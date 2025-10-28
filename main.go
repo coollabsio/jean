@@ -12,6 +12,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/coollabsio/gcool/install"
+	"github.com/coollabsio/gcool/internal/update"
+	versionpkg "github.com/coollabsio/gcool/internal/version"
 	"github.com/coollabsio/gcool/tui"
 )
 
@@ -53,6 +55,9 @@ func main() {
 		case "init":
 			handleInit()
 			return
+		case "update":
+			handleUpdate()
+			return
 		case "version":
 			fmt.Printf("gcool version %s\n", version)
 			os.Exit(0)
@@ -84,6 +89,10 @@ func main() {
 	// Get repo path and auto-claude setting
 	repoPath := *pathFlag
 	autoClaude := !*noClaudeFlag
+
+	// Check for updates (non-blocking, happens in background)
+	// This check is rate-limited to once every 10 minutes
+	go versionpkg.CheckLatestVersionOfCli(false)
 
 	// Create and run TUI
 	model := tui.NewModel(repoPath, autoClaude)
@@ -286,6 +295,7 @@ USAGE:
 
 COMMANDS:
     init            Install or manage gcool shell integration
+    update          Update gcool to the latest version
     help            Show this help message
     version         Print version and exit
 
@@ -390,4 +400,12 @@ func toUpper(c byte) byte {
 		return c - 32
 	}
 	return c
+}
+
+// handleUpdate handles the update subcommand
+func handleUpdate() {
+	if err := update.UpdateGcool(version); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }

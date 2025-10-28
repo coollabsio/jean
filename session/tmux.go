@@ -6,17 +6,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const sessionPrefix = "gcool-"
 
 // Session represents a tmux session
 type Session struct {
-	Name    string
-	Branch  string
-	Active  bool
-	Windows int
+	Name         string
+	Branch       string
+	Active       bool
+	Windows      int
+	LastActivity time.Time
 }
 
 // Manager handles tmux session operations
@@ -281,8 +284,9 @@ func (m *Manager) NewWindowAndAttach(sessionName, path string) error {
 
 // List returns all gcool tmux sessions
 func (m *Manager) List() ([]Session, error) {
-	// List all sessions with format: name:windows:attached
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}:#{session_windows}:#{session_attached}")
+	// List all sessions with format: name:windows:attached:activity
+	// activity is the maximum window_activity timestamp in the session
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}:#{session_windows}:#{session_attached}:#{session_activity}")
 	output, err := cmd.Output()
 	if err != nil {
 		// No sessions exist
@@ -298,7 +302,7 @@ func (m *Manager) List() ([]Session, error) {
 		}
 
 		parts := strings.Split(line, ":")
-		if len(parts) < 3 {
+		if len(parts) < 4 {
 			continue
 		}
 
@@ -310,11 +314,20 @@ func (m *Manager) List() ([]Session, error) {
 		windows := 1
 		fmt.Sscanf(parts[1], "%d", &windows)
 
+		// Parse activity timestamp (Unix time)
+		var lastActivity time.Time
+		if activityStr := parts[3]; activityStr != "" {
+			if activityUnix, err := strconv.ParseInt(activityStr, 10, 64); err == nil {
+				lastActivity = time.Unix(activityUnix, 0)
+			}
+		}
+
 		sessions = append(sessions, Session{
-			Name:    name,
-			Branch:  branch,
-			Active:  active,
-			Windows: windows,
+			Name:         name,
+			Branch:       branch,
+			Active:       active,
+			Windows:      windows,
+			LastActivity: lastActivity,
 		})
 	}
 
@@ -324,6 +337,19 @@ func (m *Manager) List() ([]Session, error) {
 // Kill terminates a tmux session
 func (m *Manager) Kill(sessionName string) error {
 	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+	return cmd.Run()
+}
+
+// RenameSession renames an existing tmux session
+// Returns nil if session doesn't exist (no error)
+func (m *Manager) RenameSession(oldName, newName string) error {
+	// Check if session exists
+	if !m.SessionExists(oldName) {
+		// Session doesn't exist, nothing to do
+		return nil
+	}
+
+	cmd := exec.Command("tmux", "rename-session", "-t", oldName, newName)
 	return cmd.Run()
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -109,6 +110,12 @@ func (m Model) renderWorktreeList() string {
 			if wt.IsOutdated && wt.BehindCount > 0 {
 				behindIndicator := fmt.Sprintf(" ↓%d", wt.BehindCount)
 				line += normalItemStyle.Copy().Foreground(warningColor).Render(behindIndicator)
+			}
+
+			// Show activity indicator if session has recent activity
+			activityIndicator := m.getSessionActivityIndicator(wt.Branch)
+			if activityIndicator != "" {
+				line += " " + activityIndicator
 			}
 		}
 
@@ -1023,4 +1030,26 @@ func (m Model) renderTmuxConfigModal() string {
 		lipgloss.Center, lipgloss.Center,
 		modalStyle.Render(b.String()),
 	)
+}
+
+// getSessionActivityIndicator returns an activity indicator if the session has recent activity
+func (m Model) getSessionActivityIndicator(branch string) string {
+	// Check both Claude and terminal sessions for this branch
+	sessionNames := []string{
+		m.sessionManager.SanitizeName(branch),
+		m.sessionManager.SanitizeNameTerminal(branch),
+	}
+
+	for _, sessionName := range sessionNames {
+		for _, session := range m.sessions {
+			if session.Name == sessionName && !session.LastActivity.IsZero() {
+				// Check if activity occurred within the last 10 seconds
+				if time.Since(session.LastActivity) <= 10*time.Second {
+					return normalItemStyle.Copy().Foreground(successColor).Render("⚡")
+				}
+			}
+		}
+	}
+
+	return ""
 }

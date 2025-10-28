@@ -9,7 +9,8 @@ import (
 
 // Config represents the global gcool configuration
 type Config struct {
-	Repositories map[string]*RepoConfig `json:"repositories"`
+	Repositories        map[string]*RepoConfig `json:"repositories"`
+	LastUpdateCheckTime string                 `json:"lastUpdateCheckTime"` // RFC3339 format
 }
 
 // RepoConfig represents configuration for a specific repository
@@ -176,5 +177,16 @@ func (m *Manager) SetAutoFetchInterval(repoPath string, interval int) error {
 	}
 
 	m.config.Repositories[repoPath].AutoFetchInterval = interval
+	return m.save()
+}
+
+// GetLastUpdateCheckTime returns the last update check time
+func (m *Manager) GetLastUpdateCheckTime() string {
+	return m.config.LastUpdateCheckTime
+}
+
+// SetLastUpdateCheckTime sets the last update check time
+func (m *Manager) SetLastUpdateCheckTime(timestamp string) error {
+	m.config.LastUpdateCheckTime = timestamp
 	return m.save()
 }

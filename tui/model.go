@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,6 +63,10 @@ type Model struct {
 
 	// Branch status tracking
 	lastCreatedBranch string // Last created branch name (for auto-selection after creation)
+
+	// Activity tracking
+	lastActivityCheck     time.Time
+	activityCheckInterval time.Duration
 
 	// Modal state
 	modal                  modalType
@@ -134,9 +139,12 @@ func NewModel(repoPath string, autoClaude bool) Model {
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
+	m.activityCheckInterval = 2 * time.Second
+	m.lastActivityCheck = time.Now()
 	return tea.Batch(
 		m.loadWorktrees,
 		m.loadBaseBranch,
+		m.scheduleActivityCheck(),
 		tea.EnterAltScreen,
 	)
 }
@@ -164,7 +172,9 @@ type (
 	}
 
 	branchRenamedMsg struct {
-		err error
+		oldBranch string
+		newBranch string
+		err       error
 	}
 
 	branchCheckedOutMsg struct {
@@ -195,6 +205,13 @@ type (
 
 	refreshWithPullMsg struct {
 		err error
+	}
+
+	activityTickMsg time.Time
+
+	activityCheckedMsg struct {
+		sessions []session.Session
+		err      error
 	}
 )
 
@@ -251,7 +268,29 @@ func (m Model) deleteWorktree(path, branch string, force bool) tea.Cmd {
 func (m Model) renameBranch(oldName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		err := m.gitManager.RenameBranch(oldName, newName)
-		return branchRenamedMsg{err: err}
+		return branchRenamedMsg{oldBranch: oldName, newBranch: newName, err: err}
+	}
+}
+
+func (m Model) renameSessionsForBranch(oldBranch, newBranch string) tea.Cmd {
+	return func() tea.Msg {
+		// Sanitize both branch names for session names
+		oldSessionName := m.sessionManager.SanitizeName(oldBranch)
+		newSessionName := m.sessionManager.SanitizeName(newBranch)
+		oldTerminalSessionName := m.sessionManager.SanitizeNameTerminal(oldBranch)
+		newTerminalSessionName := m.sessionManager.SanitizeNameTerminal(newBranch)
+
+		// Rename Claude session
+		if err := m.sessionManager.RenameSession(oldSessionName, newSessionName); err != nil {
+			// Log error but continue (session might not exist)
+		}
+
+		// Rename terminal session
+		if err := m.sessionManager.RenameSession(oldTerminalSessionName, newTerminalSessionName); err != nil {
+			// Log error but continue (session might not exist)
+		}
+
+		return nil
 	}
 }
 
@@ -501,5 +540,23 @@ func (m Model) refreshWithPull() tea.Cmd {
 		// Step 4: Worktree list will be reloaded by the Update handler
 		// Return success so the handler can reload the list
 		return refreshWithPullMsg{err: nil}
+	}
+}
+
+// scheduleActivityCheck schedules periodic activity checks
+func (m Model) scheduleActivityCheck() tea.Cmd {
+	return tea.Every(2*time.Second, func(t time.Time) tea.Msg {
+		return activityTickMsg(t)
+	})
+}
+
+// checkSessionActivity checks for recent session activity
+func (m Model) checkSessionActivity() tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := m.sessionManager.List()
+		if err != nil {
+			return activityCheckedMsg{sessions: []session.Session{}, err: err}
+		}
+		return activityCheckedMsg{sessions: sessions, err: nil}
 	}
 }
