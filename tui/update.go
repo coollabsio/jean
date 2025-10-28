@@ -140,7 +140,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		} else {
 			m.status = "Branch renamed successfully"
-			cmd = m.loadWorktrees
+			// Rename tmux sessions to match the new branch name
+			cmd = tea.Batch(
+				m.renameSessionsForBranch(msg.oldBranch, msg.newBranch),
+				m.loadWorktrees,
+			)
 		}
 		return m, cmd
 

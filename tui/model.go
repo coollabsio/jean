@@ -164,7 +164,9 @@ type (
 	}
 
 	branchRenamedMsg struct {
-		err error
+		oldBranch string
+		newBranch string
+		err       error
 	}
 
 	branchCheckedOutMsg struct {
@@ -247,7 +249,29 @@ func (m Model) deleteWorktree(path, branch string, force bool) tea.Cmd {
 func (m Model) renameBranch(oldName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		err := m.gitManager.RenameBranch(oldName, newName)
-		return branchRenamedMsg{err: err}
+		return branchRenamedMsg{oldBranch: oldName, newBranch: newName, err: err}
+	}
+}
+
+func (m Model) renameSessionsForBranch(oldBranch, newBranch string) tea.Cmd {
+	return func() tea.Msg {
+		// Sanitize both branch names for session names
+		oldSessionName := m.sessionManager.SanitizeName(oldBranch)
+		newSessionName := m.sessionManager.SanitizeName(newBranch)
+		oldTerminalSessionName := m.sessionManager.SanitizeNameTerminal(oldBranch)
+		newTerminalSessionName := m.sessionManager.SanitizeNameTerminal(newBranch)
+
+		// Rename Claude session
+		if err := m.sessionManager.RenameSession(oldSessionName, newSessionName); err != nil {
+			// Log error but continue (session might not exist)
+		}
+
+		// Rename terminal session
+		if err := m.sessionManager.RenameSession(oldTerminalSessionName, newTerminalSessionName); err != nil {
+			// Log error but continue (session might not exist)
+		}
+
+		return nil
 	}
 }
 

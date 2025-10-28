@@ -327,6 +327,19 @@ func (m *Manager) Kill(sessionName string) error {
 	return cmd.Run()
 }
 
+// RenameSession renames an existing tmux session
+// Returns nil if session doesn't exist (no error)
+func (m *Manager) RenameSession(oldName, newName string) error {
+	// Check if session exists
+	if !m.SessionExists(oldName) {
+		// Session doesn't exist, nothing to do
+		return nil
+	}
+
+	cmd := exec.Command("tmux", "rename-session", "-t", oldName, newName)
+	return cmd.Run()
+}
+
 // IsTmuxAvailable checks if tmux is installed
 func (m *Manager) IsTmuxAvailable() bool {
 	cmd := exec.Command("tmux", "-V")
