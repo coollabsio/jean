@@ -59,7 +59,15 @@ func (m Model) renderWorktreeList() string {
 
 	repoName := filepath.Base(m.repoPath)
 	b.WriteString(titleStyle.Render(fmt.Sprintf("📁 %s", repoName)))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// Show base branch info
+	if m.baseBranch != "" {
+		b.WriteString(normalItemStyle.Copy().Foreground(mutedColor).Render(fmt.Sprintf("Base: %s (press 'b' to change)", m.baseBranch)))
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("\n")
+	}
 
 	if len(m.worktrees) == 0 {
 		b.WriteString(normalItemStyle.Render("No worktrees found"))
@@ -105,6 +113,12 @@ func (m Model) renderWorktreeList() string {
 		} else {
 			line = fmt.Sprintf("%s%s", icon, branch)
 
+			// Show uncommitted changes indicator
+			if wt.HasUncommitted {
+				uncommittedIndicator := " ●"
+				line += normalItemStyle.Copy().Foreground(warningColor).Render(uncommittedIndicator)
+			}
+
 			// Show behind count if outdated
 			if wt.IsOutdated && wt.BehindCount > 0 {
 				behindIndicator := fmt.Sprintf(" ↓%d", wt.BehindCount)
@@ -125,14 +139,6 @@ func (m Model) renderDetails() string {
 	b.WriteString(titleStyle.Render("ℹ️  Details"))
 	b.WriteString("\n\n")
 
-	// Show base branch at the top
-	if m.baseBranch != "" {
-		b.WriteString(detailKeyStyle.Render("Base Branch: "))
-		b.WriteString(detailValueStyle.Render(m.baseBranch))
-		b.WriteString(normalItemStyle.Copy().Foreground(mutedColor).Render(" (for new worktrees)"))
-		b.WriteString("\n\n")
-	}
-
 	wt := m.selectedWorktree()
 	if wt == nil {
 		b.WriteString(normalItemStyle.Render("No worktree selected"))
@@ -140,19 +146,41 @@ func (m Model) renderDetails() string {
 	}
 
 	// Render details in a nice format
+	b.WriteString(detailKeyStyle.Render("Branch: "))
+	b.WriteString(detailValueStyle.Render(wt.Branch))
+	b.WriteString("\n")
+
+	// Show base branch right after branch
+	if m.baseBranch != "" {
+		b.WriteString(detailKeyStyle.Render("Base Branch: "))
+		b.WriteString(detailValueStyle.Render(m.baseBranch))
+
+		// Show status on the same line if branch differs from base branch
+		if wt.Branch != m.baseBranch && !strings.HasPrefix(wt.Branch, "(detached") {
+			b.WriteString("  ")
+			// Show ahead/behind counts
+			if wt.AheadCount > 0 || wt.BehindCount > 0 {
+				statusParts := []string{}
+				if wt.AheadCount > 0 {
+					statusParts = append(statusParts, fmt.Sprintf("↑%d ahead", wt.AheadCount))
+				}
+				if wt.BehindCount > 0 {
+					statusParts = append(statusParts, normalItemStyle.Copy().Foreground(warningColor).Render(fmt.Sprintf("↓%d behind", wt.BehindCount)))
+				}
+				b.WriteString(strings.Join(statusParts, ", "))
+			} else {
+				b.WriteString(normalItemStyle.Copy().Foreground(successColor).Render("✓ Up to date"))
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	details := []struct {
 		key   string
 		value string
 	}{
-		{"Branch", wt.Branch},
 		{"Path", wt.Path},
 		{"Commit", wt.Commit[:min(7, len(wt.Commit))]},
-		{"Status", func() string {
-			if wt.IsCurrent {
-				return "Current"
-			}
-			return "Available"
-		}()},
 	}
 
 	for _, d := range details {
@@ -161,42 +189,41 @@ func (m Model) renderDetails() string {
 		b.WriteString("\n")
 	}
 
-	// Show branch status vs base branch
-	if m.baseBranch != "" && wt.Branch != m.baseBranch && !strings.HasPrefix(wt.Branch, "(detached") {
+	// Show uncommitted changes status
+	if wt.HasUncommitted {
 		b.WriteString("\n")
-		b.WriteString(detailKeyStyle.Render("Base Branch Status:"))
+		b.WriteString(detailKeyStyle.Render("Git Status:"))
 		b.WriteString("\n")
-
-		// Show ahead/behind counts
-		if wt.AheadCount > 0 || wt.BehindCount > 0 {
-			statusParts := []string{}
-			if wt.AheadCount > 0 {
-				statusParts = append(statusParts, fmt.Sprintf("↑%d ahead", wt.AheadCount))
-			}
-			if wt.BehindCount > 0 {
-				statusParts = append(statusParts, normalItemStyle.Copy().Foreground(warningColor).Render(fmt.Sprintf("↓%d behind", wt.BehindCount)))
-			}
-			b.WriteString("  " + strings.Join(statusParts, ", "))
-			b.WriteString("\n")
-
-			// Show pull hint if behind
-			if wt.BehindCount > 0 && !wt.IsCurrent && strings.Contains(wt.Path, ".workspaces") {
-				b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  Press 'P' to pull changes from base branch"))
-				b.WriteString("\n")
-			}
-		} else {
-			b.WriteString(normalItemStyle.Copy().Foreground(successColor).Render("  ✓ Up to date"))
+		b.WriteString(normalItemStyle.Copy().Foreground(warningColor).Render("  ● Uncommitted changes"))
+		b.WriteString("\n")
+		if !wt.IsCurrent {
+			b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  Press 'C' to commit"))
 			b.WriteString("\n")
 		}
 	}
 
-	// Add extra info
-	b.WriteString("\n")
-	if wt.IsCurrent {
-		b.WriteString(normalItemStyle.Copy().Foreground(mutedColor).Render("You are currently in this worktree"))
-	} else {
-		b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("Press Enter to switch to this worktree"))
+	// Show pull hint if behind
+	if m.baseBranch != "" && wt.Branch != m.baseBranch && !strings.HasPrefix(wt.Branch, "(detached") {
+		if wt.BehindCount > 0 && !wt.IsCurrent && strings.Contains(wt.Path, ".workspaces") {
+			b.WriteString("\n")
+			b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("Press 'P' to pull changes from base branch"))
+		}
 	}
+
+	// Add action hints
+	b.WriteString("\n")
+	b.WriteString(detailKeyStyle.Render("Actions:"))
+	b.WriteString("\n")
+	b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  t for open terminal"))
+	b.WriteString("\n")
+	// Get the default editor
+	editor := "code"
+	if m.configManager != nil {
+		editor = m.configManager.GetEditor(m.repoPath)
+	}
+	b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render(fmt.Sprintf("  o open in default editor (%s)", editor)))
+	b.WriteString("\n")
+	b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  Enter to start Claude"))
 
 	return b.String()
 }
@@ -214,18 +241,20 @@ func (m Model) renderHelpBar() string {
 	// Split keybindings into two rows
 	row1 := []string{
 		"↑/↓ navigate",
-		"n new worktree",
-		"a existing branch",
-		"o open editor",
-		"t terminal",
-		"p pull base",
+		"n new",
+		"a existing",
+		"C commit",
+		"p pull",
 		"P push & PR",
+		"o open",
 	}
 
 	row2 := []string{
-		"r refresh & pull",
+		"r refresh",
 		"R rename",
 		"d delete",
+		"b base",
+		"B checkout",
 		"s settings",
 		"S sessions",
 		"h help",
@@ -263,6 +292,8 @@ func (m Model) renderModal() string {
 		return m.renderSettingsModal()
 	case tmuxConfigModal:
 		return m.renderTmuxConfigModal()
+	case commitModal:
+		return m.renderCommitModal()
 	case helperModal:
 		return m.renderHelperModal()
 	}
@@ -806,6 +837,67 @@ func (m Model) renderChangeBaseBranchModal() string {
 	)
 }
 
+func (m Model) renderCommitModal() string {
+	var b strings.Builder
+
+	title := "Commit Changes"
+	b.WriteString(modalTitleStyle.Render(title))
+	b.WriteString("\n\n")
+
+	// Subject input
+	b.WriteString(inputLabelStyle.Render("Subject (required):"))
+	b.WriteString("\n")
+	subjectStyle := normalItemStyle
+	if m.modalFocused == 0 {
+		subjectStyle = selectedItemStyle
+	}
+	b.WriteString(subjectStyle.Render(m.commitSubjectInput.View()))
+	b.WriteString("\n\n")
+
+	// Body input
+	b.WriteString(inputLabelStyle.Render("Body (optional):"))
+	b.WriteString("\n")
+	bodyStyle := normalItemStyle
+	if m.modalFocused == 1 {
+		bodyStyle = selectedItemStyle
+	}
+	b.WriteString(bodyStyle.Render(m.commitBodyInput.View()))
+	b.WriteString("\n\n")
+
+	// Buttons
+	commitStyle := normalItemStyle
+	cancelStyle := normalItemStyle
+
+	if m.modalFocused == 2 {
+		commitStyle = selectedItemStyle
+	} else if m.modalFocused == 3 {
+		cancelStyle = selectedItemStyle
+	}
+
+	buttons := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		commitStyle.Render("[ Commit ]"),
+		"  ",
+		cancelStyle.Render("[ Cancel ]"),
+	)
+	b.WriteString(buttons)
+
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("Tab: next field • Enter: confirm/move • Esc: cancel"))
+
+	// Center the modal
+	modalContent := b.String()
+	modalBox := modalStyle.Render(modalContent)
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modalBox,
+	)
+}
+
 func (m Model) renderEditorSelectModal() string {
 	var b strings.Builder
 
@@ -1065,8 +1157,9 @@ func (m Model) renderHelperModal() string {
 				description string
 			}{
 				{"R", "Rename current branch"},
-				{"C", "Checkout/switch branch in main repo"},
-				{"c", "Change base branch for new worktrees"},
+				{"B", "Checkout/switch branch in main repo"},
+				{"b", "Change base branch for new worktrees"},
+				{"C", "Commit all uncommitted changes"},
 				{"p", "Pull changes from base branch"},
 				{"P", "Push & create draft PR"},
 			},

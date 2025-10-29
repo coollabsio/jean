@@ -242,6 +242,15 @@ Key external dependencies:
 - Branch rename protection (prevents renaming main branch)
 - Search/filter for branch selection modals
 
+**Commit Modal** ✅:
+- Press `C` (Shift+C) to open commit modal when there are uncommitted changes
+- Two-field commit message: subject (required) + body (optional)
+- Tab to cycle through fields and buttons
+- Enter to confirm commit, Esc to cancel
+- Shows commit hash on success (first 8 characters)
+- Auto-refreshes worktree list after successful commit
+- Full git commit flow: stages all changes with `git add -A`, then commits with subject and body
+
 **Automatic Base Branch Update Detection** ⚠️ (NOT YET TESTED):
 - Periodic checks every 10 seconds (configurable) for base branch updates
 - Automatically fetches from remote without user intervention
@@ -262,7 +271,43 @@ Key external dependencies:
 
 ### Implementation Details (New Features)
 
-**Files Modified**:
+**Commit Modal Feature**:
+
+Files Modified:
+1. `git/worktree.go`: Added `CreateCommit()` method
+   - Stages all changes with `git add -A`
+   - Creates commit with subject and optional body using `git commit -m "subject" -m "body"`
+   - Parses commit hash from output or falls back to `git rev-parse HEAD`
+   - Returns commit hash on success
+2. `tui/model.go`: Added commit modal state and messages
+   - Added `commitModal` to `modalType` enum
+   - Added `commitSubjectInput` and `commitBodyInput` textinput fields to `Model`
+   - Added `commitCreatedMsg` message type with error and commitHash fields
+   - Added `createCommit()` command function that wraps git operation
+3. `tui/update.go`: Added keybinding and input handler
+   - Added `C` (Shift+C) keybinding to open commit modal (checks for uncommitted changes first)
+   - Added `handleCommitModalInput()` for Tab/Enter/Esc navigation
+   - Tab cycles: subject → body → commit button → cancel button
+   - Enter in input fields moves to next field, on button confirms action
+   - Added `commitCreatedMsg` handler in `Update()` that refreshes worktree list
+4. `tui/view.go`: Added modal renderer
+   - Added `renderCommitModal()` function with focused field styling
+   - Updated help bar to show "C commit" keybinding
+   - Removed "c" and "C" from help bar, replaced with "b base" and "K checkout"
+
+**Keybinding Changes**:
+- Rebind `c` → `b` for changing base branch
+- Rebind `C` → `K` for checking out branch in main repo (originally)
+- New `C` (Shift+C) keybinding for commit modal
+
+**Architecture Notes**:
+- Commit modal uses same text input pattern as rename modal with Tab cycling
+- Focus states: 0=subject, 1=body, 2=commit button, 3=cancel button
+- Commits are atomic: if `git add -A` fails, commit is not attempted
+- Uses `git add -A` to include untracked files, modified files, and deletions
+- Hash parsing is robust: tries output parsing first, falls back to `git rev-parse HEAD`
+
+**Files Modified (Branch Update Feature)**:
 1. `git/worktree.go`: Added `FetchRemote()`, `GetBranchStatus()`, `MergeBranch()`, `AbortMerge()` methods
    - Updated `Worktree` struct with `BehindCount`, `AheadCount`, `IsOutdated` fields
 2. `config/config.go`: Added `AutoFetchInterval` field to `RepoConfig`
@@ -280,7 +325,7 @@ Key external dependencies:
    - Help bar dynamically shows "P pull" when applicable
 6. `tui/styles.go`: Added `successColor` for up-to-date status display
 
-**Architecture Notes**:
+**Architecture Notes (Branch Update)**:
 - Uses Bubble Tea's `tea.Every()` for periodic tick messages (every 10s by default)
 - Fetch operations are non-blocking - failures don't interrupt user workflow
 - Status checks only run if enough time has passed (configurable interval)
@@ -379,8 +424,9 @@ All keybindings are defined in `tui/update.go`. The application uses Bubble Tea'
 
 **Branch Operations**:
 - `R` (Shift+R) - Rename current branch
-- `C` (Shift+C) - Checkout/switch branch in main repository
-- `c` - Change base branch for new worktrees
+- `K` (Shift+K) - Checkout/switch branch in main repository
+- `b` - Change base branch for new worktrees
+- `C` (Shift+C) - Commit all uncommitted changes (opens commit modal)
 - `P` (Shift+P) - Pull changes from base branch (only when behind) ⚠️ NOT YET TESTED
 - `p` (lowercase) - Create draft PR
 
@@ -406,6 +452,7 @@ Specific modal handlers are implemented in `tui/update.go`:
 - `handleSessionListModalInput()` - Session list (uses `↑`/`↓`, `k` to kill sessions)
 - `handleRenameModalInput()` - Branch rename modal (text input, prevents renaming main branch)
 - `handleChangeBaseBranchModalInput()` - Base branch modal with search/filter
+- `handleCommitModalInput()` - Commit modal (subject + optional body, Tab to cycle, Enter to move/confirm)
 - `handleEditorSelectModalInput()` - Editor selection modal (uses `↑`/`↓` navigation)
 - `handleSettingsModalInput()` - Settings menu navigation
 - `handleTmuxConfigModalInput()` - Tmux config install/update/remove

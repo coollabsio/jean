@@ -214,6 +214,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
+	case commitCreatedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Failed to create commit: " + msg.err.Error()
+			// Auto-clear error after 4 seconds
+			return m, tea.Tick(4*time.Second, func(t time.Time) tea.Msg {
+				return clearErrorMsg{}
+			})
+		} else {
+			// Show success message with commit hash
+			if msg.commitHash != "" {
+				hashDisplay := msg.commitHash
+				if len(msg.commitHash) > 8 {
+					hashDisplay = msg.commitHash[:8]
+				}
+				m.status = "Commit created: " + hashDisplay
+			} else {
+				m.status = "Commit created successfully"
+			}
+			m.err = nil
+			// Refresh worktree list to show clean state
+			cmd = m.loadWorktrees
+			// Auto-clear status after 3 seconds
+			return m, tea.Sequence(
+				cmd,
+				tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return clearErrorMsg{}
+				}),
+			)
+		}
+
 	case branchPulledMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -331,8 +362,8 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "Creating worktree with branch: " + randomName
 		return m, m.createWorktree(path, randomName, true)
 
-	case "c":
-		// Open change base branch modal
+	case "b":
+		// Open change base branch modal (b for base branch)
 		m.modal = changeBaseBranchModal
 		m.modalFocused = 0
 		m.branchIndex = 0
@@ -373,7 +404,7 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		// Switch to selected worktree with Claude
-		if wt := m.selectedWorktree(); wt != nil && !wt.IsCurrent {
+		if wt := m.selectedWorktree(); wt != nil {
 			// Save the last selected branch before switching
 			if m.configManager != nil {
 				_ = m.configManager.SetLastSelectedBranch(m.repoPath, wt.Branch)
@@ -403,8 +434,8 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case "C":
-		// Checkout/switch branch in main repository (Shift+C)
+	case "B":
+		// Checkout/switch branch in main repository (Shift+B for checkout)
 		m.modal = checkoutBranchModal
 		m.modalFocused = 0
 		m.branchIndex = 0
@@ -500,6 +531,34 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.createPR(wt.Path, wt.Branch)
 		}
 
+	case "C":
+		// Open commit modal (Shift+C for commit)
+		if wt := m.selectedWorktree(); wt != nil {
+			// Check if worktree has uncommitted changes
+			hasUncommitted, err := m.gitManager.HasUncommittedChanges(wt.Path)
+			if err != nil {
+				m.err = err
+				m.status = "Failed to check for uncommitted changes: " + err.Error()
+				// Auto-clear error after 3 seconds
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return clearErrorMsg{}
+				})
+			}
+			if !hasUncommitted {
+				m.status = "Nothing to commit - no uncommitted changes in " + wt.Branch
+				// Auto-clear status after 3 seconds
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return clearErrorMsg{}
+				})
+			}
+			m.modal = commitModal
+			m.modalFocused = 0
+			m.commitSubjectInput.SetValue("")
+			m.commitSubjectInput.Focus()
+			m.commitBodyInput.SetValue("")
+			return m, nil
+		}
+
 	case "h":
 		// Open help modal
 		m.modal = helperModal
@@ -542,6 +601,9 @@ func (m Model) handleModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tmuxConfigModal:
 		return m.handleTmuxConfigModalInput(msg)
+
+	case commitModal:
+		return m.handleCommitModalInput(msg)
 
 	case helperModal:
 		return m.handleHelperModalInput(msg)
@@ -959,6 +1021,79 @@ func (m Model) handleChangeBaseBranchModalInput(msg tea.KeyMsg) (tea.Model, tea.
 		},
 	}
 	return m.handleSearchBasedModalInput(msg, config)
+}
+
+func (m Model) handleCommitModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.modal = noModal
+		m.commitSubjectInput.Blur()
+		m.commitBodyInput.Blur()
+		return m, nil
+
+	case "tab", "shift+tab":
+		// Cycle through: subject input -> body input -> commit button -> cancel button
+		m.modalFocused = (m.modalFocused + 1) % 4
+
+		// Update focus state
+		if m.modalFocused == 0 {
+			m.commitSubjectInput.Focus()
+			m.commitBodyInput.Blur()
+		} else if m.modalFocused == 1 {
+			m.commitSubjectInput.Blur()
+			m.commitBodyInput.Focus()
+		} else {
+			m.commitSubjectInput.Blur()
+			m.commitBodyInput.Blur()
+		}
+		return m, nil
+
+	case "enter":
+		if m.modalFocused == 0 {
+			// In subject input, move to body
+			m.modalFocused = 1
+			m.commitSubjectInput.Blur()
+			m.commitBodyInput.Focus()
+			return m, nil
+		} else if m.modalFocused == 1 {
+			// In body input, move to commit button
+			m.modalFocused = 2
+			m.commitBodyInput.Blur()
+			return m, nil
+		} else if m.modalFocused == 2 {
+			// Commit button
+			subject := m.commitSubjectInput.Value()
+			if subject == "" {
+				m.status = "Commit subject cannot be empty"
+				return m, nil
+			}
+
+			body := m.commitBodyInput.Value()
+			if wt := m.selectedWorktree(); wt != nil {
+				m.status = "Creating commit..."
+				m.modal = noModal
+				m.commitSubjectInput.Blur()
+				m.commitBodyInput.Blur()
+				return m, m.createCommit(wt.Path, subject, body)
+			}
+		} else {
+			// Cancel button
+			m.modal = noModal
+			m.commitSubjectInput.Blur()
+			m.commitBodyInput.Blur()
+			return m, nil
+		}
+	}
+
+	// Handle text input
+	var cmd tea.Cmd
+	if m.modalFocused == 0 {
+		m.commitSubjectInput, cmd = m.commitSubjectInput.Update(msg)
+	} else if m.modalFocused == 1 {
+		m.commitBodyInput, cmd = m.commitBodyInput.Update(msg)
+	}
+
+	return m, cmd
 }
 
 func (m Model) handleEditorSelectModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

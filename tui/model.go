@@ -36,6 +36,7 @@ const (
 	editorSelectModal
 	settingsModal
 	tmuxConfigModal
+	commitModal
 	helperModal
 )
 
@@ -75,6 +76,8 @@ type Model struct {
 	nameInput              textinput.Model
 	pathInput              textinput.Model
 	searchInput            textinput.Model
+	commitSubjectInput     textinput.Model // Subject line for commit message
+	commitBodyInput        textinput.Model // Body for commit message
 	branchIndex            int
 	filteredBranches       []string // Filtered list of branches for search
 	createNewBranch        bool
@@ -103,6 +106,16 @@ func NewModel(repoPath string, autoClaude bool) Model {
 	searchInput.CharLimit = 100
 	searchInput.Width = 50
 
+	commitSubjectInput := textinput.New()
+	commitSubjectInput.Placeholder = "Commit subject (required)"
+	commitSubjectInput.CharLimit = 72
+	commitSubjectInput.Width = 70
+
+	commitBodyInput := textinput.New()
+	commitBodyInput.Placeholder = "Commit body (optional)"
+	commitBodyInput.CharLimit = 500
+	commitBodyInput.Width = 70
+
 	// Initialize config manager (ignore errors, will use defaults)
 	configManager, _ := config.NewManager()
 
@@ -125,16 +138,18 @@ func NewModel(repoPath string, autoClaude bool) Model {
 	}
 
 	return Model{
-		gitManager:     gitManager,
-		sessionManager: session.NewManager(),
-		configManager:  configManager,
-		githubManager:  github.NewManager(),
-		nameInput:      nameInput,
-		pathInput:      pathInput,
-		searchInput:    searchInput,
-		autoClaude:     autoClaude,
-		repoPath:       absoluteRepoPath,
-		editors:        editors,
+		gitManager:         gitManager,
+		sessionManager:     session.NewManager(),
+		configManager:      configManager,
+		githubManager:      github.NewManager(),
+		nameInput:          nameInput,
+		pathInput:          pathInput,
+		searchInput:        searchInput,
+		commitSubjectInput: commitSubjectInput,
+		commitBodyInput:    commitBodyInput,
+		autoClaude:         autoClaude,
+		repoPath:           absoluteRepoPath,
+		editors:            editors,
 	}
 }
 
@@ -217,6 +232,11 @@ type (
 	activityCheckedMsg struct {
 		sessions []session.Session
 		err      error
+	}
+
+	commitCreatedMsg struct {
+		err        error
+		commitHash string
 	}
 )
 
@@ -410,6 +430,18 @@ func (m Model) createPR(worktreePath, branch string) tea.Cmd {
 		}
 
 		return prCreatedMsg{prURL: prURL}
+	}
+}
+
+// createCommit creates a commit with the given subject and body
+func (m Model) createCommit(worktreePath, subject, body string) tea.Cmd {
+	return func() tea.Msg {
+		if subject == "" {
+			return commitCreatedMsg{err: fmt.Errorf("commit subject cannot be empty")}
+		}
+
+		commitHash, err := m.gitManager.CreateCommit(worktreePath, subject, body)
+		return commitCreatedMsg{err: err, commitHash: commitHash}
 	}
 }
 

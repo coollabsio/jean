@@ -12,13 +12,14 @@ import (
 
 // Worktree represents a Git worktree
 type Worktree struct {
-	Path        string
-	Branch      string
-	Commit      string
-	IsCurrent   bool
-	BehindCount int  // Commits behind base branch
-	AheadCount  int  // Commits ahead of base branch
-	IsOutdated  bool // Convenience flag: true if behind > 0
+	Path            string
+	Branch          string
+	Commit          string
+	IsCurrent       bool
+	BehindCount     int  // Commits behind base branch
+	AheadCount      int  // Commits ahead of base branch
+	IsOutdated      bool // Convenience flag: true if behind > 0
+	HasUncommitted  bool // Whether the worktree has uncommitted changes
 }
 
 // Manager handles Git worktree operations
@@ -83,13 +84,21 @@ func (m *Manager) parseWorktrees(output string) ([]Worktree, error) {
 		worktrees = append(worktrees, current)
 	}
 
-	// Mark current worktree
+	// Mark current worktree and check for uncommitted changes
 	currentPath, err := m.getCurrentPath()
 	if err == nil {
 		for i := range worktrees {
 			if worktrees[i].Path == currentPath {
 				worktrees[i].IsCurrent = true
 			}
+		}
+	}
+
+	// Check for uncommitted changes in each worktree
+	for i := range worktrees {
+		hasUncommitted, err := m.HasUncommittedChanges(worktrees[i].Path)
+		if err == nil {
+			worktrees[i].HasUncommitted = hasUncommitted
 		}
 	}
 
@@ -690,4 +699,63 @@ func parseCount(s string) (int, error) {
 	}
 
 	return result, nil
+}
+
+// CreateCommit stages all changes and creates a commit with the given subject and body
+// Returns the commit hash on success or an error
+func (m *Manager) CreateCommit(worktreePath, subject, body string) (string, error) {
+	if subject == "" {
+		return "", fmt.Errorf("commit subject cannot be empty")
+	}
+
+	// First, stage all changes (git add -A)
+	addCmd := exec.Command("git", "-C", worktreePath, "add", "-A")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to stage changes: %s", string(output))
+	}
+
+	// Build the commit command
+	args := []string{"-C", worktreePath, "commit", "-m", subject}
+
+	// Add body if provided
+	if body != "" {
+		args = append(args, "-m", body)
+	}
+
+	commitCmd := exec.Command("git", args...)
+	output, err := commitCmd.CombinedOutput()
+	outputStr := string(output)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to create commit: %s", outputStr)
+	}
+
+	// Parse the commit hash from the output
+	// Output format: "[branch_name hash] commit subject"
+	lines := strings.Split(outputStr, "\n")
+	for _, line := range lines {
+		// Look for hash in square brackets like "[main abc1234]"
+		if strings.Contains(line, "[") && strings.Contains(line, "]") {
+			start := strings.Index(line, "[")
+			end := strings.Index(line, "]")
+			if start < end {
+				content := line[start+1 : end]
+				parts := strings.Fields(content)
+				if len(parts) >= 2 {
+					// Last part should be the hash
+					return parts[len(parts)-1], nil
+				}
+			}
+		}
+	}
+
+	// If we can't parse the hash, run git rev-parse to get it
+	hashCmd := exec.Command("git", "-C", worktreePath, "rev-parse", "HEAD")
+	hashOutput, err := hashCmd.Output()
+	if err == nil {
+		return strings.TrimSpace(string(hashOutput)), nil
+	}
+
+	// Fallback: return empty string (commit was successful but we couldn't get the hash)
+	return "", nil
 }
