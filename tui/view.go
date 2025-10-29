@@ -214,21 +214,21 @@ func (m Model) renderHelpBar() string {
 	// Split keybindings into two rows
 	row1 := []string{
 		"↑/↓ navigate",
-		"n new branch",
+		"n new worktree",
 		"a existing branch",
 		"o open editor",
 		"t terminal",
-		"p pull",
-		"P create PR",
+		"p pull base",
+		"P push & PR",
 	}
 
 	row2 := []string{
-		"r refresh",
+		"r refresh & pull",
 		"R rename",
 		"d delete",
 		"s settings",
 		"S sessions",
-		"enter switch",
+		"h help",
 		"q quit",
 	}
 
@@ -263,6 +263,8 @@ func (m Model) renderModal() string {
 		return m.renderSettingsModal()
 	case tmuxConfigModal:
 		return m.renderTmuxConfigModal()
+	case helperModal:
+		return m.renderHelperModal()
 	}
 	return ""
 }
@@ -1016,6 +1018,109 @@ func (m Model) renderTmuxConfigModal() string {
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		modalStyle.Render(b.String()),
+	)
+}
+
+func (m Model) renderHelperModal() string {
+	var b strings.Builder
+
+	b.WriteString(modalTitleStyle.Render("📖 Help - Keybindings"))
+	b.WriteString("\n\n")
+
+	// Define keybinding categories
+	categories := []struct {
+		name        string
+		keybindings []struct {
+			key         string
+			description string
+		}
+	}{
+		{
+			name: "Navigation",
+			keybindings: []struct {
+				key         string
+				description string
+			}{
+				{"↑, k", "Move cursor up"},
+				{"↓, j", "Move cursor down"},
+			},
+		},
+		{
+			name: "Worktree Management",
+			keybindings: []struct {
+				key         string
+				description string
+			}{
+				{"n", "Create new worktree with generated branch name"},
+				{"a", "Create worktree from existing branch"},
+				{"d", "Delete selected worktree"},
+				{"enter", "Switch to selected worktree (with Claude)"},
+				{"t", "Open terminal in worktree"},
+			},
+		},
+		{
+			name: "Branch Operations",
+			keybindings: []struct {
+				key         string
+				description string
+			}{
+				{"R", "Rename current branch"},
+				{"C", "Checkout/switch branch in main repo"},
+				{"c", "Change base branch for new worktrees"},
+				{"p", "Pull changes from base branch"},
+				{"P", "Push & create draft PR"},
+			},
+		},
+		{
+			name: "Application",
+			keybindings: []struct {
+				key         string
+				description string
+			}{
+				{"r", "Refresh & pull latest commits"},
+				{"o", "Open worktree in default editor"},
+				{"e", "Select default editor"},
+				{"s", "Open settings"},
+				{"S", "View tmux sessions"},
+				{"h", "Show this help"},
+				{"q", "Quit application"},
+			},
+		},
+	}
+
+	// Render categories
+	for i, category := range categories {
+		b.WriteString(detailKeyStyle.Render(category.name))
+		b.WriteString("\n")
+
+		for _, kb := range category.keybindings {
+			// Format: "  key - description"
+			b.WriteString(normalItemStyle.Render(fmt.Sprintf("  %-10s %s", kb.key, "—")))
+			b.WriteString(" ")
+			b.WriteString(helpStyle.Render(kb.description))
+			b.WriteString("\n")
+		}
+
+		// Add spacing between categories (except after last one)
+		if i < len(categories)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("Press 'h' or Esc to close this help"))
+
+	// Create a wider modal for better readability
+	maxWidth := m.width - 4
+	if maxWidth > 120 {
+		maxWidth = 120
+	}
+	content := modalStyle.Width(maxWidth).Render(b.String())
+
+	return lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		content,
 	)
 }
 

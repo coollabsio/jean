@@ -36,6 +36,7 @@ const (
 	editorSelectModal
 	settingsModal
 	tmuxConfigModal
+	helperModal
 )
 
 // Model represents the TUI state

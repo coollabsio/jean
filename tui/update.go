@@ -499,6 +499,11 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "Creating draft PR..."
 			return m, m.createPR(wt.Path, wt.Branch)
 		}
+
+	case "h":
+		// Open help modal
+		m.modal = helperModal
+		return m, nil
 	}
 
 	return m, nil
@@ -537,6 +542,9 @@ func (m Model) handleModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tmuxConfigModal:
 		return m.handleTmuxConfigModalInput(msg)
+
+	case helperModal:
+		return m.handleHelperModalInput(msg)
 	}
 
 	return m, cmd
@@ -1151,4 +1159,15 @@ func buildRefreshStatusMessage(msg refreshWithPullMsg) string {
 	}
 
 	return fmt.Sprintf("Pulled %d commits: %s", totalCommits, strings.Join(branchDetails, ", "))
+}
+
+func (m Model) handleHelperModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "h", "q":
+		// Close helper modal with Esc, h, or q
+		m.modal = noModal
+		return m, nil
+	}
+
+	return m, nil
 }
