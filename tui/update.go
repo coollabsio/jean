@@ -43,15 +43,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case worktreesLoadedMsg:
 		if msg.err != nil {
+			debugLog(fmt.Sprintf("Failed to load worktrees: %v", msg.err))
 			cmd = m.showErrorNotification("Failed to load worktrees", 4*time.Second)
 			return m, cmd
 		} else {
+			debugLog(fmt.Sprintf("Worktrees loaded: %d worktrees", len(msg.worktrees)))
+			for i, wt := range msg.worktrees {
+				debugLog(fmt.Sprintf("  [%d] %s - HasUncommitted: %v", i, wt.Branch, wt.HasUncommitted))
+			}
 			m.worktrees = msg.worktrees
 
 			// Load PRs from config for each worktree
 			for i := range m.worktrees {
 				if m.configManager != nil {
 					prs := m.configManager.GetPRs(m.repoPath, m.worktrees[i].Branch)
+					debugLog(fmt.Sprintf("  Loaded %d PRs for branch %s", len(prs), m.worktrees[i].Branch))
+					if len(prs) > 0 {
+						for _, pr := range prs {
+							debugLog(fmt.Sprintf("    PR: %s (Status: %s)", pr.URL, pr.Status))
+						}
+					}
 					m.worktrees[i].PRs = prs
 				}
 			}
@@ -188,9 +199,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prCreatedMsg:
 		if msg.err != nil {
+			debugLog(fmt.Sprintf("PR creation failed: %v", msg.err))
 			cmd = m.showErrorNotification("Failed to create PR: " + msg.err.Error(), 4*time.Second)
 			return m, cmd
 		} else {
+			debugLog(fmt.Sprintf("PR created successfully: %s", msg.prURL))
 			// Find the worktree branch for this PR
 			var prBranch string
 			for _, wt := range m.worktrees {
@@ -210,13 +223,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			debugLog(fmt.Sprintf("Saving PR for branch: %s", prBranch))
 			// Save PR to config
 			if prBranch != "" {
 				_ = m.configManager.AddPR(m.repoPath, prBranch, msg.prURL)
 			}
 
+			debugLog("Triggering worktree refresh after PR creation")
 			cmd = m.showSuccessNotification("Draft PR created: " + msg.prURL, 5*time.Second)
-			return m, cmd
+			return m, tea.Batch(
+				cmd,
+				m.loadWorktrees,
+			)
 		}
 
 	case prBranchNameGeneratedMsg:
@@ -330,9 +348,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commitCreatedMsg:
 		if msg.err != nil {
+			debugLog(fmt.Sprintf("Commit creation failed: %v", msg.err))
 			cmd = m.showErrorNotification("Failed to create commit: " + msg.err.Error(), 4*time.Second)
 			return m, cmd
 		} else {
+			debugLog(fmt.Sprintf("Commit created successfully with hash: %s", msg.commitHash))
+			// Clear commit modal inputs for next use
+			m.commitSubjectInput.SetValue("")
+			m.commitBodyInput.SetValue("")
+			m.modalFocused = 0
+
 			// Show success message with commit hash
 			if msg.commitHash != "" {
 				hashDisplay := msg.commitHash
@@ -376,7 +401,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Normal commit (not before PR)
-			return m, cmd
+			debugLog("Triggering worktree refresh after commit")
+			return m, tea.Batch(
+				cmd,
+				m.loadWorktrees,
+			)
 		}
 
 	case autoCommitBeforePRMsg:
