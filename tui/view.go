@@ -200,10 +200,8 @@ func (m Model) renderDetails() string {
 		b.WriteString("\n")
 		b.WriteString(normalItemStyle.Copy().Foreground(warningColor).Render("  ● Uncommitted changes"))
 		b.WriteString("\n")
-		if !wt.IsCurrent {
-			b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  Press 'c' to commit"))
-			b.WriteString("\n")
-		}
+		b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  Press 'c' to commit"))
+		b.WriteString("\n")
 	}
 
 	// Show PR status
@@ -256,7 +254,7 @@ func (m Model) renderDetails() string {
 	// Show pull hint if behind (as first action)
 	if m.baseBranch != "" && wt.Branch != m.baseBranch && !strings.HasPrefix(wt.Branch, "(detached") {
 		if wt.BehindCount > 0 && !wt.IsCurrent && strings.Contains(wt.Path, ".workspaces") {
-			b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  p pull changes from base branch"))
+			b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  u update from base branch"))
 			b.WriteString("\n\n")
 		}
 	}

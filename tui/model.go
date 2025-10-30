@@ -1198,7 +1198,7 @@ func (m Model) pullFromBaseBranch(worktreePath, baseBranch string) tea.Cmd {
 
 // refreshWithPull fetches latest commits and refreshes worktree status
 // Read-only operation: fetches from remote but does NOT merge or pull anything
-// User must explicitly use 'p' keybinding to pull/merge changes
+// User must explicitly use 'u' keybinding to pull/merge changes
 func (m Model) refreshWithPull() tea.Cmd {
 	return func() tea.Msg {
 		msg := refreshWithPullMsg{

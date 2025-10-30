@@ -621,7 +621,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			cmd = m.showSuccessNotification("Successfully pulled changes from base branch", 3*time.Second)
-			return m, cmd
+			return m, tea.Batch(
+				cmd,
+				m.loadWorktrees,
+			)
 		}
 
 	case refreshWithPullMsg:
