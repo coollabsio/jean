@@ -1587,8 +1587,17 @@ func (m *Model) sortWorktrees() {
 		return
 	}
 
-	// Sort by LastModified time, most recent first
-	sort.Slice(m.worktrees, func(i, j int) bool {
+	// Sort: root worktree (IsCurrent=true) always first, then by LastModified (most recent first)
+	sort.SliceStable(m.worktrees, func(i, j int) bool {
+		// Root worktree always comes first
+		if m.worktrees[i].IsCurrent {
+			return true
+		}
+		if m.worktrees[j].IsCurrent {
+			return false
+		}
+
+		// Otherwise, sort by last modified time (most recent first)
 		return m.worktrees[i].LastModified.After(m.worktrees[j].LastModified)
 	})
 >>>>>>> main
