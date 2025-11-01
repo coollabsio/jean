@@ -1253,53 +1253,113 @@ func (m Model) renderPRContentModal() string {
 func (m Model) renderPRListModal() string {
 	var b strings.Builder
 
-	wt := m.selectedWorktree()
-	if wt == nil {
-		return ""
+	// Handle error case
+	if m.prLoadingError != "" {
+		b.WriteString(modalTitleStyle.Render("Select PR to Create Worktree"))
+		b.WriteString("\n\n")
+		b.WriteString(errorStyle.Render("Error: " + m.prLoadingError))
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render("Press Esc to close"))
+		return lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			modalStyle.Render(b.String()),
+		)
 	}
 
-	prs, ok := wt.PRs.([]config.PRInfo)
-	if !ok || len(prs) == 0 {
-		return ""
+	// Handle loading case (no PRs loaded yet)
+	if len(m.prs) == 0 {
+		if len(m.filteredPRs) == 0 {
+			b.WriteString(modalTitleStyle.Render("Select PR to Create Worktree"))
+			b.WriteString("\n\n")
+			b.WriteString(helpStyle.Render("Loading pull requests..."))
+			b.WriteString("\n\n")
+			b.WriteString(helpStyle.Render("Press Esc to cancel"))
+			return lipgloss.Place(
+				m.width, m.height,
+				lipgloss.Center, lipgloss.Center,
+				modalStyle.Render(b.String()),
+			)
+		}
 	}
 
-	b.WriteString(modalTitleStyle.Render("Select Pull Request"))
+	b.WriteString(modalTitleStyle.Render("Select PR to Create Worktree"))
 	b.WriteString("\n\n")
 
-	// Show PRs list
-	for i, pr := range prs {
-		// Determine status indicator
-		statusEmoji := "🟢"
-		switch pr.Status {
-		case "merged":
-			statusEmoji = "🟣"
-		case "closed":
-			statusEmoji = "⚫"
-		}
+	// Search input
+	if m.modalFocused == 0 {
+		b.WriteString(inputLabelStyle.Render("Search:"))
+	} else {
+		b.WriteString(helpStyle.Render("Search:"))
+	}
+	b.WriteString("\n")
+	b.WriteString(m.prSearchInput.View())
+	b.WriteString("\n\n")
 
-		// Extract PR number from URL
-		prDisplay := pr.URL
-		if strings.Contains(pr.URL, "/pull/") {
-			parts := strings.Split(pr.URL, "/pull/")
-			if len(parts) > 1 {
-				prNum := strings.Split(parts[1], "/")[0]
-				prDisplay = "#" + prNum
-			}
-		}
+	// Show filtered PRs list
+	filteredPRs := m.filterPRs(m.prSearchInput.Value())
 
-		// Format the line
-		line := fmt.Sprintf("%s %s", statusEmoji, prDisplay)
-
-		if i == m.prListIndex {
-			b.WriteString(selectedItemStyle.Render("› " + line))
+	if len(filteredPRs) == 0 {
+		if m.prSearchInput.Value() != "" {
+			b.WriteString(helpStyle.Render("No PRs matching search"))
 		} else {
-			b.WriteString(normalItemStyle.Render("  " + line))
+			b.WriteString(helpStyle.Render("No open pull requests found"))
 		}
-		b.WriteString("\n")
+	} else {
+		// Calculate max lines for list (leave room for header, search, buttons, help)
+		maxLines := m.height - 15
+		startIdx := 0
+		if m.prListIndex >= maxLines {
+			startIdx = m.prListIndex - maxLines + 1
+		}
+
+		endIdx := startIdx + maxLines
+		if endIdx > len(filteredPRs) {
+			endIdx = len(filteredPRs)
+		}
+
+		// Show subset of PRs
+		for i := startIdx; i < endIdx; i++ {
+			pr := filteredPRs[i]
+			displayIdx := i - startIdx
+
+			// Format: #123 - Title (by @author) [branch]
+			line := fmt.Sprintf("#%d - %s (by @%s) [%s]",
+				pr.Number,
+				pr.Title,
+				pr.Author.Login,
+				pr.HeadRefName,
+			)
+
+			if displayIdx+startIdx == m.prListIndex {
+				b.WriteString(selectedItemStyle.Render("› " + line))
+			} else {
+				b.WriteString(normalItemStyle.Render("  " + line))
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓ navigate • Enter to open • Esc to cancel"))
+
+	// Buttons
+	okBtn := " OK "
+	cancelBtn := " Cancel "
+
+	if m.modalFocused == 2 {
+		b.WriteString(selectedButtonStyle.Render(okBtn))
+	} else {
+		b.WriteString(buttonStyle.Render(okBtn))
+	}
+	b.WriteString(" ")
+	if m.modalFocused == 3 {
+		b.WriteString(selectedCancelButtonStyle.Render(cancelBtn))
+	} else {
+		b.WriteString(cancelButtonStyle.Render(cancelBtn))
+	}
+
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("↑↓ navigate • Enter to create • Tab to focus • Esc to cancel"))
 
 	return lipgloss.Place(
 		m.width, m.height,
@@ -1762,7 +1822,7 @@ func (m Model) renderHelperModal() string {
 				key         string
 				description string
 			}{
-				{"P", "Push & create draft PR (with AI)"},
+				{"P", "Select PR and create worktree from it"},
 				{"v", "Open PR in default browser"},
 			},
 		},

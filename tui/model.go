@@ -203,7 +203,11 @@ type Model struct {
 	prSpinnerFrame      int  // Current spinner animation frame for PR modal (0-9)
 
 	// PR list modal state
-	prListIndex int // Selected PR index in the PR list modal
+	prListIndex    int                 // Selected PR index in the PR list modal
+	prs            []github.PRInfo      // All PRs from GitHub
+	filteredPRs    []github.PRInfo      // Filtered PRs based on search
+	prSearchInput  textinput.Model      // Search input for PR filtering
+	prLoadingError string               // Error message when loading PRs
 
 	// Scripts modal state
 	scriptConfig       *config.ScriptConfig   // Loaded script configuration
@@ -283,6 +287,11 @@ func NewModel(repoPath string, autoClaude bool) Model {
 	aiAPIKeyInput.Width = 50
 	aiAPIKeyInput.EchoMode = textinput.EchoPassword // Mask API key input
 
+	prSearchInput := textinput.New()
+	prSearchInput.Placeholder = "Search PRs by title, author, or branch..."
+	prSearchInput.CharLimit = 100
+	prSearchInput.Width = 50
+
 	// Initialize config manager (ignore errors, will use defaults)
 	configManager, _ := config.NewManager()
 
@@ -333,6 +342,7 @@ func NewModel(repoPath string, autoClaude bool) Model {
 		prTitleInput:       prTitleInput,
 		prDescriptionInput: prDescriptionInput,
 		aiAPIKeyInput:      aiAPIKeyInput,
+		prSearchInput:      prSearchInput,
 		aiModels:           aiModels,
 		autoClaude:         autoClaude,
 		repoPath:           absoluteRepoPath,
@@ -414,6 +424,11 @@ type (
 	branchesLoadedMsg struct {
 		branches []string
 		err      error
+	}
+
+	prsLoadedMsg struct {
+		prs []github.PRInfo
+		err error
 	}
 
 	worktreeCreatedMsg struct {
@@ -644,6 +659,13 @@ func (m Model) loadWorktreesLightweight() tea.Cmd {
 func (m Model) loadBranches() tea.Msg {
 	branches, err := m.gitManager.ListBranches()
 	return branchesLoadedMsg{branches: branches, err: err}
+}
+
+func (m Model) loadPRs() tea.Cmd {
+	return func() tea.Msg {
+		prs, err := m.githubManager.ListPRs(m.repoPath)
+		return prsLoadedMsg{prs: prs, err: err}
+	}
 }
 
 func (m Model) createWorktree(path, branch string, newBranch bool) tea.Cmd {
@@ -1306,6 +1328,24 @@ func (m Model) filterBranches(query string) []string {
 	for _, branch := range m.branches {
 		if strings.Contains(strings.ToLower(branch), queryLower) {
 			filtered = append(filtered, branch)
+		}
+	}
+	return filtered
+}
+
+func (m Model) filterPRs(query string) []github.PRInfo {
+	if query == "" {
+		return m.prs
+	}
+
+	var filtered []github.PRInfo
+	queryLower := strings.ToLower(query)
+	for _, pr := range m.prs {
+		// Search in title, author, and head branch name
+		if strings.Contains(strings.ToLower(pr.Title), queryLower) ||
+			strings.Contains(strings.ToLower(pr.Author.Login), queryLower) ||
+			strings.Contains(strings.ToLower(pr.HeadRefName), queryLower) {
+			filtered = append(filtered, pr)
 		}
 	}
 	return filtered

@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -8,6 +9,17 @@ import (
 
 // Manager handles GitHub operations using gh CLI
 type Manager struct{}
+
+// PRInfo holds information about a pull request
+type PRInfo struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	HeadRefName string `json:"headRefName"`
+	URL         string `json:"url"`
+	Author      struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
 
 // NewManager creates a new GitHub manager
 func NewManager() *Manager {
@@ -133,4 +145,40 @@ func (m *Manager) UpdatePR(worktreePath, prIdentifier, title, description string
 	}
 
 	return nil
+}
+
+// ListPRs lists all open pull requests for the repository
+func (m *Manager) ListPRs(worktreePath string) ([]PRInfo, error) {
+	// Check if gh is installed
+	if !m.IsGhInstalled() {
+		return nil, fmt.Errorf("gh CLI is not installed. Install it from https://cli.github.com")
+	}
+
+	// Check if authenticated
+	authenticated, err := m.IsAuthenticated()
+	if err != nil {
+		return nil, err
+	}
+	if !authenticated {
+		return nil, fmt.Errorf("not authenticated with GitHub. Run 'gh auth login' to authenticate")
+	}
+
+	// List open PRs in JSON format
+	cmd := exec.Command("gh", "pr", "list",
+		"--state", "open",
+		"--json", "number,title,headRefName,url,author",
+		"--limit", "100")
+	cmd.Dir = worktreePath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list PRs: %s", string(output))
+	}
+
+	// Parse JSON response
+	var prs []PRInfo
+	if err := json.Unmarshal(output, &prs); err != nil {
+		return nil, fmt.Errorf("failed to parse PR list: %w", err)
+	}
+
+	return prs, nil
 }

@@ -114,6 +114,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case prsLoadedMsg:
+		if msg.err != nil {
+			m.prLoadingError = msg.err.Error()
+			cmd = m.showErrorNotification("Failed to load PRs: "+msg.err.Error(), 4*time.Second)
+			return m, cmd
+		} else {
+			m.prs = msg.prs
+			m.filteredPRs = msg.prs
+			m.prListIndex = 0
+			m.prLoadingError = ""
+		}
+		return m, nil
+
 	case worktreeCreatedMsg:
 		if msg.err != nil {
 			// Check if this is a setup script error (warning) or a git error (error)
@@ -1353,41 +1366,14 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "P":
-		// Create draft PR (Shift+P) - only creates PR, no commits or pushes
-		if wt := m.selectedWorktree(); wt != nil {
-			// Check if there are uncommitted changes
-			hasUncommitted, err := m.gitManager.HasUncommittedChanges(wt.Path)
-			if err != nil {
-				return m, m.showErrorNotification("Failed to check for uncommitted changes: "+err.Error(), 3*time.Second)
-			}
-			if hasUncommitted {
-				return m, m.showErrorNotification("Cannot create PR: you have uncommitted changes. Commit them first with 'c'", 4*time.Second)
-			}
-
-			// Check if there are unpushed commits
-			hasUnpushed, err := m.gitManager.HasUnpushedCommits(wt.Path, wt.Branch)
-			if err != nil {
-				return m, m.showErrorNotification("Failed to check for unpushed commits: "+err.Error(), 3*time.Second)
-			}
-			if hasUnpushed {
-				return m, m.showErrorNotification("Cannot create PR: you have unpushed commits. Push them first with 'p'", 4*time.Second)
-			}
-
-			// All clean - proceed to PR creation
-			// Check AI configuration
-			hasAPIKey := m.configManager != nil && m.configManager.GetOpenRouterAPIKey() != ""
-			aiContentEnabled := m.configManager != nil && m.configManager.GetAICommitEnabled()
-
-			if hasAPIKey && aiContentEnabled {
-				// Generate PR content with AI (title and description from diff)
-				cmd = m.showInfoNotification("🤖 Generating PR content...")
-				return m, tea.Batch(cmd, m.generatePRContent(wt.Path, wt.Branch, m.baseBranch))
-			} else {
-				// Normal PR creation (no AI)
-				cmd = m.showInfoNotification("Creating draft PR...")
-				return m, tea.Batch(cmd, m.createOrUpdatePR(wt.Path, wt.Branch, "", ""))
-			}
-		}
+		// Select existing PR and create worktree from it (Shift+P)
+		m.modal = prListModal
+		m.prListIndex = 0
+		m.prSearchInput.SetValue("")
+		m.prSearchInput.Focus()
+		m.filteredPRs = nil
+		m.prLoadingError = ""
+		return m, m.loadPRs()
 
 	case "c":
 		// Commit changes
@@ -2238,47 +2224,123 @@ func (m Model) handlePRContentModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePRListModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	wt := m.selectedWorktree()
-	if wt == nil {
-		m.modal = noModal
-		return m, nil
-	}
-
-	prs, ok := wt.PRs.([]config.PRInfo)
-	if !ok || len(prs) == 0 {
-		m.modal = noModal
-		return m, nil
-	}
+	var cmd tea.Cmd
 
 	switch msg.String() {
 	case "esc":
+		m.prSearchInput.Blur()
 		m.modal = noModal
 		return m, nil
 
+	case "tab":
+		if m.modalFocused == 0 {
+			// In search input, move focus to list
+			m.modalFocused = 1
+			m.prSearchInput.Blur()
+		} else if m.modalFocused == 1 {
+			// In list, move focus to OK button
+			m.modalFocused = 2
+		} else if m.modalFocused == 2 {
+			// In OK button, move focus to Cancel button
+			m.modalFocused = 3
+		} else {
+			// In Cancel button, move focus back to search
+			m.modalFocused = 0
+			m.prSearchInput.Focus()
+		}
+		return m, nil
+
 	case "up":
-		if m.prListIndex > 0 {
+		if m.modalFocused == 0 {
+			// In search input, move focus to list
+			m.modalFocused = 1
+			m.prSearchInput.Blur()
+		} else if m.modalFocused == 1 && m.prListIndex > 0 {
+			// In list, move selection up
 			m.prListIndex--
 		}
 		return m, nil
 
 	case "down":
-		if m.prListIndex < len(prs)-1 {
-			m.prListIndex++
+		if m.modalFocused == 0 {
+			// In search input, move focus to list
+			m.modalFocused = 1
+			m.prSearchInput.Blur()
+		} else if m.modalFocused == 1 {
+			// In list, move selection down
+			filteredPRs := m.filterPRs(m.prSearchInput.Value())
+			if len(filteredPRs) == 0 {
+				m.prListIndex = -1
+			} else if m.prListIndex < len(filteredPRs)-1 {
+				m.prListIndex++
+			}
 		}
 		return m, nil
 
 	case "enter":
-		// Open selected PR in browser
-		if m.prListIndex >= 0 && m.prListIndex < len(prs) {
-			selectedPR := prs[m.prListIndex]
-			cmd := exec.Command("gh", "pr", "view", selectedPR.URL, "--web")
-			err := cmd.Start()
-			if err != nil {
+		if m.modalFocused <= 1 {
+			// In search or list, confirm selection
+			filteredPRs := m.filterPRs(m.prSearchInput.Value())
+			if len(filteredPRs) > 0 && m.prListIndex >= 0 && m.prListIndex < len(filteredPRs) {
+				selectedPR := filteredPRs[m.prListIndex]
+				// Create worktree from the selected PR's branch using the branch name
+				worktreePath, err := m.gitManager.GetDefaultPath(selectedPR.HeadRefName)
+				if err != nil {
+					m.modal = noModal
+					return m, m.showErrorNotification("Failed to determine worktree path: "+err.Error(), 3*time.Second)
+				}
+
+				// Reset modal state
+				m.prSearchInput.Blur()
 				m.modal = noModal
-				return m, m.showErrorNotification("Failed to open PR in browser: "+err.Error(), 3*time.Second)
+				m.prListIndex = 0
+				m.prSearchInput.SetValue("")
+				m.filteredPRs = nil
+				m.prLoadingError = ""
+
+				// Create worktree from PR branch
+				m.lastCreatedBranch = selectedPR.HeadRefName
+				cmd = m.showInfoNotification("Creating worktree from PR #" + fmt.Sprint(selectedPR.Number) + "...")
+				return m, tea.Batch(
+					cmd,
+					m.createWorktree(worktreePath, selectedPR.HeadRefName, false),
+				)
 			}
-			m.modal = noModal
-			return m, m.showSuccessNotification("Opening PR in browser...", 2*time.Second)
+		} else if m.modalFocused == 2 {
+			// OK button - same as pressing enter in list
+			filteredPRs := m.filterPRs(m.prSearchInput.Value())
+			if len(filteredPRs) > 0 && m.prListIndex >= 0 && m.prListIndex < len(filteredPRs) {
+				selectedPR := filteredPRs[m.prListIndex]
+				worktreePath, err := m.gitManager.GetDefaultPath(selectedPR.HeadRefName)
+				if err != nil {
+					m.modal = noModal
+					return m, m.showErrorNotification("Failed to determine worktree path: "+err.Error(), 3*time.Second)
+				}
+
+				m.prSearchInput.Blur()
+				m.modal = noModal
+				m.prListIndex = 0
+				m.prSearchInput.SetValue("")
+				m.filteredPRs = nil
+				m.prLoadingError = ""
+
+				m.lastCreatedBranch = selectedPR.HeadRefName
+				cmd = m.showInfoNotification("Creating worktree from PR #" + fmt.Sprint(selectedPR.Number) + "...")
+				return m, tea.Batch(
+					cmd,
+					m.createWorktree(worktreePath, selectedPR.HeadRefName, false),
+				)
+			}
+		}
+		return m, nil
+
+	default:
+		// Pass input to search input
+		if m.modalFocused == 0 {
+			m.prSearchInput, cmd = m.prSearchInput.Update(msg)
+			m.filteredPRs = m.filterPRs(m.prSearchInput.Value())
+			m.prListIndex = 0 // Reset index when filtering
+			return m, cmd
 		}
 	}
 
