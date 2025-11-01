@@ -963,6 +963,8 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.String() {
 	case "q", "ctrl+c":
+		// Clear switch info to prevent shell wrapper from switching directories
+		m.switchInfo = SwitchInfo{}
 		return m, tea.Quit
 
 	case "up":
