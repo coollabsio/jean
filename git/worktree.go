@@ -25,6 +25,7 @@ type Worktree struct {
 	IsOutdated      bool             // Convenience flag: true if behind > 0
 	HasUncommitted  bool             // Whether the worktree has uncommitted changes
 	PRs             interface{}      // []config.PRInfo - Pull requests for this branch (loaded from config)
+	LastModified    time.Time        // Last modification time of the worktree directory
 }
 
 // Manager handles Git worktree operations
@@ -69,6 +70,10 @@ func (m *Manager) parseWorktrees(output string, baseBranch string) ([]Worktree, 
 	for _, line := range lines {
 		if line == "" {
 			if current.Path != "" {
+				// Populate LastModified time before adding to list
+				if modTime, err := m.getWorktreeModTime(current.Path); err == nil {
+					current.LastModified = modTime
+				}
 				worktrees = append(worktrees, current)
 				current = Worktree{}
 			}
@@ -98,6 +103,10 @@ func (m *Manager) parseWorktrees(output string, baseBranch string) ([]Worktree, 
 
 	// Add the last worktree if exists
 	if current.Path != "" {
+		// Populate LastModified time before adding to list
+		if modTime, err := m.getWorktreeModTime(current.Path); err == nil {
+			current.LastModified = modTime
+		}
 		worktrees = append(worktrees, current)
 	}
 
@@ -141,6 +150,15 @@ func (m *Manager) parseWorktrees(output string, baseBranch string) ([]Worktree, 
 	}
 
 	return worktrees, nil
+}
+
+// getWorktreeModTime returns the modification time of a worktree directory
+func (m *Manager) getWorktreeModTime(path string) (time.Time, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
 }
 
 // GetCurrentBranch returns the name of the current branch

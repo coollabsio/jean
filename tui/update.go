@@ -99,6 +99,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	// Sort worktrees after loading
+	m.sortWorktrees()
 		return m, nil
 
 	case branchesLoadedMsg:

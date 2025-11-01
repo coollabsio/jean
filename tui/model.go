@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1552,6 +1553,7 @@ func (m Model) scheduleNotificationHide(id int64, duration time.Duration) tea.Cm
 	)
 }
 
+<<<<<<< HEAD
 // gitRepoOpenedMsg is sent when the git repository is opened in browser
 type gitRepoOpenedMsg struct {
 	err error
@@ -1578,4 +1580,16 @@ func (m Model) openGitRepo() tea.Cmd {
 
 		return gitRepoOpenedMsg{err: nil}
 	}
+=======
+// sortWorktrees sorts the worktree list by last modified time (most recent first)
+func (m *Model) sortWorktrees() {
+	if len(m.worktrees) == 0 {
+		return
+	}
+
+	// Sort by LastModified time, most recent first
+	sort.Slice(m.worktrees, func(i, j int) bool {
+		return m.worktrees[i].LastModified.After(m.worktrees[j].LastModified)
+	})
+>>>>>>> main
 }
