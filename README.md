@@ -144,15 +144,15 @@ gcool -path /path/to/other/repo
 ## Keybindings
 
 ### Main View - Navigation
-- `↑` / `k` - Move cursor up in worktree list
-- `↓` / `j` - Move cursor down in worktree list
+- `↑` - Move cursor up in worktree list
+- `↓` - Move cursor down in worktree list
 - `Enter` - Switch to selected worktree (with Claude)
 - `t` - Open terminal in worktree (without Claude)
 
 ### Main View - Worktree Management
 - `n` - Create new worktree with a **new branch** (random name, selects but doesn't auto-switch)
 - `a` - Create worktree from an **existing branch**
-- `d` / `x` - Delete selected worktree
+- `d` - Delete selected worktree
 - `r` - Refresh worktree list (fetch from remote)
 - `R` (Shift+R) - Run 'run' script on selected worktree
 - `;` - Open scripts modal
@@ -161,8 +161,15 @@ gcool -path /path/to/other/repo
 - `B` (Shift+B) - Rename current branch
 - `K` (Shift+K) - Checkout/switch branch in main repository
 - `b` - Change base branch for new worktrees
+- `c` - Commit all uncommitted changes
+- `p` - Push to remote (with AI branch naming)
+- `P` (Shift+P) - Push & create draft PR
+- `u` - Update from base branch (pull/merge)
+- `v` - Open PR in browser
 
 ### Main View - Application
+- `e` - Select default editor
+- `h` - Show help modal
 - `s` - Open settings menu
 - `S` (Shift+S) - View/manage tmux sessions
 - `o` - Open worktree in configured editor
@@ -174,25 +181,25 @@ gcool -path /path/to/other/repo
 - `Esc` - Cancel/close modal
 
 ### Session List Modal (Press `S` - Shift+S)
-- `↑` / `↓` / `j` / `k` - Navigate through sessions
+- `↑` / `↓` - Navigate through sessions
 - `Enter` - Attach to selected session
-- `k` - Kill selected session
+- `d` - Kill selected session
 - `Esc` / `q` - Close modal
 
-### Branch Selection Modals (Press `a`, `C`, or `c`)
+### Branch Selection Modals (Press `a`, `K`, or `b`)
 - Type to filter branches by name
-- `↑` / `↓` / `j` / `k` - Navigate through filtered branch list
+- `↑` / `↓` - Navigate through filtered branch list
 - `Tab` - Cycle between search input, list, and buttons
 - `Enter` - Select branch
 - `Esc` - Cancel
 
 ### Settings Modal (Press `s`)
-- `↑` / `↓` / `j` / `k` - Navigate through settings options
+- `↑` / `↓` - Navigate through settings options
 - `Enter` - Configure selected setting
 - `Esc` / `q` - Close modal
 
 ### Editor Selection Modal (Press `e` or via settings)
-- `↑` / `↓` / `j` / `k` - Navigate through available editors
+- `↑` / `↓` - Navigate through available editors
 - `Enter` - Select and save editor preference
 - `Esc` - Cancel
 

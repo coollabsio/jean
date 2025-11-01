@@ -355,13 +355,13 @@ func (m Model) renderMinimalHelpBar() string {
 	var b strings.Builder
 
 	keybindings := []string{
+		"↑/↓ nav",
 		"n new",
-		"enter switch",
-		"t terminal",
-		"; scripts",
-		"r refresh",
-		"R run",
+		"enter/t cli/terminal",
+		"c commit",
+		"p push",
 		"h help",
+		"q quit",
 	}
 
 	helpText := strings.Join(keybindings, " • ")
@@ -1692,44 +1692,54 @@ func (m Model) renderHelperModal() string {
 		}
 	}{
 		{
-			name: "Navigation",
+			name: "Worktree & Navigation",
 			keybindings: []struct {
 				key         string
 				description string
 			}{
-				{"↑, k", "Move cursor up"},
-				{"↓, j", "Move cursor down"},
-			},
-		},
-		{
-			name: "Worktree Management",
-			keybindings: []struct {
-				key         string
-				description string
-			}{
-				{"n", "Create new worktree with generated branch name"},
-				{"a", "Create worktree from existing branch"},
+				{"↑", "Move cursor up"},
+				{"↓", "Move cursor down"},
+				{"n", "Create new worktree (with AI)"},
+				{"a", "Create new worktree (from existing branch)"},
+				{"enter", "Open CLI (Claude for now)"},
+				{"t", "Open terminal"},
+				{"o", "Open default editor"},
 				{"d", "Delete selected worktree"},
-				{"enter", "Switch to selected worktree (with Claude)"},
-				{"t", "Open terminal in worktree"},
 			},
 		},
 		{
-			name: "Branch Operations",
+			name: "Git Operations",
 			keybindings: []struct {
 				key         string
 				description string
 			}{
-				{"b", "Change base branch for new worktrees"},
-				{"K", "Checkout/switch branch in main repo"},
-				{"c", "Commit all uncommitted changes"},
-				{"p", "Push to remote (with AI branch naming)"},
-				{"P", "Push & create draft PR"},
+				{"c", "Commit all uncommitted changes (with AI)"},
+				{"p", "Push to remote (with AI)"},
 				{"u", "Update from base branch (pull/merge)"},
-				{"v", "Open PR in browser"},
 				{"r", "Refresh status (fetch from remote, no merging)"},
-				{"R", "Run 'run' script on selected worktree"},
+				{"b", "Change base branch for new worktrees"},
 				{"B", "Rename current branch"},
+				{"K", "Checkout/switch branch in main repo"},
+			},
+		},
+		{
+			name: "Pull Requests",
+			keybindings: []struct {
+				key         string
+				description string
+			}{
+				{"P", "Push & create draft PR (with AI)"},
+				{"v", "Open PR in default browser"},
+			},
+		},
+		{
+			name: "Automation & Scripts",
+			keybindings: []struct {
+				key         string
+				description string
+			}{
+				{"R", "Execute 'run' script (gcool.json)"},
+				{";", "View and run custom scripts (gcool.json)"},
 			},
 		},
 		{
@@ -1738,44 +1748,90 @@ func (m Model) renderHelperModal() string {
 				key         string
 				description string
 			}{
-				{"e", "Select default editor"},
-				{"h", "Show this help"},
-				{"o", "Open worktree in default editor"},
-				{"q", "Quit application"},
 				{"s", "Open settings"},
+				{"e", "Select default editor"},
 				{"S", "View tmux sessions"},
+				{"g", "Generate branch name (with AI) — in new worktree modal"},
+				{"h", "Show this help"},
+				{"q", "Quit application"},
 			},
 		},
 	}
 
-	// Render categories
-	for i, category := range categories {
-		b.WriteString(detailKeyStyle.Render(category.name))
-		b.WriteString("\n")
+	// Split categories into two groups: left (3) and right (2)
+	leftCategories := categories[:3]
+	rightCategories := categories[3:]
+
+	// Calculate column width (account for padding and spacing)
+	colWidth := 48
+	if m.width > 120 {
+		colWidth = (m.width - 16) / 2
+	}
+
+	// Render left column
+	var leftCol strings.Builder
+	for i, category := range leftCategories {
+		leftCol.WriteString(detailKeyStyle.Render(category.name))
+		leftCol.WriteString("\n")
 
 		for _, kb := range category.keybindings {
 			// Format: "  key - description"
-			b.WriteString(normalItemStyle.Render(fmt.Sprintf("  %-10s %s", kb.key, "—")))
-			b.WriteString(" ")
-			b.WriteString(helpStyle.Render(kb.description))
-			b.WriteString("\n")
+			leftCol.WriteString(normalItemStyle.Render(fmt.Sprintf("  %-10s %s", kb.key, "—")))
+			leftCol.WriteString(" ")
+			leftCol.WriteString(helpStyle.Render(kb.description))
+			leftCol.WriteString("\n")
 		}
 
-		// Add spacing between categories (except after last one)
-		if i < len(categories)-1 {
-			b.WriteString("\n")
+		// Add spacing between categories
+		if i < len(leftCategories)-1 {
+			leftCol.WriteString("\n")
 		}
 	}
 
-	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("Press 'h' or Esc to close this help"))
+	// Render right column
+	var rightCol strings.Builder
+	for i, category := range rightCategories {
+		rightCol.WriteString(detailKeyStyle.Render(category.name))
+		rightCol.WriteString("\n")
 
-	// Create a wider modal for better readability
+		for _, kb := range category.keybindings {
+			// Format: "  key - description"
+			rightCol.WriteString(normalItemStyle.Render(fmt.Sprintf("  %-10s %s", kb.key, "—")))
+			rightCol.WriteString(" ")
+			rightCol.WriteString(helpStyle.Render(kb.description))
+			rightCol.WriteString("\n")
+		}
+
+		// Add spacing between categories
+		if i < len(rightCategories)-1 {
+			rightCol.WriteString("\n")
+		}
+	}
+
+	// Add hint about AI capabilities
+	rightCol.WriteString("\n")
+	rightCol.WriteString(helpStyle.Render("(with AI) = AI automations if enabled"))
+
+	// Join columns horizontally with proper spacing
+	colStyle := lipgloss.NewStyle().Width(colWidth)
+	leftRendered := colStyle.Render(leftCol.String())
+	rightRendered := colStyle.Render(rightCol.String())
+	columnsContent := lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, rightRendered)
+
+	// Combine with title and footer
+	var finalContent strings.Builder
+	finalContent.WriteString(modalTitleStyle.Render("📖 Help - Keybindings"))
+	finalContent.WriteString("\n\n")
+	finalContent.WriteString(columnsContent)
+	finalContent.WriteString("\n\n")
+	finalContent.WriteString(helpStyle.Render("Press 'h' or Esc to close this help"))
+
+	// Create modal with appropriate width
 	maxWidth := m.width - 4
-	if maxWidth > 120 {
-		maxWidth = 120
+	if maxWidth > 160 {
+		maxWidth = 160
 	}
-	content := modalStyle.Width(maxWidth).Render(b.String())
+	content := modalStyle.Width(maxWidth).Render(finalContent.String())
 
 	return lipgloss.Place(
 		m.width, m.height,

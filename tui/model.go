@@ -224,6 +224,9 @@ type Model struct {
 	// Worktree switch state (for ensuring worktree exists before switching)
 	pendingSwitchInfo   *SwitchInfo // Info for pending switch (will be completed after ensure succeeds)
 	ensuringWorktree    bool        // Whether we're currently ensuring a worktree exists
+
+	// Initialization state
+	isInitializing      bool        // Suppress notifications during app startup (before first successful worktree load)
 }
 
 // NewModel creates a new TUI model
@@ -327,9 +330,10 @@ func NewModel(repoPath string, autoClaude bool) Model {
 		aiAPIKeyInput:      aiAPIKeyInput,
 		aiModels:           aiModels,
 		autoClaude:         autoClaude,
-		repoPath:        absoluteRepoPath,
-		editors:         editors,
-		availableThemes: GetAvailableThemes(),
+		repoPath:           absoluteRepoPath,
+		editors:            editors,
+		availableThemes:    GetAvailableThemes(),
+		isInitializing:     true,
 	}
 
 	// Load AI settings from config
@@ -459,6 +463,7 @@ type (
 		updatedBranches   map[string]int  // Branch name -> commits pulled
 		upToDate          bool            // Whether everything was already up to date
 		mergedBaseBranch  bool            // Whether base branch was merged into selected worktree
+		pullErr           error           // Error from pulling the main repo branch (non-blocking)
 	}
 
 	activityTickMsg time.Time
@@ -1327,8 +1332,8 @@ func (m Model) pullFromBaseBranch(worktreePath, baseBranch string) tea.Cmd {
 }
 
 // refreshWithPull fetches latest commits and refreshes worktree status
-// Read-only operation: fetches from remote but does NOT merge or pull anything
-// User must explicitly use 'u' keybinding to pull/merge changes
+// For the main repository: fetches AND pulls to update the working directory
+// For workspace worktrees: fetches only (user must explicitly pull via 'u' keybinding)
 func (m Model) refreshWithPull() tea.Cmd {
 	return func() tea.Msg {
 		msg := refreshWithPullMsg{
@@ -1339,6 +1344,21 @@ func (m Model) refreshWithPull() tea.Cmd {
 		// Fetch all updates from remote first to get latest refs
 		if err := m.gitManager.FetchRemote(); err != nil {
 			return refreshWithPullMsg{err: fmt.Errorf("failed to fetch updates: %w", err)}
+		}
+
+		// If the selected worktree is the main repo (IsCurrent), pull to update working directory
+		selected := m.selectedWorktree()
+		if selected != nil && selected.IsCurrent {
+			// Get the current branch of the main repo
+			branch := selected.Branch
+			if branch != "" {
+				// Pull from the remote tracking branch to get latest commits
+				if err := m.gitManager.PullCurrentBranch(m.repoPath, branch); err != nil {
+					// Pull failed, but fetch succeeded - don't fail the refresh
+					// User can see the behind count and manually pull if needed
+					msg.pullErr = err
+				}
+			}
 		}
 
 		// Worktree list will be reloaded by the Update handler
