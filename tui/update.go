@@ -74,6 +74,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		// Sort worktrees before restoring cursor position
+		// This ensures cursor is positioned correctly in the sorted list
+		m.sortWorktrees()
+
 			// If we just created a worktree, select it
 			if m.lastCreatedBranch != "" {
 				for i, wt := range m.worktrees {
@@ -99,8 +103,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-	// Sort worktrees after loading
-	m.sortWorktrees()
 		return m, nil
 
 	case branchesLoadedMsg:
