@@ -154,8 +154,8 @@ gcool -path /path/to/other/repo
 - `n` - Create new worktree with a **new branch** (random name, selects but doesn't auto-switch)
 - `a` - Create worktree from an **existing branch**
 - `d` / `x` - Delete selected worktree
-- `r` - Run 'run' script on selected worktree
-- `R` (Shift+R) - Refresh worktree list
+- `r` - Refresh worktree list (fetch from remote)
+- `R` (Shift+R) - Run 'run' script on selected worktree
 - `;` - Open scripts modal
 
 ### Main View - Branch Operations

@@ -115,7 +115,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modal = noModal
 				m.lastCreatedBranch = msg.branch
 				// Still refresh worktrees since the worktree was created successfully
-				return m, tea.Batch(cmd, m.loadWorktreesLightweight)
+				return m, tea.Batch(cmd, m.loadWorktreesLightweight())
 			} else {
 				// Git worktree creation failed - show error
 				cmd = m.showErrorNotification("Failed to create worktree", 4*time.Second)
@@ -131,7 +131,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Quick refresh without expensive status checks
 			return m, tea.Batch(
 				cmd,
-				m.loadWorktreesLightweight,
+				m.loadWorktreesLightweight(),
 			)
 		}
 
@@ -151,7 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Quick refresh without expensive status checks
 			return m, tea.Batch(
 				cmd,
-				m.loadWorktreesLightweight,
+				m.loadWorktreesLightweight(),
 			)
 		}
 
@@ -179,7 +179,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case baseBranchLoadedMsg:
 		m.baseBranch = msg.branch
-		return m, nil
+		// Load worktrees immediately (without status), then fetch in background
+		return m, tea.Batch(
+			m.loadWorktreesLightweight(), // Shows list immediately
+			m.refreshWithPull(),           // Fetches + triggers reload with status
+		)
 
 	case notificationHideMsg:
 		// Only handle if this is the current notification
@@ -285,7 +289,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = m.showSuccessNotification("PR created / updated: " + msg.prURL, 5*time.Second)
 			return m, tea.Batch(
 				cmd,
-				m.loadWorktrees,
+				m.loadWorktrees(),
 			)
 		}
 
@@ -484,7 +488,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			debugLog("Triggering worktree refresh after commit")
 			return m, tea.Batch(
 				cmd,
-				m.loadWorktrees,
+				m.loadWorktrees(),
 			)
 		}
 
@@ -662,7 +666,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.showSuccessNotification("Pushed to origin/"+msg.branch, 3*time.Second)
 		return m, tea.Batch(
 			cmd,
-			m.loadWorktrees,
+			m.loadWorktrees(),
 		)
 
 	case themeChangedMsg:
@@ -688,7 +692,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = m.showSuccessNotification("Successfully pulled changes from base branch", 3*time.Second)
 			return m, tea.Batch(
 				cmd,
-				m.loadWorktrees,
+				m.loadWorktrees(),
 			)
 		}
 
@@ -702,17 +706,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Reload worktree list to show updated status
 			return m, tea.Batch(
 				cmd,
-				m.loadWorktrees,
+				m.loadWorktrees(),
 			)
 		}
 
 	case prStatusesRefreshedMsg:
 		if msg.err != nil {
 			// Silently handle PR status refresh errors
-			return m, m.loadWorktrees
+			return m, m.loadWorktrees()
 		}
 		// Reload worktrees to show updated PR statuses
-		return m, m.loadWorktrees
+		return m, m.loadWorktrees()
 
 	case scriptOutputMsg:
 		// Find and update the script execution with this name

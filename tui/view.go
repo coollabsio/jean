@@ -172,6 +172,11 @@ func (m Model) renderDetails() string {
 					statusParts = append(statusParts, normalItemStyle.Copy().Foreground(warningColor).Render(fmt.Sprintf("↓%d behind", wt.BehindCount)))
 				}
 				b.WriteString(strings.Join(statusParts, ", "))
+
+				// Add pull hint directly on the same line if behind
+				if wt.BehindCount > 0 && !wt.IsCurrent && strings.Contains(wt.Path, ".workspaces") {
+					b.WriteString(normalItemStyle.Copy().Foreground(mutedColor).Render(" (press 'u' to pull)"))
+				}
 			} else {
 				b.WriteString(normalItemStyle.Copy().Foreground(successColor).Render("✓ Up to date"))
 			}
@@ -250,14 +255,6 @@ func (m Model) renderDetails() string {
 	b.WriteString("\n")
 	b.WriteString(detailKeyStyle.Render("Actions:"))
 	b.WriteString("\n")
-
-	// Show pull hint if behind (as first action)
-	if m.baseBranch != "" && wt.Branch != m.baseBranch && !strings.HasPrefix(wt.Branch, "(detached") {
-		if wt.BehindCount > 0 && !wt.IsCurrent && strings.Contains(wt.Path, ".workspaces") {
-			b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  u update from base branch"))
-			b.WriteString("\n\n")
-		}
-	}
 
 	b.WriteString(normalItemStyle.Copy().Foreground(accentColor).Render("  t for open terminal"))
 	b.WriteString("\n")
@@ -1640,8 +1637,8 @@ func (m Model) renderHelperModal() string {
 				{"P", "Push & create draft PR"},
 				{"u", "Update from base branch (pull/merge)"},
 				{"v", "Open PR in browser"},
-				{"r", "Run 'run' script on selected worktree"},
-				{"R", "Refresh status (fetch from remote, no merging)"},
+				{"r", "Refresh status (fetch from remote, no merging)"},
+				{"R", "Run 'run' script on selected worktree"},
 				{"B", "Rename current branch"},
 			},
 		},

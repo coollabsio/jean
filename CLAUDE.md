@@ -460,10 +460,10 @@ All keybindings are defined in `tui/update.go`. The application uses Bubble Tea'
 - `n` - Create new worktree with random branch name (selects it but doesn't switch)
 - `a` - Create worktree from existing branch
 - `d` - Delete selected worktree
-- `r` - Refresh worktree list
+- `r` - Refresh worktree list (fetch from remote)
+- `R` (Shift+R) - Run 'run' script on selected worktree
 
 **Branch Operations**:
-- `R` (Shift+R) - Rename current branch
 - `K` (Shift+K) - Checkout/switch branch in main repository
 - `b` - Change base branch for new worktrees
 - `C` (Shift+C) - Commit all uncommitted changes (opens commit modal)

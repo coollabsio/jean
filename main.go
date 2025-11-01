@@ -344,6 +344,7 @@ KEYBINDINGS:
         a           Create worktree from existing branch
         d           Delete selected worktree
         r           Refresh worktree list
+        R           Run 'run' script on selected worktree
         q/Ctrl+C    Quit
 
     Modal Navigation:

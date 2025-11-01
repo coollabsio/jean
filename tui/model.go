@@ -356,8 +356,7 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	return tea.Batch(
-		m.loadWorktrees,
-		m.loadBaseBranch,
+		m.loadBaseBranch(),
 		m.scheduleActivityCheck(),
 		tea.EnterAltScreen,
 	)
@@ -549,14 +548,18 @@ type (
 )
 
 // Commands
-func (m Model) loadWorktrees() tea.Msg {
-	worktrees, err := m.gitManager.List(m.baseBranch)
-	return worktreesLoadedMsg{worktrees: worktrees, err: err}
+func (m Model) loadWorktrees() tea.Cmd {
+	return func() tea.Msg {
+		worktrees, err := m.gitManager.List(m.baseBranch)
+		return worktreesLoadedMsg{worktrees: worktrees, err: err}
+	}
 }
 
-func (m Model) loadWorktreesLightweight() tea.Msg {
-	worktrees, err := m.gitManager.ListLightweight()
-	return worktreesLoadedMsg{worktrees: worktrees, err: err}
+func (m Model) loadWorktreesLightweight() tea.Cmd {
+	return func() tea.Msg {
+		worktrees, err := m.gitManager.ListLightweight()
+		return worktreesLoadedMsg{worktrees: worktrees, err: err}
+	}
 }
 
 func (m Model) loadBranches() tea.Msg {
@@ -639,26 +642,28 @@ func (m Model) checkoutBranch(branch string) tea.Cmd {
 	}
 }
 
-func (m Model) loadBaseBranch() tea.Msg {
-	// First, try to load from config
-	if m.configManager != nil {
-		if savedBranch := m.configManager.GetBaseBranch(m.repoPath); savedBranch != "" {
-			return baseBranchLoadedMsg{branch: savedBranch}
+func (m Model) loadBaseBranch() tea.Cmd {
+	return func() tea.Msg {
+		// First, try to load from config
+		if m.configManager != nil {
+			if savedBranch := m.configManager.GetBaseBranch(m.repoPath); savedBranch != "" {
+				return baseBranchLoadedMsg{branch: savedBranch}
+			}
 		}
-	}
 
-	// If not in config, try current branch
-	branch, err := m.gitManager.GetCurrentBranch()
-	if err != nil || branch == "" {
-		// Try to get default branch (main or master)
-		defaultBranch, err := m.gitManager.GetDefaultBranch()
-		if err != nil {
-			// Last resort: empty (user must set manually)
-			return baseBranchLoadedMsg{branch: ""}
+		// If not in config, try current branch
+		branch, err := m.gitManager.GetCurrentBranch()
+		if err != nil || branch == "" {
+			// Try to get default branch (main or master)
+			defaultBranch, err := m.gitManager.GetDefaultBranch()
+			if err != nil {
+				// Last resort: empty (user must set manually)
+				return baseBranchLoadedMsg{branch: ""}
+			}
+			return baseBranchLoadedMsg{branch: defaultBranch}
 		}
-		return baseBranchLoadedMsg{branch: defaultBranch}
+		return baseBranchLoadedMsg{branch: branch}
 	}
-	return baseBranchLoadedMsg{branch: branch}
 }
 
 func (m Model) openInEditor(path string) tea.Cmd {
