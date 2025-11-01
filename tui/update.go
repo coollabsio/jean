@@ -116,14 +116,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prsLoadedMsg:
 		if msg.err != nil {
+			m.debugLog("prsLoadedMsg handler: ERROR - " + msg.err.Error())
 			m.prLoadingError = msg.err.Error()
 			cmd = m.showErrorNotification("Failed to load PRs: "+msg.err.Error(), 4*time.Second)
 			return m, cmd
 		} else {
+			m.debugLog(fmt.Sprintf("prsLoadedMsg handler: SUCCESS - loaded %d PRs, filtering and preparing modal", len(msg.prs)))
 			m.prs = msg.prs
 			m.filteredPRs = msg.prs
 			m.prListIndex = 0
 			m.prLoadingError = ""
+			m.debugLog(fmt.Sprintf("prsLoadedMsg handler: filteredPRs set to %d items, prListIndex=0", len(m.filteredPRs)))
 		}
 		return m, nil
 
@@ -455,7 +458,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if hasAPIKey && aiEnabled {
 			// Generate AI PR content before creating PR
-			cmd = m.showInfoNotification("📝 Generating PR title and description...")
+			cmd = m.showInfoNotification("🤖 Generating PR title and description...")
 			return m, tea.Batch(
 				cmd,
 				m.renameSessionsForBranch(msg.oldBranchName, msg.newBranchName),
@@ -593,7 +596,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmd, m.generateBranchNameForPR(msg.worktreePath, msg.branch, m.baseBranch))
 		} else if shouldAIContent {
 			// Generate AI PR content (title and description) even without branch rename
-			cmd = m.showInfoNotification("📝 Generating PR title and description...")
+			cmd = m.showInfoNotification("🤖 Generating PR title and description...")
 			return m, tea.Batch(cmd, m.generatePRContent(msg.worktreePath, msg.branch, m.baseBranch))
 		} else {
 			// No AI available - open PR content modal for manual entry
@@ -900,13 +903,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If auto-committing with AI, show error and abort
 			if m.autoCommitWithAI {
 				m.autoCommitWithAI = false
-				cmd := m.showErrorNotification("Failed to generate commit message: " + msg.err.Error(), 4*time.Second)
+				cmd := m.showErrorNotification("🤖 Failed to generate commit message: " + msg.err.Error(), 4*time.Second)
 				return m, cmd
 			}
 			// If in PR creation flow, show error and abort
 			if m.commitBeforePR {
 				m.commitBeforePR = false
-				cmd := m.showErrorNotification("Failed to generate commit message: " + msg.err.Error(), 4*time.Second)
+				cmd := m.showErrorNotification("🤖 Failed to generate commit message: " + msg.err.Error(), 4*time.Second)
 				return m, cmd
 			}
 			// Set status message in commit modal
@@ -924,7 +927,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// If in PR creation flow, auto-commit with generated message
 			if m.commitBeforePR {
-				cmd := m.showInfoNotification("Committing with AI-generated message...")
+				cmd := m.showInfoNotification("🤖 Committing with AI-generated message...")
 				return m, tea.Batch(cmd, m.createCommit(m.prCreationPending, msg.subject, msg.body))
 			}
 			// Otherwise populate the commit message fields with AI-generated content for user review
@@ -1536,6 +1539,7 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "N":
 		// Create worktree from existing PR on GitHub (Shift+N)
+		m.debugLog("N keybinding pressed - opening PR list modal to create worktree from PR")
 		m.modal = prListModal
 		m.prListIndex = 0
 		m.prListCreationMode = true // Set creation mode flag
@@ -1543,6 +1547,7 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prSearchInput.Focus()
 		m.filteredPRs = nil
 		m.prLoadingError = ""
+		m.debugLog("PR list modal state: prListCreationMode=true, repoPath=" + m.repoPath)
 		return m, m.loadPRs()
 
 	case "c":
@@ -2424,6 +2429,7 @@ func (m Model) handlePRContentModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handlePRListModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.debugLog("handlePRListModalInput: ESC pressed - closing PR list modal")
 		m.modal = noModal
 		m.prListMergeMode = false
 		m.prListCreationMode = false
@@ -2435,6 +2441,7 @@ func (m Model) handlePRListModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.prListIndex > 0 {
 			m.prListIndex--
 		}
+		m.debugLog(fmt.Sprintf("handlePRListModalInput: UP pressed - prListIndex now %d", m.prListIndex))
 		return m, nil
 
 	case "down":
@@ -2443,6 +2450,7 @@ func (m Model) handlePRListModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.prListIndex < len(filteredList)-1 {
 			m.prListIndex++
 		}
+		m.debugLog(fmt.Sprintf("handlePRListModalInput: DOWN pressed - prListIndex now %d (max %d)", m.prListIndex, len(filteredList)-1))
 		return m, nil
 
 	case "tab":
@@ -2453,23 +2461,30 @@ func (m Model) handlePRListModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.prSearchInput.Blur()
 		}
+		m.debugLog(fmt.Sprintf("handlePRListModalInput: TAB pressed - modalFocused now %d", m.modalFocused))
 		return m, nil
 
 	case "enter":
 		// Get filtered PRs for selection
 		filteredList := m.filterPRs(m.prSearchInput.Value())
+		m.debugLog(fmt.Sprintf("handlePRListModalInput: ENTER pressed - filtered list has %d PRs, selected index=%d", len(filteredList), m.prListIndex))
+
 		if m.prListIndex >= len(filteredList) {
+			m.debugLog("handlePRListModalInput: ENTER - index out of bounds, aborting")
 			return m, nil
 		}
 
 		if len(filteredList) == 0 {
+			m.debugLog("handlePRListModalInput: ENTER - no filtered PRs, aborting")
 			return m, nil
 		}
 
 		selectedPR := filteredList[m.prListIndex]
+		m.debugLog(fmt.Sprintf("handlePRListModalInput: ENTER - selected PR #%d - %s (branch: %s)", selectedPR.Number, selectedPR.Title, selectedPR.HeadRefName))
 
 		// Handle creation mode: create worktree from PR branch
 		if m.prListCreationMode {
+			m.debugLog(fmt.Sprintf("handlePRListModalInput: CREATION MODE - creating worktree from PR branch: %s", selectedPR.HeadRefName))
 			m.modal = noModal
 			m.prListCreationMode = false
 			m.prListIndex = 0
