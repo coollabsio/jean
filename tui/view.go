@@ -1258,6 +1258,7 @@ func (m Model) renderPRListModal() string {
 
 	// Handle error case
 	if m.prLoadingError != "" {
+		m.debugLog("renderPRListModal: displaying error state - " + m.prLoadingError)
 		b.WriteString(modalTitleStyle.Render("Select PR to Create Worktree"))
 		b.WriteString("\n\n")
 		b.WriteString(errorStyle.Render("Error: " + m.prLoadingError))
@@ -1273,6 +1274,7 @@ func (m Model) renderPRListModal() string {
 	// Handle loading case (no PRs loaded yet)
 	if len(m.prs) == 0 {
 		if len(m.filteredPRs) == 0 {
+			m.debugLog("renderPRListModal: displaying loading state (no PRs loaded yet)")
 			b.WriteString(modalTitleStyle.Render("Select PR to Create Worktree"))
 			b.WriteString("\n\n")
 			b.WriteString(helpStyle.Render("Loading pull requests..."))
@@ -1285,6 +1287,9 @@ func (m Model) renderPRListModal() string {
 			)
 		}
 	}
+
+	m.debugLog(fmt.Sprintf("renderPRListModal: displaying PR list with %d filtered PRs (search='%s', selected index=%d, modalFocused=%d, creation mode=%v)",
+		len(m.filterPRs(m.prSearchInput.Value())), m.prSearchInput.Value(), m.prListIndex, m.modalFocused, m.prListCreationMode))
 
 	b.WriteString(modalTitleStyle.Render("Select PR to Create Worktree"))
 	b.WriteString("\n\n")

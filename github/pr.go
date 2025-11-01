@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -217,19 +218,27 @@ func (m *Manager) MergePR(worktreePath, prURL, mergeMethod string) error {
 func (m *Manager) ListPRs(worktreePath string) ([]PRInfo, error) {
 	// Check if gh is installed
 	if !m.IsGhInstalled() {
-		return nil, fmt.Errorf("gh CLI is not installed. Install it from https://cli.github.com")
+		err := fmt.Errorf("gh CLI is not installed. Install it from https://cli.github.com")
+		fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: %v\n", err)
+		return nil, err
 	}
+	fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: gh CLI installed successfully, checking authentication\n")
 
 	// Check if authenticated
 	authenticated, err := m.IsAuthenticated()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: authentication check failed - %v\n", err)
 		return nil, err
 	}
 	if !authenticated {
-		return nil, fmt.Errorf("not authenticated with GitHub. Run 'gh auth login' to authenticate")
+		err := fmt.Errorf("not authenticated with GitHub. Run 'gh auth login' to authenticate")
+		fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: %v\n", err)
+		return nil, err
 	}
+	fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: authentication check passed\n")
 
 	// List open PRs in JSON format
+	fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: executing 'gh pr list --state open --json number,title,headRefName,url,author --limit 100' in directory: %s\n", worktreePath)
 	cmd := exec.Command("gh", "pr", "list",
 		"--state", "open",
 		"--json", "number,title,headRefName,url,author",
@@ -237,13 +246,31 @@ func (m *Manager) ListPRs(worktreePath string) ([]PRInfo, error) {
 	cmd.Dir = worktreePath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list PRs: %s", string(output))
+		errMsg := fmt.Sprintf("failed to list PRs: %s", string(output))
+		fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: command execution failed - %v\n", errMsg)
+		return nil, fmt.Errorf(errMsg)
+	}
+
+	fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: command executed successfully, raw output length: %d bytes\n", len(output))
+	if len(output) > 0 {
+		outputPreview := string(output)
+		if len(outputPreview) > 500 {
+			outputPreview = outputPreview[:500] + "...[truncated]"
+		}
+		fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: raw output preview: %s\n", outputPreview)
 	}
 
 	// Parse JSON response
 	var prs []PRInfo
 	if err := json.Unmarshal(output, &prs); err != nil {
-		return nil, fmt.Errorf("failed to parse PR list: %w", err)
+		errMsg := fmt.Sprintf("failed to parse PR list: %v", err)
+		fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: JSON parse failed - %v\n", errMsg)
+		return nil, fmt.Errorf(errMsg)
+	}
+
+	fmt.Fprintf(os.Stderr, "[DEBUG] ListPRs: successfully parsed %d PRs from JSON\n", len(prs))
+	for i, pr := range prs {
+		fmt.Fprintf(os.Stderr, "[DEBUG]   PR[%d]: #%d - %s (branch: %s)\n", i, pr.Number, pr.Title, pr.HeadRefName)
 	}
 
 	return prs, nil

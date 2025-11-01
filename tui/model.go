@@ -671,7 +671,16 @@ func (m Model) loadBranches() tea.Msg {
 
 func (m Model) loadPRs() tea.Cmd {
 	return func() tea.Msg {
+		m.debugLog("loadPRs() called - fetching PRs from GitHub for repo: " + m.repoPath)
 		prs, err := m.githubManager.ListPRs(m.repoPath)
+		if err != nil {
+			m.debugLog("loadPRs() failed with error: " + err.Error())
+		} else {
+			m.debugLog(fmt.Sprintf("loadPRs() succeeded - loaded %d PRs", len(prs)))
+			for i, pr := range prs {
+				m.debugLog(fmt.Sprintf("  PR[%d]: #%d - %s (branch: %s, url: %s)", i, pr.Number, pr.Title, pr.HeadRefName, pr.URL))
+			}
+		}
 		return prsLoadedMsg{prs: prs, err: err}
 	}
 }
@@ -736,14 +745,34 @@ func (m Model) deleteWorktree(path, branch string, force bool) tea.Cmd {
 
 func (m Model) createWorktreeFromPR(branch string) tea.Cmd {
 	return func() tea.Msg {
+		m.debugLog(fmt.Sprintf("createWorktreeFromPR() called with branch: %s", branch))
+
 		// Ensure .workspaces directory exists
+		m.debugLog("createWorktreeFromPR: ensuring .workspaces directory exists in repo: " + m.repoPath)
 		if err := m.gitManager.EnsureWorkspacesDir(); err != nil {
+			m.debugLog("createWorktreeFromPR: EnsureWorkspacesDir failed - " + err.Error())
 			return worktreeCreatedMsg{err: err, path: "", branch: branch}
 		}
+		m.debugLog("createWorktreeFromPR: .workspaces directory ensured successfully")
+
+		// Generate random path for the worktree
+		m.debugLog("createWorktreeFromPR: generating random path for branch: " + branch)
+		path, err := m.gitManager.GetDefaultPath(branch)
+		if err != nil {
+			m.debugLog("createWorktreeFromPR: GetDefaultPath failed - " + err.Error())
+			return worktreeCreatedMsg{err: err, path: "", branch: branch}
+		}
+		m.debugLog("createWorktreeFromPR: generated path: " + path)
 
 		// Create worktree from the PR's branch (existing branch, not new)
-		err := m.gitManager.Create("", branch, false, "")
-		return worktreeCreatedMsg{err: err, path: "", branch: branch}
+		m.debugLog(fmt.Sprintf("createWorktreeFromPR: calling gitManager.Create() with args: path='%s', branch='%s', newBranch=false, baseBranch=''", path, branch))
+		err = m.gitManager.Create(path, branch, false, "")
+		if err != nil {
+			m.debugLog("createWorktreeFromPR: gitManager.Create() failed - " + err.Error())
+		} else {
+			m.debugLog(fmt.Sprintf("createWorktreeFromPR: worktree created successfully at path: %s for branch: %s", path, branch))
+		}
+		return worktreeCreatedMsg{err: err, path: path, branch: branch}
 	}
 }
 
