@@ -223,6 +223,9 @@ type Model struct {
 	// Worktree switch state (for ensuring worktree exists before switching)
 	pendingSwitchInfo   *SwitchInfo // Info for pending switch (will be completed after ensure succeeds)
 	ensuringWorktree    bool        // Whether we're currently ensuring a worktree exists
+
+	// Initialization state
+	isInitializing      bool        // Suppress notifications during app startup (before first successful worktree load)
 }
 
 // NewModel creates a new TUI model
@@ -329,6 +332,7 @@ func NewModel(repoPath string, autoClaude bool) Model {
 		repoPath:           absoluteRepoPath,
 		editors:            editors,
 		availableThemes:    GetAvailableThemes(),
+		isInitializing:     true,
 	}
 
 	// Load AI settings from config

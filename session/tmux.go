@@ -194,6 +194,10 @@ set -g renumber-windows on
 # Ctrl-D to detach
 bind-key -n C-d detach-client
 
+# Navigate between windows with Ctrl+arrows
+bind-key -n C-Right next-window
+bind-key -n C-Left previous-window
+
 # Status bar styling (minimal)
 set -g status-style bg=default,fg=white
 set -g status-left-length 40
