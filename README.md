@@ -1,20 +1,63 @@
-# gcool - A Cool TUI for Git Worktrees & Running CLI-Based AI Assistants Simultaneously
+# gcool - AI-Powered Git Worktree Management & Development Workflow Automation
 
-A beautiful terminal user interface for managing Git worktrees with integrated tmux session management, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). Run multiple Claude CLI sessions across different branches effortlessly.
+A powerful, feature-rich terminal user interface for managing Git worktrees with integrated tmux session management, GitHub PR automation, AI-powered commit messages & branch naming, and custom script execution. Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and designed for developers who work with multiple feature branches simultaneously while leveraging AI to streamline their workflow.
 
 ## Features
 
-- **Full CRUD Operations**: Create, list, switch, and delete worktrees
-- **Tmux Session Management**: Persistent Claude CLI sessions per worktree
-- **Auto-Generated Names**: Random branch and workspace names pre-filled (editable)
-- **Organized Workspaces**: All worktrees are created in `.workspaces/` directory
-- **Fun Naming**: Names like `happy-panda-42`, `swift-dragon-17`, `brave-falcon-89`
-- **Session Persistence**: Detach and return to your work anytime
-- **Intuitive Panels UI**: Split-panel interface showing worktrees and detailed information
-- **Create from New or Existing Branches**: Choose to create a new branch or use an existing one
-- **Shell Integration**: Seamlessly switch directories using shell wrappers
-- **Keyboard-First**: Vim-style navigation and shortcuts
-- **Beautiful Styling**: Colorful, modern terminal UI using Lipgloss
+### Core Worktree Management
+- **Full CRUD Operations**: Create, list, switch, and delete worktrees with single keystrokes
+- **Organized Workspaces**: All worktrees created in `.workspaces/` directory with auto-generated names (`happy-panda-42`, `swift-dragon-17`, etc.)
+- **Create from New or Existing Branches**: Choose to create a new branch (`n`) or attach to existing (`a`)
+- **Session Persistence**: Detach and return to your work anytime - context persists across terminal restarts
+- **Automatic Sorting**: Worktrees sorted by last modified time (most recent first)
+- **Dual Session Mode**: Run both Claude AI and terminal sessions simultaneously on the same worktree
+
+### AI-Powered Workflow
+- **AI Commit Messages**: Automatically generate conventional commit messages from your changes using 11+ AI models (GPT-4, Claude, Gemini, etc.)
+- **AI Branch Naming**: Generate semantic branch names from code changes (e.g., `feat/user-authentication`, `fix/button-alignment`)
+- **AI PR Content**: Auto-generate PR titles and descriptions from your git diff
+- **OpenRouter Integration**: Switch between multiple AI models on the fly (GPT-4 Turbo, Claude 3 Opus, Gemini Pro, Llama 2, and more)
+- **Configurable AI Settings**: Toggle AI features per repository, manage API keys securely
+
+### GitHub PR Automation
+- **Create Draft PRs**: Auto-commit, rename branches with AI, generate PR content, and create draft PRs in one command (`P`)
+- **Create Worktree from PR**: Browse and filter GitHub PRs, create worktrees from PR branches instantly (`N`)
+- **View PRs in Browser**: Open PR links with clickable terminal hyperlinks (`v`)
+- **Merge with Strategy Selection**: Merge with squash, merge commit, or rebase options (`M`)
+- **PR Status Tracking**: See PR status directly in the worktree details panel
+
+### Git Operations
+- **Smart Push**: Push to remote with auto-commit and AI-powered branch naming (`p`)
+- **Refresh with Auto-Pull**: Fetch from remote and pull all worktrees in one command, skip branches with uncommitted changes (`r`)
+- **Update from Base**: Pull/merge base branch changes into your worktree (`u`)
+- **Branch Management**: Rename branches (`B`), checkout branches (`K`), change base branch (`b`)
+- **Merge Conflict Handling**: Gracefully handle merge conflicts with abort option
+
+### Custom Scripts & Automation
+- **Custom Script Execution**: Define and run bash scripts from `gcool.json` on any worktree (`R`, `;`)
+- **Real-time Output Streaming**: Watch script execution with live output updates
+- **Script Management**: View running scripts, kill scripts mid-execution, check status and elapsed time
+- **Setup Automation**: Auto-execute setup scripts when creating new worktrees
+- **Environment Variables**: Access `GCOOL_WORKSPACE_PATH`, `GCOOL_ROOT_PATH`, `GCOOL_BRANCH` in your scripts
+
+### UI & Customization
+- **5 Built-in Themes**: Matrix, Coolify, Dracula, Nord, Solarized - choose your aesthetic
+- **Dynamic Theme Switching**: Change themes without restarting the app
+- **Intuitive Split-Panel UI**: Worktree list on left, detailed information and status on right
+- **Real-time Claude Status**: See when Claude is thinking/ready with animated spinners and indicators
+- **Comprehensive Help Modal**: Press `h` to see all keybindings and features
+- **Keyboard-First Design**: Vim-style navigation (hjkl, arrow keys) - no mouse required
+- **Beautiful Terminal Styling**: Modern UI with Lipgloss and Charm styling
+
+### Developer Experience
+- **Shell Integration**: Seamlessly switch directories and attach to sessions via shell wrappers
+- **Multi-editor Support**: Open worktrees in VS Code, Cursor, Neovim, Vim, Sublime, Atom, or Zed (`o`)
+- **Configurable Settings**: Per-repository settings for editor, base branch, AI models, themes
+- **Debug Logging**: Enable debug logs for troubleshooting (`s` → Debug Logs)
+- **Configuration Files**:
+  - `~/.config/gcool/config.json` - User configuration
+  - `gcool.json` - Per-repository scripts and settings
+- **Tmux Configuration Management**: Install/update/remove optimized tmux config from the app
 
 ## Installation
 
@@ -143,65 +186,189 @@ gcool -path /path/to/other/repo
 
 ## Keybindings
 
+All keybindings are designed to be fast and intuitive. Most operations are single keystrokes. Here's the complete reference:
+
 ### Main View - Navigation
-- `↑` - Move cursor up in worktree list
-- `↓` - Move cursor down in worktree list
-- `Enter` - Switch to selected worktree (with Claude)
-- `t` - Open terminal in worktree (without Claude)
+| Key | Action |
+|-----|--------|
+| `↑` / `up` / `k` | Move cursor up in worktree list |
+| `↓` / `down` / `j` | Move cursor down in worktree list |
+| `q` / `Ctrl+C` | Quit gcool |
+| `h` | Show comprehensive help modal with all keybindings |
 
 ### Main View - Worktree Management
-- `n` - Create new worktree with a **new branch** (random name, selects but doesn't auto-switch)
-- `a` - Create worktree from an **existing branch**
-- `d` - Delete selected worktree
-- `r` - Refresh worktree list (fetch from remote)
-- `R` (Shift+R) - Run 'run' script on selected worktree
-- `;` - Open scripts modal
+| Key | Action |
+|-----|--------|
+| `Enter` | Switch to selected worktree (opens Claude session) |
+| `t` | Open terminal session in selected worktree (without Claude) |
+| `n` | Create new worktree with new random branch name (customizable) |
+| `a` | Create worktree from existing branch (searchable) |
+| `d` | Delete selected worktree (with confirmation) |
+| `o` | Open worktree in configured editor (code, nvim, vim, etc.) |
+| `r` | Refresh: fetch from remote and auto-pull all branches |
+| `R` (Shift+R) | Run 'run' script from `gcool.json` with live output |
+| `;` | Open scripts modal to run custom scripts |
 
-### Main View - Branch Operations
-- `B` (Shift+B) - Rename current branch
-- `K` (Shift+K) - Checkout/switch branch in main repository
-- `b` - Change base branch for new worktrees
-- `c` - Commit all uncommitted changes
-- `p` - Push to remote (with AI branch naming)
-- `P` (Shift+P) - Push & create draft PR
-- `u` - Update from base branch (pull/merge)
-- `v` - Open PR in browser
+### Main View - Git & Branch Operations
+| Key | Action |
+|-----|--------|
+| `b` | Change base branch for new worktrees |
+| `B` (Shift+B) | Rename current branch (protected from renaming main) |
+| `K` (Shift+K) | Checkout/switch branch in main repository |
+| `c` | Commit changes with AI-generated messages (if enabled) |
+| `p` | Push to remote with smart branch naming and auto-commit |
+| `u` | Update from base branch (fetch + merge, handles conflicts) |
+| `g` | Open repository in browser |
 
-### Main View - Application
-- `e` - Select default editor
-- `h` - Show help modal
-- `s` - Open settings menu
-- `S` (Shift+S) - View/manage tmux sessions
-- `o` - Open worktree in configured editor
-- `q` / `Ctrl+C` - Quit application
+### Main View - GitHub PR Operations
+| Key | Action |
+|-----|--------|
+| `P` (Shift+P) | Create draft PR with AI-generated title/description |
+| `N` (Shift+N) | Create worktree from existing GitHub PR |
+| `v` | Open PR in browser (clickable terminal links) |
+| `M` (Shift+M) | Merge PR (choose: squash/merge/rebase) |
+
+### Main View - Application & Settings
+| Key | Action |
+|-----|--------|
+| `e` | Select/change default editor |
+| `s` | Open settings menu (editor, base branch, themes, AI, tmux config, debug logs) |
+| `S` (Shift+S) | View and manage all active tmux sessions |
 
 ### Modal Navigation (All Modals)
-- `Tab` - Cycle through inputs/buttons
-- `Enter` - Confirm action
-- `Esc` - Cancel/close modal
+| Key | Action |
+|-----|--------|
+| `Tab` | Cycle through inputs, lists, and buttons |
+| `Enter` | Confirm action or move to next field |
+| `Esc` / `q` | Close modal without action |
 
-### Session List Modal (Press `S` - Shift+S)
-- `↑` / `↓` - Navigate through sessions
-- `Enter` - Attach to selected session
-- `d` - Kill selected session
-- `Esc` / `q` - Close modal
+### Modal-Specific Keybindings
 
-### Branch Selection Modals (Press `a`, `K`, or `b`)
-- Type to filter branches by name
-- `↑` / `↓` - Navigate through filtered branch list
-- `Tab` - Cycle between search input, list, and buttons
+**Branch Selection Modals** (Press `a`, `K`, `b`):
+- Type to filter branches in real-time
+- `↑` / `↓` - Navigate filtered results
+- `Tab` - Move focus (search → list → buttons)
 - `Enter` - Select branch
-- `Esc` - Cancel
 
-### Settings Modal (Press `s`)
-- `↑` / `↓` - Navigate through settings options
-- `Enter` - Configure selected setting
-- `Esc` / `q` - Close modal
+**PR List Modal** (Press `N`):
+- Type to search by title, author, or branch name
+- `↑` / `↓` - Navigate PRs (paginated)
+- `Enter` - Create worktree from selected PR
 
-### Editor Selection Modal (Press `e` or via settings)
-- `↑` / `↓` - Navigate through available editors
-- `Enter` - Select and save editor preference
-- `Esc` - Cancel
+**Commit Modal** (Press `c`):
+- Tab cycles: subject input → body input → commit button → cancel button
+- `Enter` in input fields moves to next field
+- Auto-generates commit message with AI if enabled
+
+**Scripts Modal** (Press `;`):
+- `↑` / `↓` - Navigate between scripts
+- `d` / `k` - Kill running scripts
+- `Enter` - Run selected script
+
+**Session List Modal** (Press `S`):
+- `↑` / `↓` - Navigate sessions
+- `d` / `k` - Kill selected session
+- `Enter` - Attach to selected session
+
+**Settings Modal** (Press `s`):
+- `↑` / `↓` - Navigate options
+- `Enter` - Configure selected setting (editor, base branch, theme, etc.)
+
+**Theme Selection Modal** (Press `s` → Theme):
+- `↑` / `↓` - Navigate between 5 themes
+- `Enter` - Apply selected theme
+- Preview theme info before selecting
+
+**Merge Strategy Modal** (Press `M`):
+- `↑` / `↓` - Choose: squash, merge commit, or rebase
+- `Enter` - Confirm merge strategy
+
+**Editor Selection Modal** (Press `e` or via settings):
+- `↑` / `↓` - Navigate available editors
+- `Enter` - Select and save preference
+
+### Quick Reference Cheat Sheet
+
+```
+NAVIGATION         WORKTREE OPS       GIT OPS           PR WORKFLOW       APPLICATION
+─────────────────  ─────────────────  ────────────────  ────────────────  ────────────────
+↑/↓ navigate       n new branch       b set base        P create PR       e select editor
+Enter attach       a exist branch     B rename          N from PR         s settings
+t terminal         d delete           K checkout        v view PR         S sessions
+q quit             r refresh          c commit          M merge PR        h help
+                   R run script       u update          g open repo
+                   ; scripts          p push
+```
+
+## Advanced Features
+
+### AI-Powered Workflow
+
+**Automatic Commit Messages**:
+```
+Press 'c' to commit with AI-generated messages:
+1. AI analyzes your git diff
+2. Generates conventional commit message (feat/fix/docs/etc.)
+3. You review and can edit before committing
+4. Commit is created with generated message
+
+Supports 11+ AI models (GPT-4, Claude, Gemini, Llama, etc.)
+```
+
+**Semantic Branch Naming**:
+```
+When creating PRs or pushing:
+1. AI analyzes your code changes
+2. Generates meaningful branch names (feat/fix/refactor/etc.)
+3. Replaces random names with semantic convention
+4. Can be toggled on/off in AI Settings
+```
+
+### GitHub PR Workflow (Single Command)
+
+```
+Press 'P' to:
+1. Auto-commit any uncommitted changes
+2. Rename branch with AI (optional)
+3. Generate PR title/description with AI (optional)
+4. Push to remote
+5. Create draft PR
+6. Store PR URL for future reference
+
+Everything in one keystroke!
+```
+
+### Custom Scripts System
+
+Define scripts in `gcool.json`:
+```json
+{
+  "scripts": {
+    "run": "npm start",
+    "test": "npm test",
+    "build": "npm run build",
+    "deploy": "npm run build && ./deploy.sh"
+  }
+}
+```
+
+Run with `R` (quick 'run' script) or `;` (scripts menu) with:
+- Real-time output streaming
+- Script execution status and elapsed time
+- Kill running scripts mid-execution
+- Setup scripts run automatically on worktree creation
+
+### Multi-Model AI Integration
+
+Switch between AI models per repository:
+- OpenAI: GPT-4 Turbo, GPT-4, GPT-3.5
+- Anthropic: Claude 3 Opus, Sonnet, Haiku
+- Google: Gemini Pro
+- Meta: Llama 2
+- Mistral: Mistral 7B
+- And more via OpenRouter API
+
+API keys stored securely in local config (`~/.config/gcool/config.json`).
 
 ## How It Works
 
@@ -386,23 +553,92 @@ See [CLAUDE.md](./CLAUDE.md) for detailed guides on:
 
 ## Configuration
 
+### AI Setup
+
+**Enable AI Features**:
+1. Press `s` to open settings
+2. Navigate to "AI Settings" and press `Enter`
+3. Enter your OpenRouter API key (get one at https://openrouter.ai)
+4. Select preferred AI model (GPT-4 recommended for best results)
+5. Toggle AI commit messages and AI branch naming on/off
+6. (Optional) Test API key to verify configuration
+
+**API Key Security**:
+- Keys stored locally in `~/.config/gcool/config.json`
+- Per-repository configuration (different keys for different repos)
+- Never transmitted except to OpenRouter API
+- Can be revoked anytime from OpenRouter dashboard
+
+### Custom Scripts (gcool.json)
+
+Create a `gcool.json` file in your repository root to define custom scripts:
+
+```json
+{
+  "scripts": {
+    "run": "npm start",
+    "test": "npm test",
+    "build": "npm run build && npm run lint",
+    "deploy": "npm run build && ./scripts/deploy.sh",
+    "watch": "npm run dev",
+    "lint": "eslint src/"
+  }
+}
+```
+
+**Available Environment Variables in Scripts**:
+- `GCOOL_WORKSPACE_PATH` - Full path to the worktree
+- `GCOOL_ROOT_PATH` - Full path to repository root
+- `GCOOL_BRANCH` - Current branch name
+
+**Example Script**:
+```bash
+#!/bin/bash
+cd "$GCOOL_WORKSPACE_PATH"
+npm install
+cp "$GCOOL_ROOT_PATH/.env.local" .env
+npm test
+```
+
+**Running Scripts**:
+- Press `R` - Run 'run' script with output modal
+- Press `;` - Open scripts modal to select and run any script
+- Press `d` or `k` while script runs to kill it
+- Real-time output streaming (updated every 200ms)
+
 ### Settings Menu
 
 Press `s` to open the settings menu, where you can configure:
 
 1. **Editor** - Default editor for opening worktrees
-   - Press `Enter` on this option to select from available editors
-   - Editors: code, cursor, nvim, vim, subl, atom, zed
+   - Press `Enter` to select from available editors
+   - Available: code, cursor, nvim, vim, subl, atom, zed
    - Default: VS Code (`code`)
 
-2. **Base Branch** - Base branch for creating new worktrees
+2. **Base Branch** - Base branch for new worktree creation
    - Press `Enter` to select from available branches
    - Used when creating new branches with `n` key
 
-3. **Tmux Config** - Install/update/remove opinionated tmux configuration
+3. **Theme** - Choose visual theme for the UI
+   - 5 themes: Matrix, Coolify, Dracula, Nord, Solarized
+   - Changes apply immediately without restart
+   - Saved per repository
+
+4. **AI Settings** - Configure AI features
+   - OpenRouter API key management
+   - Model selection (GPT-4, Claude, Gemini, etc.)
+   - Enable/disable AI commit messages
+   - Enable/disable AI branch naming
+   - Test API key connectivity
+
+5. **Tmux Config** - Install/update/remove opinionated tmux configuration
    - Press `Enter` to manage gcool's tmux config in `~/.tmux.conf`
-   - Adds mouse support, better scrollback, Ctrl-D detach, and more
+   - Features: mouse support, 10k scrollback, 256 colors, Ctrl-D detach
    - Config is clearly marked and can be safely removed anytime
+
+6. **Debug Logs** - Enable/disable debug logging
+   - Logs written to `/tmp/gcool-debug.log`
+   - Useful for troubleshooting and development
 
 All settings are saved per-repository in `~/.config/gcool/config.json`:
 
@@ -446,6 +682,38 @@ gcool provides an opinionated tmux configuration that can be optionally installe
 - The config section has warning markers - don't modify them as they're used for updates
 - You can safely delete the entire marked section if you no longer want it
 
+### Themes
+
+**5 Built-in Themes**:
+
+1. **Matrix** - Classic green terminal aesthetic
+   - Primary: Green (#00FF00), Accent: Bright green (#00FF41)
+   - Perfect for that hacker aesthetic
+
+2. **Coolify** - Purple/violet theme
+   - Primary: #9D4EDD, Accent: #E0AAFF
+   - Modern and sleek
+
+3. **Dracula** - Popular dark theme (pink/cyan)
+   - Primary: #FF79C6, Accent: #8BE9FD
+   - Eye-friendly with high contrast
+
+4. **Nord** - Blue/cyan theme
+   - Primary: #81A1C1, Accent: #88C0D0
+   - Arctic-inspired color palette
+
+5. **Solarized** - Blue/teal theme
+   - Primary: #268BD2, Accent: #2AA198
+   - Scientific color palette
+
+**How to Change Theme**:
+1. Press `s` to open settings
+2. Navigate to "Theme" and press `Enter`
+3. Use `↑`/`↓` to preview themes
+4. Press `Enter` to apply
+5. Theme changes instantly without restart
+6. Your preference is saved automatically
+
 ### Base Branch
 
 The base branch is used when creating new worktrees with new branches. gcool automatically determines the base branch:
@@ -453,9 +721,9 @@ The base branch is used when creating new worktrees with new branches. gcool aut
 1. Check saved config for repository
 2. Fall back to current branch
 3. Fall back to default branch (main/master)
-4. Fall back to empty string (user must set manually with `c` key)
+4. Fall back to empty string (user must set manually)
 
-You can change the base branch at any time by pressing `c` in the main view.
+You can change the base branch at any time by pressing `b` in the main view.
 
 ### Editor Integration
 

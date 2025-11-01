@@ -48,12 +48,19 @@ The application follows a clean separation of concerns:
   - `update.go`: Event handling and state transitions
   - `view.go`: UI rendering logic
   - `styles.go`: Lipgloss styling definitions
+  - `themes.go`: Theme definitions and system (5 themes: matrix, coolify, dracula, nord, solarized)
 - **git/**: Git worktree operations wrapper
   - `worktree.go`: All git worktree CRUD operations, branch management, and random name generation
 - **session/**: Tmux session management
   - `tmux.go`: Session creation, attachment, listing, and lifecycle management
+  - `claude_status.go`: Real-time Claude status detection (busy/ready states)
 - **config/**: User configuration persistence
   - `config.go`: Manages base branch settings per repository in `~/.config/gcool/config.json`
+  - `scripts.go`: Loads and manages custom scripts from `gcool.json`
+- **github/**: GitHub PR operations
+  - `pr.go`: PR creation, listing, merging via gh CLI
+- **openrouter/**: AI integration
+  - `client.go`: OpenRouter API client for commit messages, branch names, PR content generation
 - **install/**: Installation utilities and shell wrapper templates
   - `templates.go`: Embedded shell wrapper templates (BashZshWrapper, FishWrapper) compiled into binary
 
@@ -177,15 +184,29 @@ Configuration management:
 ## Configuration
 
 **User Config Location**: `~/.config/gcool/config.json`
-- Stores per-repository settings: base branch, editor preference, last selected branch
-- JSON structure:
+- Stores per-repository settings and integration configs
+- Complete JSON structure:
 ```json
 {
   "repositories": {
     "<repo-path>": {
       "base_branch": "main",
       "editor": "code",
-      "last_selected_branch": "feature/my-branch"
+      "last_selected_branch": "feature/my-branch",
+      "openrouter_api_key": "sk-...",
+      "openrouter_model": "gpt-4-turbo",
+      "ai_commit_enabled": true,
+      "ai_branch_name_enabled": true,
+      "debug_logging_enabled": false,
+      "theme": "matrix",
+      "auto_fetch_interval": "10s",
+      "prs": {
+        "feature-branch": "https://github.com/owner/repo/pull/123"
+      },
+      "claude_initialized": {
+        "main": true,
+        "feature-branch": true
+      }
     }
   }
 }
@@ -244,6 +265,269 @@ Key external dependencies:
 - `github.com/charmbracelet/bubbletea`: TUI framework
 - `github.com/charmbracelet/lipgloss`: Terminal styling
 - `github.com/charmbracelet/bubbles`: TUI components (textinput)
+
+## New Features (Latest Implementation)
+
+### AI Integration (OpenRouter) ✅
+**Files**: `openrouter/client.go`, `tui/model.go`, `config/config.go`
+
+**Features**:
+1. **AI Commit Message Generation** (tui/model.go:976-1003)
+   - Automatically generates conventional commit messages from git diff
+   - Triggered by pressing `c` with AI enabled in settings
+   - Shows spinner animation during generation
+   - Supports 11 AI models via OpenRouter (Gemini, Claude, GPT-4, Llama, etc.)
+   - Falls back to empty message if generation fails
+   - Requires API key configuration in AI Settings modal
+
+2. **AI Branch Name Generation** (tui/model.go:1005-1084)
+   - Generates semantic branch names from git changes
+   - Automatically used in PR creation flow (`P` key)
+   - Also used in push flow (`p` key) when enabled
+   - Replaces random names with meaningful convention (e.g., `feat/user-authentication`)
+   - Graceful fallback to current branch name if generation fails
+
+3. **AI PR Content Generation** (tui/model.go:1113-1156)
+   - Generates PR title and description from git diff
+   - Integrated into PR creation workflow
+   - User can review and manually edit before submission
+   - Modal-based editing with Tab navigation
+   - Can be retried automatically on PR creation conflicts
+
+**Configuration**:
+- API Key: Stored in config with `openrouter_api_key` field
+- Model Selection: Choose from 11+ models via settings
+- Toggles: `ai_commit_enabled` and `ai_branch_name_enabled` flags
+- Test API key function in AI Settings modal
+- Models include: GPT-4, Claude 3 Opus, Gemini Pro, Llama 2, and more
+
+### GitHub PR Integration ✅
+**Files**: `github/pr.go`, `tui/model.go`, `tui/view.go`, `tui/update.go`
+
+**Features**:
+1. **Create Draft PR** (`P` keybinding, lines 1418-1496 in update.go)
+   - Auto-commits uncommitted changes with AI if enabled
+   - Renames random branch names to semantic names with AI (optional)
+   - Generates PR title/description with AI (optional)
+   - Pushes to remote and creates draft PR via `gh` CLI
+   - Stores PR URL in config per branch
+   - Displays PR link in worktree details panel
+   - Supports retry on PR creation conflicts with regenerated content
+
+2. **Create Worktree from PR** (`N` keybinding, lines 1498-1506)
+   - Lists all open PRs with search/filter capabilities
+   - Search by title, author, or branch name
+   - Paginated display fitting terminal height
+   - Creates worktree from selected PR's branch
+   - Automatically names worktree from PR number and title
+
+3. **View PR in Browser** (`v` keybinding, lines 1548-1569)
+   - Opens PR URL in default browser using `gh` CLI
+   - Supports multiple PRs per branch with selection modal
+   - Uses hyperlinks with OSC 8 terminal codes for clickable links
+
+4. **Merge PR** (`M` keybinding, lines 1571-1591)
+   - Strategy selection modal:
+     - Squash and merge (single commit)
+     - Create a merge commit (standard)
+     - Rebase and merge (linear history)
+   - Integrated with `gh` CLI for secure merging
+   - Confirmation before merge execution
+
+5. **PR Status Tracking**
+   - PR URLs stored per branch in config
+   - Visual link in worktree details panel (clickable terminal links)
+   - Shows PR status (draft, ready, merged)
+   - Integrated with commit flow (prompt to create PR after commit)
+
+### Scripts System ✅
+**Files**: `config/scripts.go`, `tui/model.go`, `tui/view.go`, `tui/update.go`
+
+**Features**:
+1. **Custom Scripts from gcool.json** (`;` keybinding, lines 1330-1340)
+   - Load scripts from `gcool.json` in repository root
+   - Run arbitrary bash commands on selected worktrees
+   - Real-time streaming output with live updates
+   - Script execution tracking (start time, output, finished status)
+   - Structure:
+     ```json
+     {
+       "scripts": {
+         "run": "npm start",
+         "test": "npm test",
+         "build": "npm run build",
+         "custom": "custom command"
+       }
+     }
+     ```
+
+2. **Run Script** (`R` keybinding, lines 1099-1141)
+   - Quick-run the 'run' script from gcool.json
+   - Opens script output modal automatically
+   - Shows running scripts with elapsed time
+   - Spinner animation during execution
+
+3. **Scripts Modal** (view.go:1943-2056)
+   - Lists running scripts with status indicators
+   - Lists available scripts from gcool.json
+   - Kill running scripts with `d` or `k` key
+   - View script output in separate modal
+   - Color-coded status (running, finished)
+
+4. **Script Output Modal** (view.go:2058-2126)
+   - Real-time streaming output (polls every 200ms)
+   - Shows elapsed time and finish status
+   - Scrollable output display with last 30 lines visible
+   - Kill script with `k` key
+   - Close modal with `q` or `esc`
+
+**Environment Variables Available to Scripts**:
+- `GCOOL_WORKSPACE_PATH`: Full path to worktree directory
+- `GCOOL_ROOT_PATH`: Full path to repository root
+- `GCOOL_BRANCH`: Current branch name
+
+### Themes System ✅
+**Files**: `tui/themes.go`, `tui/styles.go`, `config/config.go`
+
+**5 Built-in Themes**:
+1. **Matrix** - Classic green terminal aesthetic
+   - Primary: Green (#00FF00)
+   - Accent: Bright green (#00FF41)
+   - Background: Black (#000000)
+
+2. **Coolify** - Purple/violet theme
+   - Primary: #9D4EDD (purple)
+   - Accent: #E0AAFF (light purple)
+   - Background: #10002B (dark purple)
+
+3. **Dracula** - Pink/purple theme
+   - Primary: #FF79C6 (pink)
+   - Accent: #8BE9FD (cyan)
+   - Background: #282A36 (dark gray)
+
+4. **Nord** - Blue/cyan theme
+   - Primary: #81A1C1 (blue)
+   - Accent: #88C0D0 (cyan)
+   - Background: #2E3440 (dark)
+
+5. **Solarized** - Blue/teal theme
+   - Primary: #268BD2 (blue)
+   - Accent: #2AA198 (teal)
+   - Background: #002B36 (dark)
+
+**Features**:
+- Theme selection modal accessible via settings (`s` → Theme)
+- Navigate with up/down, confirm with enter
+- Preview theme metadata before selection
+- Save theme per repository in config
+- Dynamic theme switching without restart (lines 959-973 in model.go)
+- Theme applied on startup from config (lines 406-411 in model.go)
+
+### Claude Status Detection ✅
+**Files**: `session/claude_status.go`, `tui/model.go`, `tui/view.go`
+
+**Features**:
+1. **Real-time Status Monitoring** (model.go:1690-1722)
+   - Polls tmux session every 1.5 seconds
+   - Detects busy/ready states by analyzing pane content
+   - Uses StatusDetector per session (model.go:239-241)
+   - Non-blocking polling doesn't interfere with user input
+
+2. **Visual Status Indicators** (view.go:135-147)
+   - Animated spinner for busy state (10-frame: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+   - Green dot (●) for ready state
+   - Shown in worktree list and details panel
+   - Color-coded status display
+
+3. **Status Detection Algorithm** (session/claude_status.go:45-64)
+   - Captures last 5 lines of tmux pane
+   - Checks for busy indicators:
+     - "Thinking"
+     - "Building context"
+     - "Executing tool"
+     - "Running"
+     - "Processing"
+   - Detects output stability for ready state (2s threshold)
+   - Smooth transitions between states
+
+### Debug Logging ✅
+**Files**: `tui/update.go`, `config/config.go`
+
+**Features**:
+- Toggle in Settings modal (`s` → Debug Logs)
+- Logs to `/tmp/gcool-debug.log`
+- Tracks:
+  - Worktree operations (create, delete, switch)
+  - PR creation flows
+  - Commit operations
+  - AI integrations
+  - GitHub operations
+- Conditional logging based on `debug_logging_enabled` config flag
+- Useful for troubleshooting and development
+
+### Advanced Worktree Management ✅
+**Features**:
+1. **Auto-sorting by Last Modified** (model.go:1753-1771)
+   - Root worktree always first
+   - Workspace worktrees sorted by modification time (most recent first)
+   - Automatically sorts after worktree load
+
+2. **Worktree Ensure Before Switch** (update.go:994-999, 1214-1226)
+   - Always ensures worktree exists before switching
+   - Prevents errors from stale/deleted worktrees
+   - Shows "Preparing workspace..." notification
+   - Atomic switch operation
+
+3. **Dual Session Mode** (update.go:1197-1227, 1268-1289)
+   - `enter` - Opens Claude session (`gcool-<branch>`)
+   - `t` - Opens terminal session (`gcool-<branch>-terminal`)
+   - Both sessions can coexist for same worktree
+   - Independent session lifecycle management
+
+4. **Session Persistence** (update.go:1205-1213)
+   - Tracks Claude initialization per branch in config
+   - Uses `--continue` flag for initialized sessions
+   - First run uses plain `claude` command (starts fresh context)
+   - Subsequent runs reuse session context
+
+### Pull from Base Branch ✅
+**Features** (`u` keybinding, lines 1342-1358):
+- Fetches latest changes from remote
+- Checks if worktree is behind base branch
+- Merges base branch into worktree branch
+- Merge conflict detection and graceful abort option
+- Only works on workspace worktrees (safety check)
+- Shows detailed merge status in notifications
+
+### Refresh with Auto-Pull ✅
+**Features** (`r` keybinding, lines 1094-1097):
+- Fetches from remote
+- Pulls ALL worktrees (main repo + workspace branches)
+- Skips worktrees with uncommitted changes
+- Shows detailed status message with commit counts per branch
+- Parses pull output to show commits pulled
+
+### Push to Remote ✅
+**Features** (`p` keybinding, lines 1360-1416):
+- Checks for uncommitted changes
+- Auto-commits with AI if enabled
+- Renames random branch names with AI (optional)
+- Pushes to remote with force-with-lease safety
+- Shows detailed status notifications
+
+### Notification System ✅
+**Notification Types** (model.go:82-90):
+- **Success** (green, 2-3s auto-clear) - Successful operations
+- **Error** (red, 4-5s auto-clear) - Failures with details
+- **Warning** (yellow, 3s auto-clear) - Non-critical issues
+- **Info** (blue, 3s auto-clear) - Informational messages
+
+**Features** (view.go:306-385):
+- Centered at bottom of screen
+- Non-blocking overlay (doesn't replace main view)
+- Auto-dismiss with configurable duration
+- Unique ID system to prevent stale notifications
+- Color-coded for quick scanning
 
 ## Extension Points
 
@@ -447,36 +731,98 @@ All internal imports use `github.com/coollabsio/gcool` as the import path. When 
 
 ## Keybindings
 
-All keybindings are defined in `tui/update.go`. The application uses Bubble Tea's native `tea.KeyMsg` system with string-based matching.
+All keybindings are defined in `tui/update.go` (lines 1068-1600). The application uses Bubble Tea's native `tea.KeyMsg` system with string-based matching.
 
-### Main View Keybindings (tui/update.go:150-262)
+### Main View Keybindings
 
 **Navigation**:
-- `↑`, `k` - Move cursor up
-- `↓`, `j` - Move cursor down
-- `enter` - Switch to selected worktree (with Claude)
-- `t` - Open terminal in worktree (without Claude)
+- `↑` / `up` / `k` - Move cursor up (lines 1076-1083)
+- `↓` / `down` / `j` - Move cursor down (lines 1085-1092)
+- `q` / `ctrl+c` - Quit application (lines 1071-1074)
 
 **Worktree Management**:
-- `n` - Create new worktree with random branch name (selects it but doesn't switch)
-- `a` - Create worktree from existing branch
-- `d` - Delete selected worktree
-- `r` - Refresh worktree list (fetch from remote)
-- `R` (Shift+R) - Run 'run' script on selected worktree
+- `n` - Create new worktree with custom session name (lines 1143-1155)
+  - Opens modal for custom naming, shows random name suggestion
+  - Sets Claude initialization status
+- `a` - Create worktree from existing branch (lines 1168-1177)
+  - Opens branch selection modal with search/filter
+- `d` - Delete selected worktree (lines 1179-1195)
+  - Opens confirmation modal before deletion
+- `r` - Refresh: fetch from remote and auto-pull all branches (lines 1094-1097)
+  - Skips worktrees with uncommitted changes
+  - Shows detailed pull status with commit counts
+- `R` (Shift+R) - Run 'run' script on selected worktree (lines 1099-1141)
+  - Executes `run` script from gcool.json
+  - Opens script output modal
+- `;` (semicolon) - Open scripts modal (lines 1330-1340)
+  - View available scripts and their status
+  - Kill running scripts with `d` key
+- `o` - Open worktree in default editor (lines 1291-1296)
+  - Uses configured editor (code, cursor, nvim, vim, subl, atom, zed)
 
-**Branch Operations**:
-- `K` (Shift+K) - Checkout/switch branch in main repository
-- `b` - Change base branch for new worktrees
-- `C` (Shift+C) - Commit all uncommitted changes (opens commit modal)
-- `P` (Shift+P) - Pull changes from base branch (only when behind) ⚠️ NOT YET TESTED
-- `p` (lowercase) - Create draft PR
+**Git Operations**:
+- `b` - Change base branch for new worktrees (lines 1157-1166)
+  - Opens branch selection modal with search
+- `B` (Shift+B) - Rename current branch (lines 1229-1248)
+  - Opens rename modal with protection against main branch renames
+  - Shows branch name sanitization
+- `K` (Shift+K) - Checkout/switch branch in main repository (lines 1258-1266)
+  - Opens checkout modal with all branches
+- `c` - Commit changes (lines 1508-1546)
+  - Opens commit modal with subject + body fields
+  - With AI enabled: generates commit message from diff
+  - Tab cycles through fields: subject → body → commit → cancel
+- `p` (lowercase) - Push to remote with AI branch naming (lines 1360-1416)
+  - Checks for uncommitted changes
+  - Auto-commits if needed
+  - Renames branch with AI if enabled
+  - Pushes to remote
+- `P` (Shift+P) - Create draft PR (lines 1418-1496)
+  - Auto-commits changes with AI if enabled
+  - Generates AI branch name if enabled
+  - Generates AI PR title/description if enabled
+  - Creates draft PR via gh CLI
+  - Stores PR URL in config
+- `u` - Update from base branch (lines 1342-1358)
+  - Fetches latest changes from remote
+  - Merges base branch into worktree
+  - Handles merge conflicts gracefully
+  - Only on workspace branches (safety check)
+
+**Pull Requests**:
+- `N` (Shift+N) - Create worktree from GitHub PR (lines 1498-1506)
+  - Lists all open PRs with search/filter
+  - Creates worktree from selected PR branch
+- `v` - View PR in browser (lines 1548-1569)
+  - Opens PR URL in default browser via gh CLI
+  - Supports multiple PRs per branch with selection modal
+- `M` (Shift+M) - Merge PR (lines 1571-1591)
+  - Strategy selection: squash, merge commit, or rebase
+  - Merges via gh CLI
+- `g` - Open git repository in browser (lines 1250-1256)
+  - Opens repo URL in default browser
+
+**Session Management**:
+- `enter` - Switch to selected worktree with Claude session (lines 1197-1227)
+  - Creates or attaches to Claude session
+  - Session name format: `gcool-<sanitized-branch>`
+  - First run uses `claude`, subsequent runs use `claude --continue`
+  - Tracks initialization in config
+- `t` - Open terminal session (lines 1268-1289)
+  - Creates or attaches to terminal-only session
+  - Session name format: `gcool-<sanitized-branch>-terminal`
+  - Both Claude and terminal sessions can coexist
+- `S` (Shift+S) - View/manage tmux sessions (lines 1323-1328)
+  - Lists all active sessions with kill option
 
 **Application**:
-- `q`, `ctrl+c` - Quit application
-- `s` - Open settings menu
-- `S` (Shift+S) - View/manage tmux sessions
-- `e` - Select/change default editor
-- `o` - Open worktree in configured editor
+- `e` - Select/change default editor (lines 1298-1314)
+  - Opens editor selection modal
+  - 7 editors available: code, cursor, nvim, vim, subl, atom, zed
+- `s` - Open settings menu (lines 1316-1321)
+  - Access: Editor, Base Branch, Tmux Config, AI Settings, Debug Logs, Theme
+- `h` - Show help modal (lines 1593-1596)
+  - Displays comprehensive keybinding reference
 
 ### Modal Keybindings
 
@@ -485,18 +831,45 @@ All modals support:
 - `enter` - Confirm action
 - `tab` - Navigate between inputs/options (where applicable)
 
-Specific modal handlers are implemented in `tui/update.go`:
-- `handleCreateModalInput()` - Create worktree modal
+**Specific modals in `tui/update.go`**:
+- `createWithNameModalInput()` (lines 511-577) - Create worktree with custom name
+  - Type to set branch/session name
+  - Pre-filled with random suggestion
+  - Shows sanitized name preview
 - `handleDeleteModalInput()` - Deletion confirmation
-- `handleBranchSelectModalInput()` - Branch selection with search/filter (supports typing to filter)
+- `handleBranchSelectModalInput()` - Branch selection with search/filter
+  - Type to filter in real-time
+  - Navigate with ↑/↓, Tab between search and list
 - `handleCheckoutBranchModalInput()` - Checkout modal with search/filter
-- `handleSessionListModalInput()` - Session list (uses `↑`/`↓`, `k` to kill sessions)
-- `handleRenameModalInput()` - Branch rename modal (text input, prevents renaming main branch)
+- `handleSessionListModalInput()` - Session list
+  - ↑/↓ to navigate
+  - `d` or `k` to kill selected session
+- `handleRenameModalInput()` - Branch rename
+  - Text input with main branch protection
 - `handleChangeBaseBranchModalInput()` - Base branch modal with search/filter
-- `handleCommitModalInput()` - Commit modal (subject + optional body, Tab to cycle, Enter to move/confirm)
-- `handleEditorSelectModalInput()` - Editor selection modal (uses `↑`/`↓` navigation)
-- `handleSettingsModalInput()` - Settings menu navigation
+- `handleCommitModalInput()` - Commit modal
+  - Tab cycles: subject → body → commit button → cancel button
+  - Enter in inputs moves to next field
+- `handleEditorSelectModalInput()` - Editor selection (↑/↓ navigate)
+- `handleSettingsModalInput()` - Settings menu (↑/↓ navigate)
 - `handleTmuxConfigModalInput()` - Tmux config install/update/remove
+- `handlePRContentModalInput()` (lines 592-627) - Manual PR title/description
+  - Tab to cycle between title, description, and buttons
+- `handlePRListModalInput()` (lines 1257-1372) - Browse/filter PRs
+  - Type to search by title, author, or branch
+  - ↑/↓ to navigate paginated list
+- `handleMergeStrategyModalInput()` (lines 2129-2174) - Merge strategy selection
+  - ↑/↓ navigate (squash, merge, rebase)
+- `handleScriptsModalInput()` - Scripts management
+  - ↑/↓ navigate running/available scripts
+  - `d` or `k` to kill running scripts
+  - `enter` to run selected script
+- `handleScriptOutputModalInput()` (lines 2058-2126) - Real-time script output
+  - `k` or `enter` to kill/close
+- `handleThemeSelectModalInput()` (lines 1410-1441) - Theme selection
+  - ↑/↓ navigate between 5 themes
+- `handleHelpModalInput()` (lines 1778-1939) - Help reference
+  - Shows all keybindings by category
 
 ## Common Patterns
 
