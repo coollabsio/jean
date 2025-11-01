@@ -270,12 +270,12 @@ func (m *Manager) SetOpenRouterAPIKey(apiKey string) error {
 }
 
 // GetOpenRouterModel returns the OpenRouter model
-// Returns "google/gemini-2.5-flash-lite" if not set
+// Returns "openai/gpt-4o-mini" if not set
 func (m *Manager) GetOpenRouterModel() string {
 	if m.config.OpenRouterModel != "" {
 		return m.config.OpenRouterModel
 	}
-	return "google/gemini-2.5-flash-lite"
+	return "openai/gpt-4o-mini"
 }
 
 // SetOpenRouterModel sets the OpenRouter model
