@@ -147,6 +147,72 @@ func (m *Manager) UpdatePR(worktreePath, prIdentifier, title, description string
 	return nil
 }
 
+// MarkPRReady converts a draft PR to ready for review
+func (m *Manager) MarkPRReady(worktreePath, prURL string) error {
+	// Check if gh is installed
+	if !m.IsGhInstalled() {
+		return fmt.Errorf("gh CLI is not installed. Install it from https://cli.github.com")
+	}
+
+	// Check if authenticated
+	authenticated, err := m.IsAuthenticated()
+	if err != nil {
+		return err
+	}
+	if !authenticated {
+		return fmt.Errorf("not authenticated with GitHub. Run 'gh auth login' to authenticate")
+	}
+
+	// Mark PR as ready (remove draft status)
+	cmd := exec.Command("gh", "pr", "ready", prURL)
+	cmd.Dir = worktreePath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to mark PR as ready: %s", string(output))
+	}
+
+	return nil
+}
+
+// MergePR merges a pull request using the specified merge method
+// mergeMethod should be one of: "squash", "merge", "rebase"
+func (m *Manager) MergePR(worktreePath, prURL, mergeMethod string) error {
+	// Check if gh is installed
+	if !m.IsGhInstalled() {
+		return fmt.Errorf("gh CLI is not installed. Install it from https://cli.github.com")
+	}
+
+	// Check if authenticated
+	authenticated, err := m.IsAuthenticated()
+	if err != nil {
+		return err
+	}
+	if !authenticated {
+		return fmt.Errorf("not authenticated with GitHub. Run 'gh auth login' to authenticate")
+	}
+
+	// Validate merge method
+	validMethods := map[string]bool{
+		"squash":  true,
+		"merge":   true,
+		"rebase":  true,
+	}
+	if !validMethods[mergeMethod] {
+		return fmt.Errorf("invalid merge method: %s. Must be one of: squash, merge, rebase", mergeMethod)
+	}
+
+	// Merge the PR with the specified method
+	args := []string{"pr", "merge", prURL, "--" + mergeMethod}
+	cmd := exec.Command("gh", args...)
+	cmd.Dir = worktreePath
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to merge PR: %s", string(output))
+	}
+
+	return nil
+}
+
 // ListPRs lists all open pull requests for the repository
 func (m *Manager) ListPRs(worktreePath string) ([]PRInfo, error) {
 	// Check if gh is installed

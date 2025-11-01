@@ -438,6 +438,8 @@ func (m Model) renderModal() string {
 		return m.renderPRContentModal()
 	case prListModal:
 		return m.renderPRListModal()
+	case mergeStrategyModal:
+		return m.renderMergeStrategyModal()
 	case helperModal:
 		return m.renderHelperModal()
 	case scriptsModal:
@@ -2120,3 +2122,50 @@ func (m Model) renderScriptOutputModal() string {
 	)
 }
 
+
+func (m Model) renderMergeStrategyModal() string {
+	var b strings.Builder
+
+	b.WriteString(modalTitleStyle.Render("Select Merge Strategy"))
+	b.WriteString("\n\n")
+
+	// Merge strategy options with descriptions
+	strategies := []struct {
+		name        string
+		description string
+	}{
+		{"Squash and merge", "All commits squashed into one commit on the base branch"},
+		{"Create a merge commit", "Preserves all commits from the PR in the history with a merge commit"},
+		{"Rebase and merge", "Replays commits from PR onto base branch without a merge commit"},
+	}
+
+	for i, strategy := range strategies {
+		isSelected := i == m.mergeStrategyCursor
+
+		var strategyText string
+		if isSelected {
+			strategyText = selectedItemStyle.Render("▶ " + strategy.name)
+		} else {
+			strategyText = normalItemStyle.Render("  " + strategy.name)
+		}
+
+		b.WriteString(strategyText)
+		b.WriteString("\n")
+
+		// Add description
+		descStyle := normalItemStyle.Copy().Foreground(mutedColor)
+		b.WriteString(descStyle.Render("  " + strategy.description))
+		b.WriteString("\n\n")
+	}
+
+	// Help text
+	b.WriteString(helpStyle.Render("↑/↓ select • enter confirm • esc cancel"))
+
+	// Center the modal
+	content := modalStyle.Width(m.width - 4).Render(b.String())
+	return lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		content,
+	)
+}

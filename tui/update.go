@@ -1010,6 +1010,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pollClaudeStatuses()
 		// Schedule next check
 		return m, m.scheduleClaudeStatusCheck()
+
+	case prMarkedReadyMsg:
+		// PR has been marked as ready for review
+		if msg.err != nil {
+			cmd = m.showErrorNotification("Failed to mark PR as ready: "+msg.err.Error(), 4*time.Second)
+			return m, cmd
+		}
+
+		// Now proceed with merge - get the stored merge method from merge strategy modal
+		wt := m.selectedWorktree()
+		if wt == nil {
+			return m, m.showErrorNotification("No worktree selected", 3*time.Second)
+		}
+
+		// Get the PR info to find merge method (we need to reopen the modal to get this info)
+		// For now, show success and reload
+		prs, ok := wt.PRs.([]config.PRInfo)
+		if !ok || len(prs) == 0 {
+			cmd = m.showSuccessNotification("PR marked as ready for review", 2*time.Second)
+			return m, tea.Batch(cmd, m.loadWorktrees())
+		}
+
+		// Find the PR that was just marked ready
+		for _, pr := range prs {
+			if pr.URL == msg.prURL {
+				// PR found - now we need to merge it
+				// For now, show a notification and reload
+				cmd = m.showSuccessNotification("PR marked as ready. Please press M again to merge.", 3*time.Second)
+				return m, tea.Batch(cmd, m.loadWorktrees())
+			}
+		}
+
+		cmd = m.showSuccessNotification("PR marked as ready for review", 2*time.Second)
+		return m, tea.Batch(cmd, m.loadWorktrees())
+
+	case prMergedMsg:
+		// PR has been merged
+		if msg.err != nil {
+			cmd = m.showErrorNotification("Failed to merge PR: "+msg.err.Error(), 4*time.Second)
+			return m, cmd
+		}
+
+		// Mark PR as merged in config
+		if m.configManager != nil && msg.branch != "" {
+			_ = m.configManager.UpdatePRStatus(m.repoPath, msg.branch, msg.prURL, "merged")
+		}
+
+		// Show success and reload worktrees
+		cmd = m.showSuccessNotification("PR merged successfully!", 3*time.Second)
+		return m, tea.Batch(cmd, m.loadWorktrees())
 	}
 
 	return m, cmd
@@ -1438,6 +1488,28 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case "M":
+		// Merge PR (Shift+M)
+		if wt := m.selectedWorktree(); wt != nil {
+			if prs, ok := wt.PRs.([]config.PRInfo); ok && len(prs) > 0 {
+				if len(prs) == 1 {
+					// Only one PR - proceed to merge strategy selection
+					m.selectedPRForMerge = prs[0].URL
+					m.mergeStrategyCursor = 0 // Default to squash
+					m.modal = mergeStrategyModal
+					return m, nil
+				} else {
+					// Multiple PRs - show selection modal in merge mode
+					m.modal = prListModal
+					m.prListMergeMode = true
+					m.prListIndex = len(prs) - 1 // Default to most recent
+					return m, nil
+				}
+			} else {
+				return m, m.showErrorNotification("No PRs found for this worktree", 3*time.Second)
+			}
+		}
+
 	case "h":
 		// Open help modal
 		m.modal = helperModal
@@ -1498,6 +1570,9 @@ func (m Model) handleModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case prListModal:
 		return m.handlePRListModalInput(msg)
+
+	case mergeStrategyModal:
+		return m.handleMergeStrategyModalInput(msg)
 
 	case scriptsModal:
 		return m.handleScriptsModalInput(msg)
@@ -2224,124 +2299,143 @@ func (m Model) handlePRContentModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePRListModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+	wt := m.selectedWorktree()
+	if wt == nil {
+		m.modal = noModal
+		m.prListMergeMode = false
+		return m, nil
+	}
+
+	prs, ok := wt.PRs.([]config.PRInfo)
+	if !ok || len(prs) == 0 {
+		m.modal = noModal
+		m.prListMergeMode = false
+		return m, nil
+	}
 
 	switch msg.String() {
 	case "esc":
-		m.prSearchInput.Blur()
 		m.modal = noModal
-		return m, nil
-
-	case "tab":
-		if m.modalFocused == 0 {
-			// In search input, move focus to list
-			m.modalFocused = 1
-			m.prSearchInput.Blur()
-		} else if m.modalFocused == 1 {
-			// In list, move focus to OK button
-			m.modalFocused = 2
-		} else if m.modalFocused == 2 {
-			// In OK button, move focus to Cancel button
-			m.modalFocused = 3
-		} else {
-			// In Cancel button, move focus back to search
-			m.modalFocused = 0
-			m.prSearchInput.Focus()
-		}
+		m.prListMergeMode = false
 		return m, nil
 
 	case "up":
-		if m.modalFocused == 0 {
-			// In search input, move focus to list
-			m.modalFocused = 1
-			m.prSearchInput.Blur()
-		} else if m.modalFocused == 1 && m.prListIndex > 0 {
-			// In list, move selection up
+		if m.prListIndex > 0 {
 			m.prListIndex--
 		}
 		return m, nil
 
 	case "down":
-		if m.modalFocused == 0 {
-			// In search input, move focus to list
-			m.modalFocused = 1
-			m.prSearchInput.Blur()
-		} else if m.modalFocused == 1 {
-			// In list, move selection down
-			filteredPRs := m.filterPRs(m.prSearchInput.Value())
-			if len(filteredPRs) == 0 {
-				m.prListIndex = -1
-			} else if m.prListIndex < len(filteredPRs)-1 {
-				m.prListIndex++
-			}
+		if m.prListIndex < len(prs)-1 {
+			m.prListIndex++
 		}
 		return m, nil
 
 	case "enter":
-		if m.modalFocused <= 1 {
-			// In search or list, confirm selection
-			filteredPRs := m.filterPRs(m.prSearchInput.Value())
-			if len(filteredPRs) > 0 && m.prListIndex >= 0 && m.prListIndex < len(filteredPRs) {
-				selectedPR := filteredPRs[m.prListIndex]
-				// Create worktree from the selected PR's branch using the branch name
-				worktreePath, err := m.gitManager.GetDefaultPath(selectedPR.HeadRefName)
+		if m.prListIndex >= 0 && m.prListIndex < len(prs) {
+			selectedPR := prs[m.prListIndex]
+
+			if m.prListMergeMode {
+				// User is merging a PR - proceed to merge strategy selection
+				m.selectedPRForMerge = selectedPR.URL
+				m.mergeStrategyCursor = 0 // Default to squash
+				m.modal = mergeStrategyModal
+				m.prListMergeMode = false
+				return m, nil
+			} else {
+				// User is opening PR in browser (default mode)
+				cmd := exec.Command("gh", "pr", "view", selectedPR.URL, "--web")
+				err := cmd.Start()
 				if err != nil {
 					m.modal = noModal
-					return m, m.showErrorNotification("Failed to determine worktree path: "+err.Error(), 3*time.Second)
+					return m, m.showErrorNotification("Failed to open PR in browser: "+err.Error(), 3*time.Second)
 				}
-
-				// Reset modal state
-				m.prSearchInput.Blur()
 				m.modal = noModal
-				m.prListIndex = 0
-				m.prSearchInput.SetValue("")
-				m.filteredPRs = nil
-				m.prLoadingError = ""
-
-				// Create worktree from PR branch
-				m.lastCreatedBranch = selectedPR.HeadRefName
-				cmd = m.showInfoNotification("Creating worktree from PR #" + fmt.Sprint(selectedPR.Number) + "...")
-				return m, tea.Batch(
-					cmd,
-					m.createWorktree(worktreePath, selectedPR.HeadRefName, false),
-				)
+				return m, m.showSuccessNotification("Opening PR in browser...", 2*time.Second)
 			}
-		} else if m.modalFocused == 2 {
-			// OK button - same as pressing enter in list
-			filteredPRs := m.filterPRs(m.prSearchInput.Value())
-			if len(filteredPRs) > 0 && m.prListIndex >= 0 && m.prListIndex < len(filteredPRs) {
-				selectedPR := filteredPRs[m.prListIndex]
-				worktreePath, err := m.gitManager.GetDefaultPath(selectedPR.HeadRefName)
-				if err != nil {
-					m.modal = noModal
-					return m, m.showErrorNotification("Failed to determine worktree path: "+err.Error(), 3*time.Second)
-				}
+		}
+	}
 
-				m.prSearchInput.Blur()
-				m.modal = noModal
-				m.prListIndex = 0
-				m.prSearchInput.SetValue("")
-				m.filteredPRs = nil
-				m.prLoadingError = ""
+	return m, nil
+}
 
-				m.lastCreatedBranch = selectedPR.HeadRefName
-				cmd = m.showInfoNotification("Creating worktree from PR #" + fmt.Sprint(selectedPR.Number) + "...")
-				return m, tea.Batch(
-					cmd,
-					m.createWorktree(worktreePath, selectedPR.HeadRefName, false),
-				)
-			}
+func (m Model) handleMergeStrategyModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.modal = noModal
+		m.selectedPRForMerge = ""
+		return m, nil
+
+	case "up":
+		if m.mergeStrategyCursor > 0 {
+			m.mergeStrategyCursor--
 		}
 		return m, nil
 
-	default:
-		// Pass input to search input
-		if m.modalFocused == 0 {
-			m.prSearchInput, cmd = m.prSearchInput.Update(msg)
-			m.filteredPRs = m.filterPRs(m.prSearchInput.Value())
-			m.prListIndex = 0 // Reset index when filtering
-			return m, cmd
+	case "down":
+		if m.mergeStrategyCursor < 2 {
+			m.mergeStrategyCursor++
 		}
+		return m, nil
+
+	case "enter":
+		// User confirmed merge strategy selection
+		if m.selectedPRForMerge == "" {
+			m.modal = noModal
+			return m, m.showErrorNotification("No PR selected for merge", 3*time.Second)
+		}
+
+		// Get the selected merge method
+		mergeStrategies := []string{"squash", "merge", "rebase"}
+		mergeMethod := mergeStrategies[m.mergeStrategyCursor]
+
+		// Get the selected worktree to determine if PR is draft
+		wt := m.selectedWorktree()
+		if wt == nil {
+			m.modal = noModal
+			return m, m.showErrorNotification("No worktree selected", 3*time.Second)
+		}
+
+		// Get the PR info to check its status
+		prs, ok := wt.PRs.([]config.PRInfo)
+		if !ok || len(prs) == 0 {
+			m.modal = noModal
+			return m, m.showErrorNotification("No PR found", 3*time.Second)
+		}
+
+		// Find the selected PR
+		selectedPR := config.PRInfo{}
+		for _, pr := range prs {
+			if pr.URL == m.selectedPRForMerge {
+				selectedPR = pr
+				break
+			}
+		}
+
+		if selectedPR.URL == "" {
+			m.modal = noModal
+			return m, m.showErrorNotification("PR not found", 3*time.Second)
+		}
+
+		// Check PR status - if draft, mark as ready first
+		if selectedPR.Status == "draft" {
+			m.modal = noModal
+			m.selectedPRForMerge = ""
+			notifyCmd := m.showInfoNotification("⏳ Marking PR as ready...")
+			return m, tea.Batch(
+				notifyCmd,
+				m.markPRReady(wt.Path, selectedPR.URL),
+			)
+		}
+
+		// PR is already ready/open - proceed directly to merge
+		m.modal = noModal
+		m.selectedPRForMerge = ""
+		notifyCmd := m.showInfoNotification("⏳ Merging PR with " + mergeMethod + " strategy...")
+		return m, tea.Batch(
+			notifyCmd,
+			m.mergePR(wt.Path, selectedPR.URL, mergeMethod),
+		)
 	}
 
 	return m, nil

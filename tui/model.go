@@ -76,6 +76,7 @@ const (
 	scriptsModal
 	scriptOutputModal
 	createWithNameModal
+	mergeStrategyModal
 )
 
 // NotificationType defines the type of notification
@@ -203,7 +204,12 @@ type Model struct {
 	prSpinnerFrame      int  // Current spinner animation frame for PR modal (0-9)
 
 	// PR list modal state
-	prListIndex    int                 // Selected PR index in the PR list modal
+	prListIndex int // Selected PR index in the PR list modal
+	prListMergeMode bool // Whether PR list modal is in merge mode (user pressed SHIFT+M)
+
+	// Merge strategy modal state
+	mergeStrategyCursor int // Selected merge strategy (0=squash, 1=merge, 2=rebase)
+	selectedPRForMerge string // PR URL to merge
 	prs            []github.PRInfo      // All PRs from GitHub
 	filteredPRs    []github.PRInfo      // Filtered PRs based on search
 	prSearchInput  textinput.Model      // Search input for PR filtering
@@ -1762,4 +1768,43 @@ func (m *Model) sortWorktrees() {
 		// Otherwise, sort by last modified time (most recent first)
 		return m.worktrees[i].LastModified.After(m.worktrees[j].LastModified)
 	})
+}
+
+// markPRReady marks a draft PR as ready for review
+func (m Model) markPRReady(worktreePath, prURL string) tea.Cmd {
+	return func() tea.Msg {
+		selected := m.selectedWorktree()
+		if selected == nil {
+			return prMarkedReadyMsg{prURL: prURL, err: fmt.Errorf("no worktree selected")}
+		}
+
+		err := m.githubManager.MarkPRReady(selected.Path, prURL)
+		return prMarkedReadyMsg{prURL: prURL, err: err}
+	}
+}
+
+// mergePR merges a pull request using the specified merge method
+func (m Model) mergePR(worktreePath, prURL, mergeMethod string) tea.Cmd {
+	return func() tea.Msg {
+		selected := m.selectedWorktree()
+		if selected == nil {
+			return prMergedMsg{prURL: prURL, branch: "", err: fmt.Errorf("no worktree selected")}
+		}
+
+		err := m.githubManager.MergePR(selected.Path, prURL, mergeMethod)
+		return prMergedMsg{prURL: prURL, branch: selected.Branch, err: err}
+	}
+}
+
+// Message types for PR merge operations
+
+type prMarkedReadyMsg struct {
+	prURL string
+	err   error
+}
+
+type prMergedMsg struct {
+	prURL  string
+	branch string
+	err    error
 }
