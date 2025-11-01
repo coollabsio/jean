@@ -389,12 +389,11 @@ func (m Model) renderMinimalHelpBar() string {
 
 	keybindings := []string{
 		"↑/↓ nav",
-		"n new",
+		"n/a/N new/existing/PR",
 		"enter/t cli/terminal",
 		"c commit",
 		"p push",
 		"P create PR",
-		"N from PR",
 		"g github",
 		"h help",
 		"q quit",
