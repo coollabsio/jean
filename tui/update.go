@@ -994,6 +994,92 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.aiPromptsStatusTime = time.Now()
 		return m, cmd
 
+	case prFetchedForCreationMsg:
+		// Handle fetch completion before PR creation
+		m.prFetchingForCreation = false
+		if msg.err != nil {
+			return m, m.showErrorNotification("Failed to fetch from remote: "+msg.err.Error(), 3*time.Second)
+		}
+
+		// Fetch successful, now proceed with PR creation flow
+		if wt := m.selectedWorktree(); wt != nil {
+			// Check if there are uncommitted changes
+			hasUncommitted, err := m.gitManager.HasUncommittedChanges(wt.Path)
+			if err != nil {
+				return m, m.showErrorNotification("Failed to check for uncommitted changes: "+err.Error(), 3*time.Second)
+			}
+
+			// Check AI configuration
+			hasAPIKey := m.configManager != nil && m.configManager.GetOpenRouterAPIKey() != ""
+			aiEnabled := m.configManager != nil && m.configManager.GetAIBranchNameEnabled()
+			aiContentEnabled := m.configManager != nil && m.configManager.GetAICommitEnabled()
+			hasAI := hasAPIKey && (aiEnabled || aiContentEnabled)
+
+			// If there are uncommitted changes, decide how to handle them
+			if hasUncommitted {
+				if hasAI && aiContentEnabled {
+					// AI is enabled for commit messages - generate commit message with AI first
+					cmd := m.showInfoNotification("🤖 Generating commit message...")
+					m.commitBeforePR = true
+					m.prCreationPending = wt.Path // Set to trigger PR creation after commit
+					return m, tea.Batch(cmd, m.generateCommitMessageWithAI(wt.Path))
+				} else if hasAI {
+					// AI is enabled for branch but not commit - auto-commit with simple message and proceed
+					cmd := m.showInfoNotification("Committing changes...")
+					m.commitBeforePR = true
+					m.prCreationPending = wt.Path // Set to trigger PR creation after commit
+					return m, tea.Batch(cmd, m.autoCommitBeforePR(wt.Path, wt.Branch))
+				} else {
+					// No AI - show commit modal for user to write proper commit message
+					m.modal = commitModal
+					m.modalFocused = 0
+					m.commitSubjectInput.SetValue("")
+					m.commitSubjectInput.Focus()
+					m.commitBodyInput.SetValue("")
+					m.commitBeforePR = true
+					m.prCreationPending = wt.Path // Set to trigger PR creation after commit
+					return m, nil
+				}
+			}
+
+			// No uncommitted changes - proceed to PR creation
+			// Check if we should do AI renaming first
+			isRandomName := m.gitManager.IsRandomBranchName(wt.Branch)
+			shouldAIRename := hasAPIKey && aiEnabled && isRandomName
+
+			if shouldAIRename {
+				// Start AI rename flow before PR creation
+				cmd := m.showInfoNotification("🤖 Generating semantic branch name...")
+				m.prCreationPending = wt.Path // Set to trigger PR creation after rename
+				return m, tea.Batch(cmd, m.generateBranchNameForPush(wt.Path, wt.Branch, m.baseBranch))
+			} else {
+				// Check if we should generate AI PR content
+				if hasAPIKey && aiEnabled {
+					// Generate AI PR content before creating PR
+					cmd := m.showInfoNotification("📝 Generating PR title and description...")
+					return m, tea.Batch(
+						cmd,
+						m.generatePRContent(wt.Path, wt.Branch, m.baseBranch),
+					)
+				} else {
+					// No AI - open PR content modal for manual entry
+					m.modal = prContentModal
+					m.prModalFocused = 0
+					m.prModalWorktreePath = wt.Path
+					m.prModalBranch = wt.Branch
+
+					// Default title to branch name
+					defaultTitle := strings.ReplaceAll(wt.Branch, "-", " ")
+					defaultTitle = strings.ReplaceAll(defaultTitle, "_", " ")
+					defaultTitle = strings.Title(defaultTitle)
+					m.prTitleInput.SetValue(defaultTitle)
+					m.prTitleInput.Focus()
+					m.prDescriptionInput.SetValue("")
+					return m, nil
+				}
+			}
+		}
+
 	case spinnerTickMsg:
 		// Update spinner animation frame and schedule next tick if still generating
 		if m.generatingCommit {
@@ -1460,81 +1546,10 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "P":
 		// Create new PR on GitHub (Shift+P)
 		if wt := m.selectedWorktree(); wt != nil {
-			// First check if there are uncommitted changes
-			hasUncommitted, err := m.gitManager.HasUncommittedChanges(wt.Path)
-			if err != nil {
-				return m, m.showErrorNotification("Failed to check for uncommitted changes: "+err.Error(), 3*time.Second)
-			}
-
-			// Check AI configuration
-			hasAPIKey := m.configManager != nil && m.configManager.GetOpenRouterAPIKey() != ""
-			aiEnabled := m.configManager != nil && m.configManager.GetAIBranchNameEnabled()
-			aiContentEnabled := m.configManager != nil && m.configManager.GetAICommitEnabled()
-			hasAI := hasAPIKey && (aiEnabled || aiContentEnabled)
-
-			// If there are uncommitted changes, decide how to handle them
-			if hasUncommitted {
-				if hasAI && aiContentEnabled {
-					// AI is enabled for commit messages - generate commit message with AI first
-					cmd = m.showInfoNotification("🤖 Generating commit message...")
-					m.commitBeforePR = true
-					m.prCreationPending = wt.Path // Set to trigger PR creation after commit
-					return m, tea.Batch(cmd, m.generateCommitMessageWithAI(wt.Path))
-				} else if hasAI {
-					// AI is enabled for branch but not commit - auto-commit with simple message and proceed
-					cmd = m.showInfoNotification("Committing changes...")
-					m.commitBeforePR = true
-					m.prCreationPending = wt.Path // Set to trigger PR creation after commit
-					return m, tea.Batch(cmd, m.autoCommitBeforePR(wt.Path, wt.Branch))
-				} else {
-					// No AI - show commit modal for user to write proper commit message
-					m.modal = commitModal
-					m.modalFocused = 0
-					m.commitSubjectInput.SetValue("")
-					m.commitSubjectInput.Focus()
-					m.commitBodyInput.SetValue("")
-					m.commitBeforePR = true
-					m.prCreationPending = wt.Path // Set to trigger PR creation after commit
-					return m, nil
-				}
-			}
-
-			// No uncommitted changes - proceed to PR creation
-			// Check if we should do AI renaming first
-			isRandomName := m.gitManager.IsRandomBranchName(wt.Branch)
-			shouldAIRename := hasAPIKey && aiEnabled && isRandomName
-
-			if shouldAIRename {
-				// Start AI rename flow before PR creation
-				cmd = m.showInfoNotification("🤖 Generating semantic branch name...")
-				m.prCreationPending = wt.Path // Set to trigger PR creation after rename
-				return m, tea.Batch(cmd, m.generateBranchNameForPush(wt.Path, wt.Branch, m.baseBranch))
-			} else {
-				// Check if we should generate AI PR content
-				if hasAPIKey && aiEnabled {
-					// Generate AI PR content before creating PR
-					cmd = m.showInfoNotification("📝 Generating PR title and description...")
-					return m, tea.Batch(
-						cmd,
-						m.generatePRContent(wt.Path, wt.Branch, m.baseBranch),
-					)
-				} else {
-					// No AI - open PR content modal for manual entry
-					m.modal = prContentModal
-					m.prModalFocused = 0
-					m.prModalWorktreePath = wt.Path
-					m.prModalBranch = wt.Branch
-
-					// Default title to branch name
-					defaultTitle := strings.ReplaceAll(wt.Branch, "-", " ")
-					defaultTitle = strings.ReplaceAll(defaultTitle, "_", " ")
-					defaultTitle = strings.Title(defaultTitle)
-					m.prTitleInput.SetValue(defaultTitle)
-					m.prTitleInput.Focus()
-					m.prDescriptionInput.SetValue("")
-					return m, nil
-				}
-			}
+			// First fetch from remote to get latest changes
+			cmd = m.showInfoNotification("Fetching latest changes...")
+			m.prFetchingForCreation = true // Flag to indicate fetch is for PR creation
+			return m, tea.Batch(cmd, m.fetchRemoteForPR(wt.Path))
 		}
 
 	case "N":
@@ -1603,9 +1618,15 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					return m, m.showSuccessNotification("Opening PR in browser...", 2*time.Second)
 				} else {
-					// Multiple PRs - show selection modal
+					// Multiple PRs - show selection modal for viewing
 					m.modal = prListModal
-					m.prListIndex = len(prs) - 1 // Default to most recent
+					m.prListCreationMode = false  // Ensure view mode
+					m.prListMergeMode = false      // Ensure view mode
+					m.prListIndex = len(prs) - 1   // Default to most recent
+					m.prSearchInput.SetValue("")
+					m.prSearchInput.Focus()
+					m.filteredPRs = nil
+					m.prLoadingError = ""
 					return m, nil
 				}
 			} else {

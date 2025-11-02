@@ -218,6 +218,7 @@ type Model struct {
 	prListIndex int // Selected PR index in the PR list modal
 	prListMergeMode bool // Whether PR list modal is in merge mode (user pressed SHIFT+M)
 	prListCreationMode bool // Whether PR list modal is in worktree creation mode (user pressed N)
+	prFetchingForCreation bool // Whether we're fetching before PR creation
 
 	// Merge strategy modal state
 	mergeStrategyCursor int // Selected merge strategy (0=squash, 1=merge, 2=rebase)
@@ -1290,6 +1291,14 @@ func (m Model) refreshPRStatuses() tea.Cmd {
 	}
 }
 
+// fetchRemoteForPR fetches from remote before PR creation
+func (m Model) fetchRemoteForPR(worktreePath string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.gitManager.FetchRemote()
+		return prFetchedForCreationMsg{err: err}
+	}
+}
+
 // Push-only command functions (without PR creation)
 
 // generateBranchNameForPush generates an AI branch name for push operation
@@ -1951,4 +1960,9 @@ type aiPromptsLoadedMsg struct {
 	branchPrompt string
 	prPrompt     string
 	err          error
+}
+
+// Message type for PR creation fetch completion
+type prFetchedForCreationMsg struct {
+	err error
 }
