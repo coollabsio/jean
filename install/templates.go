@@ -99,7 +99,8 @@ gcool() {
                         # Create claude window with claude command
                         if command -v claude >/dev/null 2>&1; then
                             if [ "$is_claude_initialized" = "true" ]; then
-                                tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude --continue --permission-mode plan"
+                                # Try with --continue first, fallback to fresh start if it fails
+                                tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude --continue --permission-mode plan || claude --permission-mode plan"
                             else
                                 tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude --permission-mode plan"
                             fi
@@ -127,7 +128,8 @@ gcool() {
                 if [ "$auto_claude" = "true" ]; then
                     if command -v claude >/dev/null 2>&1; then
                         if [ "$is_claude_initialized" = "true" ]; then
-                            tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude --continue --permission-mode plan"
+                            # Try with --continue first, fallback to fresh start if it fails
+                            tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude --continue --permission-mode plan || claude --permission-mode plan"
                         else
                             tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude --permission-mode plan"
                         fi
@@ -249,7 +251,8 @@ function gcool
                             if command -v claude &> /dev/null
                                 set claude_args "--permission-mode plan"
                                 if test "$is_claude_initialized" = "true"
-                                    set claude_args "--continue --permission-mode plan"
+                                    # Try with --continue first, fallback to fresh start if it fails
+                                    set claude_args "--continue --permission-mode plan; or claude --permission-mode plan"
                                 end
                                 tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude $claude_args"
                             else
@@ -274,7 +277,8 @@ function gcool
                         if command -v claude &> /dev/null
                             set claude_args "--permission-mode plan"
                             if test "$is_claude_initialized" = "true"
-                                set claude_args "--continue --permission-mode plan"
+                                # Try with --continue first, fallback to fresh start if it fails
+                                set claude_args "--continue --permission-mode plan; or claude --permission-mode plan"
                             end
                             tmux new-window -t "$session_name:2" -c "$worktree_path" -n "claude" "claude $claude_args"
                         else
