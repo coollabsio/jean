@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"github.com/coollabsio/gcool/openrouter"
+	"github.com/coollabsio/jean/openrouter"
 )
 
 // AIPrompts represents customizable AI prompts for various generation tasks
@@ -15,7 +15,7 @@ type AIPrompts struct {
 	PRContent     string `json:"pr_content,omitempty"`     // Custom prompt for PR title and description generation
 }
 
-// Config represents the global gcool configuration
+// Config represents the global jean configuration
 type Config struct {
 	Repositories        map[string]*RepoConfig `json:"repositories"`
 	LastUpdateCheckTime string                 `json:"lastUpdateCheckTime"` // RFC3339 format
@@ -66,8 +66,8 @@ func NewManager() (*Manager, error) {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Create config directory: ~/.config/gcool
-	configDir := filepath.Join(home, ".config", "gcool")
+	// Create config directory: ~/.config/jean
+	configDir := filepath.Join(home, ".config", "jean")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
@@ -456,13 +456,13 @@ func (m *Manager) SetClaudeInitialized(repoPath, branch string) error {
 
 	repo.InitializedClaudes[branch] = true
 	// Only log debug info if debug logging is enabled
-	if os.Getenv("GCOOL_DEBUG_ENABLED") == "true" {
+	if os.Getenv("JEAN_DEBUG_ENABLED") == "true" {
 		fmt.Fprintf(os.Stderr, "DEBUG config: SetClaudeInitialized called for repo=%q branch=%q\n", repoPath, branch)
 	}
 	err := m.save()
-	if err != nil && os.Getenv("GCOOL_DEBUG_ENABLED") == "true" {
+	if err != nil && os.Getenv("JEAN_DEBUG_ENABLED") == "true" {
 		fmt.Fprintf(os.Stderr, "DEBUG config: SetClaudeInitialized FAILED: %v\n", err)
-	} else if err == nil && os.Getenv("GCOOL_DEBUG_ENABLED") == "true" {
+	} else if err == nil && os.Getenv("JEAN_DEBUG_ENABLED") == "true" {
 		fmt.Fprintf(os.Stderr, "DEBUG config: SetClaudeInitialized SUCCESS\n")
 	}
 	return err

@@ -1,4 +1,4 @@
-module github.com/coollabsio/gcool
+module github.com/coollabsio/jean
 
 go 1.25.1
 

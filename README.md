@@ -1,6 +1,8 @@
-# gcool - AI-Powered Git Worktree Management & Development Workflow Automation
+# jean - AI-Powered Git Worktree Management & Development Workflow Automation
 
 A powerful, feature-rich terminal user interface for managing Git worktrees with integrated tmux session management, GitHub PR automation, AI-powered commit messages & branch naming, and custom script execution. Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and designed for developers who work with multiple feature branches simultaneously while leveraging AI to streamline their workflow.
+
+> **Why "jean"?** Named after Jean-Claude Van Damme - combining "Jean" (the CLI) with "Claude" (AI integration). A perfect martial arts kick of productivity! 🥋
 
 ## Features
 
@@ -34,11 +36,11 @@ A powerful, feature-rich terminal user interface for managing Git worktrees with
 - **Merge Conflict Handling**: Gracefully handle merge conflicts with abort option
 
 ### Custom Scripts & Automation
-- **Custom Script Execution**: Define and run bash scripts from `gcool.json` on any worktree (`R`, `;`)
+- **Custom Script Execution**: Define and run bash scripts from `jean.json` on any worktree (`R`, `;`)
 - **Real-time Output Streaming**: Watch script execution with live output updates
 - **Script Management**: View running scripts, kill scripts mid-execution, check status and elapsed time
 - **Setup Automation**: Auto-execute setup scripts when creating new worktrees
-- **Environment Variables**: Access `GCOOL_WORKSPACE_PATH`, `GCOOL_ROOT_PATH`, `GCOOL_BRANCH` in your scripts
+- **Environment Variables**: Access `JEAN_WORKSPACE_PATH`, `JEAN_ROOT_PATH`, `JEAN_BRANCH` in your scripts
 
 ### UI & Customization
 - **5 Built-in Themes**: Matrix, Coolify, Dracula, Nord, Solarized - choose your aesthetic
@@ -54,8 +56,8 @@ A powerful, feature-rich terminal user interface for managing Git worktrees with
 - **Configurable Settings**: Per-repository settings for editor, base branch, AI models, themes
 - **Debug Logging**: Enable debug logs for troubleshooting (`s` → Debug Logs)
 - **Configuration Files**:
-  - `~/.config/gcool/config.json` - User configuration
-  - `gcool.json` - Per-repository scripts and settings
+  - `~/.config/jean/config.json` - User configuration
+  - `jean.json` - Per-repository scripts and settings
 - **Tmux Configuration Management**: Install/update/remove optimized tmux config from the app
 
 ## Installation
@@ -63,16 +65,16 @@ A powerful, feature-rich terminal user interface for managing Git worktrees with
 ### Using Go Install
 
 ```bash
-go install github.com/coollabsio/gcool@latest
+go install github.com/coollabsio/jean@latest
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/coollabsio/gcool
-cd gcool
-go build -o gcool
-sudo mv gcool /usr/local/bin/
+git clone https://github.com/coollabsio/jean
+cd jean
+go build -o jean
+sudo mv jean /usr/local/bin/
 ```
 
 ## Platform Support
@@ -85,17 +87,17 @@ sudo mv gcool /usr/local/bin/
 
 ### Windows Users
 
-gcool requires **WSL2 (Windows Subsystem for Linux 2)** to run on Windows because it depends on:
+jean requires **WSL2 (Windows Subsystem for Linux 2)** to run on Windows because it depends on:
 - **tmux** - Terminal multiplexer (Unix/Linux only)
 - **bash/zsh/fish** - POSIX shells (not available on native Windows)
 
-**To use gcool on Windows:**
+**To use jean on Windows:**
 
 1. Install WSL2: https://docs.microsoft.com/en-us/windows/wsl/install
-2. Inside WSL2, install gcool normally (see Installation section below)
-3. Use gcool from within your WSL2 terminal
+2. Inside WSL2, install jean normally (see Installation section below)
+3. Use jean from within your WSL2 terminal
 
-If you try to run gcool on native Windows (not WSL2), you'll see an error message with installation instructions for WSL2.
+If you try to run jean on native Windows (not WSL2), you'll see an error message with installation instructions for WSL2.
 
 ## Prerequisites
 
@@ -123,7 +125,7 @@ The shell wrapper enables:
 Simply run:
 
 ```bash
-gcool init
+jean init
 ```
 
 This will:
@@ -141,38 +143,38 @@ source ~/.zshrc    # for zsh
 
 ### Updating the Installation
 
-If you already have gcool installed and want to update to the latest wrapper:
+If you already have jean installed and want to update to the latest wrapper:
 
 ```bash
-gcool init --update
+jean init --update
 ```
 
 ### Removing the Integration
 
-To cleanly remove gcool from your shell configuration:
+To cleanly remove jean from your shell configuration:
 
 ```bash
-gcool init --remove
+jean init --remove
 ```
 
 ### Manual Installation (Optional)
 
-If you prefer to set up the wrapper manually or have a shell not supported by `gcool init`, you can view the wrapper functions embedded in `install/templates.go`:
+If you prefer to set up the wrapper manually or have a shell not supported by `jean init`, you can view the wrapper functions embedded in `install/templates.go`:
 
 - **BashZshWrapper** constant: Bash/Zsh shell wrapper
 - **FishWrapper** constant: Fish shell wrapper
 
-These templates are automatically compiled into the gcool binary and deployed by `gcool init`.
+These templates are automatically compiled into the jean binary and deployed by `jean init`.
 
 ## Usage
 
 ### Basic Usage
 
-Run `gcool` in any Git repository:
+Run `jean` in any Git repository:
 
 ```bash
 cd /path/to/your/repo
-gcool
+jean
 ```
 
 ### With Custom Path (for Development)
@@ -180,7 +182,7 @@ gcool
 Test on a different repository without navigating to it:
 
 ```bash
-gcool -path /path/to/other/repo
+jean -path /path/to/other/repo
 ```
 
 ## Keybindings
@@ -192,7 +194,7 @@ All keybindings are designed to be fast and intuitive. Most operations are singl
 |-----|--------|
 | `↑` / `up` / `k` | Move cursor up in worktree list |
 | `↓` / `down` / `j` | Move cursor down in worktree list |
-| `q` / `Ctrl+C` | Quit gcool |
+| `q` / `Ctrl+C` | Quit jean |
 | `h` | Show comprehensive help modal with all keybindings |
 
 ### Main View - Worktree Management
@@ -205,7 +207,7 @@ All keybindings are designed to be fast and intuitive. Most operations are singl
 | `d` | Delete selected worktree (with confirmation) |
 | `o` | Open worktree in configured editor (code, nvim, vim, etc.) |
 | `r` | Refresh: fetch from remote and auto-pull all branches |
-| `R` (Shift+R) | Run 'run' script from `gcool.json` with live output |
+| `R` (Shift+R) | Run 'run' script from `jean.json` with live output |
 | `;` | Open scripts modal to run custom scripts |
 
 ### Main View - Git & Branch Operations
@@ -339,7 +341,7 @@ Everything in one keystroke!
 
 ### Custom Scripts System
 
-Define scripts in `gcool.json`:
+Define scripts in `jean.json`:
 ```json
 {
   "scripts": {
@@ -367,7 +369,7 @@ Switch between AI models per repository:
 - Mistral: Mistral 7B
 - And more via OpenRouter API
 
-API keys stored securely in local config (`~/.config/gcool/config.json`).
+API keys stored securely in local config (`~/.config/jean/config.json`).
 
 ## How It Works
 
@@ -380,10 +382,10 @@ This keeps your workspace organized and makes it easy to manage multiple feature
 
 ## Tmux Sessions & Claude CLI
 
-When you switch to a worktree, `gcool` creates separate sessions for different purposes:
+When you switch to a worktree, `jean` creates separate sessions for different purposes:
 
-1. **Claude sessions** (`Enter` key): Named `gcool-<branch-name>`, includes Claude CLI
-2. **Terminal sessions** (`t` key): Named `gcool-<branch-name>-terminal`, shell only
+1. **Claude sessions** (`Enter` key): Named `jean-<branch-name>`, includes Claude CLI
+2. **Terminal sessions** (`t` key): Named `jean-<branch-name>-terminal`, shell only
 3. **Both sessions can coexist** for the same worktree
 4. **Persists your work** - detach anytime with `Ctrl+B D`
 
@@ -394,48 +396,48 @@ You can have both a Claude session and a terminal session open for the same work
 **View all sessions**: Press `S` (Shift+S) in the TUI to see active sessions
 
 **Switching between sessions**:
-1. Open a terminal session with `t` (creates `gcool-<branch>-terminal`)
+1. Open a terminal session with `t` (creates `jean-<branch>-terminal`)
 2. Work in the terminal, then press `Ctrl+B D` to detach
-3. You'll automatically return to gcool
-4. Press `Enter` to open the Claude session (creates `gcool-<branch>`)
+3. You'll automatically return to jean
+4. Press `Enter` to open the Claude session (creates `jean-<branch>`)
 5. Now you have both sessions running simultaneously
 6. You can continue detaching and switching between sessions
 
 **Manual session control**:
 ```bash
-# List all gcool sessions
-tmux ls | grep gcool-
+# List all jean sessions
+tmux ls | grep jean-
 
 # Attach to a specific Claude session
-tmux attach -t gcool-feature-auth
+tmux attach -t jean-feature-auth
 
 # Attach to a specific terminal session
-tmux attach -t gcool-feature-auth-terminal
+tmux attach -t jean-feature-auth-terminal
 
 # Kill a session
-tmux kill-session -t gcool-feature-auth
+tmux kill-session -t jean-feature-auth
 # or
-tmux kill-session -t gcool-feature-auth-terminal
+tmux kill-session -t jean-feature-auth-terminal
 ```
 
 **Detach from session**: `Ctrl+B D` (tmux default)
 
 **Disable auto-Claude**: Use the `--no-claude` flag
 ```bash
-gcool --no-claude
+jean --no-claude
 ```
 
 ### How Sessions Work
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  You: gcool (select "feature-auth")                          │
+│  You: jean (select "feature-auth")                          │
 ├─────────────────────────────────────────────────────────────┤
-│  Press Enter → Claude session "gcool-feature-auth"           │
+│  Press Enter → Claude session "jean-feature-auth"           │
 │  ├─ Exists? → Attach to existing Claude session            │
 │  └─ New? → Create session + start Claude CLI               │
 │                                                              │
-│  Press t → Terminal session "gcool-feature-auth-terminal"   │
+│  Press t → Terminal session "jean-feature-auth-terminal"   │
 │  ├─ Exists? → Attach to existing terminal session          │
 │  └─ New? → Create session with shell only                  │
 └─────────────────────────────────────────────────────────────┘
@@ -514,21 +516,21 @@ go run main.go
 go run main.go -path /path/to/test/repo
 
 # Build binary
-go build -o gcool
+go build -o jean
 
 # Install to system
-sudo cp gcool /usr/local/bin/
+sudo cp jean /usr/local/bin/
 
 # Initialize/update dependencies
 go mod tidy
 
 # Verify the build
-go build -o gcool
+go build -o jean
 
 # Test with different flags
-./gcool --version
-./gcool --help
-./gcool --no-claude
+./jean --version
+./jean --help
+./jean --no-claude
 ```
 
 ### Project Structure
@@ -563,14 +565,14 @@ See [CLAUDE.md](./CLAUDE.md) for detailed guides on:
 6. (Optional) Test API key to verify configuration
 
 **API Key Security**:
-- Keys stored locally in `~/.config/gcool/config.json`
+- Keys stored locally in `~/.config/jean/config.json`
 - Per-repository configuration (different keys for different repos)
 - Never transmitted except to OpenRouter API
 - Can be revoked anytime from OpenRouter dashboard
 
-### Custom Scripts (gcool.json)
+### Custom Scripts (jean.json)
 
-Create a `gcool.json` file in your repository root to define custom scripts:
+Create a `jean.json` file in your repository root to define custom scripts:
 
 ```json
 {
@@ -586,16 +588,16 @@ Create a `gcool.json` file in your repository root to define custom scripts:
 ```
 
 **Available Environment Variables in Scripts**:
-- `GCOOL_WORKSPACE_PATH` - Full path to the worktree
-- `GCOOL_ROOT_PATH` - Full path to repository root
-- `GCOOL_BRANCH` - Current branch name
+- `JEAN_WORKSPACE_PATH` - Full path to the worktree
+- `JEAN_ROOT_PATH` - Full path to repository root
+- `JEAN_BRANCH` - Current branch name
 
 **Example Script**:
 ```bash
 #!/bin/bash
-cd "$GCOOL_WORKSPACE_PATH"
+cd "$JEAN_WORKSPACE_PATH"
 npm install
-cp "$GCOOL_ROOT_PATH/.env.local" .env
+cp "$JEAN_ROOT_PATH/.env.local" .env
 npm test
 ```
 
@@ -631,15 +633,15 @@ Press `s` to open the settings menu, where you can configure:
    - Test API key connectivity
 
 5. **Tmux Config** - Install/update/remove opinionated tmux configuration
-   - Press `Enter` to manage gcool's tmux config in `~/.tmux.conf`
+   - Press `Enter` to manage jean's tmux config in `~/.tmux.conf`
    - Features: mouse support, 10k scrollback, 256 colors, Ctrl-D detach
    - Config is clearly marked and can be safely removed anytime
 
 6. **Debug Logs** - Enable/disable debug logging
-   - Logs written to `/tmp/gcool-debug.log`
+   - Logs written to `/tmp/jean-debug.log`
    - Useful for troubleshooting and development
 
-All settings are saved per-repository in `~/.config/gcool/config.json`:
+All settings are saved per-repository in `~/.config/jean/config.json`:
 
 ```json
 {
@@ -654,7 +656,7 @@ All settings are saved per-repository in `~/.config/gcool/config.json`:
 
 ### Tmux Configuration
 
-gcool provides an opinionated tmux configuration that can be optionally installed to enhance your terminal experience.
+jean provides an opinionated tmux configuration that can be optionally installed to enhance your terminal experience.
 
 **Installing the config:**
 1. Press `s` to open the settings menu
@@ -669,13 +671,13 @@ gcool provides an opinionated tmux configuration that can be optionally installe
 - **Window navigation** - Use `Shift+Left` and `Shift+Right` arrows to switch between tmux windows quickly
 - **Quick detach** - Press `Ctrl+D` to detach from session instead of the default `Ctrl+B D` (faster workflow)
 - **Vim/Neovim integration** - Focus events enabled for better editor integration and responsiveness
-- **Improved status bar** - Minimal design showing `gcool@repo:branch` format with time and date
+- **Improved status bar** - Minimal design showing `jean@repo:branch` format with time and date
 - **Better window management** - Windows numbered from 1 (not 0) with automatic renumbering when windows close
 - **Visual improvements** - Color-coded pane borders (highlight active pane) and styled message displays
 
 **Managing the config:**
-- **Update**: If gcool adds new features, use the "Update Config" button to get the latest
-- **Remove**: Use the "Remove Config" button to cleanly remove the gcool section
+- **Update**: If jean adds new features, use the "Update Config" button to get the latest
+- **Remove**: Use the "Remove Config" button to cleanly remove the jean section
 - **Manual edit**: The config is marked with unique identifiers - you can manually delete it anytime
 
 **Important notes:**
@@ -727,7 +729,7 @@ bind-key -n S-Left previous-window  # Shift+Left arrow for previous window
 **Visual Styling:**
 ```tmux
 # Status bar with repo:branch format
-set -g status-left "#[fg=green]gcool@#[fg=cyan]#(echo '#S' | sed 's/^gcool-\\([^-]*\\)-\\(.*\\)/\\1:\\2/') "
+set -g status-left "#[fg=green]jean@#[fg=cyan]#(echo '#S' | sed 's/^jean-\\([^-]*\\)-\\(.*\\)/\\1:\\2/') "
 set -g status-right "#[fg=yellow]%H:%M #[fg=white]%d-%b-%y"
 
 # Pane borders (subtle inactive, bright active)
@@ -748,7 +750,7 @@ set -g message-style bg=colour33,fg=black,bold  # Blue background, bold text
 - **Focus events** let vim/neovim know when you switch panes, enabling better autoread behavior
 - **Clickable links** let you Cmd+Click (macOS) or Ctrl+Click (Linux) URLs in the terminal
 
-The full configuration is embedded in the gcool binary and can be viewed in [`session/tmux.go`](./session/tmux.go) (lines 199-256).
+The full configuration is embedded in the jean binary and can be viewed in [`session/tmux.go`](./session/tmux.go) (lines 199-256).
 
 ### Themes
 
@@ -784,7 +786,7 @@ The full configuration is embedded in the gcool binary and can be viewed in [`se
 
 ### Base Branch
 
-The base branch is used when creating new worktrees with new branches. gcool automatically determines the base branch:
+The base branch is used when creating new worktrees with new branches. jean automatically determines the base branch:
 
 1. Check saved config for repository
 2. Fall back to current branch
@@ -795,7 +797,7 @@ You can change the base branch at any time by pressing `b` in the main view.
 
 ### Editor Integration
 
-gcool includes built-in editor integration for opening worktrees in your IDE with a single keypress.
+jean includes built-in editor integration for opening worktrees in your IDE with a single keypress.
 
 **Setting your preferred editor:**
 1. Press `e` in the main view (or access via settings menu with `s`)
@@ -814,8 +816,8 @@ gcool includes built-in editor integration for opening worktrees in your IDE wit
 **Opening a worktree:**
 - Navigate to any worktree in the list
 - Press `o` to open it in your configured editor
-- The editor launches in the background and you stay in gcool
-- Editor preference is saved per repository in `~/.config/gcool/config.json`
+- The editor launches in the background and you stay in jean
+- Editor preference is saved per repository in `~/.config/jean/config.json`
 
 **Tips:**
 - If opening fails, press `e` to select a different editor
@@ -827,12 +829,12 @@ gcool includes built-in editor integration for opening worktrees in your IDE wit
 ### Directory Structure
 
 ```
-gcool/
+jean/
 ├── main.go              # CLI entry point, handles flags and shell integration
 ├── CLAUDE.md            # Development guide and codebase documentation
-├── go.mod               # Module: github.com/coollabsio/gcool
+├── go.mod               # Module: github.com/coollabsio/jean
 ├── config/              # Configuration management
-│   └── config.go        # Manages ~/.config/gcool/config.json
+│   └── config.go        # Manages ~/.config/jean/config.json
 ├── git/                 # Git operations wrapper
 │   └── worktree.go      # Worktree CRUD, branch management, random names
 ├── session/             # Tmux session management
@@ -863,7 +865,7 @@ gcool/
 - All modals support Tab navigation, Enter to confirm, Esc to cancel
 
 **Shell Integration Protocol**: Communication with shell wrappers via:
-- `GCOOL_SWITCH_FILE` environment variable (preferred): Write switch data to file
+- `JEAN_SWITCH_FILE` environment variable (preferred): Write switch data to file
 - Stdout (legacy): Print switch data in format `path|branch|auto-claude|terminal-only`
 
 **Worktree Organization**: All worktrees are created in `.workspaces/` directory at repository root with randomly generated names (adjective-noun-number pattern)

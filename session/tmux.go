@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const sessionPrefix = "gcool-"
+const sessionPrefix = "jean-"
 
 // Session represents a tmux session
 type Session struct {
@@ -49,7 +49,7 @@ func (m *Manager) SanitizeBranchName(branch string) string {
 }
 
 // SanitizeName sanitizes a repo name and branch name for use as a tmux session name
-// Format: gcool-<repo>-<branch>
+// Format: jean-<repo>-<branch>
 func (m *Manager) SanitizeName(repoName, branch string) string {
 	// Sanitize both repo name and branch name
 	sanitizedRepo := m.SanitizeBranchName(repoName)
@@ -193,12 +193,12 @@ func (m *Manager) AttachToWindow(sessionName, path string, autoStartClaude bool,
 	return cmd.Run()
 }
 
-const gcoolTmuxConfigMarker = "# === GCOOL_TMUX_CONFIG_START_DO_NOT_MODIFY_THIS_LINE ==="
-const gcoolTmuxConfigEnd = "# === GCOOL_TMUX_CONFIG_END_DO_NOT_MODIFY_THIS_LINE ==="
+const jeanTmuxConfigMarker = "# === JEAN_TMUX_CONFIG_START_DO_NOT_MODIFY_THIS_LINE ==="
+const jeanTmuxConfigEnd = "# === JEAN_TMUX_CONFIG_END_DO_NOT_MODIFY_THIS_LINE ==="
 
-const gcoolTmuxConfig = `
-# === GCOOL_TMUX_CONFIG_START_DO_NOT_MODIFY_THIS_LINE ===
-# gcool opinionated tmux configuration
+const jeanTmuxConfig = `
+# === JEAN_TMUX_CONFIG_START_DO_NOT_MODIFY_THIS_LINE ===
+# jean opinionated tmux configuration
 # WARNING: Do not modify the marker lines above/below - they are used for automatic updates
 # You can safely delete this entire section if you no longer want these settings
 
@@ -243,7 +243,7 @@ bind-key -n S-Left previous-window
 set -g status-style bg=default,fg=white
 set -g status-left-length 40
 set -g status-right-length 60
-set -g status-left "#[fg=green]gcool@#[fg=cyan]#(echo '#S' | sed 's/^gcool-\\([^-]*\\)-\\(.*\\)/\\1:\\2/') "
+set -g status-left "#[fg=green]jean@[fg=cyan]#(echo '#S' | sed 's/^jean-\\([^-]*\\)-\\(.*\\)/\\1:\\2/') "
 set -g status-right "#[fg=yellow]%H:%M #[fg=white]%d-%b-%y"
 
 # Pane border colors
@@ -252,11 +252,11 @@ set -g pane-active-border-style fg=colour33
 
 # Message styling
 set -g message-style bg=colour33,fg=black,bold
-# === GCOOL_TMUX_CONFIG_END_DO_NOT_MODIFY_THIS_LINE ===
+# === JEAN_TMUX_CONFIG_END_DO_NOT_MODIFY_THIS_LINE ===
 `
 
-// HasGcoolTmuxConfig checks if ~/.tmux.conf contains gcool config
-func (m *Manager) HasGcoolTmuxConfig() (bool, error) {
+// HasJeanTmuxConfig checks if ~/.tmux.conf contains jean config
+func (m *Manager) HasJeanTmuxConfig() (bool, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return false, err
@@ -271,11 +271,11 @@ func (m *Manager) HasGcoolTmuxConfig() (bool, error) {
 		return false, err
 	}
 
-	return strings.Contains(string(content), gcoolTmuxConfigMarker), nil
+	return strings.Contains(string(content), jeanTmuxConfigMarker), nil
 }
 
-// AddGcoolTmuxConfig appends or updates gcool config in ~/.tmux.conf
-func (m *Manager) AddGcoolTmuxConfig() error {
+// AddJeanTmuxConfig appends or updates jean config in ~/.tmux.conf
+func (m *Manager) AddJeanTmuxConfig() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -284,14 +284,14 @@ func (m *Manager) AddGcoolTmuxConfig() error {
 	tmuxConfPath := filepath.Join(homeDir, ".tmux.conf")
 
 	// Check if config already exists
-	hasConfig, err := m.HasGcoolTmuxConfig()
+	hasConfig, err := m.HasJeanTmuxConfig()
 	if err != nil {
 		return err
 	}
 
 	if hasConfig {
 		// Update existing config by removing old and appending new
-		if err := m.RemoveGcoolTmuxConfig(); err != nil {
+		if err := m.RemoveJeanTmuxConfig(); err != nil {
 			return fmt.Errorf("failed to update config (remove old): %w", err)
 		}
 	}
@@ -303,15 +303,15 @@ func (m *Manager) AddGcoolTmuxConfig() error {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString(gcoolTmuxConfig); err != nil {
+	if _, err := f.WriteString(jeanTmuxConfig); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// RemoveGcoolTmuxConfig removes gcool config from ~/.tmux.conf
-func (m *Manager) RemoveGcoolTmuxConfig() error {
+// RemoveJeanTmuxConfig removes jean config from ~/.tmux.conf
+func (m *Manager) RemoveJeanTmuxConfig() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -329,19 +329,19 @@ func (m *Manager) RemoveGcoolTmuxConfig() error {
 
 	contentStr := string(content)
 
-	// Find and remove the gcool config section
-	startIdx := strings.Index(contentStr, gcoolTmuxConfigMarker)
+	// Find and remove the jean config section
+	startIdx := strings.Index(contentStr, jeanTmuxConfigMarker)
 	if startIdx == -1 {
-		return fmt.Errorf("gcool tmux config not found in ~/.tmux.conf")
+		return fmt.Errorf("jean tmux config not found in ~/.tmux.conf")
 	}
 
-	endIdx := strings.Index(contentStr, gcoolTmuxConfigEnd)
+	endIdx := strings.Index(contentStr, jeanTmuxConfigEnd)
 	if endIdx == -1 {
-		return fmt.Errorf("gcool tmux config end marker not found in ~/.tmux.conf")
+		return fmt.Errorf("jean tmux config end marker not found in ~/.tmux.conf")
 	}
 
 	// Remove the section (including the end marker line)
-	endIdx += len(gcoolTmuxConfigEnd)
+	endIdx += len(jeanTmuxConfigEnd)
 	// Also remove trailing newline if present
 	if endIdx < len(contentStr) && contentStr[endIdx] == '\n' {
 		endIdx++
@@ -381,8 +381,8 @@ func (m *Manager) NewWindowAndAttach(sessionName, path string) error {
 	return m.Attach(sessionName)
 }
 
-// List returns all gcool tmux sessions, optionally filtered by repository path
-// If repoPath is empty string, returns all gcool sessions
+// List returns all jean tmux sessions, optionally filtered by repository path
+// If repoPath is empty string, returns all jean sessions
 func (m *Manager) List(repoPath string) ([]Session, error) {
 	// List all sessions with format: name:windows:attached:activity:path
 	// activity is the maximum window_activity timestamp in the session

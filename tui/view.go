@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/coollabsio/gcool/config"
+	"github.com/coollabsio/jean/config"
 )
 
 // View renders the TUI
@@ -1491,7 +1491,7 @@ func (m Model) renderSettingsModal() string {
 
 	b.WriteString(modalTitleStyle.Render("Settings"))
 	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("Configure gcool settings for this repository"))
+	b.WriteString(helpStyle.Render("Configure jean settings for this repository"))
 	b.WriteString("\n\n")
 
 	// Define settings options (without computing current values yet)
@@ -1534,10 +1534,10 @@ func (m Model) renderSettingsModal() string {
 		{
 			name:        "Tmux Config",
 			key:         "t",
-			description: "Add/remove gcool tmux config to ~/.tmux.conf",
+			description: "Add/remove jean tmux config to ~/.tmux.conf",
 			getCurrent: func() string {
 				if m.sessionManager != nil {
-					hasConfig, err := m.sessionManager.HasGcoolTmuxConfig()
+					hasConfig, err := m.sessionManager.HasJeanTmuxConfig()
 					if err == nil && hasConfig {
 						return "Installed"
 					}
@@ -1559,7 +1559,7 @@ func (m Model) renderSettingsModal() string {
 		{
 			name:        "Debug Logs",
 			key:         "d",
-			description: "Enable/disable debug logging to /tmp/gcool-*.log files",
+			description: "Enable/disable debug logging to /tmp/jean-*.log files",
 			getCurrent: func() string {
 				if m.configManager != nil {
 					if m.configManager.GetDebugLoggingEnabled() {
@@ -1819,14 +1819,14 @@ func (m Model) renderTmuxConfigModal() string {
 	// Check current status
 	hasConfig := false
 	if m.sessionManager != nil {
-		installed, err := m.sessionManager.HasGcoolTmuxConfig()
+		installed, err := m.sessionManager.HasJeanTmuxConfig()
 		if err == nil {
 			hasConfig = installed
 		}
 	}
 
 	if hasConfig {
-		b.WriteString(helpStyle.Render("gcool tmux config is currently installed in ~/.tmux.conf"))
+		b.WriteString(helpStyle.Render("jean tmux config is currently installed in ~/.tmux.conf"))
 		b.WriteString("\n\n")
 		b.WriteString(normalItemStyle.Render("Current features:"))
 		b.WriteString("\n")
@@ -1872,7 +1872,7 @@ func (m Model) renderTmuxConfigModal() string {
 			b.WriteString(cancelButtonStyle.Render(cancelBtn))
 		}
 	} else {
-		b.WriteString(helpStyle.Render("gcool has an opinionated tmux configuration that includes:"))
+		b.WriteString(helpStyle.Render("jean has an opinionated tmux configuration that includes:"))
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("  • Mouse support for scrolling and clickable links"))
 		b.WriteString("\n")
@@ -1986,8 +1986,8 @@ func (m Model) renderHelperModal() string {
 				key         string
 				description string
 			}{
-				{"R", "Execute 'run' script (gcool.json)"},
-				{";", "View and run custom scripts (gcool.json)"},
+				{"R", "Execute 'run' script (jean.json)"},
+				{";", "View and run custom scripts (jean.json)"},
 			},
 		},
 		{
@@ -2094,7 +2094,7 @@ func (m Model) renderScriptsModal() string {
 	if len(m.runningScripts) == 0 && !m.scriptConfig.HasScripts() {
 		b.WriteString(modalTitleStyle.Render("Scripts"))
 		b.WriteString("\n\n")
-		b.WriteString(normalItemStyle.Render("No scripts configured in gcool.json"))
+		b.WriteString(normalItemStyle.Render("No scripts configured in jean.json"))
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("Press Esc to close"))
 	} else {
@@ -2370,11 +2370,11 @@ func (m Model) renderPRTypeModal() string {
 func (m Model) renderOnboardingModal() string {
 	var b strings.Builder
 
-	b.WriteString(modalTitleStyle.Render("Welcome to gcool!"))
+	b.WriteString(modalTitleStyle.Render("Welcome to jean!"))
 	b.WriteString("\n\n")
 
 	// Brief introduction
-	b.WriteString(normalItemStyle.Render("gcool is a TUI for managing Git worktrees with tmux + Claude integration."))
+	b.WriteString(normalItemStyle.Render("jean is a TUI for managing Git worktrees with tmux + Claude integration."))
 	b.WriteString("\n\n")
 
 	// Explain shell integration
@@ -2402,7 +2402,7 @@ func (m Model) renderOnboardingModal() string {
 	b.WriteString("\n\n")
 
 	// Check if tmux config is already installed
-	hasTmuxConfig, _ := m.sessionManager.HasGcoolTmuxConfig()
+	hasTmuxConfig, _ := m.sessionManager.HasJeanTmuxConfig()
 	if hasTmuxConfig {
 		b.WriteString(helpStyle.Render("Note: Tmux config is already installed. You can update it or skip."))
 		b.WriteString("\n\n")

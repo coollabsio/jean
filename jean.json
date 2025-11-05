@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "setup": "./scripts/conductor-setup.sh",
+    "run": "go run main.go",
+    "build": "go build -o jean",
+    "test": "go test ./..."
+  }
+}

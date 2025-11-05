@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# gcool installer script
-# Downloads and installs gcool from GitHub releases
-# Usage: curl -fsSL https://gcool.sh/install.sh | bash
+# jean installer script
+# Downloads and installs jean from GitHub releases
+# Usage: curl -fsSL https://jean.sh/install.sh | bash
 
 set -e
 
 # Configuration
-REPO="coollabsio/gcool"
+REPO="coollabsio/jean"
 GITHUB_API="https://api.github.com/repos/$REPO"
 INSTALL_DIR=""
 VERSION=""
@@ -104,7 +104,7 @@ get_latest_version() {
     fi
 }
 
-# Download and extract gcool
+# Download and extract jean
 download_and_extract() {
     local version="$1"
     local platform="$2"
@@ -116,26 +116,26 @@ download_and_extract() {
     local clean_version="${version#v}"
 
     # Construct download URL
-    local filename="gcool_${clean_version}_${platform}.tar.gz"
+    local filename="jean_${clean_version}_${platform}.tar.gz"
     local download_url="${GITHUB_API}/releases/download/${version}/${filename}"
 
-    echo "Downloading gcool ${clean_version} for ${platform}..."
+    echo "Downloading jean ${clean_version} for ${platform}..."
     if ! curl -fsSL -o "$temp_dir/$filename" "$download_url"; then
-        echo -e "${RED}Error: Failed to download gcool from ${download_url}${NC}"
+        echo -e "${RED}Error: Failed to download jean from ${download_url}${NC}"
         exit 1
     fi
 
-    echo "Extracting gcool..."
+    echo "Extracting jean..."
     if ! tar -xzf "$temp_dir/$filename" -C "$temp_dir"; then
-        echo -e "${RED}Error: Failed to extract gcool${NC}"
+        echo -e "${RED}Error: Failed to extract jean${NC}"
         exit 1
     fi
 
-    # Find the gcool binary
+    # Find the jean binary
     local binary_path
-    binary_path=$(find "$temp_dir" -name "gcool" -type f | head -1)
+    binary_path=$(find "$temp_dir" -name "jean" -type f | head -1)
     if [ -z "$binary_path" ]; then
-        echo -e "${RED}Error: gcool binary not found in archive${NC}"
+        echo -e "${RED}Error: jean binary not found in archive${NC}"
         exit 1
     fi
 
@@ -157,12 +157,12 @@ install_binary() {
     if [ ! -w "$install_dir" ]; then
         if [ "$install_dir" = "/usr/local/bin" ]; then
             echo "Attempting to install to $install_dir (requires sudo)..."
-            if ! sudo cp "$binary_path" "$install_dir/gcool"; then
-                echo -e "${RED}Error: Failed to install gcool to $install_dir${NC}"
+            if ! sudo cp "$binary_path" "$install_dir/jean"; then
+                echo -e "${RED}Error: Failed to install jean to $install_dir${NC}"
                 echo "Please ensure you have sudo privileges or use --user flag"
                 exit 1
             fi
-            if ! sudo chmod +x "$install_dir/gcool"; then
+            if ! sudo chmod +x "$install_dir/jean"; then
                 echo -e "${RED}Error: Failed to set execute permissions${NC}"
                 exit 1
             fi
@@ -171,14 +171,14 @@ install_binary() {
             exit 1
         fi
     else
-        cp "$binary_path" "$install_dir/gcool"
-        chmod +x "$install_dir/gcool"
+        cp "$binary_path" "$install_dir/jean"
+        chmod +x "$install_dir/jean"
     fi
 }
 
 # Main installation logic
 main() {
-    echo -e "${GREEN}gcool Installer${NC}"
+    echo -e "${GREEN}jean Installer${NC}"
     echo ""
 
     # Detect platform
@@ -215,10 +215,10 @@ main() {
     echo ""
 
     # Check if already installed
-    if [ -f "$INSTALL_DIR/gcool" ]; then
+    if [ -f "$INSTALL_DIR/jean" ]; then
         local installed_version
-        installed_version=$("$INSTALL_DIR/gcool" version 2>/dev/null | grep -oP '(?<=version )[^ ]*' || echo "unknown")
-        echo "gcool is already installed (version: $installed_version)"
+        installed_version=$("$INSTALL_DIR/jean" version 2>/dev/null | grep -oP '(?<=version )[^ ]*' || echo "unknown")
+        echo "jean is already installed (version: $installed_version)"
         echo ""
         read -p "Do you want to update to $VERSION? (y/n) " -n 1 -r
         echo ""
@@ -229,18 +229,18 @@ main() {
     fi
 
     # Download and extract
-    echo "Downloading gcool..."
+    echo "Downloading jean..."
     local binary_path
     binary_path=$(download_and_extract "$VERSION" "${platform//:/_}")
 
     # Install
-    echo "Installing gcool to $INSTALL_DIR..."
+    echo "Installing jean to $INSTALL_DIR..."
     install_binary "$binary_path" "$INSTALL_DIR"
 
     echo ""
-    echo -e "${GREEN}✓ Successfully installed gcool $VERSION${NC}"
+    echo -e "${GREEN}✓ Successfully installed jean $VERSION${NC}"
     echo ""
-    echo "To get started, run: $INSTALL_DIR/gcool --help"
+    echo "To get started, run: $INSTALL_DIR/jean --help"
 
     # Check if install dir is in PATH
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then

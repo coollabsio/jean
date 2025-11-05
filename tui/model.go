@@ -13,11 +13,11 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/coollabsio/gcool/config"
-	"github.com/coollabsio/gcool/git"
-	"github.com/coollabsio/gcool/github"
-	"github.com/coollabsio/gcool/openrouter"
-	"github.com/coollabsio/gcool/session"
+	"github.com/coollabsio/jean/config"
+	"github.com/coollabsio/jean/git"
+	"github.com/coollabsio/jean/github"
+	"github.com/coollabsio/jean/openrouter"
+	"github.com/coollabsio/jean/session"
 )
 
 // Package-level shared state for streaming script output
@@ -46,7 +46,7 @@ type SwitchInfo struct {
 
 // ScriptExecution represents a running or completed script
 type ScriptExecution struct {
-	name         string    // Name of the script from gcool.json
+	name         string    // Name of the script from jean.json
 	command      string    // The actual command to run
 	output       string    // Captured output
 	pid          int       // Process ID (for killing)
@@ -419,7 +419,7 @@ func NewModel(repoPath string, autoClaude bool) Model {
 		}
 	}
 
-	// Load scripts from gcool.json
+	// Load scripts from jean.json
 	if scriptConfig, err := config.LoadScripts(absoluteRepoPath); err == nil {
 		m.scriptConfig = scriptConfig
 		allScripts := scriptConfig.GetScriptNames()
@@ -1423,7 +1423,7 @@ func (m Model) refreshPRStatuses() tea.Cmd {
 }
 
 // loadPRDetailsForAllWorktrees loads PR details from GitHub for all worktrees asynchronously
-// This is used during refresh to discover PRs that may have been created outside gcool
+// This is used during refresh to discover PRs that may have been created outside jean
 func (m Model) loadPRDetailsForAllWorktrees() tea.Cmd {
 	return func() tea.Msg {
 		m.debugLog("loadPRDetailsForAllWorktrees() called - checking all worktrees for PRs")

@@ -14,7 +14,7 @@ import (
 
 const (
 	repoOwner = "coollabsio"
-	repoName  = "gcool"
+	repoName  = "jean"
 )
 
 // Release represents a GitHub release
@@ -31,8 +31,8 @@ type Asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// UpdateGcool checks for and installs the latest version of gcool
-func UpdateGcool(currentVersion string) error {
+// UpdateJean checks for and installs the latest version of jean
+func UpdateJean(currentVersion string) error {
 	ctx := context.Background()
 
 	// Parse current version
@@ -64,7 +64,7 @@ func UpdateGcool(currentVersion string) error {
 
 	// Check if update is needed
 	if !latestVer.GreaterThan(current) {
-		fmt.Printf("gcool is already up to date (version %s)\n", currentVersion)
+		fmt.Printf("jean is already up to date (version %s)\n", currentVersion)
 		return nil
 	}
 
@@ -74,7 +74,7 @@ func UpdateGcool(currentVersion string) error {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
-	fmt.Printf("Updating gcool from %s to %s...\n", currentVersion, latestRelease.TagName)
+	fmt.Printf("Updating jean from %s to %s...\n", currentVersion, latestRelease.TagName)
 
 	// Download and install the new binary
 	if err := downloadAndInstall(ctx, latestRelease, exe); err != nil {
@@ -126,14 +126,14 @@ func downloadAndInstall(ctx context.Context, release *Release, exePath string) e
 	}
 
 	// Create a temporary directory for the download
-	tmpDir, err := os.MkdirTemp("", "gcool-update-")
+	tmpDir, err := os.MkdirTemp("", "jean-update-")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	// Download the binary
-	tmpFile := filepath.Join(tmpDir, "gcool.tar.gz")
+	tmpFile := filepath.Join(tmpDir, "jean.tar.gz")
 	if err := downloadFile(ctx, assetURL, tmpFile); err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func downloadAndInstall(ctx context.Context, release *Release, exePath string) e
 // findAssetURL finds the download URL for the appropriate platform
 func findAssetURL(release *Release) string {
 	// Look for tar.gz asset matching the current platform
-	// The asset name should be like: gcool_0.1.0_linux_amd64.tar.gz
+	// The asset name should be like: jean_0.1.0_linux_amd64.tar.gz
 	for _, asset := range release.Assets {
 		// For now, we'll just return the first tar.gz file
 		// In production, you'd want to check the OS and ARCH
@@ -215,14 +215,14 @@ func downloadFile(ctx context.Context, url, filePath string) error {
 	return nil
 }
 
-// extractBinary extracts the gcool binary from a tar.gz file
+// extractBinary extracts the jean binary from a tar.gz file
 func extractBinary(tarPath, destDir string) (string, error) {
 	// This is a simplified version - in production you'd want proper tar extraction
 	// For now, we assume the binary will be extracted directly
 	// In a real implementation, you'd use archive/tar to extract the file
 
 	// Return the expected path of the extracted binary
-	return filepath.Join(destDir, "gcool"), nil
+	return filepath.Join(destDir, "jean"), nil
 }
 
 // copyFile copies a file from src to dst

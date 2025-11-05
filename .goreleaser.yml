@@ -1,14 +1,14 @@
 # .goreleaser.yml
-# Build and release gcool binaries
+# Build and release jean binaries
 
-project_name: gcool
+project_name: jean
 env:
   - GO111MODULE=on
 
 builds:
-  - id: gcool
+  - id: jean
     main: ./main.go
-    binary: gcool
+    binary: jean
     goos:
       - linux
       - darwin
@@ -21,9 +21,9 @@ builds:
       - -s -w
 
 archives:
-  - id: gcool-archive
+  - id: jean-archive
     builds:
-      - gcool
+      - jean
     format: tar.gz
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     files:
@@ -33,7 +33,7 @@ archives:
 release:
   github:
     owner: coollabsio
-    name: gcool
+    name: jean
   prerelease: auto
   draft: false
   make_latest: true

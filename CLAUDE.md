@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-gcool is a Terminal User Interface (TUI) for managing Git worktrees with integrated tmux session management. It's built in Go using the Bubble Tea framework for the TUI and provides persistent Claude CLI sessions per worktree.
+jean is a Terminal User Interface (TUI) for managing Git worktrees with integrated tmux session management. It's built in Go using the Bubble Tea framework for the TUI and provides persistent Claude CLI sessions per worktree.
 
 ## Development Commands
 
@@ -17,10 +17,10 @@ go run main.go
 go run main.go -path /path/to/test/repo
 
 # Build binary
-go build -o gcool
+go build -o jean
 
 # Install to system
-sudo cp gcool /usr/local/bin/
+sudo cp jean /usr/local/bin/
 ```
 
 ### Testing
@@ -29,12 +29,12 @@ sudo cp gcool /usr/local/bin/
 go mod tidy
 
 # Verify the build
-go build -o gcool
+go build -o jean
 
 # Test with different flags
-./gcool --version
-./gcool --help
-./gcool --no-claude
+./jean --version
+./jean --help
+./jean --no-claude
 ```
 
 ## Architecture
@@ -54,8 +54,8 @@ The application follows a clean separation of concerns:
 - **session/**: Tmux session management
   - `tmux.go`: Session creation, attachment, listing, and lifecycle management
 - **config/**: User configuration persistence
-  - `config.go`: Manages base branch settings per repository in `~/.config/gcool/config.json`
-  - `scripts.go`: Loads and manages custom scripts from `gcool.json`
+  - `config.go`: Manages base branch settings per repository in `~/.config/jean/config.json`
+  - `scripts.go`: Loads and manages custom scripts from `jean.json`
 - **github/**: GitHub PR operations
   - `pr.go`: PR creation, listing, merging via gh CLI
 - **openrouter/**: AI integration
@@ -117,15 +117,15 @@ Tmux integration:
 - `KillSession()`: Terminate a tmux session
 - `SessionExists()`: Check if session is running
 - `SanitizeSessionName()`: Convert branch names to valid tmux session names
-- `HasGcoolTmuxConfig()`: Check if gcool config is installed in ~/.tmux.conf
-- `AddGcoolTmuxConfig()`: Install or update gcool tmux config (with unique markers)
-- `RemoveGcoolTmuxConfig()`: Remove gcool config section from ~/.tmux.conf
+- `HasJeanTmuxConfig()`: Check if jean config is installed in ~/.tmux.conf
+- `AddJeanTmuxConfig()`: Install or update jean tmux config (with unique markers)
+- `RemoveJeanTmuxConfig()`: Remove jean config section from ~/.tmux.conf
 
 #### config/config.go
 Configuration management:
 - `Config` struct: Stores repository-specific settings
 - `RepoConfig` struct: Base branch, editor, last selected branch
-- `LoadConfig()`: Read from `~/.config/gcool/config.json`
+- `LoadConfig()`: Read from `~/.config/jean/config.json`
 - `SaveConfig()`: Persist configuration changes
 - `GetBaseBranch()`: Get base branch for repository
 - `SetBaseBranch()`: Update base branch setting
@@ -147,7 +147,7 @@ Configuration management:
 - The Update function handles these messages and updates state accordingly
 
 **Shell Integration Protocol**: The app communicates with shell wrappers via:
-- Environment variable `GCOOL_SWITCH_FILE` (preferred): Write switch data to file
+- Environment variable `JEAN_SWITCH_FILE` (preferred): Write switch data to file
 - Stdout (legacy): Print switch data in format `path|branch|auto-claude|terminal-only`
 - Shell wrappers read this data to perform `cd` and tmux session management
 
@@ -163,8 +163,8 @@ Configuration management:
 - `tmuxConfigModal`: Install/update/remove tmux configuration
 
 **Session Naming**: Tmux session names are sanitized from branch names:
-- Claude sessions: `gcool-<sanitized-branch-name>`
-- Terminal sessions: `gcool-<sanitized-branch-name>-terminal`
+- Claude sessions: `jean-<sanitized-branch-name>`
+- Terminal sessions: `jean-<sanitized-branch-name>-terminal`
 - Invalid characters replaced with hyphens
 - Both session types can coexist for the same worktree
 
@@ -182,7 +182,7 @@ Configuration management:
 
 ## Configuration
 
-**User Config Location**: `~/.config/gcool/config.json`
+**User Config Location**: `~/.config/jean/config.json`
 - Stores per-repository settings and integration configs
 - Complete JSON structure:
 ```json
@@ -225,7 +225,7 @@ Configuration management:
 
 **Last Selected Worktree Persistence**:
 - Automatically saves last selected worktree branch
-- Restores selection when reopening gcool
+- Restores selection when reopening jean
 - Updates on navigation (up/down keys) and switching
 
 **Tmux Configuration Management**:
@@ -237,17 +237,17 @@ Configuration management:
 
 **Setup Script Integration** ✅:
 - Automatic script execution when creating new worktrees
-- Configure in `gcool.json` at repository root:
+- Configure in `jean.json` at repository root:
 ```json
 {
   "scripts": {
-    "onWorktreeCreate": "npm install && cp $GCOOL_ROOT_PATH/.env ."
+    "onWorktreeCreate": "npm install && cp $JEAN_ROOT_PATH/.env ."
   }
 }
 ```
 - Environment variables available in script:
-  - `GCOOL_WORKSPACE_PATH`: Path to the newly created worktree
-  - `GCOOL_ROOT_PATH`: Path to the repository root directory
+  - `JEAN_WORKSPACE_PATH`: Path to the newly created worktree
+  - `JEAN_ROOT_PATH`: Path to the repository root directory
 - Script runs every time a worktree is created (no marker file tracking)
 - Executes for ALL new worktrees (created with `n` or `a` keys)
 - Script failures show as warnings, not errors (worktree still usable)
@@ -343,8 +343,8 @@ Key external dependencies:
 **Files**: `config/scripts.go`, `tui/model.go`, `tui/view.go`, `tui/update.go`
 
 **Features**:
-1. **Custom Scripts from gcool.json** (`;` keybinding, lines 1330-1340)
-   - Load scripts from `gcool.json` in repository root
+1. **Custom Scripts from jean.json** (`;` keybinding, lines 1330-1340)
+   - Load scripts from `jean.json` in repository root
    - Run arbitrary bash commands on selected worktrees
    - Real-time streaming output with live updates
    - Script execution tracking (start time, output, finished status)
@@ -361,14 +361,14 @@ Key external dependencies:
      ```
 
 2. **Run Script** (`R` keybinding, lines 1099-1141)
-   - Quick-run the 'run' script from gcool.json
+   - Quick-run the 'run' script from jean.json
    - Opens script output modal automatically
    - Shows running scripts with elapsed time
    - Spinner animation during execution
 
 3. **Scripts Modal** (view.go:1943-2056)
    - Lists running scripts with status indicators
-   - Lists available scripts from gcool.json
+   - Lists available scripts from jean.json
    - Kill running scripts with `d` or `k` key
    - View script output in separate modal
    - Color-coded status (running, finished)
@@ -381,9 +381,9 @@ Key external dependencies:
    - Close modal with `q` or `esc`
 
 **Environment Variables Available to Scripts**:
-- `GCOOL_WORKSPACE_PATH`: Full path to worktree directory
-- `GCOOL_ROOT_PATH`: Full path to repository root
-- `GCOOL_BRANCH`: Current branch name
+- `JEAN_WORKSPACE_PATH`: Full path to worktree directory
+- `JEAN_ROOT_PATH`: Full path to repository root
+- `JEAN_BRANCH`: Current branch name
 
 ### Themes System ✅
 **Files**: `tui/themes.go`, `tui/styles.go`, `config/config.go`
@@ -426,7 +426,7 @@ Key external dependencies:
 
 **Features**:
 - Toggle in Settings modal (`s` → Debug Logs)
-- Logs to `/tmp/gcool-debug.log`
+- Logs to `/tmp/jean-debug.log`
 - Tracks:
   - Worktree operations (create, delete, switch)
   - PR creation flows
@@ -450,8 +450,8 @@ Key external dependencies:
    - Atomic switch operation
 
 3. **Dual Session Mode** (update.go:1197-1227, 1268-1289)
-   - `enter` - Opens Claude session (`gcool-<branch>`)
-   - `t` - Opens terminal session (`gcool-<branch>-terminal`)
+   - `enter` - Opens Claude session (`jean-<branch>`)
+   - `t` - Opens terminal session (`jean-<branch>-terminal`)
    - Both sessions can coexist for same worktree
    - Independent session lifecycle management
 
@@ -508,7 +508,7 @@ Key external dependencies:
 - `o` keybinding to open worktree in default IDE
 - `e` keybinding to select/change editor
 - Support for 7 editors: VS Code, Cursor, Neovim, Vim, Sublime Text, Atom, Zed
-- Per-repository editor preference stored in `~/.config/gcool/config.json`
+- Per-repository editor preference stored in `~/.config/jean/config.json`
 
 **Enhanced Configuration** ✅:
 - Settings menu (`s` keybinding) for centralized configuration
@@ -532,15 +532,15 @@ Key external dependencies:
 
 **Worktree Setup Scripts** ✅:
 - Automatic execution of setup scripts when creating new worktrees
-- Configured via `gcool.json` in repository root using `scripts.onWorktreeCreate` key
-- Provides `GCOOL_WORKSPACE_PATH` and `GCOOL_ROOT_PATH` environment variables to scripts
+- Configured via `jean.json` in repository root using `scripts.onWorktreeCreate` key
+- Provides `JEAN_WORKSPACE_PATH` and `JEAN_ROOT_PATH` environment variables to scripts
 - Runs every time a worktree is created (no marker file tracking)
 - Runs for all worktree creation methods (new branch with `n`, existing branch with `a`)
 - Script failures are non-blocking - displayed as warnings, not errors
 - Full script output captured and shown in notification for debugging
 - Scripts modal (`;` key) displays `onWorktreeCreate` as view-only (cannot be manually executed)
 - Implementation details:
-  - `config/scripts.go`: Loads `gcool.json` configuration
+  - `config/scripts.go`: Loads `jean.json` configuration
   - `git/worktree.go`: `executeSetupScript()` method handles execution
   - `tui/update.go`: Distinguishes setup script warnings from git errors
   - `tui/model.go`: Filters `onWorktreeCreate` from runnable scripts list
@@ -553,7 +553,7 @@ Key external dependencies:
 - Displays visual indicators showing which worktrees are behind base branch
 - Behind count displayed as `↓X` next to worktree names (e.g., `↓3` for 3 commits behind)
 - Shows ahead/behind status in the details panel
-- Per-repository configurable fetch interval (5s/10s/30s/60s) in `~/.config/gcool/config.json`
+- Per-repository configurable fetch interval (5s/10s/30s/60s) in `~/.config/jean/config.json`
 - **Status**: Implemented but NOT tested - will be tested in follow-up session
 
 **Pull from Base Branch** ⚠️ (NOT YET TESTED):
@@ -686,13 +686,13 @@ The current tmux integration pattern (`session/tmux.go`) can be extended to supp
 
 ## Module Information
 
-**Module Name**: `github.com/coollabsio/gcool`
+**Module Name**: `github.com/coollabsio/jean`
 
-All internal imports use `github.com/coollabsio/gcool` as the import path. When adding new packages, use this as the base path:
-- `github.com/coollabsio/gcool/tui`
-- `github.com/coollabsio/gcool/git`
-- `github.com/coollabsio/gcool/config`
-- `github.com/coollabsio/gcool/session`
+All internal imports use `github.com/coollabsio/jean` as the import path. When adding new packages, use this as the base path:
+- `github.com/coollabsio/jean/tui`
+- `github.com/coollabsio/jean/git`
+- `github.com/coollabsio/jean/config`
+- `github.com/coollabsio/jean/session`
 
 ## Prerequisites
 
@@ -723,7 +723,7 @@ All keybindings are defined in `tui/update.go` (lines 1068-1600). The applicatio
   - Skips worktrees with uncommitted changes
   - Shows detailed pull status with commit counts
 - `R` (Shift+R) - Run 'run' script on selected worktree (lines 1099-1141)
-  - Executes `run` script from gcool.json
+  - Executes `run` script from jean.json
   - Opens script output modal
 - `;` (semicolon) - Open scripts modal (lines 1330-1340)
   - View available scripts and their status
@@ -776,12 +776,12 @@ All keybindings are defined in `tui/update.go` (lines 1068-1600). The applicatio
 **Session Management**:
 - `enter` - Switch to selected worktree with Claude session (lines 1197-1227)
   - Creates or attaches to Claude session
-  - Session name format: `gcool-<sanitized-branch>`
+  - Session name format: `jean-<sanitized-branch>`
   - First run uses `claude`, subsequent runs use `claude --continue`
   - Tracks initialization in config
 - `t` - Open terminal session (lines 1268-1289)
   - Creates or attaches to terminal-only session
-  - Session name format: `gcool-<sanitized-branch>-terminal`
+  - Session name format: `jean-<sanitized-branch>-terminal`
   - Both Claude and terminal sessions can coexist
 - `S` (Shift+S) - View/manage tmux sessions (lines 1323-1328)
   - Lists all active sessions with kill option
@@ -916,7 +916,7 @@ row1 := []string{
 
 ### Message Flow Pattern
 
-Async operations in gcool follow this pattern:
+Async operations in jean follow this pattern:
 
 1. **User Action** → Keybinding triggers command
 2. **Command Function** → Returns `tea.Cmd` that executes async operation

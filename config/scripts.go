@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 )
 
-// ScriptConfig represents the gcool.json configuration file
+// ScriptConfig represents the jean.json configuration file
 type ScriptConfig struct {
 	Scripts map[string]string `json:"scripts"`
 }
 
-// LoadScripts loads the gcool.json file from a repository path
+// LoadScripts loads the jean.json file from a repository path
 // Returns an empty ScriptConfig if the file doesn't exist
 func LoadScripts(repoPath string) (*ScriptConfig, error) {
-	configPath := filepath.Join(repoPath, "gcool.json")
+	configPath := filepath.Join(repoPath, "jean.json")
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {

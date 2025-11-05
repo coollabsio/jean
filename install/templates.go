@@ -1,25 +1,25 @@
 package install
 
 // BashZshWrapper is the wrapper function for bash and zsh shells
-const BashZshWrapper = `# BEGIN GCOOL INTEGRATION
-# gcool - Git Worktree TUI Manager shell wrapper
-# Source this in your shell rc file to enable gcool with directory switching
+const BashZshWrapper = `# BEGIN JEAN INTEGRATION
+# jean - Git Worktree TUI Manager shell wrapper
+# Source this in your shell rc file to enable jean with directory switching
 
-gcool() {
-    local debug_log="/tmp/gcool-wrapper-debug.log"
+jean() {
+    local debug_log="/tmp/jean-wrapper-debug.log"
     local debug_enabled=false
 
     # Check if debug logging is enabled in config
-    if [ -f "$HOME/.config/gcool/config.json" ]; then
-        if grep -q '"debug_logging_enabled"\s*:\s*true' "$HOME/.config/gcool/config.json"; then
+    if [ -f "$HOME/.config/jean/config.json" ]; then
+        if grep -q '"debug_logging_enabled"\s*:\s*true' "$HOME/.config/jean/config.json"; then
             debug_enabled=true
         fi
     fi
 
     if [ "$debug_enabled" = "true" ]; then
-    echo "DEBUG wrapper: gcool function called with args: $@" >> "$debug_log"
+    echo "DEBUG wrapper: jean function called with args: $@" >> "$debug_log"
     fi
-    # Loop until user explicitly quits gcool (not just detaches from tmux)
+    # Loop until user explicitly quits jean (not just detaches from tmux)
     while true; do
         # Save current PATH to restore it later
         local saved_path="$PATH"
@@ -27,8 +27,8 @@ gcool() {
         # Create a temp file for communication
         local temp_file=$(mktemp)
 
-        # Set environment variable so gcool knows to write to file
-        GCOOL_SWITCH_FILE="$temp_file" command gcool "$@"
+        # Set environment variable so jean knows to write to file
+        JEAN_SWITCH_FILE="$temp_file" command jean "$@"
         local exit_code=$?
 
         # Restore PATH if it got corrupted
@@ -64,13 +64,13 @@ gcool() {
                 return
             fi
 
-            # Use the pre-sanitized session name from gcool (includes repo basename)
-            # Format: gcool-<repo>-<branch>
+            # Use the pre-sanitized session name from jean (includes repo basename)
+            # Format: jean-<repo>-<branch>
             local session_name="$claude_session_name"
 
             # If session name is empty (older version or fallback), generate it from branch
             if [ -z "$session_name" ]; then
-                session_name="gcool-${branch//[^a-zA-Z0-9\-_]/-}"
+                session_name="jean-${branch//[^a-zA-Z0-9\-_]/-}"
                 session_name="${session_name//--/-}"
                 session_name="${session_name#-}"
                 session_name="${session_name%-}"
@@ -153,7 +153,7 @@ gcool() {
             return 1
         fi
         else
-            # No switch file, user quit gcool without selecting a worktree
+            # No switch file, user quit jean without selecting a worktree
             # Only remove if it's in /tmp (safety check)
             if [[ "$temp_file" == /tmp/* ]] || [[ "$temp_file" == /var/folders/* ]]; then
                 rm -f "$temp_file"
@@ -163,31 +163,31 @@ gcool() {
         fi
     done
 }
-# END GCOOL INTEGRATION
+# END JEAN INTEGRATION
 `
 
 // FishWrapper is the wrapper function for fish shell
-const FishWrapper = `# BEGIN GCOOL INTEGRATION
-# gcool - Git Worktree TUI Manager shell wrapper (Fish shell)
-# Source this in your config.fish to enable gcool with directory switching
+const FishWrapper = `# BEGIN JEAN INTEGRATION
+# jean - Git Worktree TUI Manager shell wrapper (Fish shell)
+# Source this in your config.fish to enable jean with directory switching
 
-function gcool
+function jean
     # Check if debug logging is enabled in config
     set debug_enabled false
-    if test -f "$HOME/.config/gcool/config.json"
-        if grep -q '"debug_logging_enabled"\s*:\s*true' "$HOME/.config/gcool/config.json"
+    if test -f "$HOME/.config/jean/config.json"
+        if grep -q '"debug_logging_enabled"\s*:\s*true' "$HOME/.config/jean/config.json"
             set debug_enabled true
         end
     end
 
-    # Loop until user explicitly quits gcool (not just detaches from tmux)
+    # Loop until user explicitly quits jean (not just detaches from tmux)
     while true
         # Create a temp file for communication
         set temp_file (mktemp)
 
-        # Set environment variable so gcool knows to write to file
-        set -x GCOOL_SWITCH_FILE $temp_file
-        command gcool $argv
+        # Set environment variable so jean knows to write to file
+        set -x JEAN_SWITCH_FILE $temp_file
+        command jean $argv
         set exit_code $status
 
         # Check if switch info was written
@@ -225,13 +225,13 @@ function gcool
                     return
                 end
 
-                # Use the pre-sanitized session name from gcool (includes repo basename)
-                # Format: gcool-<repo>-<branch>
+                # Use the pre-sanitized session name from jean (includes repo basename)
+                # Format: jean-<repo>-<branch>
                 set session_name "$claude_session_name"
 
                 # If session name is empty (older version or fallback), generate it from branch
                 if test -z "$session_name"
-                    set session_name "gcool-"(string replace -ra '[^a-zA-Z0-9\-_]' '-' $branch)
+                    set session_name "jean-"(string replace -ra '[^a-zA-Z0-9\-_]' '-' $branch)
                     set session_name (string replace -ra '--+' '-' $session_name)
                     set session_name (string trim -c '-' $session_name)
                 end
@@ -312,5 +312,5 @@ function gcool
         end
     end
 end
-# END GCOOL INTEGRATION
+# END JEAN INTEGRATION
 `

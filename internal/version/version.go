@@ -10,14 +10,14 @@ import (
 	"time"
 
 	gover "github.com/hashicorp/go-version"
-	"github.com/coollabsio/gcool/config"
+	"github.com/coollabsio/jean/config"
 )
 
 const (
 	CliVersion   = "0.1.0"
 	CheckInterval = 10 * time.Minute
 	repoOwner    = "coollabsio"
-	repoName     = "gcool"
+	repoName     = "jean"
 )
 
 // GitRef represents a git reference from GitHub API
@@ -77,8 +77,8 @@ func CheckLatestVersionOfCli(debug bool) {
 	}
 
 	if latestVersion.GreaterThan(current) {
-		fmt.Printf("\nThere is a new version of gcool available: %s (you have %s)\n", latestVersion.String(), CliVersion)
-		fmt.Printf("Please update with 'gcool update'\n\n")
+		fmt.Printf("\nThere is a new version of jean available: %s (you have %s)\n", latestVersion.String(), CliVersion)
+		fmt.Printf("Please update with 'jean update'\n\n")
 	}
 }
 

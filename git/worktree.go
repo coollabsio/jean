@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coollabsio/gcool/config"
+	"github.com/coollabsio/jean/config"
 )
 
 // Worktree represents a Git worktree
@@ -26,7 +26,7 @@ type Worktree struct {
 	HasUncommitted    bool             // Whether the worktree has uncommitted changes
 	PRs               interface{}      // []config.PRInfo - Pull requests for this branch (loaded from config)
 	LastModified      time.Time        // Last modification time of the worktree directory
-	ClaudeSessionName string           // Sanitized tmux session name for Claude (e.g., "gcool-feature-add-status")
+	ClaudeSessionName string           // Sanitized tmux session name for Claude (e.g., "jean-feature-add-status")
 }
 
 // Manager handles Git worktree operations
@@ -299,7 +299,7 @@ func (m *Manager) Create(path, branch string, newBranch bool, baseBranch string)
 	return nil
 }
 
-// executeSetupScript runs the onWorktreeCreate script from gcool.json if configured
+// executeSetupScript runs the onWorktreeCreate script from jean.json if configured
 // Returns error if script execution fails, nil if no script configured or script succeeds
 func (m *Manager) executeSetupScript(workspacePath string) error {
 	// Load script config from repository root
@@ -310,7 +310,7 @@ func (m *Manager) executeSetupScript(workspacePath string) error {
 
 	scriptConfig, err := config.LoadScripts(repoRoot)
 	if err != nil {
-		return fmt.Errorf("failed to load gcool.json: %w", err)
+		return fmt.Errorf("failed to load jean.json: %w", err)
 	}
 
 	// Get the onWorktreeCreate script
@@ -324,8 +324,8 @@ func (m *Manager) executeSetupScript(workspacePath string) error {
 	cmd := exec.Command("sh", "-c", script)
 	cmd.Dir = workspacePath // Run script in the worktree directory
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("GCOOL_WORKSPACE_PATH=%s", workspacePath),
-		fmt.Sprintf("GCOOL_ROOT_PATH=%s", repoRoot),
+		fmt.Sprintf("JEAN_WORKSPACE_PATH=%s", workspacePath),
+		fmt.Sprintf("JEAN_ROOT_PATH=%s", repoRoot),
 	)
 
 	// Capture both stdout and stderr for error reporting
@@ -605,7 +605,7 @@ func (m *Manager) IsRandomBranchName(branchName string) bool {
 // Push pushes commits from a branch to remote
 func (m *Manager) Push(worktreePath, branch string) error {
 	// Debug logging: capture git config for troubleshooting
-	debugLog := "=== GCool Git Push Debug Log ===\n"
+	debugLog := "=== Jean Git Push Debug Log ===\n"
 	debugLog += fmt.Sprintf("Timestamp: %s\n", time.Now().String())
 	debugLog += fmt.Sprintf("Worktree Path: %s\n", worktreePath)
 	debugLog += fmt.Sprintf("Branch: %s\n", branch)
@@ -636,7 +636,7 @@ func (m *Manager) Push(worktreePath, branch string) error {
 	}
 
 	// Write debug log to file
-	if err := os.WriteFile("/tmp/gcool-git-debug.log", []byte(debugLog), 0644); err != nil {
+	if err := os.WriteFile("/tmp/jean-git-debug.log", []byte(debugLog), 0644); err != nil {
 		// Log write error but continue
 		fmt.Fprintf(os.Stderr, "Warning: could not write debug log: %v\n", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coollabsio/gcool/config"
+	"github.com/coollabsio/jean/config"
 )
 
 // Shell represents a shell type
@@ -97,21 +97,21 @@ func (d *Detector) GetWrapper() string {
 	}
 }
 
-// IsInstalled checks if gcool integration is already in the rc file
+// IsInstalled checks if jean integration is already in the rc file
 func (d *Detector) IsInstalled() bool {
 	content, err := os.ReadFile(d.RCFile)
 	if err != nil {
 		return false
 	}
 
-	return strings.Contains(string(content), "BEGIN GCOOL INTEGRATION")
+	return strings.Contains(string(content), "BEGIN JEAN INTEGRATION")
 }
 
-// Install adds the gcool wrapper to the rc file
+// Install adds the jean wrapper to the rc file
 func (d *Detector) Install(dryRun bool) error {
 	// Check if already installed
 	if d.IsInstalled() {
-		return fmt.Errorf("gcool integration is already installed in %s", d.RCFile)
+		return fmt.Errorf("jean integration is already installed in %s", d.RCFile)
 	}
 
 	// Create directory if it doesn't exist (for fish)
@@ -123,7 +123,7 @@ func (d *Detector) Install(dryRun bool) error {
 	wrapper := d.GetWrapper()
 
 	if dryRun {
-		fmt.Printf("Would install gcool to %s\n", d.RCFile)
+		fmt.Printf("Would install jean to %s\n", d.RCFile)
 		fmt.Printf("Content to be added:\n%s\n", wrapper)
 		return nil
 	}
@@ -152,7 +152,7 @@ func (d *Detector) Install(dryRun bool) error {
 		return fmt.Errorf("failed to write to %s: %w", d.RCFile, err)
 	}
 
-	fmt.Printf("✓ gcool integration installed to %s\n", d.RCFile)
+	fmt.Printf("✓ jean integration installed to %s\n", d.RCFile)
 	fmt.Printf("Run: source %s (or restart your terminal)\n", d.RCFile)
 
 	return nil
@@ -162,13 +162,13 @@ func (d *Detector) Install(dryRun bool) error {
 func (d *Detector) Update(dryRun bool) error {
 	// Check if already installed
 	if !d.IsInstalled() {
-		return fmt.Errorf("gcool integration is not installed in %s. Run 'gcool init' to install.", d.RCFile)
+		return fmt.Errorf("jean integration is not installed in %s. Run 'jean init' to install.", d.RCFile)
 	}
 
 	wrapper := d.GetWrapper()
 
 	if dryRun {
-		fmt.Printf("Would update gcool in %s\n", d.RCFile)
+		fmt.Printf("Would update jean in %s\n", d.RCFile)
 		fmt.Printf("New content:\n%s\n", wrapper)
 		return nil
 	}
@@ -182,14 +182,14 @@ func (d *Detector) Update(dryRun bool) error {
 	contentStr := string(content)
 
 	// Remove old integration
-	startMarker := "# BEGIN GCOOL INTEGRATION"
-	endMarker := "# END GCOOL INTEGRATION"
+	startMarker := "# BEGIN JEAN INTEGRATION"
+	endMarker := "# END JEAN INTEGRATION"
 
 	startIdx := strings.Index(contentStr, startMarker)
 	endIdx := strings.Index(contentStr, endMarker)
 
 	if startIdx == -1 || endIdx == -1 {
-		return fmt.Errorf("could not find gcool integration markers in %s", d.RCFile)
+		return fmt.Errorf("could not find jean integration markers in %s", d.RCFile)
 	}
 
 	// Remove everything from start marker to end marker (inclusive)
@@ -204,21 +204,21 @@ func (d *Detector) Update(dryRun bool) error {
 		return fmt.Errorf("failed to write to %s: %w", d.RCFile, err)
 	}
 
-	fmt.Printf("✓ gcool integration updated in %s\n", d.RCFile)
+	fmt.Printf("✓ jean integration updated in %s\n", d.RCFile)
 	fmt.Printf("Run: source %s (or restart your terminal)\n", d.RCFile)
 
 	return nil
 }
 
-// Remove removes the gcool integration from the rc file
+// Remove removes the jean integration from the rc file
 func (d *Detector) Remove(dryRun bool) error {
 	// Check if installed
 	if !d.IsInstalled() {
-		return fmt.Errorf("gcool integration is not installed in %s", d.RCFile)
+		return fmt.Errorf("jean integration is not installed in %s", d.RCFile)
 	}
 
 	if dryRun {
-		fmt.Printf("Would remove gcool from %s\n", d.RCFile)
+		fmt.Printf("Would remove jean from %s\n", d.RCFile)
 		return nil
 	}
 
@@ -231,14 +231,14 @@ func (d *Detector) Remove(dryRun bool) error {
 	contentStr := string(content)
 
 	// Remove integration block
-	startMarker := "# BEGIN GCOOL INTEGRATION"
-	endMarker := "# END GCOOL INTEGRATION"
+	startMarker := "# BEGIN JEAN INTEGRATION"
+	endMarker := "# END JEAN INTEGRATION"
 
 	startIdx := strings.Index(contentStr, startMarker)
 	endIdx := strings.Index(contentStr, endMarker)
 
 	if startIdx == -1 || endIdx == -1 {
-		return fmt.Errorf("could not find gcool integration markers in %s", d.RCFile)
+		return fmt.Errorf("could not find jean integration markers in %s", d.RCFile)
 	}
 
 	// Remove the block and the preceding newline
@@ -253,7 +253,7 @@ func (d *Detector) Remove(dryRun bool) error {
 		return fmt.Errorf("failed to write to %s: %w", d.RCFile, err)
 	}
 
-	fmt.Printf("✓ gcool integration removed from %s\n", d.RCFile)
+	fmt.Printf("✓ jean integration removed from %s\n", d.RCFile)
 
 	return nil
 }
@@ -336,14 +336,14 @@ func (d *Detector) AutoUpdate(cfg *config.Manager) error {
 	contentStr := string(content)
 
 	// Remove old integration
-	startMarker := "# BEGIN GCOOL INTEGRATION"
-	endMarker := "# END GCOOL INTEGRATION"
+	startMarker := "# BEGIN JEAN INTEGRATION"
+	endMarker := "# END JEAN INTEGRATION"
 
 	startIdx := strings.Index(contentStr, startMarker)
 	endIdx := strings.Index(contentStr, endMarker)
 
 	if startIdx == -1 || endIdx == -1 {
-		return fmt.Errorf("could not find gcool integration markers in %s", d.RCFile)
+		return fmt.Errorf("could not find jean integration markers in %s", d.RCFile)
 	}
 
 	// Remove everything from start marker to end marker (inclusive)

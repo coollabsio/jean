@@ -11,11 +11,11 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/coollabsio/gcool/config"
-	"github.com/coollabsio/gcool/install"
-	"github.com/coollabsio/gcool/internal/update"
-	versionpkg "github.com/coollabsio/gcool/internal/version"
-	"github.com/coollabsio/gcool/tui"
+	"github.com/coollabsio/jean/config"
+	"github.com/coollabsio/jean/install"
+	"github.com/coollabsio/jean/internal/update"
+	versionpkg "github.com/coollabsio/jean/internal/version"
+	"github.com/coollabsio/jean/tui"
 )
 
 const version = "0.1.0"
@@ -28,7 +28,7 @@ func debugLog(msg string) {
 	if !debugLoggingEnabled {
 		return
 	}
-	if f, err := os.OpenFile("/tmp/gcool-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+	if f, err := os.OpenFile("/tmp/jean-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		fmt.Fprintf(f, "%s\n", msg)
 		f.Close()
 	}
@@ -45,9 +45,9 @@ func main() {
 	// Check for unsupported Windows (native, not WSL2)
 	if runtime.GOOS == "windows" {
 		if !isRunningInWSL() {
-			fmt.Fprintf(os.Stderr, "Error: gcool requires WSL2 on Windows\n\n")
-			fmt.Fprintf(os.Stderr, "gcool depends on tmux and bash/zsh/fish, which are not available on native Windows.\n")
-			fmt.Fprintf(os.Stderr, "Please install and use WSL2 (Windows Subsystem for Linux 2) to run gcool.\n\n")
+			fmt.Fprintf(os.Stderr, "Error: jean requires WSL2 on Windows\n\n")
+			fmt.Fprintf(os.Stderr, "jean depends on tmux and bash/zsh/fish, which are not available on native Windows.\n")
+			fmt.Fprintf(os.Stderr, "Please install and use WSL2 (Windows Subsystem for Linux 2) to run Jean.\n\n")
 			fmt.Fprintf(os.Stderr, "For installation instructions, see:\n")
 			fmt.Fprintf(os.Stderr, "  https://docs.microsoft.com/en-us/windows/wsl/install\n")
 			os.Exit(1)
@@ -64,10 +64,10 @@ func main() {
 		}
 	}
 
-	if shouldCheckInit && os.Getenv("GCOOL_INIT_ATTEMPTED") == "" {
+	if shouldCheckInit && os.Getenv("JEAN_INIT_ATTEMPTED") == "" {
 		if err := ensureShellIntegration(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Could not auto-initialize shell integration: %v\n", err)
-			fmt.Fprintf(os.Stderr, "You can run 'gcool init' manually to set up shell integration.\n")
+			fmt.Fprintf(os.Stderr, "You can run 'jean init' manually to set up shell integration.\n")
 		}
 	}
 
@@ -81,7 +81,7 @@ func main() {
 			handleUpdate()
 			return
 		case "version":
-			fmt.Printf("gcool version %s\n", version)
+			fmt.Printf("jean version %s\n", version)
 			os.Exit(0)
 		case "help":
 			printHelp()
@@ -99,7 +99,7 @@ func main() {
 
 	// Handle flags
 	if *versionFlag {
-		fmt.Printf("gcool version %s\n", version)
+		fmt.Printf("jean version %s\n", version)
 		os.Exit(0)
 	}
 
@@ -157,7 +157,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "DEBUG main: SessionName=%q\n", switchInfo.SessionName)
 
 			// Check if we should write to a file (for shell wrapper integration)
-			if switchFile := os.Getenv("GCOOL_SWITCH_FILE"); switchFile != "" {
+			if switchFile := os.Getenv("JEAN_SWITCH_FILE"); switchFile != "" {
 				// Write to file for shell wrapper
 				if err := os.WriteFile(switchFile, []byte(switchData), 0600); err != nil {
 					debugLog(fmt.Sprintf("Warning: could not write switch file: %v", err))
@@ -178,7 +178,7 @@ func main() {
 // Returns nil if wrapper is already active, otherwise performs init/update and re-exec.
 func ensureShellIntegration() error {
 	// Check if wrapper is already active
-	if os.Getenv("GCOOL_SWITCH_FILE") != "" {
+	if os.Getenv("JEAN_SWITCH_FILE") != "" {
 		// Wrapper is active, but check if it needs update
 		cfg, err := config.NewManager()
 		if err != nil {
@@ -209,7 +209,7 @@ func ensureShellIntegration() error {
 	}
 
 	// Set flag to prevent infinite loop
-	os.Setenv("GCOOL_INIT_ATTEMPTED", "1")
+	os.Setenv("JEAN_INIT_ATTEMPTED", "1")
 
 	// Load config for checksum tracking
 	cfg, err := config.NewManager()
@@ -240,7 +240,7 @@ func ensureShellIntegration() error {
 		}
 	}
 
-	// Source the RC file and re-execute gcool in the same shell session
+	// Source the RC file and re-execute jean in the same shell session
 	if err := sourceAndReexec(detector); err != nil {
 		return fmt.Errorf("failed to source and re-execute: %w", err)
 	}
@@ -248,8 +248,8 @@ func ensureShellIntegration() error {
 	return nil
 }
 
-// sourceAndReexec sources the RC file and re-executes gcool with the wrapper active.
-// It uses shell tricks to source the RC file and then call gcool again.
+// sourceAndReexec sources the RC file and re-executes jean with the wrapper active.
+// It uses shell tricks to source the RC file and then call jean again.
 func sourceAndReexec(detector *install.Detector) error {
 	// Get the shell command to use
 	shellPath := os.Getenv("SHELL")
@@ -258,9 +258,9 @@ func sourceAndReexec(detector *install.Detector) error {
 	}
 	shellName := filepath.Base(shellPath)
 
-	// Build the command that sources the RC file and re-executes gcool
-	// For both bash/zsh and fish, we source the RC file and then re-execute gcool
-	// This ensures GCOOL_SWITCH_FILE will be set (by the wrapper function in RC file)
+	// Build the command that sources the RC file and re-executes jean
+	// For both bash/zsh and fish, we source the RC file and then re-execute jean
+	// This ensures JEAN_SWITCH_FILE will be set (by the wrapper function in RC file)
 	var sourceCmd string
 	if shellName == "fish" {
 		// Fish uses different syntax
@@ -270,10 +270,10 @@ func sourceAndReexec(detector *install.Detector) error {
 		sourceCmd = fmt.Sprintf("source %s; %s", detector.RCFile, strings.Join(os.Args, " "))
 	}
 
-	// Create command to execute shell with source and gcool re-exec
+	// Create command to execute shell with source and jean re-exec
 	cmd := exec.Command(shellPath, "-c", sourceCmd)
 
-	// Copy environment variables but ensure GCOOL_INIT_ATTEMPTED is still set
+	// Copy environment variables but ensure JEAN_INIT_ATTEMPTED is still set
 	cmd.Env = os.Environ()
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -292,8 +292,8 @@ func sourceAndReexec(detector *install.Detector) error {
 func handleInit() {
 	// Parse init subcommand flags
 	initCmd := flag.NewFlagSet("init", flag.ExitOnError)
-	updateFlag := initCmd.Bool("update", false, "Update existing gcool integration")
-	removeFlag := initCmd.Bool("remove", false, "Remove gcool integration")
+	updateFlag := initCmd.Bool("update", false, "Update existing jean integration")
+	removeFlag := initCmd.Bool("remove", false, "Remove jean integration")
 	dryRunFlag := initCmd.Bool("dry-run", false, "Show what would be done without making changes")
 	shellFlag := initCmd.String("shell", "", "Specify shell (bash, zsh, fish). Auto-detected if not specified")
 
@@ -356,19 +356,19 @@ func getRCFileForShell(shell install.Shell, homeDir string) string {
 }
 
 func printHelp() {
-	fmt.Printf(`gcool - A Cool TUI for Git Worktrees & Running CLI-Based AI Assistants Simultaneously v%s
+	fmt.Printf(`jean - A Cool TUI for Git Worktrees & Running CLI-Based AI Assistants Simultaneously v%s
 
 A beautiful terminal user interface for managing Git worktrees with integrated tmux
 session management, letting you run multiple Claude CLI sessions across different
 branches effortlessly.
 
 USAGE:
-    gcool [OPTIONS]
-    gcool init [FLAGS]
+    jean [OPTIONS]
+    jean init [FLAGS]
 
 COMMANDS:
-    init            Install or manage gcool shell integration
-    update          Update gcool to the latest version
+    init            Install or manage jean shell integration
+    update          Update jean to the latest version
     help            Show this help message
     version         Print version and exit
 
@@ -379,8 +379,8 @@ MAIN OPTIONS:
     -version        Print version and exit
 
 INIT COMMAND FLAGS:
-    -update         Update existing gcool integration
-    -remove         Remove gcool integration
+    -update         Update existing jean integration
+    -remove         Remove jean integration
     -dry-run        Show what would be done without making changes
     -shell <shell>  Specify shell (bash, zsh, fish). Auto-detected if not specified
 
@@ -406,34 +406,34 @@ KEYBINDINGS:
 SHELL INTEGRATION SETUP:
     One-time setup to enable directory switching:
 
-        gcool init
+        jean init
 
     This will auto-detect your shell and install the necessary wrapper.
     After installation, restart your terminal or run: source ~/.bashrc (or ~/.zshrc, etc.)
 
     To update an existing installation:
-        gcool init --update
+        jean init --update
 
     To remove the integration:
-        gcool init --remove
+        jean init --remove
 
 EXAMPLES:
     # Run in current directory
-    gcool
+    jean
 
     # Run for a specific repository
-    gcool -path /path/to/repo
+    jean -path /path/to/repo
 
     # Set up shell integration (one-time)
-    gcool init
+    jean init
 
     # Update shell integration
-    gcool init --update
+    jean init --update
 
     # Remove shell integration
-    gcool init --remove
+    jean init --remove
 
-For more information, visit: https://github.com/coollabsio/gcool
+For more information, visit: https://github.com/coollabsio/jean
 `, version)
 }
 
@@ -478,7 +478,7 @@ func toUpper(c byte) byte {
 
 // handleUpdate handles the update subcommand
 func handleUpdate() {
-	if err := update.UpdateGcool(version); err != nil {
+	if err := update.UpdateJean(version); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

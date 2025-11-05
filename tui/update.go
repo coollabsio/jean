@@ -10,9 +10,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/coollabsio/gcool/config"
-	"github.com/coollabsio/gcool/git"
-	"github.com/coollabsio/gcool/github"
+	"github.com/coollabsio/jean/config"
+	"github.com/coollabsio/jean/git"
+	"github.com/coollabsio/jean/github"
 )
 
 // debugLog writes a message to the debug log file if debug logging is enabled
@@ -21,7 +21,7 @@ func (m Model) debugLog(msg string) {
 	if m.configManager == nil || !m.configManager.GetDebugLoggingEnabled() {
 		return
 	}
-	if f, err := os.OpenFile("/tmp/gcool-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+	if f, err := os.OpenFile("/tmp/jean-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		fmt.Fprintf(f, "%s\n", msg)
 		f.Close()
 	}
@@ -1275,7 +1275,7 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		// Run the 'run' script on selected worktree (Shift+R)
 		if m.scriptConfig == nil || m.scriptConfig.GetScript("run") == "" {
-			return m, m.showWarningNotification("No 'run' script configured in gcool.json")
+			return m, m.showWarningNotification("No 'run' script configured in jean.json")
 		}
 
 		wt := m.selectedWorktree()
@@ -1388,7 +1388,7 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			// Store pending switch info and ensure worktree exists
-			// SessionName includes repo basename for uniqueness across repositories (e.g., gcool-reponame-branch)
+			// SessionName includes repo basename for uniqueness across repositories (e.g., jean-reponame-branch)
 			m.pendingSwitchInfo = &SwitchInfo{
 				Path:                 wt.Path,
 				Branch:               wt.Branch,
@@ -1519,7 +1519,7 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Start with running scripts if any, otherwise available scripts
 			m.isViewingRunning = len(m.runningScripts) > 0
 		} else {
-			return m, m.showWarningNotification("No scripts configured in gcool.json")
+			return m, m.showWarningNotification("No scripts configured in jean.json")
 		}
 		return m, nil
 
@@ -3281,7 +3281,7 @@ func (m Model) handleTmuxConfigModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Check if config exists to determine button count
 		hasConfig := false
 		if m.sessionManager != nil {
-			installed, _ := m.sessionManager.HasGcoolTmuxConfig()
+			installed, _ := m.sessionManager.HasJeanTmuxConfig()
 			hasConfig = installed
 		}
 
@@ -3300,7 +3300,7 @@ func (m Model) handleTmuxConfigModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		hasConfig, err := m.sessionManager.HasGcoolTmuxConfig()
+		hasConfig, err := m.sessionManager.HasJeanTmuxConfig()
 		if err != nil {
 			m.showErrorNotification("Error checking tmux config: " + err.Error(), 3*time.Second)
 			m.modal = settingsModal
@@ -3312,17 +3312,17 @@ func (m Model) handleTmuxConfigModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.modalFocused {
 			case 0:
 				// Update button - reinstalls config (remove + add)
-				if err := m.sessionManager.AddGcoolTmuxConfig(); err != nil {
+				if err := m.sessionManager.AddJeanTmuxConfig(); err != nil {
 					m.showErrorNotification("Failed to update tmux config: " + err.Error(), 3*time.Second)
 				} else {
-					m.showSuccessNotification("gcool tmux config updated! New tmux sessions will use the updated config.", 3*time.Second)
+					m.showSuccessNotification("jean tmux config updated! New tmux sessions will use the updated config.", 3*time.Second)
 				}
 			case 1:
 				// Remove button
-				if err := m.sessionManager.RemoveGcoolTmuxConfig(); err != nil {
+				if err := m.sessionManager.RemoveJeanTmuxConfig(); err != nil {
 					m.showErrorNotification("Failed to remove tmux config: " + err.Error(), 3*time.Second)
 				} else {
-					m.showSuccessNotification("gcool tmux config removed. New tmux sessions will use your default config.", 3*time.Second)
+					m.showSuccessNotification("jean tmux config removed. New tmux sessions will use your default config.", 3*time.Second)
 				}
 			case 2:
 				// Cancel button - do nothing
@@ -3332,10 +3332,10 @@ func (m Model) handleTmuxConfigModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.modalFocused {
 			case 0:
 				// Install button
-				if err := m.sessionManager.AddGcoolTmuxConfig(); err != nil {
+				if err := m.sessionManager.AddJeanTmuxConfig(); err != nil {
 					m.showErrorNotification("Failed to add tmux config: " + err.Error(), 3*time.Second)
 				} else {
-					m.showSuccessNotification("gcool tmux config installed! New tmux sessions will use this config.", 3*time.Second)
+					m.showSuccessNotification("jean tmux config installed! New tmux sessions will use this config.", 3*time.Second)
 				}
 			case 1:
 				// Cancel button - do nothing
@@ -3551,7 +3551,7 @@ func (m Model) handleOnboardingModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.onboardingFocused == 0 {
 			// Install tmux config
 			return m, func() tea.Msg {
-				err := m.sessionManager.AddGcoolTmuxConfig()
+				err := m.sessionManager.AddJeanTmuxConfig()
 				return tmuxConfigInstalledMsg{err: err}
 			}
 		} else {
