@@ -247,11 +247,11 @@ func (m *Manager) ListPRs(worktreePath string) ([]PRInfo, error) {
 		return nil, err
 	}
 
-	// List open PRs in JSON format
+	// List open PRs in JSON format (only 5 latest to avoid cluttering the screen)
 	cmd := exec.Command("gh", "pr", "list",
 		"--state", "open",
 		"--json", "number,title,headRefName,url,author",
-		"--limit", "100")
+		"--limit", "5")
 	cmd.Dir = worktreePath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
