@@ -505,6 +505,14 @@ type (
 		err error
 	}
 
+	worktreeStatusUpdatedMsg struct {
+		index    int  // Index of worktree in list
+		hasUncommitted bool
+		aheadCount int
+		behindCount int
+		err      error
+	}
+
 	branchRenamedMsg struct {
 		oldBranch string
 		newBranch string
@@ -717,6 +725,36 @@ func (m Model) loadWorktreesLightweight() tea.Cmd {
 			worktrees[i].ClaudeSessionName = m.sessionManager.SanitizeName(repoName, worktrees[i].Branch)
 		}
 		return worktreesLoadedMsg{worktrees: worktrees, err: err}
+	}
+}
+
+// loadWorktreeStatus loads status (uncommitted changes, ahead/behind counts) for a single worktree
+// This is called asynchronously after the initial lightweight load
+func (m Model) loadWorktreeStatus(index int, worktree git.Worktree) tea.Cmd {
+	return func() tea.Msg {
+		// Check for uncommitted changes
+		hasUncommitted := false
+		if uncommitted, err := m.gitManager.HasUncommittedChanges(worktree.Path); err == nil {
+			hasUncommitted = uncommitted
+		}
+
+		// Check branch status (ahead/behind counts)
+		aheadCount := 0
+		behindCount := 0
+		if m.baseBranch != "" && !strings.HasPrefix(worktree.Branch, "(detached") {
+			if ahead, behind, err := m.gitManager.GetBranchStatus(worktree.Path, worktree.Branch, m.baseBranch); err == nil {
+				aheadCount = ahead
+				behindCount = behind
+			}
+		}
+
+		return worktreeStatusUpdatedMsg{
+			index:          index,
+			hasUncommitted: hasUncommitted,
+			aheadCount:     aheadCount,
+			behindCount:    behindCount,
+			err:            nil,
+		}
 	}
 }
 

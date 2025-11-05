@@ -47,7 +47,20 @@ func (m *Manager) List(baseBranch string) ([]Worktree, error) {
 		return nil, fmt.Errorf("failed to list worktrees: %w", err)
 	}
 
-	return m.parseWorktrees(string(output), baseBranch)
+	return m.parseWorktrees(string(output), baseBranch, false)
+}
+
+// ListWithLightweight returns all worktrees with optional lightweight mode
+// When lightweight=true, skips expensive status checks (uncommitted changes, ahead/behind counts)
+// for faster initial loading. Status can be loaded asynchronously afterwards.
+func (m *Manager) ListWithLightweight(baseBranch string, lightweight bool) ([]Worktree, error) {
+	cmd := exec.Command("git", "-C", m.repoPath, "worktree", "list", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	return m.parseWorktrees(string(output), baseBranch, lightweight)
 }
 
 // ListLightweight returns all worktrees without expensive status checks (for quick refreshes)
@@ -59,11 +72,12 @@ func (m *Manager) ListLightweight() ([]Worktree, error) {
 	}
 
 	// Pass empty baseBranch to skip status calculations
-	return m.parseWorktrees(string(output), "")
+	return m.parseWorktrees(string(output), "", true)
 }
 
 // parseWorktrees parses the output of 'git worktree list --porcelain' and calculates branch status
-func (m *Manager) parseWorktrees(output string, baseBranch string) ([]Worktree, error) {
+// When lightweight=true, skips expensive checks like uncommitted changes and ahead/behind counts
+func (m *Manager) parseWorktrees(output string, baseBranch string, lightweight bool) ([]Worktree, error) {
 	var worktrees []Worktree
 	var current Worktree
 
@@ -121,16 +135,18 @@ func (m *Manager) parseWorktrees(output string, baseBranch string) ([]Worktree, 
 		}
 	}
 
-	// Check for uncommitted changes in each worktree
-	for i := range worktrees {
-		hasUncommitted, err := m.HasUncommittedChanges(worktrees[i].Path)
-		if err == nil {
-			worktrees[i].HasUncommitted = hasUncommitted
+	// Check for uncommitted changes in each worktree (skip if lightweight mode)
+	if !lightweight {
+		for i := range worktrees {
+			hasUncommitted, err := m.HasUncommittedChanges(worktrees[i].Path)
+			if err == nil {
+				worktrees[i].HasUncommitted = hasUncommitted
+			}
 		}
 	}
 
-	// Calculate branch status relative to base branch
-	if baseBranch != "" {
+	// Calculate branch status relative to base branch (skip if lightweight mode)
+	if !lightweight && baseBranch != "" {
 		for i := range worktrees {
 			// Skip detached HEAD and main repo worktrees
 			if strings.HasPrefix(worktrees[i].Branch, "(detached") {

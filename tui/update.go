@@ -53,7 +53,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = m.showErrorNotification("Failed to load worktrees", 4*time.Second)
 			return m, cmd
 		} else {
-			m.debugLog(fmt.Sprintf("Worktrees loaded: %d worktrees", len(msg.worktrees)))
+			m.debugLog(fmt.Sprintf("Worktrees loaded: %d worktrees (lightweight mode)", len(msg.worktrees)))
 			for i, wt := range msg.worktrees {
 				m.debugLog(fmt.Sprintf("  [%d] %s - HasUncommitted: %v", i, wt.Branch, wt.HasUncommitted))
 			}
@@ -104,9 +104,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+
+			// Launch background status loaders for each worktree (non-blocking)
+			// This enables progressive status updates as each worktree's data loads
+			statusLoaders := make([]tea.Cmd, 0, len(m.worktrees))
+			for i := range m.worktrees {
+				statusLoaders = append(statusLoaders, m.loadWorktreeStatus(i, m.worktrees[i]))
+			}
+			if len(statusLoaders) > 0 {
+				cmd = tea.Batch(statusLoaders...)
+			} else {
+				cmd = nil
+			}
 		}
 		// After first successful worktree load, check if we need to show onboarding
-		return m, m.checkOnboardingStatus()
+		return m, tea.Batch(cmd, m.checkOnboardingStatus())
+
+	case worktreeStatusUpdatedMsg:
+		// Update individual worktree with loaded status data (no blocking, progressive update)
+		if msg.index >= 0 && msg.index < len(m.worktrees) {
+			m.worktrees[msg.index].HasUncommitted = msg.hasUncommitted
+			m.worktrees[msg.index].AheadCount = msg.aheadCount
+			m.worktrees[msg.index].BehindCount = msg.behindCount
+			m.worktrees[msg.index].IsOutdated = msg.behindCount > 0
+		}
+		return m, nil
 
 	case onboardingStatusMsg:
 		// If user needs onboarding and we haven't shown it yet, show the modal
@@ -319,10 +341,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case baseBranchLoadedMsg:
 		m.baseBranch = msg.branch
-		// Load worktrees immediately (without status), then fetch in background
-		// Don't call refreshWithPull() initially - just load the list without notifications
-		// The fetch will happen silently on the first worktree load
-		return m, m.loadWorktrees()
+		// Load worktrees with lightweight mode for instant UI appearance
+		// Status data (uncommitted changes, ahead/behind counts) loads asynchronously in background
+		// This dramatically improves perceived startup performance with many worktrees
+		return m, m.loadWorktreesLightweight()
 
 	case notificationHideMsg:
 		// Only handle if this is the current notification
