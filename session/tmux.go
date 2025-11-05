@@ -243,7 +243,7 @@ bind-key -n S-Left previous-window
 set -g status-style bg=default,fg=white
 set -g status-left-length 40
 set -g status-right-length 60
-set -g status-left "#[fg=green]jean@[fg=cyan]#(echo '#S' | sed 's/^jean-\\([^-]*\\)-\\(.*\\)/\\1:\\2/') "
+set -g status-left "#[fg=green]jean@#[fg=cyan]#(echo '#S' | sed 's/^jean-\\([^-]*\\)-\\(.*\\)/\\1:\\2/') "
 set -g status-right "#[fg=yellow]%H:%M #[fg=white]%d-%b-%y"
 
 # Pane border colors
