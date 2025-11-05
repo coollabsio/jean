@@ -356,6 +356,17 @@ func (m *Manager) Remove(path string, force bool) error {
 	return nil
 }
 
+// MoveWorktree moves a worktree to a new location using git worktree move
+// This is used to rename the worktree directory when a branch is renamed
+func (m *Manager) MoveWorktree(oldPath, newPath string) error {
+	cmd := exec.Command("git", "-C", m.repoPath, "worktree", "move", oldPath, newPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to move worktree: %s", string(output))
+	}
+	return nil
+}
+
 // EnsureWorktreeExists checks if the worktree directory exists and recreates it if missing
 // This is useful when a worktree has been deleted externally but git still tracks it
 func (m *Manager) EnsureWorktreeExists(path, branch string) error {

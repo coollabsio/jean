@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -284,7 +285,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = m.showErrorNotification("Failed to rename branch", 4*time.Second)
 			return m, cmd
 		} else {
-			cmd = m.showSuccessNotification("Branch renamed successfully", 3*time.Second)
+			// Check if directory was renamed
+			var notificationMsg string
+			if msg.oldPath != msg.newPath {
+				// Directory was renamed successfully
+				oldDir := filepath.Base(msg.oldPath)
+				newDir := filepath.Base(msg.newPath)
+				notificationMsg = fmt.Sprintf("Branch renamed: %s → %s (%s → %s)",
+					msg.oldBranch, msg.newBranch, oldDir, newDir)
+			} else {
+				// Only branch was renamed (not in workspace or move failed)
+				notificationMsg = fmt.Sprintf("Branch renamed: %s → %s", msg.oldBranch, msg.newBranch)
+			}
+
+			cmd = m.showSuccessNotification(notificationMsg, 4*time.Second)
 			// Rename tmux sessions to match the new branch name
 			// Reload worktree list to update the UI
 			return m, tea.Batch(
@@ -1401,6 +1415,13 @@ func (m Model) handleMainInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.showErrorNotification("Cannot rename branch with existing PRs. Delete PRs first or close them manually.", 5*time.Second)
 			}
 
+			// Check if any scripts are running in this worktree
+			for _, script := range m.runningScripts {
+				if script.worktreePath == wt.Path && !script.finished {
+					return m, m.showWarningNotification("Cannot rename while scripts are running. Stop scripts first (press ';' to view)")
+				}
+			}
+
 			m.modal = renameModal
 			m.modalFocused = 0
 			m.nameInput.SetValue(wt.Branch)
@@ -2283,7 +2304,7 @@ func (m Model) handleRenameModalInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				cmd := m.showInfoNotification(fmt.Sprintf("Renaming branch to '%s'...", newName))
 				m.modal = noModal
 				m.nameInput.Blur()
-				return m, tea.Batch(cmd, m.renameBranch(wt.Branch, newName))
+				return m, tea.Batch(cmd, m.renameBranch(wt.Branch, newName, wt.Path))
 			}
 		} else if m.modalFocused == 2 {
 			// Cancel button

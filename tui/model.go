@@ -506,6 +506,8 @@ type (
 	branchRenamedMsg struct {
 		oldBranch string
 		newBranch string
+		oldPath   string // Old worktree path before rename
+		newPath   string // New worktree path after rename
 		err       error
 	}
 
@@ -857,10 +859,64 @@ func (m Model) ensureWorktreeExists(worktreePath, branch string) tea.Cmd {
 	}
 }
 
-func (m Model) renameBranch(oldName, newName string) tea.Cmd {
+func (m Model) renameBranch(oldName, newName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
+		// Step 1: Rename the git branch
 		err := m.gitManager.RenameBranch(oldName, newName)
-		return branchRenamedMsg{oldBranch: oldName, newBranch: newName, err: err}
+		if err != nil {
+			return branchRenamedMsg{
+				oldBranch: oldName,
+				newBranch: newName,
+				oldPath:   worktreePath,
+				newPath:   worktreePath, // Keep old path since rename failed
+				err:       err,
+			}
+		}
+
+		// Step 2: Check if this is a workspace worktree (not root)
+		// Only rename directories in .workspaces/
+		workspacesDir, err := m.gitManager.GetWorkspacesDir()
+		if err != nil || !strings.HasPrefix(worktreePath, workspacesDir) {
+			// Not a workspace worktree, skip directory rename
+			return branchRenamedMsg{
+				oldBranch: oldName,
+				newBranch: newName,
+				oldPath:   worktreePath,
+				newPath:   worktreePath, // Keep old path
+				err:       nil,
+			}
+		}
+
+		// Step 3: Sanitize the new branch name for use as directory name
+		// This creates a safe directory name from the branch name (replaces slashes, etc.)
+		sanitizedDirName := git.SanitizeBranchName(newName)
+		sanitizedDirName = strings.ReplaceAll(sanitizedDirName, "/", "-") // Replace slashes with hyphens
+
+		// Step 4: Calculate new path
+		newPath := filepath.Join(workspacesDir, sanitizedDirName)
+
+		// Step 5: Move the worktree directory
+		if err := m.gitManager.MoveWorktree(worktreePath, newPath); err != nil {
+			// Branch was renamed successfully but directory move failed
+			// This is non-critical - worktree still works with old directory name
+			// Log warning but don't show error to user
+			return branchRenamedMsg{
+				oldBranch: oldName,
+				newBranch: newName,
+				oldPath:   worktreePath,
+				newPath:   worktreePath, // Keep old path since move failed
+				err:       nil,          // Don't treat directory rename failure as error
+			}
+		}
+
+		// Success: both branch and directory renamed
+		return branchRenamedMsg{
+			oldBranch: oldName,
+			newBranch: newName,
+			oldPath:   worktreePath,
+			newPath:   newPath,
+			err:       nil,
+		}
 	}
 }
 
@@ -1233,12 +1289,34 @@ func (m Model) deleteRemoteBranchForPR(worktreePath, oldBranch, newBranch string
 // renameBranchForPR renames a branch during PR creation
 func (m Model) renameBranchForPR(oldName, newName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
+		// Step 1: Rename the git branch
 		err := m.gitManager.RenameBranchInWorktree(worktreePath, oldName, newName)
+		if err != nil {
+			return prBranchRenamedMsg{
+				oldBranchName: oldName,
+				newBranchName: newName,
+				worktreePath:  worktreePath,
+				err:           err,
+			}
+		}
+
+		// Step 2: Rename directory if it's a workspace worktree
+		workspacesDir, err := m.gitManager.GetWorkspacesDir()
+		if err == nil && strings.HasPrefix(worktreePath, workspacesDir) {
+			// Sanitize the new branch name for use as directory name
+			sanitizedDirName := git.SanitizeBranchName(newName)
+			sanitizedDirName = strings.ReplaceAll(sanitizedDirName, "/", "-")
+			newPath := filepath.Join(workspacesDir, sanitizedDirName)
+
+			// Move the worktree directory (non-critical if it fails)
+			_ = m.gitManager.MoveWorktree(worktreePath, newPath)
+		}
+
 		return prBranchRenamedMsg{
 			oldBranchName: oldName,
 			newBranchName: newName,
 			worktreePath:  worktreePath,
-			err:           err,
+			err:           nil,
 		}
 	}
 }
@@ -1462,12 +1540,34 @@ func (m Model) deleteRemoteBranchForPush(worktreePath, oldBranch, newBranch stri
 // renameBranchForPush renames a branch during push operation
 func (m Model) renameBranchForPush(oldName, newName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
+		// Step 1: Rename the git branch
 		err := m.gitManager.RenameBranchInWorktree(worktreePath, oldName, newName)
+		if err != nil {
+			return pushBranchRenamedMsg{
+				oldBranchName: oldName,
+				newBranchName: newName,
+				worktreePath:  worktreePath,
+				err:           err,
+			}
+		}
+
+		// Step 2: Rename directory if it's a workspace worktree
+		workspacesDir, err := m.gitManager.GetWorkspacesDir()
+		if err == nil && strings.HasPrefix(worktreePath, workspacesDir) {
+			// Sanitize the new branch name for use as directory name
+			sanitizedDirName := git.SanitizeBranchName(newName)
+			sanitizedDirName = strings.ReplaceAll(sanitizedDirName, "/", "-")
+			newPath := filepath.Join(workspacesDir, sanitizedDirName)
+
+			// Move the worktree directory (non-critical if it fails)
+			_ = m.gitManager.MoveWorktree(worktreePath, newPath)
+		}
+
 		return pushBranchRenamedMsg{
 			oldBranchName: oldName,
 			newBranchName: newName,
 			worktreePath:  worktreePath,
-			err:           err,
+			err:           nil,
 		}
 	}
 }
