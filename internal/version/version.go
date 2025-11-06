@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	CliVersion    = "0.1.9"
+	CliVersion    = "0.1.10"
 	CheckInterval = 10 * time.Minute
 	repoOwner     = "coollabsio"
 	repoName      = "jean"
