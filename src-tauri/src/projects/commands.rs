@@ -19,10 +19,10 @@ use super::github_issues::{
 use super::names::generate_unique_workspace_name;
 use super::storage::{get_project_worktrees_dir, load_projects_data, save_projects_data};
 use super::types::{
-    MergeType, Project, SessionType, Worktree, WorktreeArchivedEvent, WorktreeBranchExistsEvent,
-    WorktreeCreateErrorEvent, WorktreeCreatedEvent, WorktreeCreatingEvent,
-    WorktreeDeleteErrorEvent, WorktreeDeletedEvent, WorktreeDeletingEvent, WorktreePathExistsEvent,
-    WorktreePermanentlyDeletedEvent, WorktreeUnarchivedEvent,
+    ForkSource, MergeType, Project, SessionType, Worktree, WorktreeArchivedEvent,
+    WorktreeBranchExistsEvent, WorktreeCreateErrorEvent, WorktreeCreatedEvent,
+    WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent, WorktreeDeletingEvent,
+    WorktreePathExistsEvent, WorktreePermanentlyDeletedEvent, WorktreeUnarchivedEvent,
 };
 use crate::claude_cli::get_cli_binary_path;
 
@@ -354,6 +354,7 @@ pub async fn create_worktree(
     issue_context: Option<IssueContext>,
     pr_context: Option<PullRequestContext>,
     custom_name: Option<String>,
+    fork_source: Option<ForkSource>,
 ) -> Result<Worktree, String> {
     log::trace!("Creating worktree for project: {project_id}");
 
@@ -469,6 +470,7 @@ pub async fn create_worktree(
     let base_clone = base.clone();
     let issue_context_clone = issue_context.clone();
     let pr_context_clone = pr_context.clone();
+    let fork_source_clone = fork_source.clone();
 
     // Spawn background thread for git operations
     thread::spawn(move || {
@@ -782,6 +784,62 @@ pub async fn create_worktree(
                     log::error!("Failed to emit worktree:error event: {emit_err}");
                 }
                 return;
+            }
+
+            // If this is a fork, copy messages from source session to new session
+            if let Some(fork_source) = fork_source_clone {
+                log::trace!(
+                    "Background: Forking conversation from session {} to worktree {}",
+                    fork_source.source_session_id,
+                    worktree_id_clone
+                );
+
+                // Create a new session for the forked worktree
+                // The session ID will be created when we initialize the index
+                use crate::chat::storage::{load_index, with_index_mut};
+                use crate::chat::run_log::copy_runs_to_session;
+
+                // Load or create index for new worktree (this creates default Session 1)
+                if let Ok(index) = load_index(&app_clone, &worktree_id_clone) {
+                    if let Some(first_session) = index.sessions.first() {
+                        let target_session_id = first_session.id.clone();
+                        let target_session_name = first_session.name.clone();
+                        let target_order = first_session.order;
+
+                        // Copy runs from source session to target session
+                        match copy_runs_to_session(
+                            &app_clone,
+                            &fork_source.source_session_id,
+                            &target_session_id,
+                            &worktree_id_clone,
+                            &target_session_name,
+                            target_order,
+                            &fork_source.up_to_message_id,
+                        ) {
+                            Ok(count) => {
+                                log::trace!(
+                                    "Background: Copied {} runs from {} to {}",
+                                    count,
+                                    fork_source.source_session_id,
+                                    target_session_id
+                                );
+
+                                // Update the message count in the index
+                                let _ = with_index_mut(&app_clone, &worktree_id_clone, |idx| {
+                                    if let Some(session) = idx.find_session_mut(&target_session_id) {
+                                        // Each run = 2 messages (user + assistant)
+                                        session.message_count = count * 2;
+                                    }
+                                    Ok(())
+                                });
+                            }
+                            Err(e) => {
+                                log::error!("Background: Failed to copy runs for fork: {e}");
+                                // Don't fail the worktree creation, just log the error
+                            }
+                        }
+                    }
+                }
             }
 
             // Emit success event

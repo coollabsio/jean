@@ -26,6 +26,7 @@ pub struct RunLogWriter {
     app: tauri::AppHandle,
     session_id: String,
     worktree_id: String,
+    worktree_path: String,
     session_name: String,
     order: u32,
     run_id: String,
@@ -69,6 +70,9 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let claude_sid = claude_session_id.map(|s| s.to_string());
 
+        // Capture git diff for revert functionality
+        let git_patch = capture_git_diff(&self.worktree_path);
+
         with_metadata_mut(
             &self.app,
             &self.session_id,
@@ -82,6 +86,7 @@ impl RunLogWriter {
                     run.assistant_message_id = Some(assistant_message_id.to_string());
                     run.claude_session_id = claude_sid.clone();
                     run.usage = usage.clone();
+                    run.git_patch = git_patch.clone();
                 }
 
                 // Update metadata's claude_session_id for resumption
@@ -194,7 +199,12 @@ impl RunLogWriter {
     ///
     /// This is used when resuming a detached process that was still running
     /// after the app restarted.
-    pub fn resume(app: &tauri::AppHandle, session_id: &str, run_id: &str) -> Result<Self, String> {
+    pub fn resume(
+        app: &tauri::AppHandle,
+        session_id: &str,
+        run_id: &str,
+        worktree_path: &str,
+    ) -> Result<Self, String> {
         let session_dir = get_session_dir(app, session_id)?;
         let jsonl_path = session_dir.join(format!("{run_id}.jsonl"));
 
@@ -214,6 +224,7 @@ impl RunLogWriter {
             app: app.clone(),
             session_id: session_id.to_string(),
             worktree_id: metadata.worktree_id.clone(),
+            worktree_path: worktree_path.to_string(),
             session_name: metadata.name.clone(),
             order: metadata.order,
             run_id: run_id.to_string(),
@@ -254,6 +265,7 @@ pub fn start_run(
     app: &tauri::AppHandle,
     session_id: &str,
     worktree_id: &str,
+    worktree_path: &str,
     session_name: &str,
     order: u32,
     user_message_id: &str,
@@ -310,8 +322,9 @@ pub fn start_run(
         cancelled: false,
         recovered: false,
         claude_session_id: None,
-        pid: None,   // Set later via set_pid() after spawning detached process
-        usage: None, // Set on completion via complete()
+        pid: None,      // Set later via set_pid() after spawning detached process
+        usage: None,    // Set on completion via complete()
+        git_patch: None, // Set on completion via complete()
     };
 
     with_metadata_mut(
@@ -337,6 +350,7 @@ pub fn start_run(
         app: app.clone(),
         session_id: session_id.to_string(),
         worktree_id: worktree_id.to_string(),
+        worktree_path: worktree_path.to_string(),
         session_name: session_name.to_string(),
         order,
         run_id,
@@ -846,6 +860,280 @@ pub fn delete_run_logs(app: &tauri::AppHandle, session_id: &str) -> Result<usize
     }
 
     Ok(deleted)
+}
+
+// ============================================================================
+// Fork / Copy Functions
+// ============================================================================
+
+/// Copy runs from source session to target session up to and including a specific assistant message.
+/// This is used for conversation forking - creating a new session with history up to a point.
+pub fn copy_runs_to_session(
+    app: &tauri::AppHandle,
+    source_session_id: &str,
+    target_session_id: &str,
+    target_worktree_id: &str,
+    target_session_name: &str,
+    target_order: u32,
+    up_to_assistant_message_id: &str,
+) -> Result<u32, String> {
+    use super::storage::{get_session_dir, load_metadata, with_metadata_mut};
+
+    // Load source metadata to get the runs list
+    let source_metadata = load_metadata(app, source_session_id)?
+        .ok_or_else(|| format!("Source session {source_session_id} not found"))?;
+
+    // Find which runs to copy (up to and including the one with the target assistant message)
+    let mut runs_to_copy: Vec<&RunEntry> = Vec::new();
+    let mut found_target = false;
+
+    for run in &source_metadata.runs {
+        runs_to_copy.push(run);
+
+        // Check if this run contains the target assistant message
+        if let Some(ref asst_id) = run.assistant_message_id {
+            if asst_id == up_to_assistant_message_id {
+                found_target = true;
+                break;
+            }
+        }
+    }
+
+    if !found_target {
+        return Err(format!(
+            "Assistant message {up_to_assistant_message_id} not found in session {source_session_id}"
+        ));
+    }
+
+    // Get source and target session directories
+    let source_dir = get_session_dir(app, source_session_id)?;
+    let target_dir = get_session_dir(app, target_session_id)?;
+
+    // Copy each run's JSONL file and create metadata entries
+    let mut copied_count = 0u32;
+
+    for run in &runs_to_copy {
+        // Copy the JSONL file
+        let source_jsonl = source_dir.join(format!("{}.jsonl", run.run_id));
+        let target_jsonl = target_dir.join(format!("{}.jsonl", run.run_id));
+
+        if source_jsonl.exists() {
+            fs::copy(&source_jsonl, &target_jsonl)
+                .map_err(|e| format!("Failed to copy JSONL file {}: {e}", run.run_id))?;
+        }
+
+        // Add run entry to target metadata
+        let run_entry = RunEntry {
+            run_id: run.run_id.clone(),
+            user_message_id: run.user_message_id.clone(),
+            user_message: run.user_message.clone(),
+            model: run.model.clone(),
+            execution_mode: run.execution_mode.clone(),
+            thinking_level: run.thinking_level.clone(),
+            started_at: run.started_at,
+            ended_at: run.ended_at,
+            status: run.status.clone(),
+            assistant_message_id: run.assistant_message_id.clone(),
+            cancelled: run.cancelled,
+            recovered: run.recovered,
+            claude_session_id: None, // Don't copy Claude session ID - fork starts fresh
+            pid: None,
+            usage: run.usage.clone(),
+            git_patch: run.git_patch.clone(), // Copy git patch for revert functionality
+        };
+
+        with_metadata_mut(
+            app,
+            target_session_id,
+            target_worktree_id,
+            target_session_name,
+            target_order,
+            |metadata| {
+                metadata.runs.push(run_entry.clone());
+                Ok(())
+            },
+        )?;
+
+        copied_count += 1;
+    }
+
+    log::trace!(
+        "Copied {copied_count} runs from session {source_session_id} to {target_session_id}"
+    );
+
+    Ok(copied_count)
+}
+
+/// Truncate a session to a specific assistant message, removing all subsequent runs
+///
+/// This deletes all runs (and their JSONL files) that come after the specified
+/// assistant message, effectively "reverting" the conversation to that point.
+/// If `worktree_path` is provided and runs have git patches, the code changes
+/// will also be reverted using `git apply -R`.
+pub fn truncate_session_to_message(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    up_to_assistant_message_id: &str,
+    worktree_path: Option<&str>,
+) -> Result<u32, String> {
+    use super::storage::{get_session_dir, load_metadata, save_metadata};
+
+    // Load session metadata
+    let mut metadata = load_metadata(app, session_id)?
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+
+    // Find the index of the run containing the target assistant message
+    let target_run_index = metadata
+        .runs
+        .iter()
+        .position(|run| {
+            run.assistant_message_id
+                .as_ref()
+                .map(|id| id == up_to_assistant_message_id)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            format!("Assistant message {up_to_assistant_message_id} not found in session {session_id}")
+        })?;
+
+    // If this is already the last run, nothing to truncate
+    if target_run_index >= metadata.runs.len() - 1 {
+        log::trace!("No runs to truncate - message is already the last one");
+        return Ok(0);
+    }
+
+    // Get the session directory for deleting JSONL files
+    let session_dir = get_session_dir(app, session_id)?;
+
+    // Collect runs to delete (everything after target_run_index)
+    let runs_to_delete: Vec<RunEntry> = metadata.runs.drain(target_run_index + 1..).collect();
+    let deleted_count = runs_to_delete.len() as u32;
+
+    // Apply reverse patches in reverse order (most recent first)
+    // This undoes the code changes made by each run
+    if let Some(path) = worktree_path {
+        for run in runs_to_delete.iter().rev() {
+            if let Some(ref patch) = run.git_patch {
+                log::trace!(
+                    "Applying reverse patch for run {} ({} bytes)",
+                    run.run_id,
+                    patch.len()
+                );
+                if let Err(e) = apply_reverse_patch(path, patch) {
+                    log::warn!(
+                        "Failed to apply reverse patch for run {}: {e}",
+                        run.run_id
+                    );
+                    // Continue with other patches even if one fails
+                }
+            }
+        }
+    }
+
+    // Delete the JSONL files for removed runs
+    for run in &runs_to_delete {
+        let jsonl_path = session_dir.join(format!("{}.jsonl", run.run_id));
+        if jsonl_path.exists() {
+            if let Err(e) = fs::remove_file(&jsonl_path) {
+                log::warn!("Failed to delete JSONL file {}: {e}", run.run_id);
+            }
+        }
+    }
+
+    // Save updated metadata
+    save_metadata(app, &metadata)?;
+
+    log::trace!(
+        "Truncated session {session_id} to message {up_to_assistant_message_id}, deleted {deleted_count} runs"
+    );
+
+    Ok(deleted_count)
+}
+
+// ============================================================================
+// Git Patch Functions
+// ============================================================================
+
+/// Capture the current git diff (staged and unstaged changes) for a worktree.
+/// Returns the patch content if there are changes, None otherwise.
+fn capture_git_diff(worktree_path: &str) -> Option<String> {
+    use std::process::Command;
+
+    // Run git diff to capture all unstaged changes
+    let output = Command::new("git")
+        .args(["diff", "HEAD"])
+        .current_dir(worktree_path)
+        .output();
+
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                let diff = String::from_utf8_lossy(&output.stdout).to_string();
+                if diff.trim().is_empty() {
+                    None
+                } else {
+                    log::trace!(
+                        "Captured git diff ({} bytes) for worktree: {}",
+                        diff.len(),
+                        worktree_path
+                    );
+                    Some(diff)
+                }
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                log::warn!("git diff failed for {}: {}", worktree_path, stderr);
+                None
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to run git diff for {}: {}", worktree_path, e);
+            None
+        }
+    }
+}
+
+/// Apply a git patch in reverse to undo changes.
+/// Returns Ok(()) if successful or if the patch is empty.
+pub fn apply_reverse_patch(worktree_path: &str, patch: &str) -> Result<(), String> {
+    use std::process::Command;
+
+    if patch.trim().is_empty() {
+        return Ok(());
+    }
+
+    // Use git apply -R to reverse the patch
+    let mut child = Command::new("git")
+        .args(["apply", "-R", "--3way"])
+        .current_dir(worktree_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn git apply: {e}"))?;
+
+    // Write the patch to stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|e| format!("Failed to write patch to git apply: {e}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git apply: {e}"))?;
+
+    if output.status.success() {
+        log::trace!(
+            "Successfully applied reverse patch ({} bytes) in {}",
+            patch.len(),
+            worktree_path
+        );
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git apply -R failed: {stderr}"))
+    }
 }
 
 // ============================================================================

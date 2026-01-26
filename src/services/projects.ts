@@ -17,6 +17,7 @@ import type {
   WorktreePermanentlyDeletedEvent,
   WorktreePathExistsEvent,
   WorktreeBranchExistsEvent,
+  ForkSource,
 } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -313,6 +314,7 @@ export function useCreateWorktree() {
       issueContext,
       prContext,
       customName,
+      forkSource,
     }: {
       projectId: string
       baseBranch?: string
@@ -334,18 +336,21 @@ export function useCreateWorktree() {
       }
       /** Custom worktree name (used when retrying after path conflict) */
       customName?: string
+      /** Fork source for conversation forking */
+      forkSource?: ForkSource
     }): Promise<Worktree> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
-      logger.debug('Creating worktree (background)', { projectId, baseBranch, issueNumber: issueContext?.number, prNumber: prContext?.number, customName })
+      logger.debug('Creating worktree (background)', { projectId, baseBranch, issueNumber: issueContext?.number, prNumber: prContext?.number, customName, forkSource })
       const worktree = await invoke<Worktree>('create_worktree', {
         projectId,
         baseBranch,
         issueContext,
         prContext,
         customName,
+        forkSource,
       })
       // Mark as pending since creation is happening in background
       return { ...worktree, status: 'pending' as const }

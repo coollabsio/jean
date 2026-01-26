@@ -344,7 +344,7 @@ export function WorktreeItem({
         clearWorktreeLoading(worktree.id)
       }
     },
-    [worktree.path, defaultBranch, projectId]
+    [worktree.id, worktree.path, defaultBranch, projectId]
   )
 
   const handlePush = useCallback(

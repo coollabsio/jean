@@ -1,4 +1,6 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useMemo } from 'react'
+import { GitFork, Copy, RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
 import { Markdown } from '@/components/ui/markdown'
@@ -35,6 +37,26 @@ import { ReviewFindingsList } from './ReviewFindingBlock'
 /** Format timestamp for tooltip display */
 const formatTimestamp = (timestamp: number) => {
   return new Date(timestamp * 1000).toLocaleString()
+}
+
+/** Format relative time for action bar (e.g., "5m, 39s") */
+const formatRelativeTime = (timestamp: number) => {
+  const now = Date.now() / 1000
+  const diff = Math.floor(now - timestamp)
+
+  if (diff < 60) return `${diff}s`
+  if (diff < 3600) {
+    const m = Math.floor(diff / 60)
+    const s = diff % 60
+    return `${m}m, ${s}s`
+  }
+  if (diff < 86400) {
+    const h = Math.floor(diff / 3600)
+    const m = Math.floor((diff % 3600) / 60)
+    return `${h}h, ${m}m`
+  }
+  const d = Math.floor(diff / 86400)
+  return `${d}d`
 }
 
 /** Regex to extract image paths from message content */
@@ -183,6 +205,12 @@ interface MessageItemProps {
   areQuestionsSkipped: (sessionId: string) => boolean
   /** Check if a finding has been fixed */
   isFindingFixed: (sessionId: string, key: string) => boolean
+  /** Callback when user wants to fork conversation from this message */
+  onFork?: (messageId: string) => void
+  /** Callback when user wants to revert conversation to this message */
+  onRevert?: (messageId: string) => void
+  /** Whether actions are available (assistant message, not streaming) */
+  canShowActions?: boolean
 }
 
 /**
@@ -212,9 +240,18 @@ export const MessageItem = memo(function MessageItem({
   getSubmittedAnswers,
   areQuestionsSkipped,
   isFindingFixed,
+  onFork,
+  onRevert,
+  canShowActions,
 }: MessageItemProps) {
   // Only show Approve button for the last message with ExitPlanMode
   const isLatestPlanRequest = messageIndex === lastPlanMessageIndex
+
+  // Check if this message has code modifications (Edit, Write, NotebookEdit tools)
+  const hasCodeModifications = useMemo(() => {
+    const codeModifyingTools = ['Edit', 'Write', 'NotebookEdit']
+    return message.tool_calls.some(tc => codeModifyingTools.includes(tc.name))
+  }, [message.tool_calls])
 
   // Extract image, text file, file mention, and skill paths and clean content for user messages
   const imagePaths =
@@ -243,6 +280,9 @@ export const MessageItem = memo(function MessageItem({
   const skipToolCalls =
     isSending && isLastMessage && message.role === 'assistant'
 
+  // Show revert button only if: not the last message AND has code modifications
+  const canShowRevert = !isLastMessage && hasCodeModifications
+
   // Stable callback for plan approval
   const handlePlanApproval = useCallback(() => {
     onPlanApproval(message.id)
@@ -258,6 +298,24 @@ export const MessageItem = memo(function MessageItem({
     (findingKey: string) => isFindingFixed(sessionId, findingKey),
     [isFindingFixed, sessionId]
   )
+
+  // Check if message has text content for showing action bar
+  const hasTextContent = useMemo(() => {
+    if (message.role !== 'assistant') return false
+    // Check if there's direct text content
+    if (showContent) return true
+    // Check if there are text blocks in content_blocks
+    if (message.content_blocks?.some(b => b.type === 'text')) return true
+    return false
+  }, [message.role, showContent, message.content_blocks])
+
+  // Copy message text to clipboard
+  const handleCopy = useCallback(() => {
+    const text = message.content
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success('Copied to clipboard')
+    })
+  }, [message.content])
 
   // Content for the message box (shared between user and assistant)
   const messageBoxContent = (
@@ -588,11 +646,64 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         <div
           className={cn(
-            'text-muted-foreground w-full min-w-0 break-words',
+            'relative group text-muted-foreground w-full min-w-0 break-words',
             message.cancelled && 'opacity-60'
           )}
         >
           {messageBoxContent}
+          {/* Action bar - shown for messages with text content */}
+          {hasTextContent && canShowActions && (
+            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground/60">
+              <span>{formatRelativeTime(message.timestamp)}</span>
+              <span className="text-muted-foreground/30">·</span>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleCopy}
+                      className="p-1 hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    Copy to clipboard
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onFork?.(message.id)}
+                      className="p-1 hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      <GitFork className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    Fork conversation
+                  </TooltipContent>
+                </Tooltip>
+                {canShowRevert && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => onRevert?.(message.id)}
+                        className="p-1 hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      Revert to this point
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

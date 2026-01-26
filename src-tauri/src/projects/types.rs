@@ -11,6 +11,19 @@ pub enum SessionType {
     Base,
 }
 
+/// Source information for forking a conversation
+/// Used when creating a worktree as a fork of an existing conversation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkSource {
+    /// The source worktree ID to fork from
+    pub source_worktree_id: String,
+    /// The source session ID to fork from
+    pub source_session_id: String,
+    /// The assistant message ID to fork up to (inclusive)
+    pub up_to_message_id: String,
+}
+
 /// Type of merge operation for merging worktree to base
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

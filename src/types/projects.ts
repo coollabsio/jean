@@ -9,6 +9,19 @@ export type SessionType = 'worktree' | 'base'
 export type WorktreeStatus = 'pending' | 'ready' | 'error' | 'deleting'
 
 /**
+ * Source information for forking a conversation
+ * Used when creating a worktree as a fork of an existing conversation
+ */
+export interface ForkSource {
+  /** The source worktree ID to fork from */
+  sourceWorktreeId: string
+  /** The source session ID to fork from */
+  sourceSessionId: string
+  /** The assistant message ID to fork up to (inclusive) */
+  upToMessageId: string
+}
+
+/**
  * Check if a worktree is a base session
  */
 export function isBaseSession(worktree: Worktree): boolean {

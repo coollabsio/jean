@@ -1267,6 +1267,7 @@ pub fn run() {
             // Chat commands - Session-based messaging
             chat::send_chat_message,
             chat::clear_session_history,
+            chat::revert_session_to_message,
             chat::set_session_model,
             chat::set_session_thinking_level,
             chat::cancel_chat_message,
