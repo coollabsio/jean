@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, Manager};
 mod background_tasks;
 mod chat;
 mod claude_cli;
+mod claude_usage;
 mod gh_cli;
 mod platform;
 mod projects;
@@ -134,6 +135,8 @@ pub struct AppPreferences {
     pub quick_access_actions: Vec<String>, // Which actions to show: terminal, run, editor, finder, terminal_app
     #[serde(default)]
     pub quick_access_compact: bool, // Show only icons without labels
+    #[serde(default = "default_show_usage_status_bar")]
+    pub show_usage_status_bar: bool, // Show Claude usage status bar (cost, context, limits)
 }
 
 fn default_auto_branch_naming() -> bool {
@@ -226,6 +229,10 @@ fn default_quick_access_enabled() -> bool {
 
 fn default_quick_access_actions() -> Vec<String> {
     vec!["terminal".to_string(), "editor".to_string()]
+}
+
+fn default_show_usage_status_bar() -> bool {
+    true // Show usage status bar by default
 }
 
 fn default_disable_thinking_in_non_plan_modes() -> bool {
@@ -487,6 +494,7 @@ impl Default for AppPreferences {
             quick_access_enabled: default_quick_access_enabled(),
             quick_access_actions: default_quick_access_actions(),
             quick_access_compact: false,
+            show_usage_status_bar: default_show_usage_status_bar(),
         }
     }
 }
@@ -1336,6 +1344,14 @@ pub fn run() {
             background_tasks::commands::set_remote_poll_interval,
             background_tasks::commands::get_remote_poll_interval,
             background_tasks::commands::trigger_immediate_remote_poll,
+            // Claude usage commands
+            claude_usage::commands::get_claude_usage_limits,
+            claude_usage::commands::get_session_usage,
+            claude_usage::commands::has_claude_credentials,
+            claude_usage::commands::get_hook_context_data,
+            claude_usage::commands::is_context_hook_installed,
+            claude_usage::commands::install_context_hook,
+            claude_usage::commands::uninstall_context_hook,
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri application")

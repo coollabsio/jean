@@ -238,6 +238,7 @@ export interface AppPreferences {
   quick_access_enabled: boolean // Enable quick access buttons on worktree hover
   quick_access_actions: QuickAccessAction[] // Which actions to show in quick access
   quick_access_compact: boolean // Show only icons without labels
+  show_usage_status_bar: boolean // Show Claude usage status bar (cost, context, limits)
 }
 
 export type FileEditMode = 'inline' | 'external'
@@ -454,4 +455,5 @@ export const defaultPreferences: AppPreferences = {
   quick_access_enabled: true,
   quick_access_actions: ['terminal', 'editor'],
   quick_access_compact: false,
+  show_usage_status_bar: true, // Default: show usage status bar
 }

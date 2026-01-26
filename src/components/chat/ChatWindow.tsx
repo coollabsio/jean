@@ -2004,6 +2004,8 @@ Begin your investigation now.`
                   magicModalShortcut={magicModalShortcut}
                   activeWorktreePath={activeWorktreePath}
                   worktreeId={activeWorktreeId ?? null}
+                  sessionId={activeSessionId ?? null}
+                  showUsageStatusBar={preferences?.show_usage_status_bar ?? true}
                   loadedIssueContexts={loadedIssueContexts ?? []}
                   loadedPRContexts={loadedPRContexts ?? []}
                   attachedSavedContexts={attachedSavedContexts ?? []}

@@ -101,6 +101,7 @@ describe('preferences service', () => {
         quick_access_enabled: true,
         quick_access_actions: ['terminal', 'editor'],
         quick_access_compact: false,
+        show_usage_status_bar: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -180,6 +181,7 @@ describe('preferences service', () => {
         quick_access_enabled: true,
         quick_access_actions: ['terminal', 'editor'],
         quick_access_compact: false,
+        show_usage_status_bar: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -234,6 +236,7 @@ describe('preferences service', () => {
         quick_access_enabled: true,
         quick_access_actions: ['terminal', 'editor'],
         quick_access_compact: false,
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -286,6 +289,7 @@ describe('preferences service', () => {
         quick_access_enabled: true,
         quick_access_actions: ['terminal', 'editor'],
         quick_access_compact: false,
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -338,6 +342,7 @@ describe('preferences service', () => {
         quick_access_enabled: true,
         quick_access_actions: ['terminal', 'editor'],
         quick_access_compact: false,
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -390,6 +395,7 @@ describe('preferences service', () => {
         quick_access_enabled: true,
         quick_access_actions: ['terminal', 'editor'],
         quick_access_compact: false,
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

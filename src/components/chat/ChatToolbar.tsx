@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { gitPull, gitPush, triggerImmediateGitPoll } from '@/services/git-status'
 import { useChatStore } from '@/store/chat-store'
+import { ClaudeUsageStatusBar } from './ClaudeUsageStatusBar'
 import {
   ArrowDown,
   ArrowUp,
@@ -171,6 +172,8 @@ interface ChatToolbarProps {
   // Worktree info
   activeWorktreePath: string | undefined
   worktreeId: string | null
+  sessionId: string | null
+  showUsageStatusBar: boolean
 
   // Issue/PR/Saved context
   loadedIssueContexts: LoadedIssueContext[]
@@ -223,6 +226,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   magicModalShortcut,
   activeWorktreePath,
   worktreeId,
+  sessionId,
+  showUsageStatusBar,
   loadedIssueContexts,
   loadedPRContexts,
   attachedSavedContexts,
@@ -372,6 +377,14 @@ export const ChatToolbar = memo(function ChatToolbar({
     <div className="@container px-4 py-2 md:px-6">
       {/* Controls - segmented button group */}
       <div className="inline-flex items-center rounded-lg bg-muted/50">
+        {/* Claude usage status bar */}
+        {showUsageStatusBar && (
+          <ClaudeUsageStatusBar
+            worktreeId={worktreeId}
+            worktreePath={activeWorktreePath ?? null}
+            sessionId={sessionId}
+          />
+        )}
         {/* Mobile overflow menu - only visible on small screens */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
