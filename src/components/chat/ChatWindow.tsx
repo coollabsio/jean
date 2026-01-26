@@ -1837,7 +1837,6 @@ Begin your investigation now.`
                   {/* Permission approval UI - shown when tools require approval (never in yolo mode) */}
                   {pendingDenials.length > 0 &&
                     activeSessionId &&
-                    !isSending &&
                     executionMode !== 'yolo' && (
                       <PermissionApproval
                         sessionId={activeSessionId}
