@@ -128,6 +128,12 @@ pub struct AppPreferences {
     pub waiting_sound: String, // Sound when session is waiting for input: none, ding, chime, pop, choochoo
     #[serde(default = "default_review_sound")]
     pub review_sound: String, // Sound when session finishes reviewing: none, ding, chime, pop, choochoo
+    #[serde(default = "default_quick_access_enabled")]
+    pub quick_access_enabled: bool, // Enable quick access buttons on worktree hover
+    #[serde(default = "default_quick_access_actions")]
+    pub quick_access_actions: Vec<String>, // Which actions to show: terminal, run, editor, finder, terminal_app
+    #[serde(default)]
+    pub quick_access_compact: bool, // Show only icons without labels
 }
 
 fn default_auto_branch_naming() -> bool {
@@ -212,6 +218,14 @@ fn default_syntax_theme_light() -> String {
 
 fn default_file_edit_mode() -> String {
     "external".to_string() // Default to external editor (VS Code, etc.)
+}
+
+fn default_quick_access_enabled() -> bool {
+    true // Enabled by default
+}
+
+fn default_quick_access_actions() -> Vec<String> {
+    vec!["terminal".to_string(), "editor".to_string()]
 }
 
 fn default_disable_thinking_in_non_plan_modes() -> bool {
@@ -470,6 +484,9 @@ impl Default for AppPreferences {
             allow_web_tools_in_plan_mode: default_allow_web_tools_in_plan_mode(),
             waiting_sound: default_waiting_sound(),
             review_sound: default_review_sound(),
+            quick_access_enabled: default_quick_access_enabled(),
+            quick_access_actions: default_quick_access_actions(),
+            quick_access_compact: false,
         }
     }
 }

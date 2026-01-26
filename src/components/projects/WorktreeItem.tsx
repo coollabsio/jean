@@ -7,6 +7,7 @@ import { isBaseSession, type Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { WorktreeContextMenu } from './WorktreeContextMenu'
+import { QuickAccessButtons } from './QuickAccessButtons'
 import { useRenameWorktree } from '@/services/projects'
 import { useSessions } from '@/services/chat'
 import { isAskUserQuestion, isExitPlanMode } from '@/types/chat'
@@ -370,8 +371,7 @@ export function WorktreeItem({
     >
       <div
         className={cn(
-          'group relative flex cursor-pointer items-center gap-1.5 py-1.5 pr-2 transition-colors duration-150',
-          isNarrowSidebar ? 'pl-4' : 'pl-7',
+          'group relative flex flex-col cursor-pointer transition-colors duration-150',
           isSelected
             ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
             : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
@@ -379,98 +379,109 @@ export function WorktreeItem({
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
       >
-        {/* Status indicator: circle for base session, square for worktrees */}
-        {/* Priority: chat running > loading operation > idle states */}
-        {isChatRunning ? (
-          <BorderSpinner
-            shape={isBase ? 'circle' : 'square'}
-            className={cn(
-              'h-2 w-2 shadow-[0_0_6px_currentColor]',
-              runningSessionExecutionMode === 'yolo' ? 'text-destructive' : 'text-yellow-500'
-            )}
-            bgClassName={
-              runningSessionExecutionMode === 'yolo' ? 'fill-destructive/50' : 'fill-yellow-500/50'
-            }
-          />
-        ) : loadingOperation ? (
-          <BorderSpinner
-            shape={isBase ? 'circle' : 'square'}
-            className="h-2 w-2 shadow-[0_0_6px_currentColor] text-cyan-500"
-            bgClassName="fill-cyan-500/50"
-          />
-        ) : isBase ? (
-          <Circle className={cn('h-2 w-2 shrink-0 fill-current rounded-full', indicatorColor)} />
-        ) : (
-          <Square className={cn('h-2 w-2 shrink-0 fill-current rounded-sm', indicatorColor)} />
-        )}
+        {/* Main row: status + name + badges */}
+        <div
+          className={cn(
+            'flex items-center gap-1.5 py-1.5 pr-2',
+            isNarrowSidebar ? 'pl-4' : 'pl-7'
+          )}
+        >
+          {/* Status indicator: circle for base session, square for worktrees */}
+          {/* Priority: chat running > loading operation > idle states */}
+          {isChatRunning ? (
+            <BorderSpinner
+              shape={isBase ? 'circle' : 'square'}
+              className={cn(
+                'h-2 w-2 shadow-[0_0_6px_currentColor]',
+                runningSessionExecutionMode === 'yolo' ? 'text-destructive' : 'text-yellow-500'
+              )}
+              bgClassName={
+                runningSessionExecutionMode === 'yolo' ? 'fill-destructive/50' : 'fill-yellow-500/50'
+              }
+            />
+          ) : loadingOperation ? (
+            <BorderSpinner
+              shape={isBase ? 'circle' : 'square'}
+              className="h-2 w-2 shadow-[0_0_6px_currentColor] text-cyan-500"
+              bgClassName="fill-cyan-500/50"
+            />
+          ) : isBase ? (
+            <Circle className={cn('h-2 w-2 shrink-0 fill-current rounded-full', indicatorColor)} />
+          ) : (
+            <Square className={cn('h-2 w-2 shrink-0 fill-current rounded-sm', indicatorColor)} />
+          )}
 
-        {/* Workspace name - editable on double-click */}
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={editValue}
-            onChange={e => setEditValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleBlur}
-            onClick={e => e.stopPropagation()}
-            className="flex-1 bg-transparent text-sm outline-none ring-1 ring-ring rounded px-1"
-          />
-        ) : (
-          <span
-            className={cn('flex-1 truncate text-sm', isBase && 'font-medium')}
-          >
-            {worktree.name}
-            {/* Show branch name if different from worktree name */}
-            {worktree.branch !== worktree.name && (
-              <span className="ml-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground">
-                <GitBranch className="h-2.5 w-2.5" />
-                {worktree.branch}
+          {/* Workspace name - editable on double-click */}
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={editValue}
+              onChange={e => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={handleBlur}
+              onClick={e => e.stopPropagation()}
+              className="flex-1 bg-transparent text-sm outline-none ring-1 ring-ring rounded px-1"
+            />
+          ) : (
+            <span
+              className={cn('flex-1 truncate text-sm', isBase && 'font-medium')}
+            >
+              {worktree.name}
+              {/* Show branch name if different from worktree name */}
+              {worktree.branch !== worktree.name && (
+                <span className="ml-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+                  <GitBranch className="h-2.5 w-2.5" />
+                  {worktree.branch}
+                </span>
+              )}
+            </span>
+          )}
+
+          {/* Pull badge - shown when behind remote */}
+          {behindCount > 0 && (
+            <button
+              onClick={handlePull}
+              className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+              title={`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}
+            >
+              <span className="flex items-center gap-0.5">
+                <ArrowDown className="h-3 w-3" />
+                {behindCount}
               </span>
-            )}
-          </span>
-        )}
+            </button>
+          )}
 
-        {/* Pull badge - shown when behind remote */}
-        {behindCount > 0 && (
-          <button
-            onClick={handlePull}
-            className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
-            title={`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}
-          >
-            <span className="flex items-center gap-0.5">
-              <ArrowDown className="h-3 w-3" />
-              {behindCount}
+          {/* Push badge - unpushed commits */}
+          {pushCount > 0 && (
+            <button
+              onClick={handlePush}
+              className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
+              title={`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}
+            >
+              <span className="flex items-center gap-0.5">
+                <ArrowUp className="h-3 w-3" />
+                {pushCount}
+              </span>
+            </button>
+          )}
+        </div>
+
+          {/* Uncommitted changes */}
+          {hasUncommitted && (
+            <span
+              className="shrink-0 text-[11px] font-medium"
+              title={`Uncommitted: +${uncommittedAdded}/-${uncommittedRemoved} lines`}
+            >
+              <span className="text-green-500">+{uncommittedAdded}</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-red-500">-{uncommittedRemoved}</span>
             </span>
-          </button>
-        )}
+          )}
+        </div>
 
-        {/* Push badge - unpushed commits */}
-        {pushCount > 0 && (
-          <button
-            onClick={handlePush}
-            className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
-            title={`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}
-          >
-            <span className="flex items-center gap-0.5">
-              <ArrowUp className="h-3 w-3" />
-              {pushCount}
-            </span>
-          </button>
-        )}
-
-        {/* Uncommitted changes */}
-        {hasUncommitted && (
-          <span
-            className="shrink-0 text-[11px] font-medium"
-            title={`Uncommitted: +${uncommittedAdded}/-${uncommittedRemoved} lines`}
-          >
-            <span className="text-green-500">+{uncommittedAdded}</span>
-            <span className="text-muted-foreground">/</span>
-            <span className="text-red-500">-{uncommittedRemoved}</span>
-          </span>
-        )}
-
+        {/* Quick access buttons row - shown on hover, below the name */}
+        <QuickAccessButtons worktree={worktree} isNarrowSidebar={isNarrowSidebar} />
       </div>
     </WorktreeContextMenu>
   )

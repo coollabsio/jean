@@ -44,8 +44,10 @@ import {
   type TerminalApp,
   type EditorApp,
   type NotificationSound,
+  type QuickAccessAction,
 } from '@/types/preferences'
 import { playNotificationSound } from '@/lib/sounds'
+import { QuickAccessActionsPicker } from '../QuickAccessActionsPicker'
 import type { ThinkingLevel } from '@/types/chat'
 import {
   setGitPollInterval,
@@ -227,6 +229,24 @@ export const GeneralPane: React.FC = () => {
       savePreferences.mutate({ ...preferences, review_sound: value })
       // Play preview of the selected sound
       playNotificationSound(value)
+    }
+  }
+
+  const handleQuickAccessEnabledChange = (checked: boolean) => {
+    if (preferences) {
+      savePreferences.mutate({ ...preferences, quick_access_enabled: checked })
+    }
+  }
+
+  const handleQuickAccessActionsChange = (actions: QuickAccessAction[]) => {
+    if (preferences) {
+      savePreferences.mutate({ ...preferences, quick_access_actions: actions })
+    }
+  }
+
+  const handleQuickAccessCompactChange = (checked: boolean) => {
+    if (preferences) {
+      savePreferences.mutate({ ...preferences, quick_access_compact: checked })
     }
   }
 
@@ -643,6 +663,44 @@ export const GeneralPane: React.FC = () => {
               </SelectContent>
             </Select>
           </InlineField>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Quick Access">
+        <div className="space-y-4">
+          <InlineField
+            label="Enable quick access"
+            description="Show action buttons when hovering over worktrees"
+          >
+            <Switch
+              checked={preferences?.quick_access_enabled ?? true}
+              onCheckedChange={handleQuickAccessEnabledChange}
+            />
+          </InlineField>
+
+          {preferences?.quick_access_enabled && (
+            <>
+              <InlineField
+                label="Quick access actions"
+                description="Select which actions to show on hover"
+              >
+                <QuickAccessActionsPicker
+                  value={preferences?.quick_access_actions ?? ['terminal', 'editor']}
+                  onChange={handleQuickAccessActionsChange}
+                />
+              </InlineField>
+
+              <InlineField
+                label="Compact display"
+                description="Show only icons without labels"
+              >
+                <Switch
+                  checked={preferences?.quick_access_compact ?? false}
+                  onCheckedChange={handleQuickAccessCompactChange}
+                />
+              </InlineField>
+            </>
+          )}
         </div>
       </SettingsSection>
 

@@ -98,6 +98,9 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        quick_access_enabled: true,
+        quick_access_actions: ['terminal', 'editor'],
+        quick_access_compact: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -174,6 +177,9 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        quick_access_enabled: true,
+        quick_access_actions: ['terminal', 'editor'],
+        quick_access_compact: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -225,6 +231,9 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        quick_access_enabled: true,
+        quick_access_actions: ['terminal', 'editor'],
+        quick_access_compact: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -274,6 +283,9 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        quick_access_enabled: true,
+        quick_access_actions: ['terminal', 'editor'],
+        quick_access_compact: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -323,6 +335,9 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        quick_access_enabled: true,
+        quick_access_actions: ['terminal', 'editor'],
+        quick_access_compact: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -372,6 +387,9 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        quick_access_enabled: true,
+        quick_access_actions: ['terminal', 'editor'],
+        quick_access_compact: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

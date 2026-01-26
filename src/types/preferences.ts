@@ -235,6 +235,9 @@ export interface AppPreferences {
   allow_web_tools_in_plan_mode: boolean // Allow WebFetch/WebSearch in plan mode without prompts
   waiting_sound: NotificationSound // Sound when session is waiting for input
   review_sound: NotificationSound // Sound when session finishes reviewing
+  quick_access_enabled: boolean // Enable quick access buttons on worktree hover
+  quick_access_actions: QuickAccessAction[] // Which actions to show in quick access
+  quick_access_compact: boolean // Show only icons without labels
 }
 
 export type FileEditMode = 'inline' | 'external'
@@ -242,6 +245,25 @@ export type FileEditMode = 'inline' | 'external'
 export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
   { value: 'inline', label: 'Jean (inline editor)' },
   { value: 'external', label: 'External editor' },
+]
+
+// Quick access actions for worktree hover buttons
+export type QuickAccessAction =
+  | 'terminal' // Opens terminal panel
+  | 'run' // Runs jean.json script (if available)
+  | 'editor' // Opens in configured editor
+  | 'finder' // Opens in Finder
+  | 'terminal_app' // Opens in external terminal app
+
+export const quickAccessActionOptions: {
+  value: QuickAccessAction
+  label: string
+}[] = [
+  { value: 'terminal', label: 'Terminal' },
+  { value: 'run', label: 'Run' },
+  { value: 'editor', label: 'Open in Editor' },
+  { value: 'finder', label: 'Open in Finder' },
+  { value: 'terminal_app', label: 'Open in Terminal App' },
 ]
 
 export type ClaudeModel = 'opus' | 'sonnet' | 'haiku'
@@ -429,4 +451,7 @@ export const defaultPreferences: AppPreferences = {
   allow_web_tools_in_plan_mode: true, // Default: enabled
   waiting_sound: 'none',
   review_sound: 'none',
+  quick_access_enabled: true,
+  quick_access_actions: ['terminal', 'editor'],
+  quick_access_compact: false,
 }
