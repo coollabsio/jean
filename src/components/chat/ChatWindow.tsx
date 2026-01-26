@@ -54,6 +54,7 @@ import type {
 } from '@/types/chat'
 import { isAskUserQuestion, isExitPlanMode, isTodoWrite } from '@/types/chat'
 import { getFilename } from '@/lib/path-utils'
+import { cn } from '@/lib/utils'
 import { PermissionApproval } from './PermissionApproval'
 import { SetupScriptOutput } from './SetupScriptOutput'
 import { SessionTabBar } from './SessionTabBar'
@@ -102,6 +103,7 @@ import { useGitOperations } from './hooks/useGitOperations'
 import { useContextOperations } from './hooks/useContextOperations'
 import { useMessageHandlers, GIT_ALLOWED_TOOLS } from './hooks/useMessageHandlers'
 import { useMagicCommands } from './hooks/useMagicCommands'
+import { useDragAndDropImages } from './hooks/useDragAndDropImages'
 
 /** Check if we're in development mode */
 const isDev = import.meta.env.DEV
@@ -532,6 +534,9 @@ export function ChatWindow() {
     messages: session?.messages,
     virtualizedListRef,
   })
+
+  // Drag and drop images into chat input
+  const { isDragging } = useDragAndDropImages(activeSessionId, formRef)
 
   // State for file content modal (opened by clicking filenames in tool calls)
   const [viewingFilePath, setViewingFilePath] = useState<string | null>(null)
@@ -1942,7 +1947,15 @@ Begin your investigation now.`
                 )}
 
               {/* Input area - unified container with textarea and toolbar */}
-              <form ref={formRef} onSubmit={handleSubmit} className="relative">
+              <form
+                ref={formRef}
+                onSubmit={handleSubmit}
+                className={cn(
+                  'relative rounded-lg transition-all duration-150',
+                  isDragging &&
+                    'ring-2 ring-primary ring-inset bg-primary/5'
+                )}
+              >
                 {/* Textarea section */}
                 <div className="px-4 pt-3 pb-2 md:px-6">
                   <ChatInput

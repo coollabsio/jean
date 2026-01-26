@@ -1291,6 +1291,7 @@ pub fn run() {
             chat::mark_plan_approved,
             // Chat commands - Image handling
             chat::save_pasted_image,
+            chat::save_dropped_image,
             chat::delete_pasted_image,
             // Chat commands - Text paste handling
             chat::save_pasted_text,

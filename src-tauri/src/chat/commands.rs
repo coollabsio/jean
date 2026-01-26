@@ -1423,6 +1423,83 @@ pub async fn save_pasted_image(
     })
 }
 
+/// Save a dropped image file to the app data directory
+///
+/// Takes a source file path (from Tauri's drag-drop event) and copies it
+/// to the images directory. More efficient than base64 encoding for dropped files.
+#[tauri::command]
+pub async fn save_dropped_image(
+    app: AppHandle,
+    source_path: String,
+) -> Result<SaveImageResponse, String> {
+    log::trace!("Saving dropped image from: {source_path}");
+
+    let source = std::path::PathBuf::from(&source_path);
+
+    // Validate source file exists
+    if !source.exists() {
+        return Err(format!("Source file not found: {source_path}"));
+    }
+
+    // Get extension and validate it's an allowed image type
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .ok_or_else(|| "File has no extension".to_string())?;
+
+    let allowed_extensions = ["png", "jpg", "jpeg", "gif", "webp"];
+    if !allowed_extensions.contains(&extension.as_str()) {
+        return Err(format!(
+            "Invalid image type: .{extension}. Allowed types: {}",
+            allowed_extensions.join(", ")
+        ));
+    }
+
+    // Check file size
+    let metadata = std::fs::metadata(&source)
+        .map_err(|e| format!("Failed to read file metadata: {e}"))?;
+
+    if metadata.len() as usize > MAX_IMAGE_SIZE {
+        return Err(format!(
+            "Image too large: {} bytes. Maximum size: {} bytes (10MB)",
+            metadata.len(),
+            MAX_IMAGE_SIZE
+        ));
+    }
+
+    // Get the images directory
+    let images_dir = get_images_dir(&app)?;
+
+    // Generate unique filename (normalize jpeg to jpg)
+    let normalized_ext = if extension == "jpeg" { "jpg" } else { &extension };
+    let timestamp = now();
+    let short_uuid = &Uuid::new_v4().to_string()[..8];
+    let filename = format!("image-{timestamp}-{short_uuid}.{normalized_ext}");
+    let dest_path = images_dir.join(&filename);
+
+    // Copy file atomically (copy to temp, then rename)
+    let temp_path = dest_path.with_extension("tmp");
+    std::fs::copy(&source, &temp_path)
+        .map_err(|e| format!("Failed to copy image file: {e}"))?;
+
+    std::fs::rename(&temp_path, &dest_path)
+        .map_err(|e| format!("Failed to finalize image file: {e}"))?;
+
+    let path_str = dest_path
+        .to_str()
+        .ok_or_else(|| "Failed to convert path to string".to_string())?
+        .to_string();
+
+    log::trace!("Dropped image saved to: {path_str}");
+
+    Ok(SaveImageResponse {
+        id: Uuid::new_v4().to_string(),
+        filename,
+        path: path_str,
+    })
+}
+
 /// Delete a pasted image
 ///
 /// Validates that the path is within allowed directories before deleting.

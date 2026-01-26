@@ -19,22 +19,13 @@ import {
 } from './FileMentionPopover'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
 
-/** Maximum image size in bytes (10MB) */
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024
+import { MAX_IMAGE_SIZE, ALLOWED_IMAGE_TYPES } from './image-constants'
 
 /** Maximum text file size in bytes (10MB) */
 const MAX_TEXT_SIZE = 10 * 1024 * 1024
 
 /** Threshold for saving pasted text as file (500 chars) */
 const TEXT_PASTE_THRESHOLD = 500
-
-/** Allowed MIME types for pasted images */
-const ALLOWED_IMAGE_TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-]
 
 interface ChatInputProps {
   activeSessionId: string | undefined
