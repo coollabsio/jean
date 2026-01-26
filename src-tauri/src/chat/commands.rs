@@ -978,6 +978,7 @@ pub async fn send_chat_message(
         &app,
         &session_id,
         &worktree_id,
+        &worktree_path,
         &session_name,
         session_order,
         &user_message_id,
@@ -1213,6 +1214,33 @@ pub async fn clear_session_history(
             Err(format!("Session not found: {session_id}"))
         }
     })
+}
+
+/// Revert a session to a specific assistant message, removing all subsequent messages.
+/// If worktree_path is provided, also reverts code changes using git patches.
+#[tauri::command]
+pub async fn revert_session_to_message(
+    app: AppHandle,
+    session_id: String,
+    assistant_message_id: String,
+    worktree_path: Option<String>,
+) -> Result<u32, String> {
+    log::trace!(
+        "Reverting session {session_id} to message {assistant_message_id} (worktree_path: {:?})",
+        worktree_path
+    );
+
+    // Truncate the session using the run_log helper
+    let deleted_count = super::run_log::truncate_session_to_message(
+        &app,
+        &session_id,
+        &assistant_message_id,
+        worktree_path.as_deref(),
+    )?;
+
+    log::trace!("Reverted session, deleted {deleted_count} runs");
+
+    Ok(deleted_count)
 }
 
 /// Set the selected model for a session
@@ -2719,8 +2747,10 @@ pub async fn resume_session(
                     );
 
                     // Create a RunLogWriter to update the manifest
+                    // Note: Empty worktree_path for resumed runs - git diff capture won't work
+                    // but that's OK since we can't accurately capture diffs for partial runs
                     if let Ok(mut writer) =
-                        RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
+                        RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone, "")
                     {
                         // Mark as completed
                         let assistant_message_id = uuid::Uuid::new_v4().to_string();
@@ -2751,8 +2781,9 @@ pub async fn resume_session(
                     log::error!("Resume failed for run: {run_id_clone}, error: {e}");
 
                     // Mark as crashed
+                    // Note: Empty worktree_path - no diff capture for crashed resumed runs
                     if let Ok(mut writer) =
-                        RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
+                        RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone, "")
                     {
                         if let Err(e) = writer.crash() {
                             log::error!("Failed to mark run as crashed: {e}");

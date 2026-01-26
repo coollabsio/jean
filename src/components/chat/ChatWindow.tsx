@@ -32,7 +32,7 @@ import {
   useCreateSession,
   cancelChatMessage,
 } from '@/services/chat'
-import { useWorktree, useProjects, useRunScript } from '@/services/projects'
+import { useWorktree, useProjects, useRunScript, useCreateWorktree } from '@/services/projects'
 import { githubQueryKeys, useLoadedIssueContexts, useLoadedPRContexts, useAttachedSavedContexts } from '@/services/github'
 import type { LoadedIssueContext, LoadedPullRequestContext } from '@/types/github'
 import {
@@ -262,6 +262,7 @@ export function ChatWindow() {
   )
   const sendMessage = useSendMessage()
   const createSession = useCreateSession()
+  const createWorktree = useCreateWorktree()
   const setSessionModel = useSetSessionModel()
   const setSessionThinkingLevel = useSetSessionThinkingLevel()
 
@@ -1459,6 +1460,49 @@ Begin your investigation now.`
     pendingPlanMessage,
   })
 
+  // Fork conversation handler - creates a new worktree with messages up to selected point
+  const handleFork = useCallback(
+    (messageId: string) => {
+      if (!worktree?.project_id || !activeWorktreeId || !activeSessionId) return
+
+      createWorktree.mutate({
+        projectId: worktree.project_id,
+        forkSource: {
+          sourceWorktreeId: activeWorktreeId,
+          sourceSessionId: activeSessionId,
+          upToMessageId: messageId,
+        },
+      })
+    },
+    [worktree?.project_id, activeWorktreeId, activeSessionId, createWorktree]
+  )
+
+  // Revert conversation handler - truncates session to selected message and reverts code
+  const handleRevert = useCallback(
+    async (messageId: string) => {
+      if (!activeSessionId) return
+
+      try {
+        const deletedCount = await invoke<number>('revert_session_to_message', {
+          sessionId: activeSessionId,
+          assistantMessageId: messageId,
+          worktreePath: activeWorktreePath, // Pass worktree path to enable code revert via git patches
+        })
+
+        if (deletedCount > 0) {
+          // Invalidate session query to refresh messages
+          queryClient.invalidateQueries({ queryKey: ['session', activeSessionId] })
+          toast.success(`Reverted conversation and code (removed ${deletedCount} message${deletedCount > 1 ? 's' : ''})`)
+        } else {
+          toast.info('Nothing to revert - this is already the last message')
+        }
+      } catch (error) {
+        toast.error(`Failed to revert: ${error}`)
+      }
+    },
+    [activeSessionId, activeWorktreePath, queryClient]
+  )
+
   // Listen for approve-plan keyboard shortcut event
   useEffect(() => {
     const handleApprovePlanEvent = () => {
@@ -1813,6 +1857,8 @@ Begin your investigation now.`
                       isFindingFixed={isFindingFixed}
                       shouldScrollToBottom={isAtBottom}
                       onScrollToBottomHandled={handleScrollToBottomHandled}
+                      onFork={handleFork}
+                      onRevert={handleRevert}
                     />
                   )}
                   {isSending && activeSessionId && (

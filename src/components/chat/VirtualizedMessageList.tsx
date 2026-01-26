@@ -92,6 +92,10 @@ interface VirtualizedMessageListProps {
   shouldScrollToBottom?: boolean
   /** Callback when scroll-to-bottom is handled */
   onScrollToBottomHandled?: () => void
+  /** Callback when user wants to fork conversation from a message */
+  onFork?: (messageId: string) => void
+  /** Callback when user wants to revert conversation to a message */
+  onRevert?: (messageId: string) => void
 }
 
 /**
@@ -127,6 +131,8 @@ export const VirtualizedMessageList = memo(
         isFindingFixed,
         shouldScrollToBottom,
         onScrollToBottomHandled,
+        onFork,
+        onRevert,
       },
       ref
     ) {
@@ -299,6 +305,11 @@ export const VirtualizedMessageList = memo(
                   getSubmittedAnswers={getSubmittedAnswers}
                   areQuestionsSkipped={areQuestionsSkipped}
                   isFindingFixed={isFindingFixed}
+                  onFork={onFork}
+                  onRevert={onRevert}
+                  canShowActions={
+                    message.role === 'assistant' && !isSending
+                  }
                 />
               </div>
             )

@@ -465,7 +465,6 @@ export function WorktreeItem({
               </span>
             </button>
           )}
-        </div>
 
           {/* Uncommitted changes */}
           {hasUncommitted && (

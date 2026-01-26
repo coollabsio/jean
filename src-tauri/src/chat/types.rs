@@ -678,6 +678,9 @@ pub struct RunEntry {
     /// Token usage for this run (captured from Claude CLI result)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<UsageData>,
+    /// Git patch (diff) of changes made during this run - for revert functionality
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_patch: Option<String>,
 }
 
 /// Session metadata - single source of truth for session data and run history
