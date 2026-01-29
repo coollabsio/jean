@@ -2405,18 +2405,39 @@ pub async fn open_worktree_in_terminal(
 
     #[cfg(target_os = "windows")]
     {
-        // Use PowerShell (default choice per user preference)
-        let result = std::process::Command::new("powershell")
-            .args([
-                "-NoExit",
-                "-Command",
-                &format!("Set-Location '{}'", worktree_path),
-            ])
-            .spawn();
+        let result = match terminal_app.as_str() {
+            "warp" => {
+                // Try warp in PATH, fall back to default install location
+                let warp_exe = crate::platform::find_executable("warp")
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| {
+                        let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+                        format!("{local}\\Warp\\Warp.exe")
+                    });
+                std::process::Command::new(&warp_exe)
+                    .current_dir(&worktree_path)
+                    .spawn()
+            }
+            "windows-terminal" => {
+                std::process::Command::new("wt")
+                    .args(["-d", &worktree_path])
+                    .spawn()
+            }
+            _ => {
+                // Default: PowerShell
+                std::process::Command::new("powershell")
+                    .args([
+                        "-NoExit",
+                        "-Command",
+                        &format!("Set-Location '{worktree_path}'"),
+                    ])
+                    .spawn()
+            }
+        };
 
         match result {
-            Ok(_) => log::trace!("Opened PowerShell in {worktree_path}"),
-            Err(e) => return Err(format!("Failed to open PowerShell: {e}")),
+            Ok(_) => log::trace!("Opened {terminal_app} in {worktree_path}"),
+            Err(e) => return Err(format!("Failed to open {terminal_app}: {e}")),
         }
     }
 
@@ -2482,9 +2503,37 @@ pub async fn open_worktree_in_editor(
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     {
-        // VS Code and Cursor CLI work the same on all platforms
+        // On Windows, VS Code and Cursor install their CLIs as .cmd batch files.
+        // Rust's Command::new only resolves .exe, so we use cmd /C to handle .cmd files.
+        let result = match editor_app.as_str() {
+            "cursor" => std::process::Command::new("cmd")
+                .args(["/C", "cursor", &worktree_path])
+                .spawn(),
+            "xcode" => {
+                return Err("Xcode is only available on macOS".to_string());
+            }
+            _ => {
+                // Default to VS Code
+                std::process::Command::new("cmd")
+                    .args(["/C", "code", &worktree_path])
+                    .spawn()
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                log::trace!("Successfully opened {editor_app}");
+            }
+            Err(e) => {
+                return Err(format!("Failed to open {editor_app}: {e}"));
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
         let result = match editor_app.as_str() {
             "cursor" => std::process::Command::new("cursor")
                 .arg(&worktree_path)

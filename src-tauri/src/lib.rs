@@ -77,7 +77,7 @@ pub struct AppPreferences {
     #[serde(default = "default_thinking_level")]
     pub thinking_level: String, // Thinking level: off, think, megathink, ultrathink
     #[serde(default = "default_terminal")]
-    pub terminal: String, // Terminal app: terminal, warp, ghostty
+    pub terminal: String, // Terminal app: terminal, warp, ghostty, powershell, windows-terminal
     #[serde(default = "default_editor")]
     pub editor: String, // Editor app: vscode, cursor, xcode
     #[serde(default = "default_auto_branch_naming")]
@@ -181,7 +181,14 @@ fn default_thinking_level() -> String {
 }
 
 fn default_terminal() -> String {
-    "terminal".to_string()
+    #[cfg(target_os = "windows")]
+    {
+        "powershell".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "terminal".to_string()
+    }
 }
 
 fn default_editor() -> String {

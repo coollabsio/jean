@@ -1815,9 +1815,15 @@ pub async fn open_file_in_default_app(
 
     #[cfg(target_os = "windows")]
     {
+        // On Windows, VS Code and Cursor install their CLIs as .cmd batch files.
+        // Rust's Command::new only resolves .exe, so we use cmd /C to handle .cmd files.
         let result = match editor_app.as_str() {
-            "cursor" => std::process::Command::new("cursor").arg(&path).spawn(),
-            _ => std::process::Command::new("code").arg(&path).spawn(),
+            "cursor" => std::process::Command::new("cmd")
+                .args(["/C", "cursor", &path])
+                .spawn(),
+            _ => std::process::Command::new("cmd")
+                .args(["/C", "code", &path])
+                .spawn(),
         };
 
         result.map_err(|e| format!("Failed to open {editor_app}: {e}"))?;
