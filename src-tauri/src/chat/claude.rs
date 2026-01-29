@@ -4,6 +4,7 @@ use super::types::{ContentBlock, ThinkingLevel, ToolCall, UsageData};
 use crate::projects::github_issues::{
     get_github_contexts_dir, get_worktree_issue_refs, get_worktree_pr_refs,
 };
+use crate::projects::storage::load_projects_data;
 
 // =============================================================================
 // Claude CLI execution
@@ -441,6 +442,85 @@ fn build_claude_args(
     (args, env_vars)
 }
 
+/// Read `permissions.additionalDirectories` from a directory's `.claude/settings.local.json`.
+fn read_additional_dirs_from_settings(dir: &std::path::Path) -> Vec<String> {
+    let settings_path = dir.join(".claude").join("settings.local.json");
+    if !settings_path.exists() {
+        return Vec::new();
+    }
+
+    let content = match std::fs::read_to_string(&settings_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Failed to read {settings_path:?}: {e}");
+            return Vec::new();
+        }
+    };
+
+    let settings: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("Failed to parse {settings_path:?}: {e}");
+            return Vec::new();
+        }
+    };
+
+    settings
+        .get("permissions")
+        .and_then(|p| p.get("additionalDirectories"))
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Sync `permissions.additionalDirectories` into a worktree's `.claude/settings.local.json`.
+///
+/// Reads the worktree's existing settings, merges the `additionalDirectories` key, and writes back.
+fn sync_additional_dirs_to_settings(working_dir: &std::path::Path, dirs: &[String]) {
+    let claude_dir = working_dir.join(".claude");
+    let settings_path = claude_dir.join("settings.local.json");
+
+    // Read existing worktree settings or start with empty object
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        match std::fs::read_to_string(&settings_path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or(serde_json::json!({})),
+            Err(_) => serde_json::json!({}),
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    // Set additionalDirectories
+    if settings.get("permissions").is_none() {
+        settings["permissions"] = serde_json::json!({});
+    }
+    settings["permissions"]["additionalDirectories"] = serde_json::json!(dirs);
+
+    // Ensure .claude directory exists
+    if let Err(e) = std::fs::create_dir_all(&claude_dir) {
+        log::error!("Failed to create .claude directory: {e}");
+        return;
+    }
+
+    match serde_json::to_string_pretty(&settings) {
+        Ok(content) => {
+            if let Err(e) = std::fs::write(&settings_path, content) {
+                log::error!("Failed to write settings.local.json: {e}");
+            } else {
+                log::trace!(
+                    "Synced {} additionalDirectories to {settings_path:?}",
+                    dirs.len()
+                );
+            }
+        }
+        Err(e) => log::error!("Failed to serialize settings: {e}"),
+    }
+}
+
 /// Execute Claude CLI in detached mode.
 ///
 /// Spawns Claude CLI as a fully detached process that survives Jean quitting.
@@ -512,6 +592,22 @@ pub fn execute_claude_detached(
         parallel_execution_prompt_enabled,
         ai_language,
     );
+
+    // Sync project's .claude/settings.local.json additionalDirectories to worktree
+    if let Ok(data) = load_projects_data(app) {
+        if let Some(worktree) = data.find_worktree(worktree_id) {
+            if let Some(project) = data.find_project(&worktree.project_id) {
+                let project_path = std::path::Path::new(&project.path);
+                // Only sync if worktree is a different directory than the project
+                if project_path != working_dir {
+                    let dirs = read_additional_dirs_from_settings(project_path);
+                    if !dirs.is_empty() {
+                        sync_additional_dirs_to_settings(working_dir, &dirs);
+                    }
+                }
+            }
+        }
+    }
 
     // Log the full Claude CLI command for debugging
     log::debug!(

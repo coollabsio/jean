@@ -1728,6 +1728,69 @@ export function useUpdateProjectSettings() {
 }
 
 /**
+ * Hook to read additionalDirectories from a project's .claude/settings.local.json
+ */
+export function useProjectAdditionalDirs(projectId: string | null) {
+  return useQuery({
+    queryKey: [...projectsQueryKeys.detail(projectId ?? ''), 'additional-dirs'] as const,
+    queryFn: async (): Promise<string[]> => {
+      if (!isTauri() || !projectId) {
+        return []
+      }
+
+      try {
+        return await invoke<string[]>('get_project_additional_dirs', { projectId })
+      } catch (error) {
+        logger.error('Failed to load additional dirs', { error, projectId })
+        return []
+      }
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 30,
+  })
+}
+
+/**
+ * Hook to write additionalDirectories to a project's .claude/settings.local.json
+ */
+export function useSetProjectAdditionalDirs() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      projectId,
+      dirs,
+    }: {
+      projectId: string
+      dirs: string[]
+    }): Promise<void> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      logger.debug('Setting project additional dirs', { projectId, dirs })
+      await invoke('set_project_additional_dirs', { projectId, dirs })
+      logger.info('Additional dirs updated')
+    },
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({
+        queryKey: [...projectsQueryKeys.detail(projectId), 'additional-dirs'],
+      })
+    },
+    onError: error => {
+      const message =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : 'Unknown error occurred'
+      logger.error('Failed to save additional dirs', { error })
+      toast.error('Failed to save directories', { description: message })
+    },
+  })
+}
+
+/**
  * Hook to reorder projects in the sidebar
  */
 export function useReorderProjects() {

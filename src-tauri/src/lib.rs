@@ -1311,6 +1311,8 @@ pub fn run() {
             projects::list_worktree_files,
             projects::get_project_branches,
             projects::update_project_settings,
+            projects::get_project_additional_dirs,
+            projects::set_project_additional_dirs,
             projects::get_pr_prompt,
             projects::get_review_prompt,
             projects::save_worktree_pr,

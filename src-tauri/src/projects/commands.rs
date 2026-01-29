@@ -2903,6 +2903,117 @@ pub async fn update_project_settings(
     Ok(updated_project)
 }
 
+/// Read additionalDirectories from a project's .claude/settings.local.json
+#[tauri::command]
+pub async fn get_project_additional_dirs(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<String>, String> {
+    let data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    let settings_path = Path::new(&project.path)
+        .join(".claude")
+        .join("settings.local.json");
+
+    if !settings_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = std::fs::read_to_string(&settings_path)
+        .map_err(|e| format!("Failed to read settings.local.json: {e}"))?;
+
+    let settings: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse settings.local.json: {e}"))?;
+
+    let dirs = settings
+        .get("permissions")
+        .and_then(|p| p.get("additionalDirectories"))
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(dirs)
+}
+
+/// Write additionalDirectories to a project's .claude/settings.local.json
+///
+/// Merges into the existing file, preserving other settings.
+#[tauri::command]
+pub async fn set_project_additional_dirs(
+    app: AppHandle,
+    project_id: String,
+    dirs: Vec<String>,
+) -> Result<(), String> {
+    // Validate each path exists and is a directory
+    for dir in &dirs {
+        let path = Path::new(dir);
+        if !path.exists() {
+            return Err(format!("Directory does not exist: {dir}"));
+        }
+        if !path.is_dir() {
+            return Err(format!("Path is not a directory: {dir}"));
+        }
+    }
+
+    let data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    let claude_dir = Path::new(&project.path).join(".claude");
+    let settings_path = claude_dir.join("settings.local.json");
+
+    // Read existing settings or start with empty object
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path)
+            .map_err(|e| format!("Failed to read settings.local.json: {e}"))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse settings.local.json: {e}"))?
+    } else {
+        serde_json::json!({})
+    };
+
+    if dirs.is_empty() {
+        // Remove additionalDirectories
+        if let Some(permissions) = settings.get_mut("permissions") {
+            if let Some(obj) = permissions.as_object_mut() {
+                obj.remove("additionalDirectories");
+                if obj.is_empty() {
+                    if let Some(root) = settings.as_object_mut() {
+                        root.remove("permissions");
+                    }
+                }
+            }
+        }
+    } else {
+        // Set additionalDirectories
+        if settings.get("permissions").is_none() {
+            settings["permissions"] = serde_json::json!({});
+        }
+        settings["permissions"]["additionalDirectories"] = serde_json::json!(dirs);
+    }
+
+    // Ensure .claude directory exists
+    std::fs::create_dir_all(&claude_dir)
+        .map_err(|e| format!("Failed to create .claude directory: {e}"))?;
+
+    // Write settings
+    let content = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
+    std::fs::write(&settings_path, content)
+        .map_err(|e| format!("Failed to write settings.local.json: {e}"))?;
+
+    log::trace!("Updated additionalDirectories in {settings_path:?}: {dirs:?}");
+    Ok(())
+}
+
 /// Rebase a worktree's branch onto the base branch
 ///
 /// This command:

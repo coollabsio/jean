@@ -1,6 +1,16 @@
-import { useState } from 'react'
-import { Loader2, GitBranch, Check, ChevronsUpDown, ImageIcon, X } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import {
+  Check,
+  ChevronsUpDown,
+  FolderOpen,
+  GitBranch,
+  ImageIcon,
+  Loader2,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import {
   Dialog,
   DialogContent,
@@ -23,15 +33,18 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { useProjectsStore } from '@/store/projects-store'
 import {
-  useProjects,
-  useProjectBranches,
-  useUpdateProjectSettings,
   useAppDataDir,
-  useSetProjectAvatar,
+  useProjectAdditionalDirs,
+  useProjectBranches,
+  useProjects,
   useRemoveProjectAvatar,
+  useSetProjectAdditionalDirs,
+  useSetProjectAvatar,
+  useUpdateProjectSettings,
 } from '@/services/projects'
 
 export function ProjectSettingsDialog() {
@@ -50,7 +63,13 @@ export function ProjectSettingsDialog() {
     error: branchesError,
   } = useProjectBranches(projectSettingsProjectId)
 
+  // Read additionalDirectories from .claude/settings.local.json
+  const { data: savedAdditionalDirs = [] } = useProjectAdditionalDirs(
+    projectSettingsDialogOpen ? projectSettingsProjectId : null
+  )
+
   const updateSettings = useUpdateProjectSettings()
+  const setAdditionalDirs = useSetProjectAdditionalDirs()
   const { data: appDataDir = '' } = useAppDataDir()
   const setProjectAvatar = useSetProjectAvatar()
   const removeProjectAvatar = useRemoveProjectAvatar()
@@ -58,6 +77,11 @@ export function ProjectSettingsDialog() {
   // Use project's default_branch as the initial value, allow local overrides
   const [localBranch, setLocalBranch] = useState<string | null>(null)
   const [branchPopoverOpen, setBranchPopoverOpen] = useState(false)
+
+  // External directories state (null = no local changes, array = local override)
+  const [localExternalDirs, setLocalExternalDirs] = useState<string[] | null>(
+    null
+  )
 
   // Track image load errors - use avatar_path as key to reset error state when it changes
   const [imgErrorKey, setImgErrorKey] = useState<string | null>(null)
@@ -86,13 +110,51 @@ export function ProjectSettingsDialog() {
     setLocalBranch(branch)
   }
 
-  const handleSave = async () => {
-    if (!projectSettingsProjectId || !selectedBranch) return
+  // External dirs: use local state if changed, otherwise the value from settings.local.json
+  const currentExternalDirs = localExternalDirs ?? savedAdditionalDirs
 
-    await updateSettings.mutateAsync({
-      projectId: projectSettingsProjectId,
-      defaultBranch: selectedBranch,
+  const handleAddExternalDir = useCallback(async () => {
+    const selected = await open({ directory: true, multiple: false })
+    if (!selected) return
+
+    setLocalExternalDirs(prev => {
+      const current = prev ?? savedAdditionalDirs
+      // Prevent duplicates
+      if (current.includes(selected)) return current
+      return [...current, selected]
     })
+  }, [savedAdditionalDirs])
+
+  const handleRemoveExternalDir = useCallback(
+    (dir: string) => {
+      setLocalExternalDirs(prev => {
+        const current = prev ?? savedAdditionalDirs
+        return current.filter(d => d !== dir)
+      })
+    },
+    [savedAdditionalDirs]
+  )
+
+  const handleSave = async () => {
+    if (!projectSettingsProjectId) return
+
+    // Save branch settings if changed
+    const branchChanged =
+      selectedBranch && selectedBranch !== project?.default_branch
+    if (branchChanged) {
+      await updateSettings.mutateAsync({
+        projectId: projectSettingsProjectId,
+        defaultBranch: selectedBranch,
+      })
+    }
+
+    // Save additional dirs if changed
+    if (localExternalDirs !== null) {
+      await setAdditionalDirs.mutateAsync({
+        projectId: projectSettingsProjectId,
+        dirs: localExternalDirs,
+      })
+    }
 
     closeProjectSettings()
   }
@@ -100,16 +162,19 @@ export function ProjectSettingsDialog() {
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       setLocalBranch(null) // Reset local state when closing
+      setLocalExternalDirs(null)
       closeProjectSettings()
     }
   }
 
-  const hasChanges = project && selectedBranch !== project.default_branch
-  const isPending = updateSettings.isPending
+  const branchChanged = project && selectedBranch !== project.default_branch
+  const externalDirsChanged = localExternalDirs !== null
+  const hasChanges = branchChanged || externalDirsChanged
+  const isPending = updateSettings.isPending || setAdditionalDirs.isPending
 
   return (
     <Dialog open={projectSettingsDialogOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Project Settings</DialogTitle>
           <DialogDescription>
@@ -256,6 +321,47 @@ export function ProjectSettingsDialog() {
                 </PopoverContent>
               </Popover>
             )}
+          </div>
+
+          {/* External Directories Section */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium leading-none">
+              External Directories
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Additional directories Claude can read (outside the worktree)
+            </p>
+
+            {currentExternalDirs.length > 0 && (
+              <ScrollArea className="max-h-32">
+                <div className="space-y-1">
+                  {currentExternalDirs.map(dir => (
+                    <div
+                      key={dir}
+                      className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate" title={dir}>
+                        {dir}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => handleRemoveExternalDir(dir)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+
+            <Button variant="outline" size="sm" onClick={handleAddExternalDir}>
+              <FolderOpen className="h-4 w-4" />
+              Add Directory
+            </Button>
           </div>
         </div>
 
