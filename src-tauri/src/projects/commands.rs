@@ -16,6 +16,10 @@ use super::github_issues::{
     format_pr_context_markdown, generate_branch_name_from_issue, generate_branch_name_from_pr,
     get_github_contexts_dir, get_github_pr, get_pr_diff, IssueContext, PullRequestContext,
 };
+use super::gitlab_issues::{
+    format_gitlab_mr_context_markdown, generate_branch_name_from_gitlab_mr, get_gitlab_mr,
+    get_mr_diff, GitLabMergeRequestContext,
+};
 use super::names::generate_unique_workspace_name;
 use super::storage::{get_project_worktrees_dir, load_projects_data, save_projects_data};
 use super::types::{
@@ -35,10 +39,36 @@ fn now() -> u64 {
 }
 
 /// List all projects
+/// Also migrates existing projects to fill in git_provider if missing
 #[tauri::command]
 pub async fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
     log::trace!("Listing all projects");
-    let data = load_projects_data(&app)?;
+    let mut data = load_projects_data(&app)?;
+
+    // Migrate: fill in git_provider for existing projects that don't have it
+    let mut needs_save = false;
+    for project in &mut data.projects {
+        if project.git_provider.is_none() && !project.path.is_empty() {
+            // Detect git provider from remote URL
+            if let Ok(provider) = git::detect_git_provider(&project.path) {
+                project.git_provider = Some(match provider {
+                    git::GitProvider::GitHub => "github".to_string(),
+                    git::GitProvider::GitLab => "gitlab".to_string(),
+                    git::GitProvider::Unknown => "other".to_string(),
+                });
+                needs_save = true;
+                log::debug!("Migrated git_provider for project {}: {:?}", project.name, project.git_provider);
+            }
+        }
+    }
+
+    // Save back if any projects were migrated
+    if needs_save {
+        if let Err(e) = save_projects_data(&app, &data) {
+            log::warn!("Failed to save migrated git_provider: {e}");
+        }
+    }
+
     Ok(data.projects)
 }
 
@@ -64,6 +94,15 @@ pub async fn add_project(
     let name = git::get_repo_name(&path)?;
     let default_branch = git::get_current_branch(&path)?;
 
+    // Detect git provider from remote URL
+    let git_provider = git::detect_git_provider(&path)
+        .ok()
+        .map(|p| match p {
+            git::GitProvider::GitHub => "github".to_string(),
+            git::GitProvider::GitLab => "gitlab".to_string(),
+            git::GitProvider::Unknown => "other".to_string(),
+        });
+
     // Check if project already exists
     let mut data = load_projects_data(&app)?;
     if data.projects.iter().any(|p| p.path == path) {
@@ -82,6 +121,7 @@ pub async fn add_project(
         parent_id,
         is_folder: false,
         avatar_path: None,
+        git_provider,
     };
 
     data.add_project(project.clone());
@@ -224,13 +264,20 @@ pub async fn init_project(
     let project = Project {
         id: Uuid::new_v4().to_string(),
         name,
-        path,
+        path: path.clone(),
         default_branch,
         added_at: now(),
         order: max_order,
         parent_id,
         is_folder: false,
         avatar_path: None,
+        git_provider: git::detect_git_provider(&path)
+            .ok()
+            .map(|p| match p {
+                git::GitProvider::GitHub => "github".to_string(),
+                git::GitProvider::GitLab => "gitlab".to_string(),
+                git::GitProvider::Unknown => "other".to_string(),
+            }),
     };
 
     data.add_project(project.clone());
@@ -455,9 +502,11 @@ pub async fn create_worktree(
         cached_base_branch_ahead_count: None,
         cached_base_branch_behind_count: None,
         cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+        cached_unpushed_count: None,
         order: 0, // Placeholder, actual order is set in background thread
         archived_at: None,
+        ai_provider: None,
+        ai_model: None,
     };
 
     // Clone values for the background thread
@@ -820,9 +869,11 @@ pub async fn create_worktree(
                 cached_base_branch_ahead_count: None,
                 cached_base_branch_behind_count: None,
                 cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+                cached_unpushed_count: None,
                 order: max_order + 1,
                 archived_at: None,
+                ai_provider: None,
+                ai_model: None,
             };
 
             data.add_worktree(worktree.clone());
@@ -940,9 +991,11 @@ pub async fn create_worktree_from_existing_branch(
         cached_base_branch_ahead_count: None,
         cached_base_branch_behind_count: None,
         cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+        cached_unpushed_count: None,
         order: 0, // Placeholder, actual order is set in background thread
         archived_at: None,
+        ai_provider: None,
+        ai_model: None,
     };
 
     // Clone values for the background thread
@@ -1153,9 +1206,11 @@ pub async fn create_worktree_from_existing_branch(
                 cached_base_branch_ahead_count: None,
                 cached_base_branch_behind_count: None,
                 cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+                cached_unpushed_count: None,
                 order: max_order + 1,
                 archived_at: None,
+                ai_provider: None,
+                ai_model: None,
             };
 
             data.add_worktree(worktree.clone());
@@ -1313,9 +1368,11 @@ pub async fn checkout_pr(
         cached_base_branch_ahead_count: None,
         cached_base_branch_behind_count: None,
         cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+        cached_unpushed_count: None,
         order: 0, // Will be updated in background thread
         archived_at: None,
+        ai_provider: None,
+        ai_model: None,
     };
 
     // Clone values for background thread
@@ -1520,9 +1577,11 @@ pub async fn checkout_pr(
                 cached_base_branch_ahead_count: None,
                 cached_base_branch_behind_count: None,
                 cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+                cached_unpushed_count: None,
                 order: max_order + 1,
                 archived_at: None,
+                ai_provider: None,
+                ai_model: None,
             };
 
             data.add_worktree(worktree.clone());
@@ -1563,6 +1622,319 @@ pub async fn checkout_pr(
     });
 
     log::trace!("Returning pending worktree for PR #{}: {}", pr_number, pending_worktree.name);
+    Ok(pending_worktree)
+}
+
+/// Checkout a GitLab Merge Request into a new worktree
+///
+/// Similar to checkout_pr but for GitLab merge requests.
+/// Uses `glab mr checkout` to checkout the MR branch.
+///
+/// Events emitted:
+/// - `worktree:creating` - Emitted immediately with worktree ID and info
+/// - `worktree:created` - Emitted when worktree is ready
+/// - `worktree:error` - Emitted if any step fails
+#[tauri::command]
+pub async fn checkout_gitlab_mr(
+    app: AppHandle,
+    project_id: String,
+    mr_iid: u32,
+) -> Result<Worktree, String> {
+    log::trace!("Checking out GitLab MR !{mr_iid} for project: {project_id}");
+
+    let data = load_projects_data(&app)?;
+
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?
+        .clone();
+
+    // Check if there's an archived worktree for this MR — restore it instead of creating a new one
+    // Note: We use pr_number field for GitLab MR IID as well
+    if let Some(archived_wt) = data.worktrees.iter().find(|w| {
+        w.project_id == project_id
+            && w.pr_number == Some(mr_iid)
+            && w.archived_at.is_some()
+    }) {
+        let worktree_id = archived_wt.id.clone();
+        log::trace!("Found archived worktree {worktree_id} for MR !{mr_iid}, restoring instead of creating new");
+        return unarchive_worktree(app, worktree_id).await;
+    }
+
+    // Fetch MR details from GitLab (for context and worktree naming)
+    let mr_detail = get_gitlab_mr(project.path.clone(), mr_iid).await?;
+
+    // Get valid base branch for creating the worktree
+    let base_branch = git::get_valid_base_branch(&project.path, &project.default_branch)?;
+
+    // Generate worktree name from MR (for the directory/worktree name, not the branch)
+    let worktree_name = generate_branch_name_from_gitlab_mr(mr_iid, &mr_detail.title);
+
+    // Check if worktree name already exists, add suffix if needed
+    let final_worktree_name = if data.worktree_name_exists(&project_id, &worktree_name) {
+        let mut counter = 2;
+        loop {
+            let candidate = format!("{worktree_name}-{counter}");
+            if !data.worktree_name_exists(&project_id, &candidate) {
+                break candidate;
+            }
+            counter += 1;
+        }
+    } else {
+        worktree_name
+    };
+
+    // Generate a temporary branch name for worktree creation
+    // This will be replaced by the actual MR branch after glab mr checkout
+    let temp_branch_name = format!("mr-{mr_iid}-temp-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("xxxx"));
+
+    // Build worktree path: ~/jean/<project-name>/<workspace-name>
+    let project_worktrees_dir = get_project_worktrees_dir(&project.name)?;
+    let worktree_path = project_worktrees_dir.join(&final_worktree_name);
+    let worktree_path_str = worktree_path
+        .to_str()
+        .ok_or_else(|| "Invalid worktree path".to_string())?
+        .to_string();
+
+    // Generate ID upfront so we can track this worktree
+    let worktree_id = Uuid::new_v4().to_string();
+    let created_at = now();
+
+    // Emit creating event immediately (branch will be updated after glab mr checkout)
+    let creating_event = WorktreeCreatingEvent {
+        id: worktree_id.clone(),
+        project_id: project_id.clone(),
+        name: final_worktree_name.clone(),
+        path: worktree_path_str.clone(),
+        branch: mr_detail.source_branch.clone(), // Use MR's actual source branch name
+    };
+    if let Err(e) = app.emit("worktree:creating", &creating_event) {
+        log::error!("Failed to emit worktree:creating event: {e}");
+    }
+
+    // Create a pending worktree record to return immediately
+    // Note: branch will be updated to actual MR branch after glab mr checkout
+    let pending_worktree = Worktree {
+        id: worktree_id.clone(),
+        project_id: project_id.clone(),
+        name: final_worktree_name.clone(),
+        path: worktree_path_str.clone(),
+        branch: mr_detail.source_branch.clone(), // Use MR's actual source branch name
+        created_at,
+        setup_output: None,
+        setup_script: None,
+        session_type: SessionType::Worktree,
+        pr_number: Some(mr_iid), // Reuse pr_number field for MR IID
+        pr_url: None,
+        cached_pr_status: None,
+        cached_check_status: None,
+        cached_behind_count: None,
+        cached_ahead_count: None,
+        cached_status_at: None,
+        cached_uncommitted_added: None,
+        cached_uncommitted_removed: None,
+        cached_branch_diff_added: None,
+        cached_branch_diff_removed: None,
+        cached_base_branch_ahead_count: None,
+        cached_base_branch_behind_count: None,
+        cached_worktree_ahead_count: None,
+        cached_unpushed_count: None,
+        order: 0, // Will be updated in background thread
+        archived_at: None,
+        ai_provider: None,
+        ai_model: None,
+    };
+
+    // Clone values for background thread
+    let app_clone = app.clone();
+    let project_path = project.path.clone();
+    let worktree_id_clone = worktree_id.clone();
+    let project_id_clone = project_id.clone();
+    let worktree_path_clone = worktree_path_str.clone();
+    let worktree_name_clone = final_worktree_name.clone();
+    let temp_branch_clone = temp_branch_name.clone();
+    let base_branch_clone = base_branch.clone();
+    let mr_title = mr_detail.title.clone();
+    let mr_description = mr_detail.description.clone();
+    let mr_source_branch = mr_detail.source_branch.clone();
+    let mr_target_branch = mr_detail.target_branch.clone();
+    let mr_notes = mr_detail.notes.clone();
+
+    // Do the heavy lifting in a background thread
+    thread::spawn(move || {
+        log::trace!("Background: Creating worktree for GitLab MR !{mr_iid}");
+
+        // Step 1: Create worktree with a temporary branch based on base branch
+        // This gives us a working directory where we can run glab mr checkout
+        if let Err(e) = git::create_worktree(
+            &project_path,
+            &worktree_path_clone,
+            &temp_branch_clone,
+            &base_branch_clone,
+        ) {
+            log::error!("Background: Failed to create worktree: {e}");
+            let error_event = WorktreeCreateErrorEvent {
+                id: worktree_id_clone,
+                project_id: project_id_clone,
+                error: e,
+            };
+            if let Err(emit_err) = app_clone.emit("worktree:error", &error_event) {
+                log::error!("Failed to emit worktree:error event: {emit_err}");
+            }
+            return;
+        }
+        log::trace!("Background: Created worktree at {worktree_path_clone}");
+
+        // Step 2: Run glab mr checkout to get the actual MR branch
+        log::trace!("Background: Running glab mr checkout {mr_iid}");
+        let actual_branch = match git::glab_mr_checkout(&worktree_path_clone, mr_iid) {
+            Ok(branch) => {
+                log::trace!("Background: glab mr checkout successful, branch: {branch}");
+                branch
+            }
+            Err(e) => {
+                log::error!("Background: Failed to checkout MR: {e}");
+                // Clean up the worktree we created
+                let _ = git::remove_worktree(&project_path, &worktree_path_clone);
+                let _ = git::delete_branch(&project_path, &temp_branch_clone);
+
+                let error_event = WorktreeCreateErrorEvent {
+                    id: worktree_id_clone,
+                    project_id: project_id_clone,
+                    error: format!("Failed to checkout GitLab MR !{mr_iid}: {e}"),
+                };
+                if let Err(emit_err) = app_clone.emit("worktree:error", &error_event) {
+                    log::error!("Failed to emit worktree:error event: {emit_err}");
+                }
+                return;
+            }
+        };
+
+        // Step 3: Delete the temporary branch (it's no longer needed)
+        let _ = git::delete_branch(&project_path, &temp_branch_clone);
+
+        // Step 4: Save the MR context as markdown
+        let mr_diff = get_mr_diff(&worktree_path_clone, mr_iid).ok();
+        let mr_context = GitLabMergeRequestContext {
+            iid: mr_iid,
+            title: mr_title.clone(),
+            description: mr_description,
+            source_branch: mr_source_branch,
+            target_branch: mr_target_branch,
+            notes: mr_notes,
+            diff: mr_diff,
+        };
+
+        // Write MR context to git-context directory
+        if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
+            if std::fs::create_dir_all(&contexts_dir).is_ok() {
+                if let Ok(repo_id) = git::get_gitlab_repo_identifier(&project_path) {
+                    let repo_key = repo_id.to_key();
+                    let context_file = contexts_dir.join(format!("{repo_key}-gitlab-mr-{mr_iid}.md"));
+                    let context_content = format_gitlab_mr_context_markdown(&mr_context);
+
+                    if let Err(e) = std::fs::write(&context_file, context_content) {
+                        log::warn!("Failed to write MR context file: {e}");
+                    }
+
+                    // Add reference tracking
+                    if let Err(e) = add_pr_reference(
+                        &app_clone,
+                        &format!("gitlab-{repo_key}"),
+                        mr_iid,
+                        &worktree_id_clone,
+                    ) {
+                        log::warn!("Failed to add MR reference: {e}");
+                    }
+                }
+            }
+        }
+
+        // Step 5: Get the max order for worktrees in this project
+        let max_order = match load_projects_data(&app_clone) {
+            Ok(data) => data
+                .worktrees
+                .iter()
+                .filter(|w| w.project_id == project_id_clone && w.archived_at.is_none())
+                .map(|w| w.order)
+                .max()
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
+
+        // Step 6: Save the worktree record with actual branch and updated order
+        match load_projects_data(&app_clone) {
+            Ok(mut data) => {
+                let worktree_record = Worktree {
+                    id: worktree_id_clone.clone(),
+                    project_id: project_id_clone.clone(),
+                    name: worktree_name_clone.clone(),
+                    path: worktree_path_clone.clone(),
+                    branch: actual_branch.clone(),
+                    created_at,
+                    setup_output: None,
+                    setup_script: None,
+                    session_type: SessionType::Worktree,
+                    pr_number: Some(mr_iid),
+                    pr_url: None,
+                    cached_pr_status: None,
+                    cached_check_status: None,
+                    cached_behind_count: None,
+                    cached_ahead_count: None,
+                    cached_status_at: None,
+                    cached_uncommitted_added: None,
+                    cached_uncommitted_removed: None,
+                    cached_branch_diff_added: None,
+                    cached_branch_diff_removed: None,
+                    cached_base_branch_ahead_count: None,
+                    cached_base_branch_behind_count: None,
+                    cached_worktree_ahead_count: None,
+                    cached_unpushed_count: None,
+                    order: max_order + 1,
+                    archived_at: None,
+                    ai_provider: None,
+                    ai_model: None,
+                };
+
+                data.worktrees.push(worktree_record.clone());
+                if let Err(e) = save_projects_data(&app_clone, &data) {
+                    log::error!("Background: Failed to save worktree: {e}");
+                    let error_event = WorktreeCreateErrorEvent {
+                        id: worktree_id_clone.clone(),
+                        project_id: project_id_clone.clone(),
+                        error: format!("Failed to save worktree: {e}"),
+                    };
+                    if let Err(emit_err) = app_clone.emit("worktree:error", &error_event) {
+                        log::error!("Failed to emit worktree:error event: {emit_err}");
+                    }
+                    return;
+                }
+
+                // Emit created event with full worktree data
+                let created_event = WorktreeCreatedEvent {
+                    worktree: worktree_record,
+                };
+                if let Err(e) = app_clone.emit("worktree:created", &created_event) {
+                    log::error!("Background: Failed to emit worktree:created event: {e}");
+                }
+
+                log::trace!("Background: Successfully created worktree for GitLab MR !{mr_iid}");
+            }
+            Err(e) => {
+                log::error!("Background: Failed to load projects data: {e}");
+                let error_event = WorktreeCreateErrorEvent {
+                    id: worktree_id_clone,
+                    project_id: project_id_clone,
+                    error: format!("Failed to load projects data: {e}"),
+                };
+                if let Err(emit_err) = app_clone.emit("worktree:error", &error_event) {
+                    log::error!("Failed to emit worktree:error event: {emit_err}");
+                }
+            }
+        }
+    });
+
+    log::trace!("Returning pending worktree for GitLab MR !{}: {}", mr_iid, pending_worktree.name);
     Ok(pending_worktree)
 }
 
@@ -1741,9 +2113,11 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
         cached_base_branch_ahead_count: None,
         cached_base_branch_behind_count: None,
         cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+        cached_unpushed_count: None,
         order: 0, // Base sessions are always first
         archived_at: None,
+        ai_provider: None,
+        ai_model: None,
     };
 
     data.add_worktree(session.clone());
@@ -2041,9 +2415,11 @@ pub async fn import_worktree(
         cached_base_branch_ahead_count: None,
         cached_base_branch_behind_count: None,
         cached_worktree_ahead_count: None,
-            cached_unpushed_count: None,
+        cached_unpushed_count: None,
         order: max_order + 1,
         archived_at: None,
+        ai_provider: None,
+        ai_model: None,
     };
 
     data.add_worktree(worktree.clone());
@@ -2591,6 +2967,38 @@ pub async fn open_pull_request(
 
     log::trace!(
         "Successfully opened pull request for worktree: {}",
+        worktree.name
+    );
+    Ok(result)
+}
+
+/// Open a merge request for a worktree using the GitLab CLI
+#[tauri::command]
+pub async fn open_merge_request(
+    app: AppHandle,
+    worktree_id: String,
+    title: Option<String>,
+    body: Option<String>,
+    draft: Option<bool>,
+) -> Result<String, String> {
+    log::trace!("Opening merge request for worktree: {worktree_id}");
+
+    let data = load_projects_data(&app)?;
+
+    let worktree = data
+        .find_worktree(&worktree_id)
+        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
+
+    // Use the worktree path for the MR creation
+    let result = git::open_merge_request(
+        &worktree.path,
+        title.as_deref(),
+        body.as_deref(),
+        draft.unwrap_or(false),
+    )?;
+
+    log::trace!(
+        "Successfully opened merge request for worktree: {}",
         worktree.name
     );
     Ok(result)
@@ -4958,6 +5366,7 @@ pub async fn create_folder(
         parent_id,
         is_folder: true,
         avatar_path: None,
+        git_provider: None,
     };
 
     data.add_project(folder.clone());

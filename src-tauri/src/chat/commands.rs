@@ -604,6 +604,8 @@ pub async fn restore_session_with_base(
         cached_unpushed_count: None,
         order: 0,
         archived_at: None,
+        ai_provider: None,
+        ai_model: None,
     };
 
     projects_data.add_worktree(new_worktree.clone());
@@ -813,6 +815,7 @@ pub async fn send_chat_message(
     worktree_path: String,
     message: String,
     model: Option<String>,
+    provider: Option<String>,
     execution_mode: Option<String>,
     thinking_level: Option<ThinkingLevel>,
     disable_thinking_for_mode: Option<bool>,
@@ -820,7 +823,12 @@ pub async fn send_chat_message(
     ai_language: Option<String>,
     allowed_tools: Option<Vec<String>>,
 ) -> Result<ChatMessage, String> {
-    log::trace!("Sending chat message for session: {session_id}, worktree: {worktree_id}, model: {model:?}, execution_mode: {execution_mode:?}, thinking: {thinking_level:?}, disable_thinking_for_mode: {disable_thinking_for_mode:?}, allowed_tools: {allowed_tools:?}");
+    let provider_str = provider.as_deref().unwrap_or("claude");
+    log::info!("=== CHAT MESSAGE DEBUG ===");
+    log::info!("Provider param received: {:?}", provider);
+    log::info!("Effective provider: {}", provider_str);
+    log::info!("Model: {:?}", model);
+    log::trace!("Sending chat message for session: {session_id}, worktree: {worktree_id}, provider: {provider_str}, model: {model:?}, execution_mode: {execution_mode:?}, thinking: {thinking_level:?}, disable_thinking_for_mode: {disable_thinking_for_mode:?}, allowed_tools: {allowed_tools:?}");
 
     // Validate inputs
     if message.trim().is_empty() {
@@ -1005,60 +1013,95 @@ pub async fn send_chat_message(
     // Use passed parameter for parallel execution prompt (default false - experimental)
     let parallel_execution_prompt = parallel_execution_prompt_enabled.unwrap_or(false);
 
-    // Execute Claude CLI in detached mode
-    // If resume fails with "session not found", retry without the session ID
-    let mut claude_session_id_for_call = claude_session_id.clone();
-    let (pid, claude_response) = loop {
-        log::trace!("About to call execute_claude_detached...");
+    // Execute the appropriate CLI based on provider
+    // Default to Claude if no provider specified
+    let effective_provider = provider.as_deref().unwrap_or("claude");
 
-        match super::claude::execute_claude_detached(
-            &app,
-            &session_id,
-            &worktree_id,
-            &input_file,
-            &output_file,
-            context.worktree_path.as_ref(),
-            claude_session_id_for_call.as_deref(),
-            model.as_deref(),
-            execution_mode.as_deref(),
-            thinking_level.as_ref(),
-            allowed_tools.as_deref(),
-            disable_thinking_in_non_plan_modes,
-            parallel_execution_prompt,
-            ai_language.as_deref(),
-        ) {
-            Ok((pid, response)) => {
-                log::trace!("execute_claude_detached succeeded (PID: {pid})");
-                break (pid, response);
-            }
-            Err(e) => {
-                // Check if this is a session not found error and we were trying to resume
-                let is_session_not_found = e.to_lowercase().contains("session")
-                    && (e.to_lowercase().contains("not found")
-                        || e.to_lowercase().contains("invalid")
-                        || e.to_lowercase().contains("expired"));
+    let (pid, claude_response) = match effective_provider {
+        "gemini" => {
+            log::trace!("Using Gemini CLI for provider: {effective_provider}");
+            super::gemini::execute_gemini_detached(
+                &app,
+                &session_id,
+                &worktree_id,
+                &input_file,
+                &output_file,
+                context.worktree_path.as_ref(),
+                model.as_deref(),
+                execution_mode.as_deref(),
+            )?
+        }
+        "codex" => {
+            log::trace!("Using Codex CLI for provider: {effective_provider}");
+            super::codex::execute_codex_detached(
+                &app,
+                &session_id,
+                &worktree_id,
+                &input_file,
+                &output_file,
+                context.worktree_path.as_ref(),
+                model.as_deref(),
+                execution_mode.as_deref(),
+                thinking_level.as_ref().map(|t| t.as_str()),
+            )?
+        }
+        _ => {
+            // Default to Claude CLI
+            // If resume fails with "session not found", retry without the session ID
+            let mut claude_session_id_for_call = claude_session_id.clone();
+            loop {
+                log::trace!("About to call execute_claude_detached...");
 
-                if is_session_not_found && claude_session_id_for_call.is_some() {
-                    log::warn!(
-                        "Session not found, clearing stored session ID and retrying: {}",
-                        claude_session_id_for_call.as_deref().unwrap_or("")
-                    );
+                match super::claude::execute_claude_detached(
+                    &app,
+                    &session_id,
+                    &worktree_id,
+                    &input_file,
+                    &output_file,
+                    context.worktree_path.as_ref(),
+                    claude_session_id_for_call.as_deref(),
+                    model.as_deref(),
+                    execution_mode.as_deref(),
+                    thinking_level.as_ref(),
+                    allowed_tools.as_deref(),
+                    disable_thinking_in_non_plan_modes,
+                    parallel_execution_prompt,
+                    ai_language.as_deref(),
+                ) {
+                    Ok((pid, response)) => {
+                        log::trace!("execute_claude_detached succeeded (PID: {pid})");
+                        break (pid, response);
+                    }
+                    Err(e) => {
+                        // Check if this is a session not found error and we were trying to resume
+                        let is_session_not_found = e.to_lowercase().contains("session")
+                            && (e.to_lowercase().contains("not found")
+                                || e.to_lowercase().contains("invalid")
+                                || e.to_lowercase().contains("expired"));
 
-                    // Clear the invalid session ID from storage (atomic update)
-                    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-                        if let Some(session) = sessions.find_session_mut(&session_id) {
-                            session.claude_session_id = None;
+                        if is_session_not_found && claude_session_id_for_call.is_some() {
+                            log::warn!(
+                                "Session not found, clearing stored session ID and retrying: {}",
+                                claude_session_id_for_call.as_deref().unwrap_or("")
+                            );
+
+                            // Clear the invalid session ID from storage (atomic update)
+                            with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+                                if let Some(session) = sessions.find_session_mut(&session_id) {
+                                    session.claude_session_id = None;
+                                }
+                                Ok(())
+                            })?;
+
+                            // Retry without session ID
+                            claude_session_id_for_call = None;
+                            continue;
                         }
-                        Ok(())
-                    })?;
 
-                    // Retry without session ID
-                    claude_session_id_for_call = None;
-                    continue;
+                        log::error!("execute_claude_detached FAILED: {e}");
+                        return Err(e);
+                    }
                 }
-
-                log::error!("execute_claude_detached FAILED: {e}");
-                return Err(e);
             }
         }
     };
@@ -1216,21 +1259,27 @@ pub async fn clear_session_history(
     })
 }
 
-/// Set the selected model for a session
+/// Set the selected model and/or provider for a session
 #[tauri::command]
 pub async fn set_session_model(
     app: AppHandle,
     worktree_id: String,
     worktree_path: String,
     session_id: String,
-    model: String,
+    model: Option<String>,
+    provider: Option<String>,
 ) -> Result<(), String> {
-    log::trace!("Setting model for session {session_id}: {model}");
+    log::trace!("Setting model/provider for session {session_id}: model={model:?}, provider={provider:?}");
 
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
-            session.selected_model = Some(model);
-            log::trace!("Model selection saved");
+            if let Some(m) = model {
+                session.selected_model = Some(m);
+            }
+            if let Some(p) = provider {
+                session.selected_provider = Some(p);
+            }
+            log::trace!("Model/provider selection saved");
             Ok(())
         } else {
             Err(format!("Session not found: {session_id}"))

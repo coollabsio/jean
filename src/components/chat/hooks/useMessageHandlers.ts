@@ -33,6 +33,7 @@ interface SendMessageMutation {
       worktreeId: string
       worktreePath: string
       message: string
+      provider?: string
       model?: string
       executionMode?: ExecutionMode
       thinkingLevel?: ThinkingLevel
@@ -51,6 +52,7 @@ interface UseMessageHandlersParams {
   activeWorktreeIdRef: RefObject<string | null | undefined>
   activeWorktreePathRef: RefObject<string | null | undefined>
   // Refs for settings (stable across re-renders)
+  selectedProviderRef: RefObject<string>
   selectedModelRef: RefObject<string>
   executionModeRef: RefObject<ExecutionMode>
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
@@ -103,6 +105,7 @@ export function useMessageHandlers({
   activeSessionIdRef,
   activeWorktreeIdRef,
   activeWorktreePathRef,
+  selectedProviderRef,
   selectedModelRef,
   executionModeRef,
   selectedThinkingLevelRef,
@@ -158,6 +161,7 @@ export function useMessageHandlers({
           worktreeId,
           worktreePath,
           message,
+          provider: selectedProviderRef.current,
           model: selectedModelRef.current,
           executionMode: executionModeRef.current,
           thinkingLevel: selectedThinkingLevelRef.current,
@@ -234,6 +238,13 @@ export function useMessageHandlers({
       // Mark plan as approved in the message (persisted to disk)
       markPlanApprovedService(worktreeId, worktreePath, sessionId, messageId)
 
+      // Get plan content from the message for Codex
+      const sessionData = queryClient.getQueryData<Session>(
+        chatQueryKeys.session(sessionId)
+      )
+      const message = sessionData?.messages?.find(m => m.id === messageId)
+      const planContent = message?.content ?? ''
+
       // Optimistically update the UI to hide the approve button
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(sessionId),
@@ -269,10 +280,18 @@ export function useMessageHandlers({
       setSessionReviewing(sessionId, false)
       setWaitingForInput(sessionId, false)
 
+      // For Codex, we need to include the plan in the approval message
+      // because Codex doesn't have native plan mode and needs context
+      const provider = selectedProviderRef.current
+      const approvalMessage =
+        provider === 'codex' && planContent
+          ? `Implement the following plan now:\n\n${planContent}`
+          : 'Approved'
+
       // Send approval message to Claude so it continues with execution
       // NOTE: setLastSentMessage is critical for permission denial flow - without it,
       // the denied message context won't be set and approval UI won't work
-      setLastSentMessage(sessionId, 'Approved')
+      setLastSentMessage(sessionId, approvalMessage)
       setError(sessionId, null)
       addSendingSession(sessionId)
       setSelectedModel(sessionId, selectedModelRef.current)
@@ -283,7 +302,8 @@ export function useMessageHandlers({
           sessionId,
           worktreeId,
           worktreePath,
-          message: 'Approved',
+          message: approvalMessage,
+          provider,
           model: selectedModelRef.current,
           executionMode: 'build',
           thinkingLevel: selectedThinkingLevelRef.current,
@@ -300,6 +320,7 @@ export function useMessageHandlers({
       activeSessionIdRef,
       activeWorktreeIdRef,
       activeWorktreePathRef,
+      selectedProviderRef,
       selectedModelRef,
       selectedThinkingLevelRef,
       sendMessage,
@@ -319,6 +340,13 @@ export function useMessageHandlers({
 
       // Mark plan as approved in the message (persisted to disk)
       markPlanApprovedService(worktreeId, worktreePath, sessionId, messageId)
+
+      // Get plan content from the message for Codex
+      const sessionData = queryClient.getQueryData<Session>(
+        chatQueryKeys.session(sessionId)
+      )
+      const message = sessionData?.messages?.find(m => m.id === messageId)
+      const planContent = message?.content ?? ''
 
       // Optimistically update the UI to hide the approve button
       queryClient.setQueryData<Session>(
@@ -355,8 +383,16 @@ export function useMessageHandlers({
       setSessionReviewing(sessionId, false)
       setWaitingForInput(sessionId, false)
 
+      // For Codex, we need to include the plan in the approval message
+      // because Codex doesn't have native plan mode and needs context
+      const provider = selectedProviderRef.current
+      const approvalMessage =
+        provider === 'codex' && planContent
+          ? `Implement the following plan now (auto-approve all actions):\n\n${planContent}`
+          : 'Approved - yolo'
+
       // Send approval message to Claude so it continues with execution
-      setLastSentMessage(sessionId, 'Approved - yolo')
+      setLastSentMessage(sessionId, approvalMessage)
       setError(sessionId, null)
       addSendingSession(sessionId)
       setSelectedModel(sessionId, selectedModelRef.current)
@@ -367,7 +403,8 @@ export function useMessageHandlers({
           sessionId,
           worktreeId,
           worktreePath,
-          message: 'Approved - yolo',
+          message: approvalMessage,
+          provider,
           model: selectedModelRef.current,
           executionMode: 'yolo',
           thinkingLevel: selectedThinkingLevelRef.current,
@@ -384,6 +421,7 @@ export function useMessageHandlers({
       activeSessionIdRef,
       activeWorktreeIdRef,
       activeWorktreePathRef,
+      selectedProviderRef,
       selectedModelRef,
       selectedThinkingLevelRef,
       sendMessage,
@@ -420,6 +458,7 @@ export function useMessageHandlers({
       setWaitingForInput,
       clearToolCalls,
       clearStreamingContentBlocks,
+      streamingContents,
     } = useChatStore.getState()
     setStreamingPlanApproved(sessionId, true)
 
@@ -433,10 +472,19 @@ export function useMessageHandlers({
     setMode(sessionId, 'build')
     setSelectedModel(sessionId, selectedModelRef.current)
 
+    // For Codex, we need to include the plan in the approval message
+    // because Codex doesn't have native plan mode and needs context
+    const provider = selectedProviderRef.current
+    const planContent = streamingContents[sessionId] ?? ''
+    const approvalMessage =
+      provider === 'codex' && planContent
+        ? `Implement the following plan now:\n\n${planContent}`
+        : 'Approved'
+
     // Send approval message to Claude so it continues with execution
     // NOTE: setLastSentMessage is critical for permission denial flow - without it,
     // the denied message context won't be set and approval UI won't work
-    setLastSentMessage(sessionId, 'Approved')
+    setLastSentMessage(sessionId, approvalMessage)
     setError(sessionId, null)
     addSendingSession(sessionId)
     setExecutingMode(sessionId, 'build')
@@ -446,7 +494,8 @@ export function useMessageHandlers({
         sessionId,
         worktreeId,
         worktreePath,
-        message: 'Approved',
+        message: approvalMessage,
+        provider,
         model: selectedModelRef.current,
         executionMode: 'build',
         thinkingLevel: selectedThinkingLevelRef.current,
@@ -462,6 +511,7 @@ export function useMessageHandlers({
     activeSessionIdRef,
     activeWorktreeIdRef,
     activeWorktreePathRef,
+    selectedProviderRef,
     selectedModelRef,
     selectedThinkingLevelRef,
     sendMessage,
@@ -489,6 +539,7 @@ export function useMessageHandlers({
       setWaitingForInput,
       clearToolCalls,
       clearStreamingContentBlocks,
+      streamingContents,
     } = useChatStore.getState()
     setStreamingPlanApproved(sessionId, true)
 
@@ -502,8 +553,17 @@ export function useMessageHandlers({
     setMode(sessionId, 'yolo')
     setSelectedModel(sessionId, selectedModelRef.current)
 
+    // For Codex, we need to include the plan in the approval message
+    // because Codex doesn't have native plan mode and needs context
+    const provider = selectedProviderRef.current
+    const planContent = streamingContents[sessionId] ?? ''
+    const approvalMessage =
+      provider === 'codex' && planContent
+        ? `Implement the following plan now (auto-approve all actions):\n\n${planContent}`
+        : 'Approved - yolo'
+
     // Send approval message to Claude so it continues with execution
-    setLastSentMessage(sessionId, 'Approved - yolo')
+    setLastSentMessage(sessionId, approvalMessage)
     setError(sessionId, null)
     addSendingSession(sessionId)
     setExecutingMode(sessionId, 'yolo')
@@ -513,7 +573,8 @@ export function useMessageHandlers({
         sessionId,
         worktreeId,
         worktreePath,
-        message: 'Approved - yolo',
+        message: approvalMessage,
+        provider,
         model: selectedModelRef.current,
         executionMode: 'yolo',
         thinkingLevel: selectedThinkingLevelRef.current,
@@ -529,6 +590,7 @@ export function useMessageHandlers({
     activeSessionIdRef,
     activeWorktreeIdRef,
     activeWorktreePathRef,
+    selectedProviderRef,
     selectedModelRef,
     selectedThinkingLevelRef,
     sendMessage,
@@ -625,6 +687,7 @@ export function useMessageHandlers({
           worktreeId,
           worktreePath,
           message: continuationMessage,
+          provider: selectedProviderRef.current,
           model: modelToUse,
           executionMode: modeToUse,
           thinkingLevel:
@@ -738,6 +801,7 @@ export function useMessageHandlers({
           worktreeId,
           worktreePath,
           message: continuationMessage,
+          provider: selectedProviderRef.current,
           model: modelToUse,
           executionMode: 'yolo',
           thinkingLevel:

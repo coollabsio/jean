@@ -387,6 +387,7 @@ pub fn load_sessions(
                 messages: vec![],
                 message_count: Some(entry.message_count),
                 claude_session_id: None,
+                selected_provider: None,
                 selected_model: None,
                 selected_thinking_level: None,
                 session_naming_completed: false,

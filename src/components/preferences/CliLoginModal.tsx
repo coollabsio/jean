@@ -38,7 +38,7 @@ export function CliLoginModal() {
 }
 
 interface CliLoginModalContentProps {
-  cliType: 'claude' | 'gh' | null
+  cliType: 'claude' | 'gh' | 'glab' | null
   command: string
   onClose: () => void
 }
@@ -46,7 +46,7 @@ interface CliLoginModalContentProps {
 function CliLoginModalContent({ cliType, command, onClose }: CliLoginModalContentProps) {
   const initialized = useRef(false)
   const observerRef = useRef<ResizeObserver | null>(null)
-  const cliName = cliType === 'claude' ? 'Claude CLI' : 'GitHub CLI'
+  const cliName = cliType === 'claude' ? 'Claude CLI' : cliType === 'glab' ? 'GitLab CLI' : 'GitHub CLI'
 
   // Generate unique terminal ID for this login session
   const terminalId = useMemo(() => {

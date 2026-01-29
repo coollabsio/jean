@@ -1,0 +1,84 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jean",
+  "version": "0.1.0",
+  "identifier": "com.jean.desktop",
+  "build": {
+    "removeUnusedCommands": true,
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Jean",
+        "width": 800,
+        "height": 600,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "maximized": false,
+        "center": true,
+        "decorations": false,
+        "alwaysOnTop": false,
+        "transparent": true,
+        "shadow": true,
+        "dragDropEnabled": true,
+        "windowEffects": {
+          "effects": ["hudWindow"],
+          "radius": 12.0,
+          "state": "active"
+        }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": ["**/.jean/images/**", "$APPDATA/**"],
+          "requireLiteralLeadingDot": false
+        }
+      }
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "createUpdaterArtifacts": true,
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Andras Bacsai",
+    "category": "DeveloperTool",
+    "shortDescription": "Jean - AI Assistant",
+    "longDescription": "Jean is an AI assistant application built with Tauri, React, and TypeScript.",
+    "copyright": "Copyright © 2025 Andras Bacsai. All rights reserved.",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": null,
+      "providerShortName": "8D3F6CQFS8",
+      "entitlements": null,
+      "exceptionDomain": ""
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/coollabsio/jean/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyNzkyNTI0QUFENzA3MUYKUldRZkI5ZXFKQ1Y1WWdod05PSjhkcUVBUnNyOWJTcEpVazBRN01SUndya2JQcTdNeUxrS0pFY3QK"
+    }
+  }
+}

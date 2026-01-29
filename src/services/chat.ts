@@ -1047,6 +1047,7 @@ export function useSendMessage() {
       worktreePath,
       message,
       model,
+      provider,
       executionMode,
       thinkingLevel,
       disableThinkingForMode,
@@ -1059,6 +1060,7 @@ export function useSendMessage() {
       worktreePath: string
       message: string
       model?: string
+      provider?: string
       executionMode?: ExecutionMode
       thinkingLevel?: ThinkingLevel
       disableThinkingForMode?: boolean
@@ -1070,9 +1072,13 @@ export function useSendMessage() {
         throw new Error('Not in Tauri context')
       }
 
+      logger.info('=== FRONTEND CHAT DEBUG ===')
+      logger.info('Provider being sent:', provider)
+      logger.info('Model being sent:', model)
       logger.debug('Sending chat message', {
         sessionId,
         worktreeId,
+        provider,
         model,
         executionMode,
         thinkingLevel,
@@ -1087,6 +1093,7 @@ export function useSendMessage() {
         worktreePath,
         message,
         model,
+        provider,
         executionMode,
         thinkingLevel,
         disableThinkingForMode,
@@ -1337,7 +1344,7 @@ export function useClearChatHistory() {
 }
 
 /**
- * Hook to set the selected model for a session
+ * Hook to set the selected model and/or provider for a session
  */
 export function useSetSessionModel() {
   const queryClient = useQueryClient()
@@ -1348,24 +1355,27 @@ export function useSetSessionModel() {
       worktreePath,
       sessionId,
       model,
+      provider,
     }: {
       worktreeId: string
       worktreePath: string
       sessionId: string
-      model: string
+      model?: string
+      provider?: string
     }): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
-      logger.debug('Setting session model', { sessionId, model })
+      logger.debug('Setting session model/provider', { sessionId, model, provider })
       await invoke('set_session_model', {
         worktreeId,
         worktreePath,
         sessionId,
         model,
+        provider,
       })
-      logger.info('Session model saved')
+      logger.info('Session model/provider saved')
     },
     onSuccess: (_, { sessionId, worktreeId }) => {
       queryClient.invalidateQueries({
@@ -1378,7 +1388,7 @@ export function useSetSessionModel() {
     onError: error => {
       const message =
         error instanceof Error ? error.message : 'Unknown error occurred'
-      logger.error('Failed to save model selection', { error })
+      logger.error('Failed to save model/provider selection', { error })
       toast.error('Failed to save model', { description: message })
     },
   })

@@ -202,6 +202,136 @@ pub fn get_github_url(repo_path: &str) -> Result<String, String> {
     Ok(github_url)
 }
 
+/// Git hosting provider
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GitProvider {
+    GitHub,
+    GitLab,
+    Unknown,
+}
+
+/// Get the remote URL for a repository
+pub fn get_remote_url(repo_path: &str) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to get remote URL: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to get remote URL: {stderr}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Detect the git hosting provider from the remote URL
+pub fn detect_git_provider(repo_path: &str) -> Result<GitProvider, String> {
+    let remote_url = get_remote_url(repo_path)?;
+
+    if remote_url.contains("github.com") {
+        Ok(GitProvider::GitHub)
+    } else if remote_url.contains("gitlab.com") || remote_url.contains("gitlab.") {
+        Ok(GitProvider::GitLab)
+    } else {
+        // Check for .gitlab-ci.yml as a fallback for self-hosted GitLab
+        let gitlab_ci_path = Path::new(repo_path).join(".gitlab-ci.yml");
+        if gitlab_ci_path.exists() {
+            return Ok(GitProvider::GitLab);
+        }
+        Ok(GitProvider::Unknown)
+    }
+}
+
+/// Get the GitLab URL for a repository's remote
+///
+/// Supports both SSH and HTTPS URLs.
+/// - git@gitlab.com:user/repo.git -> https://gitlab.com/user/repo
+/// - https://gitlab.com/user/repo.git -> https://gitlab.com/user/repo
+pub fn get_gitlab_url(repo_path: &str) -> Result<String, String> {
+    let remote_url = get_remote_url(repo_path)?;
+
+    // Convert SSH URL to HTTPS URL if needed
+    let gitlab_url = if remote_url.starts_with("git@gitlab.com:") {
+        remote_url
+            .replace("git@gitlab.com:", "https://gitlab.com/")
+            .trim_end_matches(".git")
+            .to_string()
+    } else if remote_url.starts_with("https://gitlab.com/") {
+        remote_url.trim_end_matches(".git").to_string()
+    } else if remote_url.contains("gitlab") {
+        // Handle self-hosted GitLab instances
+        // Pattern: git@gitlab.example.com:user/repo.git or https://gitlab.example.com/user/repo.git
+        if remote_url.starts_with("git@") {
+            // git@gitlab.example.com:user/repo.git -> https://gitlab.example.com/user/repo
+            let without_git = remote_url.trim_start_matches("git@");
+            let parts: Vec<&str> = without_git.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                format!(
+                    "https://{}/{}",
+                    parts[0],
+                    parts[1].trim_end_matches(".git")
+                )
+            } else {
+                return Err(format!("Invalid GitLab SSH URL format: {remote_url}"));
+            }
+        } else if remote_url.starts_with("https://") {
+            remote_url.trim_end_matches(".git").to_string()
+        } else {
+            return Err(format!(
+                "Remote URL is not a GitLab repository: {remote_url}"
+            ));
+        }
+    } else {
+        return Err(format!(
+            "Remote URL is not a GitLab repository: {remote_url}"
+        ));
+    };
+
+    Ok(gitlab_url)
+}
+
+/// Extract repository path from a GitLab repository's remote
+///
+/// Returns the project path (e.g., "user/repo" or "group/subgroup/repo")
+pub fn get_gitlab_repo_identifier(repo_path: &str) -> Result<RepoIdentifier, String> {
+    let gitlab_url = get_gitlab_url(repo_path)?;
+
+    // Parse project path from URL: https://gitlab.com/owner/repo or https://gitlab.com/group/subgroup/repo
+    // We treat it as owner/repo for simplicity (owner = first part, repo = rest joined)
+    let url_without_prefix = if gitlab_url.starts_with("https://gitlab.com/") {
+        gitlab_url.strip_prefix("https://gitlab.com/").unwrap()
+    } else {
+        // Self-hosted: https://gitlab.example.com/owner/repo
+        // Find the path after the host
+        gitlab_url
+            .split("//")
+            .nth(1)
+            .and_then(|s| s.split_once('/'))
+            .map(|(_, path)| path)
+            .ok_or_else(|| format!("Could not parse GitLab URL: {gitlab_url}"))?
+    };
+
+    let parts: Vec<&str> = url_without_prefix.split('/').collect();
+    if parts.len() < 2 {
+        return Err(format!(
+            "Could not parse owner/repo from GitLab URL: {gitlab_url}"
+        ));
+    }
+
+    // For nested groups, combine all parts except the last as "owner"
+    let owner = if parts.len() > 2 {
+        parts[..parts.len() - 1].join("-")
+    } else {
+        parts[0].to_string()
+    };
+    let repo = parts.last().unwrap().to_string();
+
+    Ok(RepoIdentifier { owner, repo })
+}
+
 /// Get the current branch name (HEAD) for a repository
 pub fn get_current_branch(repo_path: &str) -> Result<String, String> {
     let output = Command::new("git")
@@ -1020,6 +1150,178 @@ pub fn open_pull_request(
     log::trace!("Successfully created pull request: {stdout}");
 
     Ok(stdout)
+}
+
+// =============================================================================
+// GitLab Merge Request Operations
+// =============================================================================
+
+/// Returns platform-specific installation instructions for GitLab CLI
+fn get_glab_install_hint() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Install it with: brew install glab"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Install it with: winget install GitLab.GLab"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "Install it from: https://gitlab.com/gitlab-org/cli/-/releases"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "Install GitLab CLI from: https://gitlab.com/gitlab-org/cli"
+    }
+}
+
+/// Open a merge request using the GitLab CLI (glab)
+///
+/// # Arguments
+/// * `repo_path` - Path to the repository
+/// * `title` - Optional MR title (if None, glab will use default)
+/// * `body` - Optional MR body/description
+/// * `draft` - Whether to create as draft MR
+///
+/// Returns the MR URL on success
+pub fn open_merge_request(
+    repo_path: &str,
+    title: Option<&str>,
+    body: Option<&str>,
+    draft: bool,
+) -> Result<String, String> {
+    log::trace!("Opening merge request from {repo_path}");
+
+    // First check if glab is installed
+    let glab_check = Command::new("glab")
+        .args(["--version"])
+        .output()
+        .map_err(|_| {
+            format!(
+                "GitLab CLI (glab) is not installed. {}",
+                get_glab_install_hint()
+            )
+        })?;
+
+    if !glab_check.status.success() {
+        return Err(format!(
+            "GitLab CLI (glab) is not installed. {}",
+            get_glab_install_hint()
+        ));
+    }
+
+    // Check if user is authenticated
+    let auth_check = Command::new("glab")
+        .args(["auth", "status"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to check glab auth status: {e}"))?;
+
+    if !auth_check.status.success() {
+        return Err("Not authenticated with GitLab. Run: glab auth login".to_string());
+    }
+
+    // Push current branch to remote first
+    log::trace!("Pushing current branch to remote...");
+    let push_output = Command::new("git")
+        .args(["push", "-u", "origin", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to push to remote: {e}"))?;
+
+    if !push_output.status.success() {
+        let stderr = String::from_utf8_lossy(&push_output.stderr);
+        // Don't fail if the branch is already up to date or already pushed
+        if !stderr.contains("Everything up-to-date") && !stderr.contains("set up to track") {
+            log::warn!("Push warning: {stderr}");
+        }
+    }
+    log::trace!("Push completed");
+
+    // Build the glab mr create command
+    let mut args = vec!["mr", "create", "--fill"];
+
+    if let Some(t) = title {
+        args.push("--title");
+        args.push(t);
+    }
+
+    if let Some(b) = body {
+        args.push("--description");
+        args.push(b);
+    }
+
+    if draft {
+        args.push("--draft");
+    }
+
+    // Add --web to open in browser after creation
+    args.push("--web");
+
+    log::trace!("Running glab command with args: {:?}", args);
+
+    let output = Command::new("glab")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run glab mr create: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Check for common errors
+        if stderr.contains("already exists") {
+            return Err("A merge request for this branch already exists".to_string());
+        }
+        if stderr.contains("no commits") || stderr.contains("nothing to compare") {
+            return Err("No commits to create a merge request. Make sure you have commits that differ from the target branch.".to_string());
+        }
+        return Err(format!("Failed to create merge request: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::trace!("Successfully created merge request: {stdout}");
+
+    Ok(stdout)
+}
+
+/// Checkout a MR using glab CLI in the specified directory
+///
+/// Uses `glab mr checkout <number>` which properly handles:
+/// - Fetching the MR branch from forks
+/// - Setting up proper tracking
+/// - Checking out the actual MR branch
+///
+/// # Arguments
+/// * `worktree_path` - Path to the worktree where to checkout the MR
+/// * `mr_iid` - The MR IID (internal ID) to checkout
+pub fn glab_mr_checkout(worktree_path: &str, mr_iid: u32) -> Result<String, String> {
+    log::trace!("Running glab mr checkout {mr_iid} in {worktree_path}");
+
+    let output = Command::new("glab")
+        .args(["mr", "checkout", &mr_iid.to_string()])
+        .current_dir(worktree_path)
+        .output()
+        .map_err(|e| format!("Failed to run glab mr checkout: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to checkout MR !{mr_iid}: {stderr}"));
+    }
+
+    // Get the current branch name after checkout
+    let branch_output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(worktree_path)
+        .output()
+        .map_err(|e| format!("Failed to get branch name: {e}"))?;
+
+    let branch_name = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+
+    log::trace!("Successfully checked out MR !{mr_iid} to branch {branch_name}");
+    Ok(branch_name)
 }
 
 // =============================================================================

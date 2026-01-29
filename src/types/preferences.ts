@@ -266,6 +266,8 @@ export interface AppPreferences {
   allow_web_tools_in_plan_mode: boolean // Allow WebFetch/WebSearch in plan mode without prompts
   waiting_sound: NotificationSound // Sound when session is waiting for input
   review_sound: NotificationSound // Sound when session finishes reviewing
+  workspace_folder: string // Base folder for worktrees (empty = default ~/jean/)
+  default_ai_provider: AiCliProvider // Default AI CLI provider
 }
 
 export type FileEditMode = 'inline' | 'external'
@@ -275,12 +277,74 @@ export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
   { value: 'external', label: 'External editor' },
 ]
 
+// =============================================================================
+// AI Model Types - Per Provider
+// =============================================================================
+
 export type ClaudeModel = 'opus' | 'sonnet' | 'haiku'
 
-export const modelOptions: { value: ClaudeModel; label: string }[] = [
+export const claudeModelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'opus', label: 'Claude Opus' },
   { value: 'sonnet', label: 'Claude Sonnet' },
   { value: 'haiku', label: 'Claude Haiku' },
+]
+
+// Legacy alias for backwards compatibility
+export const modelOptions = claudeModelOptions
+
+export type GeminiModel =
+  | 'gemini-3-flash-preview'
+  | 'gemini-3-pro-preview'
+
+export const geminiModelOptions: { value: GeminiModel; label: string }[] = [
+  { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+  { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
+]
+
+export type CodexModel = 'gpt-5.2-codex'
+
+export const codexModelOptions: { value: CodexModel; label: string }[] = [
+  { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
+]
+
+// Union type for all models across providers
+export type AiModel = ClaudeModel | GeminiModel | CodexModel
+
+// Helper to get model options for a provider
+export function getModelOptionsForProvider(provider: AiCliProvider): { value: string; label: string }[] {
+  switch (provider) {
+    case 'claude':
+      return claudeModelOptions
+    case 'gemini':
+      return geminiModelOptions
+    case 'codex':
+      return codexModelOptions
+    default:
+      return claudeModelOptions
+  }
+}
+
+// Helper to get default model for a provider
+export function getDefaultModelForProvider(provider: AiCliProvider): string {
+  switch (provider) {
+    case 'claude':
+      return 'opus'
+    case 'gemini':
+      return 'gemini-3-flash-preview'
+    case 'codex':
+      return 'gpt-5.2-codex'
+    default:
+      return 'opus'
+  }
+}
+
+// AI CLI Provider types
+export type AiCliProvider = 'claude' | 'gemini' | 'codex'
+
+export const aiProviderOptions: { value: AiCliProvider; label: string; description: string }[] = [
+  { value: 'claude', label: 'Anthropic', description: 'Claude Code CLI' },
+  { value: 'gemini', label: 'Google', description: 'Gemini CLI' },
+  { value: 'codex', label: 'OpenAI', description: 'OpenAI Codex CLI' },
 ]
 
 export const thinkingLevelOptions: { value: ThinkingLevel; label: string }[] = [
@@ -461,4 +525,6 @@ export const defaultPreferences: AppPreferences = {
   allow_web_tools_in_plan_mode: true, // Default: enabled
   waiting_sound: 'none',
   review_sound: 'none',
+  workspace_folder: '', // Default: empty means ~/jean/
+  default_ai_provider: 'claude', // Default: Claude
 }

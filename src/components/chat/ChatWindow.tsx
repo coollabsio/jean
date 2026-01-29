@@ -33,15 +33,23 @@ import {
   cancelChatMessage,
 } from '@/services/chat'
 import { useWorktree, useProjects, useRunScript } from '@/services/projects'
-import { githubQueryKeys, useLoadedIssueContexts, useLoadedPRContexts, useAttachedSavedContexts } from '@/services/github'
-import type { LoadedIssueContext, LoadedPullRequestContext } from '@/types/github'
+import {
+  githubQueryKeys,
+  useLoadedIssueContexts,
+  useLoadedPRContexts,
+  useAttachedSavedContexts,
+} from '@/services/github'
+import type {
+  LoadedIssueContext,
+  LoadedPullRequestContext,
+} from '@/types/github'
 import {
   useChatStore,
-  DEFAULT_MODEL,
   DEFAULT_THINKING_LEVEL,
-  type ClaudeModel,
 } from '@/store/chat-store'
 import { usePreferences } from '@/services/preferences'
+import type { AiCliProvider } from '@/types/preferences'
+import { getDefaultModelForProvider } from '@/types/preferences'
 import type {
   ToolCall,
   ThinkingLevel,
@@ -101,7 +109,10 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { useScrollManagement } from './hooks/useScrollManagement'
 import { useGitOperations } from './hooks/useGitOperations'
 import { useContextOperations } from './hooks/useContextOperations'
-import { useMessageHandlers, GIT_ALLOWED_TOOLS } from './hooks/useMessageHandlers'
+import {
+  useMessageHandlers,
+  GIT_ALLOWED_TOOLS,
+} from './hooks/useMessageHandlers'
 import { useMagicCommands } from './hooks/useMagicCommands'
 import { useDragAndDropImages } from './hooks/useDragAndDropImages'
 
@@ -160,13 +171,17 @@ export function ChatWindow() {
   )
   // Manual thinking override per session (user changed thinking while in build/yolo)
   const hasManualThinkingOverride = useChatStore(state =>
-    activeSessionId ? (state.manualThinkingOverrides[activeSessionId] ?? false) : false
+    activeSessionId
+      ? (state.manualThinkingOverrides[activeSessionId] ?? false)
+      : false
   )
 
   // Terminal panel visibility (per-worktree)
   const terminalVisible = useTerminalStore(state => state.terminalVisible)
   const terminalPanelOpen = useTerminalStore(state =>
-    activeWorktreeId ? (state.terminalPanelOpen[activeWorktreeId] ?? false) : false
+    activeWorktreeId
+      ? (state.terminalPanelOpen[activeWorktreeId] ?? false)
+      : false
   )
   const { setTerminalVisible } = useTerminalStore.getState()
 
@@ -283,7 +298,9 @@ export function ChatWindow() {
   )
 
   // Loaded PR contexts for indicator and investigate PR functionality
-  const { data: loadedPRContexts } = useLoadedPRContexts(activeWorktreeId ?? null)
+  const { data: loadedPRContexts } = useLoadedPRContexts(
+    activeWorktreeId ?? null
+  )
 
   // Emit readiness event for auto-investigate coordination
   // When a worktree is marked for auto-investigate, projects.ts waits for this event
@@ -292,34 +309,43 @@ export function ChatWindow() {
     if (!activeWorktreeId || !activeSessionId) return
 
     // Check if this worktree was marked for auto-investigate
-    const { autoInvestigateWorktreeIds, autoInvestigatePRWorktreeIds } = useUIStore.getState()
-    const shouldInvestigateIssue = autoInvestigateWorktreeIds.has(activeWorktreeId)
-    const shouldInvestigatePR = autoInvestigatePRWorktreeIds.has(activeWorktreeId)
+    const { autoInvestigateWorktreeIds, autoInvestigatePRWorktreeIds } =
+      useUIStore.getState()
+    const shouldInvestigateIssue =
+      autoInvestigateWorktreeIds.has(activeWorktreeId)
+    const shouldInvestigatePR =
+      autoInvestigatePRWorktreeIds.has(activeWorktreeId)
 
     if (!shouldInvestigateIssue && !shouldInvestigatePR) return
 
     // Wait for contexts to be loaded
-    const hasIssueContexts = shouldInvestigateIssue && loadedIssueContexts && loadedIssueContexts.length > 0
-    const hasPRContexts = shouldInvestigatePR && loadedPRContexts && loadedPRContexts.length > 0
+    const hasIssueContexts =
+      shouldInvestigateIssue &&
+      loadedIssueContexts &&
+      loadedIssueContexts.length > 0
+    const hasPRContexts =
+      shouldInvestigatePR && loadedPRContexts && loadedPRContexts.length > 0
 
     if (hasIssueContexts) {
       window.dispatchEvent(
         new CustomEvent('chat-ready-for-investigate', {
-          detail: { worktreeId: activeWorktreeId, type: 'issue' }
+          detail: { worktreeId: activeWorktreeId, type: 'issue' },
         })
       )
     }
     if (hasPRContexts) {
       window.dispatchEvent(
         new CustomEvent('chat-ready-for-investigate', {
-          detail: { worktreeId: activeWorktreeId, type: 'pr' }
+          detail: { worktreeId: activeWorktreeId, type: 'pr' },
         })
       )
     }
   }, [activeWorktreeId, activeSessionId, loadedIssueContexts, loadedPRContexts])
 
   // Attached saved contexts for indicator
-  const { data: attachedSavedContexts } = useAttachedSavedContexts(activeWorktreeId ?? null)
+  const { data: attachedSavedContexts } = useAttachedSavedContexts(
+    activeWorktreeId ?? null
+  )
   // Use live status if available, otherwise fall back to cached
   const behindCount =
     gitStatus?.behind_count ?? worktree?.cached_behind_count ?? 0
@@ -351,10 +377,40 @@ export function ChatWindow() {
   // Run script for this worktree (used by CMD+R keybinding)
   const { data: runScript } = useRunScript(activeWorktreePath ?? null)
 
-  // Per-session model selection, falls back to preferences default
-  const defaultModel =
-    (preferences?.selected_model as ClaudeModel) ?? DEFAULT_MODEL
-  const selectedModel = (session?.selected_model as ClaudeModel) ?? defaultModel
+  // Per-session provider selection, falls back to preferences default
+  const defaultProvider: AiCliProvider =
+    (preferences?.default_ai_provider as AiCliProvider) ?? 'claude'
+  const sessionProvider: AiCliProvider =
+    (session?.selected_provider as AiCliProvider) ?? defaultProvider
+
+  // Per-session model selection, falls back to default for current provider
+  const defaultModelForSession = getDefaultModelForProvider(sessionProvider)
+  const sessionModel = (session?.selected_model as string) ?? defaultModelForSession
+
+  // Local state for immediate UI updates when user changes provider/model
+  // This avoids showing stale values while waiting for session mutation to complete
+  const [displayProvider, setDisplayProvider] = useState<AiCliProvider>(sessionProvider)
+  const [displayModel, setDisplayModel] = useState<string>(sessionModel)
+
+  // Sync display state ONLY when session ID changes (switching chats)
+  // We intentionally DON'T include sessionProvider/sessionModel in deps because:
+  // 1. User changes provider via dropdown -> setDisplayProvider/setDisplayModel called immediately
+  // 2. Mutation saves to backend -> query invalidated -> sessionProvider/sessionModel update
+  // 3. If we synced here, we'd overwrite display state with potentially stale/partial data
+  // The display state is the source of truth for UI; session data is for persistence
+  const prevSessionIdRef = useRef(activeSessionId)
+  useEffect(() => {
+    // Only sync when switching to a DIFFERENT session
+    if (prevSessionIdRef.current !== activeSessionId) {
+      prevSessionIdRef.current = activeSessionId
+      setDisplayProvider(sessionProvider)
+      setDisplayModel(sessionModel)
+    }
+  }, [activeSessionId, sessionProvider, sessionModel])
+
+  // Use display values for UI, refs for sending messages
+  const selectedProvider = displayProvider
+  const selectedModel = displayModel
 
   // Per-session thinking level, falls back to preferences default
   const defaultThinkingLevel =
@@ -499,6 +555,7 @@ export function ChatWindow() {
   const activeSessionIdRef = useRef(activeSessionId)
   const activeWorktreeIdRef = useRef(activeWorktreeId)
   const activeWorktreePathRef = useRef(activeWorktreePath)
+  const selectedProviderRef = useRef(selectedProvider)
   const selectedModelRef = useRef(selectedModel)
   const selectedThinkingLevelRef = useRef(selectedThinkingLevel)
   const executionModeRef = useRef(executionMode)
@@ -507,9 +564,26 @@ export function ChatWindow() {
   activeSessionIdRef.current = activeSessionId
   activeWorktreeIdRef.current = activeWorktreeId
   activeWorktreePathRef.current = activeWorktreePath
-  selectedModelRef.current = selectedModel
+  // NOTE: Provider/model refs are NOT synced here on every render because:
+  // 1. User clicks dropdown to change provider -> handleToolbarProviderChange updates ref
+  // 2. Mutation starts -> triggers re-render
+  // 3. If we sync ref here, it would overwrite with old session data (not updated yet)
+  // 4. User sends message -> would use old provider instead of the one they just selected
+  // Instead, refs are ONLY updated in the change handlers and when session ID changes (see useEffect below)
   selectedThinkingLevelRef.current = selectedThinkingLevel
   executionModeRef.current = executionMode
+
+  // Sync provider/model refs ONLY when session ID changes (switching chats)
+  // This ensures we load the stored preferences for the new session
+  // We intentionally don't include selectedProvider/selectedModel in deps because:
+  // - They change AFTER the mutation completes
+  // - But the refs were already set by the change handlers BEFORE the mutation
+  // - If we sync here on every provider/model change, we'd overwrite with stale session data
+  useEffect(() => {
+    selectedProviderRef.current = selectedProvider
+    selectedModelRef.current = selectedModel
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId])
 
   // Ref for approve button (passed to VirtualizedMessageList)
   const approveButtonRef = useRef<HTMLButtonElement>(null)
@@ -716,7 +790,10 @@ export function ChatWindow() {
 
     window.addEventListener('toggle-workspace-run', handleToggleWorkspaceRun)
     return () =>
-      window.removeEventListener('toggle-workspace-run', handleToggleWorkspaceRun)
+      window.removeEventListener(
+        'toggle-workspace-run',
+        handleToggleWorkspaceRun
+      )
   }, [activeWorktreeId, runScript])
 
   // Global Cmd+Option+Backspace (Mac) / Ctrl+Alt+Backspace (Windows/Linux) listener for cancellation
@@ -744,43 +821,58 @@ export function ChatWindow() {
   // This ensures they stay active even when ChatWindow is unmounted (e.g., session board view)
 
   // Helper to build full message with attachment references for backend
-  const buildMessageWithRefs = useCallback((queuedMsg: QueuedMessage): string => {
-    let message = queuedMsg.message
+  const buildMessageWithRefs = useCallback(
+    (queuedMsg: QueuedMessage): string => {
+      let message = queuedMsg.message
 
-    // Add file references (from @ mentions)
-    if (queuedMsg.pendingFiles.length > 0) {
-      const fileRefs = queuedMsg.pendingFiles
-        .map(f => `[File: ${f.relativePath} - Use the Read tool to view this file]`)
-        .join('\n')
-      message = message ? `${message}\n\n${fileRefs}` : fileRefs
-    }
+      // Add file references (from @ mentions)
+      if (queuedMsg.pendingFiles.length > 0) {
+        const fileRefs = queuedMsg.pendingFiles
+          .map(
+            f =>
+              `[File: ${f.relativePath} - Use the Read tool to view this file]`
+          )
+          .join('\n')
+        message = message ? `${message}\n\n${fileRefs}` : fileRefs
+      }
 
-    // Add skill references (from / mentions)
-    if (queuedMsg.pendingSkills.length > 0) {
-      const skillRefs = queuedMsg.pendingSkills
-        .map(s => `[Skill: ${s.path} - Read and use this skill to guide your response]`)
-        .join('\n')
-      message = message ? `${message}\n\n${skillRefs}` : skillRefs
-    }
+      // Add skill references (from / mentions)
+      if (queuedMsg.pendingSkills.length > 0) {
+        const skillRefs = queuedMsg.pendingSkills
+          .map(
+            s =>
+              `[Skill: ${s.path} - Read and use this skill to guide your response]`
+          )
+          .join('\n')
+        message = message ? `${message}\n\n${skillRefs}` : skillRefs
+      }
 
-    // Add image references
-    if (queuedMsg.pendingImages.length > 0) {
-      const imageRefs = queuedMsg.pendingImages
-        .map(img => `[Image attached: ${img.path} - Use the Read tool to view this image]`)
-        .join('\n')
-      message = message ? `${message}\n\n${imageRefs}` : imageRefs
-    }
+      // Add image references
+      if (queuedMsg.pendingImages.length > 0) {
+        const imageRefs = queuedMsg.pendingImages
+          .map(
+            img =>
+              `[Image attached: ${img.path} - Use the Read tool to view this image]`
+          )
+          .join('\n')
+        message = message ? `${message}\n\n${imageRefs}` : imageRefs
+      }
 
-    // Add text file references
-    if (queuedMsg.pendingTextFiles.length > 0) {
-      const textFileRefs = queuedMsg.pendingTextFiles
-        .map(tf => `[Text file attached: ${tf.path} - Use the Read tool to view this file]`)
-        .join('\n')
-      message = message ? `${message}\n\n${textFileRefs}` : textFileRefs
-    }
+      // Add text file references
+      if (queuedMsg.pendingTextFiles.length > 0) {
+        const textFileRefs = queuedMsg.pendingTextFiles
+          .map(
+            tf =>
+              `[Text file attached: ${tf.path} - Use the Read tool to view this file]`
+          )
+          .join('\n')
+        message = message ? `${message}\n\n${textFileRefs}` : textFileRefs
+      }
 
-    return message
-  }, [])
+      return message
+    },
+    []
+  )
 
   // Helper to send a queued message immediately
   const sendMessageNow = useCallback(
@@ -841,6 +933,7 @@ export function ChatWindow() {
           worktreeId: activeWorktreeId,
           worktreePath: activeWorktreePath,
           message: fullMessage,
+          provider: queuedMsg.provider,
           model: queuedMsg.model,
           executionMode: queuedMsg.executionMode,
           thinkingLevel: queuedMsg.thinkingLevel,
@@ -857,7 +950,16 @@ export function ChatWindow() {
         }
       )
     },
-    [activeSessionId, activeWorktreeId, activeWorktreePath, buildMessageWithRefs, sendMessage, preferences?.parallel_execution_prompt_enabled, preferences?.ai_language, preferences?.allow_web_tools_in_plan_mode]
+    [
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      buildMessageWithRefs,
+      sendMessage,
+      preferences?.parallel_execution_prompt_enabled,
+      preferences?.ai_language,
+      preferences?.allow_web_tools_in_plan_mode,
+    ]
   )
 
   // GitDiffModal handlers - extracted for performance (prevents child re-renders)
@@ -867,7 +969,10 @@ export function ChatWindow() {
         const { inputDrafts } = useChatStore.getState()
         const currentInput = inputDrafts[activeSessionId] ?? ''
         const separator = currentInput.length > 0 ? '\n' : ''
-        setInputDraft(activeSessionId, `${currentInput}${separator}${reference}`)
+        setInputDraft(
+          activeSessionId,
+          `${currentInput}${separator}${reference}`
+        )
       }
     },
     [activeSessionId, setInputDraft]
@@ -902,7 +1007,9 @@ export function ChatWindow() {
       setSelectedModel(activeSessionId, model)
       setExecutingMode(activeSessionId, 'build')
 
-      const hasManualOverride = useChatStore.getState().hasManualThinkingOverride(activeSessionId)
+      const hasManualOverride = useChatStore
+        .getState()
+        .hasManualThinkingOverride(activeSessionId)
       sendMessage.mutate(
         {
           sessionId: activeSessionId,
@@ -912,9 +1019,7 @@ export function ChatWindow() {
           model,
           executionMode: 'build',
           thinkingLevel,
-          disableThinkingForMode:
-            thinkingLevel !== 'off' &&
-            !hasManualOverride,
+          disableThinkingForMode: thinkingLevel !== 'off' && !hasManualOverride,
           parallelExecutionPromptEnabled:
             preferences?.parallel_execution_prompt_enabled ?? false,
           aiLanguage: preferences?.ai_language,
@@ -922,7 +1027,13 @@ export function ChatWindow() {
         { onSettled: () => inputRef.current?.focus() }
       )
     },
-    [activeSessionId, activeWorktreeId, activeWorktreePath, preferences, sendMessage]
+    [
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      preferences,
+      sendMessage,
+    ]
   )
 
   const handleSubmit = useCallback(
@@ -985,7 +1096,8 @@ export function ChatWindow() {
 
       // Clear question skip state so new questions can be shown
       // Clear waiting state so tab shows "planning" instead of "waiting" when extending a plan
-      const { setQuestionsSkipped, setWaitingForInput } = useChatStore.getState()
+      const { setQuestionsSkipped, setWaitingForInput } =
+        useChatStore.getState()
       setQuestionsSkipped(activeSessionId, false)
       setWaitingForInput(activeSessionId, false)
 
@@ -993,7 +1105,9 @@ export function ChatWindow() {
       // Use refs to avoid recreating callback when these settings change
       const mode = executionModeRef.current
       const thinkingLvl = selectedThinkingLevelRef.current
-      const hasManualOverride = useChatStore.getState().hasManualThinkingOverride(activeSessionId)
+      const hasManualOverride = useChatStore
+        .getState()
+        .hasManualThinkingOverride(activeSessionId)
       const queuedMessage: QueuedMessage = {
         id: crypto.randomUUID(),
         message,
@@ -1001,13 +1115,12 @@ export function ChatWindow() {
         pendingFiles: files,
         pendingSkills: skills,
         pendingTextFiles: textFiles,
+        provider: selectedProviderRef.current,
         model: selectedModelRef.current,
         executionMode: mode,
         thinkingLevel: thinkingLvl,
         disableThinkingForMode:
-          mode !== 'plan' &&
-          thinkingLvl !== 'off' &&
-          !hasManualOverride,
+          mode !== 'plan' && thinkingLvl !== 'off' && !hasManualOverride,
         queuedAt: Date.now(),
       }
 
@@ -1093,8 +1206,48 @@ export function ChatWindow() {
   })
 
   // PERFORMANCE: Stable callbacks for ChatToolbar to prevent re-renders
+  const handleToolbarProviderChange = useCallback(
+    (provider: AiCliProvider) => {
+      // Update refs immediately for next message send (don't wait for query refetch)
+      selectedProviderRef.current = provider
+      const newDefaultModel = getDefaultModelForProvider(provider)
+      selectedModelRef.current = newDefaultModel
+
+      // Update display state immediately for UI
+      setDisplayProvider(provider)
+      setDisplayModel(newDefaultModel)
+
+      // Gemini and Codex don't support plan mode well - auto-switch to build if currently in plan
+      // Gemini CLI only has YOLO mode, Codex keeps asking questions instead of implementing
+      if ((provider === 'gemini' || provider === 'codex') && executionModeRef.current === 'plan') {
+        executionModeRef.current = 'build'
+        if (activeSessionId) {
+          setExecutionMode(activeSessionId, 'build')
+        }
+      }
+
+      // Save provider AND model to session (per-session persistence)
+      if (activeSessionId && activeWorktreeId && activeWorktreePath) {
+        setSessionModel.mutate({
+          sessionId: activeSessionId,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          provider,
+          model: newDefaultModel,
+        })
+      }
+    },
+    [activeSessionId, activeWorktreeId, activeWorktreePath, setSessionModel, setExecutionMode]
+  )
+
   const handleToolbarModelChange = useCallback(
-    (model: ClaudeModel) => {
+    (model: string) => {
+      // Update ref immediately for next message send
+      selectedModelRef.current = model
+
+      // Update display state immediately for UI
+      setDisplayModel(model)
+
       if (activeSessionId && activeWorktreeId && activeWorktreePath) {
         setSessionModel.mutate({
           sessionId: activeSessionId,
@@ -1166,12 +1319,18 @@ export function ChatWindow() {
     const [loadedIssues, loadedPRs] = await Promise.all([
       queryClient.fetchQuery({
         queryKey: githubQueryKeys.loadedContexts(worktreeId),
-        queryFn: () => invoke<LoadedIssueContext[]>('list_loaded_issue_contexts', { worktreeId }),
+        queryFn: () =>
+          invoke<LoadedIssueContext[]>('list_loaded_issue_contexts', {
+            worktreeId,
+          }),
         staleTime: 1000 * 60,
       }),
       queryClient.fetchQuery({
         queryKey: githubQueryKeys.loadedPrContexts(worktreeId),
-        queryFn: () => invoke<LoadedPullRequestContext[]>('list_loaded_pr_contexts', { worktreeId }),
+        queryFn: () =>
+          invoke<LoadedPullRequestContext[]>('list_loaded_pr_contexts', {
+            worktreeId,
+          }),
         staleTime: 1000 * 60,
       }),
     ])
@@ -1291,16 +1450,16 @@ Begin your investigation now.`
 Begin your investigation now.`
 
       promptParts.push(
-        prTemplate
-          .replace(/\{prRefs\}/g, prRefs)
-          .replace(/\{prWord\}/g, prWord)
+        prTemplate.replace(/\{prRefs\}/g, prRefs).replace(/\{prWord\}/g, prWord)
       )
     }
 
     const prompt = promptParts.join('\n\n---\n\n')
 
     // Send message
-    const investigateModel = preferences?.magic_prompt_models?.investigate_model ?? selectedModelRef.current
+    const investigateModel =
+      preferences?.magic_prompt_models?.investigate_model ??
+      selectedModelRef.current
 
     const {
       addSendingSession,
@@ -1331,33 +1490,54 @@ Begin your investigation now.`
       },
       { onSettled: () => inputRef.current?.focus() }
     )
-  }, [queryClient, sendMessage, setLoadContextModalOpen, preferences?.magic_prompts?.investigate_issue, preferences?.magic_prompts?.investigate_pr, preferences?.magic_prompt_models?.investigate_model, preferences?.parallel_execution_prompt_enabled, preferences?.ai_language])
+  }, [
+    queryClient,
+    sendMessage,
+    setLoadContextModalOpen,
+    preferences?.magic_prompts?.investigate_issue,
+    preferences?.magic_prompts?.investigate_pr,
+    preferences?.magic_prompt_models?.investigate_model,
+    preferences?.parallel_execution_prompt_enabled,
+    preferences?.ai_language,
+  ])
 
   // Wraps modal open/close to auto-trigger investigation after user loads context
-  const handleLoadContextModalChange = useCallback(async (open: boolean) => {
-    setLoadContextModalOpen(open)
-    if (!open && pendingInvestigateRef.current) {
-      pendingInvestigateRef.current = false
-      // Only re-trigger investigate if the user actually loaded contexts
-      const worktreeId = activeWorktreeIdRef.current
-      if (!worktreeId) return
-      const [loadedIssues, loadedPRs] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: githubQueryKeys.loadedContexts(worktreeId),
-          queryFn: () => invoke<LoadedIssueContext[]>('list_loaded_issue_contexts', { worktreeId }),
-          staleTime: 1000 * 60,
-        }),
-        queryClient.fetchQuery({
-          queryKey: githubQueryKeys.loadedPrContexts(worktreeId),
-          queryFn: () => invoke<LoadedPullRequestContext[]>('list_loaded_pr_contexts', { worktreeId }),
-          staleTime: 1000 * 60,
-        }),
-      ])
-      if ((loadedIssues && loadedIssues.length > 0) || (loadedPRs && loadedPRs.length > 0)) {
-        handleInvestigate()
+  const handleLoadContextModalChange = useCallback(
+    async (open: boolean) => {
+      setLoadContextModalOpen(open)
+      if (!open && pendingInvestigateRef.current) {
+        pendingInvestigateRef.current = false
+        // Only re-trigger investigate if the user actually loaded contexts
+        const worktreeId = activeWorktreeIdRef.current
+        if (!worktreeId) return
+        const [loadedIssues, loadedPRs] = await Promise.all([
+          queryClient.fetchQuery({
+            queryKey: githubQueryKeys.loadedContexts(worktreeId),
+            queryFn: () =>
+              invoke<LoadedIssueContext[]>('list_loaded_issue_contexts', {
+                worktreeId,
+              }),
+            staleTime: 1000 * 60,
+          }),
+          queryClient.fetchQuery({
+            queryKey: githubQueryKeys.loadedPrContexts(worktreeId),
+            queryFn: () =>
+              invoke<LoadedPullRequestContext[]>('list_loaded_pr_contexts', {
+                worktreeId,
+              }),
+            staleTime: 1000 * 60,
+          }),
+        ])
+        if (
+          (loadedIssues && loadedIssues.length > 0) ||
+          (loadedPRs && loadedPRs.length > 0)
+        ) {
+          handleInvestigate()
+        }
       }
-    }
-  }, [setLoadContextModalOpen, handleInvestigate, queryClient])
+    },
+    [setLoadContextModalOpen, handleInvestigate, queryClient]
+  )
 
   // Handle checkout PR - opens modal to select and checkout a PR to a new worktree
   const handleCheckoutPR = useCallback(() => {
@@ -1439,6 +1619,7 @@ Begin your investigation now.`
     activeSessionIdRef,
     activeWorktreeIdRef,
     activeWorktreePathRef,
+    selectedProviderRef,
     selectedModelRef,
     executionModeRef,
     selectedThinkingLevelRef,
@@ -1500,7 +1681,9 @@ Begin your investigation now.`
         setSelectedModel(targetSessionId, selectedModelRef.current)
         setExecutingMode(targetSessionId, 'build') // Always use build mode for fixes
         const thinkingLvl = selectedThinkingLevelRef.current
-        const hasManualOverride = useChatStore.getState().hasManualThinkingOverride(targetSessionId)
+        const hasManualOverride = useChatStore
+          .getState()
+          .hasManualThinkingOverride(targetSessionId)
         sendMessage.mutate(
           {
             sessionId: targetSessionId,
@@ -1619,6 +1802,7 @@ Begin your investigation now.`
         pendingFiles: [],
         pendingSkills: [],
         pendingTextFiles: [],
+        provider: selectedProviderRef.current,
         model: selectedModelRef.current,
         executionMode: executionModeRef.current,
         thinkingLevel: selectedThinkingLevelRef.current,
@@ -1715,14 +1899,20 @@ Begin your investigation now.`
   }
 
   return (
-    <ErrorBoundary fallback={
-      <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
-        <span>Something went wrong. Please refresh the page.</span>
-        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-          Refresh
-        </Button>
-      </div>
-    }>
+    <ErrorBoundary
+      fallback={
+        <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
+          <span>Something went wrong. Please refresh the page.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.location.reload()}
+          >
+            Refresh
+          </Button>
+        </div>
+      }
+    >
       <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
         {/* Session tab bar */}
         <SessionTabBar
@@ -1737,10 +1927,13 @@ Begin your investigation now.`
           <ReviewResultsPanel worktreeId={activeWorktreeId} />
         ) : (
           <ResizablePanelGroup direction="vertical" className="flex-1">
-            <ResizablePanel defaultSize={terminalVisible ? 70 : 100} minSize={30}>
-              <div className="flex h-full flex-col">
-                {/* Messages area */}
-                <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+            <ResizablePanel
+              defaultSize={terminalVisible ? 70 : 100}
+              minSize={30}
+            >
+              <div className="relative flex h-full flex-col">
+                {/* Messages area - with padding at bottom for floating input */}
+                <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden pb-32">
                   {/* Session digest reminder (shows when opening a session that had activity while out of focus) */}
                   {activeSessionId && (
                     <SessionDigestReminder sessionId={activeSessionId} />
@@ -1767,11 +1960,17 @@ Begin your investigation now.`
                         {setupScriptResult && activeWorktreeId && (
                           <SetupScriptOutput
                             result={setupScriptResult}
-                            onDismiss={() => clearSetupScriptResult(activeWorktreeId)}
+                            onDismiss={() =>
+                              clearSetupScriptResult(activeWorktreeId)
+                            }
                           />
                         )}
-                        {isLoading || isSessionsLoading || isSessionSwitching ? (
-                          <div className="text-muted-foreground">Loading...</div>
+                        {isLoading ||
+                        isSessionsLoading ||
+                        isSessionSwitching ? (
+                          <div className="text-muted-foreground">
+                            Loading...
+                          </div>
                         ) : !session || session.messages.length === 0 ? (
                           <div className="text-muted-foreground">
                             No messages yet. Start a conversation!
@@ -1803,7 +2002,9 @@ Begin your investigation now.`
                             areQuestionsSkipped={areQuestionsSkipped}
                             isFindingFixed={isFindingFixed}
                             shouldScrollToBottom={isAtBottom}
-                            onScrollToBottomHandled={handleScrollToBottomHandled}
+                            onScrollToBottomHandled={
+                              handleScrollToBottomHandled
+                            }
                           />
                         )}
                         {isSending && activeSessionId && (
@@ -1823,8 +2024,12 @@ Begin your investigation now.`
                             getSubmittedAnswers={getSubmittedAnswers}
                             areQuestionsSkipped={areQuestionsSkipped}
                             isStreamingPlanApproved={isStreamingPlanApproved}
-                            onStreamingPlanApproval={handleStreamingPlanApproval}
-                            onStreamingPlanApprovalYolo={handleStreamingPlanApprovalYolo}
+                            onStreamingPlanApproval={
+                              handleStreamingPlanApproval
+                            }
+                            onStreamingPlanApprovalYolo={
+                              handleStreamingPlanApprovalYolo
+                            }
                           />
                         )}
 
@@ -1878,9 +2083,9 @@ Begin your investigation now.`
                   />
                 )}
 
-                {/* Input container - full width, centered content */}
-                <div className="bg-sidebar">
-                  <div className="mx-auto max-w-7xl">
+                {/* Input container */}
+                <div className="absolute bottom-0 left-0 right-0 px-4 pb-4 md:px-6 pointer-events-none">
+                  <div className="mx-auto max-w-4xl pointer-events-auto">
                     {/* Pending file preview (@ mentions) */}
                     <FilePreview
                       files={currentPendingFiles}
@@ -1937,14 +2142,14 @@ Begin your investigation now.`
                         </div>
                       )}
 
-                    {/* Input area - unified container with textarea and toolbar */}
+                    {/* Input area - floating container with textarea and toolbar */}
                     <form
                       ref={formRef}
                       onSubmit={handleSubmit}
                       className={cn(
-                        'relative rounded-lg transition-all duration-150',
+                        'pointer-events-auto relative rounded-2xl border border-border/50 bg-background shadow-lg transition-all duration-150',
                         isDragging &&
-                        'ring-2 ring-primary ring-inset bg-primary/5'
+                          'ring-2 ring-primary ring-inset bg-primary/5'
                       )}
                     >
                       {/* Textarea section */}
@@ -1971,6 +2176,7 @@ Begin your investigation now.`
                         hasPendingAttachments={hasPendingAttachments}
                         hasInputValue={hasInputValue}
                         executionMode={executionMode}
+                        selectedProvider={selectedProvider}
                         selectedModel={selectedModel}
                         selectedThinkingLevel={selectedThinkingLevel}
                         thinkingOverrideActive={
@@ -2010,6 +2216,7 @@ Begin your investigation now.`
                         isBaseSession={worktree ? isBaseSession(worktree) : true}
                         hasOpenPr={Boolean(worktree?.pr_url)}
                         onSetDiffRequest={setDiffRequest}
+                        onProviderChange={handleToolbarProviderChange}
                         onModelChange={handleToolbarModelChange}
                         onThinkingLevelChange={handleToolbarThinkingLevelChange}
                         onSetExecutionMode={handleToolbarSetExecutionMode}
@@ -2145,7 +2352,6 @@ Begin your investigation now.`
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-
       </div>
     </ErrorBoundary>
   )

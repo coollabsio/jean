@@ -194,6 +194,32 @@
   animation: dots 1.5s steps(1, end) infinite;
 }
 
+/* Shimmer text animation - seamless glowing wave moves left to right */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(156, 163, 175, 0.6) 0%,
+    rgba(156, 163, 175, 0.6) 35%,
+    rgba(255, 255, 255, 0.95) 50%,
+    rgba(156, 163, 175, 0.6) 65%,
+    rgba(156, 163, 175, 0.6) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.5s linear infinite;
+}
+
 /* Collapsible animations */
 @keyframes collapsible-down {
   from {

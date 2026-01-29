@@ -250,7 +250,7 @@ export const StreamingMessage = memo(function StreamingMessage({
 
       {/* Show status indicator - waiting when question pending, planning/vibing otherwise */}
       <div className="text-sm text-muted-foreground/60 mt-4">
-        <span className="animate-dots">
+        <span className="animate-shimmer">
           {toolCalls.some(
             tc =>
               (isAskUserQuestion(tc) || isExitPlanMode(tc)) &&
@@ -258,10 +258,10 @@ export const StreamingMessage = memo(function StreamingMessage({
           )
             ? 'Waiting for your input'
             : streamingExecutionMode === 'plan'
-              ? 'Planning'
+              ? 'Planning...'
               : streamingExecutionMode === 'yolo'
-                ? 'Yoloing'
-                : 'Vibing'}
+                ? 'Yoloing...'
+                : 'Vibing...'}
         </span>
       </div>
     </div>

@@ -114,6 +114,8 @@ export interface Session {
   message_count?: number
   /** Claude CLI session ID for resuming conversations */
   claude_session_id?: string
+  /** Selected AI provider for this session */
+  selected_provider?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */
@@ -254,6 +256,8 @@ export interface ToolUseEvent {
 export interface DoneEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
+  // Optional content for non-streaming providers (Gemini, Codex)
+  content?: string
 }
 
 /**
@@ -660,6 +664,8 @@ export interface QueuedMessage {
   pendingSkills: PendingSkill[]
   /** Snapshot of pending text files at time of queue */
   pendingTextFiles: PendingTextFile[]
+  /** AI provider to use for this message (snapshot at queue time) */
+  provider: string
   /** Model to use for this message (snapshot at queue time) */
   model: string
   /** Execution mode setting (snapshot at queue time) */

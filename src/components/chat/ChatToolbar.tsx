@@ -21,18 +21,12 @@ import {
   MoreHorizontal,
   Pencil,
   Send,
-  Sparkles,
   Wand2,
   Zap,
 } from 'lucide-react'
+import { RiAnthropicFill, RiGeminiFill } from 'react-icons/ri'
+import { SiOpenai } from 'react-icons/si'
 import { Kbd } from '@/components/ui/kbd'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,8 +49,14 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
-import type { ClaudeModel } from '@/store/chat-store'
 import type { ThinkingLevel, ExecutionMode } from '@/types/chat'
+import type { AiCliProvider } from '@/types/preferences'
+import {
+  claudeModelOptions,
+  geminiModelOptions,
+  codexModelOptions,
+  getModelOptionsForProvider,
+} from '@/types/preferences'
 import type { PrDisplayStatus, CheckStatus, MergeableStatus } from '@/types/pr-status'
 import type { DiffRequest } from '@/types/git-diff'
 import type {
@@ -70,12 +70,38 @@ import {
   getSavedContextContent,
 } from '@/services/github'
 
-/** Model options with display labels */
-const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] = [
-  { value: 'sonnet', label: 'Sonnet' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'haiku', label: 'Haiku' },
-]
+/** Get provider icon component */
+function ProviderIcon({ provider, className }: { provider: AiCliProvider; className?: string }) {
+  switch (provider) {
+    case 'claude':
+      return <RiAnthropicFill className={className} />
+    case 'gemini':
+      return <RiGeminiFill className={className} />
+    case 'codex':
+      return <SiOpenai className={className} />
+    default:
+      return <RiAnthropicFill className={className} />
+  }
+}
+
+/** Get display label for a model */
+function getModelLabel(model: string, provider: AiCliProvider): string {
+  const options = getModelOptionsForProvider(provider)
+  return options.find(o => o.value === model)?.label || model
+}
+
+/** Check if provider supports extended thinking */
+function providerSupportsThinking(provider: AiCliProvider): boolean {
+  return provider === 'claude'
+}
+
+/** Check if provider supports plan mode (approval before execution) */
+function providerSupportsPlanMode(provider: AiCliProvider): boolean {
+  // Only Claude has native plan mode with proper approval flow
+  // Gemini CLI only supports YOLO mode (--yolo flag)
+  // Codex doesn't handle plan approval well - keeps asking questions instead of implementing
+  return provider === 'claude'
+}
 
 /** Thinking level options with display labels and token counts */
 const THINKING_LEVEL_OPTIONS: {
@@ -145,7 +171,8 @@ interface ChatToolbarProps {
   hasPendingAttachments: boolean
   hasInputValue: boolean
   executionMode: ExecutionMode
-  selectedModel: ClaudeModel
+  selectedProvider: AiCliProvider
+  selectedModel: string
   selectedThinkingLevel: ThinkingLevel
   thinkingOverrideActive: boolean // True when thinking is disabled in build/yolo due to preference
   queuedMessageCount: number
@@ -192,7 +219,8 @@ interface ChatToolbarProps {
   isBaseSession: boolean
   hasOpenPr: boolean
   onSetDiffRequest: (request: DiffRequest) => void
-  onModelChange: (model: ClaudeModel) => void
+  onProviderChange: (provider: AiCliProvider) => void
+  onModelChange: (model: string) => void
   onThinkingLevelChange: (level: ThinkingLevel) => void
   onSetExecutionMode: (mode: ExecutionMode) => void
   onCancel: () => void
@@ -208,6 +236,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   hasPendingAttachments,
   hasInputValue,
   executionMode,
+  selectedProvider,
   selectedModel,
   selectedThinkingLevel,
   thinkingOverrideActive,
@@ -243,17 +272,28 @@ export const ChatToolbar = memo(function ChatToolbar({
   isBaseSession,
   hasOpenPr,
   onSetDiffRequest,
+  onProviderChange,
   onModelChange,
   onThinkingLevelChange,
   onSetExecutionMode,
   onCancel,
 }: ChatToolbarProps) {
-  // Memoize callbacks to prevent Select re-renders
+  // Check if thinking is supported by current provider
+  const thinkingSupported = providerSupportsThinking(selectedProvider)
+
+  // Memoize callbacks to prevent re-renders
   const handleModelChange = useCallback(
     (value: string) => {
-      onModelChange(value as ClaudeModel)
+      onModelChange(value)
     },
     [onModelChange]
+  )
+
+  const handleProviderChange = useCallback(
+    (provider: AiCliProvider) => {
+      onProviderChange(provider)
+    },
+    [onProviderChange]
   )
 
   const handleThinkingLevelChange = useCallback(
@@ -528,25 +568,27 @@ export const ChatToolbar = memo(function ChatToolbar({
 
             <DropdownMenuSeparator />
 
-            {/* Model selector as submenu */}
+            {/* Provider/Model selector - Claude */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                <Sparkles className="mr-2 h-4 w-4" />
-                <span>Model</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {MODEL_OPTIONS.find(o => o.value === selectedModel)?.label}
-                </span>
+                <RiAnthropicFill className="mr-2 h-4 w-4" />
+                <span>Claude</span>
+                {selectedProvider === 'claude' && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {getModelLabel(selectedModel, 'claude')}
+                  </span>
+                )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuRadioGroup
-                  value={selectedModel}
-                  onValueChange={handleModelChange}
+                  value={selectedProvider === 'claude' ? selectedModel : ''}
+                  onValueChange={(value) => {
+                    handleProviderChange('claude')
+                    handleModelChange(value)
+                  }}
                 >
-                  {MODEL_OPTIONS.map(option => (
-                    <DropdownMenuRadioItem
-                      key={option.value}
-                      value={option.value}
-                    >
+                  {claudeModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
                       {option.label}
                     </DropdownMenuRadioItem>
                   ))}
@@ -554,75 +596,141 @@ export const ChatToolbar = memo(function ChatToolbar({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Thinking level as submenu */}
+            {/* Provider/Model selector - Gemini */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                <Brain className="mr-2 h-4 w-4" />
-                <span>Thinking</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {thinkingOverrideActive
-                    ? 'Off'
-                    : THINKING_LEVEL_OPTIONS.find(
-                      o => o.value === selectedThinkingLevel
-                    )?.label}
-                </span>
+                <RiGeminiFill className="mr-2 h-4 w-4" />
+                <span>Gemini</span>
+                {selectedProvider === 'gemini' && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {getModelLabel(selectedModel, 'gemini')}
+                  </span>
+                )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuRadioGroup
-                  value={thinkingOverrideActive ? 'off' : selectedThinkingLevel}
-                  onValueChange={handleThinkingLevelChange}
+                  value={selectedProvider === 'gemini' ? selectedModel : ''}
+                  onValueChange={(value) => {
+                    handleProviderChange('gemini')
+                    handleModelChange(value)
+                  }}
                 >
-                  {THINKING_LEVEL_OPTIONS.map(option => (
-                    <DropdownMenuRadioItem
-                      key={option.value}
-                      value={option.value}
-                    >
+                  {geminiModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
                       {option.label}
-                      <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                        {option.tokens}
-                      </span>
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Execution mode as submenu */}
+            {/* Provider/Model selector - OpenAI */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                {executionMode === 'plan' && (
-                  <ClipboardList className="mr-2 h-4 w-4" />
+                <SiOpenai className="mr-2 h-4 w-4" />
+                <span>Codex</span>
+                {selectedProvider === 'codex' && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {getModelLabel(selectedModel, 'codex')}
+                  </span>
                 )}
-                {executionMode === 'build' && (
-                  <Hammer className="mr-2 h-4 w-4" />
-                )}
-                {executionMode === 'yolo' && <Zap className="mr-2 h-4 w-4" />}
-                <span>Mode</span>
-                <span className="ml-auto text-xs text-muted-foreground capitalize">
-                  {executionMode}
-                </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuRadioGroup
-                  value={executionMode}
-                  onValueChange={v => onSetExecutionMode(v as ExecutionMode)}
+                  value={selectedProvider === 'codex' ? selectedModel : ''}
+                  onValueChange={(value) => {
+                    handleProviderChange('codex')
+                    handleModelChange(value)
+                  }}
                 >
-                  <DropdownMenuRadioItem value="plan">
-                    Plan
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="build">
-                    Build
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuRadioItem
-                    value="yolo"
-                    className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
+                  {codexModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Thinking level as submenu - only for Claude */}
+            {thinkingSupported && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Brain className="mr-2 h-4 w-4" />
+                  <span>Thinking</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {thinkingOverrideActive
+                      ? 'Off'
+                      : THINKING_LEVEL_OPTIONS.find(
+                        o => o.value === selectedThinkingLevel
+                      )?.label}
+                  </span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    value={thinkingOverrideActive ? 'off' : selectedThinkingLevel}
+                    onValueChange={handleThinkingLevelChange}
                   >
-                    Yolo
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+                    {THINKING_LEVEL_OPTIONS.map(option => (
+                      <DropdownMenuRadioItem
+                        key={option.value}
+                        value={option.value}
+                      >
+                        {option.label}
+                        <span className="ml-auto pl-4 text-xs text-muted-foreground">
+                          {option.tokens}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
+
+            {/* Execution mode as submenu - only for providers that support plan mode */}
+            {providerSupportsPlanMode(selectedProvider) ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  {executionMode === 'plan' && (
+                    <ClipboardList className="mr-2 h-4 w-4" />
+                  )}
+                  {executionMode === 'build' && (
+                    <Hammer className="mr-2 h-4 w-4" />
+                  )}
+                  {executionMode === 'yolo' && <Zap className="mr-2 h-4 w-4" />}
+                  <span>Mode</span>
+                  <span className="ml-auto text-xs text-muted-foreground capitalize">
+                    {executionMode}
+                  </span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    value={executionMode}
+                    onValueChange={v => onSetExecutionMode(v as ExecutionMode)}
+                  >
+                    <DropdownMenuRadioItem value="plan">
+                      Plan
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="build">
+                      Build
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuRadioItem
+                      value="yolo"
+                      className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
+                    >
+                      Yolo
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ) : (
+              /* Gemini only supports YOLO mode - show indicator */
+              <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground">
+                <Zap className="h-4 w-4 text-yellow-500" />
+                <span>Auto mode only</span>
+              </div>
+            )}
 
             {/* Queue indicator */}
             {queuedMessageCount > 0 && (
@@ -865,133 +973,212 @@ export const ChatToolbar = memo(function ChatToolbar({
         {/* Divider - desktop only */}
         <div className="hidden @md:block h-4 w-px bg-border/50" />
 
-        {/* Model selector - desktop only */}
-        <Select
-          value={selectedModel}
-          onValueChange={handleModelChange}
-          disabled={hasPendingQuestions}
-        >
-          <SelectTrigger className="hidden @md:flex h-8 w-auto gap-1.5 rounded-none border-0 bg-transparent px-3 text-sm text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground dark:bg-transparent dark:hover:bg-muted/80">
-            <Sparkles className="h-3.5 w-3.5" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MODEL_OPTIONS.map(option => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {/* Divider - desktop only */}
-        <div className="hidden @md:block h-4 w-px bg-border/50" />
-
-        {/* Thinking level dropdown - desktop only */}
+        {/* Provider/Model selector - desktop only */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               disabled={hasPendingQuestions}
-              className={cn(
-                'hidden @md:flex h-8 items-center gap-1.5 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-                selectedThinkingLevel !== 'off' &&
-                !thinkingOverrideActive &&
-                'border border-purple-500/50 bg-purple-500/10 text-purple-700 dark:border-purple-400/40 dark:bg-purple-500/10 dark:text-purple-400'
-              )}
-              title={
-                thinkingOverrideActive
-                  ? `Thinking disabled in ${executionMode} mode (change in Settings)`
-                  : `Thinking: ${THINKING_LEVEL_OPTIONS.find(o => o.value === selectedThinkingLevel)?.label}`
-              }
+              className="hidden @md:flex h-8 items-center gap-1.5 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              title={`${selectedProvider}: ${getModelLabel(selectedModel, selectedProvider)}`}
             >
-              <Brain className="h-3.5 w-3.5" />
-              <span>
-                {thinkingOverrideActive
-                  ? 'Off'
-                  : THINKING_LEVEL_OPTIONS.find(
-                    o => o.value === selectedThinkingLevel
-                  )?.label}
-              </span>
+              <ProviderIcon provider={selectedProvider} className="h-3.5 w-3.5" />
+              <span>{getModelLabel(selectedModel, selectedProvider)}</span>
               <ChevronDown className="h-3 w-3 opacity-50" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              value={thinkingOverrideActive ? 'off' : selectedThinkingLevel}
-              onValueChange={handleThinkingLevelChange}
-            >
-              {THINKING_LEVEL_OPTIONS.map(option => (
-                <DropdownMenuRadioItem key={option.value} value={option.value}>
-                  <Brain className="mr-2 h-4 w-4" />
-                  {option.label}
+          <DropdownMenuContent align="start" className="w-64">
+            {/* Claude models */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <RiAnthropicFill className="mr-2 h-4 w-4" />
+                <span>Anthropic</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={selectedProvider === 'claude' ? selectedModel : ''}
+                  onValueChange={(value) => {
+                    handleProviderChange('claude')
+                    handleModelChange(value)
+                  }}
+                >
+                  {claudeModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Gemini models */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <RiGeminiFill className="mr-2 h-4 w-4" />
+                <span>Google</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={selectedProvider === 'gemini' ? selectedModel : ''}
+                  onValueChange={(value) => {
+                    handleProviderChange('gemini')
+                    handleModelChange(value)
+                  }}
+                >
+                  {geminiModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Codex models */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <SiOpenai className="mr-2 h-4 w-4" />
+                <span>OpenAI</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={selectedProvider === 'codex' ? selectedModel : ''}
+                  onValueChange={(value) => {
+                    handleProviderChange('codex')
+                    handleModelChange(value)
+                  }}
+                >
+                  {codexModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Thinking level dropdown - desktop only (Claude only) */}
+        {thinkingSupported && (
+          <>
+            <div className="hidden @md:block h-4 w-px bg-border/50" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  disabled={hasPendingQuestions}
+                  className={cn(
+                    'hidden @md:flex h-8 items-center gap-1.5 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+                    selectedThinkingLevel !== 'off' &&
+                    !thinkingOverrideActive &&
+                    'border border-purple-500/50 bg-purple-500/10 text-purple-700 dark:border-purple-400/40 dark:bg-purple-500/10 dark:text-purple-400'
+                  )}
+                  title={
+                    thinkingOverrideActive
+                      ? `Thinking disabled in ${executionMode} mode (change in Settings)`
+                      : `Thinking: ${THINKING_LEVEL_OPTIONS.find(o => o.value === selectedThinkingLevel)?.label}`
+                  }
+                >
+                  <Brain className="h-3.5 w-3.5" />
+                  <span>
+                    {thinkingOverrideActive
+                      ? 'Off'
+                      : THINKING_LEVEL_OPTIONS.find(
+                        o => o.value === selectedThinkingLevel
+                      )?.label}
+                  </span>
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={thinkingOverrideActive ? 'off' : selectedThinkingLevel}
+                  onValueChange={handleThinkingLevelChange}
+                >
+                  {THINKING_LEVEL_OPTIONS.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      <Brain className="mr-2 h-4 w-4" />
+                      {option.label}
+                      <span className="ml-auto pl-4 text-xs text-muted-foreground">
+                        {option.tokens}
+                      </span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
+
+        {/* Divider - desktop only (only show if provider supports plan mode) */}
+        {providerSupportsPlanMode(selectedProvider) && (
+          <div className="hidden @md:block h-4 w-px bg-border/50" />
+        )}
+
+        {/* Execution mode dropdown - desktop only (only for providers that support plan mode) */}
+        {providerSupportsPlanMode(selectedProvider) ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={hasPendingQuestions}
+                className={cn(
+                  'hidden @md:flex h-8 items-center gap-1.5 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
+                  executionMode === 'plan' &&
+                  'border border-yellow-600/50 bg-yellow-500/10 text-yellow-700 dark:border-yellow-500/40 dark:bg-yellow-500/10 dark:text-yellow-400',
+                  executionMode === 'yolo' &&
+                  'border border-red-500/50 bg-red-500/10 text-red-600 dark:border-red-400/40 dark:text-red-400'
+                )}
+                title={`${executionMode.charAt(0).toUpperCase() + executionMode.slice(1)} mode (Shift+Tab to cycle)`}
+              >
+                {executionMode === 'plan' && (
+                  <ClipboardList className="h-3.5 w-3.5" />
+                )}
+                {executionMode === 'build' && <Hammer className="h-3.5 w-3.5" />}
+                {executionMode === 'yolo' && <Zap className="h-3.5 w-3.5" />}
+                <span className="capitalize">{executionMode}</span>
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup
+                value={executionMode}
+                onValueChange={v => onSetExecutionMode(v as ExecutionMode)}
+              >
+                <DropdownMenuRadioItem value="plan">
+                  <ClipboardList className="mr-2 h-4 w-4" />
+                  Plan
                   <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                    {option.tokens}
+                    Read-only
                   </span>
                 </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Divider - desktop only */}
-        <div className="hidden @md:block h-4 w-px bg-border/50" />
-
-        {/* Execution mode dropdown - desktop only */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              disabled={hasPendingQuestions}
-              className={cn(
-                'hidden @md:flex h-8 items-center gap-1.5 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-                executionMode === 'plan' &&
-                'border border-yellow-600/50 bg-yellow-500/10 text-yellow-700 dark:border-yellow-500/40 dark:bg-yellow-500/10 dark:text-yellow-400',
-                executionMode === 'yolo' &&
-                'border border-red-500/50 bg-red-500/10 text-red-600 dark:border-red-400/40 dark:text-red-400'
-              )}
-              title={`${executionMode.charAt(0).toUpperCase() + executionMode.slice(1)} mode (Shift+Tab to cycle)`}
-            >
-              {executionMode === 'plan' && (
-                <ClipboardList className="h-3.5 w-3.5" />
-              )}
-              {executionMode === 'build' && <Hammer className="h-3.5 w-3.5" />}
-              {executionMode === 'yolo' && <Zap className="h-3.5 w-3.5" />}
-              <span className="capitalize">{executionMode}</span>
-              <ChevronDown className="h-3 w-3 opacity-50" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              value={executionMode}
-              onValueChange={v => onSetExecutionMode(v as ExecutionMode)}
-            >
-              <DropdownMenuRadioItem value="plan">
-                <ClipboardList className="mr-2 h-4 w-4" />
-                Plan
-                <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                  Read-only
-                </span>
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="build">
-                <Hammer className="mr-2 h-4 w-4" />
-                Build
-                <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                  Auto-edits
-                </span>
-              </DropdownMenuRadioItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuRadioItem
-                value="yolo"
-                className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
-              >
-                <Zap className="mr-2 h-4 w-4" />
-                Yolo
-                <span className="ml-auto pl-4 text-xs">No limits!</span>
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <DropdownMenuRadioItem value="build">
+                  <Hammer className="mr-2 h-4 w-4" />
+                  Build
+                  <span className="ml-auto pl-4 text-xs text-muted-foreground">
+                    Auto-edits
+                  </span>
+                </DropdownMenuRadioItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioItem
+                  value="yolo"
+                  className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  Yolo
+                  <span className="ml-auto pl-4 text-xs">No limits!</span>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          /* Gemini - show auto mode indicator on desktop */
+          <div className="hidden @md:flex h-8 items-center gap-1.5 px-3 text-sm text-yellow-600 dark:text-yellow-400">
+            <Zap className="h-3.5 w-3.5" />
+            <span>Auto</span>
+          </div>
+        )}
 
         {/* Queue indicator - desktop only */}
         {queuedMessageCount > 0 && (

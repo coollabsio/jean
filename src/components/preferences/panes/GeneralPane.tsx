@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, ChevronDown } from 'lucide-react'
@@ -10,9 +11,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useClaudeCliStatus, useClaudeCliAuth, claudeCliQueryKeys } from '@/services/claude-cli'
 import { useGhCliStatus, useGhCliAuth, ghCliQueryKeys } from '@/services/gh-cli'
+import { useGlabCliStatus, useGlabCliAuth, glabCliQueryKeys } from '@/services/glab-cli'
+import {
+  useGeminiCliStatus,
+  useGeminiCliAuth,
+  useCodexCliStatus,
+  useCodexCliAuth,
+} from '@/services/ai-cli'
 import { useUIStore } from '@/store/ui-store'
 import type { ClaudeAuthStatus } from '@/types/claude-cli'
 import type { GhAuthStatus } from '@/types/gh-cli'
+import type { GlabAuthStatus } from '@/types/glab-cli'
 import {
   Select,
   SelectContent,
@@ -32,7 +41,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { usePreferences, useSavePreferences } from '@/services/preferences'
 import {
-  modelOptions,
   thinkingLevelOptions,
   terminalOptions,
   editorOptions,
@@ -40,10 +48,14 @@ import {
   remotePollIntervalOptions,
   archiveRetentionOptions,
   notificationSoundOptions,
+  aiProviderOptions,
+  getModelOptionsForProvider,
+  getDefaultModelForProvider,
   type ClaudeModel,
   type TerminalApp,
   type EditorApp,
   type NotificationSound,
+  type AiCliProvider,
 } from '@/types/preferences'
 import { playNotificationSound } from '@/lib/sounds'
 import type { ThinkingLevel } from '@/types/chat'
@@ -100,6 +112,9 @@ export const GeneralPane: React.FC = () => {
   // CLI status hooks
   const { data: cliStatus, isLoading: isCliLoading } = useClaudeCliStatus()
   const { data: ghStatus, isLoading: isGhLoading } = useGhCliStatus()
+  const { data: glabStatus, isLoading: isGlabLoading } = useGlabCliStatus()
+  const { data: geminiStatus, isLoading: isGeminiLoading } = useGeminiCliStatus()
+  const { data: codexStatus, isLoading: isCodexLoading } = useCodexCliStatus()
 
   // Auth status queries - only enabled when CLI is installed
   const { data: claudeAuth, isLoading: isClaudeAuthLoading } = useClaudeCliAuth({
@@ -108,10 +123,22 @@ export const GeneralPane: React.FC = () => {
   const { data: ghAuth, isLoading: isGhAuthLoading } = useGhCliAuth({
     enabled: !!ghStatus?.installed,
   })
+  const { data: glabAuth, isLoading: isGlabAuthLoading } = useGlabCliAuth({
+    enabled: !!glabStatus?.installed,
+  })
+  const { data: geminiAuth, isLoading: isGeminiAuthLoading } = useGeminiCliAuth(
+    !!geminiStatus?.installed
+  )
+  const { data: codexAuth, isLoading: isCodexAuthLoading } = useCodexCliAuth(
+    !!codexStatus?.installed
+  )
 
   // Track which auth check is in progress (for manual refresh)
   const [checkingClaudeAuth, setCheckingClaudeAuth] = useState(false)
   const [checkingGhAuth, setCheckingGhAuth] = useState(false)
+  const [checkingGlabAuth, setCheckingGlabAuth] = useState(false)
+  const [checkingGeminiAuth, _setCheckingGeminiAuth] = useState(false)
+  const [checkingCodexAuth, _setCheckingCodexAuth] = useState(false)
 
   // Use global ui-store for CLI modals
   const openCliUpdateModal = useUIStore(state => state.openCliUpdateModal)
@@ -153,11 +180,28 @@ export const GeneralPane: React.FC = () => {
     }
   }, [queryClient])
 
-  const handleModelChange = (value: ClaudeModel) => {
+  const handleModelChange = (value: string) => {
     if (preferences) {
-      savePreferences.mutate({ ...preferences, selected_model: value })
+      // Type assertion since we know it's a valid model for the current provider
+      savePreferences.mutate({ ...preferences, selected_model: value as ClaudeModel })
     }
   }
+
+  // When AI provider changes, reset the model to the default for that provider
+  const handleProviderChange = (value: AiCliProvider) => {
+    if (preferences) {
+      const defaultModel = getDefaultModelForProvider(value)
+      savePreferences.mutate({
+        ...preferences,
+        default_ai_provider: value,
+        selected_model: defaultModel as ClaudeModel,
+      })
+    }
+  }
+
+  // Get model options based on current provider
+  const currentProvider = preferences?.default_ai_provider ?? 'claude'
+  const currentModelOptions = getModelOptionsForProvider(currentProvider)
 
   const handleThinkingLevelChange = (value: ThinkingLevel) => {
     if (preferences) {
@@ -283,6 +327,41 @@ export const GeneralPane: React.FC = () => {
   const ghStatusDescription = ghStatus?.installed
     ? ghStatus.path
     : 'GitHub CLI is required for GitHub integration'
+
+  const handleGlabLogin = useCallback(async () => {
+    if (!glabStatus?.path) return
+
+    // First check if already authenticated
+    setCheckingGlabAuth(true)
+    try {
+      // Invalidate cache and refetch to get fresh status
+      await queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.auth() })
+      const result = await queryClient.fetchQuery<GlabAuthStatus>({ queryKey: glabCliQueryKeys.auth() })
+
+      if (result?.authenticated) {
+        toast.success('GitLab CLI is already authenticated')
+        return
+      }
+    } finally {
+      setCheckingGlabAuth(false)
+    }
+
+    // Not authenticated, open login modal
+    const escapedPath = `'${glabStatus.path.replace(/'/g, "'\\''")}'`
+    openCliLoginModal('glab', `${escapedPath} auth login`)
+  }, [glabStatus?.path, openCliLoginModal, queryClient])
+
+  const glabStatusDescription = glabStatus?.installed
+    ? glabStatus.path
+    : 'GitLab CLI is required for GitLab integration'
+
+  const geminiStatusDescription = geminiStatus?.installed
+    ? geminiStatus.path
+    : 'Gemini CLI for Google AI'
+
+  const codexStatusDescription = codexStatus?.installed
+    ? codexStatus.path
+    : 'Codex CLI for OpenAI'
 
   const handleCopyPath = useCallback((path: string | null | undefined) => {
     if (!path) return
@@ -422,21 +501,276 @@ export const GeneralPane: React.FC = () => {
         </div>
       </SettingsSection>
 
+      <SettingsSection
+        title="GitLab CLI"
+        actions={
+          glabStatus?.installed ? (
+            checkingGlabAuth || isGlabAuthLoading ? (
+              <span className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="size-3 animate-spin" />
+                Checking...
+              </span>
+            ) : glabAuth?.authenticated ? (
+              <span className="text-sm text-muted-foreground">
+                {glabAuth.host ? `Logged in to ${glabAuth.host}` : 'Logged in'}
+              </span>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGlabLogin}
+              >
+                Login
+              </Button>
+            )
+          ) : (
+            <span className="text-sm text-muted-foreground">Not installed</span>
+          )
+        }
+      >
+        <div className="space-y-4">
+          <InlineField
+            label={glabStatus?.installed ? 'Version' : 'Status'}
+            description={
+              glabStatus?.installed ? (
+                <button
+                  onClick={() => handleCopyPath(glabStatus.path)}
+                  className="text-left hover:underline cursor-pointer"
+                  title="Click to copy path"
+                >
+                  {glabStatusDescription}
+                </button>
+              ) : (
+                'Optional'
+              )
+            }
+          >
+            {isGlabLoading ? (
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            ) : glabStatus?.installed ? (
+              <Button
+                variant="outline"
+                className="w-40 justify-between"
+                onClick={() => openCliUpdateModal('glab')}
+              >
+                {glabStatus.version ?? 'Installed'}
+                <ChevronDown className="size-3" />
+              </Button>
+            ) : (
+              <Button
+                className="w-40"
+                onClick={() => openCliUpdateModal('glab')}
+              >
+                Install
+              </Button>
+            )}
+          </InlineField>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Gemini CLI"
+        actions={
+          geminiStatus?.installed ? (
+            checkingGeminiAuth || isGeminiAuthLoading ? (
+              <span className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="size-3 animate-spin" />
+                Checking...
+              </span>
+            ) : geminiAuth?.authenticated ? (
+              <span className="text-sm text-muted-foreground">Logged in</span>
+            ) : (
+              <span className="text-sm text-muted-foreground">Not authenticated</span>
+            )
+          ) : (
+            <span className="text-sm text-muted-foreground">Not installed</span>
+          )
+        }
+      >
+        <div className="space-y-4">
+          <InlineField
+            label={geminiStatus?.installed ? 'Version' : 'Status'}
+            description={
+              geminiStatus?.installed ? (
+                <button
+                  onClick={() => handleCopyPath(geminiStatus.path)}
+                  className="text-left hover:underline cursor-pointer"
+                  title="Click to copy path"
+                >
+                  {geminiStatusDescription}
+                </button>
+              ) : (
+                'Optional - npm install -g @google/generative-ai-cli'
+              )
+            }
+          >
+            {isGeminiLoading ? (
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            ) : geminiStatus?.installed ? (
+              <Button
+                variant="outline"
+                className="w-40 justify-between"
+                disabled
+              >
+                {geminiStatus.version ?? 'Installed'}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-40"
+                onClick={() => {
+                  navigator.clipboard.writeText('npm install -g @google/generative-ai-cli')
+                  toast.success('Install command copied to clipboard')
+                }}
+              >
+                Copy install cmd
+              </Button>
+            )}
+          </InlineField>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Codex CLI"
+        actions={
+          codexStatus?.installed ? (
+            checkingCodexAuth || isCodexAuthLoading ? (
+              <span className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="size-3 animate-spin" />
+                Checking...
+              </span>
+            ) : codexAuth?.authenticated ? (
+              <span className="text-sm text-muted-foreground">Logged in</span>
+            ) : (
+              <span className="text-sm text-muted-foreground">Not authenticated</span>
+            )
+          ) : (
+            <span className="text-sm text-muted-foreground">Not installed</span>
+          )
+        }
+      >
+        <div className="space-y-4">
+          <InlineField
+            label={codexStatus?.installed ? 'Version' : 'Status'}
+            description={
+              codexStatus?.installed ? (
+                <button
+                  onClick={() => handleCopyPath(codexStatus.path)}
+                  className="text-left hover:underline cursor-pointer"
+                  title="Click to copy path"
+                >
+                  {codexStatusDescription}
+                </button>
+              ) : (
+                'Optional - npm install -g @openai/codex'
+              )
+            }
+          >
+            {isCodexLoading ? (
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            ) : codexStatus?.installed ? (
+              <Button
+                variant="outline"
+                className="w-40 justify-between"
+                disabled
+              >
+                {codexStatus.version ?? 'Installed'}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-40"
+                onClick={() => {
+                  navigator.clipboard.writeText('npm install -g @openai/codex')
+                  toast.success('Install command copied to clipboard')
+                }}
+              >
+                Copy install cmd
+              </Button>
+            )}
+          </InlineField>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Workspace">
+        <div className="space-y-4">
+          <InlineField
+            label="Workspace folder"
+            description={preferences?.workspace_folder || '~/jean (default)'}
+          >
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="w-40"
+                onClick={async () => {
+                  const selected = await open({
+                    directory: true,
+                    multiple: false,
+                    title: 'Select workspace folder',
+                  })
+                  if (selected && preferences) {
+                    savePreferences.mutate({ ...preferences, workspace_folder: selected as string })
+                    toast.success('Workspace folder updated')
+                  }
+                }}
+              >
+                {preferences?.workspace_folder ? 'Change' : 'Select folder'}
+              </Button>
+              {preferences?.workspace_folder && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (preferences) {
+                      savePreferences.mutate({ ...preferences, workspace_folder: '' })
+                      toast.success('Reset to default ~/jean')
+                    }
+                  }}
+                >
+                  Reset
+                </Button>
+              )}
+            </div>
+          </InlineField>
+
+          <InlineField
+            label="Default AI provider"
+            description="AI CLI for new sessions (changing resets model)"
+          >
+            <Select
+              value={preferences?.default_ai_provider ?? 'claude'}
+              onValueChange={handleProviderChange}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {aiProviderOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </InlineField>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Defaults">
         <div className="space-y-4">
           <InlineField
             label="Model"
-            description="Claude model for AI assistance"
+            description={`Model for ${currentProvider === 'claude' ? 'Claude' : currentProvider === 'gemini' ? 'Gemini' : 'Codex'} AI assistance`}
           >
             <Select
-              value={preferences?.selected_model ?? 'opus'}
+              value={preferences?.selected_model ?? getDefaultModelForProvider(currentProvider)}
               onValueChange={handleModelChange}
             >
               <SelectTrigger className="w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {modelOptions.map(option => (
+                {currentModelOptions.map(option => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

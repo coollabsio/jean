@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useClaudeCliSetup } from '@/services/claude-cli'
 import { useGhCliSetup } from '@/services/gh-cli'
+import { useGlabCliSetup } from '@/services/glab-cli'
 import { logger } from '@/lib/logger'
 import {
   SetupState,
@@ -95,13 +96,34 @@ function GhCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
   )
 }
 
+/**
+ * GitLab CLI specific modal - calls ONLY useGlabCliSetup
+ * This ensures only one event listener is active
+ */
+export function GlabCliReinstallModal({ open, onOpenChange }: ModalProps) {
+  if (!open) return null
+  return <GlabCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+}
+
+function GlabCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+  const setup = useGlabCliSetup()
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType="glab"
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
 
 /**
  * Shared UI component - receives setup as prop, no hooks here
  */
 interface CliReinstallModalUIProps {
   setup: CliSetupInterface
-  cliType: 'claude' | 'gh'
+  cliType: 'claude' | 'gh' | 'glab'
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -112,7 +134,7 @@ function CliReinstallModalUI({
   open,
   onOpenChange,
 }: CliReinstallModalUIProps) {
-  const cliName = cliType === 'claude' ? 'Claude CLI' : 'GitHub CLI'
+  const cliName = cliType === 'claude' ? 'Claude CLI' : cliType === 'glab' ? 'GitLab CLI' : 'GitHub CLI'
 
   // Store setup in ref for stable callback reference
   const setupRef = useRef(setup)
@@ -216,7 +238,7 @@ function CliReinstallModalUI({
               ? `${cliName} has been successfully installed.`
               : isReinstall
                 ? 'Select a version to install. This will replace the current installation.'
-                : `${cliName} is required for ${cliType === 'claude' ? 'AI chat functionality' : 'GitHub integration'}.`}
+                : `${cliName} is required for ${cliType === 'claude' ? 'AI chat functionality' : cliType === 'glab' ? 'GitLab integration' : 'GitHub integration'}.`}
           </DialogDescription>
         </DialogHeader>
 

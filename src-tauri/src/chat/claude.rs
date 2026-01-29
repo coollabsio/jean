@@ -27,10 +27,10 @@ pub struct ClaudeResponse {
 
 /// Payload for text chunk events sent to frontend
 #[derive(serde::Serialize, Clone)]
-struct ChunkEvent {
-    session_id: String,
-    worktree_id: String, // Kept for backward compatibility
-    content: String,
+pub struct ChunkEvent {
+    pub session_id: String,
+    pub worktree_id: String, // Kept for backward compatibility
+    pub content: String,
 }
 
 /// Payload for tool use events sent to frontend
@@ -180,7 +180,7 @@ fn build_claude_args(
         }
     }
 
-    // Model
+    // Model - Claude CLI accepts opus, sonnet, haiku
     if let Some(m) = model {
         args.push("--model".to_string());
         args.push(m.to_string());

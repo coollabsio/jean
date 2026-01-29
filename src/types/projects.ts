@@ -37,6 +37,8 @@ export interface Project {
   is_folder?: boolean
   /** Path to custom avatar image (relative to app data dir, e.g., "avatars/abc123.png") */
   avatar_path?: string
+  /** Git provider detected from remote URL ("github", "gitlab", or "other") */
+  git_provider?: 'github' | 'gitlab' | 'other'
 }
 
 /**
@@ -104,6 +106,10 @@ export interface Worktree {
   order: number
   /** Unix timestamp when worktree was archived (undefined = not archived) */
   archived_at?: number
+  /** Override AI CLI provider for this worktree (undefined = use global default) */
+  ai_provider?: string
+  /** Override AI model for this worktree (undefined = use global default) */
+  ai_model?: string
 }
 
 // =============================================================================

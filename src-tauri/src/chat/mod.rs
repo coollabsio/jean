@@ -1,6 +1,8 @@
 mod claude;
+mod codex;
 mod commands;
 pub mod detached;
+mod gemini;
 mod naming;
 pub mod registry;
 pub mod run_log;

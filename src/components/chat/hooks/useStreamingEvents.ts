@@ -233,9 +233,17 @@ export default function useStreamingEvents({
 
       // Capture streaming state to local variables BEFORE clearing
       // This ensures we have the data for the optimistic message
-      const content = streamingContents[sessionId]
+      // For non-streaming providers (Gemini, Codex), content comes in the done event
+      // For Claude, content comes from streaming chunks accumulated in store
+      const eventContent = (event.payload as { content?: string }).content
+      const content = eventContent || streamingContents[sessionId]
       const toolCalls = activeToolCalls[sessionId]
       const contentBlocks = streamingContentBlocks[sessionId]
+
+      // Debug log for non-Claude providers
+      if (eventContent) {
+        console.log('[useStreamingEvents] Got content from done event:', eventContent.substring(0, 100))
+      }
 
       // Check for unanswered blocking tools BEFORE clearing state
       // This determines whether to show "waiting" status in the UI

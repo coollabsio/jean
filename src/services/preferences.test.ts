@@ -99,6 +99,8 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        workspace_folder: '',
+        default_ai_provider: 'claude',
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -176,6 +178,8 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        workspace_folder: '',
+        default_ai_provider: 'claude',
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -228,6 +232,8 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        workspace_folder: '',
+        default_ai_provider: 'claude',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -278,6 +284,8 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        workspace_folder: '',
+        default_ai_provider: 'claude',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -328,6 +336,8 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        workspace_folder: '',
+        default_ai_provider: 'claude',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -378,6 +388,8 @@ describe('preferences service', () => {
         allow_web_tools_in_plan_mode: true,
         waiting_sound: 'none',
         review_sound: 'none',
+        workspace_folder: '',
+        default_ai_provider: 'claude',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

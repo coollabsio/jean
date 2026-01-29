@@ -12,6 +12,7 @@ import { useUIStore } from '@/store/ui-store'
 import {
   ClaudeCliReinstallModal,
   GhCliReinstallModal,
+  GlabCliReinstallModal,
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
@@ -25,7 +26,7 @@ export function CliUpdateModal() {
     }
   }
 
-  // Render both modals - each has lazy mounting (returns null when closed)
+  // Render all modals - each has lazy mounting (returns null when closed)
   // Only the one matching cliUpdateModalType will actually render hooks
   return (
     <>
@@ -35,6 +36,10 @@ export function CliUpdateModal() {
       />
       <GhCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'gh'}
+        onOpenChange={handleOpenChange}
+      />
+      <GlabCliReinstallModal
+        open={cliUpdateModalOpen && cliUpdateModalType === 'glab'}
         onOpenChange={handleOpenChange}
       />
     </>

@@ -64,6 +64,9 @@ pub struct Project {
     /// Path to custom avatar image (relative to app data dir, e.g., "avatars/abc123.png")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_path: Option<String>,
+    /// Git provider detected from remote URL ("github", "gitlab", or "other")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_provider: Option<String>,
 }
 
 /// A git worktree created for a project
@@ -141,6 +144,12 @@ pub struct Worktree {
     /// Unix timestamp when worktree was archived (None = not archived)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// Override AI CLI provider for this worktree (None = use global default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_provider: Option<String>,
+    /// Override AI model for this worktree (None = use global default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_model: Option<String>,
 }
 
 /// Container for all persisted project data

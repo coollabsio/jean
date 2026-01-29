@@ -161,6 +161,7 @@ export function useQueueProcessor(): void {
           worktreeId,
           worktreePath,
           message: fullMessage,
+          provider: queuedMsg.provider,
           model: queuedMsg.model,
           executionMode: queuedMsg.executionMode,
           thinkingLevel: queuedMsg.thinkingLevel,

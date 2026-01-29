@@ -52,7 +52,7 @@ export const FloatingButtons = memo(function FloatingButtons({
   }, [hasStreamingPlan, onStreamingPlanApproval, onPendingPlanApproval, onScrollToBottom])
 
   return (
-    <div className="absolute bottom-4 right-4 flex gap-2">
+    <div className="absolute bottom-4 right-4 z-20 flex gap-2">
       {/* Floating Approve button - shown when main approve button is not visible */}
       {showApproveButton && (
         <button

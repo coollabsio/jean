@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, MoreHorizontal, Plus } from 'lucide-react'
+import { FaGithub } from 'react-icons/fa'
+import { FaGitlab } from 'react-icons/fa6'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -147,7 +149,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
           onClick={handleClick}
         >
-          {/* Avatar */}
+          {/* Avatar - show git provider icon or custom avatar */}
           {avatarUrl ? (
             <img
               src={avatarUrl}
@@ -155,6 +157,10 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
               className="size-4 shrink-0 rounded object-cover"
               onError={() => setImgErrorKey(project.avatar_path ?? null)}
             />
+          ) : project.git_provider === 'github' ? (
+            <FaGithub className="size-4 shrink-0 text-muted-foreground" />
+          ) : project.git_provider === 'gitlab' ? (
+            <FaGitlab className="size-4 shrink-0 text-orange-500" />
           ) : (
             <div className="flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
               <span className="text-[10px] font-medium uppercase">

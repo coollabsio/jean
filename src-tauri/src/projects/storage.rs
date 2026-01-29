@@ -25,17 +25,48 @@ pub fn get_projects_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join("projects.json"))
 }
 
-/// Get the base directory for all worktrees (~/jean)
+/// Get the base directory for all worktrees (~/jean or custom folder)
 pub fn get_worktrees_base_dir() -> Result<PathBuf, String> {
+    get_worktrees_base_dir_with_config(None)
+}
+
+/// Get the base directory for all worktrees with optional custom folder
+///
+/// If workspace_folder is empty or None, uses default ~/jean/
+/// Supports:
+/// - Absolute paths: /Users/foo/workspaces
+/// - Home-relative paths: ~/workspaces
+/// - Empty string: uses default ~/jean/
+pub fn get_worktrees_base_dir_with_config(workspace_folder: Option<&str>) -> Result<PathBuf, String> {
     let home_dir = dirs::home_dir().ok_or_else(|| "Failed to get home directory".to_string())?;
 
-    let jean_dir = home_dir.join("jean");
+    let base_dir = match workspace_folder {
+        Some(folder) if !folder.is_empty() => {
+            if folder.starts_with("~/") {
+                // Expand ~ to home directory
+                home_dir.join(&folder[2..])
+            } else if folder.starts_with('/') || folder.contains(':') {
+                // Absolute path (Unix or Windows)
+                PathBuf::from(folder)
+            } else {
+                // Relative path - treat as relative to home
+                home_dir.join(folder)
+            }
+        }
+        _ => home_dir.join("jean"), // Default
+    };
 
     // Ensure the directory exists
-    std::fs::create_dir_all(&jean_dir)
-        .map_err(|e| format!("Failed to create jean directory: {e}"))?;
+    std::fs::create_dir_all(&base_dir)
+        .map_err(|e| format!("Failed to create workspace directory: {e}"))?;
 
-    Ok(jean_dir)
+    Ok(base_dir)
+}
+
+/// Get the default workspace folder path for display purposes
+pub fn get_default_workspace_folder() -> Result<String, String> {
+    let home_dir = dirs::home_dir().ok_or_else(|| "Failed to get home directory".to_string())?;
+    Ok(home_dir.join("jean").to_string_lossy().to_string())
 }
 
 /// Get the directory for a specific project's worktrees (~/jean/<project-name>)

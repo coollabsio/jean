@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
+mod ai_cli;
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
@@ -12,6 +13,7 @@ mod background_tasks;
 mod chat;
 mod claude_cli;
 mod gh_cli;
+mod glab_cli;
 mod platform;
 mod projects;
 mod terminal;
@@ -132,6 +134,10 @@ pub struct AppPreferences {
     pub waiting_sound: String, // Sound when session is waiting for input: none, ding, chime, pop, choochoo
     #[serde(default = "default_review_sound")]
     pub review_sound: String, // Sound when session finishes reviewing: none, ding, chime, pop, choochoo
+    #[serde(default)]
+    pub workspace_folder: String, // Base folder for worktrees (empty = default ~/jean/)
+    #[serde(default = "default_ai_provider")]
+    pub default_ai_provider: String, // Default AI CLI provider: claude, gemini, codex
 }
 
 fn default_auto_branch_naming() -> bool {
@@ -244,6 +250,10 @@ fn default_waiting_sound() -> String {
 
 fn default_review_sound() -> String {
     "none".to_string()
+}
+
+fn default_ai_provider() -> String {
+    "claude".to_string() // Claude is the default AI provider
 }
 
 // =============================================================================
@@ -519,6 +529,8 @@ impl Default for AppPreferences {
             allow_web_tools_in_plan_mode: default_allow_web_tools_in_plan_mode(),
             waiting_sound: default_waiting_sound(),
             review_sound: default_review_sound(),
+            workspace_folder: String::new(),
+            default_ai_provider: default_ai_provider(),
         }
     }
 }
@@ -1413,6 +1425,34 @@ pub fn run() {
             gh_cli::check_gh_cli_auth,
             gh_cli::get_available_gh_versions,
             gh_cli::install_gh_cli,
+            // GitLab CLI management commands
+            glab_cli::check_glab_cli_installed,
+            glab_cli::check_glab_cli_auth,
+            glab_cli::get_available_glab_versions,
+            glab_cli::install_glab_cli,
+            // Gemini CLI management commands
+            ai_cli::gemini::commands::check_gemini_cli_installed,
+            ai_cli::gemini::commands::check_gemini_cli_auth,
+            ai_cli::gemini::commands::install_gemini_cli,
+            // Codex CLI management commands
+            ai_cli::codex::commands::check_codex_cli_installed,
+            ai_cli::codex::commands::check_codex_cli_auth,
+            ai_cli::codex::commands::install_codex_cli,
+            // GitLab issues/MRs commands
+            projects::list_gitlab_issues,
+            projects::get_gitlab_issue,
+            projects::list_gitlab_mrs,
+            projects::get_gitlab_mr,
+            projects::load_gitlab_issue_context,
+            projects::load_gitlab_mr_context,
+            projects::remove_gitlab_issue_context,
+            projects::remove_gitlab_mr_context,
+            projects::list_loaded_gitlab_issue_contexts,
+            projects::list_loaded_gitlab_mr_contexts,
+            projects::get_gitlab_issue_context_content,
+            projects::get_gitlab_mr_context_content,
+            projects::open_merge_request,
+            projects::checkout_gitlab_mr,
             // Background task commands
             background_tasks::commands::set_app_focus_state,
             background_tasks::commands::set_active_worktree_for_polling,
