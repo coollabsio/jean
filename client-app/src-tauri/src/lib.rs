@@ -39,6 +39,21 @@ fn load_client_config(app: tauri::AppHandle) -> Result<ClientConfig, String> {
     serde_json::from_str(&contents).map_err(|e| format!("Failed to parse config: {e}"))
 }
 
+/// Send a native system notification.
+#[tauri::command]
+fn send_native_notification(
+    app: tauri::AppHandle,
+    title: String,
+    body: Option<String>,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    let mut notification = app.notification().builder().title(&title);
+    if let Some(b) = body.as_deref() {
+        notification = notification.body(b);
+    }
+    notification.show().map_err(|e| format!("Notification failed: {e}"))
+}
+
 /// Save the client connection config to disk.
 #[tauri::command]
 fn save_client_config(app: tauri::AppHandle, config: ClientConfig) -> Result<(), String> {
@@ -67,7 +82,7 @@ pub fn run() {
                 "Object.defineProperty(window, '__JEAN_CLIENT_MODE__', { value: true, writable: false, configurable: false });"
             )
             .title("Jean Client")
-            .inner_size(800.0, 600.0)
+            .inner_size(1000.0, 700.0)
             .min_inner_size(1000.0, 700.0)
             .resizable(true)
             .center()
@@ -87,6 +102,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_client_config,
             save_client_config,
+            send_native_notification,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Jean Client");

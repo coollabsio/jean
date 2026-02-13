@@ -459,6 +459,22 @@ class WsTransport {
     }
   }
 
+  /** Close the WebSocket and reset connection state. */
+  disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws) {
+      this.ws.onclose = null // prevent auto-reconnect
+      this.ws.close()
+      this.ws = null
+    }
+    this.setConnected(false)
+    this.setAuthError(null)
+    this.reconnectAttempt = 0
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return
     // Don't reconnect if there's an auth error — user needs to fix the token
@@ -528,10 +544,5 @@ export function connectToServer(): void {
 export function disconnectFromServer(): void {
   localStorage.removeItem('jean-client-server-url')
   localStorage.removeItem('jean-http-token')
-  // Force-close the websocket; onclose handler will update state
-  if (wsTransport['ws']) {
-    wsTransport['ws'].close()
-    wsTransport['ws'] = null
-  }
-  wsTransport['setConnected'](false)
+  wsTransport.disconnect()
 }

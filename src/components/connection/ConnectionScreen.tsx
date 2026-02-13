@@ -22,6 +22,7 @@ export function ConnectionScreen({ onConnected }: ConnectionScreenProps) {
   const [connecting, setConnecting] = useState(false)
 
   const handleConnect = useCallback(async () => {
+    if (connecting) return
     setError(null)
     setConnecting(true)
 
