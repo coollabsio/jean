@@ -170,6 +170,12 @@ export function getPreloadedData(): InitialData | null {
   return result
 }
 
+/** Reset preload cache so next call fetches fresh data. Used after client connects. */
+export function resetPreloadCache(): void {
+  initialDataPromise = null
+  initialDataResolved = false
+}
+
 // ---------------------------------------------------------------------------
 // WebSocket Transport (used in browser mode)
 // ---------------------------------------------------------------------------

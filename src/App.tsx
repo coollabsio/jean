@@ -5,6 +5,7 @@ import {
   useWsConnectionStatus,
   useWsAuthError,
   preloadInitialData,
+  resetPreloadCache,
   type InitialData,
 } from '@/lib/transport'
 import { isNativeApp, isClientApp, isServerApp } from '@/lib/environment'
@@ -161,6 +162,9 @@ function App() {
   useEffect(() => {
     if (isServerApp()) return
 
+    // In client mode, wait until the user has connected before preloading
+    if (isClientApp() && !clientConnected) return
+
     const seedCache = (data: InitialData) => {
       // Seed projects into TanStack Query cache
       if (data.projects) {
@@ -269,6 +273,12 @@ function App() {
       }
     }
 
+    // In client mode, reset the preload cache so we fetch fresh data
+    // (the initial preload returned null because no server URL existed yet)
+    if (isClientApp()) {
+      resetPreloadCache()
+    }
+
     preloadInitialData()
       .then(data => {
         if (data) {
@@ -284,7 +294,7 @@ function App() {
       .finally(() => {
         setIsPreloading(false)
       })
-  }, [queryClient])
+  }, [queryClient, clientConnected])
 
   // Apply font settings from preferences
   useFontSettings()
