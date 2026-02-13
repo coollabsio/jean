@@ -21,7 +21,7 @@ import {
   triggerImmediateGitPoll,
 } from '@/services/git-status'
 import { isBaseSession } from '@/types/projects'
-import { isNativeApp } from '@/lib/environment'
+import { isServerApp } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { toast } from 'sonner'
 import { GitDiffModal } from './GitDiffModal'
@@ -219,7 +219,7 @@ export function SessionChatModal({
               />
             </div>
             <div className="flex items-center gap-1">
-              {isNativeApp() && (
+              {isServerApp() && (
                 <>
                   <Button
                     variant="ghost"
@@ -272,7 +272,7 @@ export function SessionChatModal({
         </div>
 
         {/* Terminal side drawer */}
-        {isNativeApp() && (
+        {isServerApp() && (
           <ModalTerminalDrawer
             worktreeId={worktreeId}
             worktreePath={worktreePath}

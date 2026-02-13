@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
 import type { SaveImageResponse } from '@/types/chat'
 import { MAX_IMAGE_SIZE } from '../image-constants'
-import { isNativeApp } from '@/lib/environment'
+import { isServerApp } from '@/lib/environment'
 
 /** Allowed file extensions for dropped images */
 const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp']
@@ -32,7 +32,7 @@ export function useDragAndDropImages(
   const [isDragging, setIsDragging] = useState(false)
 
   useEffect(() => {
-    if (options?.disabled || !isNativeApp()) return
+    if (options?.disabled || !isServerApp()) return
 
     let cancelled = false
     let unlisten: (() => void) | null = null

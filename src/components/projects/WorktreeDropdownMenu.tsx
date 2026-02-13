@@ -31,7 +31,7 @@ import {
 import { Button } from '@/components/ui/button'
 import type { Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
-import { isNativeApp } from '@/lib/environment'
+import { isServerApp } from '@/lib/environment'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
 interface WorktreeDropdownMenuProps {
@@ -83,7 +83,7 @@ export function WorktreeDropdownMenu({
             New Session
           </DropdownMenuItem>
 
-          {isNativeApp() && runScript && (
+          {isServerApp() && runScript && (
             <DropdownMenuItem onClick={handleRun}>
               <Play className="mr-2 h-4 w-4" />
               Run
@@ -102,23 +102,23 @@ export function WorktreeDropdownMenu({
             </DropdownMenuItem>
           )}
 
-          {isNativeApp() && <DropdownMenuSeparator />}
+          {isServerApp() && <DropdownMenuSeparator />}
 
-          {isNativeApp() && (
+          {isServerApp() && (
             <DropdownMenuItem onClick={handleOpenInEditor}>
               <Code className="mr-2 h-4 w-4" />
               Open in {getEditorLabel(preferences?.editor)}
             </DropdownMenuItem>
           )}
 
-          {isNativeApp() && (
+          {isServerApp() && (
             <DropdownMenuItem onClick={handleOpenInFinder}>
               <FolderOpen className="mr-2 h-4 w-4" />
               Open in Finder
             </DropdownMenuItem>
           )}
 
-          {isNativeApp() && (
+          {isServerApp() && (
             <DropdownMenuItem onClick={handleOpenInTerminal}>
               <Terminal className="mr-2 h-4 w-4" />
               Open in {getTerminalLabel(preferences?.terminal)}
