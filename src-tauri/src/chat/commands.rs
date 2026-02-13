@@ -1130,67 +1130,98 @@ pub async fn send_chat_message(
         Some(final_allowed_tools)
     };
 
-    // Execute Claude CLI in detached mode
-    // If resume fails with "session not found", retry without the session ID
-    let mut claude_session_id_for_call = claude_session_id.clone();
-    let (pid, claude_response) = loop {
-        log::trace!("About to call execute_claude_detached...");
+    // Execute Claude CLI in detached mode on a dedicated OS thread.
+    // This prevents tokio thread pool starvation when many sessions run concurrently,
+    // since execute_claude_detached blocks (it tails the output file with thread::sleep).
+    // If resume fails with "session not found", retry without the session ID.
+    let bl_app = app.clone();
+    let bl_session_id = session_id.clone();
+    let bl_worktree_id = worktree_id.clone();
+    let bl_worktree_path = worktree_path.clone();
+    let bl_input_file = input_file.clone();
+    let bl_output_file = output_file.clone();
+    let bl_working_dir = context.worktree_path.clone();
+    let bl_claude_session_id = claude_session_id.clone();
+    let bl_model = model.clone();
+    let bl_execution_mode = execution_mode.clone();
+    let bl_thinking_level = thinking_level.clone();
+    let bl_effort_level = effort_level.clone();
+    let bl_allowed_tools = allowed_tools_for_cli.clone();
+    let bl_parallel_prompt = parallel_execution_prompt.clone();
+    let bl_ai_language = ai_language.clone();
+    let bl_mcp_config = mcp_config.clone();
+    let bl_custom_profile = custom_profile_name.clone();
 
-        match super::claude::execute_claude_detached(
-            &app,
-            &session_id,
-            &worktree_id,
-            &input_file,
-            &output_file,
-            context.worktree_path.as_ref(),
-            claude_session_id_for_call.as_deref(),
-            model.as_deref(),
-            execution_mode.as_deref(),
-            thinking_level.as_ref(),
-            effort_level.as_ref(),
-            allowed_tools_for_cli.as_deref(),
-            disable_thinking_in_non_plan_modes,
-            parallel_execution_prompt.as_deref(),
-            ai_language.as_deref(),
-            mcp_config.as_deref(),
-            chrome,
-            custom_profile_name.as_deref(),
-        ) {
-            Ok((pid, response)) => {
-                log::trace!("execute_claude_detached succeeded (PID: {pid})");
-                break (pid, response);
-            }
-            Err(e) => {
-                // Check if this is a session not found error and we were trying to resume
-                let is_session_not_found = e.to_lowercase().contains("session")
-                    && (e.to_lowercase().contains("not found")
-                        || e.to_lowercase().contains("invalid")
-                        || e.to_lowercase().contains("expired"));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let mut claude_session_id_for_call = bl_claude_session_id;
+        let result = loop {
+            log::trace!("About to call execute_claude_detached...");
 
-                if is_session_not_found && claude_session_id_for_call.is_some() {
-                    log::warn!(
-                        "Session not found, clearing stored session ID and retrying: {}",
-                        claude_session_id_for_call.as_deref().unwrap_or("")
-                    );
-
-                    // Clear the invalid session ID from storage (atomic update)
-                    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-                        if let Some(session) = sessions.find_session_mut(&session_id) {
-                            session.claude_session_id = None;
-                        }
-                        Ok(())
-                    })?;
-
-                    // Retry without session ID
-                    claude_session_id_for_call = None;
-                    continue;
+            match super::claude::execute_claude_detached(
+                &bl_app,
+                &bl_session_id,
+                &bl_worktree_id,
+                &bl_input_file,
+                &bl_output_file,
+                std::path::Path::new(&bl_working_dir),
+                claude_session_id_for_call.as_deref(),
+                bl_model.as_deref(),
+                bl_execution_mode.as_deref(),
+                bl_thinking_level.as_ref(),
+                bl_effort_level.as_ref(),
+                bl_allowed_tools.as_deref(),
+                disable_thinking_in_non_plan_modes,
+                bl_parallel_prompt.as_deref(),
+                bl_ai_language.as_deref(),
+                bl_mcp_config.as_deref(),
+                chrome,
+                bl_custom_profile.as_deref(),
+            ) {
+                Ok((pid, response)) => {
+                    log::trace!("execute_claude_detached succeeded (PID: {pid})");
+                    break Ok((pid, response));
                 }
+                Err(e) => {
+                    let is_session_not_found = e.to_lowercase().contains("session")
+                        && (e.to_lowercase().contains("not found")
+                            || e.to_lowercase().contains("invalid")
+                            || e.to_lowercase().contains("expired"));
 
-                log::error!("execute_claude_detached FAILED: {e}");
-                return Err(e);
+                    if is_session_not_found && claude_session_id_for_call.is_some() {
+                        log::warn!(
+                            "Session not found, clearing stored session ID and retrying: {}",
+                            claude_session_id_for_call.as_deref().unwrap_or("")
+                        );
+
+                        with_sessions_mut(
+                            &bl_app,
+                            &bl_worktree_path,
+                            &bl_worktree_id,
+                            |sessions| {
+                                if let Some(session) = sessions.find_session_mut(&bl_session_id) {
+                                    session.claude_session_id = None;
+                                }
+                                Ok(())
+                            },
+                        )
+                        .ok();
+
+                        claude_session_id_for_call = None;
+                        continue;
+                    }
+
+                    log::error!("execute_claude_detached FAILED: {e}");
+                    break Err(e);
+                }
             }
-        }
-    };
+        };
+        let _ = tx.send(result);
+    });
+
+    let (pid, claude_response) = rx
+        .await
+        .map_err(|_| "Claude execution thread panicked".to_string())??;
 
     // Store the PID in the run log for recovery
     run_log_writer.set_pid(pid)?;
