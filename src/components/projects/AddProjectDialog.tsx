@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
-import { isNativeApp } from '@/lib/environment'
+import { isServerApp, isClientApp } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
 import { FolderOpen, FolderPlus } from 'lucide-react'
 import {
@@ -26,11 +26,17 @@ export function AddProjectDialog() {
   const isPending = addProject.isPending || initProject.isPending
 
   const handleAddExisting = useCallback(async () => {
-    if (!isNativeApp()) {
-      toast.error('Not running in Tauri', {
-        description:
-          'Run the app with "bun run tauri:dev" to use native features.',
-      })
+    if (!isServerApp()) {
+      toast.error(
+        isClientApp()
+          ? 'Not available in client mode'
+          : 'Not running in Tauri',
+        {
+          description: isClientApp()
+            ? 'Projects are managed on the Jean server.'
+            : 'Run the app with "bun run tauri:dev" to use native features.',
+        }
+      )
       return
     }
 
@@ -80,11 +86,17 @@ export function AddProjectDialog() {
   }, [addProject, addProjectParentFolderId, setAddProjectDialogOpen])
 
   const handleInitNew = useCallback(async () => {
-    if (!isNativeApp()) {
-      toast.error('Not running in Tauri', {
-        description:
-          'Run the app with "bun run tauri:dev" to use native features.',
-      })
+    if (!isServerApp()) {
+      toast.error(
+        isClientApp()
+          ? 'Not available in client mode'
+          : 'Not running in Tauri',
+        {
+          description: isClientApp()
+            ? 'Projects are managed on the Jean server.'
+            : 'Run the app with "bun run tauri:dev" to use native features.',
+        }
+      )
       return
     }
 

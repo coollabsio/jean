@@ -7,7 +7,12 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { isNativeApp, setWsConnected } from './environment'
+import {
+  isNativeApp,
+  isClientApp,
+  isServerApp,
+  setWsConnected,
+} from './environment'
 import { generateId } from './uuid'
 
 // ---------------------------------------------------------------------------
@@ -24,7 +29,8 @@ import { generateId } from './uuid'
  * but the app won't crash).
  */
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
-  if (!isNativeApp()) return filePath
+  // Client mode can't reach server files via asset protocol
+  if (!isNativeApp() || isClientApp()) return filePath
   const path = encodeURIComponent(filePath)
   return navigator.userAgent.includes('Windows')
     ? `https://${protocol}.localhost/${path}`
@@ -38,14 +44,30 @@ export type UnlistenFn = () => void
 // Public API (same signatures as Tauri)
 // ---------------------------------------------------------------------------
 
+// Commands that the client app handles locally via Tauri IPC
+const CLIENT_LOCAL_COMMANDS = new Set([
+  'load_client_config',
+  'save_client_config',
+  'send_native_notification',
+])
+
 /**
  * Call a backend command. Drop-in replacement for Tauri's invoke().
+ *
+ * Routing:
+ * - Server app (full Jean): always Tauri IPC
+ * - Client app: Tauri IPC for local commands, WebSocket for everything else
+ * - Browser: always WebSocket
  */
 export async function invoke<T>(
   command: string,
   args?: Record<string, unknown>
 ): Promise<T> {
-  if (isNativeApp()) {
+  if (isServerApp()) {
+    const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
+    return tauriInvoke<T>(command, args)
+  }
+  if (isClientApp() && CLIENT_LOCAL_COMMANDS.has(command)) {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
     return tauriInvoke<T>(command, args)
   }
@@ -55,12 +77,14 @@ export async function invoke<T>(
 /**
  * Listen for backend events. Drop-in replacement for Tauri's listen().
  * Returns an unlisten function.
+ *
+ * Server app uses Tauri IPC events; client and browser use WebSocket events.
  */
 export async function listen<T>(
   event: string,
   handler: (event: { payload: T }) => void
 ): Promise<() => void> {
-  if (isNativeApp()) {
+  if (isServerApp()) {
     const { listen: tauriListen } = await import('@tauri-apps/api/event')
     return tauriListen<T>(event, handler)
   }
@@ -91,17 +115,26 @@ let initialDataResolved = false
  * Returns null if preloading fails (app will fall back to WebSocket).
  */
 export async function preloadInitialData(): Promise<InitialData | null> {
-  if (isNativeApp()) return null
+  // Server app uses Tauri IPC, no HTTP preload needed
+  if (isServerApp()) return null
   if (initialDataPromise) return initialDataPromise
 
   initialDataPromise = (async () => {
     const urlToken = new URLSearchParams(window.location.search).get('token')
     const token = urlToken || localStorage.getItem('jean-http-token') || ''
 
+    // In client mode, use the saved server URL; in browser mode, use current origin
+    const baseUrl = isClientApp()
+      ? localStorage.getItem('jean-client-server-url') || ''
+      : ''
+
+    // Can't preload without a server URL in client mode
+    if (isClientApp() && !baseUrl) return null
+
     try {
       const url = token
-        ? `/api/init?token=${encodeURIComponent(token)}`
-        : '/api/init'
+        ? `${baseUrl}/api/init?token=${encodeURIComponent(token)}`
+        : `${baseUrl}/api/init`
       const response = await fetch(url)
       if (!response.ok) {
         return null
@@ -135,6 +168,12 @@ export function getPreloadedData(): InitialData | null {
     result = data
   })
   return result
+}
+
+/** Reset preload cache so next call fetches fresh data. Used after client connects. */
+export function resetPreloadCache(): void {
+  initialDataPromise = null
+  initialDataResolved = false
 }
 
 // ---------------------------------------------------------------------------
@@ -240,10 +279,23 @@ class WsTransport {
     })
   }
 
+  private getServerOrigin(): string {
+    if (isClientApp()) {
+      return localStorage.getItem('jean-client-server-url') || ''
+    }
+    return window.location.origin
+  }
+
   private async validateAndConnect(token: string): Promise<void> {
+    const origin = this.getServerOrigin()
+    if (isClientApp() && !origin) {
+      // No server URL configured yet — don't try to connect
+      return
+    }
+
     const authUrl = token
-      ? `${window.location.origin}/api/auth?token=${encodeURIComponent(token)}`
-      : `${window.location.origin}/api/auth`
+      ? `${origin}/api/auth?token=${encodeURIComponent(token)}`
+      : `${origin}/api/auth`
 
     try {
       const res = await fetch(authUrl)
@@ -252,8 +304,8 @@ class WsTransport {
         localStorage.removeItem('jean-http-token')
         this.setAuthError(
           token
-            ? "Invalid access token. Check the URL in Jean's Web Access settings."
-            : "No access token provided. Use the URL from Jean's Web Access settings."
+            ? "Invalid access token. Check your server's Web Access settings."
+            : 'Server requires authentication. Please provide an access token.'
         )
         return
       }
@@ -270,9 +322,25 @@ class WsTransport {
   }
 
   private connectWs(token: string): void {
-    // Derive WS URL from current page location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
+    // Derive WS URL from server origin (client mode) or current page location (browser)
+    let protocol: string
+    let host: string
+
+    if (isClientApp()) {
+      const serverUrl = localStorage.getItem('jean-client-server-url') || ''
+      try {
+        const parsed = new URL(serverUrl)
+        protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
+        host = parsed.host
+      } catch {
+        // Invalid URL — can't connect
+        return
+      }
+    } else {
+      protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      host = window.location.host
+    }
+
     const url = `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`
 
     this.ws = new WebSocket(url)
@@ -397,6 +465,22 @@ class WsTransport {
     }
   }
 
+  /** Close the WebSocket and reset connection state. */
+  disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws) {
+      this.ws.onclose = null // prevent auto-reconnect
+      this.ws.close()
+      this.ws = null
+    }
+    this.setConnected(false)
+    this.setAuthError(null)
+    this.reconnectAttempt = 0
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return
     // Don't reconnect if there's an auth error — user needs to fix the token
@@ -416,9 +500,15 @@ class WsTransport {
 // Singleton instance
 const wsTransport = new WsTransport()
 
-// Auto-connect in browser mode
-if (!isNativeApp() && typeof window !== 'undefined') {
-  wsTransport.connect()
+// Auto-connect in browser mode, or client mode if a saved connection exists
+if (typeof window !== 'undefined') {
+  if (!isNativeApp()) {
+    // Browser mode: always auto-connect
+    wsTransport.connect()
+  } else if (isClientApp() && localStorage.getItem('jean-client-server-url')) {
+    // Client mode: auto-connect only if server URL is saved
+    wsTransport.connect()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -439,8 +529,26 @@ export function useWsConnectionStatus(): boolean {
 
 /**
  * React hook that returns the current auth error message, or null if none.
- * Only meaningful in browser mode (!isNativeApp()).
+ * Only meaningful in browser/client mode.
  */
 export function useWsAuthError(): string | null {
   return useSyncExternalStore(subscribe, getAuthErrorSnapshot)
+}
+
+/**
+ * Trigger a WebSocket connection attempt.
+ * Used by ConnectionScreen after saving server URL and token.
+ */
+export function connectToServer(): void {
+  wsTransport.connect()
+}
+
+/**
+ * Disconnect from the WebSocket server and clear connection state.
+ * Used by ConnectionPane when user disconnects.
+ */
+export function disconnectFromServer(): void {
+  localStorage.removeItem('jean-client-server-url')
+  localStorage.removeItem('jean-http-token')
+  wsTransport.disconnect()
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { listen, invoke } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, isServerApp } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
@@ -207,7 +207,7 @@ function executeKeybindingAction(
       break
     case 'execute_run': {
       logger.debug('Keybinding: execute_run')
-      if (!isNativeApp()) break
+      if (!isServerApp()) break
 
       const chatStore = useChatStore.getState()
       const uiStore = useUIStore.getState()
@@ -521,7 +521,7 @@ export function useMainWindowEventListeners() {
 
         listen('menu-check-updates', async () => {
           logger.debug('Check for updates menu event received')
-          if (!isNativeApp()) return
+          if (!isServerApp()) return
           try {
             const { check } = await import('@tauri-apps/plugin-updater')
             const update = await check()

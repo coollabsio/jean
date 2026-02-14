@@ -65,7 +65,7 @@ import {
 } from '@/types/preferences'
 import { playNotificationSound } from '@/lib/sounds'
 import type { ThinkingLevel, EffortLevel } from '@/types/chat'
-import { isNativeApp } from '@/lib/environment'
+import { isServerApp } from '@/lib/environment'
 import {
   setGitPollInterval,
   setRemotePollInterval,
@@ -341,7 +341,7 @@ export const GeneralPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {isNativeApp() && (
+      {isServerApp() && (
         <SettingsSection
           title="Claude CLI"
           actions={
@@ -410,7 +410,7 @@ export const GeneralPane: React.FC = () => {
         </SettingsSection>
       )}
 
-      {isNativeApp() && (
+      {isServerApp() && (
         <SettingsSection
           title="GitHub CLI"
           actions={
@@ -600,7 +600,7 @@ export const GeneralPane: React.FC = () => {
             />
           </InlineField>
 
-          {isNativeApp() && (
+          {isServerApp() && (
             <InlineField label="Editor" description="App to open worktrees in">
               <Select
                 value={preferences?.editor ?? 'vscode'}
@@ -620,7 +620,7 @@ export const GeneralPane: React.FC = () => {
             </InlineField>
           )}
 
-          {isNativeApp() && (
+          {isServerApp() && (
             <InlineField
               label="Terminal"
               description="App to open terminals in"

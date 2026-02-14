@@ -8,6 +8,7 @@ import {
   Blocks,
   FlaskConical,
   Globe,
+  Wifi,
   X,
 } from 'lucide-react'
 import {
@@ -51,6 +52,8 @@ import { McpServersPane } from './panes/McpServersPane'
 import { ProvidersPane } from './panes/ProvidersPane'
 import { ExperimentalPane } from './panes/ExperimentalPane'
 import { WebAccessPane } from './panes/WebAccessPane'
+import { ConnectionPane } from '../connection/ConnectionPane'
+import { isClientApp } from '@/lib/environment'
 
 const navigationItems = [
   {
@@ -94,6 +97,13 @@ const navigationItems = [
     name: 'Web Access (Experimental)',
     icon: Globe,
     desktopOnly: true,
+    serverOnly: true,
+  },
+  {
+    id: 'connection' as const,
+    name: 'Connection',
+    icon: Wifi,
+    clientOnly: true,
   },
 ]
 
@@ -115,10 +125,20 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'Experimental'
     case 'web-access':
       return 'Web Access (Experimental)'
+    case 'connection':
+      return 'Connection'
     default:
       return 'General'
   }
 }
+
+const clientMode = isClientApp()
+
+const filteredNavItems = navigationItems.filter(item => {
+  if ('serverOnly' in item && item.serverOnly && clientMode) return false
+  if ('clientOnly' in item && item.clientOnly && !clientMode) return false
+  return true
+})
 
 export function PreferencesDialog() {
   const [activePane, setActivePane] = useState<PreferencePane>('general')
@@ -157,7 +177,7 @@ export function PreferencesDialog() {
               <SidebarGroup>
                 <SidebarGroupContent>
                   <SidebarMenu>
-                    {navigationItems.map(item => (
+                    {filteredNavItems.map(item => (
                       <SidebarMenuItem key={item.id}>
                         <SidebarMenuButton
                           asChild
@@ -191,7 +211,7 @@ export function PreferencesDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {navigationItems
+                    {filteredNavItems
                       .filter(item => !item.desktopOnly)
                       .map(item => (
                         <SelectItem key={item.id} value={item.id}>
@@ -233,6 +253,7 @@ export function PreferencesDialog() {
               {activePane === 'providers' && <ProvidersPane />}
               {activePane === 'experimental' && <ExperimentalPane />}
               {activePane === 'web-access' && <WebAccessPane />}
+              {activePane === 'connection' && <ConnectionPane />}
             </div>
           </main>
         </SidebarProvider>

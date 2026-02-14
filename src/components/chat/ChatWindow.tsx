@@ -127,7 +127,7 @@ import {
 } from '@/services/mcp'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
-import { isNativeApp } from '@/lib/environment'
+import { isServerApp } from '@/lib/environment'
 import { supportsAdaptiveThinking } from '@/lib/model-utils'
 import { useClaudeCliStatus } from '@/services/claude-cli'
 import { usePrStatus, usePrStatusEvents } from '@/services/pr-status'
@@ -2017,7 +2017,7 @@ export function ChatWindow({
     const handleSaveContextEvent = () => handleSaveContext()
     const handleLoadContextEvent = () => handleLoadContext()
     const handleRunScriptEvent = () => {
-      if (!isNativeApp() || !activeWorktreeId || !runScript) return
+      if (!isServerApp() || !activeWorktreeId || !runScript) return
       useTerminalStore.getState().startRun(activeWorktreeId, runScript)
     }
 
@@ -2851,7 +2851,7 @@ export function ChatWindow({
 
             {/* Terminal panel - only render when panel is open (native app only, not in modal) */}
             {!isModal &&
-              isNativeApp() &&
+              isServerApp() &&
               activeWorktreePath &&
               terminalPanelOpen && (
                 <>

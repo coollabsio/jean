@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jean Client",
+  "version": "0.1.0",
+  "identifier": "com.jean.client",
+  "build": {
+    "beforeDevCommand": "cd .. && VITE_CLIENT_MODE=true vite --port 1430",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "cd .. && VITE_CLIENT_MODE=true bun run build",
+    "frontendDist": "../../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' ipc: http: https: ws: wss:; img-src 'self' asset: http://asset.localhost data: blob: http: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [
+            "$APPDATA/**"
+          ],
+          "requireLiteralLeadingDot": false
+        }
+      }
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Andras Bacsai",
+    "category": "DeveloperTool",
+    "shortDescription": "Jean Client - Remote AI Assistant",
+    "longDescription": "Jean Client connects to a remote Jean server for AI-assisted development.",
+    "copyright": "Copyright © 2025 Andras Bacsai. All rights reserved.",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

@@ -5,9 +5,10 @@ import {
   useWsConnectionStatus,
   useWsAuthError,
   preloadInitialData,
+  resetPreloadCache,
   type InitialData,
 } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, isClientApp, isServerApp } from '@/lib/environment'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
 import type { WorktreeSessions } from '@/types/chat'
@@ -16,6 +17,7 @@ import { logger } from './lib/logger'
 import { toast } from 'sonner'
 import { cleanupOldFiles } from './lib/recovery'
 import './App.css'
+import { ConnectionScreen } from './components/connection/ConnectionScreen'
 import MainWindow from './components/layout/MainWindow'
 import { ThemeProvider } from './components/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -87,9 +89,15 @@ function WsStatusBadge() {
 }
 
 function App() {
-  // Track preloading state for web view
-  const [isPreloading, setIsPreloading] = useState(!isNativeApp())
+  // Track preloading state for web view / client mode
+  const [isPreloading, setIsPreloading] = useState(!isServerApp())
   const queryClient = useQueryClient()
+
+  // Client mode: track whether user has configured a connection
+  const [clientConnected, setClientConnected] = useState(() => {
+    if (!isClientApp()) return true // Not client mode — skip gate
+    return !!localStorage.getItem('jean-client-server-url')
+  })
 
   // Holds the update object so the title bar indicator can trigger install later
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,9 +158,12 @@ function App() {
     }
   }, [])
 
-  // Preload initial data via HTTP for web view (faster than waiting for WebSocket)
+  // Preload initial data via HTTP for web view / client mode
   useEffect(() => {
-    if (isNativeApp()) return
+    if (isServerApp()) return
+
+    // In client mode, wait until the user has connected before preloading
+    if (isClientApp() && !clientConnected) return
 
     const seedCache = (data: InitialData) => {
       // Seed projects into TanStack Query cache
@@ -262,6 +273,12 @@ function App() {
       }
     }
 
+    // In client mode, reset the preload cache so we fetch fresh data
+    // (the initial preload returned null because no server URL existed yet)
+    if (isClientApp()) {
+      resetPreloadCache()
+    }
+
     preloadInitialData()
       .then(data => {
         if (data) {
@@ -277,7 +294,7 @@ function App() {
       .finally(() => {
         setIsPreloading(false)
       })
-  }, [queryClient])
+  }, [queryClient, clientConnected])
 
   // Apply font settings from preferences
   useFontSettings()
@@ -302,11 +319,11 @@ function App() {
   // Auto-archive worktrees when their PR is merged (if enabled in preferences)
   useAutoArchiveOnMerge()
 
-  // When WebSocket connects (browser mode), invalidate queries that weren't preloaded
+  // When WebSocket connects (browser or client mode), invalidate queries that weren't preloaded
   // so they refetch with the now-available backend. Skip preloaded data.
   const wsConnected = useWsConnectionStatus()
   useEffect(() => {
-    if (!isNativeApp() && wsConnected) {
+    if (!isServerApp() && wsConnected) {
       logger.info('WebSocket connected, invalidating dynamic queries')
       // Invalidate everything except what we preloaded
       queryClient.invalidateQueries({
@@ -345,9 +362,9 @@ function App() {
   })
 
   // Show onboarding if either CLI is not installed or not authenticated
-  // Only in native app - web view uses the desktop's CLIs via WebSocket
+  // Only in server app — client mode uses the remote server's CLIs
   useEffect(() => {
-    if (!isNativeApp()) return
+    if (!isServerApp()) return
 
     const isLoading =
       isClaudeStatusLoading ||
@@ -407,11 +424,11 @@ function App() {
   }, [queryClient])
 
   // Kill all terminals on page refresh/close (backup for Rust-side cleanup)
+  // Only in server app — client mode has no local terminals
   useEffect(() => {
+    if (!isServerApp()) return
+
     const handleBeforeUnload = () => {
-      // Best-effort sync cleanup for refresh scenarios
-      // Note: async operations may not complete, but Rust-side RunEvent::Exit
-      // will handle proper cleanup on app quit
       invoke('kill_all_terminals').catch(() => {
         /* noop */
       })
@@ -429,62 +446,61 @@ function App() {
     // Preload notification sounds for instant playback
     preloadAllSounds()
 
-    // Kill any orphaned terminals from previous session/reload
-    // This ensures cleanup even if beforeunload didn't complete
-    invoke<number>('kill_all_terminals')
-      .then(killed => {
-        if (killed > 0) {
-          logger.info(
-            `Cleaned up ${killed} orphaned terminal(s) from previous session`
-          )
-        }
-      })
-      .catch(error => {
-        logger.warn('Failed to cleanup orphaned terminals', { error })
-      })
-
-    // Clean up old recovery files on startup
-    cleanupOldFiles().catch(error => {
-      logger.warn('Failed to cleanup old recovery files', { error })
-    })
-
-    // Check for and resume any detached Claude sessions that are still running
-    interface ResumableSession {
-      session_id: string
-      worktree_id: string
-      run_id: string
-      user_message: string
-      resumable: boolean
-    }
-    invoke<ResumableSession[]>('check_resumable_sessions')
-      .then(resumable => {
-        if (resumable.length > 0) {
-          logger.info('Found resumable sessions', { count: resumable.length })
-          // Resume each session
-          for (const session of resumable) {
-            logger.info('Resuming session', {
-              session_id: session.session_id,
-              worktree_id: session.worktree_id,
-            })
-            // Mark session as sending to show streaming UI
-            useChatStore.getState().addSendingSession(session.session_id)
-            // Resume the session (this will start tailing the output file)
-            invoke('resume_session', {
-              sessionId: session.session_id,
-              worktreeId: session.worktree_id,
-            }).catch(error => {
-              logger.error('Failed to resume session', {
-                session_id: session.session_id,
-                error,
-              })
-              useChatStore.getState().removeSendingSession(session.session_id)
-            })
+    // Server-only startup tasks (terminals, recovery, resumable sessions)
+    if (isServerApp()) {
+      // Kill any orphaned terminals from previous session/reload
+      invoke<number>('kill_all_terminals')
+        .then(killed => {
+          if (killed > 0) {
+            logger.info(
+              `Cleaned up ${killed} orphaned terminal(s) from previous session`
+            )
           }
-        }
+        })
+        .catch(error => {
+          logger.warn('Failed to cleanup orphaned terminals', { error })
+        })
+
+      // Clean up old recovery files on startup
+      cleanupOldFiles().catch(error => {
+        logger.warn('Failed to cleanup old recovery files', { error })
       })
-      .catch(error => {
-        logger.error('Failed to check resumable sessions', { error })
-      })
+
+      // Check for and resume any detached Claude sessions that are still running
+      interface ResumableSession {
+        session_id: string
+        worktree_id: string
+        run_id: string
+        user_message: string
+        resumable: boolean
+      }
+      invoke<ResumableSession[]>('check_resumable_sessions')
+        .then(resumable => {
+          if (resumable.length > 0) {
+            logger.info('Found resumable sessions', { count: resumable.length })
+            for (const session of resumable) {
+              logger.info('Resuming session', {
+                session_id: session.session_id,
+                worktree_id: session.worktree_id,
+              })
+              useChatStore.getState().addSendingSession(session.session_id)
+              invoke('resume_session', {
+                sessionId: session.session_id,
+                worktreeId: session.worktree_id,
+              }).catch(error => {
+                logger.error('Failed to resume session', {
+                  session_id: session.session_id,
+                  error,
+                })
+                useChatStore.getState().removeSendingSession(session.session_id)
+              })
+            }
+          }
+        })
+        .catch(error => {
+          logger.error('Failed to check resumable sessions', { error })
+        })
+    }
 
     // Example of logging with context
     logger.info('App environment', {
@@ -494,7 +510,7 @@ function App() {
 
     // Auto-updater logic - check for updates 5 seconds after app loads
     const checkForUpdates = async () => {
-      if (!isNativeApp()) return
+      if (!isServerApp()) return
 
       try {
         const { check } = await import('@tauri-apps/plugin-updater')
@@ -527,7 +543,18 @@ function App() {
     }
   }, [installAppUpdate])
 
-  // Show loading screen while preloading initial data (web view only)
+  // Client mode: show connection screen if not connected
+  if (isClientApp() && !clientConnected) {
+    return (
+      <ErrorBoundary>
+        <ThemeProvider>
+          <ConnectionScreen onConnected={() => setClientConnected(true)} />
+        </ThemeProvider>
+      </ErrorBoundary>
+    )
+  }
+
+  // Show loading screen while preloading initial data (web/client mode)
   if (isPreloading) {
     return <WebLoadingScreen />
   }
@@ -536,7 +563,7 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <MainWindow />
-        {!isNativeApp() && <WsStatusBadge />}
+        {!isServerApp() && <WsStatusBadge />}
       </ThemeProvider>
     </ErrorBoundary>
   )
