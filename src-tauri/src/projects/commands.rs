@@ -2833,9 +2833,8 @@ pub async fn open_worktree_in_editor(
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     {
-        // VS Code and Cursor CLI work the same on all platforms
         let result = match editor_app.as_str() {
             "cursor" => std::process::Command::new("cursor")
                 .arg(&worktree_path)
@@ -2849,6 +2848,30 @@ pub async fn open_worktree_in_editor(
                     .arg(&worktree_path)
                     .spawn()
             }
+        };
+
+        match result {
+            Ok(_) => {
+                log::trace!("Successfully opened {editor_app}");
+            }
+            Err(e) => {
+                return Err(format_open_error(&editor_app, &e));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let result = match editor_app.as_str() {
+            "cursor" => std::process::Command::new("cmd")
+                .args(["/C", "cursor", &worktree_path])
+                .spawn(),
+            "xcode" => {
+                return Err("Xcode is only available on macOS".to_string());
+            }
+            _ => std::process::Command::new("cmd")
+                .args(["/C", "code", &worktree_path])
+                .spawn(),
         };
 
         match result {

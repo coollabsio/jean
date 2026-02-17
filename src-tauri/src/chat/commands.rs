@@ -2238,8 +2238,8 @@ pub async fn open_file_in_default_app(path: String, editor: Option<String>) -> R
     #[cfg(target_os = "windows")]
     {
         let result = match editor_app.as_str() {
-            "cursor" => std::process::Command::new("cursor").arg(&path).spawn(),
-            _ => std::process::Command::new("code").arg(&path).spawn(),
+            "cursor" => std::process::Command::new("cmd").args(["/C", "cursor", &path]).spawn(),
+            _ => std::process::Command::new("cmd").args(["/C", "code", &path]).spawn(),
         };
 
         result.map_err(|e| format!("Failed to open {editor_app}: {e}"))?;
