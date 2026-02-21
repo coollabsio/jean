@@ -73,7 +73,7 @@ pub fn run() {
         .setup(|app| {
             // Create the main window programmatically so we can inject
             // an initialization script that runs BEFORE any page JS.
-            let _window = tauri::WebviewWindowBuilder::new(
+            let mut builder = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App(Default::default()),
@@ -88,14 +88,20 @@ pub fn run() {
             .center()
             .decorations(false)
             .transparent(true)
-            .shadow(true)
-            .effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![tauri::window::Effect::HudWindow],
-                radius: Some(12.0),
-                state: Some(tauri::window::EffectState::Active),
-                color: None,
-            })
-            .build()?;
+            .shadow(true);
+
+            // HudWindow effect is macOS-only, conditionally apply to prevent crashes on other platforms
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder.effects(tauri::utils::config::WindowEffectsConfig {
+                    effects: vec![tauri::window::Effect::HudWindow],
+                    radius: Some(12.0),
+                    state: Some(tauri::window::EffectState::Active),
+                    color: None,
+                });
+            }
+
+            let _window = builder.build()?;
 
             Ok(())
         })

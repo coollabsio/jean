@@ -700,7 +700,7 @@ export function useMainWindowEventListeners() {
   useEffect(() => {
     // Skip in development mode - only block quit in production
     if (import.meta.env.DEV) return
-    if (!isNativeApp()) return
+    if (!isServerApp()) return
 
     let unlisten: (() => void) | null = null
 

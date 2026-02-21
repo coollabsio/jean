@@ -63,6 +63,16 @@ export async function invoke<T>(
   command: string,
   args?: Record<string, unknown>
 ): Promise<T> {
+  // E2E mock transport — route to in-memory handlers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const e2eMock = (window as any).__JEAN_E2E_MOCK__
+  if (e2eMock) {
+    const handler = e2eMock.invokeHandlers[command]
+    if (handler) return handler(args) as T
+    console.warn(`[E2E] No mock for command: ${command}`)
+    return null as T
+  }
+
   if (isServerApp()) {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
     return tauriInvoke<T>(command, args)
@@ -84,6 +94,16 @@ export async function listen<T>(
   event: string,
   handler: (event: { payload: T }) => void
 ): Promise<() => void> {
+  // E2E mock transport — route to in-memory event emitter
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const e2eMock = (window as any).__JEAN_E2E_MOCK__
+  if (e2eMock) {
+    const et = e2eMock.eventEmitter as EventTarget
+    const wrapped = (e: Event) => handler({ payload: (e as CustomEvent).detail })
+    et.addEventListener(event, wrapped)
+    return () => et.removeEventListener(event, wrapped)
+  }
+
   if (isServerApp()) {
     const { listen: tauriListen } = await import('@tauri-apps/api/event')
     return tauriListen<T>(event, handler)
@@ -117,6 +137,10 @@ let initialDataResolved = false
 export async function preloadInitialData(): Promise<InitialData | null> {
   // Server app uses Tauri IPC, no HTTP preload needed
   if (isServerApp()) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== 'undefined' && (window as any).__JEAN_E2E_MOCK__) return null
+
   if (initialDataPromise) return initialDataPromise
 
   initialDataPromise = (async () => {
@@ -471,6 +495,17 @@ class WsTransport {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
+
+    // Reject all pending invoke() promises
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error('Disconnected from server'))
+    }
+    this.pending.clear()
+
+    // Clear queued messages
+    this.queue = []
+
     if (this.ws) {
       this.ws.onclose = null // prevent auto-reconnect
       this.ws.close()
@@ -501,7 +536,8 @@ class WsTransport {
 const wsTransport = new WsTransport()
 
 // Auto-connect in browser mode, or client mode if a saved connection exists
-if (typeof window !== 'undefined') {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+if (typeof window !== 'undefined' && !(window as any).__JEAN_E2E_MOCK__) {
   if (!isNativeApp()) {
     // Browser mode: always auto-connect
     wsTransport.connect()
@@ -515,6 +551,11 @@ if (typeof window !== 'undefined') {
 // React hooks for connection status (browser mode only)
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isE2eMocked = typeof window !== 'undefined' && !!(window as any).__JEAN_E2E_MOCK__
+// eslint-disable-next-line @typescript-eslint/no-empty-function
+const noopSubscribe = () => () => {}
+
 const subscribe = (cb: () => void) => wsTransport.subscribe(cb)
 const getSnapshot = () => wsTransport.getSnapshot()
 const getAuthErrorSnapshot = () => wsTransport.getAuthErrorSnapshot()
@@ -524,7 +565,10 @@ const getAuthErrorSnapshot = () => wsTransport.getAuthErrorSnapshot()
  * Only meaningful in browser mode (!isNativeApp()).
  */
 export function useWsConnectionStatus(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot)
+  return useSyncExternalStore(
+    isE2eMocked ? noopSubscribe : subscribe,
+    isE2eMocked ? () => true : getSnapshot
+  )
 }
 
 /**
@@ -532,7 +576,10 @@ export function useWsConnectionStatus(): boolean {
  * Only meaningful in browser/client mode.
  */
 export function useWsAuthError(): string | null {
-  return useSyncExternalStore(subscribe, getAuthErrorSnapshot)
+  return useSyncExternalStore(
+    isE2eMocked ? noopSubscribe : subscribe,
+    isE2eMocked ? () => null : getAuthErrorSnapshot
+  )
 }
 
 /**

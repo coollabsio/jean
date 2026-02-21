@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import {
   Settings,
   Palette,
@@ -132,17 +132,20 @@ const getPaneTitle = (pane: PreferencePane): string => {
   }
 }
 
-const clientMode = isClientApp()
-
-const filteredNavItems = navigationItems.filter(item => {
-  if ('serverOnly' in item && item.serverOnly && clientMode) return false
-  if ('clientOnly' in item && item.clientOnly && !clientMode) return false
-  return true
-})
-
 export function PreferencesDialog() {
   const [activePane, setActivePane] = useState<PreferencePane>('general')
   const { preferencesOpen, setPreferencesOpen, preferencesPane } = useUIStore()
+
+  const clientMode = isClientApp()
+  const filteredNavItems = useMemo(
+    () =>
+      navigationItems.filter(item => {
+        if ('serverOnly' in item && item.serverOnly && clientMode) return false
+        if ('clientOnly' in item && item.clientOnly && !clientMode) return false
+        return true
+      }),
+    [clientMode]
+  )
 
   // Handle open state change and navigate to specific pane if requested
   const handleOpenChange = useCallback(

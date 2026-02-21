@@ -17,6 +17,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { invoke, convertFileSrc } from '@/lib/transport'
+import { isServerApp } from '@/lib/environment'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -284,14 +285,16 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
                     )}
                   </>
                 ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenExternal}
-                  >
-                    <ExternalLink className="h-4 w-4 mr-1" />
-                    Open in Editor
-                  </Button>
+                  isServerApp() && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleOpenExternal}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-1" />
+                      Open in Editor
+                    </Button>
+                  )
                 )}
               </div>
             )}

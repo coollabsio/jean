@@ -45,7 +45,11 @@ export function ConnectionScreen({ onConnected }: ConnectionScreenProps) {
         ? `${url}/api/auth?token=${encodeURIComponent(token)}`
         : `${url}/api/auth`
 
-      const res = await fetch(authUrl)
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 15000)
+      const res = await fetch(authUrl, { signal: controller.signal })
+      clearTimeout(timeout)
+
       if (!res.ok) {
         setError(
           token
@@ -55,8 +59,12 @@ export function ConnectionScreen({ onConnected }: ConnectionScreenProps) {
         setConnecting(false)
         return
       }
-    } catch {
-      setError('Could not reach the server. Check the URL and ensure Jean is running.')
+    } catch (err) {
+      setError(
+        err instanceof DOMException && err.name === 'AbortError'
+          ? 'Connection timed out. Check the URL and ensure Jean is running.'
+          : 'Could not reach the server. Check the URL and ensure Jean is running.'
+      )
       setConnecting(false)
       return
     }
@@ -83,91 +91,95 @@ export function ConnectionScreen({ onConnected }: ConnectionScreenProps) {
     // Trigger WebSocket connection
     connectToServer()
     onConnected()
-  }, [serverUrl, token, onConnected])
+  }, [serverUrl, token, connecting, onConnected])
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background">
-      <div className="mx-4 w-full max-w-sm space-y-6">
-        <div className="flex flex-col items-center gap-2">
-          <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
-            <Wifi className="size-6 text-primary" />
-          </div>
-          <h1 className="text-xl font-semibold text-foreground">
-            Connect to Jean Server
-          </h1>
-          <p className="text-center text-sm text-muted-foreground">
-            Enter your Jean server details to get started.
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="server-url">Server URL</Label>
-            <Input
-              id="server-url"
-              type="text"
-              placeholder="http://192.168.1.100:3456"
-              value={serverUrl}
-              onChange={e => setServerUrl(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleConnect()}
-              autoFocus
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="server-token">
-              Access Token{' '}
-              <span className="font-normal text-muted-foreground">(optional)</span>
-            </Label>
-            <div className="relative">
-              <Input
-                id="server-token"
-                type={showToken ? 'text' : 'password'}
-                placeholder="Leave empty if auth is disabled"
-                value={token}
-                onChange={e => setToken(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleConnect()}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowToken(!showToken)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                tabIndex={-1}
-                aria-label={showToken ? 'Hide token' : 'Show token'}
-              >
-                {showToken ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-              </button>
+    <div className="flex h-screen w-full flex-col bg-background">
+      {/* Drag region for frameless window */}
+      <div data-tauri-drag-region className="h-8 w-full shrink-0" />
+      <div className="flex flex-1 items-center justify-center">
+        <div className="mx-4 w-full max-w-sm space-y-6">
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+              <Wifi className="size-6 text-primary" />
             </div>
-            <p className="text-xs text-muted-foreground">
-              Only required if your server has authentication enabled.
+            <h1 className="text-xl font-semibold text-foreground">
+              Connect to Jean Server
+            </h1>
+            <p className="text-center text-sm text-muted-foreground">
+              Enter your Jean server details to get started.
             </p>
           </div>
 
-          {error && (
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="server-url">Server URL</Label>
+              <Input
+                id="server-url"
+                type="text"
+                placeholder="http://192.168.1.100:3456"
+                value={serverUrl}
+                onChange={e => setServerUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleConnect()}
+                autoFocus
+              />
             </div>
-          )}
 
-          <Button
-            onClick={handleConnect}
-            disabled={connecting}
-            className="w-full"
-          >
-            {connecting ? (
-              <>
-                <Loader2 className="mr-2 size-4 animate-spin" />
-                Connecting...
-              </>
-            ) : (
-              'Connect'
+            <div className="space-y-2">
+              <Label htmlFor="server-token">
+                Access Token{' '}
+                <span className="font-normal text-muted-foreground">(optional)</span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="server-token"
+                  type={showToken ? 'text' : 'password'}
+                  placeholder="Leave empty if auth is disabled"
+                  value={token}
+                  onChange={e => setToken(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleConnect()}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowToken(!showToken)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                  aria-label={showToken ? 'Hide token' : 'Show token'}
+                >
+                  {showToken ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Only required if your server has authentication enabled.
+              </p>
+            </div>
+
+            {error && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
             )}
-          </Button>
+
+            <Button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="w-full"
+            >
+              {connecting ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                'Connect'
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
