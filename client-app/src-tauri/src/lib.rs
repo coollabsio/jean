@@ -64,6 +64,47 @@ fn save_client_config(app: tauri::AppHandle, config: ClientConfig) -> Result<(),
 }
 
 pub fn run() {
+    // FIX: Avoid WebKit GBM buffer errors on Linux (especially NVIDIA)
+    //
+    // This issue occurs when using transparent windows with WebKitGTK on Linux,
+    // particularly with NVIDIA GPUs. The error "Failed to create GBM buffer of size NxN: Invalid argument"
+    // is caused by incompatibilities between hardware-accelerated compositing and certain
+    // GPU drivers/compositors.
+    //
+    // Related issues:
+    // - https://github.com/tauri-apps/tauri/issues/13493
+    // - https://github.com/tauri-apps/tauri/issues/8254
+    // - https://bugs.webkit.org/show_bug.cgi?id=165246
+    // - https://github.com/tauri-apps/tauri/issues/9394 (NVIDIA problems doc)
+    //
+    // The fix disables problematic GPU compositing modes. Users can override via env vars:
+    // - JEAN_FORCE_X11=1 to force X11 backend (default: no)
+    // - WEBKIT_DISABLE_COMPOSITING_MODE=0 to re-enable GPU compositing (risky)
+    #[cfg(target_os = "linux")]
+    {
+        log::trace!("Setting WebKit compatibility fixes for Linux (client app)");
+
+        // Disable problematic GPU compositing modes
+        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+            log::trace!("WEBKIT_DISABLE_COMPOSITING_MODE=1");
+        }
+
+        // Disable DMABUF renderer (common cause of GBM errors)
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            log::trace!("WEBKIT_DISABLE_DMABUF_RENDERER=1");
+        }
+
+        // Force X11 backend if Wayland causes issues
+        // Check if user explicitly wants X11 via environment variable
+        let force_x11 = std::env::var("JEAN_FORCE_X11").unwrap_or_else(|_| "0".to_string()) == "1";
+        if force_x11 && std::env::var_os("GDK_BACKEND").is_none() {
+            std::env::set_var("GDK_BACKEND", "x11");
+            log::trace!("GDK_BACKEND=x11 (forced by JEAN_FORCE_X11)");
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_process::init())

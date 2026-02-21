@@ -98,6 +98,18 @@ function App() {
     if (!isClientApp()) return true // Not client mode — skip gate
     return !!localStorage.getItem('jean-client-server-url')
   })
+  const wsAuthError = useWsAuthError()
+
+  // Client mode: if auth becomes invalid and the token was cleared, return to setup.
+  useEffect(() => {
+    if (!isClientApp() || !clientConnected || !wsAuthError) return
+
+    const hasToken = !!localStorage.getItem('jean-http-token')
+    if (!hasToken) {
+      logger.warn('Client auth became invalid, reopening connection setup')
+      setClientConnected(false)
+    }
+  }, [clientConnected, wsAuthError])
 
   // Holds the update object so the title bar indicator can trigger install later
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
