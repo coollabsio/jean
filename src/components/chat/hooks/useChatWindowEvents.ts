@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { cancelChatMessage } from '@/services/chat'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, isServerMode } from '@/lib/environment'
 import { logger } from '@/lib/logger'
 import type {
   ContentBlock,
@@ -348,7 +348,7 @@ export function useChatWindowEvents({
     const handleSave = () => handleSaveContext()
     const handleLoad = () => handleLoadContext()
     const handleRun = () => {
-      if (!isNativeApp() || !activeWorktreeId || !runScript) return
+      if (!isServerMode() || !activeWorktreeId || !runScript) return
       useTerminalStore.getState().startRun(activeWorktreeId, runScript)
     }
     window.addEventListener('command:save-context', handleSave)

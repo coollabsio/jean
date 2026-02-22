@@ -20,7 +20,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { getOpenInDefaultLabel } from '@/types/preferences'
-import { isNativeApp } from '@/lib/environment'
+import { isServerMode } from '@/lib/environment'
 
 interface OpenInButtonProps {
   worktreePath: string
@@ -78,7 +78,7 @@ export function OpenInButton({
     preferences?.terminal
   )
 
-  if (!isNativeApp()) return null
+  if (!isServerMode()) return null
 
   return (
     <div

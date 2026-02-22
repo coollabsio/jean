@@ -20,7 +20,7 @@ import {
 import { usePreferences, useSavePreferences } from '@/services/preferences'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
-import { isNativeApp } from '@/lib/environment'
+import { isServerMode } from '@/lib/environment'
 import { openExternal } from '@/lib/platform'
 
 const SettingsSection: React.FC<{
@@ -69,7 +69,7 @@ export const WebAccessPane: React.FC = () => {
 
   // Poll server status
   const refreshStatus = useCallback(async () => {
-    if (!isNativeApp()) return
+    if (!isServerMode()) return
     try {
       const status = await invoke<ServerStatus>('get_http_server_status')
       setServerStatus(status)
@@ -213,7 +213,7 @@ export const WebAccessPane: React.FC = () => {
     [preferences, savePreferences, serverStatus?.running, refreshStatus]
   )
 
-  if (!isNativeApp()) {
+  if (!isServerMode()) {
     return (
       <div className="space-y-6">
         <div className="rounded-lg border border-muted p-4">

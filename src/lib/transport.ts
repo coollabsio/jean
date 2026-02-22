@@ -7,7 +7,13 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { isNativeApp, setWsConnected } from './environment'
+import {
+  isNativeApp,
+  isClientMode,
+  isServerMode,
+  getClientServerUrl,
+  setWsConnected,
+} from './environment'
 import { generateId } from './uuid'
 
 // ---------------------------------------------------------------------------
@@ -24,7 +30,7 @@ import { generateId } from './uuid'
  * but the app won't crash).
  */
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
-  if (!isNativeApp()) return filePath
+  if (!isServerMode()) return filePath
   const path = encodeURIComponent(filePath)
   return navigator.userAgent.includes('Windows')
     ? `https://${protocol}.localhost/${path}`
@@ -55,7 +61,7 @@ export async function invoke<T>(
     return null as T
   }
 
-  if (isNativeApp()) {
+  if (isServerMode()) {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
     return tauriInvoke<T>(command, args)
   }
@@ -81,7 +87,7 @@ export async function listen<T>(
     return () => et.removeEventListener(event, wrapped)
   }
 
-  if (isNativeApp()) {
+  if (isServerMode()) {
     const { listen: tauriListen } = await import('@tauri-apps/api/event')
     return tauriListen<T>(event, handler)
   }
@@ -112,20 +118,23 @@ let initialDataResolved = false
  * Returns null if preloading fails (app will fall back to WebSocket).
  */
 export async function preloadInitialData(): Promise<InitialData | null> {
-  if (isNativeApp()) return null
+  if (isServerMode()) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof window !== 'undefined' && (window as any).__JEAN_E2E_MOCK__)
     return null
+  // Client mode with no URL configured yet — nothing to preload
+  if (isClientMode() && !getClientServerUrl()) return null
   if (initialDataPromise) return initialDataPromise
 
   initialDataPromise = (async () => {
+    const origin = getServerOrigin()
     const urlToken = new URLSearchParams(window.location.search).get('token')
     const token = urlToken || localStorage.getItem('jean-http-token') || ''
 
     try {
       const url = token
-        ? `/api/init?token=${encodeURIComponent(token)}`
-        : '/api/init'
+        ? `${origin}/api/init?token=${encodeURIComponent(token)}`
+        : `${origin}/api/init`
       const response = await fetch(url)
       if (!response.ok) {
         return null
@@ -161,8 +170,27 @@ export function getPreloadedData(): InitialData | null {
   return result
 }
 
+/** Clear cached preload state (used when switching modes/servers). */
+export function resetPreloadCache(): void {
+  initialDataPromise = null
+  initialDataResolved = false
+}
+
 // ---------------------------------------------------------------------------
-// WebSocket Transport (used in browser mode)
+// Server origin helper
+// ---------------------------------------------------------------------------
+
+/** Return the server origin for HTTP/WS connections. */
+function getServerOrigin(): string {
+  if (isClientMode()) {
+    const url = getClientServerUrl()
+    if (url) return url.replace(/\/$/, '')
+  }
+  return window.location.origin
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket Transport (used in browser and client modes)
 // ---------------------------------------------------------------------------
 
 interface PendingRequest {
@@ -265,9 +293,10 @@ class WsTransport {
   }
 
   private async validateAndConnect(token: string): Promise<void> {
+    const origin = getServerOrigin()
     const authUrl = token
-      ? `${window.location.origin}/api/auth?token=${encodeURIComponent(token)}`
-      : `${window.location.origin}/api/auth`
+      ? `${origin}/api/auth?token=${encodeURIComponent(token)}`
+      : `${origin}/api/auth`
 
     try {
       const res = await fetch(authUrl)
@@ -294,10 +323,10 @@ class WsTransport {
   }
 
   private connectWs(token: string): void {
-    // Derive WS URL from current page location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const url = `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`
+    // Derive WS URL from server origin
+    const origin = getServerOrigin()
+    const wsOrigin = origin.replace(/^http/, 'ws')
+    const url = `${wsOrigin}/ws?token=${encodeURIComponent(token)}`
 
     this.ws = new WebSocket(url)
 
@@ -421,6 +450,26 @@ class WsTransport {
     }
   }
 
+  /** Disconnect cleanly — clears timers, rejects pending, closes socket. */
+  disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    for (const [, req] of this.pending) {
+      clearTimeout(req.timeout)
+      req.reject(new Error('Disconnected from server'))
+    }
+    this.pending.clear()
+    this.queue = []
+    if (this.ws) {
+      this.ws.onclose = null // prevent auto-reconnect
+      this.ws.close()
+      this.ws = null
+    }
+    this.setConnected(false)
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return
     // Don't reconnect if there's an auth error — user needs to fix the token
@@ -440,14 +489,17 @@ class WsTransport {
 // Singleton instance
 const wsTransport = new WsTransport()
 
-// Auto-connect in browser mode (skip when E2E mocks are active)
+// Auto-connect in browser mode and client mode (skip when E2E mocks are active)
 if (
-  !isNativeApp() &&
   typeof window !== 'undefined' &&
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   !(window as any).__JEAN_E2E_MOCK__
 ) {
-  wsTransport.connect()
+  if (!isNativeApp()) {
+    wsTransport.connect() // Browser mode: always
+  } else if (isClientMode() && getClientServerUrl()) {
+    wsTransport.connect() // Client mode: only when URL is saved
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -485,4 +537,29 @@ export function useWsAuthError(): string | null {
     isE2eMocked ? noopSubscribe : subscribe,
     isE2eMocked ? () => null : getAuthErrorSnapshot
   )
+}
+
+// ---------------------------------------------------------------------------
+// Client mode connection helpers
+// ---------------------------------------------------------------------------
+
+/** Connect to a remote Jean server. Saves config and reloads. */
+export function connectToServer(serverUrl: string, token?: string): void {
+  localStorage.setItem('jean-client-mode', 'true')
+  localStorage.setItem('jean-client-server-url', serverUrl)
+  if (token) {
+    localStorage.setItem('jean-http-token', token)
+  } else {
+    localStorage.removeItem('jean-http-token')
+  }
+  window.location.reload()
+}
+
+/** Disconnect from remote server and return to local mode. Reloads. */
+export function disconnectFromServer(): void {
+  localStorage.removeItem('jean-client-mode')
+  localStorage.removeItem('jean-client-server-url')
+  localStorage.removeItem('jean-http-token')
+  wsTransport.disconnect()
+  window.location.reload()
 }

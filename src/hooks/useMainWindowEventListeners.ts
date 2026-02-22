@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { listen, invoke } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, isServerMode } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
@@ -78,7 +78,7 @@ function executeKeybindingAction(
       break
     case 'execute_run': {
       logger.debug('Keybinding: execute_run')
-      if (!isNativeApp()) break
+      if (!isServerMode()) break
 
       const chatStore = useChatStore.getState()
       const uiStore = useUIStore.getState()
@@ -607,7 +607,7 @@ export function useMainWindowEventListeners() {
   useEffect(() => {
     // Skip in development mode - only block quit in production
     if (import.meta.env.DEV) return
-    if (!isNativeApp()) return
+    if (!isServerMode()) return
 
     let unlisten: (() => void) | null = null
 
