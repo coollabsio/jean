@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { cancelChatMessage } from '@/services/chat'
-import { isNativeApp, isServerMode } from '@/lib/environment'
+import { isServerMode } from '@/lib/environment'
 import { logger } from '@/lib/logger'
 import type {
   ContentBlock,
