@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { listen, invoke } from '@/lib/transport'
-import { isNativeApp, isServerMode } from '@/lib/environment'
+import { isNativeApp, isServerMode, isUpdaterDisabled } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
@@ -420,6 +420,13 @@ export function useMainWindowEventListeners() {
         listen('menu-check-updates', async () => {
           logger.debug('Check for updates menu event received')
           if (!isNativeApp()) return
+          if (isUpdaterDisabled()) {
+            commandContext.showToast(
+              'Updates are disabled for this build',
+              'success'
+            )
+            return
+          }
           try {
             const { check } = await import('@tauri-apps/plugin-updater')
             const update = await check()

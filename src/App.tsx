@@ -7,7 +7,12 @@ import {
   preloadInitialData,
   type InitialData,
 } from '@/lib/transport'
-import { isNativeApp, isServerMode, isClientMode } from '@/lib/environment'
+import {
+  isNativeApp,
+  isServerMode,
+  isClientMode,
+  isUpdaterDisabled,
+} from '@/lib/environment'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
 import type { WorktreeSessions } from '@/types/chat'
@@ -556,6 +561,11 @@ function App() {
       isDev: import.meta.env.DEV,
       mode: import.meta.env.MODE,
     })
+
+    if (isUpdaterDisabled()) {
+      logger.info('Auto-updater disabled by configuration')
+      return
+    }
 
     // Auto-updater logic - check for updates 5 seconds after app loads
     const checkForUpdates = async () => {

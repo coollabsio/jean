@@ -30,6 +30,19 @@ export const getClientServerUrl = (): string | null =>
     ? localStorage.getItem('jean-client-server-url')
     : null
 
+/**
+ * Updater disable switch for local/testing builds.
+ * - Build-time: VITE_DISABLE_UPDATER=true
+ * - Runtime: localStorage.setItem('jean-disable-updater', 'true')
+ */
+export const isUpdaterDisabled = (): boolean => {
+  if (import.meta.env.VITE_DISABLE_UPDATER === 'true') return true
+  return (
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('jean-disable-updater') === 'true'
+  )
+}
+
 /** A backend is available (either Tauri IPC, WebSocket connection, or E2E mock). */
 export const hasBackend = (): boolean => {
   if (isServerMode()) return true

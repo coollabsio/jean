@@ -30,6 +30,7 @@
     "tauri:dev": "tauri dev --config src-tauri/tauri.conf.dev.json",
     "tauri:build": "bun run tauri build",
     "tauri:build:macos": "tauri build --target universal-apple-darwin --bundles app,dmg",
+    "tauri:build:macos:local": "VITE_DISABLE_UPDATER=true tauri build --bundles app,dmg --no-sign",
     "tauri:build:linux": "tauri build --bundles deb,rpm",
     "tauri:build:linux:appimage": "bash scripts/build-appimage.sh",
     "tauri:build:windows": "tauri build --bundles msi,nsis",
