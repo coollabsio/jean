@@ -31,6 +31,7 @@ import { getLanguageFromPath } from '@/lib/language-detection'
 import { getFilename } from '@/lib/path-utils'
 import { useTheme } from '@/hooks/use-theme'
 import { usePreferences } from '@/services/preferences'
+import { isServerMode } from '@/lib/environment'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
 
@@ -289,14 +290,16 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
                     )}
                   </>
                 ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenExternal}
-                  >
-                    <ExternalLink className="h-4 w-4 mr-1" />
-                    Open in Editor
-                  </Button>
+                  isServerMode() && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleOpenExternal}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-1" />
+                      Open in Editor
+                    </Button>
+                  )
                 )}
               </div>
             )}

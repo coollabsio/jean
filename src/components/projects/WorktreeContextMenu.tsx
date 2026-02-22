@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/context-menu'
 import type { Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
-import { isNativeApp } from '@/lib/environment'
+import { isServerMode } from '@/lib/environment'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
 interface WorktreeContextMenuProps {
@@ -68,7 +68,7 @@ export function WorktreeContextMenu({
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        {isNativeApp() && runScript && (
+        {isServerMode() && runScript && (
           <ContextMenuItem onClick={handleRun}>
             <Play className="mr-2 h-4 w-4" />
             Run
@@ -87,23 +87,23 @@ export function WorktreeContextMenu({
           </ContextMenuItem>
         )}
 
-        {isNativeApp() && <ContextMenuSeparator />}
+        {isServerMode() && <ContextMenuSeparator />}
 
-        {isNativeApp() && (
+        {isServerMode() && (
           <ContextMenuItem onClick={handleOpenInEditor}>
             <Code className="mr-2 h-4 w-4" />
             Open in {getEditorLabel(preferences?.editor)}
           </ContextMenuItem>
         )}
 
-        {isNativeApp() && (
+        {isServerMode() && (
           <ContextMenuItem onClick={handleOpenInFinder}>
             <FolderOpen className="mr-2 h-4 w-4" />
             Open in Finder
           </ContextMenuItem>
         )}
 
-        {isNativeApp() && (
+        {isServerMode() && (
           <ContextMenuItem onClick={handleOpenInTerminal}>
             <Terminal className="mr-2 h-4 w-4" />
             Open in {getTerminalLabel(preferences?.terminal)}

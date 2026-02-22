@@ -65,7 +65,7 @@ import {
 } from '@/services/git-status'
 import { isBaseSession } from '@/types/projects'
 import type { Session } from '@/types/chat'
-import { isNativeApp } from '@/lib/environment'
+import { isServerMode } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { toast } from 'sonner'
 const GitDiffModal = lazy(() =>
@@ -666,7 +666,7 @@ export function SessionChatModal({
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {/* Desktop: inline action buttons */}
-                {isNativeApp() && (
+                {isServerMode() && (
                   <div className="hidden sm:flex items-center gap-1">
                     <OpenInButton
                       worktreePath={worktreePath}
@@ -751,7 +751,7 @@ export function SessionChatModal({
                   </div>
                 )}
                 {/* Mobile: overflow menu */}
-                {isNativeApp() && (
+                {isServerMode() && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -1102,7 +1102,7 @@ export function SessionChatModal({
           </div>
 
           {/* Terminal side drawer */}
-          {isNativeApp() && (
+          {isServerMode() && (
             <ModalTerminalDrawer
               worktreeId={worktreeId}
               worktreePath={worktreePath}

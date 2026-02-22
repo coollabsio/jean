@@ -33,7 +33,7 @@ import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { isNativeApp } from '@/lib/environment'
+import { isServerMode } from '@/lib/environment'
 
 interface ModalOption {
   id: string
@@ -79,7 +79,7 @@ export function OpenInModal() {
   const { data: loadedPRs } = useLoadedPRContexts(activeSessionId)
   const { data: loadedIssues } = useLoadedIssueContexts(activeSessionId)
 
-  const isNative = isNativeApp()
+  const isServer = isServerMode()
 
   // Base options (Editor, Terminal, Finder, GitHub)
   const baseOptions = useMemo(() => {
@@ -120,13 +120,13 @@ export function OpenInModal() {
         : []),
     ]
 
-    return isNative
+    return isServer
       ? allOptions
       : allOptions.filter(opt => opt.id === 'github' || opt.id === 'open-pr')
   }, [
     preferences?.editor,
     preferences?.terminal,
-    isNative,
+    isServer,
     worktree?.pr_url,
     worktree?.pr_number,
   ])
@@ -182,12 +182,12 @@ export function OpenInModal() {
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open && !hasInitializedRef.current) {
-        setSelectedOption(isNative ? 'editor' : 'github')
+        setSelectedOption(isServer ? 'editor' : 'github')
         hasInitializedRef.current = true
       }
       setOpenInModalOpen(open)
     },
-    [setOpenInModalOpen, isNative]
+    [setOpenInModalOpen, isServer]
   )
 
   const targetPath = useMemo(() => {

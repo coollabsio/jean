@@ -96,7 +96,7 @@ import { OPENCODE_MODEL_OPTIONS } from '@/components/chat/toolbar/toolbar-option
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
 import { playNotificationSound } from '@/lib/sounds'
 import type { ThinkingLevel, EffortLevel } from '@/types/chat'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, isServerMode } from '@/lib/environment'
 import { cn } from '@/lib/utils'
 import {
   setGitPollInterval,
@@ -521,7 +521,7 @@ export const GeneralPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {isNativeApp() && (
+      {isServerMode() && (
         <SettingsSection
           title="Claude CLI"
           actions={
@@ -590,7 +590,7 @@ export const GeneralPane: React.FC = () => {
         </SettingsSection>
       )}
 
-      {isNativeApp() && (
+      {isServerMode() && (
         <SettingsSection
           title="GitHub CLI"
           actions={
@@ -659,7 +659,7 @@ export const GeneralPane: React.FC = () => {
         </SettingsSection>
       )}
 
-      {isNativeApp() && (
+      {isServerMode() && (
         <SettingsSection
           title={
             <>
@@ -1102,7 +1102,7 @@ export const GeneralPane: React.FC = () => {
             />
           </InlineField>
 
-          {isNativeApp() && (
+          {isServerMode() && (
             <InlineField label="Editor" description="App to open worktrees in">
               <Select
                 value={preferences?.editor ?? 'zed'}
@@ -1122,7 +1122,7 @@ export const GeneralPane: React.FC = () => {
             </InlineField>
           )}
 
-          {isNativeApp() && (
+          {isServerMode() && (
             <InlineField
               label="Terminal"
               description="App to open terminals in"
@@ -1145,7 +1145,7 @@ export const GeneralPane: React.FC = () => {
             </InlineField>
           )}
 
-          {isNativeApp() && (
+          {isServerMode() && (
             <InlineField
               label="Open In"
               description="Default app for Open button"

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import {
   Settings,
   Palette,
@@ -8,6 +8,7 @@ import {
   Blocks,
   FlaskConical,
   Globe,
+  Wifi,
 } from 'lucide-react'
 import {
   Breadcrumb,
@@ -50,6 +51,8 @@ import { McpServersPane } from './panes/McpServersPane'
 import { ProvidersPane } from './panes/ProvidersPane'
 import { ExperimentalPane } from './panes/ExperimentalPane'
 import { WebAccessPane } from './panes/WebAccessPane'
+import { ConnectionPane } from './panes/ConnectionPane'
+import { isNativeApp, isClientMode } from '@/lib/environment'
 
 const navigationItems = [
   {
@@ -93,6 +96,13 @@ const navigationItems = [
     name: 'Web Access (Experimental)',
     icon: Globe,
     desktopOnly: true,
+    serverOnly: true,
+  },
+  {
+    id: 'connection' as const,
+    name: 'Connection',
+    icon: Wifi,
+    nativeOnly: true,
   },
 ]
 
@@ -114,6 +124,8 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'Experimental'
     case 'web-access':
       return 'Web Access (Experimental)'
+    case 'connection':
+      return 'Connection'
     default:
       return 'General'
   }
@@ -125,7 +137,19 @@ export function PreferencesDialog() {
   const setPreferencesOpen = useUIStore(state => state.setPreferencesOpen)
   const preferencesPane = useUIStore(state => state.preferencesPane)
 
-  // Handle open state change and navigate to specific pane if requested
+  const filteredNavItems = useMemo(
+    () =>
+      navigationItems.filter(item => {
+        if ('serverOnly' in item && item.serverOnly && isClientMode())
+          return false
+        if ('nativeOnly' in item && item.nativeOnly && !isNativeApp())
+          return false
+        return true
+      }),
+    []
+  )
+
+  // Handle open state change
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
@@ -161,7 +185,7 @@ export function PreferencesDialog() {
               <SidebarGroup>
                 <SidebarGroupContent>
                   <SidebarMenu>
-                    {navigationItems.map(item => (
+                    {filteredNavItems.map(item => (
                       <SidebarMenuItem key={item.id}>
                         <SidebarMenuButton
                           asChild
@@ -195,7 +219,7 @@ export function PreferencesDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {navigationItems
+                    {filteredNavItems
                       .filter(item => !item.desktopOnly)
                       .map(item => (
                         <SelectItem key={item.id} value={item.id}>
@@ -238,6 +262,7 @@ export function PreferencesDialog() {
               {activePane === 'providers' && <ProvidersPane />}
               {activePane === 'experimental' && <ExperimentalPane />}
               {activePane === 'web-access' && <WebAccessPane />}
+              {activePane === 'connection' && <ConnectionPane />}
             </div>
           </main>
         </SidebarProvider>

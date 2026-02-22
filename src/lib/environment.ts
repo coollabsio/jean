@@ -1,25 +1,55 @@
 /**
  * Environment detection utilities.
  *
- * - isNativeApp(): true only when running inside the Tauri desktop shell
- * - hasBackend(): true when a backend is available (Tauri IPC or HTTP/WS)
+ * - isNativeApp(): true when running inside any Tauri desktop shell (server or client)
+ * - isClientMode(): true when running in client mode (connecting to remote server)
+ * - isServerMode(): true when running as the full Jean server app with local backend
+ * - hasBackend(): true when a backend is available (Tauri IPC or WS connection)
  *
  * Services should guard with hasBackend(), not isTauri().
- * UI should use isNativeApp() to hide terminal, Finder, etc.
+ * UI should use isServerMode() to gate features requiring a local backend.
+ * Use isNativeApp() only for native window features (zoom, traffic lights, clipboard).
  */
 
-/** Running inside the native Tauri desktop app. */
+/** Running inside any Tauri desktop app (server or client). */
 export const isNativeApp = (): boolean =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
+/** True when running in client mode (native Tauri app pointed at a remote server). */
+export const isClientMode = (): boolean =>
+  isNativeApp() &&
+  typeof localStorage !== 'undefined' &&
+  localStorage.getItem('jean-client-mode') === 'true'
+
+/** True when running as the full Jean server app with local backend. */
+export const isServerMode = (): boolean => isNativeApp() && !isClientMode()
+
+/** Get the saved remote server URL (client mode). */
+export const getClientServerUrl = (): string | null =>
+  typeof localStorage !== 'undefined'
+    ? localStorage.getItem('jean-client-server-url')
+    : null
+
+/**
+ * Updater disable switch for local/testing builds.
+ * - Build-time: VITE_DISABLE_UPDATER=true
+ * - Runtime: localStorage.setItem('jean-disable-updater', 'true')
+ */
+export const isUpdaterDisabled = (): boolean => {
+  if (import.meta.env.VITE_DISABLE_UPDATER === 'true') return true
+  return (
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('jean-disable-updater') === 'true'
+  )
+}
+
 /** A backend is available (either Tauri IPC, WebSocket connection, or E2E mock). */
 export const hasBackend = (): boolean => {
-  if (isNativeApp()) return true
+  if (isServerMode()) return true
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof window !== 'undefined' && (window as any).__JEAN_E2E_MOCK__)
     return true
-  // In browser mode, check if we have WS connection info
-  // (set when the transport connects)
+  // Browser or client mode: need WS
   return _wsConnected
 }
 

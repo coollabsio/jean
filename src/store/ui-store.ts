@@ -10,6 +10,7 @@ export type PreferencePane =
   | 'providers'
   | 'experimental'
   | 'web-access'
+  | 'connection'
 
 export type OnboardingStartStep = 'claude' | 'gh' | null
 
