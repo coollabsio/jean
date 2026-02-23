@@ -396,7 +396,7 @@ pub fn cleanup_orphaned_session_data(app: &AppHandle) -> Result<u32, String> {
     }
 
     if deleted > 0 {
-        log::debug!("Cleaned up {deleted} orphaned session data directories");
+        log::info!("Cleaned up {deleted} orphaned session data directories");
     }
 
     Ok(deleted)

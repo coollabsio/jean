@@ -1761,6 +1761,7 @@ pub fn run() {
             tauri_plugin_log::TargetKind::Webview,
         ));
     }
+    #[cfg(target_os = "macos")]
     log_targets.push(tauri_plugin_log::Target::new(
         tauri_plugin_log::TargetKind::LogDir { file_name: None },
     ));
@@ -1781,7 +1782,7 @@ pub fn run() {
                 .level_for("globset", log::LevelFilter::Warn)
                 .level_for("ignore", log::LevelFilter::Warn)
                 .level_for("tauri_plugin_updater", log::LevelFilter::Warn)
-                .level_for("reqwest", log::LevelFilter::Warn)
+                .level_for("reqwest", log::LevelFilter::Debug)
                 .targets(log_targets)
                 .build(),
         )
@@ -1806,14 +1807,25 @@ pub fn run() {
                 }
             }
 
-            // Kill orphaned OpenCode server from a previous crash (if any)
-            opencode_server::cleanup_orphaned_server(app.handle());
-
-            // NOTE: Run recovery (crash recovery) is handled by check_resumable_sessions
-            // which the frontend calls once it's ready. Previously this was done here in
-            // setup(), but that caused a double-invocation bug: the second call from the
-            // frontend found nothing to recover (statuses already transitioned), so
-            // resumable sessions were never actually resumed.
+            // Recover any incomplete runs from previous session (crash recovery)
+            let app_handle = app.handle().clone();
+            match chat::run_log::recover_incomplete_runs(&app_handle) {
+                Ok(recovered) => {
+                    if !recovered.is_empty() {
+                        log::trace!(
+                            "Recovered {} incomplete run(s) from previous session",
+                            recovered.len()
+                        );
+                        // Emit event to frontend about recovered runs
+                        if let Err(e) = app_handle.emit("runs:recovered", &recovered) {
+                            log::warn!("Failed to emit runs:recovered event: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to recover incomplete runs: {e}");
+                }
+            }
 
             // Skip menu creation in headless mode (no window to attach to)
             #[cfg(target_os = "macos")]
@@ -2006,7 +2018,6 @@ pub fn run() {
             projects::delete_all_archives,
             projects::rename_worktree,
             projects::open_worktree_in_finder,
-            projects::open_log_directory,
             projects::open_project_worktrees_folder,
             projects::open_worktree_in_terminal,
             projects::open_worktree_in_editor,

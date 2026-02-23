@@ -4,7 +4,7 @@ pub mod server;
 pub mod websocket;
 
 use serde::Serialize;
-use serde_json::Value;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast;
 
@@ -14,25 +14,56 @@ pub struct WsBroadcaster {
     tx: broadcast::Sender<WsEvent>,
 }
 
+/// A pre-serialized WebSocket event.
+/// The JSON string is wrapped in `Arc<str>` so cloning across N broadcast
+/// receivers is a cheap reference-count increment instead of N allocations.
 #[derive(Clone, Debug)]
 pub struct WsEvent {
-    pub event: String,
-    pub payload: Value,
+    /// Ready-to-send JSON: `{"type":"event","event":"...","payload":...}`
+    pub json: Arc<str>,
+}
+
+/// Wire-format envelope serialized directly to String in a single pass.
+/// Using a concrete struct avoids the intermediate `serde_json::Value` tree
+/// that `serde_json::json!()` would allocate.
+#[derive(Serialize)]
+struct WsEnvelope<'a, S: Serialize> {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+    event: &'a str,
+    payload: &'a S,
 }
 
 impl WsBroadcaster {
     pub fn new() -> (Self, broadcast::Sender<WsEvent>) {
-        // Buffer 1000 events — slow clients will miss old events
-        let (tx, _) = broadcast::channel(1000);
+        // Buffer 8000 events — generous headroom for burst scenarios with
+        // multiple concurrent chat streams + background polling.  Memory
+        // cost is minimal: each WsEvent is ~16 bytes (Arc pointer + len).
+        let (tx, _) = broadcast::channel(8000);
         let tx_clone = tx.clone();
         (Self { tx }, tx_clone)
     }
 
-    pub fn broadcast(&self, event: &str, payload: &Value) {
+    /// Serialize the payload directly into the wire-format JSON envelope
+    /// in a single `serde_json::to_string` pass (no intermediate Value tree).
+    /// Each broadcast receiver gets an `Arc<str>` clone (cheap ref-count
+    /// increment) instead of re-serializing per client.
+    pub fn broadcast<S: Serialize>(&self, event: &str, payload: &S) {
+        let envelope = WsEnvelope {
+            msg_type: "event",
+            event,
+            payload,
+        };
+        let json = match serde_json::to_string(&envelope) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("Failed to serialize WS event: {e}");
+                return;
+            }
+        };
         // Ignore send errors (no active receivers is fine)
         let _ = self.tx.send(WsEvent {
-            event: event.to_string(),
-            payload: payload.clone(),
+            json: Arc::from(json),
         });
     }
 
@@ -53,11 +84,10 @@ impl EmitExt for AppHandle {
         self.emit(event, payload.clone())
             .map_err(|e| format!("Tauri emit failed: {e}"))?;
 
-        // Broadcast to WebSocket clients (if server is running)
+        // Broadcast to WebSocket clients (if server is running).
+        // Serializes directly from &S → String in one pass (no intermediate Value).
         if let Some(ws) = self.try_state::<WsBroadcaster>() {
-            let value = serde_json::to_value(payload)
-                .map_err(|e| format!("Failed to serialize for WS broadcast: {e}"))?;
-            ws.broadcast(event, &value);
+            ws.broadcast(event, payload);
         }
 
         Ok(())

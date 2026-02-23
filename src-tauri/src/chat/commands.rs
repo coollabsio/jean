@@ -1446,33 +1446,6 @@ pub async fn send_chat_message(
     let thread_codex_multi_agent = codex_multi_agent_enabled;
     let thread_codex_max_threads = codex_max_agent_threads;
 
-    // Build a callback factory that persists the PID to metadata immediately after spawn
-    // (before tailing starts). This is critical for crash recovery — without it,
-    // metadata has pid: None and recover_incomplete_runs marks the run as Crashed.
-    // Uses Arc so it can be cloned for retry loops (Claude session-not-found retry).
-    let pid_cb_app = app.clone();
-    let pid_cb_session_id = session_id.clone();
-    let pid_cb_worktree_id = worktree_id.clone();
-    let pid_cb_session_name = session_name.clone();
-    let pid_cb_run_id = run_id.clone();
-    let make_pid_callback = move || -> Box<dyn FnOnce(u32) + Send> {
-        let app = pid_cb_app.clone();
-        let sid = pid_cb_session_id.clone();
-        let wid = pid_cb_worktree_id.clone();
-        let sname = pid_cb_session_name.clone();
-        let rid = pid_cb_run_id.clone();
-        Box::new(move |pid: u32| {
-            use super::storage::with_metadata_mut;
-            let _ = with_metadata_mut(&app, &sid, &wid, &sname, session_order, |metadata| {
-                if let Some(run) = metadata.find_run_mut(&rid) {
-                    run.pid = Some(pid);
-                }
-                Ok(())
-            });
-            log::trace!("Persisted PID {pid} to metadata for run: {rid}");
-        })
-    };
-
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
         let result: Result<(u32, UnifiedResponse), String> = match thread_backend {
@@ -1500,7 +1473,6 @@ pub async fn send_chat_message(
                         thread_mcp_config.as_deref(),
                         chrome,
                         thread_custom_profile.as_deref(),
-                        Some(make_pid_callback()),
                     ) {
                         Ok((pid, response)) => {
                             log::trace!("execute_claude_detached succeeded (PID: {pid})");
@@ -1888,7 +1860,6 @@ pub async fn send_chat_message(
                     codex_instructions_file.as_deref(),
                     thread_codex_multi_agent,
                     thread_codex_max_threads,
-                    Some(make_pid_callback()),
                 ) {
                     Ok((pid, response)) => Ok((
                         pid,
@@ -2145,12 +2116,14 @@ pub async fn send_chat_message(
         let _ = tx.send(result);
     });
 
-    let (_pid, unified_response) = rx.await.map_err(|_| {
+    let (pid, unified_response) = rx.await.map_err(|_| {
         "CLI execution thread closed unexpectedly (possible crash or panic)".to_string()
     })??;
 
-    // PID is now persisted via pid_callback immediately after spawn (before tailing).
-    // No need to set_pid here — it was already saved for crash recovery.
+    // Store PID only for detached CLI runs (Claude/Codex). OpenCode is HTTP-based.
+    if unified_response.backend != Backend::Opencode {
+        run_log_writer.set_pid(pid)?;
+    }
 
     // OpenCode runs are HTTP-based (no detached JSONL stream).
     // Write a synthetic assistant line so history reload can reconstruct content.
@@ -2395,13 +2368,6 @@ pub async fn set_session_model(
 
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
-            // Clear CLI session ID so next message starts a fresh CLI session.
-            // Claude CLI's --resume ignores --model, so we must not resume
-            // when the model changes.
-            if session.selected_model.as_deref() != Some(&model) {
-                session.claude_session_id = None;
-                log::trace!("Model changed — cleared claude_session_id for fresh CLI session");
-            }
             session.selected_model = Some(model);
             log::trace!("Model selection saved");
             Ok(())
@@ -4065,9 +4031,6 @@ pub async fn resume_session(
         }
         save_metadata(&app, &metadata)?;
 
-        // Register the PID in the in-memory process registry so cancel works
-        super::registry::register_process(session_id.clone(), pid);
-
         // Clone values for the async task
         let app_clone = app.clone();
         let session_id_clone = session_id.clone();
@@ -4079,16 +4042,8 @@ pub async fn resume_session(
         tauri::async_runtime::spawn(async move {
             log::trace!("Starting tail task for run: {run_id_clone}, session: {session_id_clone}");
 
-            // Helper: emit chat:done so frontend clears sending state
-            let emit_done = |app: &tauri::AppHandle, sid: &str, wid: &str| {
-                let _ = app.emit_all(
-                    "chat:done",
-                    &serde_json::json!({ "session_id": sid, "worktree_id": wid }),
-                );
-            };
-
             // Tail the output file — route by backend
-            let (resume_id, usage, cancelled) = if is_codex {
+            let (resume_id, usage, _cancelled) = if is_codex {
                 match super::codex::tail_codex_output(
                     &app_clone,
                     &session_id_clone,
@@ -4099,7 +4054,6 @@ pub async fn resume_session(
                     Ok(response) => (response.thread_id, response.usage, response.cancelled),
                     Err(e) => {
                         log::error!("Resume Codex tail failed for run: {run_id_clone}, error: {e}");
-                        super::registry::unregister_process(&session_id_clone);
                         if let Ok(mut writer) =
                             RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                         {
@@ -4107,7 +4061,6 @@ pub async fn resume_session(
                                 log::error!("Failed to mark run as crashed: {e}");
                             }
                         }
-                        emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                         return;
                     }
                 }
@@ -4124,7 +4077,6 @@ pub async fn resume_session(
                         log::error!(
                             "Resume Claude tail failed for run: {run_id_clone}, error: {e}"
                         );
-                        super::registry::unregister_process(&session_id_clone);
                         if let Ok(mut writer) =
                             RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
                         {
@@ -4132,25 +4084,15 @@ pub async fn resume_session(
                                 log::error!("Failed to mark run as crashed: {e}");
                             }
                         }
-                        emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
                         return;
                     }
                 }
             };
 
-            // Unregister from process registry now that tailing is complete
-            super::registry::unregister_process(&session_id_clone);
-
             log::trace!(
-                "Resume completed for run: {run_id_clone}, resume_id: {:?}, cancelled: {cancelled}",
+                "Resume completed for run: {run_id_clone}, resume_id: {:?}",
                 resume_id
             );
-
-            // If tail detected dead process (cancelled=true), it skipped emitting chat:done.
-            // Emit it here so the frontend clears sending state.
-            if cancelled {
-                emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
-            }
 
             // Create a RunLogWriter to update the manifest
             {

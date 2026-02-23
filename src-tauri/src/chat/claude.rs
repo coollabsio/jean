@@ -702,7 +702,6 @@ pub fn execute_claude_detached(
     mcp_config: Option<&str>,
     chrome_enabled: bool,
     custom_profile_name: Option<&str>,
-    pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, ClaudeResponse), String> {
     use super::detached::spawn_detached_claude;
     use crate::claude_cli::resolve_cli_binary;
@@ -791,11 +790,6 @@ pub fn execute_claude_detached(
 
     log::trace!("Detached Claude CLI spawned with PID: {pid}");
 
-    // Persist PID to metadata immediately (before tailing) for crash recovery
-    if let Some(cb) = pid_callback {
-        cb(pid);
-    }
-
     // Register the process for cancellation
     super::registry::register_process(session_id.to_string(), pid);
 
@@ -839,7 +833,7 @@ pub fn tail_claude_output(
     pid: u32,
 ) -> Result<ClaudeResponse, String> {
     use super::detached::is_process_alive;
-    use super::tail::{NdjsonTailer, POLL_INTERVAL};
+    use super::tail::{NdjsonTailer, POLL_INTERVAL, POLL_INTERVAL_FAST};
     use std::time::{Duration, Instant};
 
     log::trace!("Starting to tail NDJSON output for session: {session_id}");
@@ -870,8 +864,9 @@ pub fn tail_claude_output(
     loop {
         // Poll for new lines
         let lines = tailer.poll()?;
+        let had_output = !lines.is_empty();
 
-        if !lines.is_empty() {
+        if had_output {
             last_output_time = Instant::now();
         }
 
@@ -1323,8 +1318,13 @@ pub fn tail_claude_output(
             }
         }
 
-        // Sleep before next poll
-        std::thread::sleep(POLL_INTERVAL);
+        // Adaptive sleep: poll faster when actively receiving data (5ms)
+        // to reduce per-event latency, back off to 50ms when idle.
+        if had_output {
+            std::thread::sleep(POLL_INTERVAL_FAST);
+        } else {
+            std::thread::sleep(POLL_INTERVAL);
+        }
     }
 
     // Surface CLI errors when process failed with no meaningful output

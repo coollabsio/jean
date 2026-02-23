@@ -131,7 +131,6 @@ export function useSessions(
     enabled: !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
     gcTime: 1000 * 60 * 5,
-    refetchOnMount: 'always', // Catch status changes (running→completed, etc.) on re-mount
   })
 }
 
@@ -1582,16 +1581,6 @@ export function useSetSessionModel() {
       })
       logger.info('Session model saved')
     },
-    onMutate: async ({ sessionId, model }) => {
-      await queryClient.cancelQueries({ queryKey: chatQueryKeys.session(sessionId) })
-      const prev = queryClient.getQueryData(chatQueryKeys.session(sessionId))
-      queryClient.setQueryData(
-        chatQueryKeys.session(sessionId),
-        (old: Record<string, unknown> | undefined) =>
-          old ? { ...old, selected_model: model } : old
-      )
-      return { prev, sessionId }
-    },
     onSuccess: (_, { sessionId, worktreeId }) => {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.session(sessionId),
@@ -1600,10 +1589,7 @@ export function useSetSessionModel() {
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
     },
-    onError: (error, _vars, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(chatQueryKeys.session(context.sessionId), context.prev)
-      }
+    onError: error => {
       const message =
         error instanceof Error
           ? error.message

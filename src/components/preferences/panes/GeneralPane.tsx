@@ -1444,31 +1444,6 @@ export const GeneralPane: React.FC = () => {
         </div>
       </SettingsSection>
 
-      {isNativeApp() && (
-        <SettingsSection title="Troubleshooting">
-          <div className="space-y-4">
-            <InlineField
-              label="Application logs"
-              description="Open the log directory for troubleshooting"
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  try {
-                    await invoke('open_log_directory')
-                  } catch (error) {
-                    toast.error(`Failed to open logs: ${error}`)
-                  }
-                }}
-              >
-                Show Logs
-              </Button>
-            </InlineField>
-          </div>
-        </SettingsSection>
-      )}
-
       <AlertDialog
         open={showDeleteAllDialog}
         onOpenChange={setShowDeleteAllDialog}

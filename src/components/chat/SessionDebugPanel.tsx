@@ -93,16 +93,8 @@ export function SessionDebugPanel({
   const handleCopyAll = useCallback(async () => {
     if (!debugInfo) return
 
-    const providerDisplay =
-      selectedBackend === 'codex'
-        ? 'OpenAI'
-        : !selectedProvider || selectedProvider === '__anthropic__'
-          ? 'Anthropic'
-          : selectedProvider
-
     const lines = [
       `session: ${sessionId}`,
-      `model: ${selectedModel ?? 'unknown'} / provider: ${providerDisplay}`,
       `sessions file: ${debugInfo.sessions_file}`,
       `runs dir: ${debugInfo.runs_dir}`,
       `manifest: ${debugInfo.manifest_file || 'none'}`,
@@ -130,7 +122,7 @@ export function SessionDebugPanel({
       console.error('Failed to copy:', error)
       toast.error(`Failed to copy: ${error}`)
     }
-  }, [debugInfo, sessionId, selectedModel, selectedProvider, selectedBackend])
+  }, [debugInfo, sessionId])
 
   if (!debugInfo) {
     return null
@@ -164,11 +156,9 @@ export function SessionDebugPanel({
         <span className="text-foreground">
           {selectedBackend === 'codex'
             ? 'OpenAI'
-            : selectedBackend === 'opencode'
-              ? 'OpenCode'
-              : !selectedProvider || selectedProvider === '__anthropic__'
-                ? 'Anthropic'
-                : selectedProvider}
+            : !selectedProvider || selectedProvider === '__anthropic__'
+              ? 'Anthropic'
+              : selectedProvider}
         </span>
       </div>
       <Tooltip>

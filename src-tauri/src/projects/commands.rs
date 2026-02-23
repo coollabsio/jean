@@ -2635,56 +2635,6 @@ pub async fn open_project_worktrees_folder(project_name: String) -> Result<(), S
     open_worktree_in_finder(path_str).await
 }
 
-/// Open the application log directory in the system file explorer
-#[tauri::command]
-pub async fn open_log_directory(app: AppHandle) -> Result<(), String> {
-    let log_dir = app
-        .path()
-        .app_log_dir()
-        .map_err(|e| format!("Failed to get log directory: {e}"))?;
-
-    // Create the directory if it doesn't exist yet
-    if !log_dir.exists() {
-        std::fs::create_dir_all(&log_dir)
-            .map_err(|e| format!("Failed to create log directory: {e}"))?;
-    }
-
-    let path = log_dir.to_string_lossy().to_string();
-    log::trace!("Opening log directory: {path}");
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open Finder: {e}"))?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open Explorer: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open file manager: {e}"))?;
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        log::warn!("File explorer not supported on this platform");
-        return Err("File explorer not supported on this platform".to_string());
-    }
-
-    Ok(())
-}
-
 /// Open a worktree path in the system file explorer
 #[tauri::command]
 pub async fn open_worktree_in_finder(worktree_path: String) -> Result<(), String> {

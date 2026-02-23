@@ -107,7 +107,6 @@ function useOffScreenWaiting(
   storeState: {
     sendingSessionIds: Record<string, boolean>
     executionModes: Record<string, string>
-    executingModes: Record<string, string>
     reviewingSessions: Record<string, boolean>
   },
   viewportRef: RefObject<HTMLDivElement | null>
@@ -171,14 +170,11 @@ function getSessionStatus(
   storeState: {
     sendingSessionIds: Record<string, boolean>
     executionModes: Record<string, string>
-    executingModes: Record<string, string>
     reviewingSessions: Record<string, boolean>
   }
 ): SessionStatus {
   const isSending = storeState.sendingSessionIds[session.id]
-  const executionMode = isSending
-    ? (storeState.executingModes[session.id] ?? storeState.executionModes[session.id] ?? 'plan')
-    : (storeState.executionModes[session.id] ?? 'plan')
+  const executionMode = storeState.executionModes[session.id]
   const isReviewing =
     storeState.reviewingSessions[session.id] || !!session.review_results
 
@@ -193,20 +189,6 @@ function getSessionStatus(
   }
 
   if (isReviewing) return 'review'
-
-  // Check for running/resumable processes (detected on app restart recovery)
-  if (
-    session.last_run_status === 'running' ||
-    session.last_run_status === 'resumable'
-  ) {
-    const mode = session.last_run_execution_mode ?? 'plan'
-    if (mode === 'plan') return 'planning'
-    if (mode === 'yolo') return 'yoloing'
-    return 'vibing'
-  }
-
-  if (session.last_run_status === 'completed') return 'completed'
-
   return 'idle'
 }
 
@@ -276,11 +258,10 @@ export function SessionChatModal({
   // Store state for tab status indicators
   const sendingSessionIds = useChatStore(state => state.sendingSessionIds)
   const executionModes = useChatStore(state => state.executionModes)
-  const executingModes = useChatStore(state => state.executingModes)
   const reviewingSessions = useChatStore(state => state.reviewingSessions)
   const storeState = useMemo(
-    () => ({ sendingSessionIds, executionModes, executingModes, reviewingSessions }),
-    [sendingSessionIds, executionModes, executingModes, reviewingSessions]
+    () => ({ sendingSessionIds, executionModes, reviewingSessions }),
+    [sendingSessionIds, executionModes, reviewingSessions]
   )
 
   // Plan/recap indicators for tab bar buttons

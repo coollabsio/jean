@@ -289,7 +289,7 @@ fn get_platform_asset() -> Result<PlatformAsset, String> {
 #[tauri::command]
 pub async fn get_available_opencode_versions() -> Result<Vec<OpenCodeReleaseInfo>, String> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases");
-    log::debug!("Fetching available OpenCode versions from {url}");
+    log::info!("Fetching available OpenCode versions from {url}");
 
     let client = reqwest::Client::new();
     let response = client
@@ -320,7 +320,7 @@ pub async fn get_available_opencode_versions() -> Result<Vec<OpenCodeReleaseInfo
         format!("Failed to parse GitHub releases: {e}")
     })?;
 
-    log::debug!("OpenCode versions: got {} releases", releases.len());
+    log::info!("OpenCode versions: got {} releases", releases.len());
 
     let result: Vec<OpenCodeReleaseInfo> = releases
         .into_iter()
@@ -335,7 +335,7 @@ pub async fn get_available_opencode_versions() -> Result<Vec<OpenCodeReleaseInfo
         })
         .collect();
 
-    log::debug!("OpenCode versions: returning {} versions", result.len());
+    log::info!("OpenCode versions: returning {} versions", result.len());
     Ok(result)
 }
 

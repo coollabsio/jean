@@ -621,13 +621,6 @@ export default function useStreamingEvents({
         useChatStore.getState()
       clearExecutingMode(session_id)
       setSessionReviewing(session_id, true)
-
-      // Invalidate sessions list to update last_run_status in tab bar
-      if (sessionWorktreeId) {
-        queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessions(sessionWorktreeId),
-        })
-      }
     })
 
     // Handle cancellation (user pressed Cmd+Option+Backspace / Ctrl+Alt+Backspace)

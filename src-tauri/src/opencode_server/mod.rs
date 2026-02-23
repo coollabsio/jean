@@ -1,12 +1,10 @@
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
+use serde::Serialize;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::opencode_cli::resolve_cli_binary;
 use crate::platform::silent_command;
@@ -17,9 +15,6 @@ const DEFAULT_HOSTNAME: &str = "127.0.0.1";
 /// Number of active consumers (prompts) using the managed server.
 /// Server is shut down only when this drops to 0.
 static USAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Cached AppHandle so stop/release paths can access app data dir without param changes.
-static APP_HANDLE: once_cell::sync::OnceCell<AppHandle> = once_cell::sync::OnceCell::new();
 
 #[derive(Debug)]
 struct OpenCodeServerProcess {
@@ -63,104 +58,7 @@ fn wait_until_healthy(url: &str, attempts: u32) -> bool {
     false
 }
 
-// ---------------------------------------------------------------------------
-// PID file for crash-recovery cleanup
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ServerPidRecord {
-    jean_pid: u32,
-    server_pid: u32,
-    port: u16,
-}
-
-fn pid_file_path() -> Option<PathBuf> {
-    APP_HANDLE
-        .get()
-        .and_then(|app| app.path().app_data_dir().ok())
-        .map(|d| d.join("opencode-server.pid"))
-}
-
-fn write_pid_file(server_pid: u32, port: u16) {
-    let Some(path) = pid_file_path() else { return };
-    let record = ServerPidRecord {
-        jean_pid: std::process::id(),
-        server_pid,
-        port,
-    };
-    if let Ok(json) = serde_json::to_string(&record) {
-        let _ = fs::write(&path, json);
-    }
-}
-
-fn remove_pid_file() {
-    if let Some(path) = pid_file_path() {
-        let _ = fs::remove_file(path);
-    }
-}
-
-/// Kill an orphaned OpenCode server left behind by a previous Jean crash.
-/// Call once at app startup, before any `ensure_running()`.
-pub fn cleanup_orphaned_server(app: &AppHandle) {
-    // Seed the OnceCell early so pid_file_path() works.
-    let _ = APP_HANDLE.set(app.clone());
-
-    let path = match app.path().app_data_dir() {
-        Ok(d) => d.join("opencode-server.pid"),
-        Err(_) => return,
-    };
-
-    let content = match fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return, // No PID file → nothing to clean up
-    };
-
-    let record: ServerPidRecord = match serde_json::from_str(&content) {
-        Ok(r) => r,
-        Err(_) => {
-            let _ = fs::remove_file(&path);
-            return;
-        }
-    };
-
-    // If the Jean instance that spawned the server is still alive, leave it alone.
-    if crate::platform::is_process_alive(record.jean_pid) {
-        log::debug!(
-            "[OPENCODE CLEANUP] PID file exists but Jean PID {} is still alive — another instance owns the server",
-            record.jean_pid
-        );
-        return;
-    }
-
-    // Jean is dead. Check if the server is still running AND healthy on our port
-    // (health check guards against PID recycling — an unrelated process won't respond).
-    let url = server_url(DEFAULT_HOSTNAME, record.port);
-    if crate::platform::is_process_alive(record.server_pid) && is_healthy(&url) {
-        log::info!(
-            "[OPENCODE CLEANUP] Killing orphaned OpenCode server (PID {}) from crashed Jean (PID {})",
-            record.server_pid,
-            record.jean_pid
-        );
-        let _ = crate::platform::kill_process_tree(record.server_pid);
-        std::thread::sleep(Duration::from_millis(300));
-        // Verify kill succeeded
-        if is_healthy(&url) {
-            log::warn!("[OPENCODE CLEANUP] Server still healthy after tree kill, trying direct kill");
-            let _ = crate::platform::kill_process(record.server_pid);
-        }
-    } else {
-        log::debug!(
-            "[OPENCODE CLEANUP] Stale PID file (server PID {} not alive or not healthy), cleaning up",
-            record.server_pid
-        );
-    }
-
-    let _ = fs::remove_file(&path);
-}
-
 pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
-    // Cache the AppHandle for stop/release paths that don't have it.
-    let _ = APP_HANDLE.set(app.clone());
     let hostname = DEFAULT_HOSTNAME.to_string();
     let port = DEFAULT_PORT;
     let url = server_url(&hostname, port);
@@ -225,15 +123,11 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Failed to start OpenCode server: {e}"))?;
 
-    let server_pid = child.id();
     *guard = Some(OpenCodeServerProcess {
         child,
         port,
         hostname: hostname.clone(),
     });
-
-    // Write PID file so a future Jean instance can clean up if we crash.
-    write_pid_file(server_pid, port);
 
     if !wait_until_healthy(&url, 50) {
         return Err("OpenCode server started but did not become healthy in time".to_string());
@@ -256,21 +150,14 @@ pub fn acquire(app: &AppHandle) -> Result<String, String> {
     }
 }
 
-/// Decrement usage count. If this was the last user, schedule a delayed shutdown.
-/// The delay prevents killing the server during the brief window between sequential
-/// operations (e.g., naming finishes just before chat sends its next request).
+/// Decrement usage count. If this was the last user, shut down the managed server.
 pub fn release() {
     let prev = USAGE_COUNT.fetch_sub(1, Ordering::SeqCst);
     if prev == 1 {
-        // Schedule delayed shutdown — if no one re-acquires within 2s, stop the server.
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_secs(2));
-            if USAGE_COUNT.load(Ordering::SeqCst) == 0 {
-                if let Err(e) = stop_managed_server_inner() {
-                    log::warn!("Failed to stop managed OpenCode server on last release: {e}");
-                }
-            }
-        });
+        // We were the last consumer — stop the server.
+        if let Err(e) = stop_managed_server_inner() {
+            log::warn!("Failed to stop managed OpenCode server on last release: {e}");
+        }
     }
 }
 
@@ -289,7 +176,6 @@ fn stop_managed_server_inner() -> Result<bool, String> {
     let _ = proc_info.child.kill();
     let _ = proc_info.child.wait();
     *guard = None;
-    remove_pid_file();
     Ok(true)
 }
 

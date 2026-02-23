@@ -452,17 +452,11 @@ export function ChatWindow({
     zustandBackend ??
     projectDefaultBackend ??
     globalDefaultBackend
-  // Model string is definitive backend source (matches Rust safety net in send_chat_message).
-  // Prevents race where setSessionModel invalidation refetches before setSessionBackend persists.
-  const modelImpliedBackend: CliBackend | null =
-    session?.selected_model?.startsWith('opencode/') ? 'opencode'
-    : (session?.selected_model?.startsWith('codex') || session?.selected_model?.includes('codex')) ? 'codex'
-    : null
   // Clamp to installed backends — prevents showing "Claude" when only Codex is installed
-  const selectedBackend: CliBackend = modelImpliedBackend
-    ?? (installedBackends.length > 0 && !installedBackends.includes(resolvedBackend)
+  const selectedBackend: CliBackend =
+    installedBackends.length > 0 && !installedBackends.includes(resolvedBackend)
       ? (installedBackends[0] as CliBackend)
-      : resolvedBackend)
+      : resolvedBackend
   const isCodexBackend = selectedBackend === 'codex'
   const isOpencodeBackend = selectedBackend === 'opencode'
 
@@ -1381,21 +1375,6 @@ export function ChatWindow({
                                 hideApproveButtons={isCodexBackend}
                               />
                             )}
-
-                            {/* Restored session status - shown when session was running but app restarted */}
-                            {!isSending &&
-                              session?.last_run_status === 'running' && (
-                                <div className="text-sm text-muted-foreground/60 mt-4">
-                                  <span className="animate-dots">
-                                    {session.last_run_execution_mode === 'plan'
-                                      ? 'Planning'
-                                      : session.last_run_execution_mode ===
-                                          'yolo'
-                                        ? 'Yoloing'
-                                        : 'Vibing'}
-                                  </span>
-                                </div>
-                              )}
 
                             {/* Permission approval UI - shown when tools require approval (never in yolo mode) */}
                             {pendingDenials.length > 0 &&

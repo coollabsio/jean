@@ -303,7 +303,6 @@ pub fn execute_codex_detached(
     instructions_file: Option<&std::path::Path>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
-    pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, CodexResponse), String> {
     use crate::codex_cli::resolve_cli_binary;
 
@@ -374,7 +373,6 @@ pub fn execute_codex_detached(
             &env_vars,
             working_dir,
             prompt,
-            pid_callback,
         )
     }
 }
@@ -391,7 +389,6 @@ fn execute_codex_detached_inner(
     env_vars: &[(String, String)],
     working_dir: &std::path::Path,
     prompt: Option<&str>,
-    pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, CodexResponse), String> {
     use super::detached::spawn_detached_codex;
 
@@ -418,11 +415,6 @@ fn execute_codex_detached_inner(
         })?;
 
     log::trace!("Detached Codex CLI spawned with PID: {pid}");
-
-    // Persist PID to metadata immediately (before tailing) for crash recovery
-    if let Some(cb) = pid_callback {
-        cb(pid);
-    }
 
     super::registry::register_process(session_id.to_string(), pid);
 
@@ -1874,7 +1866,7 @@ pub fn tail_codex_output(
     pid: u32,
 ) -> Result<CodexResponse, String> {
     use super::detached::is_process_alive;
-    use super::tail::{NdjsonTailer, POLL_INTERVAL};
+    use super::tail::{NdjsonTailer, POLL_INTERVAL, POLL_INTERVAL_FAST};
     use std::time::{Duration, Instant};
 
     log::trace!("Starting to tail Codex NDJSON output for session: {session_id}");
@@ -1903,8 +1895,9 @@ pub fn tail_codex_output(
 
     loop {
         let lines = tailer.poll()?;
+        let had_output = !lines.is_empty();
 
-        if !lines.is_empty() {
+        if had_output {
             last_output_time = Instant::now();
         }
 
@@ -1993,7 +1986,13 @@ pub fn tail_codex_output(
             }
         }
 
-        std::thread::sleep(POLL_INTERVAL);
+        // Adaptive sleep: poll faster when actively receiving data (5ms)
+        // to reduce per-event latency, back off to 50ms when idle.
+        if had_output {
+            std::thread::sleep(POLL_INTERVAL_FAST);
+        } else {
+            std::thread::sleep(POLL_INTERVAL);
+        }
     }
 
     // Surface errors

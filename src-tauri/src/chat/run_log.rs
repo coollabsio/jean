@@ -151,7 +151,6 @@ impl RunLogWriter {
     }
 
     /// Set the PID of the detached Claude CLI process
-    #[allow(dead_code)] // PID is now set via pid_callback, but kept for potential future use
     pub fn set_pid(&mut self, pid: u32) -> Result<(), String> {
         let run_id = self.run_id.clone();
 
@@ -441,10 +440,6 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
     let mut content = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
-    // Track tool IDs that received error responses (is_error: true).
-    // Used to filter out denied blocking tools (AskUserQuestion/ExitPlanMode)
-    // that Claude retried multiple times.
-    let mut errored_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for line in lines {
         if line.trim().is_empty() {
@@ -552,15 +547,6 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                     .unwrap_or("");
                                 let output =
                                     block.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                                let is_error = block
-                                    .get("is_error")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-
-                                // Track errored tool results for filtering
-                                if is_error && !tool_id.is_empty() {
-                                    errored_tool_ids.insert(tool_id.to_string());
-                                }
 
                                 // Update matching tool call's output
                                 if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
@@ -580,33 +566,6 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                 }
             }
             _ => {}
-        }
-    }
-
-    // Filter out blocking tool calls (AskUserQuestion/ExitPlanMode) that received
-    // error responses. When Jean denies a blocking tool, it sends back an error
-    // tool_result. Claude may retry the same tool multiple times, producing duplicate
-    // question/plan UIs on recovery. Remove all errored blocking tool calls and their
-    // corresponding content blocks.
-    if !errored_tool_ids.is_empty() {
-        let errored_blocking: std::collections::HashSet<String> = tool_calls
-            .iter()
-            .filter(|tc| {
-                (tc.name == "AskUserQuestion" || tc.name == "ExitPlanMode")
-                    && errored_tool_ids.contains(&tc.id)
-            })
-            .map(|tc| tc.id.clone())
-            .collect();
-
-        if !errored_blocking.is_empty() {
-            tool_calls.retain(|tc| !errored_blocking.contains(&tc.id));
-            content_blocks.retain(|cb| {
-                if let ContentBlock::ToolUse { tool_call_id } = cb {
-                    !errored_blocking.contains(tool_call_id)
-                } else {
-                    true
-                }
-            });
         }
     }
 
@@ -675,12 +634,8 @@ pub fn load_session_messages(
             });
         }
 
-        // Add assistant message if run has completed/cancelled/crashed,
-        // OR if the run is still Running but the session is waiting for user input
-        // (ExitPlanMode/AskUserQuestion blocked the CLI — JSONL has complete content up to the block)
-        let include_waiting_run =
-            run.status == RunStatus::Running && metadata.waiting_for_input;
-        if (run.status != RunStatus::Running || include_waiting_run) && !is_undo_send {
+        // Add assistant message if run has completed/cancelled/crashed
+        if run.status != RunStatus::Running && !is_undo_send {
             let lines = read_run_log(app, session_id, &run.run_id)?;
 
             // Parse JSONL content — route by backend
@@ -754,8 +709,6 @@ pub struct RecoveredRun {
     pub user_message: String,
     /// True if the process is still running and can be resumed
     pub resumable: bool,
-    /// Execution mode of the run (plan/build/yolo) for UI status restoration
-    pub execution_mode: Option<String>,
 }
 
 /// Check for and recover incomplete runs across all sessions
@@ -775,12 +728,12 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
         let mut modified = false;
 
         for run in &mut metadata.runs {
-            // Handle both Running (normal crash recovery) and Resumable (stale from
-            // a previous recovery that never completed — e.g. app crashed twice)
-            if run.status == RunStatus::Running || run.status == RunStatus::Resumable {
+            if run.status == RunStatus::Running {
+                // Check if the detached process is still running
                 let process_alive = run.pid.map(is_process_alive).unwrap_or(false);
 
                 if process_alive {
+                    // Process is still running - mark as resumable so we can tail it
                     run.status = RunStatus::Resumable;
                     modified = true;
 
@@ -790,7 +743,6 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                         run_id: run.run_id.clone(),
                         user_message: run.user_message.clone(),
                         resumable: true,
-                        execution_mode: run.execution_mode.clone(),
                     });
 
                     log::trace!(
@@ -800,22 +752,11 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                         run.pid
                     );
                 } else {
-                    // Process is dead - check if it completed successfully
-                    let completed = jsonl_has_result_line(app, &session_id, &run.run_id);
-
-                    if completed {
-                        run.status = RunStatus::Completed;
-                        metadata.is_reviewing = true;
-                    } else {
-                        run.status = RunStatus::Crashed;
-                    }
-                    if run.ended_at.is_none() {
-                        run.ended_at = Some(now_timestamp());
-                    }
+                    // Process is dead - mark as crashed
+                    run.status = RunStatus::Crashed;
+                    run.ended_at = Some(now_timestamp());
                     run.recovered = true;
-                    if run.assistant_message_id.is_none() {
-                        run.assistant_message_id = Some(Uuid::new_v4().to_string());
-                    }
+                    run.assistant_message_id = Some(Uuid::new_v4().to_string());
                     modified = true;
 
                     recovered.push(RecoveredRun {
@@ -824,12 +765,10 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                         run_id: run.run_id.clone(),
                         user_message: run.user_message.clone(),
                         resumable: false,
-                        execution_mode: run.execution_mode.clone(),
                     });
 
                     log::trace!(
-                        "Recovered {} run: {} in session {} (user message: {})",
-                        if completed { "completed" } else { "crashed" },
+                        "Recovered crashed run: {} in session {} (user message: {})",
                         run.run_id,
                         session_id,
                         run.user_message.chars().take(50).collect::<String>()
@@ -845,47 +784,12 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
 
     if !recovered.is_empty() {
         log::trace!(
-            "Recovered {} run(s) from previous session",
+            "Recovered {} crashed run(s) from previous session",
             recovered.len()
         );
     }
 
     Ok(recovered)
-}
-
-/// Check if a run's JSONL file contains a "type":"result" line,
-/// indicating the CLI process completed successfully (vs crashing).
-fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &str) -> bool {
-    let session_dir = match get_session_dir(app, session_id) {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
-    let jsonl_path = session_dir.join(format!("{run_id}.jsonl"));
-    let file = match File::open(&jsonl_path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-
-    // Read from the end — the result line is always the last line.
-    // For efficiency, read the last 8KB which is more than enough for the result JSON.
-    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
-    let reader = if file_len > 8192 {
-        use std::io::{Seek, SeekFrom};
-        let mut f = file;
-        let _ = f.seek(SeekFrom::End(-8192));
-        BufReader::new(f)
-    } else {
-        BufReader::new(file)
-    };
-
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            if line.contains("\"type\":\"result\"") {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 /// Find all runs with status = Running (incomplete runs that need recovery)

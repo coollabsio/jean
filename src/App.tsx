@@ -508,43 +508,19 @@ function App() {
       run_id: string
       user_message: string
       resumable: boolean
-      execution_mode: string | null
     }
     invoke<ResumableSession[]>('check_resumable_sessions')
       .then(resumable => {
-        // Always invalidate — recovery may have changed Running → Crashed/Completed
-        // even when no sessions are resumable
-        queryClient.invalidateQueries({ queryKey: chatQueryKeys.all })
-
-        // Clear any stale sending states from a previous app session.
-        // On fresh startup sendingSessionIds should be empty, but if the store
-        // was somehow persisted or restored, ensure only truly resumable sessions
-        // are marked as sending.
-        const { sendingSessionIds, removeSendingSession } = useChatStore.getState()
-        const resumableIds = new Set(resumable.map(r => r.session_id))
-        for (const sessionId of Object.keys(sendingSessionIds)) {
-          if (!resumableIds.has(sessionId)) {
-            removeSendingSession(sessionId)
-          }
-        }
-
         if (resumable.length > 0) {
           logger.info('Found resumable sessions', { count: resumable.length })
-
           // Resume each session
           for (const session of resumable) {
             logger.info('Resuming session', {
               session_id: session.session_id,
               worktree_id: session.worktree_id,
             })
-            // Mark session as sending and restore execution mode for streaming UI
+            // Mark session as sending to show streaming UI
             useChatStore.getState().addSendingSession(session.session_id)
-            if (session.execution_mode) {
-              useChatStore.getState().setExecutingMode(
-                session.session_id,
-                session.execution_mode as 'plan' | 'build' | 'yolo'
-              )
-            }
             // Resume the session (this will start tailing the output file)
             invoke('resume_session', {
               sessionId: session.session_id,

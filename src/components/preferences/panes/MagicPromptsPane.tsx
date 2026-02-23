@@ -1,31 +1,18 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { Check, ChevronsUpDown, RotateCcw } from 'lucide-react'
+import { RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command'
 import { usePreferences, useSavePreferences } from '@/services/preferences'
-import { useAvailableOpencodeModels } from '@/services/opencode-cli'
-import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
-import { OPENCODE_MODEL_OPTIONS as OPENCODE_FALLBACK_OPTIONS } from '@/components/chat/toolbar/toolbar-options'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_PR_PROMPT,
@@ -347,33 +334,17 @@ const CLAUDE_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] = [
 const CODEX_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] =
   codexModelOptions.map(o => ({ value: o.value, label: o.label }))
 
+const OPENCODE_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] = [
+  { value: 'opencode/gpt-5.2-codex', label: 'GPT-5.2 Codex (OpenCode)' },
+]
+
 export const MagicPromptsPane: React.FC = () => {
   const { data: preferences } = usePreferences()
   const savePreferences = useSavePreferences()
   const [selectedKey, setSelectedKey] =
     useState<keyof MagicPrompts>('investigate_issue')
   const [localValue, setLocalValue] = useState('')
-  const [modelPopoverOpen, setModelPopoverOpen] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-  const { data: availableOpencodeModels } = useAvailableOpencodeModels()
-
-  const formatOpenCodeLabel = (value: string) => {
-    const formatted = formatOpencodeModelLabel(value)
-    return value.startsWith('opencode/')
-      ? formatted.replace(/\s+\(OpenCode\)$/, '')
-      : formatted
-  }
-
-  const opencodeModelOptions = useMemo(() => {
-    const models = availableOpencodeModels?.length
-      ? availableOpencodeModels
-      : OPENCODE_FALLBACK_OPTIONS.map(o => o.value)
-    return models.map(value => ({
-      value: value as MagicPromptModel,
-      label: formatOpenCodeLabel(value),
-    }))
-  }, [availableOpencodeModels])
 
   const currentPrompts = preferences?.magic_prompts ?? DEFAULT_MAGIC_PROMPTS
   const currentModels =
@@ -704,117 +675,44 @@ export const MagicPromptsPane: React.FC = () => {
             {currentModel && (
               <>
                 <span className="text-xs text-muted-foreground">Model</span>
-                <Popover
-                  open={modelPopoverOpen}
-                  onOpenChange={setModelPopoverOpen}
+                <Select
+                  value={currentModel}
+                  onValueChange={(v: string) =>
+                    handleModelChange(v as MagicPromptModel)
+                  }
                 >
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={modelPopoverOpen}
-                      className="w-[220px] h-8 text-xs justify-between font-normal"
-                    >
-                      <span className="truncate">
-                        {(() => {
-                          const allOptions = [
-                            ...filteredClaudeOptions,
-                            ...CODEX_MODEL_OPTIONS,
-                            ...opencodeModelOptions,
-                          ]
-                          return (
-                            allOptions.find(o => o.value === currentModel)
-                              ?.label ??
-                            (currentModel.startsWith('opencode/')
-                              ? formatOpenCodeLabel(currentModel)
-                              : currentModel)
-                          )
-                        })()}
-                      </span>
-                      <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    className="w-[var(--radix-popover-trigger-width)] p-0"
-                  >
-                    <Command>
-                      <CommandInput
-                        placeholder="Search models..."
-                        className="text-xs"
-                      />
-                      <CommandList>
-                        <CommandEmpty>No models found.</CommandEmpty>
-                        <CommandGroup heading="Claude">
-                          {filteredClaudeOptions.map(opt => (
-                            <CommandItem
-                              key={opt.value}
-                              value={`${opt.label} ${opt.value}`}
-                              onSelect={() => {
-                                handleModelChange(opt.value)
-                                setModelPopoverOpen(false)
-                              }}
-                            >
-                              <span className="text-xs">{opt.label}</span>
-                              <Check
-                                className={cn(
-                                  'ml-auto h-3 w-3',
-                                  currentModel === opt.value
-                                    ? 'opacity-100'
-                                    : 'opacity-0'
-                                )}
-                              />
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                        <CommandGroup heading="Codex">
-                          {CODEX_MODEL_OPTIONS.map(opt => (
-                            <CommandItem
-                              key={opt.value}
-                              value={`${opt.label} ${opt.value}`}
-                              onSelect={() => {
-                                handleModelChange(opt.value)
-                                setModelPopoverOpen(false)
-                              }}
-                            >
-                              <span className="text-xs">{opt.label}</span>
-                              <Check
-                                className={cn(
-                                  'ml-auto h-3 w-3',
-                                  currentModel === opt.value
-                                    ? 'opacity-100'
-                                    : 'opacity-0'
-                                )}
-                              />
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                        <CommandGroup heading="OpenCode">
-                          {opencodeModelOptions.map(opt => (
-                            <CommandItem
-                              key={opt.value}
-                              value={`${opt.label} ${opt.value}`}
-                              onSelect={() => {
-                                handleModelChange(opt.value)
-                                setModelPopoverOpen(false)
-                              }}
-                            >
-                              <span className="text-xs">{opt.label}</span>
-                              <Check
-                                className={cn(
-                                  'ml-auto h-3 w-3',
-                                  currentModel === opt.value
-                                    ? 'opacity-100'
-                                    : 'opacity-0'
-                                )}
-                              />
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                  <SelectTrigger className="w-[220px] h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Claude</SelectLabel>
+                      {filteredClaudeOptions.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>Codex <span className="ml-1 rounded bg-primary/15 px-1 py-px text-[9px] font-semibold uppercase text-primary">BETA</span></SelectLabel>
+                      {CODEX_MODEL_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>OpenCode</SelectLabel>
+                      {OPENCODE_MODEL_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </>
             )}
             <Button

@@ -604,44 +604,7 @@ fn extract_text_from_opencode_parts(response_json: &serde_json::Value) -> String
 
 /// Generate names using OpenCode HTTP API.
 /// This path does not emit chat:* events, so it won't mutate active streaming UI.
-/// Retries once on connection-level errors (server temporarily unavailable).
 fn generate_names_opencode(
-    app: &tauri::AppHandle,
-    prompt: &str,
-    model: &str,
-    request: &NamingRequest,
-) -> Result<NamingOutput, String> {
-    let mut last_err = String::new();
-    for attempt in 0..2 {
-        if attempt > 0 {
-            log::info!("Retrying OpenCode naming request (attempt {attempt})");
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        }
-        match generate_names_opencode_inner(app, prompt, model, request) {
-            Ok(result) => return Ok(result),
-            Err(e) => {
-                // Only retry on connection-level errors (server unreachable)
-                if attempt == 0 && is_connection_error(&e) {
-                    log::warn!("OpenCode naming connection error, will retry: {e}");
-                    last_err = e;
-                    continue;
-                }
-                return Err(e);
-            }
-        }
-    }
-    Err(last_err)
-}
-
-/// Returns true if the error message indicates a connection-level failure
-/// (server unreachable) rather than an HTTP-level error.
-fn is_connection_error(err: &str) -> bool {
-    err.contains("error sending request")
-        || err.contains("connection refused")
-        || err.contains("Connection refused")
-}
-
-fn generate_names_opencode_inner(
     app: &tauri::AppHandle,
     prompt: &str,
     model: &str,
