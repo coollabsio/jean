@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "jean-mcp-server": {
+      "command": "node",
+      "args": ["./jean-mcp-server/dist/index.js"],
+      "env": {
+        "JEAN_BASE_URL": "http://127.0.0.1:5679",
+        "JEAN_LOG_LEVEL": "error"
+      }
+    }
+  }
+}
