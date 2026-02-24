@@ -1429,9 +1429,44 @@ export function useSendMessage() {
         useChatStore.getState()
       removeSendingSession(sessionId)
       clearExecutingMode(sessionId)
-      setError(sessionId, errorMessage || 'Unknown error occurred')
 
-      // Rollback to previous state on actual errors (not cancellation)
+      // Disconnect or timeout — the CLI likely ran fine, we just lost the
+      // RPC response.  Don't rollback (it destroys streamed content the
+      // user already saw).  Refetch from backend which has authoritative
+      // state on disk.
+      // Check both stringified error and message property (same pattern as
+      // the cancellation check above) for robustness against non-Error types.
+      const isDisconnect =
+        errorStr.includes('WebSocket disconnected') ||
+        errorMessage.includes('WebSocket disconnected')
+      const isTimeout =
+        errorStr.includes('timed out') || errorMessage.includes('timed out')
+
+      if (isDisconnect || isTimeout) {
+        logger.warn('Lost command response, refetching session', {
+          sessionId,
+          reason: isDisconnect ? 'disconnect' : 'timeout',
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.session(sessionId),
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        toast.error(
+          isDisconnect
+            ? 'Connection lost — refreshing...'
+            : 'Response timed out — refreshing...',
+          {
+            description:
+              'Your message was likely processed successfully.',
+          }
+        )
+        return
+      }
+
+      // Real errors — rollback to previous state
+      setError(sessionId, errorMessage || 'Unknown error occurred')
       if (context?.previous) {
         queryClient.setQueryData(
           chatQueryKeys.session(sessionId),

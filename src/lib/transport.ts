@@ -180,6 +180,13 @@ interface WsMessage {
   payload?: unknown
 }
 
+// Commands that spawn CLI processes and block until completion (30-120+ seconds).
+// These get a 10-minute timeout instead of the default 60s.
+const LONG_RUNNING_COMMANDS: ReadonlySet<string> = new Set([
+  'send_chat_message',
+  'run_review_with_ai',
+])
+
 class WsTransport {
   private ws: WebSocket | null = null
   private pending = new Map<string, PendingRequest>()
@@ -324,6 +331,22 @@ class WsTransport {
 
     this.ws.onclose = () => {
       this.setConnected(false)
+
+      // Reject all pending command invocations — the server response will
+      // never arrive on this socket.  This prevents the client from waiting
+      // the full timeout (up to 10 min for long-running commands) when the
+      // real problem is a dropped connection.
+      for (const [, pending] of this.pending.entries()) {
+        clearTimeout(pending.timeout)
+        pending.reject(new Error('WebSocket disconnected'))
+      }
+      this.pending.clear()
+
+      // Also clear the message queue — these were never sent to the server.
+      // Without this, reconnect would flush them, spawning duplicate commands
+      // whose responses nobody is listening for (pending was just cleared).
+      this.queue = []
+
       this.scheduleReconnect()
     }
 
@@ -342,11 +365,13 @@ class WsTransport {
       args: args || {},
     })
 
+    const timeoutMs = LONG_RUNNING_COMMANDS.has(command) ? 10 * 60_000 : 60_000
+
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`Command '${command}' timed out after 60s`))
-      }, 60_000)
+        reject(new Error(`Command '${command}' timed out after ${timeoutMs / 1000}s`))
+      }, timeoutMs)
 
       this.pending.set(id, {
         resolve: resolve as (data: unknown) => void,
