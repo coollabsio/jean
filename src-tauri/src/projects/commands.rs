@@ -3329,28 +3329,40 @@ pub async fn open_worktree_in_editor(
     {
         // On Windows, VS Code and Cursor install as .cmd batch wrappers (code.cmd, cursor.cmd).
         // Command::new("code") uses CreateProcessW which can't execute .cmd files directly,
-        // so we wrap them with cmd /c. CREATE_NO_WINDOW prevents cmd.exe console flash.
+        // so we wrap them with cmd /c. However, cmd /c always spawns successfully even if the
+        // wrapped command doesn't exist (silent failure). We pre-check with `which` to catch
+        // missing CLIs and return a clear error.
+        // CREATE_NO_WINDOW prevents cmd.exe console flash.
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        let result = match editor_app.as_str() {
-            "zed" => std::process::Command::new("zed")
-                .arg(&worktree_path)
-                .spawn(),
-            "cursor" => std::process::Command::new("cmd")
-                .args(["/c", "cursor", &worktree_path])
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn(),
+        let (cli_name, use_cmd_wrapper) = match editor_app.as_str() {
+            "zed" => ("zed", false),
+            "cursor" => ("cursor", true),
             "xcode" => {
                 return Err("Xcode is only available on macOS".to_string());
             }
-            _ => {
-                // Default to VS Code
-                std::process::Command::new("cmd")
-                    .args(["/c", "code", &worktree_path])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .spawn()
-            }
+            _ => ("code", true), // VS Code
+        };
+
+        // Pre-check that the CLI exists in PATH before attempting to launch.
+        // This catches the case where cmd /c would silently fail.
+        if !crate::platform::executable_exists(cli_name) {
+            return Err(format_open_error(
+                &editor_app,
+                &std::io::Error::new(std::io::ErrorKind::NotFound, "not in PATH"),
+            ));
+        }
+
+        let result = if use_cmd_wrapper {
+            std::process::Command::new("cmd")
+                .args(["/c", cli_name, &worktree_path])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+        } else {
+            std::process::Command::new(cli_name)
+                .arg(&worktree_path)
+                .spawn()
         };
 
         match result {
