@@ -12,7 +12,9 @@ pub const CLI_BINARY_NAME: &str = "opencode.exe";
 #[cfg(not(windows))]
 pub const CLI_BINARY_NAME: &str = "opencode";
 
-/// Get the directory where OpenCode CLI is installed.
+/// Get the directory where OpenCode CLI is installed
+///
+/// Returns: `~/Library/Application Support/jean/opencode-cli/`
 pub fn get_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
@@ -21,21 +23,40 @@ pub fn get_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join(CLI_DIR_NAME))
 }
 
-/// Get the full path to the OpenCode CLI binary.
+/// Get the full path to the OpenCode CLI binary
 ///
-/// Returns: `opencode-cli/opencode` (macOS/Linux) or `opencode-cli/opencode.exe` (Windows)
+/// Returns: `~/Library/Application Support/jean/opencode-cli/opencode`
 pub fn get_cli_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(get_cli_dir(app)?.join(CLI_BINARY_NAME))
 }
 
-/// Resolve OpenCode binary path in Jean-managed app data only.
+/// Resolve the OpenCode CLI binary to use for commands.
 ///
-/// This intentionally does not fall back to PATH/global installs.
+/// Returns the embedded binary path if it exists, otherwise falls back to
+/// resolving `opencode` from PATH.
 pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
-    get_cli_binary_path(app).unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME))
+    let embedded_binary = get_cli_binary_path(app).ok().filter(|path| path.exists());
+    let path_binary = which::which(CLI_BINARY_NAME).ok();
+
+    resolve_cli_binary_with(embedded_binary, path_binary)
 }
 
-/// Ensure the CLI directory exists.
+fn resolve_cli_binary_with(
+    embedded_binary: Option<PathBuf>,
+    path_binary: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(embedded_binary) = embedded_binary {
+        return embedded_binary;
+    }
+
+    if let Some(path_binary) = path_binary {
+        return path_binary;
+    }
+
+    PathBuf::from(CLI_BINARY_NAME)
+}
+
+/// Ensure the CLI directory exists, creating it if necessary
 pub fn ensure_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let cli_dir = get_cli_dir(app)?;
     std::fs::create_dir_all(&cli_dir)
@@ -48,10 +69,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fallback_path_is_jean_managed_location_shape() {
-        let resolved = PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME);
+    fn resolve_cli_binary_prefers_embedded_binary() {
+        let embedded = PathBuf::from("/tmp/jean/opencode");
+        let path_binary = PathBuf::from("/opt/homebrew/bin/opencode");
 
-        assert!(resolved.ends_with(CLI_BINARY_NAME));
-        assert!(resolved.to_string_lossy().contains(CLI_DIR_NAME));
+        let resolved = resolve_cli_binary_with(Some(embedded.clone()), Some(path_binary));
+
+        assert_eq!(resolved, embedded);
+    }
+
+    #[test]
+    fn resolve_cli_binary_uses_path_binary_when_embedded_missing() {
+        let path_binary = PathBuf::from("/opt/homebrew/bin/opencode");
+
+        let resolved = resolve_cli_binary_with(None, Some(path_binary.clone()));
+
+        assert_eq!(resolved, path_binary);
+    }
+
+    #[test]
+    fn resolve_cli_binary_falls_back_to_command_name() {
+        let resolved = resolve_cli_binary_with(None, None);
+
+        assert_eq!(resolved, PathBuf::from(CLI_BINARY_NAME));
     }
 }

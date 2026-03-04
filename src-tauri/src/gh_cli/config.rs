@@ -34,12 +34,32 @@ pub fn get_gh_cli_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(get_gh_cli_dir(app)?.join(GH_CLI_BINARY_NAME))
 }
 
-/// Resolve GitHub CLI binary path in Jean-managed app data only.
+/// Resolve the GitHub CLI binary to use for commands.
 ///
-/// This intentionally does not fall back to PATH/global installs.
+/// Returns the embedded binary path if it exists, otherwise falls back to
+/// resolving `gh` from PATH.
 pub fn resolve_gh_binary(app: &AppHandle) -> PathBuf {
-    get_gh_cli_binary_path(app)
-        .unwrap_or_else(|_| PathBuf::from(GH_CLI_DIR_NAME).join(GH_CLI_BINARY_NAME))
+    let embedded_binary = get_gh_cli_binary_path(app)
+        .ok()
+        .filter(|path| path.exists());
+    let path_binary = which::which(GH_CLI_BINARY_NAME).ok();
+
+    resolve_gh_binary_with(embedded_binary, path_binary)
+}
+
+fn resolve_gh_binary_with(
+    embedded_binary: Option<PathBuf>,
+    path_binary: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(embedded_binary) = embedded_binary {
+        return embedded_binary;
+    }
+
+    if let Some(path_binary) = path_binary {
+        return path_binary;
+    }
+
+    PathBuf::from(GH_CLI_BINARY_NAME)
 }
 
 /// Ensure the CLI directory exists, creating it if necessary
@@ -55,10 +75,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fallback_path_is_jean_managed_location_shape() {
-        let resolved = PathBuf::from(GH_CLI_DIR_NAME).join(GH_CLI_BINARY_NAME);
+    fn resolve_gh_binary_prefers_embedded_binary() {
+        let embedded = PathBuf::from("/tmp/jean/gh");
+        let path_binary = PathBuf::from("/opt/homebrew/bin/gh");
 
-        assert!(resolved.ends_with(GH_CLI_BINARY_NAME));
-        assert!(resolved.to_string_lossy().contains(GH_CLI_DIR_NAME));
+        let resolved = resolve_gh_binary_with(Some(embedded.clone()), Some(path_binary));
+
+        assert_eq!(resolved, embedded);
+    }
+
+    #[test]
+    fn resolve_gh_binary_uses_path_binary_when_embedded_missing() {
+        let path_binary = PathBuf::from("/opt/homebrew/bin/gh");
+
+        let resolved = resolve_gh_binary_with(None, Some(path_binary.clone()));
+
+        assert_eq!(resolved, path_binary);
+    }
+
+    #[test]
+    fn resolve_gh_binary_falls_back_to_command_name() {
+        let resolved = resolve_gh_binary_with(None, None);
+
+        assert_eq!(resolved, PathBuf::from(GH_CLI_BINARY_NAME));
     }
 }
