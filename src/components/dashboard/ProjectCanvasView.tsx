@@ -67,6 +67,13 @@ import { useUIStore } from '@/store/ui-store'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
+import {
+  copyTextToClipboard,
+  formatSessionToMarkdown,
+  generateExportFileName,
+  getSessionForExport,
+  writeSessionExportFile,
+} from '@/lib/session-export-utils'
 import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
 import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
@@ -2102,6 +2109,36 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                                   }
                                   onRenameSubmit={handleRenameSubmit}
                                   onRenameCancel={handleRenameCancel}
+                                  onExportClipboard={async () => {
+                                    const session = await getSessionForExport(
+                                      section.worktree.id,
+                                      section.worktree.path,
+                                      card.session.id
+                                    )
+                                    const markdown =
+                                      formatSessionToMarkdown(session)
+                                    await copyTextToClipboard(markdown)
+                                    toast.success('Copied to clipboard')
+                                  }}
+                                  onExportFile={async () => {
+                                    const session = await getSessionForExport(
+                                      section.worktree.id,
+                                      section.worktree.path,
+                                      card.session.id
+                                    )
+                                    const markdown =
+                                      formatSessionToMarkdown(session)
+                                    const fileName = generateExportFileName(
+                                      card.session.name
+                                    )
+                                    const relativePath =
+                                      await writeSessionExportFile(
+                                        section.worktree.path,
+                                        fileName,
+                                        markdown
+                                      )
+                                    toast.success(`Saved to ${relativePath}`)
+                                  }}
                                 />
                               )
                             })}

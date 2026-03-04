@@ -1548,6 +1548,11 @@ pub async fn dispatch_command(
         // =====================================================================
         // File Operations (additional)
         // =====================================================================
+        "create_dir_all" => {
+            let path: String = from_field(&args, "path")?;
+            crate::chat::create_dir_all(path).await?;
+            Ok(Value::Null)
+        }
         "write_file_content" => {
             let path: String = from_field(&args, "path")?;
             let content: String = from_field(&args, "content")?;

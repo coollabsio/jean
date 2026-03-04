@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
@@ -13,6 +14,13 @@ import { useRenameSession } from '@/services/chat'
 import { useCanvasKeyboardNav } from './hooks/useCanvasKeyboardNav'
 import { useCanvasShortcutEvents } from './hooks/useCanvasShortcutEvents'
 import { type SessionCardData, groupCardsByStatus } from './session-card-utils'
+import {
+  copyTextToClipboard,
+  formatSessionToMarkdown,
+  generateExportFileName,
+  getSessionForExport,
+  writeSessionExportFile,
+} from '@/lib/session-export-utils'
 
 interface CanvasGridProps {
   cards: SessionCardData[]
@@ -295,6 +303,41 @@ export function CanvasGrid({
     setRenamingSessionId(null)
   }, [])
 
+  const handleExportClipboard = useCallback(
+    async (sessionId: string) => {
+      if (!worktreeId || !worktreePath) return
+      const session = await getSessionForExport(
+        worktreeId,
+        worktreePath,
+        sessionId
+      )
+      const markdown = formatSessionToMarkdown(session)
+      await copyTextToClipboard(markdown)
+      toast.success('Copied to clipboard')
+    },
+    [worktreeId, worktreePath]
+  )
+
+  const handleExportFile = useCallback(
+    async (sessionId: string, sessionName: string) => {
+      if (!worktreeId || !worktreePath) return
+      const session = await getSessionForExport(
+        worktreeId,
+        worktreePath,
+        sessionId
+      )
+      const markdown = formatSessionToMarkdown(session)
+      const fileName = generateExportFileName(sessionName)
+      const relativePath = await writeSessionExportFile(
+        worktreePath,
+        fileName,
+        markdown
+      )
+      toast.success(`Saved to ${relativePath}`)
+    },
+    [worktreeId, worktreePath]
+  )
+
   // Track cumulative index offset per group for correct keyboard nav indices
   let indexOffset = 0
 
@@ -352,6 +395,12 @@ export function CanvasGrid({
                       onRenameStart={handleStartRename}
                       onRenameSubmit={handleRenameSubmit}
                       onRenameCancel={handleRenameCancel}
+                      onExportClipboard={() =>
+                        handleExportClipboard(card.session.id)
+                      }
+                      onExportFile={() =>
+                        handleExportFile(card.session.id, card.session.name)
+                      }
                     />
                   )
                 })}

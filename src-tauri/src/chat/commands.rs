@@ -3314,6 +3314,12 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
 }
 
+#[tauri::command]
+pub async fn create_dir_all(path: String) -> Result<(), String> {
+    log::trace!("Creating directory path: {path}");
+    std::fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {e}"))
+}
+
 /// Write file content to disk
 ///
 /// Used to save file content when editing in the inline editor.

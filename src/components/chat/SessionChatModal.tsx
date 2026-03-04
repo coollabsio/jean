@@ -13,6 +13,7 @@ import {
   Archive,
   ArrowLeft,
   Code,
+  Download,
   Eye,
   EyeOff,
   FileText,
@@ -96,7 +97,15 @@ import {
 } from '@/components/ui/context-menu'
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
 import { LabelModal } from './LabelModal'
+import { ExportSessionModal } from './ExportSessionModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
+import {
+  copyTextToClipboard,
+  formatSessionToMarkdown,
+  generateExportFileName,
+  getSessionForExport,
+  writeSessionExportFile,
+} from '@/lib/session-export-utils'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -349,6 +358,9 @@ export function SessionChatModal({
     }
   }, [isOpen])
 
+  // Export modal state
+  const [exportModalSessionId, setExportModalSessionId] = useState<string | null>(null)
+
   // Label modal state
   const [labelModalOpen, setLabelModalOpen] = useState(false)
   const [labelTargetSessionId, setLabelTargetSessionId] = useState<
@@ -426,6 +438,41 @@ export function SessionChatModal({
     removalBehavior: preferences?.removal_behavior,
     onLastSessionDeleted: onCloseWorktree ? handleCloseWorktreeFromModal : undefined,
   })
+
+  const handleExportClipboard = useCallback(
+    async (sessionId: string) => {
+      if (!worktreeId || !worktreePath) return
+      const session = await getSessionForExport(
+        worktreeId,
+        worktreePath,
+        sessionId
+      )
+      const markdown = formatSessionToMarkdown(session)
+      await copyTextToClipboard(markdown)
+      toast.success('Copied to clipboard')
+    },
+    [worktreeId, worktreePath]
+  )
+
+  const handleExportFile = useCallback(
+    async (sessionId: string, sessionName: string) => {
+      if (!worktreeId || !worktreePath) return
+      const session = await getSessionForExport(
+        worktreeId,
+        worktreePath,
+        sessionId
+      )
+      const markdown = formatSessionToMarkdown(session)
+      const fileName = generateExportFileName(sessionName)
+      const relativePath = await writeSessionExportFile(
+        worktreePath,
+        fileName,
+        markdown
+      )
+      toast.success(`Saved to ${relativePath}`)
+    },
+    [worktreeId, worktreePath]
+  )
 
   // CMD+W: close the active session tab, or close modal if last tab
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
@@ -1112,6 +1159,12 @@ export function SessionChatModal({
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session
                           </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => setExportModalSessionId(session.id)}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Export Session
+                          </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem
                             variant="destructive"
@@ -1220,6 +1273,20 @@ export function SessionChatModal({
         }}
         sessionId={labelSessionId}
         currentLabel={currentLabel}
+      />
+      <ExportSessionModal
+        isOpen={exportModalSessionId !== null}
+        onClose={() => setExportModalSessionId(null)}
+        sessionName={sessions.find(s => s.id === exportModalSessionId)?.name ?? ''}
+        onExportClipboard={() => {
+          if (!exportModalSessionId) return Promise.resolve()
+          return handleExportClipboard(exportModalSessionId)
+        }}
+        onExportFile={() => {
+          if (!exportModalSessionId) return Promise.resolve()
+          const s = sessions.find(s => s.id === exportModalSessionId)
+          return handleExportFile(exportModalSessionId, s?.name ?? '')
+        }}
       />
       <CloseWorktreeDialog
         open={closeConfirmOpen}

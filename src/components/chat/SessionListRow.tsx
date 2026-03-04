@@ -1,6 +1,7 @@
-import { forwardRef, useCallback } from 'react'
+import { forwardRef, useCallback, useState } from 'react'
 import {
   Archive,
+  Download,
   Eye,
   EyeOff,
   FileText,
@@ -29,6 +30,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { statusConfig } from './session-card-utils'
+import { ExportSessionModal } from './ExportSessionModal'
 import type { SessionCardProps } from './SessionCard'
 
 export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
@@ -52,10 +54,13 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
       onRenameStart,
       onRenameSubmit,
       onRenameCancel,
+      onExportClipboard,
+      onExportFile,
     },
     ref
   ) {
     const config = statusConfig[card.status]
+    const [exportModalOpen, setExportModalOpen] = useState(false)
     const renameInputRef = useCallback((node: HTMLInputElement | null) => {
       if (node) {
         node.focus()
@@ -76,7 +81,8 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
     )
 
     return (
-      <ContextMenu>
+      <>
+        <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
             ref={ref}
@@ -270,6 +276,12 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
               )}
             </ContextMenuItem>
           )}
+          {(onExportClipboard || onExportFile) && (
+            <ContextMenuItem onSelect={() => setExportModalOpen(true)}>
+              <Download className="mr-2 h-4 w-4" />
+              Export Session
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onSelect={onArchive}>
             <Archive className="mr-2 h-4 w-4" />
             Archive Session
@@ -281,6 +293,16 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {(onExportClipboard || onExportFile) && (
+        <ExportSessionModal
+          isOpen={exportModalOpen}
+          onClose={() => setExportModalOpen(false)}
+          sessionName={card.session.name}
+          onExportClipboard={onExportClipboard ?? (() => Promise.resolve())}
+          onExportFile={onExportFile ?? (() => Promise.resolve())}
+        />
+      )}
+    </>
     )
   }
 )

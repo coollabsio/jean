@@ -2456,6 +2456,7 @@ pub fn run() {
             chat::read_plan_file,
             // Chat commands - File content preview/edit
             chat::read_file_content,
+            chat::create_dir_all,
             chat::write_file_content,
             chat::open_file_in_default_app,
             // Chat commands - Saved context handling

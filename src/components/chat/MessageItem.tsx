@@ -1,5 +1,6 @@
 import { memo, useCallback } from 'react'
 import { Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
 import { Markdown } from '@/components/ui/markdown'
@@ -204,6 +205,20 @@ export const MessageItem = memo(function MessageItem({
   const handleCopyToInput = useCallback(() => {
     onCopyToInput?.(message)
   }, [onCopyToInput, message])
+
+  // Stable callback for copying assistant response text
+  const handleCopyAssistantResponse = useCallback(() => {
+    if (message.role !== 'assistant' || !showContent) return
+
+    void navigator.clipboard
+      .writeText(displayContent)
+      .then(() => {
+        toast.success('Copied to clipboard')
+      })
+      .catch(() => {
+        // noop
+      })
+  }, [message.role, showContent, displayContent])
 
   // Content for the message box (shared between user and assistant)
   const messageBoxContent = (
@@ -551,6 +566,25 @@ export const MessageItem = memo(function MessageItem({
           />
         )}
 
+      {/* Copy response button for assistant messages */}
+      {message.role === 'assistant' && showContent && (
+        <div className="mt-1 flex justify-end">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="Copy response"
+                onClick={handleCopyAssistantResponse}
+                className="shrink-0 p-1 rounded cursor-pointer text-muted-foreground/0 group-hover:text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50 focus-visible:text-muted-foreground focus-visible:bg-muted/50 transition-colors"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Copy response</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+
       {message.cancelled && (
         <span className="text-xs text-muted-foreground/50 italic">
           (cancelled)
@@ -595,7 +629,7 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         <div
           className={cn(
-            'text-muted-foreground w-full min-w-0 break-words',
+            'group text-muted-foreground w-full min-w-0 break-words',
             message.cancelled && 'opacity-60'
           )}
         >
