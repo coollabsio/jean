@@ -34,7 +34,6 @@ import { useQueueProcessor } from './hooks/useQueueProcessor'
 import { useBackgroundInvestigation } from './hooks/useBackgroundInvestigation'
 import { useAutoArchiveOnMerge } from './hooks/useAutoArchiveOnMerge'
 import useStreamingEvents from './components/chat/hooks/useStreamingEvents'
-import { preloadAllSounds } from './lib/sounds'
 
 /** Loading screen shown while preloading initial data (browser mode only). */
 function WebLoadingScreen() {
@@ -483,9 +482,6 @@ function App() {
     logger.info('🚀 Frontend application starting up')
     initializeCommandSystem()
     logger.debug('Command system initialized')
-
-    // Preload notification sounds for instant playback
-    preloadAllSounds()
 
     // Kill any orphaned terminals from previous session/reload
     // This ensures cleanup even if beforeunload didn't complete

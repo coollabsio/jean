@@ -9,7 +9,7 @@ import { chatQueryKeys } from '@/services/chat'
 import { isTauri, saveWorktreePr, projectsQueryKeys } from '@/services/projects'
 import type { Project, Worktree } from '@/types/projects'
 import { preferencesQueryKeys } from '@/services/preferences'
-import type { AppPreferences, NotificationSound } from '@/types/preferences'
+import type { AppPreferences } from '@/types/preferences'
 import { triggerImmediateGitPoll } from '@/services/git-status'
 import { isAskUserQuestion, isExitPlanMode } from '@/types/chat'
 import { playNotificationSound } from '@/lib/sounds'
@@ -494,9 +494,8 @@ export default function useStreamingEvents({
 
           // Play waiting sound if not currently viewing this session
           if (!isCurrentlyViewing) {
-            const waitingSound = (preferences?.waiting_sound ??
-              'none') as NotificationSound
-            playNotificationSound(waitingSound)
+            const waitingSound = preferences?.waiting_sound ?? 'none'
+            void playNotificationSound(waitingSound)
           }
         }
       } else if (event.payload.waiting_for_plan && !isCurrentlyViewing) {
@@ -604,8 +603,7 @@ export default function useStreamingEvents({
 
         // Play waiting sound if not currently viewing this session
         if (!isCurrentlyViewing) {
-          const waitingSound = (preferences?.waiting_sound ??
-            'none') as NotificationSound
+          const waitingSound = preferences?.waiting_sound ?? 'none'
           playNotificationSound(waitingSound)
         }
       } else {
@@ -706,9 +704,8 @@ export default function useStreamingEvents({
 
         // Play review sound if not currently viewing this session
         if (!isCurrentlyViewing) {
-          const reviewSound = (preferences?.review_sound ??
-            'none') as NotificationSound
-          playNotificationSound(reviewSound)
+          const reviewSound = preferences?.review_sound ?? 'none'
+          void playNotificationSound(reviewSound)
         }
       }
 

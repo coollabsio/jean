@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, type FC } from 'react'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2, ChevronDown, Check, ChevronsUpDown } from 'lucide-react'
+import { Loader2, ChevronDown, Check, ChevronsUpDown, X, Upload } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
@@ -46,7 +46,9 @@ import type { OpenCodeAuthStatus } from '@/types/opencode-cli'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -80,7 +82,6 @@ import {
   remotePollIntervalOptions,
   archiveRetentionOptions,
   removalBehaviorOptions,
-  notificationSoundOptions,
   type RemovalBehavior,
   type ClaudeModel,
   type CodexModel,
@@ -88,13 +89,13 @@ import {
   type CliBackend,
   type TerminalApp,
   type EditorApp,
-  type NotificationSound,
   openInDefaultOptions,
   type OpenInDefault,
 } from '@/types/preferences'
 import { OPENCODE_MODEL_OPTIONS } from '@/components/chat/toolbar/toolbar-options'
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
 import { playNotificationSound } from '@/lib/sounds'
+import { useNotificationSounds, notificationSoundsQueryKeys } from '@/services/preferences'
 import type { ThinkingLevel, EffortLevel } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
@@ -142,6 +143,62 @@ const InlineField: React.FC<{
     {children}
   </div>
 )
+
+import type { NotificationSoundEntry } from '@/types/preferences'
+
+const SoundSelectOptions: React.FC<{
+  sounds: NotificationSoundEntry[] | undefined
+  onDelete: (soundId: string) => void
+}> = ({ sounds, onDelete }) => {
+  if (!sounds) return <SelectItem value="none">None</SelectItem>
+
+  const defaultSounds = sounds.filter(s => s.category === 'default')
+  const systemSounds = sounds.filter(s => s.category === 'system')
+  const customSounds = sounds.filter(s => s.category === 'custom')
+
+  return (
+    <>
+      {defaultSounds.map(s => (
+        <SelectItem key={s.id} value={s.id}>
+          {s.label}
+        </SelectItem>
+      ))}
+      {systemSounds.length > 0 && (
+        <SelectGroup>
+          <SelectLabel>System</SelectLabel>
+          {systemSounds.map(s => (
+            <SelectItem key={s.id} value={s.id}>
+              {s.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      )}
+      {customSounds.length > 0 && (
+        <SelectGroup>
+          <SelectLabel>Custom</SelectLabel>
+          {customSounds.map(s => (
+            <SelectItem key={s.id} value={s.id}>
+              <span className="flex items-center gap-2">
+                {s.label}
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-destructive ml-auto"
+                  onPointerDown={e => {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    onDelete(s.id)
+                  }}
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      )}
+    </>
+  )
+}
 
 export const GeneralPane: React.FC = () => {
   const queryClient = useQueryClient()
@@ -442,19 +499,64 @@ export const GeneralPane: React.FC = () => {
     }
   }
 
-  const handleWaitingSoundChange = (value: NotificationSound) => {
+  const { data: notificationSounds } = useNotificationSounds()
+
+  const handleWaitingSoundChange = (value: string) => {
     if (preferences) {
       savePreferences.mutate({ ...preferences, waiting_sound: value })
-      // Play preview of the selected sound
       playNotificationSound(value)
     }
   }
 
-  const handleReviewSoundChange = (value: NotificationSound) => {
+  const handleReviewSoundChange = (value: string) => {
     if (preferences) {
       savePreferences.mutate({ ...preferences, review_sound: value })
-      // Play preview of the selected sound
       playNotificationSound(value)
+    }
+  }
+
+  const handleImportSound = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        multiple: false,
+        title: 'Select a sound file',
+        filters: [
+          {
+            name: 'Audio',
+            extensions: ['m4r', 'mp3', 'wav', 'ogg', 'm4a', 'aac'],
+          },
+        ],
+      })
+      if (!selected) return
+      const sourcePath = typeof selected === 'string' ? selected : String(selected)
+      await invoke<string>('import_custom_sound', { sourcePath })
+      queryClient.invalidateQueries({
+        queryKey: notificationSoundsQueryKeys.all,
+      })
+      toast.success('Sound imported')
+    } catch (error) {
+      if (String(error).includes('cancel')) return
+      toast.error(`Failed to import sound: ${error}`)
+    }
+  }
+
+  const handleDeleteSound = async (soundId: string) => {
+    try {
+      await invoke('delete_custom_sound', { soundId })
+      queryClient.invalidateQueries({
+        queryKey: notificationSoundsQueryKeys.all,
+      })
+      // If the deleted sound was selected, reset to none
+      if (preferences?.waiting_sound === soundId) {
+        savePreferences.mutate({ ...preferences, waiting_sound: 'none' })
+      }
+      if (preferences?.review_sound === soundId) {
+        savePreferences.mutate({ ...preferences, review_sound: 'none' })
+      }
+      toast.success('Sound deleted')
+    } catch (error) {
+      toast.error(`Failed to delete sound: ${error}`)
     }
   }
 
@@ -1566,11 +1668,10 @@ export const GeneralPane: React.FC = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {notificationSoundOptions.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
+                <SoundSelectOptions
+                  sounds={notificationSounds}
+                  onDelete={handleDeleteSound}
+                />
               </SelectContent>
             </Select>
           </InlineField>
@@ -1587,14 +1688,23 @@ export const GeneralPane: React.FC = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {notificationSoundOptions.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
+                <SoundSelectOptions
+                  sounds={notificationSounds}
+                  onDelete={handleDeleteSound}
+                />
               </SelectContent>
             </Select>
           </InlineField>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleImportSound}
+            className="gap-1.5"
+          >
+            <Upload className="size-3.5" />
+            Import Sound
+          </Button>
         </div>
       </SettingsSection>
 

@@ -5,19 +5,14 @@ import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from './keybindings'
 // Notification Sounds
 // =============================================================================
 
-export type NotificationSound = 'none' | 'ding' | 'chime' | 'pop' | 'choochoo'
+/** Sound ID format: "none" | "system:<name>" | "custom:<filename>" */
+export type NotificationSound = string
 
-export const notificationSoundOptions: {
-  value: NotificationSound
+export interface NotificationSoundEntry {
+  id: string
   label: string
-}[] = [
-  { value: 'none', label: 'None' },
-  // More sounds will be added later:
-  // { value: 'ding', label: 'Ding' },
-  // { value: 'chime', label: 'Chime' },
-  // { value: 'pop', label: 'Pop' },
-  // { value: 'choochoo', label: 'Choo-choo' },
-]
+  category: 'default' | 'system' | 'custom'
+}
 
 // =============================================================================
 // Magic Prompts - Customizable prompts for AI-powered features
@@ -810,8 +805,8 @@ export interface AppPreferences {
   file_edit_mode: FileEditMode // How to edit files: inline (CodeMirror) or external (VS Code, etc.)
   ai_language: string // Preferred language for AI responses (empty = default)
   allow_web_tools_in_plan_mode: boolean // Allow WebFetch/WebSearch in plan mode without prompts
-  waiting_sound: NotificationSound // Sound when session is waiting for input
-  review_sound: NotificationSound // Sound when session finishes reviewing
+  waiting_sound: string // Sound ID: "none" | "system:<name>" | "custom:<filename>"
+  review_sound: string // Sound ID: "none" | "system:<name>" | "custom:<filename>"
   http_server_enabled: boolean // Whether HTTP server is enabled
   http_server_port: number // HTTP server port (default 3456)
   http_server_token: string | null // Auth token for HTTP/WS access

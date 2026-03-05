@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
-import type { AppPreferences } from '@/types/preferences'
+import type { AppPreferences, NotificationSoundEntry } from '@/types/preferences'
 import { defaultPreferences } from '@/types/preferences'
 import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from '@/types/keybindings'
 
@@ -121,5 +121,27 @@ export function useSavePreferences() {
       })
       logger.info('Preferences cache updated')
     },
+  })
+}
+
+// =============================================================================
+// Notification Sounds
+// =============================================================================
+
+export const notificationSoundsQueryKeys = {
+  all: ['notification-sounds'] as const,
+  list: () => [...notificationSoundsQueryKeys.all, 'list'] as const,
+}
+
+export function useNotificationSounds() {
+  return useQuery({
+    queryKey: notificationSoundsQueryKeys.list(),
+    queryFn: async (): Promise<NotificationSoundEntry[]> => {
+      if (!isTauri()) {
+        return [{ id: 'none', label: 'None', category: 'default' }]
+      }
+      return invoke<NotificationSoundEntry[]>('list_notification_sounds')
+    },
+    staleTime: 1000 * 60 * 30, // 30 minutes — sound files rarely change
   })
 }

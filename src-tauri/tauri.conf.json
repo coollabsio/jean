@@ -37,13 +37,14 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob: https:; media-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
         "scope": {
           "allow": [
             "**/.jean/images/**",
-            "$APPDATA/**"
+            "$APPDATA/**",
+            "/System/Library/PrivateFrameworks/ToneLibrary.framework/**"
           ],
           "requireLiteralLeadingDot": false
         }

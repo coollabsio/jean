@@ -1491,6 +1491,199 @@ async fn send_native_notification(
     }
 }
 
+// =============================================================================
+// Notification Sounds
+// =============================================================================
+
+/// macOS system alert tones directory
+#[cfg(target_os = "macos")]
+const MACOS_ALERT_TONES_DIR: &str =
+    "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern";
+
+/// Supported audio file extensions for custom sounds
+const SOUND_EXTENSIONS: &[&str] = &["m4r", "mp3", "wav", "ogg", "m4a", "aac"];
+
+#[derive(Serialize, Clone)]
+struct NotificationSoundEntry {
+    id: String,
+    label: String,
+    category: String,
+}
+
+fn get_custom_sounds_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?;
+    let dir = app_data_dir.join("custom-sounds");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create custom-sounds directory: {e}"))?;
+    Ok(dir)
+}
+
+#[tauri::command]
+async fn list_notification_sounds(app: AppHandle) -> Result<Vec<NotificationSoundEntry>, String> {
+    let mut sounds = vec![NotificationSoundEntry {
+        id: "none".to_string(),
+        label: "None".to_string(),
+        category: "default".to_string(),
+    }];
+
+    // Scan macOS system alert tones
+    #[cfg(target_os = "macos")]
+    {
+        let tones_dir = std::path::Path::new(MACOS_ALERT_TONES_DIR);
+        if tones_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(tones_dir) {
+                let mut system_sounds: Vec<NotificationSoundEntry> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("m4r"))
+                    })
+                    .map(|e| {
+                        let stem = e
+                            .path()
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        NotificationSoundEntry {
+                            id: format!("system:{stem}"),
+                            label: stem.clone(),
+                            category: "system".to_string(),
+                        }
+                    })
+                    .collect();
+                system_sounds.sort_by(|a, b| a.label.cmp(&b.label));
+                sounds.extend(system_sounds);
+            }
+        }
+    }
+
+    // Scan custom sounds directory
+    let custom_dir = get_custom_sounds_dir(&app)?;
+    if custom_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&custom_dir) {
+            let mut custom_sounds: Vec<NotificationSoundEntry> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path().extension().is_some_and(|ext| {
+                        let ext_lower = ext.to_string_lossy().to_lowercase();
+                        SOUND_EXTENSIONS.contains(&ext_lower.as_str())
+                    })
+                })
+                .map(|e| {
+                    let filename = e.file_name().to_string_lossy().to_string();
+                    let stem = e
+                        .path()
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    NotificationSoundEntry {
+                        id: format!("custom:{filename}"),
+                        label: stem,
+                        category: "custom".to_string(),
+                    }
+                })
+                .collect();
+            custom_sounds.sort_by(|a, b| a.label.cmp(&b.label));
+            sounds.extend(custom_sounds);
+        }
+    }
+
+    Ok(sounds)
+}
+
+#[tauri::command]
+async fn get_sound_file_path(app: AppHandle, sound_id: String) -> Result<Option<String>, String> {
+    if sound_id == "none" {
+        return Ok(None);
+    }
+
+    if let Some(name) = sound_id.strip_prefix("system:") {
+        #[cfg(target_os = "macos")]
+        {
+            let path =
+                std::path::PathBuf::from(MACOS_ALERT_TONES_DIR).join(format!("{name}.m4r"));
+            if path.exists() {
+                return Ok(Some(path.to_string_lossy().to_string()));
+            }
+        }
+        return Err(format!("System sound not found: {name}"));
+    }
+
+    if let Some(filename) = sound_id.strip_prefix("custom:") {
+        let custom_dir = get_custom_sounds_dir(&app)?;
+        let path = custom_dir.join(filename);
+        if path.exists() {
+            return Ok(Some(path.to_string_lossy().to_string()));
+        }
+        return Err(format!("Custom sound not found: {filename}"));
+    }
+
+    Err(format!("Invalid sound ID format: {sound_id}"))
+}
+
+#[tauri::command]
+async fn import_custom_sound(app: AppHandle, source_path: String) -> Result<String, String> {
+    let source = std::path::Path::new(&source_path);
+    if !source.exists() {
+        return Err("Source file does not exist".to_string());
+    }
+
+    let filename = source
+        .file_name()
+        .ok_or("Invalid source file path")?
+        .to_string_lossy()
+        .to_string();
+
+    // Validate extension
+    let ext = source
+        .extension()
+        .ok_or("File has no extension")?
+        .to_string_lossy()
+        .to_lowercase();
+    if !SOUND_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!(
+            "Unsupported audio format: .{ext}. Supported: {}",
+            SOUND_EXTENSIONS.join(", ")
+        ));
+    }
+
+    let custom_dir = get_custom_sounds_dir(&app)?;
+    let dest = custom_dir.join(&filename);
+
+    std::fs::copy(source, &dest)
+        .map_err(|e| format!("Failed to copy sound file: {e}"))?;
+
+    Ok(format!("custom:{filename}"))
+}
+
+#[tauri::command]
+async fn delete_custom_sound(app: AppHandle, sound_id: String) -> Result<(), String> {
+    let filename = sound_id
+        .strip_prefix("custom:")
+        .ok_or("Can only delete custom sounds")?;
+
+    // Validate filename to prevent path traversal
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return Err("Invalid filename".to_string());
+    }
+
+    let custom_dir = get_custom_sounds_dir(&app)?;
+    let path = custom_dir.join(filename);
+
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to delete sound file: {e}"))?;
+    }
+
+    Ok(())
+}
+
 // Recovery functions - simple pattern for saving JSON data to disk
 fn get_recovery_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
@@ -2257,6 +2450,11 @@ pub fn run() {
             load_ui_state,
             save_ui_state,
             send_native_notification,
+            // Notification sound commands
+            list_notification_sounds,
+            get_sound_file_path,
+            import_custom_sound,
+            delete_custom_sound,
             save_emergency_data,
             load_emergency_data,
             cleanup_old_recovery_files,
