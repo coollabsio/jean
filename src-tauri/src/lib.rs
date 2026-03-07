@@ -193,6 +193,8 @@ pub struct AppPreferences {
     #[serde(default = "default_codex_max_agent_threads")]
     pub codex_max_agent_threads: u32, // Max concurrent agent threads (1-8)
     #[serde(default)]
+    pub auto_open_project_worktrees: bool, // Expand all project worktrees by default in sidebar (experimental)
+    #[serde(default)]
     pub restore_last_session: bool, // Restore last session when switching projects (default: false)
     #[serde(default)]
     pub close_original_on_clear_context: bool, // Close original session when using Clear Context and yolo (default: true)
@@ -1065,6 +1067,7 @@ impl Default for AppPreferences {
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_multi_agent_enabled: false,
             codex_max_agent_threads: default_codex_max_agent_threads(),
+            auto_open_project_worktrees: false,
             restore_last_session: false,
             close_original_on_clear_context: true,
             build_model: None,
@@ -2421,6 +2424,7 @@ pub fn run() {
             projects::clone_project,
             projects::remove_project,
             projects::list_worktrees,
+            projects::detect_project_worktrees,
             projects::get_worktree,
             projects::create_worktree,
             projects::create_worktree_from_existing_branch,

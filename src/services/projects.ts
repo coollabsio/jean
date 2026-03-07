@@ -8,6 +8,7 @@ import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
 import type {
   Project,
   Worktree,
+  DetectedProjectWorktree,
   WorktreeCreatingEvent,
   WorktreeCreatedEvent,
   WorktreeCreateErrorEvent,
@@ -40,6 +41,8 @@ export const projectsQueryKeys = {
   detail: (id: string) => [...projectsQueryKeys.all, 'detail', id] as const,
   worktrees: (projectId: string) =>
     [...projectsQueryKeys.all, 'worktrees', projectId] as const,
+  detectedWorktrees: (projectId: string) =>
+    [...projectsQueryKeys.all, 'detected-worktrees', projectId] as const,
 }
 
 // ============================================================================
@@ -101,6 +104,42 @@ export function useWorktrees(projectId: string | null) {
     enabled: !!projectId,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 10,
+  })
+}
+
+/**
+ * Hook to detect existing git worktrees from the repository using `git worktree list`.
+ * Includes both tracked and untracked paths, so users can open/import from the app UI.
+ */
+export function useDetectedProjectWorktrees(projectId: string | null) {
+  return useQuery({
+    queryKey: projectsQueryKeys.detectedWorktrees(projectId ?? ''),
+    queryFn: async (): Promise<DetectedProjectWorktree[]> => {
+      if (!isTauri() || !projectId) {
+        return []
+      }
+
+      try {
+        logger.debug('Detecting git worktrees for project', { projectId })
+        const worktrees = await invoke<DetectedProjectWorktree[]>(
+          'detect_project_worktrees',
+          {
+            projectId,
+          }
+        )
+        logger.info('Detected git worktrees', {
+          projectId,
+          count: worktrees.length,
+        })
+        return worktrees
+      } catch (error) {
+        logger.error('Failed to detect git worktrees', { error, projectId })
+        return []
+      }
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 20,
+    gcTime: 1000 * 60 * 5,
   })
 }
 

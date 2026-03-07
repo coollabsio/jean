@@ -10,6 +10,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { usePreferences, useSavePreferences } from '@/services/preferences'
+import { useProjectsStore } from '@/store/projects-store'
 import { modelOptions, type ClaudeModel } from '@/types/preferences'
 
 const SettingsSection: React.FC<{
@@ -44,6 +45,9 @@ const InlineField: React.FC<{
 export const ExperimentalPane: React.FC = () => {
   const { data: preferences } = usePreferences()
   const savePreferences = useSavePreferences()
+  const setExpandedWorktreeIds = useProjectsStore(
+    state => state.setExpandedWorktreeIds
+  )
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-4">
@@ -140,6 +144,27 @@ export const ExperimentalPane: React.FC = () => {
           />
         </InlineField>
 
+      </SettingsSection>
+
+      <SettingsSection title="Worktrees">
+        <InlineField
+          label="Auto-open all worktrees"
+          description="Expand all worktrees by default in project sidebar. You can still collapse individual rows."
+        >
+          <Switch
+            checked={preferences?.auto_open_project_worktrees ?? false}
+            onCheckedChange={checked => {
+              if (preferences) {
+                // Reset per-worktree overrides when changing default behavior.
+                setExpandedWorktreeIds(new Set())
+                savePreferences.mutate({
+                  ...preferences,
+                  auto_open_project_worktrees: checked,
+                })
+              }
+            }}
+          />
+        </InlineField>
       </SettingsSection>
 
     </div>

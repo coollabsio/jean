@@ -1,4 +1,4 @@
-import { GitBranch, Loader2, Plus, Settings } from 'lucide-react'
+import { FolderOpen, GitBranch, Loader2, Plus, Settings } from 'lucide-react'
 import {
   Tooltip,
   TooltipTrigger,
@@ -13,7 +13,9 @@ export interface QuickActionsTabProps {
   hasBaseSession: boolean
   onCreateWorktree: () => void
   onBaseSession: () => void
+  onImportWorktree: () => void
   isCreating: boolean
+  isImporting: boolean
   projectId: string | null
   jeanConfig: JeanConfig | null | undefined
 }
@@ -22,7 +24,9 @@ export function QuickActionsTab({
   hasBaseSession,
   onCreateWorktree,
   onBaseSession,
+  onImportWorktree,
   isCreating,
+  isImporting,
   projectId,
   jeanConfig,
 }: QuickActionsTabProps) {
@@ -39,7 +43,7 @@ export function QuickActionsTab({
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 p-4 sm:p-10">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full max-w-xl">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 w-full max-w-5xl">
         {/* Base Session button */}
         <button
           onClick={onBaseSession}
@@ -61,7 +65,7 @@ export function QuickActionsTab({
           </div>
           <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             M
-        </kbd>
+          </kbd>
         </button>
 
         {/* New Worktree button */}
@@ -92,6 +96,33 @@ export function QuickActionsTab({
           </div>
           <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             N
+          </kbd>
+        </button>
+
+        {/* Open Existing Worktree button */}
+        <button
+          onClick={onImportWorktree}
+          disabled={isImporting || !projectId}
+          className={cn(
+            'relative flex flex-col items-center justify-center gap-4 sm:aspect-square p-4 sm:p-8 rounded-xl text-sm transition-colors',
+            'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
+            'border border-border',
+            (!projectId || isImporting) && 'opacity-60'
+          )}
+        >
+          {isImporting ? (
+            <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
+          ) : (
+            <FolderOpen className="h-10 w-10 text-muted-foreground" />
+          )}
+          <div className="flex flex-col items-center gap-1.5">
+            <span className="font-medium text-base">Open Existing Worktree</span>
+            <span className="text-xs text-muted-foreground text-center">
+              Select from detected git worktrees
+            </span>
+          </div>
+          <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            O
           </kbd>
         </button>
       </div>

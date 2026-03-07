@@ -31,6 +31,8 @@ import {
   useCreateBaseSession,
   useProjectBranches,
   useCreateWorktreeFromExistingBranch,
+  useImportWorktree,
+  useUnarchiveWorktree,
   useJeanConfig,
 } from '@/services/projects'
 import { isBaseSession } from '@/types/projects'
@@ -212,6 +214,8 @@ export function useNewWorktreeData(
   const createWorktree = useCreateWorktree()
   const createBaseSession = useCreateBaseSession()
   const createWorktreeFromBranch = useCreateWorktreeFromExistingBranch()
+  const importWorktree = useImportWorktree()
+  const unarchiveWorktree = useUnarchiveWorktree()
 
   return {
     queryClient,
@@ -269,5 +273,7 @@ export function useNewWorktreeData(
     createWorktree,
     createBaseSession,
     createWorktreeFromBranch,
+    importWorktree,
+    unarchiveWorktree,
   }
 }

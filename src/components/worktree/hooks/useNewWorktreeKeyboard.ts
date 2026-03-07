@@ -20,6 +20,7 @@ interface Params {
   creatingFromNumber: number | null
   handleCreateWorktree: () => void
   handleBaseSession: () => void
+  handleImportWorktree: () => void
   handleSelectIssue: (issue: GitHubIssue, background?: boolean) => void
   handleSelectIssueAndInvestigate: (
     issue: GitHubIssue,
@@ -72,6 +73,7 @@ export function useNewWorktreeKeyboard({
   creatingFromNumber,
   handleCreateWorktree,
   handleBaseSession,
+  handleImportWorktree,
   handleSelectIssue,
   handleSelectIssueAndInvestigate,
   handlePreviewIssue,
@@ -150,6 +152,12 @@ export function useNewWorktreeKeyboard({
             e.preventDefault()
             e.nativeEvent.stopImmediatePropagation()
             handleBaseSession()
+            return
+          }
+          if (key === 'o') {
+            e.preventDefault()
+            e.nativeEvent.stopImmediatePropagation()
+            handleImportWorktree()
             return
           }
         }
@@ -387,6 +395,7 @@ export function useNewWorktreeKeyboard({
       selectedItemIndex,
       handleCreateWorktree,
       handleBaseSession,
+      handleImportWorktree,
       handleSelectIssue,
       handleSelectIssueAndInvestigate,
       handlePreviewIssue,

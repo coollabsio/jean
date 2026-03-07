@@ -17,6 +17,7 @@ import type {
   AdvisoryContext,
 } from '@/types/github'
 import type { LinearIssue, LinearIssueDetail } from '@/types/linear'
+import type { DetectedProjectWorktree } from '@/types/projects'
 import type { useNewWorktreeData } from './useNewWorktreeData'
 import type { TabId } from '../NewWorktreeModal'
 
@@ -39,6 +40,8 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     createWorktree,
     createBaseSession,
     createWorktreeFromBranch,
+    importWorktree,
+    unarchiveWorktree,
   } = data
 
   const { setActiveTab, setSearchQuery, setSelectedItemIndex, setIncludeClosed } =
@@ -162,6 +165,50 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     createBaseSession,
     handleOpenChange,
   ])
+
+  const handleOpenDetectedWorktree = useCallback(
+    async (worktree: DetectedProjectWorktree) => {
+      if (!selectedProjectId) {
+        toast.error('No project selected')
+        return
+      }
+
+      if (worktree.tracked && worktree.trackedWorktreeId) {
+        if (worktree.archived) {
+          await unarchiveWorktree.mutateAsync(worktree.trackedWorktreeId)
+        }
+
+        const { selectProject, selectWorktree } = useProjectsStore.getState()
+        const { setActiveWorktree, setViewingCanvasTab } = useChatStore.getState()
+        selectProject(selectedProjectId)
+        selectWorktree(worktree.trackedWorktreeId)
+        setActiveWorktree(worktree.trackedWorktreeId, worktree.path)
+        setViewingCanvasTab(worktree.trackedWorktreeId, true)
+        toast.success(`Opened ${worktree.name}`)
+        handleOpenChange(false)
+        return
+      }
+
+      // Main repository path should open/switch the base session, not import as a normal worktree.
+      if (worktree.isBase) {
+        handleBaseSession()
+        return
+      }
+
+      await importWorktree.mutateAsync({
+        projectId: selectedProjectId,
+        path: worktree.path,
+      })
+      handleOpenChange(false)
+    },
+    [
+      selectedProjectId,
+      importWorktree,
+      unarchiveWorktree,
+      handleOpenChange,
+      handleBaseSession,
+    ]
+  )
 
   const handleSelectBranch = useCallback(
     (branchName: string, background = false) => {
@@ -791,9 +838,12 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     creatingFromLinearId,
     creatingFromBranch,
     creatingFromGhsaId,
+    isImportingWorktree:
+      importWorktree.isPending || unarchiveWorktree.isPending,
     handleOpenChange,
     handleCreateWorktree,
     handleBaseSession,
+    handleOpenDetectedWorktree,
     handleSelectBranch,
     handleSelectIssue,
     handleSelectIssueAndInvestigate,

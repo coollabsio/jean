@@ -28,6 +28,8 @@ import { SecurityAlertsTab } from './SecurityAlertsTab'
 import { BranchesTab } from './BranchesTab'
 import { LinearIssuesTab } from './LinearIssuesTab'
 import { IssuePreviewModal } from './IssuePreviewModal'
+import { ExistingWorktreeDialog } from './ExistingWorktreeDialog'
+import type { DetectedProjectWorktree } from '@/types/projects'
 
 export type TabId = 'quick' | 'issues' | 'prs' | 'security' | 'branches' | 'linear'
 
@@ -57,6 +59,8 @@ export function NewWorktreeModal() {
   const [searchQuery, setSearchQuery] = useState('')
   const [includeClosed, setIncludeClosed] = useState(false)
   const [selectedItemIndex, setSelectedItemIndex] = useState(0)
+  const [existingWorktreeDialogOpen, setExistingWorktreeDialogOpen] =
+    useState(false)
   const [previewItem, setPreviewItem] = useState<{
     type: 'issue' | 'pr' | 'security' | 'advisory'
     number: number
@@ -102,6 +106,7 @@ export function NewWorktreeModal() {
     creatingFromNumber: handlers.creatingFromNumber,
     handleCreateWorktree: handlers.handleCreateWorktree,
     handleBaseSession: handlers.handleBaseSession,
+    handleImportWorktree: () => setExistingWorktreeDialogOpen(true),
     handleSelectIssue: handlers.handleSelectIssue,
     handleSelectIssueAndInvestigate: handlers.handleSelectIssueAndInvestigate,
     handlePreviewIssue,
@@ -190,10 +195,12 @@ export function NewWorktreeModal() {
               hasBaseSession={data.hasBaseSession}
               onCreateWorktree={handlers.handleCreateWorktree}
               onBaseSession={handlers.handleBaseSession}
+              onImportWorktree={() => setExistingWorktreeDialogOpen(true)}
               isCreating={
                 data.createWorktree.isPending ||
                 data.createBaseSession.isPending
               }
+              isImporting={handlers.isImportingWorktree}
               projectId={data.selectedProjectId}
               jeanConfig={data.jeanConfig}
             />
@@ -346,6 +353,20 @@ export function NewWorktreeModal() {
           ghsaId={previewItem.ghsaId}
         />
       )}
+      <ExistingWorktreeDialog
+        open={existingWorktreeDialogOpen}
+        onOpenChange={setExistingWorktreeDialogOpen}
+        projectId={data.selectedProjectId}
+        isOpening={handlers.isImportingWorktree}
+        onSelect={async (worktree: DetectedProjectWorktree) => {
+          try {
+            await handlers.handleOpenDetectedWorktree(worktree)
+            setExistingWorktreeDialogOpen(false)
+          } catch {
+            // keep selector open on failure
+          }
+        }}
+      />
     </Dialog>
   )
 }

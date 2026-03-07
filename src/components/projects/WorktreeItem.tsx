@@ -30,6 +30,7 @@ import {
   triggerImmediateGitPoll,
   performGitPull,
 } from '@/services/git-status'
+import { usePreferences } from '@/services/preferences'
 import {
   Tooltip,
   TooltipTrigger,
@@ -79,6 +80,7 @@ export function WorktreeItem({
   )
   const isSelected = selectedWorktreeId === worktree.id
   const isBase = isBaseSession(worktree)
+  const { data: preferences } = usePreferences()
 
   // Get git status for this worktree from event-driven cache
   // Note: useGitStatus reads from TanStack Query cache, no network requests
@@ -278,8 +280,13 @@ export function WorktreeItem({
     isReviewing,
   ])
 
-  // Worktree expansion state for sidebar session list
-  const isExpanded = expandedWorktreeIds.has(worktree.id)
+  // Worktree expansion state for sidebar session list.
+  // When auto-open is enabled, treat expandedWorktreeIds as a "collapsed overrides" set.
+  const autoOpenProjectWorktrees =
+    preferences?.auto_open_project_worktrees ?? false
+  const isExpanded = autoOpenProjectWorktrees
+    ? !expandedWorktreeIds.has(worktree.id)
+    : expandedWorktreeIds.has(worktree.id)
   const storeState = useCanvasStoreState()
 
   // Compute card data for all sessions (needed for both summary and expanded list)

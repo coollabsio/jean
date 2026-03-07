@@ -522,6 +522,80 @@ pub async fn list_worktrees(app: AppHandle, project_id: String) -> Result<Vec<Wo
     Ok(worktrees)
 }
 
+/// Existing git worktree path detected from `git worktree list --porcelain`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedProjectWorktree {
+    pub path: String,
+    pub name: String,
+    pub branch: String,
+    pub tracked: bool,
+    pub archived: bool,
+    pub tracked_worktree_id: Option<String>,
+    pub is_base: bool,
+}
+
+/// Detect all existing git worktrees for a project repository.
+///
+/// Includes both worktrees already tracked by Jean and untracked ones.
+#[tauri::command]
+pub async fn detect_project_worktrees(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<DetectedProjectWorktree>, String> {
+    log::trace!("Detecting project worktrees for project: {project_id}");
+
+    let data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    let detected_paths = git::list_worktrees(&project.path)?;
+    let tracked_worktrees = data.worktrees_for_project(&project_id);
+
+    let mut detected: Vec<DetectedProjectWorktree> = detected_paths
+        .into_iter()
+        .map(|path| {
+            let tracked_worktree = tracked_worktrees
+                .iter()
+                .find(|w| w.path == path && w.archived_at.is_none())
+                .or_else(|| tracked_worktrees.iter().find(|w| w.path == path));
+
+            let branch = git::get_current_branch(&path).unwrap_or_default();
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&path)
+                .to_string();
+            let is_base = tracked_worktree
+                .map(|w| w.session_type == SessionType::Base)
+                .unwrap_or_else(|| path == project.path);
+
+            DetectedProjectWorktree {
+                path,
+                name,
+                branch,
+                tracked: tracked_worktree.is_some(),
+                archived: tracked_worktree
+                    .map(|w| w.archived_at.is_some())
+                    .unwrap_or(false),
+                tracked_worktree_id: tracked_worktree.map(|w| w.id.clone()),
+                is_base,
+            }
+        })
+        .collect();
+
+    // Keep base/tracked entries first, then sort by name for stable UX.
+    detected.sort_by(|a, b| {
+        b.is_base
+            .cmp(&a.is_base)
+            .then_with(|| b.tracked.cmp(&a.tracked))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(detected)
+}
+
 /// Get a single worktree by ID
 #[tauri::command]
 pub async fn get_worktree(app: AppHandle, worktree_id: String) -> Result<Worktree, String> {

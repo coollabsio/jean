@@ -132,6 +132,20 @@ export interface Worktree {
   last_opened_at?: number
 }
 
+/**
+ * Existing git worktree detected from `git worktree list --porcelain`.
+ * Used by the in-app "Open Existing Worktree" selector.
+ */
+export interface DetectedProjectWorktree {
+  path: string
+  name: string
+  branch: string
+  tracked: boolean
+  archived: boolean
+  trackedWorktreeId: string | null
+  isBase: boolean
+}
+
 // =============================================================================
 // Worktree Creation Events (from Rust backend)
 // =============================================================================
