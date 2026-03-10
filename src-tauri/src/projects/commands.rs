@@ -3864,6 +3864,10 @@ pub async fn update_project_settings(
     worktrees_dir: Option<String>,
     linear_api_key: Option<String>,
     linear_team_id: Option<String>,
+    plane_api_key: Option<String>,
+    plane_url: Option<String>,
+    plane_workspace_id: Option<String>,
+    plane_project_id: Option<String>,
 ) -> Result<Project, String> {
     log::trace!("Updating settings for project: {project_id}");
 
@@ -3931,6 +3935,38 @@ pub async fn update_project_settings(
             None
         } else {
             Some(team_id)
+        };
+    }
+
+    if let Some(key) = plane_api_key {
+        let key = key.trim().to_string();
+        log::trace!("Updating Plane API key ({} chars)", key.len());
+        project.plane_api_key = if key.is_empty() { None } else { Some(key) };
+    }
+
+    if let Some(url) = plane_url {
+        let url = url.trim().to_string();
+        log::trace!("Updating Plane URL: {url:?}");
+        project.plane_url = if url.is_empty() { None } else { Some(url) };
+    }
+
+    if let Some(workspace_id) = plane_workspace_id {
+        let workspace_id = workspace_id.trim().to_string();
+        log::trace!("Updating Plane workspace ID: {workspace_id:?}");
+        project.plane_workspace_id = if workspace_id.is_empty() {
+            None
+        } else {
+            Some(workspace_id)
+        };
+    }
+
+    if let Some(project_id) = plane_project_id {
+        let project_id = project_id.trim().to_string();
+        log::trace!("Updating Plane project ID: {project_id:?}");
+        project.plane_project_id = if project_id.is_empty() {
+            None
+        } else {
+            Some(project_id)
         };
     }
 
@@ -5731,10 +5767,47 @@ pub async fn create_commit_with_ai(
     model: Option<String>,
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
+    session_id: Option<String>,
 ) -> Result<CreateCommitResponse, String> {
     log::trace!("Creating commit for: {worktree_path}");
 
-    // 1. Check for uncommitted changes
+    // Import git_status functions for session-based filtering
+    use super::git_status::{get_changed_files_since, get_current_commit, stage_files};
+
+    // 1. Get git snapshot for session-based filtering
+    let git_snapshot = if let Some(ref sid) = session_id {
+        // Try to load session metadata to get existing snapshot
+        if let Ok(Some(metadata)) = crate::chat::storage::load_metadata(&app, sid) {
+            if metadata.git_snapshot.is_some() {
+                metadata.git_snapshot.clone()
+            } else {
+                // No snapshot exists yet - capture current commit and save it
+                let current_commit = get_current_commit(&worktree_path).ok();
+                if current_commit.is_some() {
+                    // Save snapshot to session metadata
+                    let _ = crate::chat::storage::with_metadata_mut(
+                        &app,
+                        sid,
+                        &metadata.worktree_id,
+                        &metadata.name,
+                        metadata.order,
+                        |m| {
+                            m.git_snapshot = current_commit.clone();
+                            Ok(())
+                        },
+                    );
+                }
+                current_commit
+            }
+        } else {
+            // Session not found - fall back to no filtering
+            None
+        }
+    } else {
+        None
+    };
+
+    // 2. Check for uncommitted changes
     let status = get_git_status(&worktree_path)?;
     if status.trim().is_empty() {
         if push {
@@ -5756,16 +5829,35 @@ pub async fn create_commit_with_ai(
         return Err("No changes to commit".to_string());
     }
 
-    // 2. Stage all changes
-    stage_all_changes(&worktree_path)?;
+    // 3. Stage changes - either session-specific or all
+    if let Some(ref snapshot) = git_snapshot {
+        // Get files changed since session started
+        match get_changed_files_since(&worktree_path, snapshot) {
+            Ok(files) if !files.is_empty() => {
+                stage_files(&worktree_path, &files)?;
+                log::trace!("Staged {} files changed since snapshot {}", files.len(), snapshot);
+            }
+            Ok(_) => {
+                // No files changed since snapshot - try to stage all anyway (might be untracked files)
+                stage_all_changes(&worktree_path)?;
+            }
+            Err(e) => {
+                log::warn!("Failed to get changed files since {}. Staging all: {}", snapshot, e);
+                stage_all_changes(&worktree_path)?;
+            }
+        }
+    } else {
+        // No session or no snapshot - stage all changes
+        stage_all_changes(&worktree_path)?;
+    }
 
-    // 3. Get staged diff
+    // 4. Get staged diff
     let diff = get_staged_diff(&worktree_path)?;
     if diff.trim().is_empty() {
         return Err("No staged changes to commit".to_string());
     }
 
-    // 4. Get context for commit message generation
+    // 5. Get context for commit message generation
     let recent_commits = get_recent_commits(&worktree_path, 10)?;
     let remote_info = get_remote_info(&worktree_path)?;
 
