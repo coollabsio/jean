@@ -14,12 +14,9 @@ use std::io::{BufRead, BufReader};
 pub use crate::platform::is_process_alive;
 use crate::platform::silent_command;
 
-/// Escape a string for safe use in a shell command.
+// Re-export shell_escape from platform module
 #[cfg(unix)]
-fn shell_escape(s: &str) -> String {
-    // Use single quotes and escape any single quotes within
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
+use crate::platform::shell_escape;
 
 /// Spawn Claude CLI as a detached process that survives Jean quitting (Unix).
 ///

@@ -19,6 +19,15 @@ pub fn ensure_macos_path() {
     });
 }
 
+/// Escape a string for safe use in a shell command (single-quote wrapping).
+///
+/// Handles paths with spaces (e.g., `~/Library/Application Support/...`) by
+/// wrapping in single quotes and escaping any embedded single quotes.
+#[cfg(unix)]
+pub fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Creates a Command that won't open a console window on Windows.
 /// Use for all background operations (git, gh, claude CLI, etc.).
 /// Do NOT use for commands that intentionally open UI (terminals, editors, file explorers).

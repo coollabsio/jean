@@ -62,7 +62,11 @@ pub fn spawn_terminal(
             }
             c
         } else {
-            // Run the command wrapped in a shell
+            // Shell wrapper fallback — command_args was not provided
+            log::warn!(
+                "command_args is None for command '{run_command}', using shell wrapper. \
+                 This may indicate a Tauri IPC deserialization issue."
+            );
             let mut c = CommandBuilder::new(&shell);
             #[cfg(windows)]
             {
@@ -72,8 +76,9 @@ pub fn spawn_terminal(
             #[cfg(not(windows))]
             {
                 c.arg("-c");
-                // Note: Caller is responsible for properly quoting paths with spaces
-                c.arg(run_command);
+                // Quote the command to handle paths with spaces
+                // (e.g., ~/Library/Application Support/...)
+                c.arg(crate::platform::shell_escape(run_command));
             }
             c
         }
