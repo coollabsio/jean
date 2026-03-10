@@ -55,6 +55,14 @@ export interface Project {
   linear_api_key?: string | null
   /** Linear team ID to filter issues (undefined/null = show all teams) */
   linear_team_id?: string | null
+  /** Plane personal API key for fetching issues (per-project) */
+  plane_api_key?: string | null
+  /** Plane instance URL (per-project) */
+  plane_url?: string | null
+  /** Plane workspace ID to filter issues (undefined/null = show all workspaces) */
+  plane_workspace_id?: string | null
+  /** Plane project ID to filter issues (undefined/null = show all projects) */
+  plane_project_id?: string | null
 }
 
 /**

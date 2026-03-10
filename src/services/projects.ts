@@ -2306,6 +2306,10 @@ export function useUpdateProjectSettings() {
       worktreesDir?: string
       linearApiKey?: string
       linearTeamId?: string
+      planeApiKey?: string
+      planeUrl?: string
+      planeWorkspaceId?: string
+      planeProjectId?: string
     }): Promise<Project> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -2323,6 +2327,10 @@ export function useUpdateProjectSettings() {
         worktreesDir,
         linearApiKey,
         linearTeamId,
+        planeApiKey,
+        planeUrl,
+        planeWorkspaceId,
+        planeProjectId,
       })
       logger.info('Project settings updated', { project })
       return project

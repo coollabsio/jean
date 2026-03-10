@@ -39,6 +39,7 @@ rand = "0.8"
 dirs = "5.0"
 once_cell = "1.20"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+urlencoding = "2.1"
 sha2 = "0.10"       # For SHA256 checksum verification of CLI binary
 ignore = "0.4"  # For .gitignore-respecting file traversal
 zip = "2.2"      # For extracting zip archives (gh CLI on macOS/Windows)
