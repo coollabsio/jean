@@ -295,6 +295,28 @@ fn stop_managed_server_inner() -> Result<bool, String> {
     Ok(true)
 }
 
+/// Get the current server URL without incrementing the usage count.
+/// Returns `None` if no server is running (managed or unmanaged).
+pub fn get_current_url() -> Option<String> {
+    let url = server_url(DEFAULT_HOSTNAME, DEFAULT_PORT);
+
+    // Check managed process first
+    if let Ok(mut guard) = OPENCODE_SERVER.lock() {
+        if let Some(proc) = guard.as_mut() {
+            if matches!(proc.child.try_wait(), Ok(None)) {
+                return Some(server_url(&proc.hostname, proc.port));
+            }
+        }
+    }
+
+    // Fall back to checking if an unmanaged server is healthy on the default port
+    if is_healthy(&url) {
+        return Some(url);
+    }
+
+    None
+}
+
 /// Stop Jean-managed OpenCode server process during app lifecycle shutdown.
 pub fn shutdown_managed_server() -> Result<bool, String> {
     stop_managed_server_inner()

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getModifierSymbol } from '@/lib/platform'
+import { useIsMobile } from '@/hooks/use-mobile'
 import {
   Zap,
   CircleDot,
@@ -51,6 +52,7 @@ export const TABS: Tab[] = [
 export function NewWorktreeModal() {
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
   const { newWorktreeModalOpen } = useUIStore()
+  const isMobile = useIsMobile()
 
   // Local state
   const [activeTab, setActiveTab] = useState<TabId>('quick')
@@ -349,7 +351,7 @@ export function NewWorktreeModal() {
         </div>
 
         {/* Background open hint */}
-        {activeTab !== 'quick' && (
+        {activeTab !== 'quick' && !isMobile && (
           <div className="shrink-0 border-t border-border px-3 py-1.5">
             <span className="text-xs text-muted-foreground">
               Hold{' '}

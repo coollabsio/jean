@@ -1248,6 +1248,19 @@ export default function useStreamingEvents({
               }
             }
           )
+          // Persist partial content to JSONL so it survives app reload.
+          // The backend command handler may not have finished writing yet
+          // (e.g., OpenCode POST still in-flight).
+          invoke('save_cancelled_message', {
+            sessionId: session_id,
+            worktreeId: sessionWorktreeId ?? eventWorktreeId,
+            worktreePath: '',
+            content: content ?? '',
+            toolCalls: toolCalls ?? [],
+            contentBlocks: contentBlocks ?? [],
+          }).catch(err =>
+            console.debug('[useStreamingEvents] Failed to persist partial cancelled content:', err)
+          )
           toast.info('Request cancelled')
         }
 

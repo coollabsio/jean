@@ -779,6 +779,68 @@ pub fn mark_running_run_cancelled(app: &tauri::AppHandle, session_id: &str) -> R
     Ok(())
 }
 
+/// Persist partial assistant content to the latest cancelled run's JSONL file.
+/// Called by the frontend when a stream is cancelled but partial content was visible.
+/// This ensures the content survives app reload (the command handler may not have
+/// finished writing the synthetic JSONL line yet).
+pub fn persist_partial_cancelled_content(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    let metadata = match load_metadata(app, session_id)? {
+        Some(m) => m,
+        None => return Err("No metadata for session".to_string()),
+    };
+
+    // Find the latest cancelled run
+    let run = metadata
+        .runs
+        .iter()
+        .rev()
+        .find(|r| r.status == RunStatus::Cancelled)
+        .ok_or("No cancelled run found")?;
+
+    let path = get_run_log_path(app, session_id, &run.run_id)?;
+
+    // Only write if the file doesn't already have content (avoid double-write
+    // if the command handler already wrote the synthetic line)
+    let existing_lines = read_run_log(app, session_id, &run.run_id).unwrap_or_default();
+    let has_assistant_content = existing_lines.iter().any(|line| {
+        line.contains("\"type\":\"assistant\"") || line.contains("\"type\": \"assistant\"")
+    });
+    if has_assistant_content {
+        log::trace!("JSONL already has assistant content, skipping persist for session {session_id}");
+        return Ok(());
+    }
+
+    // Write a synthetic assistant line matching the format parse_run_to_message() expects
+    let synthetic = serde_json::json!({
+        "type": "assistant",
+        "message": {
+            "content": [{
+                "type": "text",
+                "text": content
+            }]
+        }
+    });
+
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to open run log for partial content: {e}"))?;
+    writeln!(file, "{synthetic}").map_err(|e| format!("Failed to write partial content: {e}"))?;
+    file.flush().map_err(|e| format!("Failed to flush partial content: {e}"))?;
+
+    log::trace!(
+        "Persisted partial cancelled content ({} chars) for session {session_id}",
+        content.len()
+    );
+    Ok(())
+}
+
 // ============================================================================
 // Recovery Functions
 // ============================================================================

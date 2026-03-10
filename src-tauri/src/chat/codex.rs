@@ -563,6 +563,23 @@ fn process_turn_events(
         }
     }
 
+    // Write accumulated text to JSONL for cancelled/interrupted runs.
+    // Delta events (item/agentMessage/delta) are not saved to JSONL during streaming,
+    // so the text would be lost on app reload. Write a synthetic item.completed line
+    // with the accumulated content so parse_codex_run_to_message() can reconstruct it.
+    if (cancelled || error_emitted) && !full_content.is_empty() {
+        if let Some(ref mut writer) = output_writer {
+            let synthetic = serde_json::json!({
+                "type": "item.completed",
+                "item": {
+                    "type": "agent_message",
+                    "text": full_content,
+                }
+            });
+            let _ = writeln!(writer, "{}", serde_json::to_string(&synthetic).unwrap_or_default());
+        }
+    }
+
     // Emit chat:done unless error was emitted
     if !cancelled && !error_emitted {
         // Write result marker for crash-recovery compatibility

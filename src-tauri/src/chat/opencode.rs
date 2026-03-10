@@ -640,6 +640,13 @@ async fn sse_listener_loop(
                     buffer = buffer[newline_pos + 1..].to_string();
 
                     if line.is_empty() {
+                        // Skip event dispatch if cancelled — prevents post-cancel
+                        // chunks from leaking to the frontend and re-triggering
+                        // streaming state after chat:cancelled was already handled.
+                        if cancelled.load(Ordering::Relaxed) {
+                            current_data.clear();
+                            continue;
+                        }
                         // End of SSE event — dispatch
                         if !current_data.is_empty() {
                             if let Some(emitted) = process_sse_event(
@@ -1162,6 +1169,10 @@ pub fn execute_opencode_http(
             .to_string()
     };
 
+    // Update the cancel flag registry with the OpenCode session ID so that
+    // cancel_process() can send a server-side interrupt request.
+    super::registry::update_cancel_flag_session_id(session_id, opencode_session_id.clone());
+
     let selected_model = if let Some(pm) = parse_provider_model(model) {
         pm
     } else {
@@ -1451,6 +1462,20 @@ pub fn execute_opencode_http(
             }
             _ => {}
         }
+    }
+
+    // Check for cancellation before emitting chat:done — if the user cancelled
+    // while we were parsing the response, suppress the done event to avoid stale UI updates.
+    if cancelled.load(Ordering::SeqCst) {
+        done_flag.store(true, Ordering::Relaxed);
+        return Ok(OpenCodeResponse {
+            content,
+            session_id: opencode_session_id,
+            tool_calls,
+            content_blocks,
+            cancelled: true,
+            usage,
+        });
     }
 
     let _ = app.emit_all(

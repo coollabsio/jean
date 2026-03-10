@@ -3,7 +3,7 @@ import { invoke } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { usePreferences } from '@/services/preferences'
-import { chatQueryKeys } from '@/services/chat'
+import { chatQueryKeys, persistEnqueue } from '@/services/chat'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
@@ -411,6 +411,7 @@ async function processBackgroundInvestigation(
   }
 
   enqueueMessage(sessionId, queuedMessage)
+  persistEnqueue(worktreeId, worktreePath, sessionId, queuedMessage)
 
   logger.info('Background investigation enqueued', {
     worktreeId,

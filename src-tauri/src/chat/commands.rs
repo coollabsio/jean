@@ -2381,7 +2381,9 @@ pub async fn send_chat_message(
 
     // OpenCode runs are HTTP-based (no detached JSONL stream).
     // Write a synthetic assistant line so history reload can reconstruct content.
-    if unified_response.backend == Backend::Opencode {
+    // Skip when cancelled: the frontend's save_cancelled_message already persists
+    // SSE content to the same JSONL file, and writing here would duplicate it.
+    if unified_response.backend == Backend::Opencode && !unified_response.cancelled {
         if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&output_file) {
             let synthetic = serde_json::json!({
                 "type": "assistant",
@@ -2733,7 +2735,9 @@ pub fn has_running_sessions() -> bool {
 }
 
 /// Save a cancelled message to chat history
-/// Called by frontend when a response is cancelled mid-stream
+/// Called by frontend when a response is cancelled mid-stream to persist
+/// partial content to the JSONL file. This ensures the content survives
+/// app reload even if the backend command handler hasn't finished writing yet.
 #[tauri::command]
 pub async fn save_cancelled_message(
     app: AppHandle,
@@ -2744,22 +2748,13 @@ pub async fn save_cancelled_message(
     tool_calls: Vec<super::types::ToolCall>,
     content_blocks: Vec<super::types::ContentBlock>,
 ) -> Result<(), String> {
-    // With NDJSON-only storage, cancelled messages are already stored in the
-    // NDJSON run log via run_log_writer.cancel(). This command is now a no-op
-    // kept for frontend compatibility.
-    log::trace!("Cancelled message already in NDJSON for session: {session_id}");
+    let _ = (worktree_id, worktree_path, tool_calls, content_blocks);
 
-    // Suppress unused variable warnings
-    let _ = (
-        app,
-        worktree_id,
-        worktree_path,
-        content,
-        tool_calls,
-        content_blocks,
-    );
+    if content.is_empty() {
+        return Ok(());
+    }
 
-    Ok(())
+    super::run_log::persist_partial_cancelled_content(&app, &session_id, &content)
 }
 
 /// Mark a message's plan as approved
