@@ -131,6 +131,28 @@ export function useScrollManagement({
     return () => observer.disconnect()
   }, [isSending])
 
+  // After streaming ends, ensure we're pinned to the actual bottom.
+  // The ResizeObserver disconnects when isSending=false, but the DOM may
+  // still reflow (streaming → final rendered content). A delayed instant
+  // scroll catches any late layout shifts.
+  const wasSendingRef = useRef(false)
+  useEffect(() => {
+    if (wasSendingRef.current && !isSending && isAtBottomRef.current) {
+      const timer = setTimeout(() => {
+        const viewport = scrollViewportRef.current
+        if (viewport && isAtBottomRef.current) {
+          const { scrollTop, scrollHeight, clientHeight } = viewport
+          if (scrollHeight - scrollTop - clientHeight > 1) {
+            viewport.scrollTo({ top: scrollHeight, behavior: 'instant' })
+          }
+        }
+      }, 150)
+      wasSendingRef.current = false
+      return () => clearTimeout(timer)
+    }
+    wasSendingRef.current = !!isSending
+  }, [isSending])
+
   // Scroll to bottom before paint when switching worktrees to prevent flash of top content
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current
