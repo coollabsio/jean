@@ -937,12 +937,12 @@ export function useCloseSessionOrWorktreeKeybinding(
       })
     }
 
-    // Last session: navigate to canvas instead of deleting the worktree
+    // Last session: navigate to project view instead of deleting the worktree
     if (sessionCount <= 1) {
-      logger.debug('Last session closed, navigating to canvas', {
+      logger.debug('Last session closed, navigating to project view', {
         worktreeId: activeWorktreeId,
       })
-      useChatStore.getState().setViewingCanvasTab(activeWorktreeId, true)
+      useChatStore.getState().clearActiveWorktree()
     }
   }, [
     archiveSession,

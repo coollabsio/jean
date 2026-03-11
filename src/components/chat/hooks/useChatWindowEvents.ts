@@ -20,7 +20,6 @@ interface UseChatWindowEventsParams {
   activeWorktreeId: string | null | undefined
   activeWorktreePath: string | null | undefined
   isModal: boolean
-  isViewingCanvasTab: boolean
   // Plan dialog
   latestPlanContent: string | null
   latestPlanFilePath: string | null
@@ -92,7 +91,6 @@ export function useChatWindowEvents({
   activeWorktreeId,
   activeWorktreePath,
   isModal,
-  isViewingCanvasTab,
   latestPlanContent,
   latestPlanFilePath,
   setPlanDialogContent,
@@ -166,7 +164,6 @@ export function useChatWindowEvents({
 
   // P key: Open plan dialog
   useEffect(() => {
-    if (isViewingCanvasTab) return
     const handler = () => {
       if (latestPlanContent) {
         setPlanDialogContent(latestPlanContent)
@@ -179,11 +176,10 @@ export function useChatWindowEvents({
     }
     window.addEventListener('open-plan', handler)
     return () => window.removeEventListener('open-plan', handler)
-  }, [latestPlanContent, latestPlanFilePath, isViewingCanvasTab, setPlanDialogContent, setIsPlanDialogOpen])
+  }, [latestPlanContent, latestPlanFilePath, setPlanDialogContent, setIsPlanDialogOpen])
 
   // R key: Open recap dialog
   useEffect(() => {
-    if (isViewingCanvasTab && !isModal) return
     const handleOpenRecap = async () => {
       if (!activeSessionId) return
 
@@ -241,7 +237,6 @@ export function useChatWindowEvents({
     window.addEventListener('open-recap', handleOpenRecap)
     return () => window.removeEventListener('open-recap', handleOpenRecap)
   }, [
-    isViewingCanvasTab,
     isModal,
     activeSessionId,
     session,
@@ -252,10 +247,9 @@ export function useChatWindowEvents({
     setIsGeneratingRecap,
   ])
 
-  // CMD+T: Create new session (canvas view handles its own creation)
+  // CMD+T: Create new session
   useEffect(() => {
     const handler = () => {
-      if (!isModal && isViewingCanvasTab) return
       if (!activeWorktreeId || !activeWorktreePath) return
       createSession.mutate(
         { worktreeId: activeWorktreeId, worktreePath: activeWorktreePath },
@@ -275,7 +269,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('create-new-session', handler)
     return () => window.removeEventListener('create-new-session', handler)
-  }, [activeWorktreeId, activeWorktreePath, isModal, isViewingCanvasTab, createSession])
+  }, [activeWorktreeId, activeWorktreePath, createSession])
 
   // SHIFT+TAB: Cycle execution mode
   useEffect(() => {
@@ -306,8 +300,6 @@ export function useChatWindowEvents({
 
   // CMD+G: Open git diff
   useEffect(() => {
-    if (!isModal && isViewingCanvasTab) return
-
     const handler = () => {
       if (!activeWorktreePath) return
       const baseBranch = gitStatus?.base_branch ?? 'main'
@@ -323,7 +315,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('open-git-diff', handler)
     return () => window.removeEventListener('open-git-diff', handler)
-  }, [isModal, isViewingCanvasTab, activeWorktreePath, gitStatus?.base_branch, setDiffRequest])
+  }, [activeWorktreePath, gitStatus?.base_branch, setDiffRequest])
 
   // ESC: Cancel prompt
   const cancelContextRef = useRef({ activeWorktreeId, activeSessionId })
@@ -349,25 +341,14 @@ export function useChatWindowEvents({
         return
       }
 
-      const activeSession =
+      const sessionToCancel =
         cancelContextRef.current.activeSessionId ??
         state.activeSessionIds[wtId] ??
         null
 
-      let sessionToCancel: string | null
-      if (isModal) {
-        // Modal: always use active session (what the user is looking at)
-        sessionToCancel = activeSession
-      } else {
-        // Canvas: use canvas-selected session; Chat tab: use active session
-        const isCanvas = state.viewingCanvasTab[wtId] ?? true
-        const canvasSession = state.canvasSelectedSessionIds[wtId] ?? null
-        sessionToCancel = isCanvas && canvasSession ? canvasSession : activeSession
-      }
-
       if (!sessionToCancel) {
         logger.debug('cancel-prompt: no sessionToCancel', {
-          activeSession,
+          sessionToCancel,
           isModal,
         })
         return
@@ -437,7 +418,6 @@ export function useChatWindowEvents({
 
   // Approve plan keyboard shortcut (no-op for Codex which has no native approval flow)
   useEffect(() => {
-    if (!isModal && isViewingCanvasTab) return
     if (isCodexBackend) return
     const handler = () => {
       if (hasStreamingPlan) {
@@ -452,7 +432,6 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('approve-plan', handler)
   }, [
     isModal,
-    isViewingCanvasTab,
     isCodexBackend,
     hasStreamingPlan,
     pendingPlanMessage,
@@ -507,7 +486,6 @@ export function useChatWindowEvents({
 
   // Approve plan yolo keyboard shortcut (no-op for Codex)
   useEffect(() => {
-    if (!isModal && isViewingCanvasTab) return
     if (isCodexBackend) return
     const handler = () => {
       if (hasStreamingPlan) {
@@ -522,7 +500,6 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('approve-plan-yolo', handler)
   }, [
     isModal,
-    isViewingCanvasTab,
     isCodexBackend,
     hasStreamingPlan,
     pendingPlanMessage,
@@ -532,7 +509,6 @@ export function useChatWindowEvents({
 
   // Clear context and yolo keyboard shortcut (no-op for Codex)
   useEffect(() => {
-    if (!isModal && isViewingCanvasTab) return
     if (isCodexBackend) return
     const handler = () => {
       if (hasStreamingPlan) {
@@ -547,7 +523,6 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('approve-plan-clear-context', handler)
   }, [
     isModal,
-    isViewingCanvasTab,
     isCodexBackend,
     hasStreamingPlan,
     pendingPlanMessage,
@@ -557,7 +532,6 @@ export function useChatWindowEvents({
 
   // Clear context and build keyboard shortcut (no-op for Codex)
   useEffect(() => {
-    if (!isModal && isViewingCanvasTab) return
     if (isCodexBackend) return
     const handler = () => {
       if (hasStreamingPlan) {
@@ -572,7 +546,6 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('approve-plan-clear-context-build', handler)
   }, [
     isModal,
-    isViewingCanvasTab,
     isCodexBackend,
     hasStreamingPlan,
     pendingPlanMessage,

@@ -6,7 +6,6 @@ import { toast } from 'sonner'
 import { generateId } from '@/lib/uuid'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
-import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys } from '@/services/chat'
 import { saveWorktreePr, projectsQueryKeys } from '@/services/projects'
 import {
@@ -449,9 +448,7 @@ export function useGitOperations({
         const {
           setReviewResults,
           setActiveSession,
-          setActiveWorktree,
-          setViewingCanvasTab,
-          registerWorktreePath,
+          clearActiveWorktree,
           copySessionSettings,
           activeSessionIds,
         } = useChatStore.getState()
@@ -461,15 +458,21 @@ export function useGitOperations({
         // Inherit model/mode/thinking settings from current session
         if (currentReviewSessionId) copySessionSettings(currentReviewSessionId, targetSessionId)
 
-        // Switch to the new review session
+        // Navigate to ProjectCanvasView and open the review session
         setActiveSession(activeWorktreeId, targetSessionId)
         useProjectsStore.getState().selectWorktree(activeWorktreeId)
-        registerWorktreePath(activeWorktreeId, activeWorktreePath)
-        setActiveWorktree(activeWorktreeId, activeWorktreePath)
-        setViewingCanvasTab(activeWorktreeId, true)
-        useUIStore
-          .getState()
-          .markWorktreeForAutoOpenSession(activeWorktreeId, targetSessionId)
+        clearActiveWorktree()
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent('open-session-modal', {
+              detail: {
+                sessionId: targetSessionId,
+                worktreeId: activeWorktreeId,
+                worktreePath: activeWorktreePath,
+              },
+            })
+          )
+        }, 50)
 
         // Persist review results to session file
         invoke('update_session_state', {
@@ -496,22 +499,23 @@ export function useGitOperations({
               onClick: () => {
                 if (!activeWorktreePath) return
                 const {
-                  setActiveWorktree,
                   setActiveSession,
-                  setViewingCanvasTab,
-                  registerWorktreePath,
+                  clearActiveWorktree,
                 } = useChatStore.getState()
                 useProjectsStore.getState().selectWorktree(activeWorktreeId)
-                registerWorktreePath(activeWorktreeId, activeWorktreePath)
-                setActiveWorktree(activeWorktreeId, activeWorktreePath)
+                clearActiveWorktree()
                 setActiveSession(activeWorktreeId, targetSessionId)
-                setViewingCanvasTab(activeWorktreeId, true)
-                useUIStore
-                  .getState()
-                  .markWorktreeForAutoOpenSession(
-                    activeWorktreeId,
-                    targetSessionId
+                setTimeout(() => {
+                  window.dispatchEvent(
+                    new CustomEvent('open-session-modal', {
+                      detail: {
+                        sessionId: targetSessionId,
+                        worktreeId: activeWorktreeId,
+                        worktreePath: activeWorktreePath,
+                      },
+                    })
                   )
+                }, 50)
               },
             },
           }

@@ -15,11 +15,9 @@ export function ChatErrorFallback({
   activeWorktreeId,
 }: ChatErrorFallbackProps) {
   const handleSwitchToCanvas = useCallback(() => {
-    if (activeWorktreeId) {
-      useChatStore.getState().setViewingCanvasTab(activeWorktreeId, true)
-    }
+    useChatStore.getState().clearActiveWorktree()
     resetErrorBoundary()
-  }, [activeWorktreeId, resetErrorBoundary])
+  }, [resetErrorBoundary])
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">

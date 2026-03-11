@@ -165,12 +165,6 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           key: 'O',
         },
         { id: 'review', label: 'Review', icon: Eye, key: 'R' },
-        {
-          id: 'update-pr',
-          label: 'Generate PR Description',
-          icon: RefreshCw,
-          key: 'E',
-        },
       ],
     },
     {
@@ -181,6 +175,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           label: 'Generate Notes',
           icon: FileText,
           key: 'G',
+        },
+        {
+          id: 'update-pr',
+          label: 'Generate PR Description',
+          icon: RefreshCw,
+          key: 'E',
         },
       ],
     },
@@ -269,13 +269,9 @@ export function MagicModal() {
   const hasIssueContexts = (issueContexts?.length ?? 0) > 0
   const hasPrContexts = (prContexts?.length ?? 0) > 0
 
-  // Detect if we're on a canvas view (without a session modal open)
-  const isViewingCanvasTab = useChatStore(state => {
-    const wtId = selectedWorktreeIdFromProjects ?? state.activeWorktreeId
-    return wtId ? (state.viewingCanvasTab[wtId] ?? true) : false
-  })
   const sessionModalOpen = useUIStore(state => state.sessionChatModalOpen)
-  const isOnCanvas = isViewingCanvasTab && !sessionModalOpen
+  // Whether MagicModal was opened from ProjectCanvasView (no active chat session)
+  const isOnCanvas = !useChatStore(state => state.activeWorktreePath) && !sessionModalOpen
   const pickRemoteOrRun = useRemotePicker(worktree?.path)
 
   // Build columns dynamically based on PR state
@@ -506,10 +502,8 @@ export function MagicModal() {
               setActiveWorktree,
               setActiveSession,
               setInputDraft,
-              setViewingCanvasTab,
               copySessionSettings,
               activeSessionIds,
-              activeWorktreePath,
             } = useChatStore.getState()
             const currentSessionId = activeSessionIds[selectedWorktreeId]
 
@@ -522,23 +516,10 @@ export function MagicModal() {
             // Inherit model/mode/thinking settings from current session
             if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
 
-            // Navigate to session
+            // Navigate to session in chat view
             useProjectsStore.getState().selectWorktree(selectedWorktreeId)
-
-            if (activeWorktreePath) {
-              // Already inside a worktree — switch to chat view
-              setActiveWorktree(selectedWorktreeId, worktree.path)
-              setActiveSession(selectedWorktreeId, newSession.id)
-              setViewingCanvasTab(selectedWorktreeId, false)
-            } else {
-              // On project canvas — stay on dashboard and auto-open session modal
-              useUIStore
-                .getState()
-                .markWorktreeForAutoOpenSession(
-                  selectedWorktreeId,
-                  newSession.id
-                )
-            }
+            setActiveWorktree(selectedWorktreeId, worktree.path)
+            setActiveSession(selectedWorktreeId, newSession.id)
 
             // Build conflict resolution prompt
             const conflictFiles = result.conflicts.join('\n- ')
@@ -625,12 +606,9 @@ ${resolveInstructions}`
             const {
               setReviewResults,
               setActiveSession,
-              setActiveWorktree,
-              setViewingCanvasTab,
-              registerWorktreePath,
+              clearActiveWorktree,
               copySessionSettings,
               activeSessionIds,
-              activeWorktreePath,
             } = useChatStore.getState()
             const currentReviewSessionId = activeSessionIds[selectedWorktreeId]
             setReviewResults(newSession.id, result)
@@ -638,29 +616,16 @@ ${resolveInstructions}`
             // Inherit model/mode/thinking settings from current session
             if (currentReviewSessionId) copySessionSettings(currentReviewSessionId, newSession.id)
 
+            // Navigate to ProjectCanvasView and auto-open session modal
             setActiveSession(selectedWorktreeId, newSession.id)
-
-            if (activeWorktreePath) {
-              // Already inside a worktree — route through canvas and open the session in modal
-              useProjectsStore.getState().selectWorktree(selectedWorktreeId)
-              registerWorktreePath(selectedWorktreeId, worktree.path)
-              setActiveWorktree(selectedWorktreeId, worktree.path)
-              setViewingCanvasTab(selectedWorktreeId, true)
-              useUIStore
-                .getState()
-                .markWorktreeForAutoOpenSession(
-                  selectedWorktreeId,
-                  newSession.id
-                )
-            } else {
-              // On project canvas — stay on dashboard and auto-open session modal
-              useUIStore
-                .getState()
-                .markWorktreeForAutoOpenSession(
-                  selectedWorktreeId,
-                  newSession.id
-                )
-            }
+            useProjectsStore.getState().selectWorktree(selectedWorktreeId)
+            clearActiveWorktree()
+            useUIStore
+              .getState()
+              .markWorktreeForAutoOpenSession(
+                selectedWorktreeId,
+                newSession.id
+              )
 
             // Persist review results to session file
             invoke('update_session_state', {
@@ -684,22 +649,23 @@ ${resolveInstructions}`
                 label: 'Open',
                 onClick: () => {
                   const {
-                    setActiveWorktree,
                     setActiveSession,
-                    setViewingCanvasTab,
-                    registerWorktreePath,
+                    clearActiveWorktree,
                   } = useChatStore.getState()
                   useProjectsStore.getState().selectWorktree(selectedWorktreeId)
-                  registerWorktreePath(selectedWorktreeId, worktree.path)
-                  setActiveWorktree(selectedWorktreeId, worktree.path)
+                  clearActiveWorktree()
                   setActiveSession(selectedWorktreeId, newSession.id)
-                  setViewingCanvasTab(selectedWorktreeId, true)
-                  useUIStore
-                    .getState()
-                    .markWorktreeForAutoOpenSession(
-                      selectedWorktreeId,
-                      newSession.id
+                  setTimeout(() => {
+                    window.dispatchEvent(
+                      new CustomEvent('open-session-modal', {
+                        detail: {
+                          sessionId: newSession.id,
+                          worktreeId: selectedWorktreeId,
+                          worktreePath: worktree.path,
+                        },
+                      })
                     )
+                  }, 50)
                 },
               },
             })
@@ -818,12 +784,11 @@ ${resolveInstructions}`
         worktree?.path
       ) {
         setMagicModalOpen(false)
-        const { setActiveWorktree, setViewingCanvasTab, setPendingMagicCommand } =
+        const { setActiveWorktree, setPendingMagicCommand } =
           useChatStore.getState()
-        // Navigate to worktree view (needed for ProjectCanvasView → worktree transition)
+        // Navigate to worktree chat view
         useProjectsStore.getState().selectWorktree(selectedWorktreeId)
         setActiveWorktree(selectedWorktreeId, worktree.path)
-        setViewingCanvasTab(selectedWorktreeId, false)
         // Store pending command — ChatWindow picks it up on mount/update (no fragile timeout)
         setPendingMagicCommand({ command: option })
         return

@@ -787,6 +787,8 @@ pub fn persist_partial_cancelled_content(
     app: &tauri::AppHandle,
     session_id: &str,
     content: &str,
+    tool_calls: &[ToolCall],
+    content_blocks: &[ContentBlock],
 ) -> Result<(), String> {
     let metadata = match load_metadata(app, session_id)? {
         Some(m) => m,
@@ -814,29 +816,89 @@ pub fn persist_partial_cancelled_content(
         return Ok(());
     }
 
-    // Write a synthetic assistant line matching the format parse_run_to_message() expects
-    let synthetic = serde_json::json!({
-        "type": "assistant",
-        "message": {
-            "content": [{
-                "type": "text",
-                "text": content
-            }]
-        }
-    });
-
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .map_err(|e| format!("Failed to open run log for partial content: {e}"))?;
-    writeln!(file, "{synthetic}").map_err(|e| format!("Failed to write partial content: {e}"))?;
+
+    // Build assistant message with structured content blocks if available,
+    // matching the format parse_run_to_message() expects
+    if !content_blocks.is_empty() {
+        let blocks: Vec<serde_json::Value> = content_blocks
+            .iter()
+            .map(|cb| match cb {
+                ContentBlock::Text { text } => {
+                    serde_json::json!({"type": "text", "text": text})
+                }
+                ContentBlock::ToolUse { tool_call_id } => {
+                    if let Some(tc) = tool_calls.iter().find(|t| t.id == *tool_call_id) {
+                        serde_json::json!({
+                            "type": "tool_use",
+                            "id": tc.id,
+                            "name": tc.name,
+                            "input": tc.input
+                        })
+                    } else {
+                        serde_json::json!({
+                            "type": "tool_use",
+                            "id": tool_call_id,
+                            "name": "",
+                            "input": null
+                        })
+                    }
+                }
+                ContentBlock::Thinking { thinking } => {
+                    serde_json::json!({"type": "thinking", "thinking": thinking})
+                }
+            })
+            .collect();
+
+        let synthetic = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": blocks }
+        });
+        writeln!(file, "{synthetic}")
+            .map_err(|e| format!("Failed to write partial content: {e}"))?;
+
+        // Write tool results as user messages so parse_run_to_message() can
+        // associate outputs with tool calls
+        for tc in tool_calls {
+            if let Some(output) = &tc.output {
+                let tool_result = serde_json::json!({
+                    "type": "user",
+                    "message": {
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": output
+                        }]
+                    }
+                });
+                writeln!(file, "{tool_result}")
+                    .map_err(|e| format!("Failed to write tool result: {e}"))?;
+            }
+        }
+    } else {
+        // Fallback: text-only (no structured blocks available)
+        let synthetic = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": content}]
+            }
+        });
+        writeln!(file, "{synthetic}")
+            .map_err(|e| format!("Failed to write partial content: {e}"))?;
+    }
+
     file.flush().map_err(|e| format!("Failed to flush partial content: {e}"))?;
 
     log::trace!(
-        "Persisted partial cancelled content ({} chars) for session {session_id}",
-        content.len()
+        "Persisted partial cancelled content ({} chars, {} blocks, {} tool calls) for session {session_id}",
+        content.len(),
+        content_blocks.len(),
+        tool_calls.len(),
     );
     Ok(())
 }

@@ -46,7 +46,7 @@ import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { KeybindingHint } from '@/components/ui/keybinding-hints'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
 
-// Canvas-specific hints (same set used in both WorktreeCanvasView and ProjectCanvasView)
+// Canvas-specific hints (used in ProjectCanvasView)
 const CANVAS_HINTS: KeybindingHint[] = [
   { shortcut: 'Enter', label: 'open' },
   { shortcut: DEFAULT_KEYBINDINGS.open_in_modal as string, label: 'open in...' },

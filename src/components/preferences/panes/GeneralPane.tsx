@@ -552,6 +552,27 @@ export const GeneralPane: React.FC = () => {
     openCliLoginModal('opencode', opencodeStatus.path, ['auth', 'login'])
   }, [opencodeStatus?.path, openCliLoginModal, queryClient])
 
+  const handleClaudeRelogin = useCallback(() => {
+    if (!cliStatus?.path) return
+    const args = cliStatus.supports_auth_command ? ['auth', 'login'] : ['login']
+    openCliLoginModal('claude', cliStatus.path, args)
+  }, [cliStatus?.path, cliStatus?.supports_auth_command, openCliLoginModal])
+
+  const handleGhRelogin = useCallback(() => {
+    if (!ghStatus?.path) return
+    openCliLoginModal('gh', ghStatus.path, ['auth', 'login'])
+  }, [ghStatus?.path, openCliLoginModal])
+
+  const handleCodexRelogin = useCallback(() => {
+    if (!codexStatus?.path) return
+    openCliLoginModal('codex', codexStatus.path, ['login'])
+  }, [codexStatus?.path, openCliLoginModal])
+
+  const handleOpenCodeRelogin = useCallback(() => {
+    if (!opencodeStatus?.path) return
+    openCliLoginModal('opencode', opencodeStatus.path, ['auth', 'login'])
+  }, [opencodeStatus?.path, openCliLoginModal])
+
   const claudeStatusDescription = cliStatus?.installed
     ? cliStatus.path
     : 'Claude CLI is required for chat functionality'
@@ -579,7 +600,12 @@ export const GeneralPane: React.FC = () => {
                   Checking...
                 </span>
               ) : claudeAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground">Logged in</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  Logged in
+                  <Button variant="outline" size="sm" onClick={handleClaudeRelogin}>
+                    Relogin
+                  </Button>
+                </span>
               ) : (
                 <Button variant="outline" size="sm" onClick={handleClaudeLogin}>
                   Login
@@ -648,7 +674,12 @@ export const GeneralPane: React.FC = () => {
                   Checking...
                 </span>
               ) : ghAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground">Logged in</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  Logged in
+                  <Button variant="outline" size="sm" onClick={handleGhRelogin}>
+                    Relogin
+                  </Button>
+                </span>
               ) : (
                 <Button variant="outline" size="sm" onClick={handleGhLogin}>
                   Login
@@ -724,7 +755,12 @@ export const GeneralPane: React.FC = () => {
                   Checking...
                 </span>
               ) : codexAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground">Logged in</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  Logged in
+                  <Button variant="outline" size="sm" onClick={handleCodexRelogin}>
+                    Relogin
+                  </Button>
+                </span>
               ) : (
                 <Button variant="outline" size="sm" onClick={handleCodexLogin}>
                   Login
@@ -800,13 +836,14 @@ export const GeneralPane: React.FC = () => {
                   Checking...
                 </span>
               ) : opencodeAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground">Logged in</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  Logged in
+                  <Button variant="outline" size="sm" onClick={handleOpenCodeRelogin}>
+                    Relogin
+                  </Button>
+                </span>
               ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleOpenCodeLogin}
-                >
+                <Button variant="outline" size="sm" onClick={handleOpenCodeLogin}>
                   Login
                 </Button>
               )

@@ -89,10 +89,7 @@ export function useSessionStatePersistence() {
     if (state.activeWorktreeId) {
       return state.activeSessionIds[state.activeWorktreeId] ?? null
     }
-    return (
-      Object.values(state.canvasSelectedSessionIds).find(id => id != null) ??
-      null
-    )
+    return null
   })
 
   // Derive worktree context via getState() (non-reactive) keyed on the reactive activeSessionId

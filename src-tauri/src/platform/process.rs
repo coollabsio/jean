@@ -2,6 +2,13 @@
 
 use std::process::Command;
 
+/// Escape a string for safe use in a shell command.
+/// Wraps in single quotes and escapes any embedded single quotes.
+#[cfg(unix)]
+pub fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Ensures macOS PATH has been fixed from the user's login shell.
 /// Uses `std::sync::Once` so the shell is only spawned on the first call.
 /// This must NOT call `silent_command()` internally to avoid recursion.

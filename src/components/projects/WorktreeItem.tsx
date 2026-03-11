@@ -23,7 +23,6 @@ import {
 } from '@/components/chat/session-card-utils'
 import { useCanvasStoreState } from '@/components/chat/hooks/useCanvasStoreState'
 import {
-  setActiveWorktreeForPolling,
   useGitStatus,
   gitPush,
   fetchWorktreesStatus,
@@ -305,23 +304,16 @@ export function WorktreeItem({
     (sessionId: string) => {
       selectProject(projectId)
       selectWorktree(worktree.id)
-      const { setActiveWorktree, setActiveSession, setViewingCanvasTab } =
-        useChatStore.getState()
-      setActiveWorktree(worktree.id, worktree.path)
-      setActiveSession(worktree.id, sessionId)
-      setViewingCanvasTab(worktree.id, true)
-      setActiveWorktreeForPolling({
-        worktreeId: worktree.id,
-        worktreePath: worktree.path,
-        baseBranch: defaultBranch,
-        prNumber: worktree.pr_number,
-        prUrl: worktree.pr_url,
-      })
-      // Open session modal in the canvas view
+      useChatStore.getState().setActiveSession(worktree.id, sessionId)
+      // Open session modal in ProjectCanvasView
       setTimeout(() => {
         window.dispatchEvent(
           new CustomEvent('open-session-modal', {
-            detail: { sessionId },
+            detail: {
+              sessionId,
+              worktreeId: worktree.id,
+              worktreePath: worktree.path,
+            },
           })
         )
       }, 50)
@@ -330,9 +322,6 @@ export function WorktreeItem({
       projectId,
       worktree.id,
       worktree.path,
-      defaultBranch,
-      worktree.pr_number,
-      worktree.pr_url,
       selectProject,
       selectWorktree,
     ]
@@ -381,18 +370,26 @@ export function WorktreeItem({
   const handleClick = useCallback(() => {
     selectProject(projectId)
     selectWorktree(worktree.id)
-    // Also set the active worktree for chat
-    const { setActiveWorktree } = useChatStore.getState()
-    setActiveWorktree(worktree.id, worktree.path)
 
-    // Set the active worktree for git status polling (includes PR info if available)
-    setActiveWorktreeForPolling({
-      worktreeId: worktree.id,
-      worktreePath: worktree.path,
-      baseBranch: defaultBranch,
-      prNumber: worktree.pr_number,
-      prUrl: worktree.pr_url,
-    })
+    // Open session modal with the first active session
+    const sessions = sessionsData?.sessions ?? []
+    const activeSessions = sessions.filter(s => !s.archived_at)
+    const activeSessionId = useChatStore.getState().activeSessionIds[worktree.id]
+    const targetSessionId = activeSessionId ?? activeSessions[0]?.id
+    if (targetSessionId) {
+      useChatStore.getState().setActiveSession(worktree.id, targetSessionId)
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('open-session-modal', {
+            detail: {
+              sessionId: targetSessionId,
+              worktreeId: worktree.id,
+              worktreePath: worktree.path,
+            },
+          })
+        )
+      }, 50)
+    }
 
     // Close sidebar on mobile after navigation
     if (isMobile) {
@@ -403,9 +400,7 @@ export function WorktreeItem({
     projectId,
     worktree.id,
     worktree.path,
-    defaultBranch,
-    worktree.pr_number,
-    worktree.pr_url,
+    sessionsData?.sessions,
     selectProject,
     selectWorktree,
   ])

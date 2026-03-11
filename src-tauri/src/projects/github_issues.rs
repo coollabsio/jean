@@ -1642,9 +1642,11 @@ pub fn get_pr_diff(
     // Truncate if > 100KB
     const MAX_DIFF_SIZE: usize = 100_000;
     if diff.len() > MAX_DIFF_SIZE {
+        // Find a safe UTF-8 char boundary near MAX_DIFF_SIZE
+        let end = diff.char_indices().take_while(|(i, _)| *i < MAX_DIFF_SIZE).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(MAX_DIFF_SIZE.min(diff.len()));
         Ok(format!(
             "{}...\n\n[Diff truncated at 100KB - {} bytes total. Run `gh pr diff {}` to see the full diff.]",
-            &diff[..MAX_DIFF_SIZE],
+            &diff[..end],
             diff.len(),
             pr_number
         ))
@@ -2144,7 +2146,13 @@ pub fn generate_branch_name_from_security_alert(
     let slug = slugify_issue_title(summary);
     // Include package name in branch, truncated
     let pkg = package_name.replace('/', "-").replace('@', "");
-    let pkg_short = if pkg.len() > 20 { &pkg[..20] } else { &pkg };
+    let pkg_truncated;
+    let pkg_short = if pkg.len() > 20 {
+        pkg_truncated = pkg.chars().take(20).collect::<String>();
+        &pkg_truncated
+    } else {
+        &pkg
+    };
     format!("security-{alert_number}-{pkg_short}-{slug}")
 }
 

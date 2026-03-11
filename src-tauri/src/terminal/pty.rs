@@ -55,7 +55,11 @@ pub fn spawn_terminal(
     // Build command - either run a specific command or start interactive shell
     let mut cmd = if let Some(ref run_command) = command {
         if let Some(ref args) = command_args {
-            // Direct binary invocation — bypass shell to avoid argument mangling
+            // Direct binary invocation — bypass shell to avoid argument mangling.
+            // Validate absolute paths exist upfront for a clear error message.
+            if run_command.starts_with('/') && !std::path::Path::new(run_command).exists() {
+                return Err(format!("Binary not found: {run_command}"));
+            }
             let mut c = CommandBuilder::new(run_command);
             for arg in args {
                 c.arg(arg);
@@ -72,7 +76,6 @@ pub fn spawn_terminal(
             #[cfg(not(windows))]
             {
                 c.arg("-c");
-                // Note: Caller is responsible for properly quoting paths with spaces
                 c.arg(run_command);
             }
             c

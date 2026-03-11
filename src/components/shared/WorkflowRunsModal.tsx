@@ -467,7 +467,7 @@ export function WorkflowRunsModal() {
           // On project canvas — let ProjectCanvasView auto-open the session modal overlay
           useUIStore.getState().markWorktreeForAutoOpenSession(worktreeId, sessionId)
         } else {
-          // Inside a worktree — dispatch event for WorktreeCanvasView to handle
+          // Inside a worktree — dispatch event for ProjectCanvasView to handle
           window.dispatchEvent(
             new CustomEvent('open-session-modal', {
               detail: { sessionId },

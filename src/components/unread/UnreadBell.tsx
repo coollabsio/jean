@@ -245,13 +245,11 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   )
 
   const handleSelect = useCallback((item: UnreadItem) => {
-    const { selectedProjectId, selectProject, selectWorktree } =
+    const { selectedProjectId, selectProject } =
       useProjectsStore.getState()
     const {
-      activeWorktreePath,
-      setActiveWorktree,
       setActiveSession,
-      setViewingCanvasTab,
+      clearActiveWorktree,
       setLastOpenedForProject,
     } = useChatStore.getState()
 
@@ -260,44 +258,34 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       selectProject(item.projectId)
     }
 
-    // If no active worktree, user is on ProjectCanvasView (or home screen).
-    // Stay there and open session modal overlay instead of navigating away.
-    const onProjectCanvas = !activeWorktreePath
-
-    if (!onProjectCanvas) {
-      selectWorktree(item.worktreeId)
-      setActiveWorktree(item.worktreeId, item.worktreePath)
-      setViewingCanvasTab(item.worktreeId, true)
-    }
-
+    // Navigate to ProjectCanvasView
+    clearActiveWorktree()
     setActiveSession(item.worktreeId, item.session.id)
     setLastOpenedForProject(item.projectId, item.worktreeId, item.session.id)
     markSessionsReadOptimistically([item.session.id])
     setOpen(false)
 
-    if (onProjectCanvas) {
-      if (crossProject) {
-        // Component remounts with new projectId key — use store-based auto-open
-        useUIStore
-          .getState()
-          .markWorktreeForAutoOpenSession(
-            item.worktreeId,
-            item.session.id
-          )
-      } else {
-        // Same project, component stays mounted — use event
-        setTimeout(() => {
-          window.dispatchEvent(
-            new CustomEvent('open-session-modal', {
-              detail: {
-                sessionId: item.session.id,
-                worktreeId: item.worktreeId,
-                worktreePath: item.worktreePath,
-              },
-            })
-          )
-        }, 50)
-      }
+    if (crossProject) {
+      // Component remounts with new projectId key — use store-based auto-open
+      useUIStore
+        .getState()
+        .markWorktreeForAutoOpenSession(
+          item.worktreeId,
+          item.session.id
+        )
+    } else {
+      // Same project, component stays mounted — use event
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('open-session-modal', {
+            detail: {
+              sessionId: item.session.id,
+              worktreeId: item.worktreeId,
+              worktreePath: item.worktreePath,
+            },
+          })
+        )
+      }, 50)
     }
   }, [markSessionsReadOptimistically])
 

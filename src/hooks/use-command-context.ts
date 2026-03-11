@@ -701,9 +701,7 @@ export function useCommandContext(
       return
     }
 
-    const sessionId =
-      chatState.getActiveSession(worktreeId) ??
-      chatState.getCanvasSelectedSession(worktreeId)
+    const sessionId = chatState.getActiveSession(worktreeId)
     if (!sessionId) {
       notify('No session selected', undefined, { type: 'error' })
       return

@@ -38,8 +38,8 @@ export function useSessionArchive({
   const closeSession = useCloseSession()
 
   const navigateToCanvas = useCallback(() => {
-    useChatStore.getState().setViewingCanvasTab(worktreeId, true)
-  }, [worktreeId])
+    useChatStore.getState().clearActiveWorktree()
+  }, [])
 
   // Always archives — used by context menu "Archive Session"
   const handleArchiveSession = useCallback(

@@ -316,15 +316,11 @@ The helper is defined in `src-tauri/src/platform/process.rs` and exported via `p
 
 #### Canvas Views Architecture
 
-**"Canvas"** refers to two list views that display sessions:
-
-1. **WorktreeCanvasView** (`src/components/chat/WorktreeCanvasView.tsx`)
-   - Worktree-level canvas showing sessions within a single worktree
-   - Uses `CanvasList` component
-
-2. **ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`)
-   - Project-level canvas showing worktrees as compact list rows (with section headers)
-   - Has its own rendering logic but uses shared hooks
+**"Canvas"** refers to **ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`):
+- Project-level canvas showing worktrees as compact list rows (with section headers)
+- Sessions are opened via `SessionChatModal` overlay
+- Navigation: clicking "back" from ChatWindow returns to ProjectCanvasView via `clearActiveWorktree()`
+- Clicking a worktree in the sidebar stays on ProjectCanvasView (does not open ChatWindow)
 
 **Shared Hooks** (in `src/components/chat/hooks/`):
 
@@ -336,8 +332,6 @@ The helper is defined in `src-tauri/src/platform/process.rs` and exported via `p
 
 - `SessionListRow.tsx` - Compact row component for list view
 - `session-card-utils.tsx` - `computeSessionCardData()`, `SessionCardData`, and `SessionCardProps` types
-
-When user mentions "Canvas", consider both views and their shared infrastructure.
 
 #### Image Processing on Paste/Drop
 

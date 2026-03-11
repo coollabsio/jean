@@ -1989,10 +1989,11 @@ pub fn execute_one_shot_codex(
         } else {
             let trimmed = stderr.trim();
             if trimmed.len() > 200 {
+                let end = trimmed.char_indices().nth(200).map(|(i, _)| i).unwrap_or(trimmed.len());
                 format!(
                     "Codex CLI failed (exit {}): {}…",
                     output.status,
-                    &trimmed[..200]
+                    &trimmed[..end]
                 )
             } else if trimmed.is_empty() {
                 format!("Codex CLI failed (exit {})", output.status)

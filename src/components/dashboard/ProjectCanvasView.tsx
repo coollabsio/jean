@@ -1044,12 +1044,6 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     const targetCard = flatCards[targetIndex]
     setSelectedIndex(targetIndex)
     if (targetCard?.card) {
-      useChatStore
-        .getState()
-        .setCanvasSelectedSession(
-          targetCard.worktreeId,
-          targetCard.card.session.id
-        )
       // Sync projects store so commands (CMD+O, open terminal, etc.) work immediately
       useProjectsStore.getState().selectWorktree(targetCard.worktreeId)
       useChatStore
@@ -1079,24 +1073,6 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     projectId,
     preferences?.restore_last_session,
   ])
-
-  // Sync selection to store for cancel shortcut - updates when user navigates with arrow keys
-  useEffect(() => {
-    if (selectedWorktreeModal?.worktreeId) {
-      const activeSessionId =
-        useChatStore.getState().activeSessionIds[
-          selectedWorktreeModal.worktreeId
-        ]
-      if (activeSessionId) {
-        useChatStore
-          .getState()
-          .setCanvasSelectedSession(
-            selectedWorktreeModal.worktreeId,
-            activeSessionId
-          )
-      }
-    }
-  }, [selectedWorktreeModal?.worktreeId])
 
   // Mutations
   const createSession = useCreateSession()
@@ -1789,7 +1765,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         worktree={section.worktree}
                         layout="list"
                         isSelected={selectedIndex === currentIndex}
-                        onSelect={() => setSelectedIndex(currentIndex)}
+                        onSelect={() => handleSelectedIndexChange(currentIndex)}
                       />
                     )
                   }
@@ -1810,7 +1786,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         isSelected={selectedIndex === currentIndex}
                         shortcutNumber={thisShortcut}
                         onRowClick={() => {
-                          setSelectedIndex(currentIndex)
+                          handleSelectedIndexChange(currentIndex)
                           handleWorktreeClick(
                             section.worktree.id,
                             section.worktree.path

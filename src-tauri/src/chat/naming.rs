@@ -814,9 +814,9 @@ fn validate_session_name(name: &str) -> Result<String, String> {
         return Err("Generated session name is empty".to_string());
     }
 
-    // Enforce character limit (50 chars max)
-    let final_name = if final_name.len() > 50 {
-        final_name[..50].trim().to_string()
+    // Enforce character limit (50 chars max, char-safe for multi-byte UTF-8)
+    let final_name = if final_name.chars().count() > 50 {
+        final_name.chars().take(50).collect::<String>().trim().to_string()
     } else {
         final_name
     };

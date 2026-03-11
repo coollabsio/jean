@@ -104,12 +104,11 @@ MainWindow (Top-level orchestrator)
 │   └── ProjectsSidebar
 │       └── ProjectTree → WorktreeList per project
 ├── MainWindowContent (Primary content area)
-│   ├── ChatWindow (when worktree selected)
-│   │   ├── WorktreeCanvasView (grid/list of sessions - default tab)
+│   ├── ChatWindow (when worktree selected — always shows chat view)
 │   │   ├── Chat view (VirtualizedMessageList + ChatInput + ChatToolbar)
 │   │   ├── TerminalPanel (integrated PTY terminal)
 │   │   └── ReviewResultsPanel (AI code review findings)
-│   ├── ProjectCanvasView (when project selected, no worktree)
+│   ├── ProjectCanvasView (when project selected, no active worktree)
 │   └── Welcome screen (when nothing selected)
 └── Global Overlays
     ├── CommandPalette
@@ -127,17 +126,13 @@ MainWindow (Top-level orchestrator)
     └── Toaster (Notifications)
 ```
 
-### Canvas Views
+### Canvas View
 
-Two grid views display session cards at different levels:
-
-- **WorktreeCanvasView** (`src/components/chat/WorktreeCanvasView.tsx`) - Shows sessions within a single worktree using the shared `CanvasGrid` component
-- **ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) - Shows sessions across all worktrees in a project, grouped by worktree with section headers
+**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) shows sessions across all worktrees in a project, grouped by worktree with section headers. Sessions are opened via `SessionChatModal` overlay.
 
 Shared infrastructure in `src/components/chat/`:
 
-- `CanvasGrid.tsx` / `CanvasList.tsx` - Grid and list layout components
-- `SessionCard.tsx` - Individual card component used by both views
+- `SessionListRow.tsx` - Compact row component for list view
 - `session-card-utils.tsx` - `computeSessionCardData()` and `SessionCardData` type
 - `hooks/useCanvasKeyboardNav.ts` - Arrow key navigation with visual-position neighbor finding
 - `hooks/useCanvasShortcutEvents.ts` - Event handlers for plan/recap/approve shortcuts

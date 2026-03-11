@@ -71,9 +71,6 @@ interface ChatUIState {
   // Whether the review sidebar is visible (global toggle)
   reviewSidebarVisible: boolean
 
-  // Track if user is viewing canvas tab (session overview grid) per worktree
-  viewingCanvasTab: Record<string, boolean>
-
   // Fixed AI review findings per session (sessionId → fixed finding keys)
   fixedReviewFindings: Record<string, Set<string>>
 
@@ -235,9 +232,6 @@ interface ChatUIState {
   // User-assigned labels per session (e.g. "Needs testing")
   sessionLabels: Record<string, LabelData>
 
-  // Canvas-selected session per worktree (for magic menu targeting)
-  canvasSelectedSessionIds: Record<string, string | null>
-
   // Pending magic command to execute when ChatWindow mounts (from canvas navigation)
   pendingMagicCommand: { command: string } | null
   setPendingMagicCommand: (cmd: { command: string } | null) => void
@@ -255,10 +249,6 @@ interface ChatUIState {
   clearReviewResults: (sessionId: string) => void
   setReviewSidebarVisible: (visible: boolean) => void
   toggleReviewSidebar: () => void
-
-  // Actions - Canvas tab management
-  setViewingCanvasTab: (worktreeId: string, viewing: boolean) => void
-  isViewingCanvasTab: (worktreeId: string) => boolean
 
   // Actions - AI Review fixed findings (session-scoped)
   markReviewFindingFixed: (sessionId: string, findingKey: string) => void
@@ -544,12 +534,6 @@ interface ChatUIState {
   getWorktreeLoadingOperation: (worktreeId: string) => string | null
 
   // Actions - Canvas-selected session (for magic menu targeting)
-  setCanvasSelectedSession: (
-    worktreeId: string,
-    sessionId: string | null
-  ) => void
-  getCanvasSelectedSession: (worktreeId: string) => string | null
-
   // Legacy actions (deprecated - for backward compatibility)
   /** @deprecated Use addSendingSession instead */
   addSendingWorktree: (worktreeId: string) => void
@@ -568,7 +552,6 @@ export const useChatStore = create<ChatUIState>()(
       activeSessionIds: {},
       reviewResults: {},
       reviewSidebarVisible: false,
-      viewingCanvasTab: {},
       fixedReviewFindings: {},
       worktreePaths: {},
       sendingSessionIds: {},
@@ -617,7 +600,6 @@ export const useChatStore = create<ChatUIState>()(
       sessionDigests: {},
       worktreeLoadingOperations: {},
       sessionLabels: {},
-      canvasSelectedSessionIds: {},
       pendingMagicCommand: null,
 
       // Session management
@@ -688,22 +670,6 @@ export const useChatStore = create<ChatUIState>()(
           undefined,
           'toggleReviewSidebar'
         ),
-
-      // Canvas tab management
-      setViewingCanvasTab: (worktreeId, viewing) =>
-        set(
-          state => ({
-            viewingCanvasTab: {
-              ...state.viewingCanvasTab,
-              [worktreeId]: viewing,
-            },
-          }),
-          undefined,
-          'setViewingCanvasTab'
-        ),
-
-      isViewingCanvasTab: worktreeId =>
-        get().viewingCanvasTab[worktreeId] ?? true, // Default to canvas view
 
       // AI Review fixed findings (session-scoped)
       markReviewFindingFixed: (sessionId, findingKey) =>
@@ -2400,30 +2366,6 @@ export const useChatStore = create<ChatUIState>()(
 
       getWorktreeLoadingOperation: worktreeId =>
         get().worktreeLoadingOperations[worktreeId] ?? null,
-
-      // Canvas-selected session (for magic menu targeting)
-      setCanvasSelectedSession: (worktreeId, sessionId) =>
-        set(
-          state => {
-            if (sessionId) {
-              return {
-                canvasSelectedSessionIds: {
-                  ...state.canvasSelectedSessionIds,
-                  [worktreeId]: sessionId,
-                },
-              }
-            } else {
-              const { [worktreeId]: _, ...rest } =
-                state.canvasSelectedSessionIds
-              return { canvasSelectedSessionIds: rest }
-            }
-          },
-          undefined,
-          'setCanvasSelectedSession'
-        ),
-
-      getCanvasSelectedSession: worktreeId =>
-        get().canvasSelectedSessionIds[worktreeId] ?? null,
 
       // Pending magic command (set when navigating from canvas, consumed by ChatWindow on mount)
       setPendingMagicCommand: cmd =>

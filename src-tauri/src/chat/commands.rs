@@ -2748,13 +2748,19 @@ pub async fn save_cancelled_message(
     tool_calls: Vec<super::types::ToolCall>,
     content_blocks: Vec<super::types::ContentBlock>,
 ) -> Result<(), String> {
-    let _ = (worktree_id, worktree_path, tool_calls, content_blocks);
+    let _ = (worktree_id, worktree_path);
 
-    if content.is_empty() {
+    if content.is_empty() && tool_calls.is_empty() && content_blocks.is_empty() {
         return Ok(());
     }
 
-    super::run_log::persist_partial_cancelled_content(&app, &session_id, &content)
+    super::run_log::persist_partial_cancelled_content(
+        &app,
+        &session_id,
+        &content,
+        &tool_calls,
+        &content_blocks,
+    )
 }
 
 /// Mark a message's plan as approved
@@ -3905,11 +3911,12 @@ fn format_messages_for_summary(messages: &[ChatMessage]) -> String {
                 MessageRole::User => "User",
                 MessageRole::Assistant => "Assistant",
             };
-            // Truncate very long messages to avoid context overflow
+            // Truncate very long messages to avoid context overflow (char-safe for multi-byte UTF-8)
             let content = if msg.content.len() > 5000 {
+                let end = msg.content.char_indices().nth(5000).map(|(i, _)| i).unwrap_or(msg.content.len());
                 format!(
                     "{}...\n[Message truncated - {} chars total]",
-                    &msg.content[..5000],
+                    &msg.content[..end],
                     msg.content.len()
                 )
             } else {
@@ -4405,9 +4412,9 @@ pub async fn get_session_debug_info(
         for run in &metadata.runs {
             let jsonl_path = session_dir.join(format!("{}.jsonl", run.run_id));
             if jsonl_path.exists() {
-                // Truncate user message preview to 50 chars
-                let preview = if run.user_message.len() > 50 {
-                    format!("{}...", &run.user_message[..47])
+                // Truncate user message preview to 50 chars (char-safe for multi-byte UTF-8)
+                let preview = if run.user_message.chars().count() > 50 {
+                    format!("{}...", run.user_message.chars().take(47).collect::<String>())
                 } else {
                     run.user_message.clone()
                 };

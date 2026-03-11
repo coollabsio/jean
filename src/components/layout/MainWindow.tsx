@@ -148,7 +148,6 @@ import {
   useCreateWorktreeKeybinding,
   useWorktreeEvents,
 } from '@/services/projects'
-import { useChatStore } from '@/store/chat-store'
 import { isNativeApp } from '@/lib/environment'
 
 // Left sidebar resize constraints (pixels)
@@ -204,12 +203,6 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
-  const isViewingCanvasTabRaw = useChatStore(state =>
-    selectedWorktreeId
-      ? (state.viewingCanvasTab[selectedWorktreeId] ?? true)
-      : false
-  )
-
   // Compute window title based on selected project/worktree
   const windowTitle = useMemo(() => {
     if (!project || !worktree) return 'Jean'
@@ -218,9 +211,6 @@ export function MainWindow() {
 
     return `${project.name} › ${worktree.name}${branchSuffix}`
   }, [project, worktree])
-
-  // Determine if canvas view is active (for hiding title bar)
-  const isViewingCanvasTab = isViewingCanvasTabRaw
 
   // Compute polling info - null if no worktree or data not loaded
   const pollingInfo: WorktreePollingInfo | null = useMemo(() => {
@@ -377,7 +367,7 @@ export function MainWindow() {
       className={`flex h-dvh w-full flex-col overflow-hidden bg-background ${isNativeApp() ? 'rounded-xl' : ''}`}
     >
       {/* Title Bar */}
-      <TitleBar title={windowTitle} hideTitle={isViewingCanvasTab} />
+      <TitleBar title={windowTitle} />
 
       {/* Dev Mode Banner */}
       <DevModeBanner />

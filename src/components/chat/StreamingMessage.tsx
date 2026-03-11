@@ -255,7 +255,7 @@ export const StreamingMessage = memo(function StreamingMessage({
                               isStreamingPlanApproved(sessionId)
 
                             return (
-                              <div>
+                              <div data-plan-display>
                                 {inlinePlan ? (
                                   <PlanDisplay
                                     content={inlinePlan}

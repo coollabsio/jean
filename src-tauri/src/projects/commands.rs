@@ -5067,20 +5067,51 @@ pub async fn create_pr_with_ai_content(
         log::trace!("Staging and committing {uncommitted} uncommitted changes");
 
         // Stage all changes
-        let stage_output = silent_command("git")
-            .args(["add", "-A"])
-            .current_dir(&worktree_path)
-            .output()
-            .map_err(|e| format!("Failed to stage changes: {e}"))?;
+        stage_all_changes(&worktree_path)?;
 
-        if !stage_output.status.success() {
-            let stderr = String::from_utf8_lossy(&stage_output.stderr);
-            return Err(format!("Failed to stage changes: {stderr}"));
-        }
+        // Generate a meaningful commit message from the staged diff
+        let commit_msg = match (|| -> Result<String, String> {
+            let status = get_git_status(&worktree_path)?;
+            let diff = get_staged_diff(&worktree_path)?;
+            let recent_commits = get_recent_commits(&worktree_path, 10)?;
+            let remote_info = get_remote_info(&worktree_path)?;
 
-        // Commit with a generic message (the PR will have the real description)
+            let prompt = COMMIT_MESSAGE_PROMPT
+                .replace("{status}", &status)
+                .replace("{diff}", &diff)
+                .replace("{recent_commits}", &recent_commits)
+                .replace("{remote_info}", &remote_info);
+
+            let commit_magic_backend = crate::get_preferences_path(&app)
+                .ok()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
+                .and_then(|p| p.magic_prompt_backends.commit_message_backend);
+
+            let response = generate_commit_message(
+                &app,
+                &prompt,
+                model.as_deref(),
+                custom_profile_name.as_deref(),
+                Some(std::path::Path::new(&worktree_path)),
+                Some(&worktree.id),
+                commit_magic_backend.as_deref(),
+                reasoning_effort.as_deref(),
+            )?;
+            Ok(response.message)
+        })() {
+            Ok(msg) => {
+                log::trace!("Generated commit message: {}", msg.lines().next().unwrap_or(""));
+                msg
+            }
+            Err(e) => {
+                log::warn!("Failed to generate commit message, using fallback: {e}");
+                "chore: prepare for PR".to_string()
+            }
+        };
+
         let commit_output = silent_command("git")
-            .args(["commit", "-m", "chore: prepare for PR"])
+            .args(["commit", "-m", &commit_msg])
             .current_dir(&worktree_path)
             .output()
             .map_err(|e| format!("Failed to commit: {e}"))?;
@@ -5522,11 +5553,12 @@ fn get_staged_diff(repo_path: &str) -> Result<String, String> {
 
     let diff = String::from_utf8_lossy(&output.stdout).to_string();
 
-    // Truncate very long diffs
+    // Truncate very long diffs (char-safe for multi-byte UTF-8)
     if diff.len() > 50000 {
+        let end = diff.char_indices().nth(50000).map(|(i, _)| i).unwrap_or(diff.len());
         Ok(format!(
             "{}...\n\n[Diff truncated - {} chars total]",
-            &diff[..50000],
+            &diff[..end],
             diff.len()
         ))
     } else {
@@ -6663,11 +6695,12 @@ fn generate_release_notes_content(
         return Err(format!("No changes found since {tag}"));
     }
 
-    // Truncate commits if too large (50K chars)
+    // Truncate commits if too large (50K chars, char-safe for multi-byte UTF-8)
     let commits = if commits.len() > 50_000 {
+        let end = commits.char_indices().nth(50_000).map(|(i, _)| i).unwrap_or(commits.len());
         format!(
             "{}\n\n[... truncated, {} total characters]",
-            &commits[..50_000],
+            &commits[..end],
             commits.len()
         )
     } else {
