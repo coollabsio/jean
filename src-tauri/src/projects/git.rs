@@ -1427,9 +1427,10 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<String>, String> {
 /// * `repo_path` - Path to the repository
 /// * `message` - Commit message
 /// * `stage_all` - Whether to stage all changes before committing (git add -A)
+/// * `include_co_author` - Whether to include Co-Authored-By in the commit
 ///
 /// Returns the commit hash on success
-pub fn commit_changes(repo_path: &str, message: &str, stage_all: bool) -> Result<String, String> {
+pub fn commit_changes(repo_path: &str, message: &str, stage_all: bool, include_co_author: bool) -> Result<String, String> {
     log::trace!("Committing changes in {repo_path}");
 
     // Optionally stage all changes
@@ -1473,9 +1474,19 @@ pub fn commit_changes(repo_path: &str, message: &str, stage_all: bool) -> Result
         );
     }
 
+    // Build commit message with co-author if enabled
+    let commit_message = if include_co_author {
+        format!(
+            "{}\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+            message
+        )
+    } else {
+        message.to_string()
+    };
+
     // Commit
     let commit_output = silent_command("git")
-        .args(["commit", "-m", message])
+        .args(["commit", "-m", &commit_message])
         .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git commit: {e}"))?;

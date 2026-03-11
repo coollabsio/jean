@@ -3657,7 +3657,14 @@ pub async fn commit_changes(
         .find_worktree(&worktree_id)
         .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
 
-    let result = git::commit_changes(&worktree.path, &message, stage_all.unwrap_or(false))?;
+    let include_co_author = crate::get_preferences_path(&app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
+        .map(|p| p.include_co_author)
+        .unwrap_or(false);
+
+    let result = git::commit_changes(&worktree.path, &message, stage_all.unwrap_or(false), include_co_author)?;
 
     log::trace!(
         "Successfully committed changes in worktree: {} ({})",
@@ -5605,9 +5612,20 @@ fn stage_all_changes(repo_path: &str) -> Result<(), String> {
 }
 
 /// Create a git commit with the given message
-fn create_git_commit(repo_path: &str, message: &str) -> Result<String, String> {
+/// If include_co_author is true, adds Co-Authored-By for Claude
+fn create_git_commit(repo_path: &str, message: &str, include_co_author: bool) -> Result<String, String> {
+    // Build commit message with co-author if enabled
+    let commit_message = if include_co_author {
+        format!(
+            "{}\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+            message
+        )
+    } else {
+        message.to_string()
+    };
+
     let output = silent_command("git")
-        .args(["commit", "-m", message])
+        .args(["commit", "-m", &commit_message])
         .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to create commit: {e}"))?;
@@ -5912,6 +5930,12 @@ pub async fn create_commit_with_ai(
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
         .and_then(|p| p.magic_prompt_backends.commit_message_backend);
+    let include_co_author = crate::get_preferences_path(&app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
+        .map(|p| p.include_co_author)
+        .unwrap_or(false);
     let worktree_id = load_projects_data(&app).ok().and_then(|d| {
         d.worktrees
             .iter()
@@ -5935,7 +5959,7 @@ pub async fn create_commit_with_ai(
     );
 
     // 7. Create the commit
-    let commit_hash = create_git_commit(&worktree_path, &response.message)?;
+    let commit_hash = create_git_commit(&worktree_path, &response.message, include_co_author)?;
 
     log::trace!("Created commit: {commit_hash}");
 
@@ -6952,6 +6976,12 @@ pub async fn merge_worktree_to_base(
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
             .and_then(|p| p.magic_prompt_efforts.commit_message_effort);
+        let include_co_author = crate::get_preferences_path(&app)
+            .ok()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
+            .map(|p| p.include_co_author)
+            .unwrap_or(false);
         match generate_commit_message(
             &app,
             &prompt,
@@ -6964,7 +6994,7 @@ pub async fn merge_worktree_to_base(
         ) {
             Ok(response) => {
                 // Create the commit with AI-generated message
-                match create_git_commit(&worktree.path, &response.message) {
+                match create_git_commit(&worktree.path, &response.message, include_co_author) {
                     Ok(hash) => log::trace!("Auto-committed with AI message: {hash}"),
                     Err(e) => {
                         if !e.contains("Nothing to commit") && !e.contains("nothing to commit") {
@@ -6976,7 +7006,7 @@ pub async fn merge_worktree_to_base(
             Err(e) => {
                 // Fallback to simple commit message if AI fails
                 log::warn!("AI commit message generation failed, using fallback: {e}");
-                match create_git_commit(&worktree.path, "Auto-commit before merge") {
+                match create_git_commit(&worktree.path, "Auto-commit before merge", include_co_author) {
                     Ok(hash) => log::trace!("Auto-committed with fallback message: {hash}"),
                     Err(e) => {
                         if !e.contains("Nothing to commit") && !e.contains("nothing to commit") {
