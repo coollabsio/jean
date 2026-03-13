@@ -119,6 +119,7 @@ export function useGitOperations({
             preferences?.default_provider
           ),
           reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
+          sessionId: activeSessionId ?? null,
         }
       )
 
@@ -136,6 +137,7 @@ export function useGitOperations({
   }, [
     activeWorktreeId,
     activeWorktreePath,
+    activeSessionId,
     project?.name,
     worktree?.name,
     preferences?.magic_prompts?.commit_message,
@@ -175,6 +177,7 @@ export function useGitOperations({
               preferences?.default_provider
             ),
             reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
+            sessionId: activeSessionId ?? null,
           }
         )
 
@@ -219,6 +222,7 @@ export function useGitOperations({
     [
       activeWorktreeId,
       activeWorktreePath,
+      activeSessionId,
       project?.name,
       worktree?.name,
       worktree?.pr_number,

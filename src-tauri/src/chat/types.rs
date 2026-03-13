@@ -1053,6 +1053,10 @@ pub struct SessionMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_opened_at: Option<u64>,
 
+    /// Git commit hash when session started (for filtering commit to session-specific changes)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_snapshot: Option<String>,
+
     /// Run history - each entry corresponds to one Claude CLI execution
     #[serde(default)]
     pub runs: Vec<RunEntry>,

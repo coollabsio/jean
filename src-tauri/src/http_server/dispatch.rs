@@ -281,6 +281,7 @@ pub async fn dispatch_command(
                 field_opt(&args, "customProfileName", "custom_profile_name")?;
             let reasoning_effort: Option<String> =
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
+            let session_id: Option<String> = from_field_opt(&args, "sessionId")?;
             let result = crate::projects::create_commit_with_ai(
                 app.clone(),
                 worktree_path,
@@ -291,6 +292,7 @@ pub async fn dispatch_command(
                 model,
                 custom_profile_name,
                 reasoning_effort,
+                session_id,
             )
             .await?;
             to_value(result)
@@ -2168,6 +2170,103 @@ pub async fn dispatch_command(
             let project_id: String = field(&args, "projectId", "project_id")?;
             let identifier: String = from_field(&args, "identifier")?;
             crate::projects::remove_linear_issue_context(
+                app.clone(),
+                session_id,
+                project_id,
+                identifier,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
+
+        // =====================================================================
+        // Plane Issues
+        // =====================================================================
+        "list_plane_workspaces" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::list_plane_workspaces(app.clone(), project_id).await?;
+            to_value(result)
+        }
+        "list_plane_projects" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let workspace_slug: String = field(&args, "workspaceSlug", "workspace_slug")?;
+            let result = crate::projects::list_plane_projects(app.clone(), project_id, workspace_slug).await?;
+            to_value(result)
+        }
+        "list_plane_issues" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let workspace_slug: String = field(&args, "workspaceSlug", "workspace_slug")?;
+            let project_id_filter: Option<String> = field_opt(&args, "projectIdFilter", "project_id_filter")?;
+            let result = crate::projects::list_plane_issues(app.clone(), project_id, workspace_slug, project_id_filter).await?;
+            to_value(result)
+        }
+        "search_plane_issues" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let workspace_slug: String = field(&args, "workspaceSlug", "workspace_slug")?;
+            let project_id_filter: Option<String> = field_opt(&args, "projectIdFilter", "project_id_filter")?;
+            let search: String = from_field(&args, "search")?;
+            let result = crate::projects::search_plane_issues(app.clone(), project_id, workspace_slug, project_id_filter, search).await?;
+            to_value(result)
+        }
+        "get_plane_issue" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let workspace_slug: String = field(&args, "workspaceSlug", "workspace_slug")?;
+            let issue_id: String = field(&args, "issueId", "issue_id")?;
+            let result = crate::projects::get_plane_issue(app.clone(), project_id, workspace_slug, issue_id).await?;
+            to_value(result)
+        }
+        "get_plane_issue_by_number" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let workspace_slug: String = field(&args, "workspaceSlug", "workspace_slug")?;
+            let project_id_filter: Option<String> = field_opt(&args, "projectIdFilter", "project_id_filter")?;
+            let identifier: String = from_field(&args, "identifier")?;
+            let result = crate::projects::get_plane_issue_by_number(app.clone(), project_id, workspace_slug, project_id_filter, identifier).await?;
+            to_value(result)
+        }
+        "load_plane_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let workspace_slug: String = field(&args, "workspaceSlug", "workspace_slug")?;
+            let issue_identifier: String = field(&args, "issueIdentifier", "issue_identifier")?;
+            let result = crate::projects::load_plane_issue_context(
+                app.clone(),
+                project_id,
+                session_id,
+                workspace_slug,
+                issue_identifier,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_loaded_plane_issue_contexts" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::list_loaded_plane_issue_contexts(
+                app.clone(),
+                project_id,
+                session_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "get_plane_issue_context_contents" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let identifier: String = from_field(&args, "identifier")?;
+            let result = crate::projects::get_plane_issue_context_contents(
+                app.clone(),
+                project_id,
+                session_id,
+                identifier,
+            )
+            .await?;
+            to_value(result)
+        }
+        "remove_plane_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let identifier: String = from_field(&args, "identifier")?;
+            crate::projects::remove_plane_issue_context(
                 app.clone(),
                 session_id,
                 project_id,

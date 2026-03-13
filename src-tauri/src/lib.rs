@@ -160,6 +160,8 @@ pub struct AppPreferences {
     pub auto_pull_base_branch: bool, // Auto-pull base branch before creating a new worktree
     #[serde(default = "default_auto_archive_on_pr_merged")]
     pub auto_archive_on_pr_merged: bool, // Auto-archive worktrees when their PR is merged
+    #[serde(default = "default_include_co_author")]
+    pub include_co_author: bool, // Include Co-Authored-By in commits (default: false)
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
     #[serde(default)]
@@ -418,6 +420,10 @@ fn default_auto_pull_base_branch() -> bool {
 
 fn default_auto_archive_on_pr_merged() -> bool {
     true // Enabled by default
+}
+
+fn default_include_co_author() -> bool {
+    false // Disabled by default
 }
 
 // =============================================================================
@@ -1085,6 +1091,7 @@ impl Default for AppPreferences {
             removal_behavior: default_removal_behavior(),
             auto_pull_base_branch: default_auto_pull_base_branch(),
             auto_archive_on_pr_merged: default_auto_archive_on_pr_merged(),
+            include_co_author: default_include_co_author(),
             debug_mode_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),

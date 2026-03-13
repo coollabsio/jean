@@ -1761,6 +1761,22 @@ export const GeneralPane: React.FC = () => {
           </InlineField>
 
           <InlineField
+            label="Include co-author in commits"
+            description="Add Co-Authored-By: Claude Opus 4.6 to commits"
+          >
+            <Switch
+              checked={preferences?.include_co_author ?? false}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  patchPreferences.mutate({
+                    include_co_author: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
+
+          <InlineField
             label="Auto-delete archives"
             description="Delete archived items older than this"
           >

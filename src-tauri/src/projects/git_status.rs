@@ -824,6 +824,71 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     })
 }
 
+// ============================================================================
+// Session-based Commit Functions
+// ============================================================================
+
+/// Get the current commit hash (HEAD) for a repository
+pub fn get_current_commit(repo_path: &str) -> Result<String, String> {
+    let output = silent_command("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run git rev-parse: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to get current commit: {stderr}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Get list of files that have changed since a specific commit (exclusive)
+/// Returns file paths relative to the repository root
+pub fn get_changed_files_since(repo_path: &str, base_commit: &str) -> Result<Vec<String>, String> {
+    let output = silent_command("git")
+        .args(["diff", "--name-only", &format!("{base_commit}..HEAD")])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run git diff: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to get changed files: {stderr}"));
+    }
+
+    let files: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(files)
+}
+
+/// Stage specific files for commit (instead of stage_all)
+pub fn stage_files(repo_path: &str, files: &[String]) -> Result<(), String> {
+    if files.is_empty() {
+        return Ok(());
+    }
+
+    let mut cmd = silent_command("git");
+    cmd.arg("add").args(files);
+
+    let output = cmd
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to stage files: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to stage files: {stderr}"));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
