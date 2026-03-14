@@ -42,6 +42,10 @@ export const IntegrationsPane: React.FC = () => {
   const [localLinearApiKey, setLocalLinearApiKey] = useState<string | null>(null)
   const [showLinearApiKey, setShowLinearApiKey] = useState(false)
 
+  const [localPlaneApiKey, setLocalPlaneApiKey] = useState<string | null>(null)
+  const [localPlaneUrl, setLocalPlaneUrl] = useState<string | null>(null)
+  const [showPlaneApiKey, setShowPlaneApiKey] = useState(false)
+
   const currentGlobalKey = preferences?.linear_api_key ?? ''
   const displayedLinearApiKey = localLinearApiKey ?? currentGlobalKey
   const linearApiKeyChanged =
@@ -59,6 +63,41 @@ export const IntegrationsPane: React.FC = () => {
     patchPreferences.mutate(
       { linear_api_key: null },
       { onSuccess: () => setLocalLinearApiKey(null) }
+    )
+  }
+
+  // Plane configuration
+  const currentPlaneApiKey = preferences?.plane_api_key ?? ''
+  const currentPlaneUrl = preferences?.plane_url ?? ''
+  const displayedPlaneApiKey = localPlaneApiKey ?? currentPlaneApiKey
+  const displayedPlaneUrl = localPlaneUrl ?? currentPlaneUrl
+  const planeApiKeyChanged =
+    localPlaneApiKey !== null && localPlaneApiKey !== currentPlaneApiKey
+  const planeUrlChanged =
+    localPlaneUrl !== null && localPlaneUrl !== currentPlaneUrl
+  const planeChanged = planeApiKeyChanged || planeUrlChanged
+
+  const handleSavePlaneConfig = () => {
+    if (localPlaneApiKey === null && localPlaneUrl === null) return
+    patchPreferences.mutate(
+      {
+        plane_api_key: localPlaneApiKey?.trim() || null,
+        plane_url: localPlaneUrl?.trim() || null,
+      },
+      { onSuccess: () => {
+        setLocalPlaneApiKey(null)
+        setLocalPlaneUrl(null)
+      }}
+    )
+  }
+
+  const handleClearPlaneConfig = () => {
+    patchPreferences.mutate(
+      { plane_api_key: null, plane_url: null },
+      { onSuccess: () => {
+        setLocalPlaneApiKey(null)
+        setLocalPlaneUrl(null)
+      }}
     )
   }
 
@@ -114,6 +153,88 @@ export const IntegrationsPane: React.FC = () => {
                 variant="ghost"
                 size="sm"
                 onClick={handleClearLinearApiKey}
+                disabled={patchPreferences.isPending}
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+        </InlineField>
+      </SettingsSection>
+
+      <SettingsSection title="Plane">
+        <InlineField
+          label="Instance URL"
+          description={
+            <>
+              Your Plane self-hosted instance URL (e.g.,{' '}
+              <code className="text-xs bg-muted px-1 rounded">https://plane.yourcompany.com</code>
+              ). Get this from your Plane admin.
+            </>
+          }
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="url"
+              placeholder="https://plane.yourcompany.com"
+              value={displayedPlaneUrl}
+              onChange={e => setLocalPlaneUrl(e.target.value)}
+              className="flex-1 text-sm"
+            />
+          </div>
+        </InlineField>
+        <InlineField
+          label="Personal API Key"
+          description={
+            <>
+              Your Plane personal API key, used by all projects unless
+              overridden in project settings. Get one from your Plane user{' '}
+              <a
+                href="#"
+                className="text-primary underline underline-offset-2"
+                onClick={e => {
+                  e.preventDefault()
+                  alert('Go to your Plane instance → Your Profile → Settings → API Tokens')
+                }}
+              >
+                settings
+              </a>
+              .
+            </>
+          }
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type={showPlaneApiKey ? 'text' : 'password'}
+              placeholder="plane_api_..."
+              value={displayedPlaneApiKey}
+              onChange={e => setLocalPlaneApiKey(e.target.value)}
+              className="flex-1 text-sm font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPlaneApiKey(!showPlaneApiKey)}
+            >
+              {showPlaneApiKey ? 'Hide' : 'Show'}
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSavePlaneConfig}
+              disabled={!planeChanged || patchPreferences.isPending}
+            >
+              {patchPreferences.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              Save
+            </Button>
+            {currentPlaneApiKey && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearPlaneConfig}
                 disabled={patchPreferences.isPending}
               >
                 Remove

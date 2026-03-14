@@ -212,6 +212,10 @@ pub struct AppPreferences {
     pub yolo_thinking_level: Option<String>, // Thinking level override for yolo mode, None = use session thinking level
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_api_key: Option<String>, // Global Linear personal API key (inherited by all projects)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_api_key: Option<String>, // Global Plane personal API key (inherited by all projects)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_url: Option<String>, // Global Plane instance URL (e.g. https://plane.miempresa.com)
 }
 
 fn default_true() -> Option<bool> {
@@ -1112,6 +1116,8 @@ impl Default for AppPreferences {
             build_thinking_level: None,
             yolo_thinking_level: None,
             linear_api_key: None,
+            plane_api_key: None,
+            plane_url: None,
         }
     }
 }
@@ -2570,6 +2576,17 @@ pub fn run() {
             projects::list_loaded_linear_issue_contexts,
             projects::get_linear_issue_context_contents,
             projects::remove_linear_issue_context,
+            // Plane issues commands
+            projects::list_plane_workspaces,
+            projects::list_plane_projects,
+            projects::list_plane_issues,
+            projects::search_plane_issues,
+            projects::get_plane_issue,
+            projects::get_plane_issue_by_number,
+            projects::load_plane_issue_context,
+            projects::list_loaded_plane_issue_contexts,
+            projects::get_plane_issue_context_contents,
+            projects::remove_plane_issue_context,
             // GitHub PR commands
             projects::list_github_prs,
             projects::search_github_prs,

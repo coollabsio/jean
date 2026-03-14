@@ -93,6 +93,18 @@ pub struct Project {
     /// Linear team ID to filter issues (None = show all teams)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_team_id: Option<String>,
+    /// Plane personal API key for fetching issues (per-project)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_api_key: Option<String>,
+    /// Plane instance URL (per-project)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_url: Option<String>,
+    /// Plane workspace ID to filter issues (None = show all workspaces)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_workspace_id: Option<String>,
+    /// Plane project ID to filter issues (None = show all projects)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane_project_id: Option<String>,
 }
 
 /// A git worktree created for a project

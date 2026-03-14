@@ -40,6 +40,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useLinearTeams, linearQueryKeys } from '@/services/linear'
+import { usePlaneWorkspaces, usePlaneProjects, planeQueryKeys } from '@/services/plane'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Select,
@@ -111,6 +112,13 @@ export function GeneralPane({
   )
   const [showLinearApiKey, setShowLinearApiKey] = useState(false)
 
+  // Plane configuration state
+  const [localPlaneApiKey, setLocalPlaneApiKey] = useState<string | null>(null)
+  const [localPlaneUrl, setLocalPlaneUrl] = useState<string | null>(null)
+  const [localPlaneWorkspaceId, setLocalPlaneWorkspaceId] = useState<string | null>(null)
+  const [localPlaneProjectId, setLocalPlaneProjectId] = useState<string | null>(null)
+  const [showPlaneApiKey, setShowPlaneApiKey] = useState(false)
+
   // Linear has access if either project key or global key is set
   const hasLinearAccess =
     !!project?.linear_api_key || !!preferences?.linear_api_key
@@ -119,6 +127,22 @@ export function GeneralPane({
   const { data: linearTeams = [], isLoading: teamsLoading } = useLinearTeams(
     projectId,
     { enabled: hasLinearAccess }
+  )
+
+  // Plane has access if either project config or global config is set
+  const hasPlaneAccess =
+    (!!project?.plane_api_key || !!preferences?.plane_api_key) &&
+    (!!project?.plane_url || !!preferences?.plane_url)
+
+  const { data: planeWorkspaces = [], isLoading: planeWorkspacesLoading } = usePlaneWorkspaces(
+    projectId,
+    { enabled: hasPlaneAccess }
+  )
+
+  const { data: planeProjects = [], isLoading: planeProjectsLoading } = usePlaneProjects(
+    projectId,
+    project?.plane_workspace_id ?? null,
+    { enabled: hasPlaneAccess && !!project?.plane_workspace_id }
   )
 
   const handleRefreshTeams = useCallback(() => {
@@ -240,6 +264,66 @@ export function GeneralPane({
       )
     },
     [projectId, updateSettings, queryClient]
+  )
+
+  // Plane handlers
+  const displayedPlaneApiKey = localPlaneApiKey ?? project?.plane_api_key ?? ''
+  const displayedPlaneUrl = localPlaneUrl ?? project?.plane_url ?? ''
+
+  const planeApiKeyChanged =
+    localPlaneApiKey !== null &&
+    localPlaneApiKey !== (project?.plane_api_key ?? '')
+  const planeUrlChanged =
+    localPlaneUrl !== null &&
+    localPlaneUrl !== (project?.plane_url ?? '')
+  const planeChanged = planeApiKeyChanged || planeUrlChanged
+
+  const handleSavePlaneConfig = useCallback(() => {
+    updateSettings.mutate(
+      {
+        projectId,
+        planeApiKey: localPlaneApiKey?.trim() || null,
+        planeUrl: localPlaneUrl?.trim() || null,
+      },
+      { onSuccess: () => {
+        setLocalPlaneApiKey(null)
+        setLocalPlaneUrl(null)
+      }}
+    )
+  }, [projectId, updateSettings, localPlaneApiKey, localPlaneUrl])
+
+  const handleClearPlaneConfig = useCallback(() => {
+    updateSettings.mutate(
+      { projectId, planeApiKey: '', planeUrl: '' },
+      { onSuccess: () => {
+        setLocalPlaneApiKey(null)
+        setLocalPlaneUrl(null)
+      }}
+    )
+  }, [projectId, updateSettings])
+
+  const handleWorkspaceChange = useCallback(
+    (value: string) => {
+      updateSettings.mutate(
+        { projectId, planeWorkspaceId: value === 'all' ? '' : value },
+        {
+          onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: planeQueryKeys.projects(projectId, value) })
+            queryClient.invalidateQueries({ queryKey: planeQueryKeys.issues(projectId, value) })
+          },
+        }
+      )
+    },
+    [projectId, updateSettings, queryClient]
+  )
+
+  const handleProjectChange = useCallback(
+    (value: string) => {
+      updateSettings.mutate(
+        { projectId, planeProjectId: value === 'all' ? '' : value }
+      )
+    },
+    [projectId, updateSettings]
   )
 
   const handleBrowseWorktreesDir = useCallback(async () => {
@@ -584,6 +668,132 @@ export function GeneralPane({
               </Button>
             </div>
           </InlineField>
+        )}
+      </SettingsSection>
+
+      <SettingsSection title="Plane Integration">
+        <InlineField
+          label="Instance URL Override"
+          description="Overrides the global URL from Settings → Integrations for this project only."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="url"
+              placeholder="https://plane.yourcompany.com"
+              value={displayedPlaneUrl}
+              onChange={e => setLocalPlaneUrl(e.target.value)}
+              className="flex-1 text-sm"
+            />
+          </div>
+        </InlineField>
+        <InlineField
+          label="API Key Override"
+          description="Overrides the global API key from Settings → Integrations for this project only. Leave empty to use the global key."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type={showPlaneApiKey ? 'text' : 'password'}
+              placeholder="plane_api_..."
+              value={displayedPlaneApiKey}
+              onChange={e => setLocalPlaneApiKey(e.target.value)}
+              className="flex-1 text-sm font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPlaneApiKey(!showPlaneApiKey)}
+            >
+              {showPlaneApiKey ? 'Hide' : 'Show'}
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSavePlaneConfig}
+              disabled={!planeChanged || updateSettings.isPending}
+            >
+              {updateSettings.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              Save
+            </Button>
+            {(project?.plane_api_key || project?.plane_url) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearPlaneConfig}
+                disabled={updateSettings.isPending}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Remove
+              </Button>
+            )}
+          </div>
+        </InlineField>
+
+        {hasPlaneAccess && (
+          <>
+            <InlineField
+              label="Workspace Filter"
+              description="Restrict Plane issues to a specific workspace. Leave as 'All workspaces' to see everything."
+            >
+              <div className="flex items-center gap-2">
+                <Select
+                  value={project?.plane_workspace_id ?? 'all'}
+                  onValueChange={handleWorkspaceChange}
+                  disabled={planeWorkspacesLoading}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue
+                      placeholder={
+                        planeWorkspacesLoading ? 'Loading workspaces...' : 'All workspaces'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All workspaces</SelectItem>
+                    {planeWorkspaces.map(ws => (
+                      <SelectItem key={ws.id} value={ws.slug}>
+                        {ws.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </InlineField>
+            <InlineField
+              label="Project Filter"
+              description="Restrict Plane issues to a specific project within the workspace."
+            >
+              <div className="flex items-center gap-2">
+                <Select
+                  value={project?.plane_project_id ?? 'all'}
+                  onValueChange={handleProjectChange}
+                  disabled={planeProjectsLoading || !project?.plane_workspace_id}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue
+                      placeholder={
+                        planeProjectsLoading
+                          ? 'Loading projects...'
+                          : !project?.plane_workspace_id
+                          ? 'Select workspace first'
+                          : 'All projects'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All projects</SelectItem>
+                    {planeProjects.map(proj => (
+                      <SelectItem key={proj.id} value={proj.id}>
+                        {proj.name} ({proj.identifier})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </InlineField>
+          </>
         )}
       </SettingsSection>
 
