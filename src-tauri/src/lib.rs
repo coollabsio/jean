@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
@@ -18,6 +18,7 @@ mod opencode_cli;
 mod opencode_server;
 mod platform;
 mod projects;
+mod rtk;
 mod terminal;
 
 // Validation functions
@@ -212,6 +213,14 @@ pub struct AppPreferences {
     pub build_thinking_level: Option<String>, // Thinking level override for build mode, None = use session thinking level
     #[serde(default)]
     pub yolo_thinking_level: Option<String>, // Thinking level override for yolo mode, None = use session thinking level
+    #[serde(default)]
+    pub rtk_ai_enabled: bool, // Global RTK AI integration switch (experimental)
+    #[serde(default = "default_use_rtk_for_claude")]
+    pub use_rtk_for_claude: bool, // Enable RTK command rewriting for Claude backend
+    #[serde(default = "default_use_rtk_for_codex")]
+    pub use_rtk_for_codex: bool, // Enable RTK command rewriting guidance for Codex backend
+    #[serde(default = "default_use_rtk_for_opencode")]
+    pub use_rtk_for_opencode: bool, // Enable RTK command rewriting guidance for OpenCode backend
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_api_key: Option<String>, // Global Linear personal API key (inherited by all projects)
 }
@@ -424,6 +433,18 @@ fn default_auto_pull_base_branch() -> bool {
 
 fn default_auto_archive_on_pr_merged() -> bool {
     true // Enabled by default
+}
+
+fn default_use_rtk_for_claude() -> bool {
+    true
+}
+
+fn default_use_rtk_for_codex() -> bool {
+    true
+}
+
+fn default_use_rtk_for_opencode() -> bool {
+    true
 }
 
 // =============================================================================
@@ -1118,6 +1139,10 @@ impl Default for AppPreferences {
             yolo_backend: None,
             build_thinking_level: None,
             yolo_thinking_level: None,
+            rtk_ai_enabled: false,
+            use_rtk_for_claude: default_use_rtk_for_claude(),
+            use_rtk_for_codex: default_use_rtk_for_codex(),
+            use_rtk_for_opencode: default_use_rtk_for_opencode(),
             linear_api_key: None,
         }
     }
@@ -2112,6 +2137,43 @@ fn parse_cli_args() -> CliArgs {
     }
 }
 
+fn rtk_init_commands() -> [&'static [&'static str]; 2] {
+    [&["init", "-g"], &["init", "-g", "--opencode"]]
+}
+
+fn initialize_rtk_integrations() {
+    for args in rtk_init_commands() {
+        match crate::platform::silent_command("rtk").args(args).output() {
+            Ok(output) if output.status.success() => {
+                log::info!("RTK initialized successfully: rtk {}", args.join(" "));
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if stderr.is_empty() {
+                    log::warn!(
+                        "RTK initialization failed (status={}): rtk {}",
+                        output.status,
+                        args.join(" ")
+                    );
+                } else {
+                    log::warn!(
+                        "RTK initialization failed (status={}): rtk {} ({})",
+                        output.status,
+                        args.join(" "),
+                        stderr
+                    );
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "RTK initialization command failed to start: rtk {} ({e})",
+                    args.join(" ")
+                );
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let cli_args = parse_cli_args();
@@ -2254,6 +2316,20 @@ pub fn run() {
             });
 
             log::info!("Startup: orphaned server cleanup spawned at {:?}", setup_start.elapsed());
+
+            // Best-effort RTK bootstrap at startup when the experimental toggle is enabled.
+            let rtk_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let Ok(preferences) = load_preferences(rtk_app.clone()).await else {
+                    return;
+                };
+                if !preferences.rtk_ai_enabled {
+                    return;
+                }
+                tokio::task::spawn_blocking(initialize_rtk_integrations)
+                    .await
+                    .ok();
+            });
 
             // Allow image access from all known project/worktree directories.
             let app_handle = app.handle().clone();
@@ -2712,6 +2788,7 @@ pub fn run() {
             codex_cli::get_codex_usage,
             codex_cli::get_available_codex_versions,
             codex_cli::install_codex_cli,
+            rtk::get_rtk_gain,
             // OpenCode CLI management commands
             opencode_cli::check_opencode_cli_installed,
             opencode_cli::check_opencode_cli_auth,
@@ -2804,4 +2881,24 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rtk_init_commands() {
+        assert_eq!(rtk_init_commands()[0], &["init", "-g"]);
+        assert_eq!(rtk_init_commands()[1], &["init", "-g", "--opencode"]);
+    }
+
+    #[test]
+    fn test_default_rtk_preferences() {
+        let prefs = AppPreferences::default();
+        assert!(!prefs.rtk_ai_enabled);
+        assert!(prefs.use_rtk_for_claude);
+        assert!(prefs.use_rtk_for_codex);
+        assert!(prefs.use_rtk_for_opencode);
+    }
 }

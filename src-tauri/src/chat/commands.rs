@@ -118,6 +118,34 @@ fn find_neighbor_non_archived_session_id(
     None
 }
 
+fn codex_rtk_system_prompt(use_rtk_for_codex: bool) -> Option<&'static str> {
+    if use_rtk_for_codex {
+        Some(
+            "RTK is enabled for Codex sessions. Prefer `rtk` wrappers for shell and file operations (for example: `rtk git status`, `rtk grep`, `rtk read`) to reduce token usage.",
+        )
+    } else {
+        None
+    }
+}
+
+fn opencode_rtk_system_prompt(use_rtk_for_opencode: bool) -> Option<&'static str> {
+    if use_rtk_for_opencode {
+        Some(
+            "RTK is enabled for OpenCode sessions. Prefer `rtk` wrappers for shell and file operations so RTK can apply token-saving rewrites.",
+        )
+    } else {
+        None
+    }
+}
+
+fn codex_rtk_enabled(preferences: &crate::AppPreferences) -> bool {
+    preferences.rtk_ai_enabled && preferences.use_rtk_for_codex
+}
+
+fn opencode_rtk_enabled(preferences: &crate::AppPreferences) -> bool {
+    preferences.rtk_ai_enabled && preferences.use_rtk_for_opencode
+}
+
 fn emit_sessions_cache_invalidation(app: &AppHandle) {
     if let Err(e) = app.emit_all(
         "cache:invalidate",
@@ -1889,11 +1917,13 @@ pub async fn send_chat_message(
                     }
 
                     // Global system prompt from preferences
+                    let mut use_rtk_for_codex = false;
                     if let Ok(prefs_path) = crate::get_preferences_path(&thread_app) {
                         if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
                             if let Ok(prefs) =
                                 serde_json::from_str::<crate::AppPreferences>(&contents)
                             {
+                                use_rtk_for_codex = codex_rtk_enabled(&prefs);
                                 let prompt = prefs
                                     .magic_prompts
                                     .global_system_prompt
@@ -1904,6 +1934,9 @@ pub async fn send_chat_message(
                                 system_prompt_parts.push(prompt.to_string());
                             }
                         }
+                    }
+                    if let Some(prompt) = codex_rtk_system_prompt(use_rtk_for_codex) {
+                        system_prompt_parts.push(prompt.to_string());
                     }
 
                     // Parallel execution prompt
@@ -2150,11 +2183,13 @@ pub async fn send_chat_message(
                     }
 
                     // Global system prompt from preferences
+                    let mut use_rtk_for_opencode = false;
                     if let Ok(prefs_path) = crate::get_preferences_path(&thread_app) {
                         if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
                             if let Ok(prefs) =
                                 serde_json::from_str::<crate::AppPreferences>(&contents)
                             {
+                                use_rtk_for_opencode = opencode_rtk_enabled(&prefs);
                                 if let Some(prompt) = prefs
                                     .magic_prompts
                                     .global_system_prompt
@@ -2166,6 +2201,9 @@ pub async fn send_chat_message(
                                 }
                             }
                         }
+                    }
+                    if let Some(prompt) = opencode_rtk_system_prompt(use_rtk_for_opencode) {
+                        system_prompt_parts.push(prompt.to_string());
                     }
 
                     // Parallel execution prompt
@@ -5532,5 +5570,57 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let remaining = vec![s2, s3];
         let selected = find_neighbor_non_archived_session_id(&remaining, 0);
         assert_eq!(selected.as_deref(), Some("s3"));
+    }
+
+    #[test]
+    fn test_codex_rtk_system_prompt_enabled() {
+        let prompt = codex_rtk_system_prompt(true);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("RTK is enabled for Codex sessions"));
+    }
+
+    #[test]
+    fn test_codex_rtk_system_prompt_disabled() {
+        assert_eq!(codex_rtk_system_prompt(false), None);
+    }
+
+    #[test]
+    fn test_opencode_rtk_system_prompt_enabled() {
+        let prompt = opencode_rtk_system_prompt(true);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("RTK is enabled for OpenCode sessions"));
+    }
+
+    #[test]
+    fn test_opencode_rtk_system_prompt_disabled() {
+        assert_eq!(opencode_rtk_system_prompt(false), None);
+    }
+
+    #[test]
+    fn test_codex_rtk_enabled_requires_global_toggle() {
+        let mut prefs = crate::AppPreferences::default();
+        prefs.rtk_ai_enabled = false;
+        prefs.use_rtk_for_codex = true;
+        assert!(!codex_rtk_enabled(&prefs));
+
+        prefs.rtk_ai_enabled = true;
+        assert!(codex_rtk_enabled(&prefs));
+
+        prefs.use_rtk_for_codex = false;
+        assert!(!codex_rtk_enabled(&prefs));
+    }
+
+    #[test]
+    fn test_opencode_rtk_enabled_requires_global_toggle() {
+        let mut prefs = crate::AppPreferences::default();
+        prefs.rtk_ai_enabled = false;
+        prefs.use_rtk_for_opencode = true;
+        assert!(!opencode_rtk_enabled(&prefs));
+
+        prefs.rtk_ai_enabled = true;
+        assert!(opencode_rtk_enabled(&prefs));
+
+        prefs.use_rtk_for_opencode = false;
+        assert!(!opencode_rtk_enabled(&prefs));
     }
 }

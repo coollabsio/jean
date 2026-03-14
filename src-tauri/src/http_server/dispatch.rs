@@ -241,7 +241,9 @@ pub async fn dispatch_command(
         "detect_and_link_pr" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let result = crate::projects::detect_and_link_pr(app.clone(), worktree_id, worktree_path).await?;
+            let result =
+                crate::projects::detect_and_link_pr(app.clone(), worktree_id, worktree_path)
+                    .await?;
             if result.is_some() {
                 emit_cache_invalidation(app, &["projects"]);
             }
@@ -1771,6 +1773,10 @@ pub async fn dispatch_command(
         }
         "get_codex_usage" => {
             let result = crate::codex_cli::get_codex_usage().await?;
+            to_value(result)
+        }
+        "get_rtk_gain" => {
+            let result = crate::rtk::get_rtk_gain(app.clone()).await?;
             to_value(result)
         }
         "install_codex_cli" => {

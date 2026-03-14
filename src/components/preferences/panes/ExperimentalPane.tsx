@@ -113,6 +113,18 @@ export const ExperimentalPane: React.FC = () => {
 
       <SettingsSection title="Developer Tools">
         <InlineField
+          label="Enable RTK AI"
+          description="Turn on RTK command rewriting support and reveal RTK-specific settings in Jean."
+        >
+          <Switch
+            checked={preferences?.rtk_ai_enabled ?? false}
+            onCheckedChange={checked => {
+              patchPreferences.mutate({ rtk_ai_enabled: checked })
+            }}
+          />
+        </InlineField>
+
+        <InlineField
           label="Debug mode"
           description="Show session debug panel with file paths, run logs, and token usage"
         >

@@ -89,6 +89,29 @@ fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static s
     }
 }
 
+fn claude_rtk_system_prompt(use_rtk_for_claude: bool) -> Option<&'static str> {
+    if use_rtk_for_claude {
+        Some(
+            "RTK is enabled for Claude sessions. Prefer normal tool calls and shell commands; RTK may rewrite them into token-efficient equivalents automatically.",
+        )
+    } else {
+        None
+    }
+}
+
+fn push_claude_rtk_allowed_tool(args: &mut Vec<String>, use_rtk_for_claude: bool) {
+    if use_rtk_for_claude {
+        args.push("--allowedTools".to_string());
+        args.push("Bash(*rtk*)".to_string());
+    }
+}
+
+fn claude_rtk_enabled(preferences: Option<&crate::AppPreferences>) -> bool {
+    preferences
+        .map(|prefs| prefs.rtk_ai_enabled && prefs.use_rtk_for_claude)
+        .unwrap_or(false)
+}
+
 // =============================================================================
 // Claude CLI execution
 // =============================================================================
@@ -247,6 +270,11 @@ fn build_claude_args(
 ) -> (Vec<String>, Vec<(String, String)>) {
     let mut args = Vec::new();
     let mut env_vars = Vec::new();
+    let loaded_prefs: Option<crate::AppPreferences> = crate::get_preferences_path(app)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|contents| serde_json::from_str::<crate::AppPreferences>(&contents).ok());
+    let use_rtk_for_claude = claude_rtk_enabled(loaded_prefs.as_ref());
 
     // Core args
     args.push("--print".to_string());
@@ -377,6 +405,7 @@ fn build_claude_args(
     args.push("Bash(*gh-cli/gh*)".to_string());
     args.push("--allowedTools".to_string());
     args.push("Bash(*claude-cli/claude*)".to_string());
+    push_claude_rtk_allowed_tool(&mut args, use_rtk_for_claude);
 
     // MCP server configuration
     if let Some(config) = mcp_config {
@@ -416,19 +445,17 @@ fn build_claude_args(
 
     // Global system prompt from preferences (like ~/.claude/CLAUDE.md)
     // Falls back to DEFAULT_GLOBAL_SYSTEM_PROMPT when not set (null = use default)
-    if let Ok(prefs_path) = crate::get_preferences_path(app) {
-        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-            if let Ok(prefs) = serde_json::from_str::<crate::AppPreferences>(&contents) {
-                let prompt = prefs
-                    .magic_prompts
-                    .global_system_prompt
-                    .as_deref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(DEFAULT_GLOBAL_SYSTEM_PROMPT);
-                system_prompt_parts.push(prompt.to_string());
-            }
-        }
+    if let Some(prefs) = loaded_prefs.as_ref() {
+        let prompt = prefs
+            .magic_prompts
+            .global_system_prompt
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_GLOBAL_SYSTEM_PROMPT);
+        system_prompt_parts.push(prompt.to_string());
+    } else {
+        system_prompt_parts.push(DEFAULT_GLOBAL_SYSTEM_PROMPT.to_string());
     }
 
     // Explicit mode override for Claude so build/yolo do not fall back into plan mode
@@ -489,6 +516,9 @@ fn build_claude_args(
                 codex_binary.display()
             ));
         }
+    }
+    if let Some(prompt) = claude_rtk_system_prompt(use_rtk_for_claude) {
+        system_prompt_parts.push(prompt.to_string());
     }
 
     // Collect all context files (issues and PRs) and concatenate into a single file
@@ -1476,4 +1506,51 @@ pub fn tail_claude_output(
         cancelled,
         usage,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_claude_rtk_system_prompt_enabled() {
+        let prompt = claude_rtk_system_prompt(true);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("RTK is enabled for Claude sessions"));
+    }
+
+    #[test]
+    fn test_claude_rtk_system_prompt_disabled() {
+        assert_eq!(claude_rtk_system_prompt(false), None);
+    }
+
+    #[test]
+    fn test_push_claude_rtk_allowed_tool_enabled() {
+        let mut args = vec!["--print".to_string()];
+        push_claude_rtk_allowed_tool(&mut args, true);
+        assert!(args.contains(&"--allowedTools".to_string()));
+        assert!(args.contains(&"Bash(*rtk*)".to_string()));
+    }
+
+    #[test]
+    fn test_push_claude_rtk_allowed_tool_disabled() {
+        let mut args = vec!["--print".to_string()];
+        push_claude_rtk_allowed_tool(&mut args, false);
+        assert_eq!(args, vec!["--print".to_string()]);
+    }
+
+    #[test]
+    fn test_claude_rtk_enabled_requires_global_toggle() {
+        let mut prefs = crate::AppPreferences::default();
+        prefs.rtk_ai_enabled = false;
+        prefs.use_rtk_for_claude = true;
+        assert!(!claude_rtk_enabled(Some(&prefs)));
+
+        prefs.rtk_ai_enabled = true;
+        assert!(claude_rtk_enabled(Some(&prefs)));
+
+        prefs.use_rtk_for_claude = false;
+        assert!(!claude_rtk_enabled(Some(&prefs)));
+        assert!(!claude_rtk_enabled(None));
+    }
 }

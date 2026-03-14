@@ -15,6 +15,7 @@ import {
   DEFAULT_MAGIC_PROMPT_PROVIDERS,
   DEFAULT_MAGIC_PROMPT_BACKENDS,
   DEFAULT_MAGIC_PROMPT_EFFORTS,
+  defaultPreferences,
 } from '@/types/preferences'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 
@@ -149,6 +150,10 @@ describe('preferences service', () => {
         yolo_backend: null,
         build_thinking_level: null,
         yolo_thinking_level: null,
+        rtk_ai_enabled: false,
+        use_rtk_for_claude: true,
+        use_rtk_for_codex: true,
+        use_rtk_for_opencode: true,
         linear_api_key: null,
         magic_models_auto_initialized: false,
       }
@@ -176,6 +181,10 @@ describe('preferences service', () => {
 
       expect(result.current.data?.theme).toBe('system')
       expect(result.current.data?.selected_model).toBe('opus')
+      expect(result.current.data?.rtk_ai_enabled).toBe(false)
+      expect(result.current.data?.use_rtk_for_claude).toBe(true)
+      expect(result.current.data?.use_rtk_for_codex).toBe(true)
+      expect(result.current.data?.use_rtk_for_opencode).toBe(true)
     })
 
     it('returns defaults on backend error', async () => {
@@ -189,6 +198,17 @@ describe('preferences service', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
       expect(result.current.data?.theme).toBe('system')
+      expect(result.current.data?.rtk_ai_enabled).toBe(false)
+      expect(result.current.data?.use_rtk_for_claude).toBe(true)
+      expect(result.current.data?.use_rtk_for_codex).toBe(true)
+      expect(result.current.data?.use_rtk_for_opencode).toBe(true)
+    })
+
+    it('includes RTK defaults in default preferences', () => {
+      expect(defaultPreferences.rtk_ai_enabled).toBe(false)
+      expect(defaultPreferences.use_rtk_for_claude).toBe(true)
+      expect(defaultPreferences.use_rtk_for_codex).toBe(true)
+      expect(defaultPreferences.use_rtk_for_opencode).toBe(true)
     })
 
     it('migrates old keybindings to new defaults', async () => {
@@ -265,6 +285,10 @@ describe('preferences service', () => {
         yolo_backend: null,
         build_thinking_level: null,
         yolo_thinking_level: null,
+        rtk_ai_enabled: false,
+        use_rtk_for_claude: true,
+        use_rtk_for_codex: true,
+        use_rtk_for_opencode: true,
         linear_api_key: null,
         magic_models_auto_initialized: false,
       }
