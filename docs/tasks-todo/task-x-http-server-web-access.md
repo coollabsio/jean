@@ -1,6 +1,7 @@
 # HTTP Server for Jean Web Mode
 
 ## Goal
+
 Enable Jean frontend to run in a browser via HTTP server, reusing existing UI while replacing Tauri IPC with REST API calls. Use HTTP polling instead of WebSockets for real-time updates.
 
 ---
@@ -44,17 +45,17 @@ Enable Jean frontend to run in a browser via HTTP server, reusing existing UI wh
 
 ## Key Decisions
 
-| Decision | Choice |
-|----------|--------|
-| Real-time updates | HTTP polling (no WebSocket) |
-| HTTP framework | Axum |
-| Static files | Embedded via `include_dir!` |
-| Auth | Token-based, persisted in preferences |
-| Binding | 0.0.0.0 for LAN access |
-| Data sharing | Shared with native app |
-| Terminal | Excluded (needs WebSocket) |
-| Startup | Manual toggle + auto-start option |
-| Port conflict | Show error |
+| Decision          | Choice                                |
+| ----------------- | ------------------------------------- |
+| Real-time updates | HTTP polling (no WebSocket)           |
+| HTTP framework    | Axum                                  |
+| Static files      | Embedded via `include_dir!`           |
+| Auth              | Token-based, persisted in preferences |
+| Binding           | 0.0.0.0 for LAN access                |
+| Data sharing      | Shared with native app                |
+| Terminal          | Excluded (needs WebSocket)            |
+| Startup           | Manual toggle + auto-start option     |
+| Port conflict     | Show error                            |
 
 ---
 
@@ -63,6 +64,7 @@ Enable Jean frontend to run in a browser via HTTP server, reusing existing UI wh
 ### Phase 1: Rust HTTP Server
 
 1. Add dependencies to `src-tauri/Cargo.toml`:
+
    ```toml
    axum = "0.8"
    tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
@@ -79,6 +81,7 @@ Enable Jean frontend to run in a browser via HTTP server, reusing existing UI wh
    - `streaming.rs` - In-memory streaming state for polling
 
 3. REST endpoints:
+
    ```
    # All require: Authorization: Bearer <token>
 
@@ -114,6 +117,7 @@ Enable Jean frontend to run in a browser via HTTP server, reusing existing UI wh
 ### Phase 2: Frontend Transport Layer
 
 1. Create `src/lib/transport.ts`:
+
    ```typescript
    interface Transport {
      call<T>(command: string, args?: Record<string, unknown>): Promise<T>
@@ -126,6 +130,7 @@ Enable Jean frontend to run in a browser via HTTP server, reusing existing UI wh
    ```
 
 2. HttpTransport gets token from URL or localStorage:
+
    ```typescript
    // e.g., http://192.168.1.100:3456?token=abc123
    const urlToken = new URLSearchParams(window.location.search).get('token')
@@ -152,6 +157,7 @@ Router::new()
 ### Phase 4: Settings UI
 
 New "Web Access" section in Settings modal:
+
 - Toggle: "Enable HTTP Server"
 - Port input (default 3456)
 - Status indicator (green/gray dot)
@@ -160,11 +166,13 @@ New "Web Access" section in Settings modal:
 - Auto-start checkbox
 
 Tauri commands:
+
 - `start_http_server(port) → { url, token }`
 - `stop_http_server()`
 - `get_http_server_status() → { running, url?, token?, port? }`
 
 Preferences:
+
 ```rust
 http_server_auto_start: bool,   // default: false
 http_server_port: u16,          // default: 3456
@@ -176,6 +184,7 @@ http_server_token: Option<String>, // generated once, persisted
 ## Files
 
 ### New Rust
+
 - `src-tauri/src/http_server/mod.rs`
 - `src-tauri/src/http_server/routes.rs`
 - `src-tauri/src/http_server/handlers.rs`
@@ -183,15 +192,18 @@ http_server_token: Option<String>, // generated once, persisted
 - `src-tauri/src/http_server/streaming.rs`
 
 ### Modified Rust
+
 - `src-tauri/Cargo.toml`
 - `src-tauri/src/lib.rs`
 
 ### New TypeScript
+
 - `src/lib/transport.ts`
 - `src/lib/http-transport.ts`
 - `src/lib/tauri-transport.ts`
 
 ### Modified TypeScript
+
 - `src/services/chat.ts`
 - `src/services/projects.ts`
 - `src/services/git-status.ts`

@@ -6,8 +6,8 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { invoke, useWsConnectionStatus } from '@/lib/transport'
+import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
 import { logger } from '@/lib/logger'
@@ -16,30 +16,45 @@ import type {
   ClaudeAuthStatus,
   ReleaseInfo,
   InstallProgress,
+  ClaudeUsageSnapshot,
 } from '@/types/claude-cli'
 
-// Check if running in Tauri context (vs plain browser)
-const isTauri = () =>
-  typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+import { hasBackend } from '@/lib/environment'
+
+const isTauri = hasBackend
+const USAGE_REFRESH_MS = 1000 * 60 * 5
 
 // Query keys for Claude CLI
 export const claudeCliQueryKeys = {
   all: ['claude-cli'] as const,
   status: () => [...claudeCliQueryKeys.all, 'status'] as const,
   auth: () => [...claudeCliQueryKeys.all, 'auth'] as const,
+  usage: () => [...claudeCliQueryKeys.all, 'usage'] as const,
   versions: () => [...claudeCliQueryKeys.all, 'versions'] as const,
+}
+
+function getUsageStaleTime(snapshot?: ClaudeUsageSnapshot): number {
+  if (!snapshot?.fetchedAt) return 0
+  const expiresAtMs = snapshot.fetchedAt * 1000 + USAGE_REFRESH_MS
+  return Math.max(0, expiresAtMs - Date.now())
+}
+
+function getUsageRefetchInterval(snapshot?: ClaudeUsageSnapshot): number {
+  if (!snapshot?.fetchedAt) return USAGE_REFRESH_MS
+  const expiresAtMs = snapshot.fetchedAt * 1000 + USAGE_REFRESH_MS
+  return Math.max(1_000, expiresAtMs - Date.now())
 }
 
 /**
  * Hook to check if Claude CLI is installed and get its status
  */
-export function useClaudeCliStatus() {
+export function useClaudeCliStatus(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: claudeCliQueryKeys.status(),
     queryFn: async (): Promise<ClaudeCliStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock CLI status')
-        return { installed: false, version: null, path: null }
+        return { installed: false, version: null, path: null, supports_auth_command: false }
       }
 
       try {
@@ -51,9 +66,10 @@ export function useClaudeCliStatus() {
         return status
       } catch (error) {
         logger.error('Failed to check Claude CLI status', { error })
-        return { installed: false, version: null, path: null }
+        return { installed: false, version: null, path: null, supports_auth_command: false }
       }
     },
+    enabled: options?.enabled ?? true,
     staleTime: 1000 * 60 * 5, // 5 minutes
     gcTime: 1000 * 60 * 10, // 10 minutes
     refetchInterval: 1000 * 60 * 60, // Re-check every hour
@@ -92,9 +108,28 @@ export function useClaudeCliAuth(options?: { enabled?: boolean }) {
 }
 
 /**
+ * Hook to fetch current Claude usage.
+ */
+export function useClaudeUsage(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: claudeCliQueryKeys.usage(),
+    queryFn: async (): Promise<ClaudeUsageSnapshot> => {
+      if (!isTauri()) {
+        throw new Error('Claude usage is only available in Tauri context')
+      }
+      return invoke<ClaudeUsageSnapshot>('get_claude_usage')
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: query => getUsageStaleTime(query.state.data),
+    gcTime: 1000 * 60 * 10,
+    refetchInterval: query => getUsageRefetchInterval(query.state.data),
+  })
+}
+
+/**
  * Hook to fetch available Claude CLI versions from GitHub
  */
-export function useAvailableCliVersions() {
+export function useAvailableCliVersions(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: claudeCliQueryKeys.versions(),
     queryFn: async (): Promise<ReleaseInfo[]> => {
@@ -126,7 +161,8 @@ export function useAvailableCliVersions() {
         throw error
       }
     },
-    staleTime: 1000 * 60 * 15, // 15 minutes
+    enabled: options?.enabled ?? true,
+    staleTime: 1000 * 60 * 15, // Cache for 15 minutes to avoid rate limiting
     gcTime: 1000 * 60 * 30, // 30 minutes
     refetchInterval: 1000 * 60 * 60, // Re-check every hour
   })
@@ -140,10 +176,6 @@ export function useInstallClaudeCli() {
 
   return useMutation({
     mutationFn: async (version?: string) => {
-      if (!isTauri()) {
-        throw new Error('Cannot install CLI outside Tauri context')
-      }
-
       logger.info('Installing Claude CLI', { version })
       await invoke('install_claude_cli', { version: version ?? null })
     },
@@ -169,6 +201,7 @@ export function useInstallClaudeCli() {
  */
 export function useInstallProgress(): [InstallProgress | null, () => void] {
   const [progress, setProgress] = useState<InstallProgress | null>(null)
+  const wsConnected = useWsConnectionStatus()
 
   const resetProgress = useCallback(() => {
     setProgress(null)
@@ -196,7 +229,10 @@ export function useInstallProgress(): [InstallProgress | null, () => void] {
           }
         )
       } catch (error) {
-        logger.error('[useInstallProgress] Failed to setup listener', { listenerId, error })
+        logger.error('[useInstallProgress] Failed to setup listener', {
+          listenerId,
+          error,
+        })
       }
     }
 
@@ -208,7 +244,7 @@ export function useInstallProgress(): [InstallProgress | null, () => void] {
         unlistenFn()
       }
     }
-  }, [])
+  }, [wsConnected])
 
   return [progress, resetProgress]
 }
@@ -237,7 +273,9 @@ export function useClaudeCliSetup() {
     // Reset progress before starting new installation to prevent stale state
     resetProgress()
 
-    logger.info('[useClaudeCliSetup] Calling installMutation.mutate()', { version })
+    logger.info('[useClaudeCliSetup] Calling installMutation.mutate()', {
+      version,
+    })
     installMutation.mutate(version, {
       onSuccess: () => {
         logger.info('[useClaudeCliSetup] mutate onSuccess callback')
@@ -254,7 +292,9 @@ export function useClaudeCliSetup() {
     status: status.data,
     isStatusLoading: status.isLoading,
     versions: versions.data ?? [],
-    isVersionsLoading: versions.isLoading,
+    isVersionsLoading: versions.isFetching,
+    isVersionsError: versions.isError,
+    refetchVersions: versions.refetch,
     needsSetup,
     isInstalling: installMutation.isPending,
     installError: installMutation.error,

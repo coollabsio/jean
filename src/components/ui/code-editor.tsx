@@ -12,7 +12,11 @@ import {
 } from '@codemirror/view'
 import { EditorState, Compartment } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { syntaxHighlighting, defaultHighlightStyle, LanguageSupport } from '@codemirror/language'
+import {
+  syntaxHighlighting,
+  defaultHighlightStyle,
+  type LanguageSupport,
+} from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
@@ -202,7 +206,7 @@ export const CodeEditor = memo(function CodeEditor({
       // Enable native clipboard handling
       EditorView.domEventHandlers({
         copy: () => false, // Let browser handle copy
-        cut: () => false,  // Let browser handle cut
+        cut: () => false, // Let browser handle cut
         paste: () => false, // Let browser handle paste
       }),
     ]

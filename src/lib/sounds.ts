@@ -16,6 +16,10 @@ export const notificationSoundOptions: {
   { value: 'choochoo', label: 'Choo-choo' },
 ]
 
+const notificationSoundAssetMap: Partial<Record<NotificationSound, string>> = {
+  choochoo: '/sounds/peon-work-work.mp3',
+}
+
 // Single audio instance to prevent overlapping sounds
 let currentAudio: HTMLAudioElement | null = null
 
@@ -29,6 +33,12 @@ let audioContext: AudioContext | null = null
 export function playNotificationSound(sound: NotificationSound): void {
   if (sound === 'none') return
 
+  const soundSrc = notificationSoundAssetMap[sound]
+  if (!soundSrc) {
+    playSystemBeep()
+    return
+  }
+
   // Stop any currently playing sound to prevent overlap
   if (currentAudio) {
     currentAudio.pause()
@@ -36,7 +46,7 @@ export function playNotificationSound(sound: NotificationSound): void {
     currentAudio = null
   }
 
-  const audio = new Audio(`/sounds/${sound}.mp3`)
+  const audio = new Audio(soundSrc)
   currentAudio = audio
 
   audio.play().catch(() => {
@@ -81,7 +91,7 @@ function playSystemBeep(): void {
 }
 
 // Cache for preloaded audio elements
-const audioCache: Map<NotificationSound, HTMLAudioElement> = new Map()
+const audioCache = new Map<NotificationSound, HTMLAudioElement>()
 
 /**
  * Preload all sound files to ensure instant playback.
@@ -89,10 +99,12 @@ const audioCache: Map<NotificationSound, HTMLAudioElement> = new Map()
  */
 export function preloadAllSounds(): void {
   for (const option of notificationSoundOptions) {
-    if (option.value !== 'none') {
-      const audio = new Audio(`/sounds/${option.value}.mp3`)
-      audio.preload = 'auto'
-      audioCache.set(option.value, audio)
-    }
+    if (option.value === 'none') continue
+    const soundSrc = notificationSoundAssetMap[option.value]
+    if (!soundSrc) continue
+
+    const audio = new Audio(soundSrc)
+    audio.preload = 'auto'
+    audioCache.set(option.value, audio)
   }
 }

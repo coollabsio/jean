@@ -26,7 +26,11 @@ export function GhAuthError({ onLogin, isGhInstalled }: GhAuthErrorProps) {
             Install the GitHub CLI to access issues and pull requests
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => openPreferences(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => openPreferences(true)}
+        >
           Open Settings
         </Button>
       </div>

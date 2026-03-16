@@ -13,7 +13,12 @@ interface FolderTreeItemProps {
   isDropTarget?: boolean
 }
 
-export function FolderTreeItem({ folder, children, depth, isDropTarget }: FolderTreeItemProps) {
+export function FolderTreeItem({
+  folder,
+  children,
+  depth,
+  isDropTarget,
+}: FolderTreeItemProps) {
   const {
     expandedFolderIds,
     toggleFolderExpanded,
@@ -32,6 +37,7 @@ export function FolderTreeItem({ folder, children, depth, isDropTarget }: Folder
   // Sync editName when folder name changes or editing starts
   useEffect(() => {
     if (isEditing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditName(folder.name)
       editStartTimeRef.current = Date.now()
     }

@@ -90,6 +90,7 @@ export function useSyntaxHighlighting(
 
   useEffect(() => {
     if (!code) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHtml(null)
       setIsLoading(false)
       setError(null)

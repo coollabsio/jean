@@ -12,14 +12,9 @@ use std::io::{BufRead, BufReader};
 
 // Re-export is_process_alive from platform module
 pub use crate::platform::is_process_alive;
-use crate::platform::silent_command;
-
-/// Escape a string for safe use in a shell command.
 #[cfg(unix)]
-fn shell_escape(s: &str) -> String {
-    // Use single quotes and escape any single quotes within
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
+use crate::platform::shell_escape;
+use crate::platform::silent_command;
 
 /// Spawn Claude CLI as a detached process that survives Jean quitting (Unix).
 ///
@@ -94,6 +89,15 @@ pub fn spawn_detached_claude(
     log::trace!("Spawning detached Claude CLI");
     log::trace!("Shell command: {shell_cmd}");
     log::trace!("Working directory: {working_dir:?}");
+
+    // Verify working directory exists before spawn (otherwise sh returns
+    // a cryptic "No such file or directory" from current_dir).
+    if !working_dir.exists() {
+        return Err(format!(
+            "Working directory does not exist: {}. The worktree may still be initializing.",
+            working_dir.display()
+        ));
+    }
 
     // Spawn the shell command
     let mut child = silent_command("sh")

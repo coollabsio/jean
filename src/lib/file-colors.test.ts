@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { getExtensionColor, getExtension, EXTENSION_COLORS } from './file-colors'
+import {
+  getExtensionColor,
+  getExtension,
+  EXTENSION_COLORS,
+} from './file-colors'
 
 describe('getExtensionColor', () => {
   it('returns correct color for TypeScript files', () => {
@@ -81,8 +85,19 @@ describe('getExtension', () => {
 describe('EXTENSION_COLORS constant', () => {
   it('has all expected extensions', () => {
     const expectedExtensions = [
-      'ts', 'tsx', 'js', 'jsx', 'rs', 'py',
-      'json', 'md', 'css', 'html', 'toml', 'yaml', 'yml'
+      'ts',
+      'tsx',
+      'js',
+      'jsx',
+      'rs',
+      'py',
+      'json',
+      'md',
+      'css',
+      'html',
+      'toml',
+      'yaml',
+      'yml',
     ]
     expectedExtensions.forEach(ext => {
       expect(EXTENSION_COLORS).toHaveProperty(ext)

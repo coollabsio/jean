@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::chat::types::LabelData;
+
 /// Type of session (base branch or worktree)
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +37,8 @@ pub struct JeanConfig {
 pub struct JeanScripts {
     /// Script to run after worktree creation
     pub setup: Option<String>,
+    /// Script to run before worktree deletion
+    pub teardown: Option<String>,
     /// Script to run the dev environment
     pub run: Option<String>,
 }
@@ -64,6 +68,31 @@ pub struct Project {
     /// Path to custom avatar image (relative to app data dir, e.g., "avatars/abc123.png")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_path: Option<String>,
+    /// MCP server names enabled by default for this project (None = inherit from global)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_mcp_servers: Option<Vec<String>>,
+    /// All MCP server names ever seen for this project (prevents re-enabling user-disabled servers)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_mcp_servers: Vec<String>,
+    /// Custom system prompt appended to every session execution
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_system_prompt: Option<String>,
+    /// Default provider profile name for sessions in this project (None = use global default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<String>,
+    /// Default CLI backend for sessions in this project (None = use global default)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_backend: Option<String>,
+    /// Custom base directory for worktrees (None = use default ~/jean).
+    /// When set, worktrees go to <worktrees_dir>/<project-name>/<worktree-name>.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktrees_dir: Option<String>,
+    /// Linear personal API key for fetching issues (per-project)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_api_key: Option<String>,
+    /// Linear team ID to filter issues (None = show all teams)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_team_id: Option<String>,
 }
 
 /// A git worktree created for a project
@@ -75,7 +104,7 @@ pub struct Worktree {
     pub project_id: String,
     /// Random workspace name (e.g., "fuzzy-tiger")
     pub name: String,
-    /// Absolute path to worktree (~/jean/<project>/<name>)
+    /// Absolute path to worktree (configurable base dir, defaults to ~/jean/<project>/<name>)
     pub path: String,
     /// Git branch name (same as workspace name)
     pub branch: String,
@@ -87,6 +116,9 @@ pub struct Worktree {
     /// The setup script that was executed (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup_script: Option<String>,
+    /// Whether the setup script succeeded (None = no script, Some(true) = success, Some(false) = failed)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_success: Option<bool>,
     /// Type of session (defaults to Worktree for backward compatibility)
     #[serde(default)]
     pub session_type: SessionType,
@@ -96,6 +128,12 @@ pub struct Worktree {
     /// GitHub PR URL (if a PR has been created)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_url: Option<String>,
+    /// GitHub issue number (if created from an issue)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_number: Option<u32>,
+    /// Linear issue identifier (e.g. "ENG-123", if created from a Linear issue)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_issue_identifier: Option<String>,
     /// Cached PR display status (draft, open, review, merged, closed)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached_pr_status: Option<String>,
@@ -138,9 +176,15 @@ pub struct Worktree {
     /// Display order within project (lower = higher in list, base sessions ignore this)
     #[serde(default)]
     pub order: u32,
+    /// User-assigned label with color (e.g. "In Progress")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<LabelData>,
     /// Unix timestamp when worktree was archived (None = not archived)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// Unix timestamp when worktree was last opened/viewed by the user
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_opened_at: Option<u64>,
 }
 
 /// Container for all persisted project data
@@ -353,6 +397,10 @@ pub struct WorktreeCreatingEvent {
     pub path: String,
     /// The branch name
     pub branch: String,
+    /// PR number (if created from a PR)
+    pub pr_number: Option<u64>,
+    /// Issue number (if created from an issue)
+    pub issue_number: Option<u64>,
 }
 
 /// Event emitted when worktree creation completes successfully
@@ -393,6 +441,9 @@ pub struct WorktreeDeletedEvent {
     pub id: String,
     /// The project ID
     pub project_id: String,
+    /// Output from the teardown script, if one was configured and ran successfully
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub teardown_output: Option<String>,
 }
 
 /// Event emitted when worktree deletion fails

@@ -545,7 +545,9 @@ const MIGRATED_KEYBINDINGS: Partial<Record<string, string>> = {
 }
 
 // Migrate: if stored value matches old default, use new default
-function migrateKeybindings(stored: KeybindingsMap | undefined): KeybindingsMap {
+function migrateKeybindings(
+  stored: KeybindingsMap | undefined
+): KeybindingsMap {
   if (!stored) return DEFAULT_KEYBINDINGS
 
   const migrated = { ...stored }

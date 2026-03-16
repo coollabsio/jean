@@ -2,6 +2,40 @@
 
 ## Linux Graphics Issues
 
+### White Screen on Ubuntu 24.04+ (AppImage)
+
+**Error Messages:**
+
+```
+/usr/lib/x86_64-linux-gnu/gvfs/libgvfscommon.so: undefined symbol: g_task_set_static_name
+Failed to load module: /usr/lib/x86_64-linux-gnu/gio/modules/libgvfsdbus.so
+GStreamer element autoaudiosink not found. Please install it
+(WebKitWebProcess): GLib-GObject-WARNING: invalid (NULL) pointer instance
+(WebKitWebProcess): GLib-GObject-CRITICAL: g_signal_connect_data: assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed
+```
+
+**Root Cause:**
+The AppImage bundles GLib 2.72 (from the Ubuntu 22.04 build host), but Ubuntu 24.04 has GLib 2.80. When the bundled old GLib is loaded, system GIO modules that require `g_task_set_static_name` (added in GLib 2.76) fail. This cascading failure crashes WebKitWebProcess, resulting in a white/blank screen.
+
+Additionally, the AppImage bundles `libgstreamer` but no GStreamer plugins, so audio element initialization fails.
+
+**Fix:**
+This is handled by the custom AppRun script (`scripts/appimage-webkit-fix.sh`) which prefers system libraries when system WebKitGTK is available. If you have an AppImage that doesn't include this fix, you can work around it by extracting and running with system libs:
+
+```bash
+# Extract
+./Jean_VERSION_amd64.AppImage --appimage-extract
+
+# Run with system GLib
+GIO_MODULE_DIR=/dev/null LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:squashfs-root/usr/lib:squashfs-root/usr/lib/x86_64-linux-gnu" squashfs-root/usr/bin/jean
+```
+
+Alternatively, install the `.deb` package which uses system libraries directly.
+
+**Related Issues:** [#54](https://github.com/coollabsio/jean/issues/54), [#100](https://github.com/coollabsio/jean/issues/100)
+
+---
+
 ### GBM Buffer Errors
 
 **Error Message:**

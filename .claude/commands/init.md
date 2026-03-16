@@ -37,8 +37,8 @@ After receiving their input:
 
 Execute these commands in order:
 
-1. `npm install`
-2. `npm run check:all`
+1. `bun install`
+2. `bun run check:all`
 
 ## Step 4: Final Instructions
 

@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useChatStore } from './chat-store'
-import type { ToolCall, QueuedMessage, PermissionDenial, PendingImage, QuestionAnswer } from '@/types/chat'
+import type {
+  ToolCall,
+  QueuedMessage,
+  PermissionDenial,
+  PendingImage,
+  PendingTextFile,
+  QuestionAnswer,
+} from '@/types/chat'
 import type { ReviewResponse } from '@/types/projects'
 
 describe('ChatStore', () => {
@@ -10,10 +17,11 @@ describe('ChatStore', () => {
       activeWorktreePath: null,
       activeSessionIds: {},
       reviewResults: {},
-      viewingReviewTab: {},
+      reviewSidebarVisible: false,
       fixedReviewFindings: {},
       worktreePaths: {},
       sendingSessionIds: {},
+      sendStartedAt: {},
       waitingForInputSessionIds: {},
       sessionWorktreeMap: {},
       streamingContents: {},
@@ -23,7 +31,6 @@ describe('ChatStore', () => {
       inputDrafts: {},
       executionModes: {},
       thinkingLevels: {},
-      manualThinkingOverrides: {},
       selectedModels: {},
       answeredQuestions: {},
       submittedAnswers: {},
@@ -42,7 +49,9 @@ describe('ChatStore', () => {
       pendingPermissionDenials: {},
       deniedMessageContext: {},
       lastCompaction: {},
+      compactingSessions: {},
       reviewingSessions: {},
+      sessionLabels: {},
       savingContext: {},
       skippedQuestionSessions: {},
     })
@@ -55,7 +64,9 @@ describe('ChatStore', () => {
       setActiveSession('worktree-1', 'session-1')
 
       expect(getActiveSession('worktree-1')).toBe('session-1')
-      expect(useChatStore.getState().sessionWorktreeMap['session-1']).toBe('worktree-1')
+      expect(useChatStore.getState().sessionWorktreeMap['session-1']).toBe(
+        'worktree-1'
+      )
     })
 
     it('updates session-worktree mapping', () => {
@@ -104,7 +115,8 @@ describe('ChatStore', () => {
 
   describe('sending state', () => {
     it('adds and removes sending session', () => {
-      const { addSendingSession, removeSendingSession, isSending } = useChatStore.getState()
+      const { addSendingSession, removeSendingSession, isSending } =
+        useChatStore.getState()
 
       expect(isSending('session-1')).toBe(false)
 
@@ -116,7 +128,8 @@ describe('ChatStore', () => {
     })
 
     it('checks if worktree is running', () => {
-      const { setActiveSession, addSendingSession, isWorktreeRunning } = useChatStore.getState()
+      const { setActiveSession, addSendingSession, isWorktreeRunning } =
+        useChatStore.getState()
 
       setActiveSession('worktree-1', 'session-1')
 
@@ -124,6 +137,75 @@ describe('ChatStore', () => {
 
       addSendingSession('session-1')
       expect(isWorktreeRunning('worktree-1')).toBe(true)
+    })
+
+    it('allows fast completion when the current run has streaming state', () => {
+      const now = Date.now()
+
+      useChatStore.setState({
+        sendingSessionIds: { 'session-1': true },
+        sendStartedAt: { 'session-1': now },
+        streamingContents: { 'session-1': 'Fast reply' },
+      })
+
+      useChatStore.getState().completeSession('session-1')
+
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds['session-1']).toBeUndefined()
+      expect(state.sendStartedAt['session-1']).toBeUndefined()
+      expect(state.reviewingSessions['session-1']).toBe(true)
+    })
+
+    it('blocks fast completion when no current streaming state exists', () => {
+      const now = Date.now()
+
+      useChatStore.setState({
+        sendingSessionIds: { 'session-1': true },
+        sendStartedAt: { 'session-1': now },
+      })
+
+      useChatStore.getState().completeSession('session-1')
+
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds['session-1']).toBe(true)
+      expect(state.sendStartedAt['session-1']).toBe(now)
+      expect(state.reviewingSessions['session-1']).toBeUndefined()
+    })
+
+    it('clears sending state and approval leftovers for an explicit cancellation', () => {
+      const now = Date.now()
+
+      useChatStore.setState({
+        sendingSessionIds: { 'session-1': true },
+        sendStartedAt: { 'session-1': now },
+        pendingPermissionDenials: {
+          'session-1': [
+            {
+              tool_name: 'Bash',
+              tool_use_id: 'tool-1',
+              tool_input: { command: 'bun test' },
+            },
+          ],
+        },
+        deniedMessageContext: {
+          'session-1': {
+            message: 'run tests',
+            model: 'opus',
+            executionMode: 'build',
+            thinkingLevel: 'off',
+          },
+        },
+        streamingContents: { 'session-1': 'partial output' },
+      })
+
+      useChatStore.getState().cancelSession('session-1')
+
+      const state = useChatStore.getState()
+      expect(state.sendingSessionIds['session-1']).toBeUndefined()
+      expect(state.sendStartedAt['session-1']).toBeUndefined()
+      expect(state.pendingPermissionDenials['session-1']).toBeUndefined()
+      expect(state.deniedMessageContext['session-1']).toBeUndefined()
+      expect(state.reviewingSessions['session-1']).toBe(true)
     })
   })
 
@@ -148,16 +230,21 @@ describe('ChatStore', () => {
       appendStreamingContent('session-1', 'Hello ')
       appendStreamingContent('session-1', 'World')
 
-      expect(useChatStore.getState().streamingContents['session-1']).toBe('Hello World')
+      expect(useChatStore.getState().streamingContents['session-1']).toBe(
+        'Hello World'
+      )
     })
 
     it('clears streaming content', () => {
-      const { appendStreamingContent, clearStreamingContent } = useChatStore.getState()
+      const { appendStreamingContent, clearStreamingContent } =
+        useChatStore.getState()
 
       appendStreamingContent('session-1', 'Hello')
       clearStreamingContent('session-1')
 
-      expect(useChatStore.getState().streamingContents['session-1']).toBeUndefined()
+      expect(
+        useChatStore.getState().streamingContents['session-1']
+      ).toBeUndefined()
     })
   })
 
@@ -173,7 +260,9 @@ describe('ChatStore', () => {
 
       addToolCall('session-1', mockToolCall)
 
-      expect(useChatStore.getState().activeToolCalls['session-1']).toContainEqual(mockToolCall)
+      expect(
+        useChatStore.getState().activeToolCalls['session-1']
+      ).toContainEqual(mockToolCall)
     })
 
     it('deduplicates tool calls by ID', () => {
@@ -182,7 +271,9 @@ describe('ChatStore', () => {
       addToolCall('session-1', mockToolCall)
       addToolCall('session-1', mockToolCall)
 
-      expect(useChatStore.getState().activeToolCalls['session-1']).toHaveLength(1)
+      expect(useChatStore.getState().activeToolCalls['session-1']).toHaveLength(
+        1
+      )
     })
 
     it('updates tool call output', () => {
@@ -201,13 +292,16 @@ describe('ChatStore', () => {
       addToolCall('session-1', mockToolCall)
       clearToolCalls('session-1')
 
-      expect(useChatStore.getState().activeToolCalls['session-1']).toBeUndefined()
+      expect(
+        useChatStore.getState().activeToolCalls['session-1']
+      ).toBeUndefined()
     })
   })
 
   describe('content blocks', () => {
     it('adds text block', () => {
-      const { addTextBlock, getStreamingContentBlocks } = useChatStore.getState()
+      const { addTextBlock, getStreamingContentBlocks } =
+        useChatStore.getState()
 
       addTextBlock('session-1', 'Hello')
 
@@ -217,7 +311,8 @@ describe('ChatStore', () => {
     })
 
     it('appends to existing text block', () => {
-      const { addTextBlock, getStreamingContentBlocks } = useChatStore.getState()
+      const { addTextBlock, getStreamingContentBlocks } =
+        useChatStore.getState()
 
       addTextBlock('session-1', 'Hello ')
       addTextBlock('session-1', 'World')
@@ -228,7 +323,8 @@ describe('ChatStore', () => {
     })
 
     it('adds tool block', () => {
-      const { addTextBlock, addToolBlock, getStreamingContentBlocks } = useChatStore.getState()
+      const { addTextBlock, addToolBlock, getStreamingContentBlocks } =
+        useChatStore.getState()
 
       addTextBlock('session-1', 'Hello')
       addToolBlock('session-1', 'tool-1')
@@ -239,7 +335,8 @@ describe('ChatStore', () => {
     })
 
     it('adds thinking block', () => {
-      const { addThinkingBlock, getStreamingContentBlocks } = useChatStore.getState()
+      const { addThinkingBlock, getStreamingContentBlocks } =
+        useChatStore.getState()
 
       addThinkingBlock('session-1', 'Thinking...')
 
@@ -249,7 +346,11 @@ describe('ChatStore', () => {
     })
 
     it('clears content blocks', () => {
-      const { addTextBlock, clearStreamingContentBlocks, getStreamingContentBlocks } = useChatStore.getState()
+      const {
+        addTextBlock,
+        clearStreamingContentBlocks,
+        getStreamingContentBlocks,
+      } = useChatStore.getState()
 
       addTextBlock('session-1', 'Hello')
       clearStreamingContentBlocks('session-1')
@@ -282,9 +383,12 @@ describe('ChatStore', () => {
     })
 
     it('clears pending denials when switching to yolo', () => {
-      const { setPendingDenials, setExecutionMode, getPendingDenials } = useChatStore.getState()
+      const { setPendingDenials, setExecutionMode, getPendingDenials } =
+        useChatStore.getState()
 
-      const denials: PermissionDenial[] = [{ tool_name: 'Bash', tool_use_id: 'toolu_123', tool_input: {} }]
+      const denials: PermissionDenial[] = [
+        { tool_name: 'Bash', tool_use_id: 'toolu_123', tool_input: {} },
+      ]
       setPendingDenials('session-1', denials)
 
       setExecutionMode('session-1', 'yolo')
@@ -303,21 +407,16 @@ describe('ChatStore', () => {
       expect(getThinkingLevel('session-1')).toBe('think')
     })
 
-    it('tracks manual thinking override', () => {
-      const { setManualThinkingOverride, hasManualThinkingOverride } = useChatStore.getState()
-
-      expect(hasManualThinkingOverride('session-1')).toBe(false)
-
-      setManualThinkingOverride('session-1', true)
-      expect(hasManualThinkingOverride('session-1')).toBe(true)
-    })
   })
 
   describe('question answering', () => {
     it('marks question as answered', () => {
-      const { markQuestionAnswered, isQuestionAnswered, getSubmittedAnswers } = useChatStore.getState()
+      const { markQuestionAnswered, isQuestionAnswered, getSubmittedAnswers } =
+        useChatStore.getState()
 
-      const answers: QuestionAnswer[] = [{ questionIndex: 0, selectedOptions: [0] }]
+      const answers: QuestionAnswer[] = [
+        { questionIndex: 0, selectedOptions: [0] },
+      ]
       markQuestionAnswered('session-1', 'tool-1', answers)
 
       expect(isQuestionAnswered('session-1', 'tool-1')).toBe(true)
@@ -331,7 +430,8 @@ describe('ChatStore', () => {
     })
 
     it('tracks question skipping', () => {
-      const { setQuestionsSkipped, areQuestionsSkipped } = useChatStore.getState()
+      const { setQuestionsSkipped, areQuestionsSkipped } =
+        useChatStore.getState()
 
       expect(areQuestionsSkipped('session-1')).toBe(false)
 
@@ -352,16 +452,17 @@ describe('ChatStore', () => {
       pendingSkills: [],
       pendingTextFiles: [],
       model: 'sonnet',
+      provider: null,
       executionMode: 'plan',
       thinkingLevel: 'off',
-      disableThinkingForMode: false,
       queuedAt: Date.now(),
     })
 
     const mockMessage = createMockMessage('msg-1', 'Hello')
 
     it('enqueues message', () => {
-      const { enqueueMessage, getQueueLength, getQueuedMessages } = useChatStore.getState()
+      const { enqueueMessage, getQueueLength, getQueuedMessages } =
+        useChatStore.getState()
 
       enqueueMessage('session-1', mockMessage)
 
@@ -390,7 +491,8 @@ describe('ChatStore', () => {
     })
 
     it('removes specific queued message', () => {
-      const { enqueueMessage, removeQueuedMessage, getQueuedMessages } = useChatStore.getState()
+      const { enqueueMessage, removeQueuedMessage, getQueuedMessages } =
+        useChatStore.getState()
 
       const msg1 = createMockMessage('msg-1', 'First')
       const msg2 = createMockMessage('msg-2', 'Second')
@@ -406,7 +508,8 @@ describe('ChatStore', () => {
     })
 
     it('clears queue', () => {
-      const { enqueueMessage, clearQueue, getQueueLength } = useChatStore.getState()
+      const { enqueueMessage, clearQueue, getQueueLength } =
+        useChatStore.getState()
 
       enqueueMessage('session-1', mockMessage)
       clearQueue('session-1')
@@ -419,15 +522,16 @@ describe('ChatStore', () => {
     it('adds approved tool', () => {
       const { addApprovedTool, getApprovedTools } = useChatStore.getState()
 
-      addApprovedTool('session-1', 'Bash(npm test)')
+      addApprovedTool('session-1', 'Bash(bun test)')
 
-      expect(getApprovedTools('session-1')).toContain('Bash(npm test)')
+      expect(getApprovedTools('session-1')).toContain('Bash(bun test)')
     })
 
     it('clears approved tools', () => {
-      const { addApprovedTool, clearApprovedTools, getApprovedTools } = useChatStore.getState()
+      const { addApprovedTool, clearApprovedTools, getApprovedTools } =
+        useChatStore.getState()
 
-      addApprovedTool('session-1', 'Bash(npm test)')
+      addApprovedTool('session-1', 'Bash(bun test)')
       clearApprovedTools('session-1')
 
       expect(getApprovedTools('session-1')).toHaveLength(0)
@@ -436,7 +540,11 @@ describe('ChatStore', () => {
 
   describe('pending denials', () => {
     const denials: PermissionDenial[] = [
-      { tool_name: 'Bash', tool_use_id: 'toolu_123', tool_input: { command: 'rm -rf /' } },
+      {
+        tool_name: 'Bash',
+        tool_use_id: 'toolu_123',
+        tool_input: { command: 'rm -rf /' },
+      },
     ]
 
     it('sets and gets pending denials', () => {
@@ -448,7 +556,8 @@ describe('ChatStore', () => {
     })
 
     it('clears pending denials', () => {
-      const { setPendingDenials, clearPendingDenials, getPendingDenials } = useChatStore.getState()
+      const { setPendingDenials, clearPendingDenials, getPendingDenials } =
+        useChatStore.getState()
 
       setPendingDenials('session-1', denials)
       clearPendingDenials('session-1')
@@ -465,7 +574,8 @@ describe('ChatStore', () => {
     }
 
     it('sets and gets denied message context', () => {
-      const { setDeniedMessageContext, getDeniedMessageContext } = useChatStore.getState()
+      const { setDeniedMessageContext, getDeniedMessageContext } =
+        useChatStore.getState()
 
       setDeniedMessageContext('session-1', context)
 
@@ -473,7 +583,11 @@ describe('ChatStore', () => {
     })
 
     it('clears denied message context', () => {
-      const { setDeniedMessageContext, clearDeniedMessageContext, getDeniedMessageContext } = useChatStore.getState()
+      const {
+        setDeniedMessageContext,
+        clearDeniedMessageContext,
+        getDeniedMessageContext,
+      } = useChatStore.getState()
 
       setDeniedMessageContext('session-1', context)
       clearDeniedMessageContext('session-1')
@@ -488,13 +602,16 @@ describe('ChatStore', () => {
 
       // Set up various session state
       store.addApprovedTool('session-1', 'Bash')
-      store.setPendingDenials('session-1', [{ tool_name: 'Write', tool_use_id: 'toolu_456', tool_input: {} }])
+      store.setPendingDenials('session-1', [
+        { tool_name: 'Write', tool_use_id: 'toolu_456', tool_input: {} },
+      ])
       store.setDeniedMessageContext('session-1', { message: 'test' })
       store.setSessionReviewing('session-1', true)
       store.setWaitingForInput('session-1', true)
-      store.markQuestionAnswered('session-1', 'q1', [{ questionIndex: 0, selectedOptions: [0] }])
+      store.markQuestionAnswered('session-1', 'q1', [
+        { questionIndex: 0, selectedOptions: [0] },
+      ])
       store.markFindingFixed('session-1', 'finding-1')
-      store.setManualThinkingOverride('session-1', true)
 
       store.clearSessionState('session-1')
 
@@ -505,7 +622,6 @@ describe('ChatStore', () => {
       expect(store.isWaitingForInput('session-1')).toBe(false)
       expect(store.isQuestionAnswered('session-1', 'q1')).toBe(false)
       expect(store.isFindingFixed('session-1', 'finding-1')).toBe(false)
-      expect(store.hasManualThinkingOverride('session-1')).toBe(false)
     })
   })
 
@@ -514,7 +630,9 @@ describe('ChatStore', () => {
       const { setInputDraft, clearInputDraft } = useChatStore.getState()
 
       setInputDraft('session-1', 'Hello world')
-      expect(useChatStore.getState().inputDrafts['session-1']).toBe('Hello world')
+      expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+        'Hello world'
+      )
 
       clearInputDraft('session-1')
       expect(useChatStore.getState().inputDrafts['session-1']).toBeUndefined()
@@ -526,25 +644,36 @@ describe('ChatStore', () => {
       const { setError } = useChatStore.getState()
 
       setError('session-1', 'Something went wrong')
-      expect(useChatStore.getState().errors['session-1']).toBe('Something went wrong')
+      expect(useChatStore.getState().errors['session-1']).toBe(
+        'Something went wrong'
+      )
 
       setError('session-1', null)
       expect(useChatStore.getState().errors['session-1']).toBeNull()
     })
 
     it('sets and clears last sent message', () => {
-      const { setLastSentMessage, clearLastSentMessage } = useChatStore.getState()
+      const { setLastSentMessage, clearLastSentMessage } =
+        useChatStore.getState()
 
       setLastSentMessage('session-1', 'Hello')
-      expect(useChatStore.getState().lastSentMessages['session-1']).toBe('Hello')
+      expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
+        'Hello'
+      )
 
       clearLastSentMessage('session-1')
-      expect(useChatStore.getState().lastSentMessages['session-1']).toBeUndefined()
+      expect(
+        useChatStore.getState().lastSentMessages['session-1']
+      ).toBeUndefined()
     })
   })
 
   describe('pending images', () => {
-    const mockImage: PendingImage = { id: 'img-1', path: '/test.png', filename: 'test.png' }
+    const mockImage: PendingImage = {
+      id: 'img-1',
+      path: '/test.png',
+      filename: 'test.png',
+    }
 
     it('adds pending image', () => {
       const { addPendingImage, getPendingImages } = useChatStore.getState()
@@ -555,7 +684,8 @@ describe('ChatStore', () => {
     })
 
     it('removes pending image', () => {
-      const { addPendingImage, removePendingImage, getPendingImages } = useChatStore.getState()
+      const { addPendingImage, removePendingImage, getPendingImages } =
+        useChatStore.getState()
 
       addPendingImage('session-1', mockImage)
       removePendingImage('session-1', 'img-1')
@@ -564,7 +694,8 @@ describe('ChatStore', () => {
     })
 
     it('clears pending images', () => {
-      const { addPendingImage, clearPendingImages, getPendingImages } = useChatStore.getState()
+      const { addPendingImage, clearPendingImages, getPendingImages } =
+        useChatStore.getState()
 
       addPendingImage('session-1', mockImage)
       clearPendingImages('session-1')
@@ -573,10 +704,106 @@ describe('ChatStore', () => {
     })
   })
 
+  describe('pending text files', () => {
+    const mockTextFile: PendingTextFile = {
+      id: 'text-1',
+      path: '/tmp/pasted-texts/paste-123.txt',
+      filename: 'paste-123.txt',
+      size: 1024,
+      content: 'Hello world',
+    }
+
+    it('adds pending text file', () => {
+      const { addPendingTextFile, getPendingTextFiles } =
+        useChatStore.getState()
+
+      addPendingTextFile('session-1', mockTextFile)
+
+      expect(getPendingTextFiles('session-1')).toContainEqual(mockTextFile)
+    })
+
+    it('updates pending text file content and size', () => {
+      const { addPendingTextFile, updatePendingTextFile, getPendingTextFiles } =
+        useChatStore.getState()
+
+      addPendingTextFile('session-1', mockTextFile)
+      updatePendingTextFile('session-1', 'text-1', 'Updated content', 15)
+
+      const files = getPendingTextFiles('session-1')
+      expect(files).toHaveLength(1)
+      expect(files[0]?.content).toBe('Updated content')
+      expect(files[0]?.size).toBe(15)
+    })
+
+    it('does not affect other text files when updating', () => {
+      const { addPendingTextFile, updatePendingTextFile, getPendingTextFiles } =
+        useChatStore.getState()
+
+      const otherFile: PendingTextFile = {
+        id: 'text-2',
+        path: '/tmp/pasted-texts/paste-456.txt',
+        filename: 'paste-456.txt',
+        size: 512,
+        content: 'Other content',
+      }
+
+      addPendingTextFile('session-1', mockTextFile)
+      addPendingTextFile('session-1', otherFile)
+      updatePendingTextFile('session-1', 'text-1', 'Updated', 7)
+
+      const files = getPendingTextFiles('session-1')
+      expect(files).toHaveLength(2)
+      expect(files.find(f => f.id === 'text-2')?.content).toBe('Other content')
+    })
+
+    it('handles update for non-existent text file gracefully', () => {
+      const { addPendingTextFile, updatePendingTextFile, getPendingTextFiles } =
+        useChatStore.getState()
+
+      addPendingTextFile('session-1', mockTextFile)
+      updatePendingTextFile('session-1', 'non-existent', 'New content', 11)
+
+      const files = getPendingTextFiles('session-1')
+      expect(files).toHaveLength(1)
+      expect(files[0]?.content).toBe('Hello world')
+    })
+
+    it('removes pending text file', () => {
+      const { addPendingTextFile, removePendingTextFile, getPendingTextFiles } =
+        useChatStore.getState()
+
+      addPendingTextFile('session-1', mockTextFile)
+      removePendingTextFile('session-1', 'text-1')
+
+      expect(getPendingTextFiles('session-1')).toHaveLength(0)
+    })
+
+    it('clears pending text files', () => {
+      const {
+        addPendingTextFile,
+        clearPendingTextFiles,
+        getPendingTextFiles,
+      } = useChatStore.getState()
+
+      addPendingTextFile('session-1', mockTextFile)
+      clearPendingTextFiles('session-1')
+
+      expect(getPendingTextFiles('session-1')).toHaveLength(0)
+    })
+  })
+
   describe('active todos', () => {
     const mockTodos = [
-      { content: 'Task 1', status: 'pending' as const, activeForm: 'Doing task 1' },
-      { content: 'Task 2', status: 'completed' as const, activeForm: 'Doing task 2' },
+      {
+        content: 'Task 1',
+        status: 'pending' as const,
+        activeForm: 'Doing task 1',
+      },
+      {
+        content: 'Task 2',
+        status: 'completed' as const,
+        activeForm: 'Doing task 2',
+      },
     ]
 
     it('sets and gets active todos', () => {
@@ -588,7 +815,8 @@ describe('ChatStore', () => {
     })
 
     it('clears active todos', () => {
-      const { setActiveTodos, clearActiveTodos, getActiveTodos } = useChatStore.getState()
+      const { setActiveTodos, clearActiveTodos, getActiveTodos } =
+        useChatStore.getState()
 
       setActiveTodos('session-1', mockTodos)
       clearActiveTodos('session-1')
@@ -608,7 +836,8 @@ describe('ChatStore', () => {
     })
 
     it('clears fixed findings', () => {
-      const { markFindingFixed, clearFixedFindings, isFindingFixed } = useChatStore.getState()
+      const { markFindingFixed, clearFixedFindings, isFindingFixed } =
+        useChatStore.getState()
 
       markFindingFixed('session-1', 'finding-1')
       clearFixedFindings('session-1')
@@ -619,7 +848,8 @@ describe('ChatStore', () => {
 
   describe('streaming plan approval', () => {
     it('sets and checks streaming plan approval', () => {
-      const { setStreamingPlanApproved, isStreamingPlanApproved } = useChatStore.getState()
+      const { setStreamingPlanApproved, isStreamingPlanApproved } =
+        useChatStore.getState()
 
       expect(isStreamingPlanApproved('session-1')).toBe(false)
 
@@ -628,7 +858,11 @@ describe('ChatStore', () => {
     })
 
     it('clears streaming plan approval', () => {
-      const { setStreamingPlanApproved, clearStreamingPlanApproval, isStreamingPlanApproved } = useChatStore.getState()
+      const {
+        setStreamingPlanApproved,
+        clearStreamingPlanApproval,
+        isStreamingPlanApproved,
+      } = useChatStore.getState()
 
       setStreamingPlanApproved('session-1', true)
       clearStreamingPlanApproval('session-1')
@@ -648,7 +882,8 @@ describe('ChatStore', () => {
     })
 
     it('clears executing mode', () => {
-      const { setExecutingMode, clearExecutingMode, getExecutingMode } = useChatStore.getState()
+      const { setExecutingMode, clearExecutingMode, getExecutingMode } =
+        useChatStore.getState()
 
       setExecutingMode('session-1', 'build')
       clearExecutingMode('session-1')
@@ -669,7 +904,8 @@ describe('ChatStore', () => {
     })
 
     it('clears last compaction', () => {
-      const { setLastCompaction, clearLastCompaction, getLastCompaction } = useChatStore.getState()
+      const { setLastCompaction, clearLastCompaction, getLastCompaction } =
+        useChatStore.getState()
 
       setLastCompaction('session-1', 'auto')
       clearLastCompaction('session-1')
@@ -699,39 +935,42 @@ describe('ChatStore', () => {
       approval_status: 'approved',
     }
 
-    it('sets review results and switches to review tab', () => {
-      const { setReviewResults, isViewingReviewTab } = useChatStore.getState()
+    it('sets review results and opens sidebar', () => {
+      const { setReviewResults } = useChatStore.getState()
 
-      setReviewResults('worktree-1', mockResults)
+      setReviewResults('session-1', mockResults)
 
-      expect(useChatStore.getState().reviewResults['worktree-1']).toEqual(mockResults)
-      expect(isViewingReviewTab('worktree-1')).toBe(true)
+      expect(useChatStore.getState().reviewResults['session-1']).toEqual(
+        mockResults
+      )
+      expect(useChatStore.getState().reviewSidebarVisible).toBe(true)
     })
 
-    it('clears review results and viewing state', () => {
-      const { setReviewResults, clearReviewResults, isViewingReviewTab } = useChatStore.getState()
+    it('clears review results', () => {
+      const { setReviewResults, clearReviewResults } = useChatStore.getState()
 
-      setReviewResults('worktree-1', mockResults)
-      clearReviewResults('worktree-1')
+      setReviewResults('session-1', mockResults)
+      clearReviewResults('session-1')
 
-      expect(useChatStore.getState().reviewResults['worktree-1']).toBeUndefined()
-      expect(isViewingReviewTab('worktree-1')).toBe(false)
+      expect(useChatStore.getState().reviewResults['session-1']).toBeUndefined()
     })
 
-    it('sets viewing review tab', () => {
-      const { setViewingReviewTab, isViewingReviewTab } = useChatStore.getState()
+    it('toggles review sidebar visibility', () => {
+      const { setReviewSidebarVisible, toggleReviewSidebar } =
+        useChatStore.getState()
 
-      setViewingReviewTab('worktree-1', true)
-      expect(isViewingReviewTab('worktree-1')).toBe(true)
+      setReviewSidebarVisible(true)
+      expect(useChatStore.getState().reviewSidebarVisible).toBe(true)
 
-      setViewingReviewTab('worktree-1', false)
-      expect(isViewingReviewTab('worktree-1')).toBe(false)
+      toggleReviewSidebar()
+      expect(useChatStore.getState().reviewSidebarVisible).toBe(false)
     })
   })
 
-  describe('review fixed findings (worktree-based)', () => {
+  describe('review fixed findings (session-based)', () => {
     it('marks and checks review finding fixed', () => {
-      const { markReviewFindingFixed, isReviewFindingFixed } = useChatStore.getState()
+      const { markReviewFindingFixed, isReviewFindingFixed } =
+        useChatStore.getState()
 
       markReviewFindingFixed('worktree-1', 'finding-1')
 
@@ -740,7 +979,11 @@ describe('ChatStore', () => {
     })
 
     it('clears fixed review findings', () => {
-      const { markReviewFindingFixed, clearFixedReviewFindings, isReviewFindingFixed } = useChatStore.getState()
+      const {
+        markReviewFindingFixed,
+        clearFixedReviewFindings,
+        isReviewFindingFixed,
+      } = useChatStore.getState()
 
       markReviewFindingFixed('worktree-1', 'finding-1')
       clearFixedReviewFindings('worktree-1')
@@ -751,7 +994,8 @@ describe('ChatStore', () => {
 
   describe('session reviewing status', () => {
     it('sets and checks session reviewing', () => {
-      const { setSessionReviewing, isSessionReviewing } = useChatStore.getState()
+      const { setSessionReviewing, isSessionReviewing } =
+        useChatStore.getState()
 
       expect(isSessionReviewing('session-1')).toBe(false)
 

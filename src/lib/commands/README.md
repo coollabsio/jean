@@ -68,7 +68,7 @@ export const myFeatureCommands: AppCommand[] = [
 import { myFeatureCommands } from './my-feature-commands'
 
 export function initializeCommandSystem(): void {
-  registerCommands(navigationCommands)
+  registerCommands(projectCommands)
   registerCommands(myFeatureCommands) // Add here
 }
 ```
@@ -110,13 +110,14 @@ export function useCommandContext(): CommandContext {
 
 ## Available Commands
 
-### Navigation Commands
+### Project Commands
 
-- `toggle-sidebar` - Show/hide sidebar (always available)
-- `show-sidebar` - Show sidebar (only when hidden)
-- `hide-sidebar` - Hide sidebar (only when visible)
-- `toggle-command-palette` - Show/hide command palette
-- `open-preferences` - Open preferences dialog
+- `add-project` - Add an existing git repository as a project
+- `init-project` - Create a new project from scratch
+
+### Debug Commands
+
+- `notification.test-toast` - Show a test toast notification
 
 ## Command Structure (Simplified)
 

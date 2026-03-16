@@ -52,7 +52,7 @@ This removes any Tauri commands that aren't actually called from your frontend.
 Use the template's analysis script:
 
 ```bash
-npm run build:analyze
+bun run build:analyze
 ```
 
 This builds your app and provides guidance on analyzing the output.
@@ -62,7 +62,7 @@ This builds your app and provides guidance on analyzing the output.
 1. **Check output folder sizes**:
 
    ```bash
-   npm run build
+   bun run build
    du -sh dist/*
    ```
 
@@ -83,10 +83,10 @@ For detailed analysis, consider these tools:
 
 ```bash
 # Install bundle analyzer (optional)
-npm install --save-dev vite-bundle-analyzer
+bun add --dev vite-bundle-analyzer
 
 # Or use webpack-bundle-analyzer on the dist folder
-npx webpack-bundle-analyzer dist/assets/index-*.js
+bunx webpack-bundle-analyzer dist/assets/index-*.js
 ```
 
 ## When You Need More Optimization
@@ -314,8 +314,9 @@ const Dashboard = lazy(() => import('./Dashboard'))
 **Solution**: Check for version conflicts
 
 ```bash
-npm ls react
-npm dedupe
+bun pm ls react
+# Note: bun doesn't have a dedupe command, reinstall dependencies if needed
+bun install
 ```
 
 ### Issue: Unused shadcn/ui Components
@@ -353,7 +354,7 @@ Add bundle size monitoring to your GitHub Actions:
 # .github/workflows/bundle-size.yml
 - name: Check bundle size
   run: |
-    npm run build
+    bun run build
     size=$(du -sb dist | cut -f1)
     echo "Bundle size: $size bytes"
     if [ $size -gt 5000000 ]; then
@@ -366,7 +367,7 @@ Add bundle size monitoring to your GitHub Actions:
 
 ```bash
 # Add to package.json scripts
-"size-check": "npm run build && bundlesize"
+"size-check": "bun run build && bundlesize"
 ```
 
 ## Performance Testing
@@ -380,7 +381,7 @@ cargo build --release
 ls -lah target/release/tauri-app
 
 # Test bundle size
-npm run build
+bun run build
 du -sh dist/
 ```
 
@@ -429,6 +430,6 @@ Start with the template's built-in optimizations. As your app grows, implement t
 2. **Then**: Optimize imports and remove unused dependencies
 3. **Finally**: Implement advanced chunking strategies
 
-Remember: **Measure before optimizing**. Use `npm run build:analyze` to understand your bundle before making changes.
+Remember: **Measure before optimizing**. Use `bun run build:analyze` to understand your bundle before making changes.
 
 The goal is a balance between bundle size and complexity. Don't over-optimize prematurely—focus on user experience first.

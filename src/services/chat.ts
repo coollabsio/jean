@@ -1,8 +1,13 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
+import { generateId } from '@/lib/uuid'
+import {
+  beginSessionStateHydration,
+  endSessionStateHydration,
+} from '@/lib/session-state-hydration'
 import type {
   AllSessionsResponse,
   ArchivedSessionEntry,
@@ -14,17 +19,18 @@ import type {
   QuestionAnswer,
   ThinkingLevel,
   ExecutionMode,
+  LabelData,
+  QueuedMessage,
 } from '@/types/chat'
 import {
   isTauri,
   projectsQueryKeys,
-  useArchiveWorktree,
-  useCloseBaseSessionClean,
 } from '@/services/projects'
+import { preferencesQueryKeys } from '@/services/preferences'
+import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
-import { useProjectsStore } from '@/store/projects-store'
-import type { Worktree } from '@/types/projects'
-import { isBaseSession } from '@/types/projects'
+import { useUIStore } from '@/store/ui-store'
+import type { ReviewResponse, Worktree } from '@/types/projects'
 
 // Query keys for chat
 export const chatQueryKeys = {
@@ -126,6 +132,7 @@ export function useSessions(
     enabled: !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
     gcTime: 1000 * 60 * 5,
+    refetchOnMount: true, // Respects staleTime; status changes pushed via streaming/cache:invalidate events
   })
 }
 
@@ -148,15 +155,41 @@ export async function prefetchSessions(
     })
     queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
 
-    // Restore reviewingSessions and waitingForInputSessionIds state
+    // Restore reviewingSessions, waitingForInputSessionIds, sessionLabels, reviewResults,
+    // fixedFindings, and selected execution modes.
     const reviewingUpdates: Record<string, boolean> = {}
     const waitingUpdates: Record<string, boolean> = {}
+    const executionModeUpdates: Record<string, ExecutionMode> = {}
+    const labelUpdates: Record<string, LabelData> = {}
+    const reviewResultsUpdates: Record<string, ReviewResponse> = {}
+    const fixedFindingsUpdates: Record<string, Set<string>> = {}
     for (const session of sessions.sessions) {
       if (session.is_reviewing) {
         reviewingUpdates[session.id] = true
       }
-      if (session.waiting_for_input) {
+      // Only restore waiting state if the session's last run is actually active,
+      // OR if it's a completed plan-mode run (Codex/Opencode plan mode intentionally
+      // sets waiting_for_input after the run completes)
+      const canBeWaiting =
+        !session.last_run_status ||
+        session.last_run_status === 'running' ||
+        session.last_run_status === 'resumable' ||
+        (session.last_run_status === 'completed' &&
+          session.waiting_for_input_type === 'plan')
+      if (session.waiting_for_input && canBeWaiting) {
         waitingUpdates[session.id] = true
+      }
+      if (session.selected_execution_mode) {
+        executionModeUpdates[session.id] = session.selected_execution_mode
+      }
+      if (session.label) {
+        labelUpdates[session.id] = session.label
+      }
+      if (session.review_results) {
+        reviewResultsUpdates[session.id] = session.review_results
+      }
+      if (session.fixed_findings && session.fixed_findings.length > 0) {
+        fixedFindingsUpdates[session.id] = new Set(session.fixed_findings)
       }
     }
 
@@ -172,18 +205,59 @@ export async function prefetchSessions(
 
     // Always register session mappings and worktree path
     if (Object.keys(sessionMappings).length > 0) {
-      storeUpdates.sessionWorktreeMap = { ...currentState.sessionWorktreeMap, ...sessionMappings }
-      storeUpdates.worktreePaths = { ...currentState.worktreePaths, [worktreeId]: worktreePath }
+      storeUpdates.sessionWorktreeMap = {
+        ...currentState.sessionWorktreeMap,
+        ...sessionMappings,
+      }
+      storeUpdates.worktreePaths = {
+        ...currentState.worktreePaths,
+        [worktreeId]: worktreePath,
+      }
     }
 
     if (Object.keys(reviewingUpdates).length > 0) {
-      storeUpdates.reviewingSessions = { ...currentState.reviewingSessions, ...reviewingUpdates }
+      storeUpdates.reviewingSessions = {
+        ...currentState.reviewingSessions,
+        ...reviewingUpdates,
+      }
     }
     if (Object.keys(waitingUpdates).length > 0) {
-      storeUpdates.waitingForInputSessionIds = { ...currentState.waitingForInputSessionIds, ...waitingUpdates }
+      storeUpdates.waitingForInputSessionIds = {
+        ...currentState.waitingForInputSessionIds,
+        ...waitingUpdates,
+      }
+    }
+    if (Object.keys(executionModeUpdates).length > 0) {
+      storeUpdates.executionModes = {
+        ...currentState.executionModes,
+        ...executionModeUpdates,
+      }
+    }
+    if (Object.keys(labelUpdates).length > 0) {
+      storeUpdates.sessionLabels = {
+        ...currentState.sessionLabels,
+        ...labelUpdates,
+      }
+    }
+    if (Object.keys(reviewResultsUpdates).length > 0) {
+      storeUpdates.reviewResults = {
+        ...currentState.reviewResults,
+        ...reviewResultsUpdates,
+      }
+    }
+    if (Object.keys(fixedFindingsUpdates).length > 0) {
+      storeUpdates.fixedReviewFindings = {
+        ...currentState.fixedReviewFindings,
+        ...fixedFindingsUpdates,
+      }
     }
     if (Object.keys(storeUpdates).length > 0) {
-      useChatStore.setState(storeUpdates)
+      beginSessionStateHydration()
+      try {
+        useChatStore.setState(storeUpdates)
+      } finally {
+        endSessionStateHydration()
+      }
     }
 
     logger.debug('Prefetched sessions', {
@@ -203,10 +277,6 @@ export function useAllSessions(enabled = true) {
   return useQuery({
     queryKey: ['all-sessions'],
     queryFn: async (): Promise<AllSessionsResponse> => {
-      if (!isTauri()) {
-        return { entries: [] }
-      }
-
       try {
         logger.debug('Loading all sessions')
         const response = await invoke<AllSessionsResponse>('list_all_sessions')
@@ -233,6 +303,8 @@ export function useSession(
   worktreeId: string | null,
   worktreePath: string | null
 ) {
+  const queryClient = useQueryClient()
+
   return useQuery({
     queryKey: chatQueryKeys.session(sessionId ?? ''),
     queryFn: async (): Promise<Session | null> => {
@@ -241,25 +313,48 @@ export function useSession(
       }
 
       try {
-        logger.debug('Loading session', { sessionId })
+        logger.debug('[useSession] fetching from disk', { sessionId })
         const session = await invoke<Session>('get_session', {
           worktreeId,
           worktreePath,
           sessionId,
         })
-        logger.info('Session loaded', { messageCount: session.messages.length })
+        logger.info('[useSession] loaded', {
+          sessionId,
+          messageCount: session.messages.length,
+          backend: session.backend,
+        })
+
+        // Preserve optimistic messages from sendMessage.onMutate that the
+        // backend hasn't persisted yet (race: refetchOnMount fires before
+        // the send_chat_message invoke writes the user message to disk).
+        const cached = queryClient.getQueryData<Session>(
+          chatQueryKeys.session(sessionId)
+        )
+        if (
+          cached &&
+          cached.messages.length > session.messages.length
+        ) {
+          logger.warn('[useSession] preserving cached messages over fresh fetch', {
+            sessionId,
+            cachedCount: cached.messages.length,
+            diskCount: session.messages.length,
+          })
+          return { ...session, messages: cached.messages }
+        }
+
         return session
       } catch (error) {
-        logger.error('Failed to load session', { error, sessionId })
+        logger.warn('[useSession] FAILED to load session', { error, sessionId })
         return null
       }
     },
     enabled: !!sessionId && !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant session switching from cache
     gcTime: 1000 * 60 * 5,
-    // Always refetch when session is opened/focused to catch background YOLO completions
-    // Cache is still used for instant display while refetch happens in background
-    refetchOnMount: 'always',
+    // Respects staleTime; cross-client sync handled by cache:invalidate broadcast
+    // from Rust after send_chat_message completes (JSONL fully written).
+    refetchOnMount: true,
   })
 }
 
@@ -296,14 +391,26 @@ export function useCreateSession() {
       logger.info('Session created', { sessionId: session.id })
       return session
     },
-    onSuccess: (_, { worktreeId }) => {
+    onSuccess: (newSession, { worktreeId }) => {
+      // Pre-populate individual session cache to prevent loading flash for empty sessions
+      queryClient.setQueryData(chatQueryKeys.session(newSession.id), newSession)
+      // Optimistically update sessions list cache with new session at end (matches backend order)
+      queryClient.setQueryData<WorktreeSessions>(
+        chatQueryKeys.sessions(worktreeId),
+        old => (old ? { ...old, sessions: [...old.sessions, newSession] } : old)
+      )
+      // Then invalidate for consistency
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to create session', { error })
       toast.error('Failed to create session', { description: message })
     },
@@ -348,7 +455,11 @@ export function useRenameSession() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to rename session', { error })
       toast.error('Failed to rename session', { description: message })
     },
@@ -374,6 +485,11 @@ export function useUpdateSessionState() {
       deniedMessageContext,
       isReviewing,
       waitingForInput,
+      waitingForInputType,
+      planFilePath,
+      pendingPlanMessageId,
+      enabledMcpServers,
+      selectedExecutionMode,
     }: {
       worktreeId: string
       worktreePath: string
@@ -393,12 +509,16 @@ export function useUpdateSessionState() {
       } | null
       isReviewing?: boolean
       waitingForInput?: boolean
+      waitingForInputType?: 'question' | 'plan' | null
+      planFilePath?: string | null
+      pendingPlanMessageId?: string | null
+      enabledMcpServers?: string[] | null
+      selectedExecutionMode?: ExecutionMode | null
     }): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
-      logger.debug('Updating session state', { sessionId })
       await invoke('update_session_state', {
         worktreeId,
         worktreePath,
@@ -410,6 +530,11 @@ export function useUpdateSessionState() {
         deniedMessageContext,
         isReviewing,
         waitingForInput,
+        waitingForInputType,
+        planFilePath,
+        pendingPlanMessageId,
+        enabledMcpServers,
+        selectedExecutionMode,
       })
       logger.debug('Session state updated')
     },
@@ -459,7 +584,7 @@ export function useCloseSession() {
       logger.info('Session closed', { newActiveId })
       return newActiveId
     },
-    onSuccess: (_, { worktreeId, sessionId }) => {
+    onSuccess: (newActiveId, { worktreeId, sessionId }) => {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
@@ -470,10 +595,19 @@ export function useCloseSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+
+      // Switch to the new active session so the UI doesn't show a blank screen
+      if (newActiveId) {
+        useChatStore.getState().setActiveSession(worktreeId, newActiveId)
+      }
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to close session', { error })
       toast.error('Failed to close session', { description: message })
     },
@@ -510,7 +644,7 @@ export function useArchiveSession() {
       logger.info('Session archived', { newActiveId })
       return newActiveId
     },
-    onSuccess: (_, { worktreeId, sessionId }) => {
+    onSuccess: (newActiveId, { worktreeId, sessionId }) => {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
@@ -520,6 +654,11 @@ export function useArchiveSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+
+      // Switch to the new active session so the UI doesn't show a blank screen
+      if (newActiveId) {
+        useChatStore.getState().setActiveSession(worktreeId, newActiveId)
+      }
     },
     onError: error => {
       const message = error instanceof Error ? error.message : String(error)
@@ -738,158 +877,118 @@ export function useAllArchivedSessions() {
  * Hook to handle the CMD+W keybinding for closing session or worktree.
  *
  * Listens for 'close-session-or-worktree' custom event and either:
- * - Archives the current session if there are multiple non-archived sessions
- * - Closes the base session cleanly (if it's a base session with last session)
- * - Archives the worktree (if it's a regular worktree with last session)
+ * - Removes the current session (archive or delete based on removal_behavior preference)
+ * - When closing the last session, navigates to canvas instead of deleting the worktree
  */
-export function useCloseSessionOrWorktreeKeybinding() {
+export function useCloseSessionOrWorktreeKeybinding(
+  onConfirmRequired?: (branchName?: string, mode?: 'worktree' | 'session') => void
+) {
   const archiveSession = useArchiveSession()
-  const archiveWorktree = useArchiveWorktree()
-  const closeBaseSessionClean = useCloseBaseSessionClean()
+  const closeSession = useCloseSession()
   const queryClient = useQueryClient()
 
+  const executeClose = useCallback(() => {
+    const { activeWorktreeId, activeWorktreePath, getActiveSession } =
+      useChatStore.getState()
+
+    if (!activeWorktreeId || !activeWorktreePath) {
+      logger.warn('Cannot archive session: no active worktree')
+      return
+    }
+
+    const activeSessionId = getActiveSession(activeWorktreeId)
+
+    if (!activeSessionId) {
+      logger.warn('Cannot archive session: no active session')
+      return
+    }
+
+    // Get sessions for this worktree from cache
+    const sessionsData = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions(activeWorktreeId)
+    )
+
+    if (!sessionsData) {
+      logger.warn('Cannot archive session: no sessions data in cache')
+      return
+    }
+
+    // Filter to non-archived sessions
+    const activeSessions = sessionsData.sessions.filter(s => !s.archived_at)
+    const sessionCount = activeSessions.length
+
+    // Read removal behavior preference from cache
+    const preferences = queryClient.getQueryData<AppPreferences>(
+      preferencesQueryKeys.preferences()
+    )
+    const shouldDelete = preferences?.removal_behavior === 'delete'
+
+    // Close the current session (archive or delete)
+    if (shouldDelete) {
+      logger.debug('Deleting session', {
+        sessionId: activeSessionId,
+        sessionCount,
+      })
+      closeSession.mutate({
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        sessionId: activeSessionId,
+      })
+    } else {
+      logger.debug('Archiving session', {
+        sessionId: activeSessionId,
+        sessionCount,
+      })
+      archiveSession.mutate({
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        sessionId: activeSessionId,
+      })
+    }
+
+    // Last session: navigate to project view instead of deleting the worktree
+    if (sessionCount <= 1) {
+      logger.debug('Last session closed, navigating to project view', {
+        worktreeId: activeWorktreeId,
+      })
+      useChatStore.getState().clearActiveWorktree()
+    }
+  }, [
+    archiveSession,
+    closeSession,
+    queryClient,
+  ])
+
   useEffect(() => {
-    const handleCloseSessionOrWorktree = async () => {
-      const { activeWorktreeId, activeWorktreePath, getActiveSession } =
-        useChatStore.getState()
+    const handleCloseSessionOrWorktree = () => {
+      // Skip when session modal is open — SessionChatModal handles CMD+W in that case
+      if (useUIStore.getState().sessionChatModalOpen) return
 
-      if (!activeWorktreeId || !activeWorktreePath) {
-        logger.warn('Cannot archive session: no active worktree')
-        return
-      }
-
-      const activeSessionId = getActiveSession(activeWorktreeId)
-
-      if (!activeSessionId) {
-        logger.warn('Cannot archive session: no active session')
-        return
-      }
-
-      // Get sessions for this worktree from cache
-      const sessionsData = queryClient.getQueryData<WorktreeSessions>(
-        chatQueryKeys.sessions(activeWorktreeId)
+      // Check if confirmation is required
+      const preferences = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences()
       )
-
-      if (!sessionsData) {
-        logger.warn('Cannot archive session: no sessions data in cache')
+      if (preferences?.confirm_session_close !== false && onConfirmRequired) {
+        // Find branch name and session count for the dialog
+        const { activeWorktreeId } = useChatStore.getState()
+        if (activeWorktreeId) {
+          const worktreeQueries = queryClient
+            .getQueryCache()
+            .findAll({ queryKey: [...projectsQueryKeys.all, 'worktrees'] })
+          for (const query of worktreeQueries) {
+            const worktrees = query.state.data as Worktree[] | undefined
+            const found = worktrees?.find(w => w.id === activeWorktreeId)
+            if (found) {
+              onConfirmRequired(found.branch, 'session')
+              return
+            }
+          }
+        }
+        onConfirmRequired()
         return
       }
 
-      // Filter to non-archived sessions
-      const activeSessions = sessionsData.sessions.filter(s => !s.archived_at)
-      const sessionCount = activeSessions.length
-
-      if (sessionCount > 1) {
-        // Multiple sessions: just archive the current one
-        logger.debug('Archiving session (multiple sessions exist)', {
-          sessionId: activeSessionId,
-          sessionCount,
-        })
-        archiveSession.mutate({
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          sessionId: activeSessionId,
-        })
-      } else {
-        // Last session: archive the worktree (which archives sessions automatically)
-        // First, find the worktree to get project info
-        const worktreeQueries = queryClient
-          .getQueryCache()
-          .findAll({ queryKey: [...projectsQueryKeys.all, 'worktrees'] })
-
-        let worktree: Worktree | undefined
-        let projectId: string | undefined
-
-        for (const query of worktreeQueries) {
-          const worktrees = query.state.data as Worktree[] | undefined
-          if (worktrees) {
-            const found = worktrees.find(w => w.id === activeWorktreeId)
-            if (found) {
-              worktree = found
-              projectId = found.project_id
-              break
-            }
-          }
-        }
-
-        if (!worktree || !projectId) {
-          logger.warn('Cannot archive worktree: worktree not found in cache')
-          return
-        }
-
-        // For both base sessions and regular worktrees, archive the worktree
-        // First, find the previous worktree to select after archiving
-        const projectWorktrees = queryClient.getQueryData<Worktree[]>(
-          projectsQueryKeys.worktrees(projectId)
-        )
-
-        if (projectWorktrees && projectWorktrees.length > 1) {
-          // Sort worktrees same as WorktreeList: base sessions first, then by created_at (newest first)
-          const sortedWorktrees = [...projectWorktrees]
-            .filter(w => w.status !== 'pending' && w.status !== 'deleting')
-            .sort((a, b) => {
-              const aIsBase = isBaseSession(a)
-              const bIsBase = isBaseSession(b)
-              if (aIsBase && !bIsBase) return -1
-              if (!aIsBase && bIsBase) return 1
-              return b.created_at - a.created_at
-            })
-
-          const currentIndex = sortedWorktrees.findIndex(
-            w => w.id === activeWorktreeId
-          )
-
-          if (currentIndex !== -1) {
-            // Select the previous worktree, or the next one if we're at the beginning
-            const newIndex =
-              currentIndex > 0 ? currentIndex - 1 : currentIndex + 1
-            const newWorktree = sortedWorktrees[newIndex]
-
-            if (newWorktree) {
-              logger.debug('Pre-selecting worktree before archiving', {
-                newWorktreeId: newWorktree.id,
-              })
-              const { selectWorktree } = useProjectsStore.getState()
-              selectWorktree(newWorktree.id)
-              const { setActiveWorktree } = useChatStore.getState()
-              setActiveWorktree(newWorktree.id, newWorktree.path)
-            }
-          }
-        } else {
-          // No other worktrees, select the project
-          logger.debug(
-            'Pre-selecting project before archiving (no other worktrees)',
-            {
-              projectId,
-            }
-          )
-          const { selectProject } = useProjectsStore.getState()
-          selectProject(projectId)
-          const { clearActiveWorktree } = useChatStore.getState()
-          clearActiveWorktree()
-        }
-
-        // For base sessions, close cleanly (no session preservation) instead of archive
-        if (isBaseSession(worktree)) {
-          logger.debug('Closing base session cleanly (last session)', {
-            worktreeId: activeWorktreeId,
-            projectId,
-          })
-          closeBaseSessionClean.mutate({
-            worktreeId: activeWorktreeId,
-            projectId,
-          })
-        } else {
-          logger.debug('Archiving worktree (last session)', {
-            worktreeId: activeWorktreeId,
-            projectId,
-          })
-          archiveWorktree.mutate({
-            worktreeId: activeWorktreeId,
-            projectId,
-          })
-        }
-      }
+      executeClose()
     }
 
     window.addEventListener(
@@ -901,7 +1000,9 @@ export function useCloseSessionOrWorktreeKeybinding() {
         'close-session-or-worktree',
         handleCloseSessionOrWorktree
       )
-  }, [archiveSession, archiveWorktree, closeBaseSessionClean, queryClient])
+  }, [queryClient, onConfirmRequired, executeClose])
+
+  return { executeClose }
 }
 
 /**
@@ -972,7 +1073,11 @@ export function useReorderSessions() {
         )
       }
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to reorder sessions', { error })
       toast.error('Failed to reorder sessions', { description: message })
     },
@@ -1020,7 +1125,11 @@ export function useSetActiveSession() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to set active session', { error })
       toast.error('Failed to set active session', { description: message })
     },
@@ -1049,10 +1158,14 @@ export function useSendMessage() {
       model,
       executionMode,
       thinkingLevel,
-      disableThinkingForMode,
-      parallelExecutionPromptEnabled,
+      effortLevel,
+      parallelExecutionPrompt,
       aiLanguage,
       allowedTools,
+      mcpConfig,
+      chromeEnabled,
+      customProfileName,
+      backend,
     }: {
       sessionId: string
       worktreeId: string
@@ -1061,25 +1174,32 @@ export function useSendMessage() {
       model?: string
       executionMode?: ExecutionMode
       thinkingLevel?: ThinkingLevel
-      disableThinkingForMode?: boolean
-      parallelExecutionPromptEnabled?: boolean
+      effortLevel?: string
+      parallelExecutionPrompt?: string
       aiLanguage?: string
       allowedTools?: string[]
+      mcpConfig?: string
+      chromeEnabled?: boolean
+      customProfileName?: string
+      backend?: string
     }): Promise<ChatMessage> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
+      console.log(`[SendMutation] mutationFn CALLED sessionId=${sessionId} worktreeId=${worktreeId}`)
       logger.debug('Sending chat message', {
         sessionId,
         worktreeId,
         model,
         executionMode,
         thinkingLevel,
-        disableThinkingForMode,
-        parallelExecutionPromptEnabled,
+        effortLevel,
+          parallelExecutionPrompt,
         aiLanguage,
         allowedTools,
+        mcpConfig: mcpConfig ? '(set)' : undefined,
+        chromeEnabled,
       })
       const response = await invoke<ChatMessage>('send_chat_message', {
         sessionId,
@@ -1089,10 +1209,14 @@ export function useSendMessage() {
         model,
         executionMode,
         thinkingLevel,
-        disableThinkingForMode,
-        parallelExecutionPromptEnabled,
+        effortLevel,
+          parallelExecutionPrompt,
         aiLanguage,
         allowedTools,
+        mcpConfig,
+        chromeEnabled,
+        customProfileName,
+        backend,
       })
       logger.info('Chat message sent', { responseId: response.id })
       return response
@@ -1105,6 +1229,7 @@ export function useSendMessage() {
       executionMode,
       thinkingLevel,
     }) => {
+      console.log(`[SendMutation] onMutate sessionId=${sessionId}`)
       // Cancel in-flight queries to avoid overwriting optimistic update
       await queryClient.cancelQueries({
         queryKey: chatQueryKeys.session(sessionId),
@@ -1116,10 +1241,38 @@ export function useSendMessage() {
       )
 
       // Optimistically add user message immediately (skip if last message is same content)
+      const optimisticUserMessage: ChatMessage = {
+        id: generateId(),
+        session_id: sessionId,
+        role: 'user' as const,
+        content: message,
+        timestamp: Math.floor(Date.now() / 1000),
+        tool_calls: [],
+        model,
+        execution_mode: executionMode,
+        thinking_level: thinkingLevel,
+      }
+
+      // Batch the optimistic user message AND sending state together so React
+      // renders both in a single pass (no two-phase scroll: message then placeholder).
+      useChatStore.getState().addSendingSession(sessionId)
+
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(sessionId),
         old => {
-          if (!old) return old
+          if (!old) {
+            // Seed cache for new/unfetched sessions so the user message
+            // appears immediately (e.g., automated prompts from workflow runs)
+            const now = Math.floor(Date.now() / 1000)
+            return {
+              id: sessionId,
+              name: '',
+              order: 0,
+              created_at: now,
+              updated_at: now,
+              messages: [optimisticUserMessage],
+            }
+          }
 
           const lastMessage = old.messages?.at(-1)
           const isDuplicate =
@@ -1132,54 +1285,46 @@ export function useSendMessage() {
 
           return {
             ...old,
-            messages: [
-              ...old.messages,
-              {
-                id: crypto.randomUUID(),
-                session_id: sessionId,
-                role: 'user' as const,
-                content: message,
-                timestamp: Math.floor(Date.now() / 1000),
-                tool_calls: [],
-                model,
-                execution_mode: executionMode,
-                thinking_level: thinkingLevel,
-              },
-            ],
+            messages: [...old.messages, optimisticUserMessage],
           }
         }
       )
 
       return { previous, worktreeId }
     },
-    onSuccess: (response, { sessionId, worktreeId }) => {
-      // Handle undo_send: cancelled with no meaningful content
-      // Remove the optimistic user message (backend already removed it from storage)
-      if (
-        response.cancelled &&
-        !response.content &&
-        response.tool_calls.length === 0
-      ) {
-        queryClient.setQueryData<Session>(
-          chatQueryKeys.session(sessionId),
-          old => {
-            if (!old) return old
-            // Remove the last user message (the one we optimistically added)
-            const messages = [...old.messages]
-            for (let i = messages.length - 1; i >= 0; i--) {
-              if (messages[i]?.role === 'user') {
-                messages.splice(i, 1)
-                break
-              }
-            }
-            return { ...old, messages }
-          }
-        )
-        // Invalidate sessions list for metadata consistency
-        queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessions(worktreeId),
-        })
+    onSuccess: (response, { sessionId, worktreeId, executionMode }) => {
+      console.log(`[SendMutation] onSuccess sessionId=${sessionId} cancelled=${response.cancelled}`, { currentSending: Object.keys(useChatStore.getState().sendingSessionIds) })
+      // All cancelled responses are handled by the chat:cancelled event handler,
+      // which already correctly restores the user message (undo path) or preserves
+      // the partial assistant response (preserve path). Letting onSuccess proceed
+      // for cancelled responses with content would corrupt history by replacing
+      // a pre-existing assistant message from a previous turn.
+      if (response.cancelled) {
         return
+      }
+
+      // For Codex plan mode: inject synthetic ExitPlanMode tool call into the response
+      // so the plan approval UI renders (Codex has no native ExitPlanMode tool)
+      const { selectedBackends } = useChatStore.getState()
+      const isCodexPlan =
+        selectedBackends[sessionId] === 'codex' &&
+        executionMode === 'plan' &&
+        !response.cancelled &&
+        response.content.length > 0
+      let finalResponse = response
+      if (isCodexPlan) {
+        const syntheticId = `codex-plan-${sessionId}-${Date.now()}`
+        finalResponse = {
+          ...response,
+          tool_calls: [
+            ...response.tool_calls,
+            { id: syntheticId, name: 'ExitPlanMode', input: {} },
+          ],
+          content_blocks: [
+            ...(response.content_blocks ?? []),
+            { type: 'tool_use' as const, tool_call_id: syntheticId },
+          ],
+        }
       }
 
       // Replace the optimistic assistant message with the complete one from backend
@@ -1202,12 +1347,12 @@ export function useSendMessage() {
 
           if (lastAssistantIdx >= 0) {
             const newMessages = [...old.messages]
-            newMessages[lastAssistantIdx] = response
+            newMessages[lastAssistantIdx] = finalResponse
             return { ...old, messages: newMessages }
           }
 
           // If no assistant message found, add the response
-          return { ...old, messages: [...old.messages, response] }
+          return { ...old, messages: [...old.messages, finalResponse] }
         }
       )
 
@@ -1216,13 +1361,17 @@ export function useSendMessage() {
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
     },
-    onError: (error, { sessionId }, context) => {
+    onError: (error, { sessionId, worktreeId }, context) => {
       // Check for cancellation - Tauri errors may not be Error instances
       // so we check both the stringified error and the message property
       const errorStr = String(error)
-      const errorMessage = error instanceof Error ? error.message : ''
+      // Tauri invoke errors are strings, not Error instances — extract from both
+      const errorMessage =
+        error instanceof Error ? error.message : typeof error === 'string' ? error : errorStr
       const isCancellation =
         errorStr.includes('cancelled') || errorMessage.includes('cancelled')
+
+      console.log(`[SendMutation] onError sessionId=${sessionId} isCancellation=${isCancellation} error=${errorMessage}`, { currentSending: Object.keys(useChatStore.getState().sendingSessionIds) })
 
       if (isCancellation) {
         logger.debug('Message cancelled', { sessionId })
@@ -1230,13 +1379,58 @@ export function useSendMessage() {
         return
       }
 
-      // Rollback to previous state on actual errors (not cancellation)
+      // Clean up sending state so session doesn't stay stuck in active status
+      const { removeSendingSession, clearExecutingMode, setError } =
+        useChatStore.getState()
+      removeSendingSession(sessionId)
+      clearExecutingMode(sessionId)
+
+      // Disconnect or timeout — the CLI likely ran fine, we just lost the
+      // RPC response. Don't rollback (it destroys streamed content the user
+      // already saw). Refetch authoritative state from backend disk.
+      // Error strings match those thrown in src/lib/transport.ts WsTransport.
+      const isDisconnect =
+        errorStr.includes('WebSocket disconnected') ||
+        errorMessage.includes('WebSocket disconnected')
+      const isTimeout =
+        errorStr.includes('timed out') || errorMessage.includes('timed out')
+
+      if (isDisconnect || isTimeout) {
+        logger.warn('Lost command response, refetching session', {
+          sessionId,
+          reason: isDisconnect ? 'disconnect' : 'timeout',
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.session(sessionId),
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        toast.error(
+          isDisconnect
+            ? 'Connection lost — refreshing...'
+            : 'Response timed out — refreshing...',
+          {
+            description: 'Your message was likely processed successfully.',
+          }
+        )
+        return
+      }
+
+      // Real errors — rollback to previous state
+      setError(sessionId, errorMessage || 'Unknown error occurred')
+
       if (context?.previous) {
         queryClient.setQueryData(
           chatQueryKeys.session(sessionId),
           context.previous
         )
       }
+
+      // Invalidate sessions to reflect current run status from backend
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(worktreeId),
+      })
 
       const message = errorMessage || 'Unknown error occurred'
       logger.error('Failed to send message', { error })
@@ -1288,7 +1482,11 @@ export function useClearSessionHistory() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to clear session history', { error })
       toast.error('Failed to clear chat history', { description: message })
     },
@@ -1329,7 +1527,11 @@ export function useClearChatHistory() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to clear chat history', { error })
       toast.error('Failed to clear chat history', { description: message })
     },
@@ -1367,6 +1569,115 @@ export function useSetSessionModel() {
       })
       logger.info('Session model saved')
     },
+    onMutate: async ({ sessionId, model }) => {
+      await queryClient.cancelQueries({ queryKey: chatQueryKeys.session(sessionId) })
+      const prev = queryClient.getQueryData(chatQueryKeys.session(sessionId))
+      queryClient.setQueryData(
+        chatQueryKeys.session(sessionId),
+        (old: Record<string, unknown> | undefined) =>
+          old ? { ...old, selected_model: model } : old
+      )
+      return { prev, sessionId }
+    },
+    onSuccess: (_, { sessionId, worktreeId }) => {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.session(sessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(worktreeId),
+      })
+    },
+    onError: (error, _vars, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(chatQueryKeys.session(context.sessionId), context.prev)
+      }
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
+      logger.error('Failed to save model selection', { error })
+      toast.error('Failed to save model', { description: message })
+    },
+  })
+}
+
+/**
+ * Hook to set the backend for a session
+ */
+export function useSetSessionBackend() {
+  return useMutation({
+    mutationFn: async ({
+      worktreeId,
+      worktreePath,
+      sessionId,
+      backend,
+    }: {
+      worktreeId: string
+      worktreePath: string
+      sessionId: string
+      backend: string
+    }): Promise<void> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      logger.debug('Setting session backend', { sessionId, backend })
+      await invoke('set_session_backend', {
+        worktreeId,
+        worktreePath,
+        sessionId,
+        backend,
+      })
+      logger.info('Session backend saved')
+    },
+    // No query invalidation here — callers chain setSessionModel after,
+    // which handles invalidation (avoids race where refetch overwrites optimistic update)
+    onError: error => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
+      logger.error('Failed to save backend selection', { error })
+      toast.error('Failed to save backend', { description: message })
+    },
+  })
+}
+
+/**
+ * Hook to set the selected provider (custom CLI profile) for a session
+ */
+export function useSetSessionProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      worktreeId,
+      worktreePath,
+      sessionId,
+      provider,
+    }: {
+      worktreeId: string
+      worktreePath: string
+      sessionId: string
+      provider: string | null
+    }): Promise<void> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      logger.debug('Setting session provider', { sessionId, provider })
+      await invoke('set_session_provider', {
+        worktreeId,
+        worktreePath,
+        sessionId,
+        provider,
+      })
+      logger.info('Session provider saved')
+    },
     onSuccess: (_, { sessionId, worktreeId }) => {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.session(sessionId),
@@ -1377,9 +1688,13 @@ export function useSetSessionModel() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
-      logger.error('Failed to save model selection', { error })
-      toast.error('Failed to save model', { description: message })
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
+      logger.error('Failed to save provider selection', { error })
+      toast.error('Failed to save provider', { description: message })
     },
   })
 }
@@ -1428,7 +1743,11 @@ export function useSetSessionThinkingLevel() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to save thinking level selection', { error })
       toast.error('Failed to save thinking level', { description: message })
     },
@@ -1470,7 +1789,11 @@ export function useSetWorktreeModel() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to save model selection', { error })
       toast.error('Failed to save model', { description: message })
     },
@@ -1519,7 +1842,11 @@ export function useSetWorktreeThinkingLevel() {
     },
     onError: error => {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error occurred'
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
       logger.error('Failed to save thinking level selection', { error })
       toast.error('Failed to save thinking level', { description: message })
     },
@@ -1690,4 +2017,71 @@ export async function markPlanApproved(
     logger.error('Failed to mark plan approved', { error, messageId })
     throw error
   }
+}
+
+// ============================================================================
+// Queue Persistence (cross-client sync)
+// ============================================================================
+
+/**
+ * Persist an enqueued message to the backend for cross-client sync.
+ * Fire-and-forget — Zustand is the optimistic source of truth.
+ */
+export function persistEnqueue(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId: string,
+  message: QueuedMessage
+): void {
+  invoke('enqueue_message', { worktreeId, worktreePath, sessionId, message }).catch(err => {
+    logger.error('Failed to persist enqueue', { err, sessionId })
+  })
+}
+
+/**
+ * Atomically dequeue a message from the backend.
+ * Returns the dequeued message or null if queue was empty (another client won the race).
+ */
+export async function persistDequeue(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId: string
+): Promise<QueuedMessage | null> {
+  return invoke<QueuedMessage | null>('dequeue_message', {
+    worktreeId,
+    worktreePath,
+    sessionId,
+  })
+}
+
+/**
+ * Persist removal of a specific queued message.
+ */
+export function persistRemoveQueued(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId: string,
+  messageId: string
+): void {
+  invoke('remove_queued_message', {
+    worktreeId,
+    worktreePath,
+    sessionId,
+    messageId,
+  }).catch(err => {
+    logger.error('Failed to persist remove queued', { err, sessionId })
+  })
+}
+
+/**
+ * Persist clearing the entire queue for a session.
+ */
+export function persistClearQueue(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId: string
+): void {
+  invoke('clear_message_queue', { worktreeId, worktreePath, sessionId }).catch(err => {
+    logger.error('Failed to persist clear queue', { err, sessionId })
+  })
 }

@@ -161,7 +161,10 @@ const setupMenuListeners = async () => {
       if (update) {
         commandContext.showToast(`Update available: ${update.version}`, 'info')
       } else {
-        commandContext.showToast('You are running the latest version', 'success')
+        commandContext.showToast(
+          'You are running the latest version',
+          'success'
+        )
       }
     }),
 
@@ -170,12 +173,14 @@ const setupMenuListeners = async () => {
     }),
 
     listen('menu-toggle-left-sidebar', () => {
-      const { leftSidebarVisible, setLeftSidebarVisible } = useUIStore.getState()
+      const { leftSidebarVisible, setLeftSidebarVisible } =
+        useUIStore.getState()
       setLeftSidebarVisible(!leftSidebarVisible)
     }),
 
     listen('menu-toggle-right-sidebar', () => {
-      const { rightSidebarVisible, setRightSidebarVisible } = useUIStore.getState()
+      const { rightSidebarVisible, setRightSidebarVisible } =
+        useUIStore.getState()
       setRightSidebarVisible(!rightSidebarVisible)
     }),
 

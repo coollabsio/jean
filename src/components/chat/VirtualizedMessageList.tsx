@@ -4,9 +4,11 @@ import {
   useImperativeHandle,
   forwardRef,
   memo,
+  useMemo,
   useState,
   useCallback,
 } from 'react'
+import { flushSync } from 'react-dom'
 import type {
   ChatMessage,
   Question,
@@ -16,11 +18,11 @@ import type {
 import { MessageItem } from './MessageItem'
 
 /** Number of messages to render initially (from the end) */
-const INITIAL_VISIBLE_COUNT = 50
+const INITIAL_VISIBLE_COUNT = 10
 /** Number of messages to load when scrolling up */
-const LOAD_MORE_COUNT = 50
+const LOAD_MORE_COUNT = 20
 /** Scroll threshold in pixels to trigger loading more */
-const SCROLL_THRESHOLD = 200
+const SCROLL_THRESHOLD = 300
 
 export interface VirtualizedMessageListHandle {
   /** Scroll to a specific message by index */
@@ -43,14 +45,18 @@ interface VirtualizedMessageListProps {
   totalMessages: number
   /** Index of the last message with ExitPlanMode tool */
   lastPlanMessageIndex: number
-  /** Pre-computed map of hasFollowUpMessage for each message index */
-  hasFollowUpMap: Map<number, boolean>
   /** Current session ID */
   sessionId: string
   /** Worktree path for resolving file mentions */
   worktreePath: string
   /** Keyboard shortcut for approve button */
   approveShortcut: string
+  /** Keyboard shortcut for approve yolo button */
+  approveShortcutYolo?: string
+  /** Keyboard shortcut to display on clear context button */
+  approveShortcutClearContext?: string
+  /** Keyboard shortcut to display on clear context build button */
+  approveShortcutClearContextBuild?: string
   /** Ref for approve button visibility tracking */
   approveButtonRef?: React.RefObject<HTMLButtonElement | null>
   /** Whether Claude is currently streaming */
@@ -59,6 +65,14 @@ interface VirtualizedMessageListProps {
   onPlanApproval: (messageId: string) => void
   /** Callback when user approves a plan with yolo mode */
   onPlanApprovalYolo?: (messageId: string) => void
+  /** Callback for clear context approval (new session with plan in yolo mode) */
+  onClearContextApproval?: (messageId: string) => void
+  /** Callback for clear context approval (new session with plan in build mode) */
+  onClearContextApprovalBuild?: (messageId: string) => void
+  /** Callback for creating new worktree session with build mode */
+  onWorktreeBuildApproval?: (messageId: string) => void
+  /** Callback for creating new worktree session with yolo mode */
+  onWorktreeYoloApproval?: (messageId: string) => void
   /** Callback when user answers a question */
   onQuestionAnswer: (
     toolCallId: string,
@@ -88,10 +102,16 @@ interface VirtualizedMessageListProps {
   areQuestionsSkipped: (sessionId: string) => boolean
   /** Check if a finding has been fixed */
   isFindingFixed: (sessionId: string, key: string) => boolean
+  /** Callback to copy a user message back to the input field */
+  onCopyToInput?: (message: ChatMessage) => void
+  /** Hide approve buttons (e.g. for Codex which has no native approval flow) */
+  hideApproveButtons?: boolean
   /** Whether we should scroll to bottom (new message arrived while at bottom) */
   shouldScrollToBottom?: boolean
   /** Callback when scroll-to-bottom is handled */
   onScrollToBottomHandled?: () => void
+  /** Duration of last completed run (ms) — shown on last assistant message */
+  completedDurationMs?: number | null
 }
 
 /**
@@ -107,14 +127,20 @@ export const VirtualizedMessageList = memo(
         scrollContainerRef,
         totalMessages,
         lastPlanMessageIndex,
-        hasFollowUpMap,
         sessionId,
         worktreePath,
         approveShortcut,
+        approveShortcutYolo,
+        approveShortcutClearContext,
+        approveShortcutClearContextBuild,
         approveButtonRef,
         isSending,
         onPlanApproval,
         onPlanApprovalYolo,
+        onClearContextApproval,
+        onClearContextApprovalBuild,
+        onWorktreeBuildApproval,
+        onWorktreeYoloApproval,
         onQuestionAnswer,
         onQuestionSkip,
         onFileClick,
@@ -125,12 +151,16 @@ export const VirtualizedMessageList = memo(
         getSubmittedAnswers,
         areQuestionsSkipped,
         isFindingFixed,
+        onCopyToInput,
+        hideApproveButtons,
         shouldScrollToBottom,
         onScrollToBottomHandled,
+        completedDurationMs,
       },
       ref
     ) {
       const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+      const isLoadingMoreRef = useRef(false)
 
       // Track how many messages to render (from the end)
       const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT)
@@ -144,28 +174,42 @@ export const VirtualizedMessageList = memo(
       const prevSessionRef = useRef(sessionId)
       useEffect(() => {
         if (sessionId !== prevSessionRef.current) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setVisibleCount(INITIAL_VISIBLE_COUNT)
           prevSessionRef.current = sessionId
         }
       }, [sessionId])
 
-      // Load more messages when scrolling near the top
+      // Pre-compute hasFollowUpMessage for all messages in O(n) instead of O(n²)
+      const hasFollowUpMap = useMemo(() => {
+        const map = new Map<number, boolean>()
+        let foundUserMessage = false
+        for (let i = messages.length - 1; i >= 0; i--) {
+          map.set(i, foundUserMessage)
+          if (messages[i]?.role === 'user') {
+            foundUserMessage = true
+          }
+        }
+        return map
+      }, [messages])
+
+      // Load more messages when scrolling near the top.
+      // Uses flushSync so state update + DOM commit + scroll correction happen in one task.
       const loadMore = useCallback(() => {
         const container = scrollContainerRef.current
-        if (!container || !hasMoreMessages) return
+        if (!container || !hasMoreMessages || isLoadingMoreRef.current) return
 
-        // Preserve scroll position when prepending
+        isLoadingMoreRef.current = true
         const scrollHeightBefore = container.scrollHeight
 
-        setVisibleCount(prev =>
-          Math.min(prev + LOAD_MORE_COUNT, messages.length)
-        )
-
-        // After render, adjust scroll to maintain position
-        requestAnimationFrame(() => {
-          const scrollHeightAfter = container.scrollHeight
-          container.scrollTop += scrollHeightAfter - scrollHeightBefore
+        flushSync(() => {
+          setVisibleCount(prev =>
+            Math.min(prev + LOAD_MORE_COUNT, messages.length)
+          )
         })
+
+        container.scrollTop += container.scrollHeight - scrollHeightBefore
+        isLoadingMoreRef.current = false
       }, [scrollContainerRef, hasMoreMessages, messages.length])
 
       // Detect scroll to top
@@ -191,9 +235,8 @@ export const VirtualizedMessageList = memo(
         ) => {
           // If target message isn't rendered yet, expand visibleCount first
           if (index < startIndex) {
-            const newVisibleCount = messages.length - index + 10 // Load up to target + buffer
+            const newVisibleCount = messages.length - index + 10
             setVisibleCount(newVisibleCount)
-            // Scroll after render
             requestAnimationFrame(() => {
               const el = messageRefs.current.get(index)
               el?.scrollIntoView({
@@ -221,9 +264,7 @@ export const VirtualizedMessageList = memo(
             rect.top < containerRect.bottom && rect.bottom > containerRect.top
           )
         },
-        getVisibleRange: () => {
-          return { start: startIndex, end: messages.length - 1 }
-        },
+        getVisibleRange: () => ({ start: startIndex, end: messages.length - 1 }),
       }))
 
       // Handle scroll-to-bottom when new messages arrive
@@ -233,28 +274,27 @@ export const VirtualizedMessageList = memo(
           shouldScrollToBottom &&
           messages.length > prevMessageCountRef.current
         ) {
-          // New message arrived while we should scroll to bottom
           const lastEl = messageRefs.current.get(messages.length - 1)
           if (lastEl) {
-            lastEl.scrollIntoView({ behavior: 'smooth', block: 'end' })
+            lastEl.scrollIntoView({ behavior: 'instant', block: 'end' })
           }
           onScrollToBottomHandled?.()
         }
         prevMessageCountRef.current = messages.length
       }, [messages.length, shouldScrollToBottom, onScrollToBottomHandled])
 
-      // Early return if no messages
-      if (messages.length === 0) {
-        return null
-      }
+      if (messages.length === 0) return null
 
       return (
         <div className="flex flex-col w-full">
-          {/* Show indicator when more messages exist */}
           {hasMoreMessages && (
-            <div className="text-center text-muted-foreground text-xs py-2 opacity-60">
-              ↑ {startIndex} older messages
-            </div>
+            <button
+              type="button"
+              onClick={loadMore}
+              className="w-full text-center text-muted-foreground text-xs py-2 opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
+            >
+              ↑ Load more ({startIndex} older messages)
+            </button>
           )}
 
           {visibleMessages.map((message, localIndex) => {
@@ -263,6 +303,19 @@ export const VirtualizedMessageList = memo(
               message.role === 'assistant' &&
               (hasFollowUpMap.get(globalIndex) ?? false)
 
+            // Show completed duration on the last assistant message (from store),
+            // or fall back to timestamp-based computation for persisted messages (after reload)
+            let durationMs: number | null = null
+            if (message.role === 'assistant' && globalIndex === messages.length - 1 && completedDurationMs) {
+              durationMs = completedDurationMs
+            } else if (message.role === 'assistant' && globalIndex > 0) {
+              const prevMessage = messages[globalIndex - 1]
+              if (prevMessage?.role === 'user') {
+                const deltaSecs = message.timestamp - prevMessage.timestamp
+                if (deltaSecs > 0 && deltaSecs < 3600) durationMs = deltaSecs * 1000
+              }
+            }
+
             return (
               <div
                 key={message.id}
@@ -270,7 +323,7 @@ export const VirtualizedMessageList = memo(
                   if (el) messageRefs.current.set(globalIndex, el)
                   else messageRefs.current.delete(globalIndex)
                 }}
-                className="pb-4"
+                className={globalIndex === messages.length - 1 && isSending ? '' : 'pb-4'}
               >
                 <MessageItem
                   message={message}
@@ -281,6 +334,9 @@ export const VirtualizedMessageList = memo(
                   sessionId={sessionId}
                   worktreePath={worktreePath}
                   approveShortcut={approveShortcut}
+                  approveShortcutYolo={approveShortcutYolo}
+                  approveShortcutClearContext={approveShortcutClearContext}
+                  approveShortcutClearContextBuild={approveShortcutClearContextBuild}
                   approveButtonRef={
                     globalIndex === lastPlanMessageIndex
                       ? approveButtonRef
@@ -289,6 +345,10 @@ export const VirtualizedMessageList = memo(
                   isSending={isSending}
                   onPlanApproval={onPlanApproval}
                   onPlanApprovalYolo={onPlanApprovalYolo}
+                  onClearContextApproval={onClearContextApproval}
+                  onClearContextApprovalBuild={onClearContextApprovalBuild}
+                  onWorktreeBuildApproval={onWorktreeBuildApproval}
+                  onWorktreeYoloApproval={onWorktreeYoloApproval}
                   onQuestionAnswer={onQuestionAnswer}
                   onQuestionSkip={onQuestionSkip}
                   onFileClick={onFileClick}
@@ -299,6 +359,9 @@ export const VirtualizedMessageList = memo(
                   getSubmittedAnswers={getSubmittedAnswers}
                   areQuestionsSkipped={areQuestionsSkipped}
                   isFindingFixed={isFindingFixed}
+                  onCopyToInput={onCopyToInput}
+                  hideApproveButtons={hideApproveButtons}
+                  durationMs={durationMs}
                 />
               </div>
             )

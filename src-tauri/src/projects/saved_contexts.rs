@@ -11,17 +11,17 @@ pub struct AttachedSavedContext {
     pub created_at: u64,
 }
 
-/// Attach a saved context to a worktree by copying it to the worktree-specific location.
+/// Attach a saved context to a session by copying it to the session-specific location.
 ///
-/// Storage location: `app-data/session-context/{worktree_id}-context-{slug}.md`
+/// Storage location: `app-data/session-context/{session_id}-context-{slug}.md`
 #[tauri::command]
 pub async fn attach_saved_context(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     source_path: String,
     slug: String,
 ) -> Result<AttachedSavedContext, String> {
-    log::trace!("Attaching saved context '{slug}' for worktree {worktree_id}");
+    log::trace!("Attaching saved context '{slug}' for session {session_id}");
 
     let app_data_dir = app
         .path()
@@ -48,8 +48,8 @@ pub async fn attach_saved_context(
         .and_then(|line| line.strip_prefix("# "))
         .map(|s| s.to_string());
 
-    // Destination file: {worktree_id}-context-{slug}.md
-    let dest_file = saved_contexts_dir.join(format!("{worktree_id}-context-{slug}.md"));
+    // Destination file: {session_id}-context-{slug}.md
+    let dest_file = saved_contexts_dir.join(format!("{session_id}-context-{slug}.md"));
 
     // Write content to destination
     std::fs::write(&dest_file, &content)
@@ -68,7 +68,7 @@ pub async fn attach_saved_context(
         .map_err(|e| format!("Failed to convert time: {e}"))?
         .as_secs();
 
-    log::trace!("Attached saved context '{slug}' for worktree {worktree_id}");
+    log::trace!("Attached saved context '{slug}' for session {session_id}");
 
     Ok(AttachedSavedContext {
         slug,
@@ -78,14 +78,14 @@ pub async fn attach_saved_context(
     })
 }
 
-/// Remove an attached saved context from a worktree.
+/// Remove an attached saved context from a session.
 #[tauri::command]
 pub async fn remove_saved_context(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     slug: String,
 ) -> Result<(), String> {
-    log::trace!("Removing saved context '{slug}' from worktree {worktree_id}");
+    log::trace!("Removing saved context '{slug}' from session {session_id}");
 
     let app_data_dir = app
         .path()
@@ -94,24 +94,24 @@ pub async fn remove_saved_context(
 
     let context_file = app_data_dir
         .join("session-context")
-        .join(format!("{worktree_id}-context-{slug}.md"));
+        .join(format!("{session_id}-context-{slug}.md"));
 
     if context_file.exists() {
         std::fs::remove_file(&context_file)
             .map_err(|e| format!("Failed to remove saved context file: {e}"))?;
-        log::trace!("Removed saved context '{slug}' from worktree {worktree_id}");
+        log::trace!("Removed saved context '{slug}' from session {session_id}");
     }
 
     Ok(())
 }
 
-/// List all attached saved contexts for a worktree.
+/// List all attached saved contexts for a session.
 #[tauri::command]
 pub async fn list_attached_saved_contexts(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
 ) -> Result<Vec<AttachedSavedContext>, String> {
-    log::trace!("Listing attached saved contexts for worktree {worktree_id}");
+    log::trace!("Listing attached saved contexts for session {session_id}");
 
     let app_data_dir = app
         .path()
@@ -125,13 +125,13 @@ pub async fn list_attached_saved_contexts(
     }
 
     let mut contexts = Vec::new();
-    let prefix = format!("{worktree_id}-context-");
+    let prefix = format!("{session_id}-context-");
 
     if let Ok(entries) = std::fs::read_dir(&saved_contexts_dir) {
         for entry in entries.flatten() {
             let file_name = entry.file_name().to_string_lossy().to_string();
 
-            // Match files like "{worktree_id}-context-{slug}.md"
+            // Match files like "{session_id}-context-{slug}.md"
             if file_name.starts_with(&prefix) && file_name.ends_with(".md") {
                 // Extract slug from filename
                 let slug = file_name[prefix.len()..file_name.len() - 3].to_string();
@@ -180,7 +180,7 @@ pub async fn list_attached_saved_contexts(
 #[tauri::command]
 pub async fn get_saved_context_content(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     slug: String,
 ) -> Result<String, String> {
     let app_data_dir = app
@@ -190,7 +190,7 @@ pub async fn get_saved_context_content(
 
     let context_file = app_data_dir
         .join("session-context")
-        .join(format!("{worktree_id}-context-{slug}.md"));
+        .join(format!("{session_id}-context-{slug}.md"));
 
     if !context_file.exists() {
         return Err(format!("Saved context file not found for slug '{slug}'"));
@@ -200,13 +200,12 @@ pub async fn get_saved_context_content(
         .map_err(|e| format!("Failed to read saved context file: {e}"))
 }
 
-/// Delete all saved context files for a worktree.
+/// Delete all saved context files for a session.
 ///
-/// Called during worktree deletion to clean up orphaned saved context files.
-#[allow(dead_code)]
-pub fn cleanup_saved_contexts_for_worktree(
+/// Called during session deletion to clean up context files.
+pub fn cleanup_saved_contexts_for_session(
     app: &tauri::AppHandle,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<(), String> {
     let app_data_dir = app
         .path()
@@ -218,7 +217,7 @@ pub fn cleanup_saved_contexts_for_worktree(
         return Ok(());
     }
 
-    let prefix = format!("{worktree_id}-context-");
+    let prefix = format!("{session_id}-context-");
     if let Ok(entries) = std::fs::read_dir(&saved_contexts_dir) {
         for entry in entries.flatten() {
             let file_name = entry.file_name().to_string_lossy().to_string();

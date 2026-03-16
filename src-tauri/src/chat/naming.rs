@@ -3,17 +3,18 @@
 //! Uses a single Claude CLI call to generate both session and branch names
 //! based on the first message in a session.
 
-use crate::claude_cli::get_cli_binary_path;
+use crate::claude_cli::resolve_cli_binary;
 use crate::platform::silent_command;
 use crate::projects::git;
 use crate::projects::storage::{load_projects_data, save_projects_data};
 
 use super::storage::with_sessions_mut;
+use crate::http_server::EmitExt;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 /// Request for combined naming (session + branch)
 #[derive(Debug, Clone)]
@@ -26,6 +27,14 @@ pub struct NamingRequest {
     pub existing_branch_names: Vec<String>,
     pub generate_session_name: bool,
     pub generate_branch_name: bool,
+    /// Optional custom prompt for session naming (from magic prompts settings)
+    pub custom_session_prompt: Option<String>,
+    /// Optional custom CLI profile name for alternative providers (e.g., OpenRouter)
+    pub custom_profile_name: Option<String>,
+    /// Per-operation backend override from magic prompt settings (None = use project/global default)
+    pub backend_override: Option<String>,
+    /// Per-operation reasoning effort override (None = use default)
+    pub reasoning_effort: Option<String>,
 }
 
 /// Successful session rename result (for event emission)
@@ -123,7 +132,7 @@ fn extract_json_object(text: &str) -> Option<&str> {
 const NAMING_PROMPT_BOTH: &str = r#"<task>Generate a session name AND a git branch name for a coding session based on the user's request.</task>
 
 <session_name_rules>
-- Maximum 3-4 words total
+- Maximum 4-5 words total
 - Use sentence case (only capitalize first word)
 - Be descriptive but concise
 - Focus on the main topic or goal
@@ -160,7 +169,7 @@ Respond with ONLY the raw JSON object, no markdown, no code fences, no explanati
 const NAMING_PROMPT_SESSION_ONLY: &str = r#"<task>Generate a short, human-friendly name for this chat session based on the user's request.</task>
 
 <rules>
-- Maximum 3-4 words total
+- Maximum 4-5 words total
 - Use sentence case (only capitalize first word)
 - Be descriptive but concise
 - Focus on the main topic or goal
@@ -289,12 +298,6 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
 
 /// Generate names using Claude CLI
 fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutput, String> {
-    let cli_path = get_cli_binary_path(app)?;
-
-    if !cli_path.exists() {
-        return Err("Claude CLI not installed".to_string());
-    }
-
     // Detect if attachments are present to enable Read tool
     let has_images = contains_image_attachment(&request.first_message);
     let has_text_files = contains_text_attachment(&request.first_message);
@@ -312,7 +315,13 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
             .replace("{message}", &request.first_message)
             .replace("{existing_names}", &existing)
     } else if request.generate_session_name {
-        NAMING_PROMPT_SESSION_ONLY.replace("{message}", &request.first_message)
+        let template = request
+            .custom_session_prompt
+            .as_ref()
+            .filter(|p| !p.trim().is_empty())
+            .map(|s| s.as_str())
+            .unwrap_or(NAMING_PROMPT_SESSION_ONLY);
+        template.replace("{message}", &request.first_message)
     } else {
         let existing = if request.existing_branch_names.is_empty() {
             "(none)".to_string()
@@ -336,6 +345,25 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
         (false, false, false) => base_prompt,
     };
 
+    // Per-operation backend > project/global default_backend
+    let backend = super::commands::resolve_magic_prompt_backend(
+        app,
+        request.backend_override.as_deref(),
+        Some(&request.worktree_id),
+    );
+
+    if backend == super::types::Backend::Opencode {
+        return generate_names_opencode(app, &prompt, &request.model, request);
+    }
+    if backend == super::types::Backend::Codex {
+        return generate_names_codex(app, &prompt, &request.model, request);
+    }
+
+    let cli_path = resolve_cli_binary(app);
+    if !cli_path.exists() {
+        return Err("Claude CLI not installed".to_string());
+    }
+
     let model_alias = get_cli_model_alias(&request.model);
 
     log::trace!(
@@ -343,6 +371,10 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
     );
 
     let mut cmd = silent_command(&cli_path);
+    crate::chat::claude::apply_custom_profile_settings(
+        &mut cmd,
+        request.custom_profile_name.as_deref(),
+    );
     cmd.args([
         "--print",
         "--input-format",
@@ -470,6 +502,290 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
     Ok(naming_output)
 }
 
+/// Schema for Codex naming output
+const NAMING_SCHEMA: &str = r#"{
+    "type": "object",
+    "properties": {
+        "session_name": {
+            "type": "string",
+            "description": "A short, descriptive name for the session (2-6 words)"
+        },
+        "branch_name": {
+            "type": "string",
+            "description": "A git branch name in kebab-case (e.g. feat/add-dark-mode)"
+        }
+    },
+    "required": ["session_name", "branch_name"],
+    "additionalProperties": false
+}"#;
+
+/// Generate names using Codex CLI with --output-schema
+fn generate_names_codex(
+    app: &tauri::AppHandle,
+    prompt: &str,
+    model: &str,
+    request: &NamingRequest,
+) -> Result<NamingOutput, String> {
+    log::trace!("Generating names with Codex CLI using model {model}");
+    let json_str = super::codex::execute_one_shot_codex(
+        app,
+        prompt,
+        model,
+        NAMING_SCHEMA,
+        Some(&request.worktree_path),
+        request.reasoning_effort.as_deref(),
+    )?;
+    log::trace!("Codex generated naming response: {json_str}");
+    serde_json::from_str(&json_str)
+        .map_err(|e| format!("Failed to parse Codex naming JSON: {e}, raw: {json_str}"))
+}
+
+fn choose_opencode_model(all_providers: &serde_json::Value) -> Option<(String, String)> {
+    let connected = all_providers
+        .get("connected")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let providers = all_providers
+        .get("all")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for provider_id in connected.iter().filter_map(|v| v.as_str()) {
+        for provider in &providers {
+            if provider.get("id").and_then(|v| v.as_str()) != Some(provider_id) {
+                continue;
+            }
+            if let Some(models) = provider.get("models").and_then(|v| v.as_object()) {
+                if let Some((model_id, _)) = models.iter().next() {
+                    return Some((provider_id.to_string(), model_id.to_string()));
+                }
+            }
+        }
+    }
+
+    for provider in providers {
+        let provider_id = match provider.get("id").and_then(|v| v.as_str()) {
+            Some(v) => v,
+            None => continue,
+        };
+        let model_id = provider
+            .get("models")
+            .and_then(|v| v.as_object())
+            .and_then(|o| o.keys().next())
+            .cloned();
+        if let Some(model_id) = model_id {
+            return Some((provider_id.to_string(), model_id));
+        }
+    }
+
+    None
+}
+
+fn parse_opencode_provider_model(model: Option<&str>) -> Option<(String, String)> {
+    let raw = model?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    // Strip "opencode/" prefix if present (e.g. "opencode/ollama/Qwen" → "ollama/Qwen")
+    let raw = raw.strip_prefix("opencode/").unwrap_or(raw);
+    let (provider, model_id) = raw.split_once('/')?;
+    let provider = provider.trim();
+    let model_id = model_id.trim();
+    if provider.is_empty() || model_id.is_empty() {
+        return None;
+    }
+    Some((provider.to_string(), model_id.to_string()))
+}
+
+fn extract_text_from_opencode_parts(response_json: &serde_json::Value) -> String {
+    response_json
+        .get("parts")
+        .and_then(|v| v.as_array())
+        .map(|parts| {
+            parts
+                .iter()
+                .filter(|part| part.get("type").and_then(|v| v.as_str()) == Some("text"))
+                .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+}
+
+/// Generate names using OpenCode HTTP API.
+/// This path does not emit chat:* events, so it won't mutate active streaming UI.
+/// Retries once on connection-level errors (server temporarily unavailable).
+fn generate_names_opencode(
+    app: &tauri::AppHandle,
+    prompt: &str,
+    model: &str,
+    request: &NamingRequest,
+) -> Result<NamingOutput, String> {
+    let mut last_err = String::new();
+    for attempt in 0..2 {
+        if attempt > 0 {
+            log::info!("Retrying OpenCode naming request (attempt {attempt})");
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        match generate_names_opencode_inner(app, prompt, model, request) {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                // Only retry on connection-level errors (server unreachable)
+                if attempt == 0 && is_connection_error(&e) {
+                    log::warn!("OpenCode naming connection error, will retry: {e}");
+                    last_err = e;
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Err(last_err)
+}
+
+/// Returns true if the error message indicates a connection-level failure
+/// (server unreachable) rather than an HTTP-level error.
+fn is_connection_error(err: &str) -> bool {
+    err.contains("error sending request")
+        || err.contains("connection refused")
+        || err.contains("Connection refused")
+}
+
+fn generate_names_opencode_inner(
+    app: &tauri::AppHandle,
+    prompt: &str,
+    model: &str,
+    request: &NamingRequest,
+) -> Result<NamingOutput, String> {
+    let base_url = crate::opencode_server::acquire(app)?;
+
+    struct ServerReleaseGuard;
+    impl Drop for ServerReleaseGuard {
+        fn drop(&mut self) {
+            crate::opencode_server::release();
+        }
+    }
+    let _server_guard = ServerReleaseGuard;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("Failed to build OpenCode HTTP client: {e}"))?;
+
+    let query = [(
+        "directory",
+        request.worktree_path.to_string_lossy().to_string(),
+    )];
+
+    let create_url = format!("{base_url}/session");
+    let create_payload = serde_json::json!({
+        "title": format!("Jean naming {}", request.session_id),
+    });
+    let create_resp = client
+        .post(&create_url)
+        .query(&query)
+        .json(&create_payload)
+        .send()
+        .map_err(|e| format!("Failed to create OpenCode naming session: {e}"))?;
+    if !create_resp.status().is_success() {
+        let status = create_resp.status();
+        let body = create_resp.text().unwrap_or_default();
+        return Err(format!(
+            "OpenCode naming session create failed: status={status}, body={body}"
+        ));
+    }
+    let created: serde_json::Value = create_resp
+        .json()
+        .map_err(|e| format!("Failed to parse OpenCode naming session response: {e}"))?;
+    let opencode_session_id = created
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or("OpenCode naming session create response missing id")?
+        .to_string();
+
+    let selected_model = if let Some(pm) = parse_opencode_provider_model(Some(model)) {
+        pm
+    } else {
+        let providers_url = format!("{base_url}/provider");
+        let providers_resp = client
+            .get(&providers_url)
+            .query(&query)
+            .send()
+            .map_err(|e| format!("Failed to query OpenCode providers: {e}"))?;
+        if !providers_resp.status().is_success() {
+            let status = providers_resp.status();
+            let body = providers_resp.text().unwrap_or_default();
+            return Err(format!(
+                "OpenCode provider query failed: status={status}, body={body}"
+            ));
+        }
+        let providers: serde_json::Value = providers_resp
+            .json()
+            .map_err(|e| format!("Failed to parse OpenCode providers response: {e}"))?;
+        // Try to find the bare model ID across providers before picking any random model
+        let bare = model.strip_prefix("opencode/").unwrap_or(model);
+        crate::chat::opencode::find_provider_for_model(&providers, bare)
+            .or_else(|| choose_opencode_model(&providers))
+            .ok_or("No OpenCode models available. Authenticate a provider first.")?
+    };
+
+    let msg_url = format!("{base_url}/session/{opencode_session_id}/message");
+    let mut payload = serde_json::json!({
+        "agent": "plan",
+        "model": {
+            "providerID": selected_model.0,
+            "modelID": selected_model.1,
+        },
+        "parts": [
+            {
+                "type": "text",
+                "text": prompt,
+            }
+        ],
+    });
+
+    if let Some(effort) = &request.reasoning_effort {
+        payload["reasoning_effort"] = serde_json::Value::String(effort.clone());
+    }
+
+    let response = client
+        .post(msg_url)
+        .query(&query)
+        .json(&payload)
+        .send()
+        .map_err(|e| format!("Failed to send OpenCode naming request: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!(
+            "OpenCode naming message failed: status={status}, body={body}"
+        ));
+    }
+
+    let response_json: serde_json::Value = response
+        .json()
+        .map_err(|e| format!("Failed to parse OpenCode naming response: {e}"))?;
+    let text = extract_text_from_opencode_parts(&response_json);
+    log::trace!("OpenCode generated naming response: {text}");
+
+    let json_text = text
+        .trim()
+        .strip_prefix("```json")
+        .or_else(|| text.trim().strip_prefix("```"))
+        .unwrap_or(&text)
+        .trim()
+        .strip_suffix("```")
+        .unwrap_or(&text)
+        .trim();
+    let json_text = extract_json_object(json_text).unwrap_or(json_text);
+
+    serde_json::from_str(json_text)
+        .map_err(|e| format!("Failed to parse OpenCode naming JSON: {e}, raw: {json_text}"))
+}
+
 /// Validate and sanitize a session name
 fn validate_session_name(name: &str) -> Result<String, String> {
     let name = name.trim();
@@ -488,8 +804,8 @@ fn validate_session_name(name: &str) -> Result<String, String> {
 
     // Enforce word limit (4 words max)
     let words: Vec<&str> = sanitized.split_whitespace().collect();
-    let final_name = if words.len() > 4 {
-        words[..4].join(" ")
+    let final_name = if words.len() > 6 {
+        words[..6].join(" ")
     } else {
         sanitized
     };
@@ -498,9 +814,14 @@ fn validate_session_name(name: &str) -> Result<String, String> {
         return Err("Generated session name is empty".to_string());
     }
 
-    // Enforce character limit (50 chars max)
-    let final_name = if final_name.len() > 50 {
-        final_name[..50].trim().to_string()
+    // Enforce character limit (50 chars max, char-safe for multi-byte UTF-8)
+    let final_name = if final_name.chars().count() > 50 {
+        final_name
+            .chars()
+            .take(50)
+            .collect::<String>()
+            .trim()
+            .to_string()
     } else {
         final_name
     };
@@ -661,7 +982,7 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
                 error: e,
                 stage: NamingStage::Generation,
             };
-            let _ = app.emit("naming-failed", &error);
+            let _ = app.emit_all("naming-failed", &error);
             return;
         }
     };
@@ -677,11 +998,11 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
                             result.old_name,
                             result.new_name
                         );
-                        let _ = app.emit("session-renamed", &result);
+                        let _ = app.emit_all("session-renamed", &result);
                     }
                     Err(error) => {
                         log::warn!("Session naming storage failed: {}", error.error);
-                        let _ = app.emit("session-naming-failed", &error);
+                        let _ = app.emit_all("session-naming-failed", &error);
                     }
                 },
                 Err(e) => {
@@ -692,7 +1013,7 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
                         error: e,
                         stage: NamingStage::Validation,
                     };
-                    let _ = app.emit("session-naming-failed", &error);
+                    let _ = app.emit_all("session-naming-failed", &error);
                 }
             }
         } else {
@@ -711,11 +1032,11 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
                             result.old_branch,
                             result.new_branch
                         );
-                        let _ = app.emit("branch-renamed", &result);
+                        let _ = app.emit_all("branch-renamed", &result);
                     }
                     Err(error) => {
                         log::warn!("Branch naming failed: {}", error.error);
-                        let _ = app.emit("branch-naming-failed", &error);
+                        let _ = app.emit_all("branch-naming-failed", &error);
                     }
                 },
                 Err(e) => {
@@ -726,7 +1047,7 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
                         error: e,
                         stage: NamingStage::Validation,
                     };
-                    let _ = app.emit("branch-naming-failed", &error);
+                    let _ = app.emit_all("branch-naming-failed", &error);
                 }
             }
         } else {

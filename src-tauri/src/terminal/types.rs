@@ -23,6 +23,8 @@ pub struct TerminalStartedEvent {
 pub struct TerminalStoppedEvent {
     pub terminal_id: String,
     pub exit_code: Option<i32>,
+    /// Signal name if the process was killed by a signal (e.g. "Interrupt: 2" for SIGINT)
+    pub signal: Option<String>,
 }
 
 /// Active terminal session state

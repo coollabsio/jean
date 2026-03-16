@@ -8,7 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+package-lock.json
+dist/*
+!dist/.gitkeep
 dist-ssr
 *.local
 *.local.*

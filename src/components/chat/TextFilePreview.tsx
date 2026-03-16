@@ -1,10 +1,23 @@
-import { useState, useCallback } from 'react'
-import { X, FileText } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
+import { useState, useCallback, useRef } from 'react'
+import { X, FileText, Copy, Pencil, Check } from 'lucide-react'
+import { invoke } from '@/lib/transport'
+import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import type { PendingTextFile } from '@/types/chat'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
+import { useChatStore } from '@/store/chat-store'
 
 function isMarkdownFile(filename: string | undefined): boolean {
   if (!filename) return false
@@ -18,6 +31,8 @@ interface TextFilePreviewProps {
   onRemove: (textFileId: string) => void
   /** Whether removal is disabled (e.g., while sending) */
   disabled?: boolean
+  /** Session ID for updating text file content */
+  sessionId?: string
 }
 
 /** Format bytes to human readable string */
@@ -35,8 +50,13 @@ export function TextFilePreview({
   textFiles,
   onRemove,
   disabled,
+  sessionId,
 }: TextFilePreviewProps) {
   const [openFileId, setOpenFileId] = useState<string | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleRemove = useCallback(
     async (e: React.MouseEvent, textFile: PendingTextFile) => {
@@ -58,6 +78,60 @@ export function TextFilePreview({
     },
     [disabled, onRemove]
   )
+
+  const handleCopy = useCallback((content: string) => {
+    copyToClipboard(content)
+    toast.success('Copied to clipboard')
+  }, [])
+
+  const handleStartEdit = useCallback((content: string) => {
+    setEditContent(content)
+    setIsEditing(true)
+    // Focus textarea after render
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+  }, [])
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false)
+    setEditContent('')
+  }, [])
+
+  const handleSaveEdit = useCallback(
+    async (textFile: PendingTextFile) => {
+      if (!sessionId || isSaving) return
+
+      setIsSaving(true)
+      try {
+        const newSize = await invoke<number>('update_pasted_text', {
+          path: textFile.path,
+          content: editContent,
+        })
+
+        const { updatePendingTextFile } = useChatStore.getState()
+        updatePendingTextFile(sessionId, textFile.id, editContent, newSize)
+
+        setIsEditing(false)
+        setEditContent('')
+        toast.success('Text file updated')
+      } catch (error) {
+        console.error('Failed to update text file:', error)
+        toast.error('Failed to update text file', {
+          description: String(error),
+        })
+      } finally {
+        setIsSaving(false)
+      }
+    },
+    [sessionId, editContent, isSaving]
+  )
+
+  const handleDialogClose = useCallback(() => {
+    setOpenFileId(null)
+    setIsEditing(false)
+    setEditContent('')
+  }, [])
 
   const openFile = textFiles.find(tf => tf.id === openFileId)
 
@@ -84,14 +158,18 @@ export function TextFilePreview({
               </div>
             </button>
             {!disabled && (
-              <button
-                type="button"
-                onClick={e => handleRemove(e, textFile)}
-                className="absolute -top-1.5 -right-1.5 p-0.5 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-destructive/90 z-10"
-                title="Remove text file"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={e => handleRemove(e, textFile)}
+                    className="absolute -top-1.5 -right-1.5 p-0.5 bg-destructive text-destructive-foreground rounded-full opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shadow-sm hover:bg-destructive/90 z-10"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Remove text file</TooltipContent>
+              </Tooltip>
             )}
           </div>
         ))}
@@ -100,9 +178,9 @@ export function TextFilePreview({
       {/* Preview dialog */}
       <Dialog
         open={!!openFileId}
-        onOpenChange={open => !open && setOpenFileId(null)}
+        onOpenChange={open => !open && handleDialogClose()}
       >
-        <DialogContent className="!max-w-[calc(100vw-4rem)] !w-[calc(100vw-4rem)] max-h-[85vh] p-4 bg-background/95 backdrop-blur-sm">
+        <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm">
           <DialogTitle className="text-sm font-medium flex items-center gap-2">
             <FileText className="h-4 w-4" />
             {openFile?.filename}
@@ -110,19 +188,82 @@ export function TextFilePreview({
               ({openFile ? formatBytes(openFile.size) : ''})
             </span>
           </DialogTitle>
-          <ScrollArea className="h-[calc(85vh-6rem)] mt-2">
-            {isMarkdownFile(openFile?.filename) ? (
-              <div className="p-3">
+          <DialogDescription className="sr-only">
+            Preview of pending text file content before sending.
+          </DialogDescription>
+          <ScrollArea className="h-[calc(85vh-8rem)] mt-2">
+            {isEditing ? (
+              <textarea
+                ref={textareaRef}
+                value={editContent}
+                onChange={e => setEditContent(e.target.value)}
+                className="w-full h-full min-h-[calc(85vh-10rem)] text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md border-none outline-none resize-none"
+              />
+            ) : isMarkdownFile(openFile?.filename) ? (
+              <div className="p-3 select-text cursor-text">
                 <Markdown className="text-sm">
                   {openFile?.content ?? ''}
                 </Markdown>
               </div>
             ) : (
-              <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md select-text cursor-text">
                 {openFile?.content}
               </pre>
             )}
           </ScrollArea>
+          <div className="flex items-center gap-1 pt-2 border-t border-border/50">
+            {isEditing ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  disabled={isSaving}
+                  className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors text-xs"
+                  title="Cancel editing"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openFile && handleSaveEdit(openFile)}
+                  disabled={isSaving}
+                  className="px-3 py-1.5 rounded-md text-primary-foreground bg-primary hover:bg-primary/90 transition-colors flex items-center gap-1 text-xs"
+                  title="Save changes"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Save
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openFile?.content && handleCopy(openFile.content)
+                  }
+                  className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                  title="Copy to clipboard"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy
+                </button>
+                {!disabled && sessionId && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openFile?.content !== undefined &&
+                      handleStartEdit(openFile.content)
+                    }
+                    className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                    title="Edit content"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>

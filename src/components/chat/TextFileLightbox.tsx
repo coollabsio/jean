@@ -1,7 +1,14 @@
 import { useState, useCallback } from 'react'
-import { FileText, Loader2 } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { FileText, Loader2, Copy } from 'lucide-react'
+import { invoke } from '@/lib/transport'
+import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
 import type { ReadTextResponse } from '@/types/chat'
@@ -58,6 +65,13 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
     }
   }, [content, isLoading, path])
 
+  const handleCopy = useCallback(() => {
+    if (content) {
+      copyToClipboard(content)
+      toast.success('Copied to clipboard')
+    }
+  }, [content])
+
   return (
     <>
       <button
@@ -77,7 +91,7 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
       </button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="!max-w-[calc(100vw-4rem)] !w-[calc(100vw-4rem)] max-h-[85vh] p-4 bg-background/95 backdrop-blur-sm">
+        <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm">
           <DialogTitle className="text-sm font-medium flex items-center gap-2">
             <FileText className="h-4 w-4" />
             {filename}
@@ -87,7 +101,10 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
               </span>
             )}
           </DialogTitle>
-          <ScrollArea className="h-[calc(85vh-6rem)] mt-2">
+          <DialogDescription className="sr-only">
+            Preview of text file content for {filename}.
+          </DialogDescription>
+          <ScrollArea className="h-[calc(85vh-8rem)] mt-2">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -97,15 +114,28 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
                 Failed to load file: {error}
               </div>
             ) : isMarkdownFile(filename) ? (
-              <div className="p-3">
+              <div className="p-3 select-text cursor-text">
                 <Markdown className="text-sm">{content ?? ''}</Markdown>
               </div>
             ) : (
-              <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-words p-3 bg-muted rounded-md select-text cursor-text">
                 {content}
               </pre>
             )}
           </ScrollArea>
+          {content && (
+            <div className="flex items-center gap-1 pt-2 border-t border-border/50">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                title="Copy to clipboard"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

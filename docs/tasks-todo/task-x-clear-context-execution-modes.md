@@ -3,6 +3,7 @@
 ## Overview
 
 Extend execution mode system with two new modes:
+
 - `build-clear`: Clears context, loads plan, executes in build mode
 - `yolo-clear`: Clears context, loads plan, executes in yolo mode
 
@@ -20,8 +21,14 @@ Extend execution mode system with two new modes:
 ### 1. Extend ExecutionMode Type
 
 **File: `src/types/chat.ts`**
+
 ```typescript
-export type ExecutionMode = 'plan' | 'build' | 'yolo' | 'build-clear' | 'yolo-clear'
+export type ExecutionMode =
+  | 'plan'
+  | 'build'
+  | 'yolo'
+  | 'build-clear'
+  | 'yolo-clear'
 
 // Shift+Tab cycle unchanged - clear modes not in cycle
 export const EXECUTION_MODE_CYCLE: ExecutionMode[] = ['plan', 'build', 'yolo']
@@ -30,6 +37,7 @@ export const EXECUTION_MODE_CYCLE: ExecutionMode[] = ['plan', 'build', 'yolo']
 ### 2. Backend: Permission Mode Mapping
 
 **File: `src-tauri/src/chat/claude.rs:185`**
+
 ```rust
 let perm_mode = match execution_mode.unwrap_or("plan") {
     "build" | "build-clear" => "acceptEdits",
@@ -43,6 +51,7 @@ let perm_mode = match execution_mode.unwrap_or("plan") {
 **File: `src-tauri/src/chat/commands.rs`**
 
 Add new Tauri command:
+
 ```rust
 #[tauri::command]
 pub fn get_session_transcript_path(
@@ -68,8 +77,11 @@ Register in `lib.rs` `invoke_handler`.
 ### 4. Frontend: Service Function
 
 **File: `src/services/chat.ts`**
+
 ```typescript
-export async function getSessionTranscriptPath(sessionId: string): Promise<string | null> {
+export async function getSessionTranscriptPath(
+  sessionId: string
+): Promise<string | null> {
   if (!isTauri()) throw new Error('Not in Tauri context')
   return invoke<string | null>('get_session_transcript_path', { sessionId })
 }
@@ -80,8 +92,11 @@ export async function getSessionTranscriptPath(sessionId: string): Promise<strin
 **File: `src/components/chat/tool-call-utils.ts`**
 
 Add function to find plan from session messages:
+
 ```typescript
-export function findPlanFileFromMessages(messages: ChatMessage[]): string | null {
+export function findPlanFileFromMessages(
+  messages: ChatMessage[]
+): string | null {
   for (const msg of messages) {
     if (msg.role !== 'assistant') continue
     const planPath = findPlanFilePath(msg.tool_calls)
@@ -96,6 +111,7 @@ export function findPlanFileFromMessages(messages: ChatMessage[]): string | null
 **File: `src/components/chat/ChatWindow.tsx`**
 
 In submit handler, detect clear modes and:
+
 1. Get plan file path from current session messages
 2. Read plan content via `readPlanFile()`
 3. Get transcript path via `getSessionTranscriptPath()`
@@ -136,6 +152,7 @@ if (executionMode === 'build-clear' || executionMode === 'yolo-clear') {
 ```
 
 Implementation message builder:
+
 ```typescript
 function buildImplementationMessage(
   userInput: string,
@@ -161,32 +178,38 @@ function buildImplementationMessage(
 **File: `src/components/chat/ChatToolbar.tsx`**
 
 Add `hasPlan` prop and conditionally render clear modes:
+
 ```tsx
 interface ChatToolbarProps {
   // ... existing props
-  hasPlan: boolean  // New prop
+  hasPlan: boolean // New prop
 }
 
 // In dropdown:
-{hasPlan && (
-  <>
-    <DropdownMenuSeparator />
-    <DropdownMenuRadioItem value="build-clear">
-      Build (Clear)
-      <span className="ml-auto text-xs text-muted-foreground">New session</span>
-    </DropdownMenuRadioItem>
-    <DropdownMenuRadioItem
-      value="yolo-clear"
-      className="text-red-600 dark:text-red-400"
-    >
-      Yolo (Clear)
-      <span className="ml-auto text-xs">New session</span>
-    </DropdownMenuRadioItem>
-  </>
-)}
+{
+  hasPlan && (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuRadioItem value="build-clear">
+        Build (Clear)
+        <span className="ml-auto text-xs text-muted-foreground">
+          New session
+        </span>
+      </DropdownMenuRadioItem>
+      <DropdownMenuRadioItem
+        value="yolo-clear"
+        className="text-red-600 dark:text-red-400"
+      >
+        Yolo (Clear)
+        <span className="ml-auto text-xs">New session</span>
+      </DropdownMenuRadioItem>
+    </>
+  )
+}
 ```
 
 Pass `hasPlan` from ChatWindow:
+
 ```typescript
 const hasPlan = useMemo(() => {
   return !!findPlanFileFromMessages(messages ?? [])
@@ -200,6 +223,7 @@ const hasPlan = useMemo(() => {
 **File: `src/lib/commands/execution-commands.ts`**
 
 Add commands with conditional availability:
+
 ```typescript
 {
   id: 'execution-build-clear',
@@ -225,24 +249,24 @@ Update command context type in `src/lib/commands/types.ts` to add `hasPlan`.
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `src/types/chat.ts` | Add `'build-clear' \| 'yolo-clear'` to ExecutionMode |
-| `src-tauri/src/chat/claude.rs` | Map clear modes to permission modes |
-| `src-tauri/src/chat/commands.rs` | Add `get_session_transcript_path` command |
-| `src-tauri/src/lib.rs` | Register new command |
-| `src/services/chat.ts` | Add `getSessionTranscriptPath()` |
-| `src/components/chat/tool-call-utils.ts` | Add `findPlanFileFromMessages()` |
-| `src/components/chat/ChatWindow.tsx` | Handle clear modes in submit, pass `hasPlan` |
-| `src/components/chat/ChatToolbar.tsx` | Add `hasPlan` prop, conditionally show modes |
-| `src/lib/commands/execution-commands.ts` | Add clear mode commands |
-| `src/lib/commands/types.ts` | Add `hasPlan` to context |
-| `src/hooks/use-command-context.ts` | Provide `hasPlan` |
+| File                                     | Change                                               |
+| ---------------------------------------- | ---------------------------------------------------- |
+| `src/types/chat.ts`                      | Add `'build-clear' \| 'yolo-clear'` to ExecutionMode |
+| `src-tauri/src/chat/claude.rs`           | Map clear modes to permission modes                  |
+| `src-tauri/src/chat/commands.rs`         | Add `get_session_transcript_path` command            |
+| `src-tauri/src/lib.rs`                   | Register new command                                 |
+| `src/services/chat.ts`                   | Add `getSessionTranscriptPath()`                     |
+| `src/components/chat/tool-call-utils.ts` | Add `findPlanFileFromMessages()`                     |
+| `src/components/chat/ChatWindow.tsx`     | Handle clear modes in submit, pass `hasPlan`         |
+| `src/components/chat/ChatToolbar.tsx`    | Add `hasPlan` prop, conditionally show modes         |
+| `src/lib/commands/execution-commands.ts` | Add clear mode commands                              |
+| `src/lib/commands/types.ts`              | Add `hasPlan` to context                             |
+| `src/hooks/use-command-context.ts`       | Provide `hasPlan`                                    |
 
 ## Verification
 
 1. `cargo build` - Rust compiles
-2. `npm run check:all` - TS/lint passes
+2. `bun run check:all` - TS/lint passes
 3. Manual test:
    - Open Jean, no plan → Clear modes hidden
    - Create plan (via plan mode) → Clear modes appear

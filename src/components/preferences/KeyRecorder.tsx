@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { RotateCcw } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
   formatShortcutDisplay,
@@ -17,9 +22,13 @@ function formatModifiersDisplay(modifiers: {
 }): string {
   const isMac =
     typeof navigator !== 'undefined' && navigator.platform.includes('Mac')
+  const isWeb =
+    typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)
+  const useMacCtrl = isMac && isWeb
 
   const parts: string[] = []
-  if (modifiers.meta || modifiers.ctrl) parts.push(isMac ? '⌘' : 'Ctrl')
+  if (modifiers.meta || modifiers.ctrl)
+    parts.push(useMacCtrl ? '⌃' : isMac ? '⌘' : 'Ctrl')
   if (modifiers.shift) parts.push(isMac ? '⇧' : 'Shift')
   if (modifiers.alt) parts.push(isMac ? '⌥' : 'Alt')
 
@@ -214,16 +223,20 @@ export const KeyRecorder: React.FC<KeyRecorderProps> = ({
       </button>
 
       {(isModified || pendingConflict) && !isRecording && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5"
-          onClick={handleReset}
-          disabled={disabled}
-          title="Reset to default"
-        >
-          <RotateCcw className="h-3 w-3" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={handleReset}
+              disabled={disabled}
+            >
+              <RotateCcw className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Reset to default</TooltipContent>
+        </Tooltip>
       )}
 
       {hasConflict && !isRecording && (

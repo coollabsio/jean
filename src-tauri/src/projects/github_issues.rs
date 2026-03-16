@@ -58,7 +58,17 @@ pub struct GitHubIssueDetail {
     pub created_at: String,
     pub author: GitHubAuthor,
     #[serde(default)]
+    pub url: String,
+    #[serde(default)]
     pub comments: Vec<GitHubComment>,
+}
+
+/// Result of listing GitHub issues, includes total count for pagination awareness
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubIssueListResult {
+    pub issues: Vec<GitHubIssue>,
+    pub total_count: u32,
 }
 
 /// Issue context to pass when creating a worktree
@@ -75,12 +85,13 @@ pub struct IssueContext {
 /// Uses `gh issue list` to fetch issues from the repository.
 /// - state: "open", "closed", or "all" (default: "open")
 /// - Returns up to 100 issues sorted by creation date (newest first)
+/// - Includes total_count from GitHub search API for accurate badge display
 #[tauri::command]
 pub async fn list_github_issues(
     app: AppHandle,
     project_path: String,
     state: Option<String>,
-) -> Result<Vec<GitHubIssue>, String> {
+) -> Result<GitHubIssueListResult, String> {
     log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
 
     let gh = resolve_gh_binary(&app);
@@ -121,8 +132,46 @@ pub async fn list_github_issues(
     let issues: Vec<GitHubIssue> =
         serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
 
-    log::trace!("Found {} issues", issues.len());
-    Ok(issues)
+    // Get accurate total count from GitHub search API
+    let total_count =
+        get_issue_total_count(&gh, &project_path, &state_arg).unwrap_or(issues.len() as u32);
+
+    log::trace!("Found {} issues (total: {total_count})", issues.len());
+    Ok(GitHubIssueListResult {
+        issues,
+        total_count,
+    })
+}
+
+/// Get accurate total issue count from GitHub search API
+///
+/// Uses `gh api search/issues` to get the real total count without fetching all issues.
+/// Falls back to None on any error so callers can use issues.len() instead.
+fn get_issue_total_count(gh: &PathBuf, project_path: &str, state: &str) -> Option<u32> {
+    let repo_id = get_repo_identifier(project_path).ok()?;
+    let state_qualifier = match state {
+        "closed" => "+state:closed",
+        "all" => "",
+        _ => "+state:open",
+    };
+    let query = format!(
+        "search/issues?q=repo:{}/{}+is:issue{}&per_page=1",
+        repo_id.owner, repo_id.repo, state_qualifier
+    );
+
+    let output = silent_command(gh)
+        .args(["api", &query])
+        .current_dir(project_path)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).ok()?;
+    json.get("total_count")?.as_u64().map(|n| n as u32)
 }
 
 /// Search GitHub issues using GitHub's search syntax
@@ -177,6 +226,50 @@ pub async fn search_github_issues(
     Ok(issues)
 }
 
+/// Get a GitHub issue by number, returning the same type as list_github_issues.
+///
+/// Uses `gh issue view` to fetch a single issue by exact number.
+/// This finds any issue regardless of age or state.
+#[tauri::command]
+pub async fn get_github_issue_by_number(
+    app: AppHandle,
+    project_path: String,
+    issue_number: u32,
+) -> Result<GitHubIssue, String> {
+    log::trace!("Getting GitHub issue #{issue_number} by number for {project_path}");
+
+    let gh = resolve_gh_binary(&app);
+    let output = silent_command(&gh)
+        .args([
+            "issue",
+            "view",
+            &issue_number.to_string(),
+            "--json",
+            "number,title,body,state,labels,createdAt,author",
+        ])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("Could not resolve") || stderr.contains("not found") {
+            return Err(format!("Issue #{issue_number} not found"));
+        }
+        return Err(format!("gh issue view failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let issue: GitHubIssue =
+        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+
+    log::trace!("Got issue #{}: {}", issue.number, issue.title);
+    Ok(issue)
+}
+
 /// Get detailed information about a specific GitHub issue
 ///
 /// Uses `gh issue view` to fetch the issue with comments.
@@ -196,7 +289,7 @@ pub async fn get_github_issue(
             "view",
             &issue_number.to_string(),
             "--json",
-            "number,title,body,state,labels,createdAt,author,comments",
+            "number,title,body,state,labels,createdAt,author,url,comments",
         ])
         .current_dir(&project_path)
         .output()
@@ -315,15 +408,22 @@ pub struct LoadedIssueContext {
 /// Reference tracking for a single context file (issue or PR)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ContextRef {
-    pub worktrees: Vec<String>,
+    #[serde(alias = "worktrees")]
+    pub sessions: Vec<String>,
     pub orphaned_at: Option<u64>,
 }
 
-/// Tracks which worktrees reference which shared context files
+/// Tracks which sessions reference which shared context files
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ContextReferences {
     pub issues: std::collections::HashMap<String, ContextRef>,
     pub prs: std::collections::HashMap<String, ContextRef>,
+    #[serde(default)]
+    pub security: std::collections::HashMap<String, ContextRef>,
+    #[serde(default)]
+    pub advisories: std::collections::HashMap<String, ContextRef>,
+    #[serde(default)]
+    pub linear: std::collections::HashMap<String, ContextRef>,
 }
 
 /// Get the directory for shared GitHub contexts
@@ -366,20 +466,20 @@ pub fn save_context_references(
     std::fs::write(&path, content).map_err(|e| format!("Failed to write references.json: {e}"))
 }
 
-/// Add a worktree reference to an issue context
+/// Add a session reference to an issue context
 /// Key format: "{owner}-{repo}-{number}"
 pub fn add_issue_reference(
     app: &tauri::AppHandle,
     repo_key: &str,
     issue_number: u32,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<(), String> {
     let mut refs = load_context_references(app)?;
     let key = format!("{repo_key}-{issue_number}");
 
     let entry = refs.issues.entry(key).or_default();
-    if !entry.worktrees.contains(&worktree_id.to_string()) {
-        entry.worktrees.push(worktree_id.to_string());
+    if !entry.sessions.contains(&session_id.to_string()) {
+        entry.sessions.push(session_id.to_string());
     }
     // Clear orphaned status when a reference is added
     entry.orphaned_at = None;
@@ -387,20 +487,20 @@ pub fn add_issue_reference(
     save_context_references(app, &refs)
 }
 
-/// Add a worktree reference to a PR context
+/// Add a session reference to a PR context
 /// Key format: "{owner}-{repo}-{number}"
 pub fn add_pr_reference(
     app: &tauri::AppHandle,
     repo_key: &str,
     pr_number: u32,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<(), String> {
     let mut refs = load_context_references(app)?;
     let key = format!("{repo_key}-{pr_number}");
 
     let entry = refs.prs.entry(key).or_default();
-    if !entry.worktrees.contains(&worktree_id.to_string()) {
-        entry.worktrees.push(worktree_id.to_string());
+    if !entry.sessions.contains(&session_id.to_string()) {
+        entry.sessions.push(session_id.to_string());
     }
     // Clear orphaned status when a reference is added
     entry.orphaned_at = None;
@@ -408,20 +508,20 @@ pub fn add_pr_reference(
     save_context_references(app, &refs)
 }
 
-/// Remove a worktree reference from an issue context
+/// Remove a session reference from an issue context
 /// Returns true if the context is now orphaned (no more references)
 pub fn remove_issue_reference(
     app: &tauri::AppHandle,
     repo_key: &str,
     issue_number: u32,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<bool, String> {
     let mut refs = load_context_references(app)?;
     let key = format!("{repo_key}-{issue_number}");
 
     let orphaned = if let Some(entry) = refs.issues.get_mut(&key) {
-        entry.worktrees.retain(|w| w != worktree_id);
-        if entry.worktrees.is_empty() && entry.orphaned_at.is_none() {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
             entry.orphaned_at = Some(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -440,20 +540,20 @@ pub fn remove_issue_reference(
     Ok(orphaned)
 }
 
-/// Remove a worktree reference from a PR context
+/// Remove a session reference from a PR context
 /// Returns true if the context is now orphaned (no more references)
 pub fn remove_pr_reference(
     app: &tauri::AppHandle,
     repo_key: &str,
     pr_number: u32,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<bool, String> {
     let mut refs = load_context_references(app)?;
     let key = format!("{repo_key}-{pr_number}");
 
     let orphaned = if let Some(entry) = refs.prs.get_mut(&key) {
-        entry.worktrees.retain(|w| w != worktree_id);
-        if entry.worktrees.is_empty() && entry.orphaned_at.is_none() {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
             entry.orphaned_at = Some(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -472,42 +572,291 @@ pub fn remove_pr_reference(
     Ok(orphaned)
 }
 
-/// Get all issue keys referenced by a worktree
+/// Get all issue keys referenced by a session
 /// Returns keys in format "{owner}-{repo}-{number}"
-pub fn get_worktree_issue_refs(
+pub fn get_session_issue_refs(
     app: &tauri::AppHandle,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<Vec<String>, String> {
     let refs = load_context_references(app)?;
     Ok(refs
         .issues
         .iter()
-        .filter(|(_, entry)| entry.worktrees.contains(&worktree_id.to_string()))
+        .filter(|(_, entry)| entry.sessions.contains(&session_id.to_string()))
         .map(|(key, _)| key.clone())
         .collect())
 }
 
-/// Get all PR keys referenced by a worktree
+/// Get all PR keys referenced by a session
 /// Returns keys in format "{owner}-{repo}-{number}"
-pub fn get_worktree_pr_refs(
+pub fn get_session_pr_refs(
     app: &tauri::AppHandle,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<Vec<String>, String> {
     let refs = load_context_references(app)?;
     Ok(refs
         .prs
         .iter()
-        .filter(|(_, entry)| entry.worktrees.contains(&worktree_id.to_string()))
+        .filter(|(_, entry)| entry.sessions.contains(&session_id.to_string()))
         .map(|(key, _)| key.clone())
         .collect())
 }
 
-/// Remove all references for a worktree
-/// Returns (orphaned_issue_keys, orphaned_pr_keys)
-pub fn remove_all_worktree_references(
+/// Add a session reference to a security alert context
+/// Key format: "{owner}-{repo}-{number}"
+pub fn add_security_reference(
     app: &tauri::AppHandle,
-    worktree_id: &str,
-) -> Result<(Vec<String>, Vec<String>), String> {
+    repo_key: &str,
+    alert_number: u32,
+    session_id: &str,
+) -> Result<(), String> {
+    let mut refs = load_context_references(app)?;
+    let key = format!("{repo_key}-{alert_number}");
+
+    let entry = refs.security.entry(key).or_default();
+    if !entry.sessions.contains(&session_id.to_string()) {
+        entry.sessions.push(session_id.to_string());
+    }
+    // Clear orphaned status when a reference is added
+    entry.orphaned_at = None;
+
+    save_context_references(app, &refs)
+}
+
+/// Remove a session reference from a security alert context
+/// Returns true if the context is now orphaned (no more references)
+pub fn remove_security_reference(
+    app: &tauri::AppHandle,
+    repo_key: &str,
+    alert_number: u32,
+    session_id: &str,
+) -> Result<bool, String> {
+    let mut refs = load_context_references(app)?;
+    let key = format!("{repo_key}-{alert_number}");
+
+    let orphaned = if let Some(entry) = refs.security.get_mut(&key) {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
+            entry.orphaned_at = Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    save_context_references(app, &refs)?;
+    Ok(orphaned)
+}
+
+/// Get all security alert keys referenced by a session
+/// Returns keys in format "{owner}-{repo}-{number}"
+pub fn get_session_security_refs(
+    app: &tauri::AppHandle,
+    session_id: &str,
+) -> Result<Vec<String>, String> {
+    let refs = load_context_references(app)?;
+    Ok(refs
+        .security
+        .iter()
+        .filter(|(_, entry)| entry.sessions.contains(&session_id.to_string()))
+        .map(|(key, _)| key.clone())
+        .collect())
+}
+
+/// Add a session reference to an advisory context
+/// Key format: "{repo_key}::{ghsa_id}"
+pub fn add_advisory_reference(
+    app: &tauri::AppHandle,
+    repo_key: &str,
+    ghsa_id: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    let mut refs = load_context_references(app)?;
+    let key = format!("{repo_key}::{ghsa_id}");
+
+    let entry = refs.advisories.entry(key).or_default();
+    if !entry.sessions.contains(&session_id.to_string()) {
+        entry.sessions.push(session_id.to_string());
+    }
+    // Clear orphaned status when a reference is added
+    entry.orphaned_at = None;
+
+    save_context_references(app, &refs)
+}
+
+/// Remove a session reference from an advisory context
+/// Returns true if the context is now orphaned (no more references)
+pub fn remove_advisory_reference(
+    app: &tauri::AppHandle,
+    repo_key: &str,
+    ghsa_id: &str,
+    session_id: &str,
+) -> Result<bool, String> {
+    let mut refs = load_context_references(app)?;
+    let key = format!("{repo_key}::{ghsa_id}");
+
+    let orphaned = if let Some(entry) = refs.advisories.get_mut(&key) {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
+            entry.orphaned_at = Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    save_context_references(app, &refs)?;
+    Ok(orphaned)
+}
+
+/// Get all advisory keys referenced by a session
+/// Returns keys in format "{repo_key}::{ghsa_id}"
+pub fn get_session_advisory_refs(
+    app: &tauri::AppHandle,
+    session_id: &str,
+) -> Result<Vec<String>, String> {
+    let refs = load_context_references(app)?;
+    Ok(refs
+        .advisories
+        .iter()
+        .filter(|(_, entry)| entry.sessions.contains(&session_id.to_string()))
+        .map(|(key, _)| key.clone())
+        .collect())
+}
+
+/// Parse an advisory context key into (owner, repo, ghsa_id)
+/// Key format: "{owner}-{repo}::{ghsa_id}"
+fn parse_advisory_context_key(key: &str) -> Option<(String, String, String)> {
+    let (repo_key, ghsa_id) = key.split_once("::")?;
+    let (owner, repo) = repo_key.split_once('-')?;
+    Some((owner.to_string(), repo.to_string(), ghsa_id.to_string()))
+}
+
+/// Extract the number from a context ref key (format: "{owner}-{repo}-{number}")
+fn extract_number_from_ref_key(key: &str) -> Option<u32> {
+    key.rsplit('-').next()?.parse().ok()
+}
+
+/// Get all issue, PR, and security alert numbers referenced by a session
+/// Returns (issue_numbers, pr_numbers, security_numbers)
+pub fn get_session_context_numbers(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<(Vec<u32>, Vec<u32>, Vec<u32>), String> {
+    let issue_keys = get_session_issue_refs(app, session_id)?;
+    let pr_keys = get_session_pr_refs(app, session_id)?;
+    let security_keys = get_session_security_refs(app, session_id)?;
+
+    let issue_nums: Vec<u32> = issue_keys
+        .iter()
+        .filter_map(|k| extract_number_from_ref_key(k))
+        .collect();
+    let pr_nums: Vec<u32> = pr_keys
+        .iter()
+        .filter_map(|k| extract_number_from_ref_key(k))
+        .collect();
+    let security_nums: Vec<u32> = security_keys
+        .iter()
+        .filter_map(|k| extract_number_from_ref_key(k))
+        .collect();
+
+    Ok((issue_nums, pr_nums, security_nums))
+}
+
+/// Get all loaded context markdown content for a session
+/// Returns concatenated markdown of all issue, PR, and security context files, or empty string if none
+pub fn get_session_context_content(
+    app: &AppHandle,
+    session_id: &str,
+    project_path: &str,
+) -> Result<String, String> {
+    let repo_id = get_repo_identifier(project_path)?;
+    let repo_key = repo_id.to_key();
+    let contexts_dir = get_github_contexts_dir(app)?;
+
+    let issue_keys = get_session_issue_refs(app, session_id)?;
+    let pr_keys = get_session_pr_refs(app, session_id)?;
+    let security_keys = get_session_security_refs(app, session_id)?;
+    let advisory_keys = get_session_advisory_refs(app, session_id)?;
+
+    if issue_keys.is_empty()
+        && pr_keys.is_empty()
+        && security_keys.is_empty()
+        && advisory_keys.is_empty()
+    {
+        return Ok(String::new());
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    for key in &issue_keys {
+        if let Some(number) = extract_number_from_ref_key(key) {
+            let file = contexts_dir.join(format!("{repo_key}-issue-{number}.md"));
+            if file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&file) {
+                    parts.push(format!("### Issue #{number}\n\n{content}"));
+                }
+            }
+        }
+    }
+
+    for key in &pr_keys {
+        if let Some(number) = extract_number_from_ref_key(key) {
+            let file = contexts_dir.join(format!("{repo_key}-pr-{number}.md"));
+            if file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&file) {
+                    parts.push(format!("### PR #{number}\n\n{content}"));
+                }
+            }
+        }
+    }
+
+    for key in &security_keys {
+        if let Some(number) = extract_number_from_ref_key(key) {
+            let file = contexts_dir.join(format!("{repo_key}-security-{number}.md"));
+            if file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&file) {
+                    parts.push(format!("### Security Alert #{number}\n\n{content}"));
+                }
+            }
+        }
+    }
+
+    for key in &advisory_keys {
+        if let Some((owner, repo, ghsa_id)) = parse_advisory_context_key(key) {
+            let adv_repo_key = format!("{owner}-{repo}");
+            let file = contexts_dir.join(format!("{adv_repo_key}-advisory-{ghsa_id}.md"));
+            if file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&file) {
+                    parts.push(format!("### Advisory {ghsa_id}\n\n{content}"));
+                }
+            }
+        }
+    }
+
+    Ok(parts.join("\n\n"))
+}
+
+/// Remove all references for a session
+/// Returns (orphaned_issue_keys, orphaned_pr_keys, orphaned_security_keys, orphaned_advisory_keys)
+pub fn remove_all_session_references(
+    app: &tauri::AppHandle,
+    session_id: &str,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>, Vec<String>), String> {
     let mut refs = load_context_references(app)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -516,25 +865,48 @@ pub fn remove_all_worktree_references(
 
     let mut orphaned_issues = Vec::new();
     let mut orphaned_prs = Vec::new();
+    let mut orphaned_security = Vec::new();
+    let mut orphaned_advisories = Vec::new();
 
     for (key, entry) in refs.issues.iter_mut() {
-        entry.worktrees.retain(|w| w != worktree_id);
-        if entry.worktrees.is_empty() && entry.orphaned_at.is_none() {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
             entry.orphaned_at = Some(now);
             orphaned_issues.push(key.clone());
         }
     }
 
     for (key, entry) in refs.prs.iter_mut() {
-        entry.worktrees.retain(|w| w != worktree_id);
-        if entry.worktrees.is_empty() && entry.orphaned_at.is_none() {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
             entry.orphaned_at = Some(now);
             orphaned_prs.push(key.clone());
         }
     }
 
+    for (key, entry) in refs.security.iter_mut() {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
+            entry.orphaned_at = Some(now);
+            orphaned_security.push(key.clone());
+        }
+    }
+
+    for (key, entry) in refs.advisories.iter_mut() {
+        entry.sessions.retain(|s| s != session_id);
+        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
+            entry.orphaned_at = Some(now);
+            orphaned_advisories.push(key.clone());
+        }
+    }
+
     save_context_references(app, &refs)?;
-    Ok((orphaned_issues, orphaned_prs))
+    Ok((
+        orphaned_issues,
+        orphaned_prs,
+        orphaned_security,
+        orphaned_advisories,
+    ))
 }
 
 /// Parse a context key into (repo_owner, repo_name, number)
@@ -633,22 +1005,85 @@ pub fn cleanup_orphaned_contexts(
         refs.prs.remove(key);
     }
 
+    // Clean up orphaned security alerts
+    let security_to_remove: Vec<String> = refs
+        .security
+        .iter()
+        .filter_map(|(key, entry)| {
+            if let Some(orphaned_at) = entry.orphaned_at {
+                if orphaned_at + retention_secs < now {
+                    return Some(key.clone());
+                }
+            }
+            None
+        })
+        .collect();
+
+    for key in &security_to_remove {
+        // File format: {repo_key}-security-{number}.md
+        // Key format: {repo_key}-{number}
+        if let Some(last_dash) = key.rfind('-') {
+            let repo_key = &key[..last_dash];
+            let number = &key[last_dash + 1..];
+            let filename = format!("{repo_key}-security-{number}.md");
+            let file_path = contexts_dir.join(&filename);
+            if file_path.exists() {
+                if let Err(e) = std::fs::remove_file(&file_path) {
+                    log::warn!("Failed to remove orphaned security context {filename}: {e}");
+                } else {
+                    deleted_count += 1;
+                }
+            }
+        }
+        refs.security.remove(key);
+    }
+
+    // Clean up orphaned advisories
+    let advisories_to_remove: Vec<String> = refs
+        .advisories
+        .iter()
+        .filter_map(|(key, entry)| {
+            if let Some(orphaned_at) = entry.orphaned_at {
+                if orphaned_at + retention_secs < now {
+                    return Some(key.clone());
+                }
+            }
+            None
+        })
+        .collect();
+
+    for key in &advisories_to_remove {
+        if let Some((owner, repo, ghsa_id)) = parse_advisory_context_key(key) {
+            let adv_repo_key = format!("{owner}-{repo}");
+            let filename = format!("{adv_repo_key}-advisory-{ghsa_id}.md");
+            let file_path = contexts_dir.join(&filename);
+            if file_path.exists() {
+                if let Err(e) = std::fs::remove_file(&file_path) {
+                    log::warn!("Failed to remove orphaned advisory context {filename}: {e}");
+                } else {
+                    deleted_count += 1;
+                }
+            }
+        }
+        refs.advisories.remove(key);
+    }
+
     save_context_references(app, &refs)?;
     Ok(deleted_count)
 }
 
-/// Load/refresh issue context for a worktree by fetching data from GitHub
+/// Load/refresh issue context for a session by fetching data from GitHub
 ///
 /// Context is stored in shared location: `git-context/{repo_key}-issue-{number}.md`
-/// Multiple worktrees can reference the same context file.
+/// Multiple sessions can reference the same context file.
 #[tauri::command]
 pub async fn load_issue_context(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     issue_number: u32,
     project_path: String,
 ) -> Result<LoadedIssueContext, String> {
-    log::trace!("Loading issue #{issue_number} context for worktree {worktree_id}");
+    log::trace!("Loading issue #{issue_number} context for session {session_id}");
 
     // Get repo identifier for shared storage
     let repo_id = get_repo_identifier(&project_path)?;
@@ -678,7 +1113,7 @@ pub async fn load_issue_context(
         .map_err(|e| format!("Failed to write issue context file: {e}"))?;
 
     // Add reference tracking
-    add_issue_reference(&app, &repo_key, issue_number, &worktree_id)?;
+    add_issue_reference(&app, &repo_key, issue_number, &session_id)?;
 
     log::trace!(
         "Issue context loaded successfully for issue #{} ({} comments)",
@@ -695,16 +1130,28 @@ pub async fn load_issue_context(
     })
 }
 
-/// List all loaded issue contexts for a worktree
+/// List all loaded issue contexts for a session
 #[tauri::command]
 pub async fn list_loaded_issue_contexts(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
+    worktree_id: Option<String>,
 ) -> Result<Vec<LoadedIssueContext>, String> {
-    log::trace!("Listing loaded issue contexts for worktree {worktree_id}");
+    log::trace!("Listing loaded issue contexts for session {session_id}");
 
-    // Get issue refs for this worktree from reference tracking
-    let issue_keys = get_worktree_issue_refs(&app, &worktree_id)?;
+    // Get issue refs for this session from reference tracking
+    let mut issue_keys = get_session_issue_refs(&app, &session_id)?;
+
+    // Also check worktree_id refs (create_worktree stores refs under worktree_id)
+    if let Some(ref wt_id) = worktree_id {
+        if let Ok(wt_keys) = get_session_issue_refs(&app, wt_id) {
+            for key in wt_keys {
+                if !issue_keys.contains(&key) {
+                    issue_keys.push(key);
+                }
+            }
+        }
+    }
 
     if issue_keys.is_empty() {
         return Ok(vec![]);
@@ -752,44 +1199,47 @@ pub async fn list_loaded_issue_contexts(
     Ok(contexts)
 }
 
-/// Delete all context references for a worktree
+/// Delete all context references for a session
 ///
-/// Called during worktree deletion. Uses reference tracking - marks contexts as orphaned
+/// Called during session deletion. Uses reference tracking - marks contexts as orphaned
 /// but doesn't immediately delete shared files (they'll be cleaned up later by cleanup_orphaned_contexts).
-pub fn cleanup_issue_contexts_for_worktree(
+pub fn cleanup_issue_contexts_for_session(
     app: &tauri::AppHandle,
-    worktree_id: &str,
+    session_id: &str,
 ) -> Result<(), String> {
-    log::trace!("Cleaning up contexts for worktree {worktree_id}");
+    log::trace!("Cleaning up contexts for session {session_id}");
 
-    // Remove all references for this worktree (handles both issues and PRs)
-    let (orphaned_issues, orphaned_prs) = remove_all_worktree_references(app, worktree_id)?;
+    // Remove all references for this session (handles issues, PRs, security alerts, and advisories)
+    let (orphaned_issues, orphaned_prs, orphaned_security, orphaned_advisories) =
+        remove_all_session_references(app, session_id)?;
 
     log::trace!(
-        "Marked {} issues and {} PRs as orphaned for worktree {worktree_id}",
+        "Marked {} issues, {} PRs, {} security alerts, and {} advisories as orphaned for session {session_id}",
         orphaned_issues.len(),
-        orphaned_prs.len()
+        orphaned_prs.len(),
+        orphaned_security.len(),
+        orphaned_advisories.len()
     );
 
     Ok(())
 }
 
-/// Remove a loaded issue context for a worktree
+/// Remove a loaded issue context for a session
 #[tauri::command]
 pub async fn remove_issue_context(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     issue_number: u32,
     project_path: String,
 ) -> Result<(), String> {
-    log::trace!("Removing issue #{issue_number} context for worktree {worktree_id}");
+    log::trace!("Removing issue #{issue_number} context for session {session_id}");
 
     // Get repo identifier
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
 
     // Remove reference
-    let is_orphaned = remove_issue_reference(&app, &repo_key, issue_number, &worktree_id)?;
+    let is_orphaned = remove_issue_reference(&app, &repo_key, issue_number, &session_id)?;
 
     // If orphaned, delete the shared file immediately
     if is_orphaned {
@@ -838,6 +1288,59 @@ pub struct GitHubReview {
     pub submitted_at: Option<String>,
 }
 
+/// Raw GitHub REST API review comment (snake_case from API)
+#[derive(Debug, Clone, Deserialize)]
+struct RawReviewComment {
+    user: Option<RawReviewCommentUser>,
+    body: Option<String>,
+    created_at: Option<String>,
+    diff_hunk: Option<String>,
+    path: Option<String>,
+    #[serde(default)]
+    start_line: Option<u32>,
+    #[serde(default)]
+    line: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawReviewCommentUser {
+    login: Option<String>,
+}
+
+/// GitHub inline review comment (on specific diff lines), normalized to camelCase for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubReviewComment {
+    pub author: GitHubAuthor,
+    pub body: String,
+    pub created_at: String,
+    pub diff_hunk: String,
+    pub path: String,
+    #[serde(default)]
+    pub start_line: Option<u32>,
+    #[serde(default)]
+    pub line: Option<u32>,
+}
+
+impl From<RawReviewComment> for GitHubReviewComment {
+    fn from(raw: RawReviewComment) -> Self {
+        Self {
+            author: GitHubAuthor {
+                login: raw
+                    .user
+                    .and_then(|u| u.login)
+                    .unwrap_or_else(|| "unknown".to_string()),
+            },
+            body: raw.body.unwrap_or_default(),
+            created_at: raw.created_at.unwrap_or_default(),
+            diff_hunk: raw.diff_hunk.unwrap_or_default(),
+            path: raw.path.unwrap_or_default(),
+            start_line: raw.start_line,
+            line: raw.line,
+        }
+    }
+}
+
 /// GitHub PR detail with comments and reviews
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -851,6 +1354,8 @@ pub struct GitHubPullRequestDetail {
     pub is_draft: bool,
     pub created_at: String,
     pub author: GitHubAuthor,
+    #[serde(default)]
+    pub url: String,
     #[serde(default)]
     pub labels: Vec<GitHubLabel>,
     #[serde(default)]
@@ -991,6 +1496,50 @@ pub async fn search_github_prs(
     Ok(prs)
 }
 
+/// Get a GitHub PR by number, returning the same type as list_github_prs.
+///
+/// Uses `gh pr view` to fetch a single PR by exact number.
+/// This finds any PR regardless of age or state.
+#[tauri::command]
+pub async fn get_github_pr_by_number(
+    app: AppHandle,
+    project_path: String,
+    pr_number: u32,
+) -> Result<GitHubPullRequest, String> {
+    log::trace!("Getting GitHub PR #{pr_number} by number for {project_path}");
+
+    let gh = resolve_gh_binary(&app);
+    let output = silent_command(&gh)
+        .args([
+            "pr",
+            "view",
+            &pr_number.to_string(),
+            "--json",
+            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
+        ])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("Could not resolve") || stderr.contains("not found") {
+            return Err(format!("PR #{pr_number} not found"));
+        }
+        return Err(format!("gh pr view failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pr: GitHubPullRequest =
+        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+
+    log::trace!("Got PR #{}: {}", pr.number, pr.title);
+    Ok(pr)
+}
+
 /// Get detailed information about a specific GitHub PR
 ///
 /// Uses `gh pr view` to fetch the PR with comments and reviews.
@@ -1010,7 +1559,7 @@ pub async fn get_github_pr(
             "view",
             &pr_number.to_string(),
             "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels,comments,reviews",
+            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,url,labels,comments,reviews",
         ])
         .current_dir(&project_path)
         .output()
@@ -1033,6 +1582,55 @@ pub async fn get_github_pr(
 
     log::trace!("Got PR #{}: {}", pr.number, pr.title);
     Ok(pr)
+}
+
+/// Fetch inline review comments for a PR.
+///
+/// Uses `gh api /repos/{owner}/{repo}/pulls/{number}/comments` to get code-level
+/// review comments (inline comments on specific diff lines).
+#[tauri::command]
+pub async fn get_pr_review_comments(
+    app: AppHandle,
+    project_path: String,
+    pr_number: u32,
+) -> Result<Vec<GitHubReviewComment>, String> {
+    log::trace!("Getting review comments for PR #{pr_number} in {project_path}");
+
+    let gh = resolve_gh_binary(&app);
+    let repo_id = get_repo_identifier(&project_path)?;
+    let endpoint = format!(
+        "/repos/{}/{}/pulls/{pr_number}/comments?per_page=100",
+        repo_id.owner, repo_id.repo
+    );
+
+    let output = silent_command(&gh)
+        .args(["api", &endpoint])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("404") || stderr.contains("Not Found") {
+            return Err(format!("PR #{pr_number} not found"));
+        }
+        return Err(format!("gh api failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw_comments: Vec<RawReviewComment> =
+        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+
+    let comments: Vec<GitHubReviewComment> = raw_comments
+        .into_iter()
+        .map(GitHubReviewComment::from)
+        .collect();
+
+    log::trace!("Got {} review comments for PR #{pr_number}", comments.len());
+    Ok(comments)
 }
 
 /// Generate a branch name from a PR
@@ -1146,9 +1744,16 @@ pub fn get_pr_diff(
     // Truncate if > 100KB
     const MAX_DIFF_SIZE: usize = 100_000;
     if diff.len() > MAX_DIFF_SIZE {
+        // Find a safe UTF-8 char boundary near MAX_DIFF_SIZE
+        let end = diff
+            .char_indices()
+            .take_while(|(i, _)| *i < MAX_DIFF_SIZE)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(MAX_DIFF_SIZE.min(diff.len()));
         Ok(format!(
             "{}...\n\n[Diff truncated at 100KB - {} bytes total. Run `gh pr diff {}` to see the full diff.]",
-            &diff[..MAX_DIFF_SIZE],
+            &diff[..end],
             diff.len(),
             pr_number
         ))
@@ -1157,18 +1762,18 @@ pub fn get_pr_diff(
     }
 }
 
-/// Load/refresh PR context for a worktree by fetching data from GitHub
+/// Load/refresh PR context for a session by fetching data from GitHub
 ///
 /// Context is stored in shared location: `git-context/{repo_key}-pr-{number}.md`
-/// Multiple worktrees can reference the same context file.
+/// Multiple sessions can reference the same context file.
 #[tauri::command]
 pub async fn load_pr_context(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     pr_number: u32,
     project_path: String,
 ) -> Result<LoadedPullRequestContext, String> {
-    log::trace!("Loading PR #{pr_number} context for worktree {worktree_id}");
+    log::trace!("Loading PR #{pr_number} context for session {session_id}");
 
     // Get repo identifier for shared storage
     let repo_id = get_repo_identifier(&project_path)?;
@@ -1207,7 +1812,7 @@ pub async fn load_pr_context(
         .map_err(|e| format!("Failed to write PR context file: {e}"))?;
 
     // Add reference tracking
-    add_pr_reference(&app, &repo_key, pr_number, &worktree_id)?;
+    add_pr_reference(&app, &repo_key, pr_number, &session_id)?;
 
     log::debug!(
         "PR context loaded successfully for PR #{} ({} comments, {} reviews, diff: {} bytes)",
@@ -1227,16 +1832,28 @@ pub async fn load_pr_context(
     })
 }
 
-/// List all loaded PR contexts for a worktree
+/// List all loaded PR contexts for a session
 #[tauri::command]
 pub async fn list_loaded_pr_contexts(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
+    worktree_id: Option<String>,
 ) -> Result<Vec<LoadedPullRequestContext>, String> {
-    log::trace!("Listing loaded PR contexts for worktree {worktree_id}");
+    log::trace!("Listing loaded PR contexts for session {session_id}");
 
-    // Get PR refs for this worktree from reference tracking
-    let pr_keys = get_worktree_pr_refs(&app, &worktree_id)?;
+    // Get PR refs for this session from reference tracking
+    let mut pr_keys = get_session_pr_refs(&app, &session_id)?;
+
+    // Also check worktree_id refs (create_worktree stores refs under worktree_id)
+    if let Some(ref wt_id) = worktree_id {
+        if let Ok(wt_keys) = get_session_pr_refs(&app, wt_id) {
+            for key in wt_keys {
+                if !pr_keys.contains(&key) {
+                    pr_keys.push(key);
+                }
+            }
+        }
+    }
 
     if pr_keys.is_empty() {
         return Ok(vec![]);
@@ -1300,35 +1917,22 @@ pub async fn list_loaded_pr_contexts(
     Ok(contexts)
 }
 
-/// Delete all PR context files for a worktree
-///
-/// This is a no-op since cleanup is handled by cleanup_issue_contexts_for_worktree
-/// which calls remove_all_worktree_references for both issues and PRs.
-pub fn cleanup_pr_contexts_for_worktree(
-    _app: &tauri::AppHandle,
-    _worktree_id: &str,
-) -> Result<(), String> {
-    // Cleanup is handled by cleanup_issue_contexts_for_worktree
-    // which calls remove_all_worktree_references for both issues and PRs
-    Ok(())
-}
-
-/// Remove a loaded PR context for a worktree
+/// Remove a loaded PR context for a session
 #[tauri::command]
 pub async fn remove_pr_context(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     pr_number: u32,
     project_path: String,
 ) -> Result<(), String> {
-    log::trace!("Removing PR #{pr_number} context for worktree {worktree_id}");
+    log::trace!("Removing PR #{pr_number} context for session {session_id}");
 
     // Get repo identifier
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
 
     // Remove reference
-    let is_orphaned = remove_pr_reference(&app, &repo_key, pr_number, &worktree_id)?;
+    let is_orphaned = remove_pr_reference(&app, &repo_key, pr_number, &session_id)?;
 
     // If orphaned, delete the shared file immediately
     if is_orphaned {
@@ -1350,7 +1954,7 @@ pub async fn remove_pr_context(
 #[tauri::command]
 pub async fn get_issue_context_content(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     issue_number: u32,
     project_path: String,
 ) -> Result<String, String> {
@@ -1358,12 +1962,12 @@ pub async fn get_issue_context_content(
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
 
-    // Verify this worktree has a reference to this context
-    let refs = get_worktree_issue_refs(&app, &worktree_id)?;
+    // Verify this session has a reference to this context
+    let refs = get_session_issue_refs(&app, &session_id)?;
     let expected_key = format!("{repo_key}-{issue_number}");
     if !refs.contains(&expected_key) {
         return Err(format!(
-            "Worktree does not have issue #{issue_number} loaded"
+            "Session does not have issue #{issue_number} loaded"
         ));
     }
 
@@ -1384,7 +1988,7 @@ pub async fn get_issue_context_content(
 #[tauri::command]
 pub async fn get_pr_context_content(
     app: tauri::AppHandle,
-    worktree_id: String,
+    session_id: String,
     pr_number: u32,
     project_path: String,
 ) -> Result<String, String> {
@@ -1392,11 +1996,11 @@ pub async fn get_pr_context_content(
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
 
-    // Verify this worktree has a reference to this context
-    let refs = get_worktree_pr_refs(&app, &worktree_id)?;
+    // Verify this session has a reference to this context
+    let refs = get_session_pr_refs(&app, &session_id)?;
     let expected_key = format!("{repo_key}-{pr_number}");
     if !refs.contains(&expected_key) {
-        return Err(format!("Worktree does not have PR #{pr_number} loaded"));
+        return Err(format!("Session does not have PR #{pr_number} loaded"));
     }
 
     let contexts_dir = get_github_contexts_dir(&app)?;
@@ -1408,6 +2012,959 @@ pub async fn get_pr_context_content(
 
     std::fs::read_to_string(&context_file)
         .map_err(|e| format!("Failed to read PR context file: {e}"))
+}
+
+// =============================================================================
+// Dependabot Alert / Security Types and Commands
+// =============================================================================
+
+/// Raw package info from GitHub Dependabot API
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotPackageRaw {
+    pub name: String,
+    pub ecosystem: String,
+}
+
+/// Raw dependency from GitHub Dependabot API
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotDependencyRaw {
+    pub package: DependabotPackageRaw,
+    pub manifest_path: String,
+}
+
+/// Raw security advisory from GitHub Dependabot API
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecurityAdvisoryRaw {
+    pub ghsa_id: String,
+    pub cve_id: Option<String>,
+    pub summary: String,
+    pub description: String,
+    pub severity: String,
+}
+
+/// Raw Dependabot alert from GitHub REST API
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotAlertRaw {
+    pub number: u32,
+    pub state: String,
+    pub dependency: DependabotDependencyRaw,
+    pub security_advisory: SecurityAdvisoryRaw,
+    pub created_at: String,
+    pub html_url: String,
+    pub dismissed_reason: Option<String>,
+    pub dismissed_comment: Option<String>,
+    pub fixed_at: Option<String>,
+}
+
+/// Dependabot alert flattened for frontend consumption
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependabotAlert {
+    pub number: u32,
+    pub state: String,
+    pub package_name: String,
+    pub package_ecosystem: String,
+    pub manifest_path: String,
+    pub ghsa_id: String,
+    pub cve_id: Option<String>,
+    pub severity: String,
+    pub summary: String,
+    pub description: String,
+    pub created_at: String,
+    pub html_url: String,
+}
+
+/// Security alert context to pass when creating a worktree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityAlertContext {
+    pub number: u32,
+    pub package_name: String,
+    pub package_ecosystem: String,
+    pub severity: String,
+    pub summary: String,
+    pub description: String,
+    pub ghsa_id: String,
+    pub cve_id: Option<String>,
+    pub manifest_path: String,
+}
+
+/// Loaded security alert context info returned to frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedSecurityAlertContext {
+    pub number: u32,
+    pub package_name: String,
+    pub severity: String,
+    pub summary: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+}
+
+impl DependabotAlertRaw {
+    pub fn into_frontend(self) -> DependabotAlert {
+        DependabotAlert {
+            number: self.number,
+            state: self.state,
+            package_name: self.dependency.package.name,
+            package_ecosystem: self.dependency.package.ecosystem,
+            manifest_path: self.dependency.manifest_path,
+            ghsa_id: self.security_advisory.ghsa_id,
+            cve_id: self.security_advisory.cve_id,
+            severity: self.security_advisory.severity,
+            summary: self.security_advisory.summary,
+            description: self.security_advisory.description,
+            created_at: self.created_at,
+            html_url: self.html_url,
+        }
+    }
+}
+
+// =============================================================================
+// Repository Security Advisory Types
+// =============================================================================
+
+/// Vulnerability package from GitHub Security Advisory API
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdvisoryVulnerabilityPackageRaw {
+    pub name: String,
+    pub ecosystem: String,
+}
+
+/// Vulnerability entry from GitHub Security Advisory API
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdvisoryVulnerabilityRaw {
+    pub package: Option<AdvisoryVulnerabilityPackageRaw>,
+    pub vulnerable_version_range: Option<String>,
+    pub patched_versions: Option<String>,
+    pub vulnerable_functions: Option<Vec<String>>,
+}
+
+/// Author from GitHub Security Advisory API
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdvisoryAuthorRaw {
+    pub login: String,
+}
+
+/// Raw repository security advisory from GitHub REST API
+#[derive(Debug, Clone, Deserialize)]
+pub struct RepositoryAdvisoryRaw {
+    pub ghsa_id: String,
+    pub cve_id: Option<String>,
+    pub summary: String,
+    pub description: Option<String>,
+    pub severity: Option<String>,
+    pub state: String,
+    pub author: Option<AdvisoryAuthorRaw>,
+    pub publisher: Option<AdvisoryAuthorRaw>,
+    pub created_at: String,
+    pub published_at: Option<String>,
+    pub html_url: String,
+    pub vulnerabilities: Vec<AdvisoryVulnerabilityRaw>,
+}
+
+/// Vulnerability info for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvisoryVulnerability {
+    pub package_name: String,
+    pub package_ecosystem: String,
+    pub vulnerable_version_range: Option<String>,
+    pub patched_versions: Option<String>,
+}
+
+/// Repository security advisory for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryAdvisory {
+    pub ghsa_id: String,
+    pub cve_id: Option<String>,
+    pub summary: String,
+    pub description: String,
+    pub severity: String,
+    pub state: String,
+    pub author_login: Option<String>,
+    pub created_at: String,
+    pub published_at: Option<String>,
+    pub html_url: String,
+    pub vulnerabilities: Vec<AdvisoryVulnerability>,
+}
+
+/// Advisory context to pass when creating a worktree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvisoryContext {
+    pub ghsa_id: String,
+    pub severity: String,
+    pub summary: String,
+    pub description: String,
+    pub cve_id: Option<String>,
+    pub vulnerabilities: Vec<AdvisoryVulnerability>,
+}
+
+/// Loaded advisory context info returned from backend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedAdvisoryContext {
+    pub ghsa_id: String,
+    pub severity: String,
+    pub summary: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+}
+
+impl RepositoryAdvisoryRaw {
+    pub fn into_frontend(self) -> RepositoryAdvisory {
+        let vulnerabilities: Vec<AdvisoryVulnerability> = self
+            .vulnerabilities
+            .into_iter()
+            .filter_map(|v| {
+                v.package.map(|pkg| AdvisoryVulnerability {
+                    package_name: pkg.name,
+                    package_ecosystem: pkg.ecosystem,
+                    vulnerable_version_range: v.vulnerable_version_range,
+                    patched_versions: v.patched_versions,
+                })
+            })
+            .collect();
+
+        RepositoryAdvisory {
+            ghsa_id: self.ghsa_id,
+            cve_id: self.cve_id,
+            summary: self.summary,
+            description: self.description.unwrap_or_default(),
+            severity: self.severity.unwrap_or_else(|| "unknown".to_string()),
+            state: self.state,
+            author_login: self.author.map(|a| a.login),
+            created_at: self.created_at,
+            published_at: self.published_at,
+            html_url: self.html_url,
+            vulnerabilities,
+        }
+    }
+}
+
+/// Generate a branch name from a security alert
+pub fn generate_branch_name_from_security_alert(
+    alert_number: u32,
+    package_name: &str,
+    summary: &str,
+) -> String {
+    let slug = slugify_issue_title(summary);
+    // Include package name in branch, truncated
+    let pkg = package_name.replace('/', "-").replace('@', "");
+    let pkg_truncated;
+    let pkg_short = if pkg.len() > 20 {
+        pkg_truncated = pkg.chars().take(20).collect::<String>();
+        &pkg_truncated
+    } else {
+        &pkg
+    };
+    format!("security-{alert_number}-{pkg_short}-{slug}")
+}
+
+/// Format security alert context as markdown
+pub fn format_security_context_markdown(ctx: &SecurityAlertContext) -> String {
+    let mut content = String::new();
+
+    content.push_str(&format!(
+        "# Dependabot Alert #{}: {}\n\n",
+        ctx.number, ctx.summary
+    ));
+
+    content.push_str(&format!(
+        "**Severity:** {} | **Package:** {} ({}) | **Manifest:** {}\n\n",
+        ctx.severity, ctx.package_name, ctx.package_ecosystem, ctx.manifest_path
+    ));
+
+    content.push_str(&format!("**GHSA:** {}", ctx.ghsa_id));
+    if let Some(ref cve) = ctx.cve_id {
+        content.push_str(&format!(" | **CVE:** {cve}"));
+    }
+    content.push_str("\n\n---\n\n");
+
+    content.push_str("## Description\n\n");
+    content.push_str(&ctx.description);
+    content.push_str("\n\n---\n\n");
+    content.push_str("*Fix this security vulnerability.*\n");
+
+    content
+}
+
+/// Generate branch name from advisory
+pub fn generate_branch_name_from_advisory(ghsa_id: &str, summary: &str) -> String {
+    let slug: String = summary
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = if slug.len() > 40 { &slug[..40] } else { &slug };
+    let slug = slug.trim_end_matches('-');
+    // Use short GHSA ID (remove "GHSA-" prefix for branch name brevity)
+    let ghsa_short = ghsa_id.strip_prefix("GHSA-").unwrap_or(ghsa_id);
+    format!("advisory-{ghsa_short}-{slug}")
+}
+
+/// Format advisory context as markdown
+pub fn format_advisory_context_markdown(ctx: &AdvisoryContext) -> String {
+    let mut content = String::new();
+
+    content.push_str(&format!(
+        "# Security Advisory {}: {}\n\n",
+        ctx.ghsa_id, ctx.summary
+    ));
+
+    content.push_str(&format!("**Severity:** {}", ctx.severity));
+    if let Some(ref cve) = ctx.cve_id {
+        content.push_str(&format!(" | **CVE:** {cve}"));
+    }
+    content.push_str("\n\n");
+
+    if !ctx.vulnerabilities.is_empty() {
+        content.push_str("## Affected Packages\n\n");
+        for vuln in &ctx.vulnerabilities {
+            content.push_str(&format!(
+                "- **{}** ({})",
+                vuln.package_name, vuln.package_ecosystem
+            ));
+            if let Some(ref range) = vuln.vulnerable_version_range {
+                content.push_str(&format!(" — vulnerable: {range}"));
+            }
+            if let Some(ref patched) = vuln.patched_versions {
+                content.push_str(&format!(", patched: {patched}"));
+            }
+            content.push('\n');
+        }
+        content.push('\n');
+    }
+
+    content.push_str("---\n\n## Description\n\n");
+    content.push_str(&ctx.description);
+    content.push_str("\n\n---\n\n");
+    content.push_str("*Fix this security advisory.*\n");
+
+    content
+}
+
+/// List Dependabot alerts for a repository
+///
+/// Uses `gh api` to fetch Dependabot alerts from the repository.
+/// - state: "open", "dismissed", "fixed", "auto_dismissed" (default: "open")
+/// - Returns up to 100 alerts
+#[tauri::command]
+pub async fn list_dependabot_alerts(
+    app: AppHandle,
+    project_path: String,
+    state: Option<String>,
+) -> Result<Vec<DependabotAlert>, String> {
+    log::trace!("Listing Dependabot alerts for {project_path} with state: {state:?}");
+
+    let gh = resolve_gh_binary(&app);
+    let repo_id = get_repo_identifier(&project_path)?;
+    let state_arg = state.unwrap_or_else(|| "open".to_string());
+
+    let endpoint = format!(
+        "/repos/{}/{}/dependabot/alerts?state={}&per_page=100",
+        repo_id.owner, repo_id.repo, state_arg
+    );
+
+    let output = silent_command(&gh)
+        .args(["api", &endpoint])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("not a git repository") {
+            return Err("Not a git repository".to_string());
+        }
+        if stderr.contains("404") || stderr.contains("Dependabot alerts are not available") {
+            log::debug!("Dependabot alerts not available for this repo, returning empty list");
+            return Ok(vec![]);
+        }
+        if stderr.contains("403") {
+            return Err("Insufficient permissions to access Dependabot alerts.".to_string());
+        }
+        return Err(format!("gh api failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw_alerts: Vec<DependabotAlertRaw> = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse Dependabot alerts response: {e}"))?;
+
+    let alerts: Vec<DependabotAlert> = raw_alerts.into_iter().map(|a| a.into_frontend()).collect();
+
+    log::trace!("Found {} Dependabot alerts", alerts.len());
+    Ok(alerts)
+}
+
+/// Get a single Dependabot alert by number
+#[tauri::command]
+pub async fn get_dependabot_alert(
+    app: AppHandle,
+    project_path: String,
+    alert_number: u32,
+) -> Result<DependabotAlert, String> {
+    let gh = resolve_gh_binary(&app);
+    let repo_id = get_repo_identifier(&project_path)?;
+
+    let endpoint = format!(
+        "/repos/{}/{}/dependabot/alerts/{alert_number}",
+        repo_id.owner, repo_id.repo
+    );
+
+    let output = silent_command(&gh)
+        .args(["api", &endpoint])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("404") {
+            return Err(format!("Dependabot alert #{alert_number} not found"));
+        }
+        return Err(format!("gh api failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw: DependabotAlertRaw = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse Dependabot alert response: {e}"))?;
+
+    Ok(raw.into_frontend())
+}
+
+/// Load/refresh security alert context for a session by fetching data from GitHub
+///
+/// Context is stored in shared location: `git-context/{repo_key}-security-{number}.md`
+/// Multiple sessions can reference the same context file.
+#[tauri::command]
+pub async fn load_security_alert_context(
+    app: tauri::AppHandle,
+    session_id: String,
+    alert_number: u32,
+    project_path: String,
+) -> Result<LoadedSecurityAlertContext, String> {
+    log::trace!("Loading security alert #{alert_number} context for session {session_id}");
+
+    let repo_id = get_repo_identifier(&project_path)?;
+    let repo_key = repo_id.to_key();
+
+    // Fetch alert from GitHub
+    let alert_raw = {
+        let gh = resolve_gh_binary(&app);
+        let endpoint = format!(
+            "/repos/{}/{}/dependabot/alerts/{alert_number}",
+            repo_id.owner, repo_id.repo
+        );
+        let output = silent_command(&gh)
+            .args(["api", &endpoint])
+            .current_dir(&project_path)
+            .output()
+            .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Failed to fetch Dependabot alert: {stderr}"));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        serde_json::from_str::<DependabotAlertRaw>(&stdout)
+            .map_err(|e| format!("Failed to parse Dependabot alert: {e}"))?
+    };
+
+    let ctx = SecurityAlertContext {
+        number: alert_raw.number,
+        package_name: alert_raw.dependency.package.name.clone(),
+        package_ecosystem: alert_raw.dependency.package.ecosystem.clone(),
+        severity: alert_raw.security_advisory.severity.clone(),
+        summary: alert_raw.security_advisory.summary.clone(),
+        description: alert_raw.security_advisory.description.clone(),
+        ghsa_id: alert_raw.security_advisory.ghsa_id.clone(),
+        cve_id: alert_raw.security_advisory.cve_id.clone(),
+        manifest_path: alert_raw.dependency.manifest_path.clone(),
+    };
+
+    // Write to shared git-context directory
+    let contexts_dir = get_github_contexts_dir(&app)?;
+    std::fs::create_dir_all(&contexts_dir)
+        .map_err(|e| format!("Failed to create git-context directory: {e}"))?;
+
+    let context_file = contexts_dir.join(format!("{repo_key}-security-{alert_number}.md"));
+    let context_content = format_security_context_markdown(&ctx);
+
+    std::fs::write(&context_file, context_content)
+        .map_err(|e| format!("Failed to write security context file: {e}"))?;
+
+    add_security_reference(&app, &repo_key, alert_number, &session_id)?;
+
+    Ok(LoadedSecurityAlertContext {
+        number: alert_raw.number,
+        package_name: alert_raw.dependency.package.name,
+        severity: alert_raw.security_advisory.severity,
+        summary: alert_raw.security_advisory.summary,
+        repo_owner: repo_id.owner,
+        repo_name: repo_id.repo,
+    })
+}
+
+/// List all loaded security alert contexts for a session
+#[tauri::command]
+pub async fn list_loaded_security_contexts(
+    app: tauri::AppHandle,
+    session_id: String,
+    worktree_id: Option<String>,
+) -> Result<Vec<LoadedSecurityAlertContext>, String> {
+    log::trace!("Listing loaded security contexts for session {session_id}");
+
+    let mut security_keys = get_session_security_refs(&app, &session_id)?;
+
+    // Also check worktree_id refs (create_worktree stores refs under worktree_id)
+    if let Some(ref wt_id) = worktree_id {
+        if let Ok(wt_keys) = get_session_security_refs(&app, wt_id) {
+            for key in wt_keys {
+                if !security_keys.contains(&key) {
+                    security_keys.push(key);
+                }
+            }
+        }
+    }
+
+    if security_keys.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let contexts_dir = get_github_contexts_dir(&app)?;
+    let mut contexts = Vec::new();
+
+    for key in security_keys {
+        if let Some((owner, repo, number)) = parse_context_key(&key) {
+            let repo_key = format!("{owner}-{repo}");
+            let context_file = contexts_dir.join(format!("{repo_key}-security-{number}.md"));
+
+            if let Ok(content) = std::fs::read_to_string(&context_file) {
+                // Parse from first line: "# Dependabot Alert #42: Summary text"
+                let summary = content
+                    .lines()
+                    .next()
+                    .and_then(|line| {
+                        line.strip_prefix("# Dependabot Alert #")
+                            .and_then(|rest| rest.split_once(": "))
+                            .map(|(_, title)| title.to_string())
+                    })
+                    .unwrap_or_else(|| format!("Alert #{number}"));
+
+                // Parse severity and package from third line (index 2)
+                // "**Severity:** critical | **Package:** lodash (npm) | **Manifest:** package.json"
+                let (severity, package_name) = content
+                    .lines()
+                    .nth(2)
+                    .map(|line| {
+                        let sev = line
+                            .split("**Severity:** ")
+                            .nth(1)
+                            .and_then(|s| s.split(" |").next())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let pkg = line
+                            .split("**Package:** ")
+                            .nth(1)
+                            .and_then(|s| s.split(" (").next())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        (sev, pkg)
+                    })
+                    .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+
+                contexts.push(LoadedSecurityAlertContext {
+                    number,
+                    package_name,
+                    severity,
+                    summary,
+                    repo_owner: owner,
+                    repo_name: repo,
+                });
+            }
+        }
+    }
+
+    contexts.sort_by_key(|c| c.number);
+    log::trace!("Found {} loaded security contexts", contexts.len());
+    Ok(contexts)
+}
+
+/// Remove a loaded security alert context for a session
+#[tauri::command]
+pub async fn remove_security_context(
+    app: tauri::AppHandle,
+    session_id: String,
+    alert_number: u32,
+    project_path: String,
+) -> Result<(), String> {
+    log::trace!("Removing security alert #{alert_number} context for session {session_id}");
+
+    let repo_id = get_repo_identifier(&project_path)?;
+    let repo_key = repo_id.to_key();
+
+    let is_orphaned = remove_security_reference(&app, &repo_key, alert_number, &session_id)?;
+
+    if is_orphaned {
+        let contexts_dir = get_github_contexts_dir(&app)?;
+        let context_file = contexts_dir.join(format!("{repo_key}-security-{alert_number}.md"));
+
+        if context_file.exists() {
+            std::fs::remove_file(&context_file)
+                .map_err(|e| format!("Failed to remove security context file: {e}"))?;
+            log::trace!("Deleted orphaned security context file");
+        }
+    }
+
+    log::trace!("Security context removed successfully");
+    Ok(())
+}
+
+/// Get the content of a loaded security alert context file
+#[tauri::command]
+pub async fn get_security_context_content(
+    app: tauri::AppHandle,
+    session_id: String,
+    alert_number: u32,
+    project_path: String,
+) -> Result<String, String> {
+    let repo_id = get_repo_identifier(&project_path)?;
+    let repo_key = repo_id.to_key();
+
+    let refs = get_session_security_refs(&app, &session_id)?;
+    let expected_key = format!("{repo_key}-{alert_number}");
+    if !refs.contains(&expected_key) {
+        return Err(format!(
+            "Session does not have security alert #{alert_number} loaded"
+        ));
+    }
+
+    let contexts_dir = get_github_contexts_dir(&app)?;
+    let context_file = contexts_dir.join(format!("{repo_key}-security-{alert_number}.md"));
+
+    if !context_file.exists() {
+        return Err(format!(
+            "Security context file not found for alert #{alert_number}"
+        ));
+    }
+
+    std::fs::read_to_string(&context_file)
+        .map_err(|e| format!("Failed to read security context file: {e}"))
+}
+
+// =============================================================================
+// Repository Security Advisory Commands
+// =============================================================================
+
+/// List repository security advisories
+///
+/// Uses `gh api` to fetch security advisories from the repository.
+/// - state: "draft", "published", "triage", "closed", or omit for all
+/// - Returns up to 100 advisories
+#[tauri::command]
+pub async fn list_repository_advisories(
+    app: AppHandle,
+    project_path: String,
+    state: Option<String>,
+) -> Result<Vec<RepositoryAdvisory>, String> {
+    log::trace!("Listing repository advisories for {project_path} with state: {state:?}");
+
+    let gh = resolve_gh_binary(&app);
+    let repo_id = get_repo_identifier(&project_path)?;
+
+    let mut endpoint = format!(
+        "/repos/{}/{}/security-advisories?per_page=100",
+        repo_id.owner, repo_id.repo
+    );
+    if let Some(ref s) = state {
+        endpoint.push_str(&format!("&state={s}"));
+    }
+
+    let output = silent_command(&gh)
+        .args(["api", &endpoint])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("not a git repository") {
+            return Err("Not a git repository".to_string());
+        }
+        if stderr.contains("404") {
+            log::debug!("Repository advisories not available for this repo, returning empty list");
+            return Ok(vec![]);
+        }
+        if stderr.contains("403") {
+            return Err("Insufficient permissions to access security advisories.".to_string());
+        }
+        return Err(format!("gh api failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw: Vec<RepositoryAdvisoryRaw> = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse advisories response: {e}"))?;
+
+    let advisories: Vec<RepositoryAdvisory> = raw.into_iter().map(|a| a.into_frontend()).collect();
+
+    log::trace!("Found {} repository advisories", advisories.len());
+    Ok(advisories)
+}
+
+/// Get a single repository security advisory by GHSA ID
+#[tauri::command]
+pub async fn get_repository_advisory(
+    app: AppHandle,
+    project_path: String,
+    ghsa_id: String,
+) -> Result<RepositoryAdvisory, String> {
+    let gh = resolve_gh_binary(&app);
+    let repo_id = get_repo_identifier(&project_path)?;
+
+    let endpoint = format!(
+        "/repos/{}/{}/security-advisories/{ghsa_id}",
+        repo_id.owner, repo_id.repo
+    );
+
+    let output = silent_command(&gh)
+        .args(["api", &endpoint])
+        .current_dir(&project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("gh auth login") || stderr.contains("authentication") {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if stderr.contains("404") {
+            return Err(format!("Advisory {ghsa_id} not found"));
+        }
+        return Err(format!("gh api failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw: RepositoryAdvisoryRaw = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse advisory response: {e}"))?;
+
+    Ok(raw.into_frontend())
+}
+
+/// Load/refresh advisory context for a session by fetching data from GitHub
+///
+/// Context is stored in shared location: `git-context/{repo_key}-advisory-{ghsa_id}.md`
+/// Multiple sessions can reference the same context file.
+#[tauri::command]
+pub async fn load_advisory_context(
+    app: tauri::AppHandle,
+    session_id: String,
+    ghsa_id: String,
+    project_path: String,
+) -> Result<LoadedAdvisoryContext, String> {
+    log::trace!("Loading advisory {ghsa_id} context for session {session_id}");
+
+    let repo_id = get_repo_identifier(&project_path)?;
+    let repo_key = repo_id.to_key();
+
+    // Fetch advisory from GitHub
+    let advisory_raw = {
+        let gh = resolve_gh_binary(&app);
+        let endpoint = format!(
+            "/repos/{}/{}/security-advisories/{ghsa_id}",
+            repo_id.owner, repo_id.repo
+        );
+        let output = silent_command(&gh)
+            .args(["api", &endpoint])
+            .current_dir(&project_path)
+            .output()
+            .map_err(|e| format!("Failed to run gh api: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Failed to fetch advisory: {stderr}"));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        serde_json::from_str::<RepositoryAdvisoryRaw>(&stdout)
+            .map_err(|e| format!("Failed to parse advisory: {e}"))?
+    };
+
+    let advisory = advisory_raw.into_frontend();
+
+    let ctx = AdvisoryContext {
+        ghsa_id: advisory.ghsa_id.clone(),
+        severity: advisory.severity.clone(),
+        summary: advisory.summary.clone(),
+        description: advisory.description.clone(),
+        cve_id: advisory.cve_id.clone(),
+        vulnerabilities: advisory.vulnerabilities.clone(),
+    };
+
+    // Write to shared git-context directory
+    let contexts_dir = get_github_contexts_dir(&app)?;
+    std::fs::create_dir_all(&contexts_dir)
+        .map_err(|e| format!("Failed to create git-context directory: {e}"))?;
+
+    let context_file = contexts_dir.join(format!("{repo_key}-advisory-{}.md", ctx.ghsa_id));
+    let context_content = format_advisory_context_markdown(&ctx);
+
+    std::fs::write(&context_file, context_content)
+        .map_err(|e| format!("Failed to write advisory context file: {e}"))?;
+
+    add_advisory_reference(&app, &repo_key, &ctx.ghsa_id, &session_id)?;
+
+    Ok(LoadedAdvisoryContext {
+        ghsa_id: advisory.ghsa_id,
+        severity: advisory.severity,
+        summary: advisory.summary,
+        repo_owner: repo_id.owner,
+        repo_name: repo_id.repo,
+    })
+}
+
+/// List all loaded advisory contexts for a session
+#[tauri::command]
+pub async fn list_loaded_advisory_contexts(
+    app: tauri::AppHandle,
+    session_id: String,
+    worktree_id: Option<String>,
+) -> Result<Vec<LoadedAdvisoryContext>, String> {
+    log::trace!("Listing loaded advisory contexts for session {session_id}");
+
+    let mut advisory_keys = get_session_advisory_refs(&app, &session_id)?;
+
+    // Also check worktree_id refs (create_worktree stores refs under worktree_id)
+    if let Some(ref wt_id) = worktree_id {
+        if let Ok(wt_keys) = get_session_advisory_refs(&app, wt_id) {
+            for key in wt_keys {
+                if !advisory_keys.contains(&key) {
+                    advisory_keys.push(key);
+                }
+            }
+        }
+    }
+
+    if advisory_keys.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let contexts_dir = get_github_contexts_dir(&app)?;
+    let mut contexts = Vec::new();
+
+    for key in advisory_keys {
+        if let Some((owner, repo, ghsa_id)) = parse_advisory_context_key(&key) {
+            let repo_key = format!("{owner}-{repo}");
+            let context_file = contexts_dir.join(format!("{repo_key}-advisory-{ghsa_id}.md"));
+
+            if let Ok(content) = std::fs::read_to_string(&context_file) {
+                // Parse from first line: "# Security Advisory GHSA-xxxx: Summary text"
+                let summary = content
+                    .lines()
+                    .next()
+                    .and_then(|line| line.strip_prefix("# Security Advisory "))
+                    .and_then(|rest| rest.split_once(": "))
+                    .map(|(_, title)| title.to_string())
+                    .unwrap_or_else(|| format!("Advisory {ghsa_id}"));
+
+                // Parse severity from second content line
+                // "**Severity:** critical | **CVE:** CVE-2024-xxxx"
+                let severity = content
+                    .lines()
+                    .nth(2)
+                    .and_then(|line| line.split("**Severity:** ").nth(1))
+                    .and_then(|s| s.split(" |").next().or(Some(s.trim())))
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                contexts.push(LoadedAdvisoryContext {
+                    ghsa_id,
+                    severity,
+                    summary,
+                    repo_owner: owner,
+                    repo_name: repo,
+                });
+            }
+        }
+    }
+
+    contexts.sort_by(|a, b| a.ghsa_id.cmp(&b.ghsa_id));
+    log::trace!("Found {} loaded advisory contexts", contexts.len());
+    Ok(contexts)
+}
+
+/// Remove a loaded advisory context for a session
+#[tauri::command]
+pub async fn remove_advisory_context(
+    app: tauri::AppHandle,
+    session_id: String,
+    ghsa_id: String,
+    project_path: String,
+) -> Result<(), String> {
+    log::trace!("Removing advisory {ghsa_id} context for session {session_id}");
+
+    let repo_id = get_repo_identifier(&project_path)?;
+    let repo_key = repo_id.to_key();
+
+    let is_orphaned = remove_advisory_reference(&app, &repo_key, &ghsa_id, &session_id)?;
+
+    if is_orphaned {
+        let contexts_dir = get_github_contexts_dir(&app)?;
+        let context_file = contexts_dir.join(format!("{repo_key}-advisory-{ghsa_id}.md"));
+
+        if context_file.exists() {
+            std::fs::remove_file(&context_file)
+                .map_err(|e| format!("Failed to remove advisory context file: {e}"))?;
+            log::trace!("Deleted orphaned advisory context file");
+        }
+    }
+
+    log::trace!("Advisory context removed successfully");
+    Ok(())
+}
+
+/// Get the content of a loaded advisory context file
+#[tauri::command]
+pub async fn get_advisory_context_content(
+    app: tauri::AppHandle,
+    session_id: String,
+    ghsa_id: String,
+    project_path: String,
+) -> Result<String, String> {
+    let repo_id = get_repo_identifier(&project_path)?;
+    let repo_key = repo_id.to_key();
+
+    let refs = get_session_advisory_refs(&app, &session_id)?;
+    let expected_key = format!("{repo_key}::{ghsa_id}");
+    if !refs.contains(&expected_key) {
+        return Err(format!("Session does not have advisory {ghsa_id} loaded"));
+    }
+
+    let contexts_dir = get_github_contexts_dir(&app)?;
+    let context_file = contexts_dir.join(format!("{repo_key}-advisory-{ghsa_id}.md"));
+
+    if !context_file.exists() {
+        return Err(format!("Advisory context file not found for {ghsa_id}"));
+    }
+
+    std::fs::read_to_string(&context_file)
+        .map_err(|e| format!("Failed to read advisory context file: {e}"))
 }
 
 #[cfg(test)]
@@ -1470,5 +3027,47 @@ mod tests {
         assert_eq!(parse_context_key("invalid"), None);
         assert_eq!(parse_context_key("repo-abc"), None);
         assert_eq!(parse_context_key("single"), None);
+    }
+
+    #[test]
+    fn test_generate_branch_name_from_security_alert() {
+        assert_eq!(
+            generate_branch_name_from_security_alert(42, "lodash", "Prototype Pollution"),
+            "security-42-lodash-prototype-pollution"
+        );
+        assert_eq!(
+            generate_branch_name_from_security_alert(
+                7,
+                "@angular/core",
+                "XSS vulnerability in template"
+            ),
+            "security-7-angular-core-xss-vulnerability-in-template"
+        );
+    }
+
+    #[test]
+    fn test_generate_branch_name_from_advisory() {
+        let result = generate_branch_name_from_advisory(
+            "GHSA-jg7v-5cqg-jvmf",
+            "Prototype Pollution in lodash",
+        );
+        assert!(result.starts_with("advisory-jg7v-5cqg-jvmf-"));
+        assert!(result.contains("prototype"));
+    }
+
+    #[test]
+    fn test_parse_advisory_context_key() {
+        assert_eq!(
+            parse_advisory_context_key("owner-repo::GHSA-jg7v-5cqg-jvmf"),
+            Some((
+                "owner".to_string(),
+                "repo".to_string(),
+                "GHSA-jg7v-5cqg-jvmf".to_string()
+            ))
+        );
+
+        // Invalid cases
+        assert_eq!(parse_advisory_context_key("owner-repo-123"), None);
+        assert_eq!(parse_advisory_context_key("invalid"), None);
     }
 }

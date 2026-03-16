@@ -8,9 +8,9 @@
 #   ./scripts/tauri-dev-rdp.sh        # Auto-detect RDP and set env vars
 #   ./scripts/tauri-dev-rdp.sh --force # Force software rendering mode
 #
-# Or via npm:
-#   npm run tauri:dev:rdp             # Auto-detect
-#   npm run tauri:dev:rdp -- --force  # Force software rendering
+# Or via bun:
+#   bun run tauri:dev:rdp             # Auto-detect
+#   bun run tauri:dev:rdp -- --force  # Force software rendering
 
 set -e
 
@@ -84,4 +84,4 @@ else
 fi
 
 echo "🚀 Starting Tauri development server..."
-exec npm run tauri:dev
+exec bun run tauri:dev

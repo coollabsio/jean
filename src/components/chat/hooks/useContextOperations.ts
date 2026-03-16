@@ -1,10 +1,14 @@
-import { useCallback, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { useCallback } from 'react'
+import { invoke } from '@/lib/transport'
+import { useUIStore } from '@/store/ui-store'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { SaveContextResponse } from '@/types/chat'
+import type { SaveContextResponse, SavedContextsResponse } from '@/types/chat'
 import type { Worktree } from '@/types/projects'
-import type { AppPreferences } from '@/types/preferences'
+import {
+  resolveMagicPromptProvider,
+  type AppPreferences,
+} from '@/types/preferences'
 
 interface UseContextOperationsParams {
   activeSessionId: string | null | undefined
@@ -40,16 +44,31 @@ export function useContextOperations({
   queryClient,
   preferences,
 }: UseContextOperationsParams): UseContextOperationsReturn {
-  const [loadContextModalOpen, setLoadContextModalOpen] = useState(false)
+  const loadContextModalOpen = useUIStore(state => state.loadContextModalOpen)
+  const setLoadContextModalOpen = useUIStore(
+    state => state.setLoadContextModalOpen
+  )
 
   // Handle Save Context - generates context summary in the background
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const handleSaveContext = useCallback(async () => {
     if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
     // Get project name from worktree
     const projectName = worktree?.name ?? 'unknown-project'
 
-    const toastId = toast.loading('Saving context...')
+    // Check if this session already has a saved context
+    const cachedContexts = queryClient.getQueryData<SavedContextsResponse>([
+      'session-context',
+    ])
+    const existingContext = cachedContexts?.contexts.find(
+      c => c.source_session_id === activeSessionId
+    )
+    const toastId = toast.loading(
+      existingContext
+        ? `Updating context: ${existingContext.name || existingContext.slug}...`
+        : 'Saving context...'
+    )
 
     try {
       // Call background summarization command
@@ -62,10 +81,17 @@ export function useContextOperations({
           projectName,
           customPrompt: preferences?.magic_prompts?.context_summary,
           model: preferences?.magic_prompt_models?.context_summary_model,
+          customProfileName: resolveMagicPromptProvider(
+            preferences?.magic_prompt_providers,
+            'context_summary_provider',
+            preferences?.default_provider
+          ),
+          reasoningEffort: preferences?.magic_prompt_efforts?.context_summary_effort ?? null,
         }
       )
 
-      toast.success(`Context saved: ${result.filename}`, { id: toastId })
+      const verb = result.updated ? 'Context updated' : 'Context saved'
+      toast.success(`${verb}: ${result.filename}`, { id: toastId })
 
       // Invalidate saved contexts query so Load Context modal shows the new context
       queryClient.invalidateQueries({ queryKey: ['session-context'] })
@@ -81,12 +107,15 @@ export function useContextOperations({
     queryClient,
     preferences?.magic_prompts?.context_summary,
     preferences?.magic_prompt_models?.context_summary_model,
+    preferences?.magic_prompt_providers,
+    preferences?.default_provider,
+    preferences?.magic_prompt_efforts?.context_summary_effort,
   ])
 
   // Handle Load Context - opens modal to select saved context
   const handleLoadContext = useCallback(() => {
     setLoadContextModalOpen(true)
-  }, [])
+  }, [setLoadContextModalOpen])
 
   return {
     handleLoadContext,

@@ -1,15 +1,15 @@
 import { useEffect, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { useArchivedWorktrees, useUnarchiveWorktree } from '@/services/projects'
-import {
-  useAllArchivedSessions,
-  useUnarchiveSession,
-  chatQueryKeys,
-} from '@/services/chat'
-import { useProjectsStore } from '@/store/projects-store'
-import { useChatStore } from '@/store/chat-store'
+import { useUnarchiveWorktree } from '@/services/projects'
+import { useUnarchiveSession, chatQueryKeys } from '@/services/chat'
+import { invoke } from '@/lib/transport'
+import { isTauri } from '@/services/projects'
 import { logger } from '@/lib/logger'
+import {
+  isOnCanvasView,
+  navigateToRestoredItem,
+} from '@/lib/restore-navigation'
 import type { Worktree } from '@/types/projects'
 import type { ArchivedSessionEntry } from '@/types/chat'
 
@@ -21,36 +21,48 @@ type ArchivedItem =
  * Hook to handle CMD+SHIFT+T keybinding for restoring the most recently archived item.
  * Similar to browser tab restore functionality.
  *
- * Listens for 'restore-last-archived' custom event and restores the most recently
- * archived worktree or session, then focuses it in the sidebar.
+ * Fetches fresh archived data on each invocation (not from stale closure) to ensure
+ * recently archived items are always found.
  */
 export function useRestoreLastArchived() {
   const queryClient = useQueryClient()
-
-  // Fetch archived data
-  const { data: archivedWorktrees } = useArchivedWorktrees()
-  const { data: archivedSessions } = useAllArchivedSessions()
 
   // Mutations
   const unarchiveWorktree = useUnarchiveWorktree()
   const unarchiveSession = useUnarchiveSession()
 
-  const restoreLastArchived = useCallback(() => {
+  const restoreLastArchived = useCallback(async () => {
+    if (!isTauri()) return
+
+    // Block restore from chat view — only allowed from canvas views
+    if (!isOnCanvasView()) {
+      toast.info('Switch to canvas view to restore')
+      return
+    }
+
+    // Fetch fresh data at invocation time to avoid stale closure issues
+    const [archivedWorktrees, archivedSessions] = await Promise.all([
+      queryClient.fetchQuery({
+        queryKey: ['archived-worktrees'],
+        queryFn: () => invoke<Worktree[]>('list_archived_worktrees'),
+        staleTime: 0,
+      }),
+      queryClient.fetchQuery({
+        queryKey: ['all-archived-sessions'],
+        queryFn: () =>
+          invoke<ArchivedSessionEntry[]>('list_all_archived_sessions'),
+        staleTime: 0,
+      }),
+    ])
+
     // Combine all archived items and sort by archived_at descending
     const items: ArchivedItem[] = []
 
-    // Add archived worktrees
-    if (archivedWorktrees) {
-      for (const worktree of archivedWorktrees) {
-        items.push({ type: 'worktree', worktree })
-      }
+    for (const worktree of archivedWorktrees) {
+      items.push({ type: 'worktree', worktree })
     }
-
-    // Add archived sessions
-    if (archivedSessions) {
-      for (const entry of archivedSessions) {
-        items.push({ type: 'session', entry })
-      }
+    for (const entry of archivedSessions) {
+      items.push({ type: 'session', entry })
     }
 
     if (items.length === 0) {
@@ -71,7 +83,6 @@ export function useRestoreLastArchived() {
       return (bTime ?? 0) - (aTime ?? 0)
     })
 
-    // Get the most recent archived item
     const mostRecent = items[0]
     if (!mostRecent) {
       toast.info('No archived items to restore')
@@ -86,14 +97,8 @@ export function useRestoreLastArchived() {
 
       unarchiveWorktree.mutate(worktree.id, {
         onSuccess: () => {
-          // Select the worktree in the sidebar
-          const { selectWorktree } = useProjectsStore.getState()
-          selectWorktree(worktree.id)
-
-          // Set the restored worktree as active
-          const { setActiveWorktree } = useChatStore.getState()
-          setActiveWorktree(worktree.id, worktree.path)
-
+          navigateToRestoredItem(worktree.id, worktree.path)
+          toast.success(`Restored worktree: ${worktree.name}`)
           logger.info('Restored worktree via CMD+SHIFT+T', {
             worktree: worktree.name,
           })
@@ -107,7 +112,7 @@ export function useRestoreLastArchived() {
       })
 
       // Check if the worktree is also archived - if so, restore it first
-      const worktreeIsArchived = archivedWorktrees?.some(
+      const worktreeIsArchived = archivedWorktrees.some(
         w => w.id === entry.worktree_id
       )
 
@@ -120,25 +125,19 @@ export function useRestoreLastArchived() {
           },
           {
             onSuccess: () => {
-              // Invalidate the all-archived-sessions query
               queryClient.invalidateQueries({
                 queryKey: ['all-archived-sessions'],
               })
-              // Invalidate sessions for this worktree
               queryClient.invalidateQueries({
                 queryKey: chatQueryKeys.sessions(entry.worktree_id),
               })
 
-              // Select the worktree in the sidebar
-              const { selectWorktree } = useProjectsStore.getState()
-              selectWorktree(entry.worktree_id)
-
-              // Set the worktree as active and the restored session as active
-              const { setActiveWorktree, setActiveSession } =
-                useChatStore.getState()
-              setActiveWorktree(entry.worktree_id, entry.worktree_path)
-              setActiveSession(entry.worktree_id, entry.session.id)
-
+              navigateToRestoredItem(
+                entry.worktree_id,
+                entry.worktree_path,
+                entry.session.id
+              )
+              toast.success(`Restored session: ${entry.session.name}`)
               logger.info('Restored session via CMD+SHIFT+T', {
                 session: entry.session.name,
               })
@@ -148,7 +147,6 @@ export function useRestoreLastArchived() {
       }
 
       if (worktreeIsArchived) {
-        // Restore the worktree first, then the session
         unarchiveWorktree.mutate(entry.worktree_id, {
           onSuccess: () => {
             restoreSessionOnly()
@@ -158,13 +156,7 @@ export function useRestoreLastArchived() {
         restoreSessionOnly()
       }
     }
-  }, [
-    archivedWorktrees,
-    archivedSessions,
-    unarchiveWorktree,
-    unarchiveSession,
-    queryClient,
-  ])
+  }, [queryClient, unarchiveWorktree, unarchiveSession])
 
   useEffect(() => {
     const handleRestoreLastArchived = () => {

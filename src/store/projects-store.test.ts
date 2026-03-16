@@ -56,21 +56,29 @@ describe('ProjectsStore', () => {
       const { toggleProjectExpanded } = useProjectsStore.getState()
 
       toggleProjectExpanded('project-1')
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(true)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(true)
 
       toggleProjectExpanded('project-1')
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(false)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(false)
     })
 
     it('expands project directly', () => {
       const { expandProject } = useProjectsStore.getState()
 
       expandProject('project-1')
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(true)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(true)
 
       // Expanding again should be idempotent
       expandProject('project-1')
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(true)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(true)
     })
 
     it('collapses project directly', () => {
@@ -78,21 +86,29 @@ describe('ProjectsStore', () => {
 
       expandProject('project-1')
       collapseProject('project-1')
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(false)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(false)
 
       // Collapsing non-expanded should be safe
       collapseProject('project-2')
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-2')).toBe(false)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-2')
+      ).toBe(false)
     })
 
     it('sets project expanded state explicitly', () => {
       const { setProjectExpanded } = useProjectsStore.getState()
 
       setProjectExpanded('project-1', true)
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(true)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(true)
 
       setProjectExpanded('project-1', false)
-      expect(useProjectsStore.getState().expandedProjectIds.has('project-1')).toBe(false)
+      expect(
+        useProjectsStore.getState().expandedProjectIds.has('project-1')
+      ).toBe(false)
     })
 
     it('handles multiple expanded projects', () => {
@@ -115,17 +131,23 @@ describe('ProjectsStore', () => {
       const { toggleFolderExpanded } = useProjectsStore.getState()
 
       toggleFolderExpanded('folder-1')
-      expect(useProjectsStore.getState().expandedFolderIds.has('folder-1')).toBe(true)
+      expect(
+        useProjectsStore.getState().expandedFolderIds.has('folder-1')
+      ).toBe(true)
 
       toggleFolderExpanded('folder-1')
-      expect(useProjectsStore.getState().expandedFolderIds.has('folder-1')).toBe(false)
+      expect(
+        useProjectsStore.getState().expandedFolderIds.has('folder-1')
+      ).toBe(false)
     })
 
     it('expands folder directly', () => {
       const { expandFolder } = useProjectsStore.getState()
 
       expandFolder('folder-1')
-      expect(useProjectsStore.getState().expandedFolderIds.has('folder-1')).toBe(true)
+      expect(
+        useProjectsStore.getState().expandedFolderIds.has('folder-1')
+      ).toBe(true)
     })
 
     it('collapses folder directly', () => {
@@ -133,7 +155,9 @@ describe('ProjectsStore', () => {
 
       expandFolder('folder-1')
       collapseFolder('folder-1')
-      expect(useProjectsStore.getState().expandedFolderIds.has('folder-1')).toBe(false)
+      expect(
+        useProjectsStore.getState().expandedFolderIds.has('folder-1')
+      ).toBe(false)
     })
   })
 
@@ -160,7 +184,8 @@ describe('ProjectsStore', () => {
     })
 
     it('closes project settings and clears project ID', () => {
-      const { openProjectSettings, closeProjectSettings } = useProjectsStore.getState()
+      const { openProjectSettings, closeProjectSettings } =
+        useProjectsStore.getState()
 
       openProjectSettings('project-1')
       closeProjectSettings()
@@ -182,7 +207,8 @@ describe('ProjectsStore', () => {
     })
 
     it('closes git init modal and clears path', () => {
-      const { openGitInitModal, closeGitInitModal } = useProjectsStore.getState()
+      const { openGitInitModal, closeGitInitModal } =
+        useProjectsStore.getState()
 
       openGitInitModal('/path/to/project')
       closeGitInitModal()

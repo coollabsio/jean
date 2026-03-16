@@ -1,0 +1,1 @@
+export { GitHubDashboardModal } from './GitHubDashboardModal'

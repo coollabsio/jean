@@ -1,5 +1,5 @@
 import { useCallback, useContext, useMemo } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -10,20 +10,27 @@ import { notify } from '@/lib/notifications'
 import { logger } from '@/lib/logger'
 import type { CommandContext } from '@/lib/commands/types'
 import type { AppPreferences, ClaudeModel } from '@/types/preferences'
+import { resolveMagicPromptProvider } from '@/types/preferences'
 import type { ThinkingLevel, ExecutionMode } from '@/types/chat'
 import type { Project, ReviewResponse } from '@/types/projects'
 import { useQueryClient } from '@tanstack/react-query'
+import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
-import { gitPull, triggerImmediateGitPoll } from '@/services/git-status'
+import { triggerImmediateGitPoll, performGitPull } from '@/services/git-status'
 
 /**
  * Command context hook - provides essential actions for commands
  * @param preferences - Optional preferences for terminal/editor selection
  */
-export function useCommandContext(preferences?: AppPreferences): CommandContext {
+export function useCommandContext(
+  preferences?: AppPreferences
+): CommandContext {
+  'use no memo'
+
   const queryClient = useQueryClient()
   const themeContext = useContext(ThemeProviderContext)
+  const { installedBackends } = useInstalledBackends()
 
   // Preferences
   const openPreferences = useCallback(() => {
@@ -172,7 +179,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
     }
   }, [queryClient])
 
-  // Sessions - Rename session (triggers edit mode in SessionTabBar)
+  // Sessions - Rename session
   const renameSession = useCallback(() => {
     const { activeWorktreeId, getActiveSession } = useChatStore.getState()
     if (!activeWorktreeId) {
@@ -266,6 +273,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
   }, [getTargetPath])
 
   // Open In - Terminal
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const openInTerminal = useCallback(async () => {
     const worktreePath = getTargetPath()
     if (!worktreePath) {
@@ -285,6 +293,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
   }, [getTargetPath, preferences?.terminal])
 
   // Open In - Editor
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const openInEditor = useCallback(async () => {
     const worktreePath = getTargetPath()
     if (!worktreePath) {
@@ -425,6 +434,16 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
     )
   }, [])
 
+  // Projects - Open project settings
+  const openProjectSettings = useCallback(() => {
+    const { selectedProjectId } = useProjectsStore.getState()
+    if (!selectedProjectId) {
+      notify('No project selected', undefined, { type: 'error' })
+      return
+    }
+    useProjectsStore.getState().openProjectSettings(selectedProjectId)
+  }, [])
+
   // State getters
   const hasActiveSession = useCallback(() => {
     const { activeWorktreeId, getActiveSession } = useChatStore.getState()
@@ -441,6 +460,11 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
     const { selectedProjectId } = useProjectsStore.getState()
     return !!selectedProjectId
   }, [])
+
+  const hasInstalledBackend = useCallback(
+    () => installedBackends.length > 0,
+    [installedBackends]
+  )
 
   const hasMultipleSessions = useCallback(() => {
     // This would need access to sessions data - return true as default
@@ -515,15 +539,12 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       }
     }
 
-    const toastId = toast.loading(`Pulling from ${baseBranch}...`)
-    try {
-      const result = await gitPull(worktreePath, baseBranch)
-      triggerImmediateGitPoll()
-      toast.success(result || 'Already up to date', { id: toastId })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast.error(`Pull failed: ${message}`, { id: toastId })
-    }
+    const { activeWorktreeId } = useChatStore.getState()
+    await performGitPull({
+      worktreeId: activeWorktreeId ?? '',
+      worktreePath,
+      baseBranch,
+    })
   }, [getTargetPath, queryClient])
 
   // Git - Refresh git status immediately
@@ -533,6 +554,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
   }, [])
 
   // AI - Run code review
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const runAIReview = useCallback(async () => {
     const { activeWorktreeId, activeWorktreePath } = useChatStore.getState()
     if (!activeWorktreeId || !activeWorktreePath) {
@@ -546,6 +568,12 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
         worktreePath: activeWorktreePath,
         customPrompt: preferences?.magic_prompts?.code_review,
         model: preferences?.magic_prompt_models?.code_review_model,
+        customProfileName: resolveMagicPromptProvider(
+          preferences?.magic_prompt_providers,
+          'code_review_provider',
+          preferences?.default_provider
+        ),
+        reasoningEffort: preferences?.magic_prompt_efforts?.code_review_effort ?? null,
       })
 
       // Store review results in Zustand (also activates review tab)
@@ -567,7 +595,13 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
     } catch (error) {
       toast.error(`Failed to review: ${error}`, { id: toastId })
     }
-  }, [preferences?.magic_prompts?.code_review, preferences?.magic_prompt_models?.code_review_model])
+  }, [
+    preferences?.magic_prompts?.code_review,
+    preferences?.magic_prompt_models?.code_review_model,
+    preferences?.magic_prompt_providers,
+    preferences?.default_provider,
+    preferences?.magic_prompt_efforts?.code_review_effort,
+  ])
 
   // Terminal - Open terminal panel
   const openTerminalPanel = useCallback(() => {
@@ -579,7 +613,9 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
 
     const { addTerminal, setTerminalPanelOpen, setTerminalVisible } =
       useTerminalStore.getState()
-    const terminals = useTerminalStore.getState().getTerminals(selectedWorktreeId)
+    const terminals = useTerminalStore
+      .getState()
+      .getTerminals(selectedWorktreeId)
 
     // Create a new terminal if none exists
     if (terminals.length === 0) {
@@ -616,6 +652,16 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
     window.dispatchEvent(new CustomEvent('restore-last-archived'))
   }, [])
 
+  // Unread sessions
+  const openUnreadSessions = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('command:open-unread-sessions'))
+  }, [])
+
+  // Developer - Toggle debug mode
+  const toggleDebugMode = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('command:toggle-debug-mode'))
+  }, [])
+
   // Session - Resume session (reconnect to Claude CLI)
   const resumeSession = useCallback(async () => {
     const { activeWorktreeId, getActiveSession } = useChatStore.getState()
@@ -642,6 +688,58 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       toast.error(`Failed to resume: ${message}`, { id: toastId })
     }
   }, [])
+
+  // Session - Regenerate session name using AI
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
+  const regenerateSessionName = useCallback(async () => {
+    const chatState = useChatStore.getState()
+    const worktreeId =
+      chatState.activeWorktreeId ??
+      useProjectsStore.getState().selectedWorktreeId
+    if (!worktreeId) {
+      notify('No worktree selected', undefined, { type: 'error' })
+      return
+    }
+
+    const sessionId = chatState.getActiveSession(worktreeId)
+    if (!sessionId) {
+      notify('No session selected', undefined, { type: 'error' })
+      return
+    }
+
+    const worktreePath = chatState.getWorktreePath(worktreeId)
+    if (!worktreePath) {
+      notify('No worktree path found', undefined, { type: 'error' })
+      return
+    }
+
+    const toastId = toast.loading('Regenerating session title...')
+    try {
+      await invoke('regenerate_session_name', {
+        worktreeId,
+        worktreePath,
+        sessionId,
+        customPrompt: preferences?.magic_prompts?.session_naming ?? null,
+        model: preferences?.magic_prompt_models?.session_naming_model ?? null,
+        customProfileName: resolveMagicPromptProvider(
+          preferences?.magic_prompt_providers,
+          'session_naming_provider',
+          preferences?.default_provider
+        ),
+        reasoningEffort: preferences?.magic_prompt_efforts?.session_naming_effort ?? null,
+      })
+      toast.success('Session title will update shortly', { id: toastId })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`Failed to regenerate: ${message}`, { id: toastId })
+    }
+  }, [
+    preferences?.magic_prompts?.session_naming,
+    preferences?.magic_prompt_models?.session_naming_model,
+    preferences?.magic_prompt_providers,
+    preferences?.default_provider,
+    preferences?.magic_prompt_efforts?.session_naming_effort,
+  ])
 
   // State getter - Check if run script is available
   const hasRunScript = useCallback(() => {
@@ -679,6 +777,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       clearSessionHistory,
       renameSession,
       resumeSession,
+      regenerateSessionName,
 
       // Worktrees
       createWorktree,
@@ -712,6 +811,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       addProject,
       initProject,
       removeProject,
+      openProjectSettings,
 
       // AI
       runAIReview,
@@ -728,10 +828,17 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       openArchivedModal,
       restoreLastArchived,
 
+      // Unread
+      openUnreadSessions,
+
+      // Developer
+      toggleDebugMode,
+
       // State getters
       hasActiveSession,
       hasActiveWorktree,
       hasSelectedProject,
+      hasInstalledBackend,
       hasMultipleSessions,
       hasMultipleWorktrees,
       hasRunScript,
@@ -757,6 +864,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       clearSessionHistory,
       renameSession,
       resumeSession,
+      regenerateSessionName,
       createWorktree,
       nextWorktree,
       previousWorktree,
@@ -776,6 +884,7 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       addProject,
       initProject,
       removeProject,
+      openProjectSettings,
       runAIReview,
       openTerminalPanel,
       runScript,
@@ -783,9 +892,12 @@ export function useCommandContext(preferences?: AppPreferences): CommandContext 
       loadContext,
       openArchivedModal,
       restoreLastArchived,
+      openUnreadSessions,
+      toggleDebugMode,
       hasActiveSession,
       hasActiveWorktree,
       hasSelectedProject,
+      hasInstalledBackend,
       hasMultipleSessions,
       hasMultipleWorktrees,
       hasRunScript,

@@ -54,7 +54,7 @@ This setup is designed to be highly effective for human developers and AI coding
 
 ## App Boilerplate (Tauri & React)
 
-App scaffolding is created with `npm create tauri-app@latest -- --template react-ts` , producing a basic directory structure. Other directories are added to provide a basic structure:
+App scaffolding is created with `bunx create-tauri-app@latest -- --template react-ts` , producing a basic directory structure. Other directories are added to provide a basic structure:
 
 ```
 /
@@ -136,7 +136,7 @@ The Tauri [Clipboard Manager plugin](https://v2.tauri.app/plugin/clipboard/) is 
   "rust:test": "cd src-tauri && cargo test",
   "test": "vitest",
   "test:run": "vitest run",
-  "check:all": "npm run typecheck && npm run lint && npm run format:check && npm run test:run && npm run rust:fmt:check && npm run rust:clippy && npm run rust:test"
+  "check:all": "bun run typecheck && bun run lint && bun run format:check && bun run test:run && bun run rust:fmt:check && bun run rust:clippy && bun run rust:test"
 },
 ```
 
@@ -326,7 +326,7 @@ Five Claude Code agents specific to this project are included:
 
 One Claude Code Command is included. You should create moreas your product evolves.
 
-- `/check` -> Checks everything meets `docs/architecture-guide.css` , runs `npm run check:all` and fixes any problems.
+- `/check` -> Checks everything meets `docs/architecture-guide.css` , runs `bun run check:all` and fixes any problems.
 
 ## Other Boilerplate Bits
 

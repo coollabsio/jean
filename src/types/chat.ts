@@ -1,3 +1,5 @@
+import type { ReviewResponse } from '@/types/projects'
+
 /**
  * Role of a chat message sender
  */
@@ -12,6 +14,22 @@ export type MessageRole = 'user' | 'assistant'
  * - ultrathink: 32K tokens budget (default)
  */
 export type ThinkingLevel = 'off' | 'think' | 'megathink' | 'ultrathink'
+
+/**
+ * Effort level for Opus 4.6 adaptive thinking
+ * Controls --settings {"effort": "<level>"} via CLI
+ * Replaces ThinkingLevel when model is Opus (latest) on CLI >= 2.1.32
+ * - low: Minimal thinking, skips for simple tasks
+ * - medium: Moderate thinking, may skip for very simple queries
+ * - high: Deep reasoning (default), almost always thinks
+ * - max: No constraints on thinking depth (Opus 4.6 only)
+ */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'max'
+
+/**
+ * Backend for a chat session (Claude CLI, Codex CLI, or OpenCode)
+ */
+export type Backend = 'claude' | 'codex' | 'opencode'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -74,6 +92,8 @@ export interface ChatMessage {
   execution_mode?: ExecutionMode
   /** Thinking level when this message was sent (user messages only) */
   thinking_level?: ThinkingLevel
+  /** Effort level when this message was sent (user messages only, Opus 4.6) */
+  effort_level?: EffortLevel
   /** True if this message was recovered from a crash */
   recovered?: boolean
   /** Token usage for this message (assistant messages only) */
@@ -108,16 +128,28 @@ export interface Session {
   order: number
   /** Unix timestamp when session was created */
   created_at: number
+  /** Unix timestamp of last activity (latest run end/start, or created_at) */
+  updated_at: number
   /** Chat messages for this session */
   messages: ChatMessage[]
   /** Message count (populated separately for efficiency when full messages not needed) */
   message_count?: number
+  /** Backend for this session (claude, codex, or opencode) */
+  backend?: Backend
   /** Claude CLI session ID for resuming conversations */
   claude_session_id?: string
+  /** Codex CLI thread ID for resuming conversations */
+  codex_thread_id?: string
+  /** OpenCode session ID for resuming conversations */
+  opencode_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */
   selected_thinking_level?: ThinkingLevel
+  /** Selected provider (custom CLI profile name) for this session */
+  selected_provider?: string
+  /** Selected execution mode for this session (plan/build/yolo) */
+  selected_execution_mode?: ExecutionMode
   /** Whether session naming has been attempted for this session */
   session_naming_completed?: boolean
   /** Unix timestamp when session was archived (undefined = not archived) */
@@ -137,12 +169,34 @@ export interface Session {
   pending_permission_denials?: PermissionDenial[]
   /** Original message context for re-send after permission approval */
   denied_message_context?: DeniedMessageContext
-  /** Whether this session is marked for review in session board */
+  /** AI code review results for this session */
+  review_results?: ReviewResponse
+  /** Whether this session is marked for review */
   is_reviewing?: boolean
   /** Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode) */
   waiting_for_input?: boolean
+  /** Type of waiting: 'question' for AskUserQuestion, 'plan' for ExitPlanMode */
+  waiting_for_input_type?: 'question' | 'plan' | null
   /** Message IDs whose plans have been approved (for NDJSON-only storage) */
   approved_plan_message_ids?: string[]
+  /** File path to the current plan (extracted from Write tool calls) */
+  plan_file_path?: string
+  /** Message ID of the pending plan awaiting approval (for Canvas view) */
+  pending_plan_message_id?: string
+  /** Per-session MCP server override (undefined = inherit from project/global) */
+  enabled_mcp_servers?: string[]
+  /** Persisted session digest (recap summary) */
+  digest?: SessionDigest
+  /** Unix timestamp when session was last opened/viewed by the user */
+  last_opened_at?: number
+  /** Status of the last run (for immediate status on app restart) */
+  last_run_status?: RunStatus
+  /** Execution mode of the last run (plan/build/yolo) */
+  last_run_execution_mode?: ExecutionMode
+  /** User-assigned label with color (e.g. "Needs testing") */
+  label?: LabelData
+  /** Messages queued for sending (synced between native + web clients) */
+  queued_messages?: QueuedMessage[]
 }
 
 /**
@@ -254,10 +308,20 @@ export interface ToolUseEvent {
 export interface DoneEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
+  /** True when a Codex/Opencode plan-mode run completed with content */
+  waiting_for_plan?: boolean
 }
 
 /**
- * Event payload for context compaction from Rust
+ * Event payload for compaction-in-progress from Rust
+ */
+export interface CompactingEvent {
+  session_id: string
+  worktree_id: string
+}
+
+/**
+ * Event payload for context compaction complete from Rust
  */
 export interface CompactedEvent {
   session_id: string
@@ -281,6 +345,7 @@ export interface CancelledEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
   undo_send: boolean // True if user message should be restored to input (instant cancellation)
+  emitted_at_ms: number
 }
 
 /**
@@ -323,10 +388,12 @@ export interface ToolResultEvent {
 export interface PermissionDenial {
   /** Name of the denied tool (e.g., "Bash") */
   tool_name: string
-  /** Tool use ID from Claude */
+  /** Tool use ID */
   tool_use_id: string
   /** Input parameters that were denied */
   tool_input: unknown
+  /** JSON-RPC request ID (Codex only — used to respond to approval requests) */
+  rpc_id?: number
 }
 
 /**
@@ -429,6 +496,35 @@ export function isTodoWrite(
 }
 
 /**
+ * A Codex multi-agent entry extracted from collab_tool_call events
+ */
+export interface CodexAgent {
+  /** Tool call ID of the SpawnAgent collab_tool_call */
+  id: string
+  /** The prompt given to the agent (truncated for display) */
+  prompt: string
+  /** Agent lifecycle status */
+  status: 'in_progress' | 'completed' | 'errored'
+  /** Completion message from agents_states */
+  message?: string
+}
+
+/** Names of collab tool calls that should be shown in the AgentWidget, not the timeline */
+const COLLAB_TOOL_NAMES = new Set([
+  'SpawnAgent',
+  'WaitForAgents',
+  'CloseAgent',
+  'SendInput',
+])
+
+/**
+ * Check if a tool call is a Codex collab tool (multi-agent)
+ */
+export function isCollabToolCall(toolCall: ToolCall): boolean {
+  return COLLAB_TOOL_NAMES.has(toolCall.name)
+}
+
+/**
  * Answer to a single question
  */
 export interface QuestionAnswer {
@@ -452,6 +548,8 @@ export interface PendingImage {
   path: string
   /** Filename (e.g., "image-1704067200-abc123.png") */
   filename: string
+  /** Whether the image is still being processed (resized/compressed) */
+  loading?: boolean
 }
 
 /**
@@ -501,6 +599,7 @@ export interface SaveTextResponse {
   size: number
 }
 
+
 /**
  * Response from the read_pasted_text Tauri command
  */
@@ -524,10 +623,12 @@ export interface WorktreeFile {
   relative_path: string
   /** File extension (e.g., "tsx", "rs") or empty for no extension */
   extension: string
+  /** Whether this entry is a directory */
+  is_dir: boolean
 }
 
 /**
- * Represents a pending file attachment before sending
+ * Represents a pending file or directory attachment before sending
  */
 export interface PendingFile {
   /** Unique ID for this pending file */
@@ -536,6 +637,8 @@ export interface PendingFile {
   relativePath: string
   /** File extension */
   extension: string
+  /** Whether this is a directory mention */
+  isDirectory: boolean
 }
 
 // ============================================================================
@@ -565,6 +668,18 @@ export interface ClaudeCommand {
   /** Full path to the command file */
   path: string
   /** Optional description from file header */
+  description?: string
+}
+
+/**
+ * A resolved Claude command with interpolations expanded
+ */
+export interface ResolvedCommand {
+  /** Final message content after frontmatter stripping and interpolation resolution */
+  content: string
+  /** Additional allowed tools requested by the command frontmatter */
+  allowed_tools: string[]
+  /** Optional description from command frontmatter */
   description?: string
 }
 
@@ -662,14 +777,53 @@ export interface QueuedMessage {
   pendingTextFiles: PendingTextFile[]
   /** Model to use for this message (snapshot at queue time) */
   model: string
+  /** Provider profile name to use (snapshot at queue time, null = default) */
+  provider: string | null
   /** Execution mode setting (snapshot at queue time) */
   executionMode: ExecutionMode
   /** Thinking level setting (snapshot at queue time) */
   thinkingLevel: ThinkingLevel
-  /** Whether thinking should be disabled for this mode (snapshot at queue time) */
-  disableThinkingForMode: boolean
+  /** Effort level for Opus 4.6 adaptive thinking (snapshot at queue time) */
+  effortLevel?: EffortLevel
+  /** MCP config JSON to pass to CLI (snapshot at queue time) */
+  mcpConfig?: string
+  /** Additional allowed tools from resolved slash command frontmatter */
+  commandAllowedTools?: string[]
+  /** Backend to use for this message (snapshot at queue time) */
+  backend?: Backend
   /** Timestamp when queued (for display ordering) */
   queuedAt: number
+}
+
+// ============================================================================
+// MCP Server Types
+// ============================================================================
+
+/** Information about a configured MCP server */
+export interface McpServerInfo {
+  /** Server name (key in mcpServers config) */
+  name: string
+  /** Full server config object (type, command, args, env, url, etc.) */
+  config: unknown
+  /** Configuration scope: user (global config), local (per-project in global config), project (project root) */
+  scope: 'user' | 'local' | 'project'
+  /** Whether the server has "disabled": true in its config */
+  disabled: boolean
+  /** Which backend this server belongs to: "claude", "codex", or "opencode" */
+  backend: string
+}
+
+/** Health status of an MCP server as reported by `claude mcp list` */
+export type McpHealthStatus =
+  | 'connected'
+  | 'needsAuthentication'
+  | 'couldNotConnect'
+  | 'disabled'
+  | 'unknown'
+
+/** Result of a health check across all MCP servers */
+export interface McpHealthResult {
+  statuses: Record<string, McpHealthStatus>
 }
 
 // ============================================================================
@@ -697,6 +851,8 @@ export interface SavedContext {
   created_at: number
   /** Optional custom display name (from metadata file) */
   name?: string
+  /** Source session ID that generated this context */
+  source_session_id?: string
 }
 
 /**
@@ -718,6 +874,8 @@ export interface SaveContextResponse {
   path: string
   /** File size in bytes */
   size: number
+  /** Whether this was an update to an existing context vs a new save */
+  updated: boolean
 }
 
 // ============================================================================
@@ -809,4 +967,16 @@ export interface SessionDigest {
   chat_summary: string
   /** One sentence describing what was just completed */
   last_action: string
+  /** When the digest was created (unix epoch seconds) */
+  created_at?: number
+  /** Number of messages when this digest was generated */
+  message_count?: number
+}
+
+/** User-assigned label with color for session cards */
+export interface LabelData {
+  /** Label name (e.g. "Needs testing") */
+  name: string
+  /** Background color hex value (e.g. "#eab308") */
+  color: string
 }

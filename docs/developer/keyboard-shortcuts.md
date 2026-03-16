@@ -8,27 +8,27 @@ User-configurable keyboard shortcut system using native DOM event listeners, int
 
 Keybindings are user-configurable in Preferences. Below are the defaults:
 
-| Action | Default Shortcut | Description |
-|--------|------------------|-------------|
-| `focus_chat_input` | `Cmd+L` | Move focus to chat textarea |
-| `toggle_left_sidebar` | `Cmd+B` | Show/hide projects sidebar |
-| `open_preferences` | `Cmd+,` | Open preferences dialog |
-| `open_commit_modal` | `Cmd+Shift+C` | Open git commit dialog |
-| `open_pull_request` | `Cmd+Shift+P` | Open pull request dialog |
-| `open_git_diff` | `Cmd+G` | Open git diff view |
-| `execute_run` | `Cmd+R` | Start/stop workspace run script |
-| `open_in_modal` | `Cmd+O` | Open worktree in editor/terminal/finder |
-| `open_magic_modal` | `Cmd+M` | Open magic git commands menu |
-| `new_session` | `Cmd+T` | Create new chat session |
-| `next_session` | `Cmd+Alt+Right` | Switch to next session tab |
-| `previous_session` | `Cmd+Alt+Left` | Switch to previous session tab |
-| `close_session_or_worktree` | `Cmd+W` | Close session or remove worktree |
-| `new_worktree` | `Cmd+N` | Create new worktree |
-| `next_worktree` | `Cmd+Alt+Down` | Switch to next worktree |
-| `previous_worktree` | `Cmd+Alt+Up` | Switch to previous worktree |
-| `cycle_execution_mode` | `Shift+Tab` | Cycle through Plan/Build/Yolo modes |
-| `approve_plan` | `Cmd+Enter` | Approve plan or answer question |
-| `restore_last_archived` | `Cmd+Shift+T` | Restore most recently archived item |
+| Action                      | Default Shortcut | Description                             |
+| --------------------------- | ---------------- | --------------------------------------- |
+| `focus_chat_input`          | `Cmd+L`          | Move focus to chat textarea             |
+| `toggle_left_sidebar`       | `Cmd+B`          | Show/hide projects sidebar              |
+| `open_preferences`          | `Cmd+,`          | Open preferences dialog                 |
+| `open_commit_modal`         | `Cmd+Shift+C`    | Open git commit dialog                  |
+| `open_pull_request`         | `Cmd+Shift+P`    | Open pull request dialog                |
+| `open_git_diff`             | `Cmd+G`          | Open git diff view                      |
+| `execute_run`               | `Cmd+R`          | Start/stop workspace run script         |
+| `open_in_modal`             | `Cmd+O`          | Open worktree in editor/terminal/finder |
+| `open_magic_modal`          | `Cmd+M`          | Open magic git commands menu            |
+| `new_session`               | `Cmd+T`          | Create new chat session                 |
+| `next_session`              | `Cmd+Alt+Right`  | Switch to next session tab              |
+| `previous_session`          | `Cmd+Alt+Left`   | Switch to previous session tab          |
+| `close_session_or_worktree` | `Cmd+W`          | Close session or remove worktree        |
+| `new_worktree`              | `Cmd+N`          | Create new worktree                     |
+| `next_worktree`             | `Cmd+Alt+Down`   | Switch to next worktree                 |
+| `previous_worktree`         | `Cmd+Alt+Up`     | Switch to previous worktree             |
+| `cycle_execution_mode`      | `Shift+Tab`      | Cycle through Plan/Build/Yolo modes     |
+| `approve_plan`              | `Cmd+Enter`      | Approve plan or answer question         |
+| `restore_last_archived`     | `Cmd+Shift+T`    | Restore most recently archived item     |
 
 **Note:** `Cmd` on Mac, `Ctrl` on Windows/Linux.
 
@@ -123,7 +123,11 @@ export function useMainWindowEventListeners() {
       for (const [action, binding] of Object.entries(keybindings)) {
         if (binding === shortcut) {
           e.preventDefault()
-          executeKeybindingAction(action as KeybindingAction, commandContext, queryClient)
+          executeKeybindingAction(
+            action as KeybindingAction,
+            commandContext,
+            queryClient
+          )
           return
         }
       }
@@ -150,7 +154,8 @@ function executeKeybindingAction(
       window.dispatchEvent(new CustomEvent('focus-chat-input'))
       break
     case 'toggle_left_sidebar': {
-      const { leftSidebarVisible, setLeftSidebarVisible } = useUIStore.getState()
+      const { leftSidebarVisible, setLeftSidebarVisible } =
+        useUIStore.getState()
       setLeftSidebarVisible(!leftSidebarVisible)
       break
     }
@@ -175,7 +180,9 @@ const MIGRATED_KEYBINDINGS: Partial<Record<keyof KeybindingsMap, string>> = {
 }
 
 // Migrate keybindings: if a stored value matches an old default, use the new default
-function migrateKeybindings(stored: KeybindingsMap | undefined): KeybindingsMap {
+function migrateKeybindings(
+  stored: KeybindingsMap | undefined
+): KeybindingsMap {
   if (!stored) return DEFAULT_KEYBINDINGS
 
   const migrated = { ...stored }
@@ -251,15 +258,23 @@ export function eventToShortcutString(e: KeyboardEvent): ShortcutString | null {
 export function formatShortcutDisplay(shortcut: ShortcutString): string {
   const isMac = navigator.platform.includes('Mac')
 
-  return shortcut.split('+').map(part => {
-    switch (part) {
-      case 'mod': return isMac ? '⌘' : 'Ctrl'
-      case 'shift': return isMac ? '⇧' : 'Shift'
-      case 'alt': return isMac ? '⌥' : 'Alt'
-      case 'comma': return ','
-      default: return part.toUpperCase()
-    }
-  }).join(' + ')
+  return shortcut
+    .split('+')
+    .map(part => {
+      switch (part) {
+        case 'mod':
+          return isMac ? '⌘' : 'Ctrl'
+        case 'shift':
+          return isMac ? '⇧' : 'Shift'
+        case 'alt':
+          return isMac ? '⌥' : 'Alt'
+        case 'comma':
+          return ','
+        default:
+          return part.toUpperCase()
+      }
+    })
+    .join(' + ')
 }
 ```
 

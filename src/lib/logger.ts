@@ -4,8 +4,6 @@
  * - warn/error: always log (even in production)
  */
 
-const isDev = import.meta.env.DEV
-
 type LogArgs = unknown[]
 
 interface Logger {
@@ -25,21 +23,14 @@ function createLogger(tagName?: string): Logger {
   }
 
   return {
-    debug: (...args: LogArgs) => {
-      if (isDev) {
-        console.debug(...formatArgs('DEBUG', args))
-      }
-    },
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    debug: () => {},
 
-    info: (...args: LogArgs) => {
-      if (isDev) {
-        console.info(...formatArgs('INFO', args))
-      }
-    },
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    info: () => {},
 
-    warn: (...args: LogArgs) => {
-      console.warn(...formatArgs('WARN', args))
-    },
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    warn: () => {},
 
     error: (...args: LogArgs) => {
       console.error(...formatArgs('ERROR', args))

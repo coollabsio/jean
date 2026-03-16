@@ -31,6 +31,10 @@ interface AskUserQuestionProps {
   submittedAnswers?: QuestionAnswer[]
   /** Intro text to show above questions (e.g., "Before we continue, I have some questions:") */
   introText?: string
+  /** Whether a user message follows this assistant message (user responded) */
+  hasFollowUpMessage?: boolean
+  /** Whether the question was explicitly skipped (not answered) */
+  isSkipped?: boolean
 }
 
 /**
@@ -45,6 +49,8 @@ export function AskUserQuestion({
   readOnly = false,
   submittedAnswers,
   introText,
+  hasFollowUpMessage = false,
+  isSkipped = false,
 }: AskUserQuestionProps) {
   // Local state for answers
   // Structure: answers[questionIndex] = { selectedOptions: [0, 2], customText: 'foo' }
@@ -153,11 +159,13 @@ export function AskUserQuestion({
 
   // Generate summary text for collapsed view
   const getAnswerSummary = useCallback(() => {
-    // No answers means questions were skipped (user sent new prompt without answering)
-    if (!effectiveAnswers) {
-      return 'Skipped'
-    }
-    if (effectiveAnswers.length === 0) {
+    // No answer data available (e.g., Zustand state lost after reload)
+    if (!effectiveAnswers || effectiveAnswers.length === 0) {
+      // Explicit skip always shows "Skipped"
+      if (isSkipped) return 'Skipped'
+      // If a follow-up user message exists, the user DID respond — show "Answered"
+      // (specific answer text is unavailable since Zustand state is ephemeral)
+      if (hasFollowUpMessage) return 'Answered'
       return 'Skipped'
     }
 
@@ -178,7 +186,7 @@ export function AskUserQuestion({
     }
 
     return summaryParts.length > 0 ? summaryParts.join(' | ') : 'Answered'
-  }, [effectiveAnswers, questions])
+  }, [effectiveAnswers, questions, isSkipped, hasFollowUpMessage])
 
   // Render collapsed summary for answered questions
   // Note: Show collapsed view when readOnly=true even if effectiveAnswers is undefined

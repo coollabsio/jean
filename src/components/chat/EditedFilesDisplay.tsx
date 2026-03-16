@@ -2,6 +2,11 @@ import { memo } from 'react'
 import type { ToolCall } from '@/types/chat'
 import { Badge } from '@/components/ui/badge'
 import { getFilename } from '@/lib/path-utils'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 
 /** Type guard to check if a tool call is Edit */
 function isEditTool(
@@ -47,15 +52,18 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
         {uniqueFilePaths.length === 1 ? '' : 's'}:
       </span>
       {uniqueFilePaths.map(filePath => (
-        <Badge
-          key={filePath}
-          variant="outline"
-          className="cursor-pointer"
-          onClick={() => onFileClick(filePath)}
-          title={filePath}
-        >
-          {getFilename(filePath)}
-        </Badge>
+        <Tooltip key={filePath}>
+          <TooltipTrigger asChild>
+            <Badge
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => onFileClick(filePath)}
+            >
+              {getFilename(filePath)}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>{filePath}</TooltipContent>
+        </Tooltip>
       ))}
     </div>
   )

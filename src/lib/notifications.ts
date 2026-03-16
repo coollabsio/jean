@@ -2,7 +2,7 @@
  * Simple notification system supporting both in-app toasts and native system notifications
  */
 
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from './logger'
 

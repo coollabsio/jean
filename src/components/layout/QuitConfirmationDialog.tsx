@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { isNativeApp } from '@/lib/environment'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,12 +29,17 @@ export function QuitConfirmationDialog() {
 
     window.addEventListener('quit-confirmation-requested', handleQuitRequest)
     return () => {
-      window.removeEventListener('quit-confirmation-requested', handleQuitRequest)
+      window.removeEventListener(
+        'quit-confirmation-requested',
+        handleQuitRequest
+      )
     }
   }, [])
 
   const handleQuit = async () => {
+    if (!isNativeApp()) return
     try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
       await getCurrentWindow().destroy()
     } catch (error) {
       logger.error('Failed to destroy window', { error })
@@ -53,7 +58,9 @@ export function QuitConfirmationDialog() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={handleQuit}>Quit Anyway</AlertDialogAction>
+          <AlertDialogAction onClick={handleQuit}>
+            Quit Anyway
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

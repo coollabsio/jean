@@ -153,11 +153,11 @@ Err("File not found".to_string())
 
 ```bash
 # Check for vulnerabilities
-npm audit
+bunx npm-audit  # bun doesn't have built-in audit, use npm-audit package
 cargo audit
 
 # Fix automatically where possible
-npm audit fix
+bunx npm-audit fix
 ```
 
 ### Dependency Management

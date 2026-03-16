@@ -1,7 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
+import type { LabelData } from '@/types/chat'
+import { isSessionStateHydrating } from '@/lib/session-state-hydration'
+import { isBackendPersisting } from '@/lib/backend-persist-guard'
 
 /**
  * Saves reviewing/waiting state immediately when it changes.
@@ -9,62 +12,113 @@ import { logger } from '@/lib/logger'
  * Fixes the issue where debounced saves don't complete before app close.
  */
 export function useImmediateSessionStateSave() {
-  // Track previous values to detect changes
+  // PERFORMANCE: Track previous references (not spreads) to short-circuit early.
+  // Zustand creates new object references on mutation, so referential equality
+  // tells us if the specific record changed — no need to iterate entries.
   const prevReviewingRef = useRef<Record<string, boolean>>({})
   const prevWaitingRef = useRef<Record<string, boolean>>({})
+  const prevLabelsRef = useRef<Record<string, LabelData>>({})
 
   useEffect(() => {
-    // Initialize with current state
     const initialState = useChatStore.getState()
-    prevReviewingRef.current = { ...initialState.reviewingSessions }
-    prevWaitingRef.current = { ...initialState.waitingForInputSessionIds }
+    prevReviewingRef.current = initialState.reviewingSessions
+    prevWaitingRef.current = initialState.waitingForInputSessionIds
+    prevLabelsRef.current = initialState.sessionLabels
 
     const unsubscribe = useChatStore.subscribe(state => {
+      if (isSessionStateHydrating()) {
+        prevReviewingRef.current = state.reviewingSessions
+        prevWaitingRef.current = state.waitingForInputSessionIds
+        prevLabelsRef.current = state.sessionLabels
+        return
+      }
+
       const {
         reviewingSessions,
         waitingForInputSessionIds,
+        sessionLabels,
         sessionWorktreeMap,
         worktreePaths,
       } = state
 
-      // Check for reviewing changes
-      for (const [sessionId, isReviewing] of Object.entries(reviewingSessions)) {
-        if (prevReviewingRef.current[sessionId] !== isReviewing) {
-          saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-            isReviewing,
-          })
+      // Short-circuit: skip all iteration if no relevant record changed
+      const reviewingChanged = reviewingSessions !== prevReviewingRef.current
+      const waitingChanged =
+        waitingForInputSessionIds !== prevWaitingRef.current
+      const labelsChanged = sessionLabels !== prevLabelsRef.current
+
+      if (!reviewingChanged && !waitingChanged && !labelsChanged) return
+
+      if (reviewingChanged) {
+        for (const [sessionId, isReviewing] of Object.entries(
+          reviewingSessions
+        )) {
+          if (prevReviewingRef.current[sessionId] !== isReviewing) {
+            // Skip if backend is persisting completion state for this session
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                isReviewing,
+              })
+            }
+          }
         }
-      }
-      // Check for removed entries (session marked as not reviewing)
-      for (const sessionId of Object.keys(prevReviewingRef.current)) {
-        if (!(sessionId in reviewingSessions)) {
-          saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-            isReviewing: false,
-          })
+        for (const sessionId of Object.keys(prevReviewingRef.current)) {
+          if (!(sessionId in reviewingSessions)) {
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                isReviewing: false,
+              })
+            }
+          }
         }
+        prevReviewingRef.current = reviewingSessions
       }
 
-      // Check for waiting changes
-      for (const [sessionId, isWaiting] of Object.entries(
-        waitingForInputSessionIds
-      )) {
-        if (prevWaitingRef.current[sessionId] !== isWaiting) {
-          saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-            waitingForInput: isWaiting,
-          })
+      if (waitingChanged) {
+        for (const [sessionId, isWaiting] of Object.entries(
+          waitingForInputSessionIds
+        )) {
+          if (prevWaitingRef.current[sessionId] !== isWaiting) {
+            // Skip if backend is persisting completion state for this session
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                waitingForInput: isWaiting,
+              })
+            }
+          }
         }
-      }
-      // Check for removed entries (session no longer waiting)
-      for (const sessionId of Object.keys(prevWaitingRef.current)) {
-        if (!(sessionId in waitingForInputSessionIds)) {
-          saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-            waitingForInput: false,
-          })
+        for (const sessionId of Object.keys(prevWaitingRef.current)) {
+          if (!(sessionId in waitingForInputSessionIds)) {
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                waitingForInput: false,
+              })
+            }
+          }
         }
+        prevWaitingRef.current = waitingForInputSessionIds
       }
 
-      prevReviewingRef.current = { ...reviewingSessions }
-      prevWaitingRef.current = { ...waitingForInputSessionIds }
+      if (labelsChanged) {
+        for (const [sessionId, label] of Object.entries(sessionLabels)) {
+          if (
+            JSON.stringify(prevLabelsRef.current[sessionId]) !==
+            JSON.stringify(label)
+          ) {
+            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+              label,
+            })
+          }
+        }
+        for (const sessionId of Object.keys(prevLabelsRef.current)) {
+          if (!(sessionId in sessionLabels)) {
+            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+              label: null,
+            })
+          }
+        }
+        prevLabelsRef.current = sessionLabels
+      }
     })
 
     return unsubscribe
@@ -75,7 +129,11 @@ async function saveSessionStatus(
   sessionId: string,
   sessionWorktreeMap: Record<string, string>,
   worktreePaths: Record<string, string>,
-  updates: { isReviewing?: boolean; waitingForInput?: boolean }
+  updates: {
+    isReviewing?: boolean
+    waitingForInput?: boolean
+    label?: LabelData | null
+  }
 ) {
   const worktreeId = sessionWorktreeMap[sessionId]
   const worktreePath = worktreeId ? worktreePaths[worktreeId] : null
@@ -88,14 +146,19 @@ async function saveSessionStatus(
   }
 
   try {
+    // Send explicit null to remove, or the label object to set
+    // Use undefined for label when we want to set/clear to avoid Tauri treating null as missing
+    const labelValue = updates.label ?? undefined
+    const clearLabel = 'label' in updates && updates.label === null
     await invoke('update_session_state', {
       worktreeId,
       worktreePath,
       sessionId,
       isReviewing: updates.isReviewing,
       waitingForInput: updates.waitingForInput,
+      label: labelValue,
+      clearLabel,
     })
-    logger.debug('Saved session status immediately', { sessionId, ...updates })
   } catch (error) {
     logger.error('Failed to save session status', { sessionId, error })
   }

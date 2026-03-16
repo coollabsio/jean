@@ -19,7 +19,7 @@ First, generate a keypair for signing updates:
 
 ```bash
 # Install Tauri CLI if not already installed
-npm install -g @tauri-apps/cli@next
+bun add -g @tauri-apps/cli@next
 
 # Generate keypair
 tauri signer generate -w ~/.tauri/myapp.key
@@ -72,12 +72,12 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
 1. **Prepare release:**
 
    ```bash
-   npm run release:prepare v1.0.0
+   bun run release:prepare v1.0.0
    ```
 
 2. **Script will:**
    - Check git status is clean
-   - Run all quality checks (`npm run check:all`)
+   - Run all quality checks (`bun run check:all`)
    - Update versions in `package.json`, `Cargo.toml`, `tauri.conf.json`
    - Ask if you want to commit and push automatically
 
@@ -100,7 +100,7 @@ If you prefer more control:
 #    - src-tauri/tauri.conf.json
 
 # 2. Run checks
-npm run check:all
+bun run check:all
 
 # 3. Commit and tag
 git add .
@@ -198,7 +198,7 @@ Each release creates:
 **Build fails:**
 
 - Verify GitHub secrets are set correctly
-- Ensure all tests pass locally: `npm run check:all`
+- Ensure all tests pass locally: `bun run check:all`
 
 **Auto-updater issues:**
 

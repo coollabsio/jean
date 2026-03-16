@@ -1,16 +1,36 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useChatStore } from '@/store/chat-store'
+
+export interface WorkflowRunDetail {
+  workflowName: string
+  runUrl: string
+  runId: string
+  branch: string
+  displayTitle: string
+  projectPath: string | null
+}
 
 interface MagicCommandHandlers {
   handleSaveContext: () => void
   handleLoadContext: () => void
   handleCommit: () => void
   handleCommitAndPush: () => void
+  handlePull: () => void
+  handlePush: () => void
   handleOpenPr: () => void
   handleReview: () => void
   handleMerge: () => void
   handleResolveConflicts: () => void
-  handleInvestigate: () => void
-  handleCheckoutPR: () => void
+  handleInvestigateWorkflowRun: (detail: WorkflowRunDetail) => void
+  handleInvestigate: (type: 'issue' | 'pr') => void
+  handleReviewComments: (prompt: string) => void
+}
+
+interface UseMagicCommandsOptions extends MagicCommandHandlers {
+  /** Whether this ChatWindow is rendered in modal mode */
+  isModal?: boolean
+  /** Whether the session chat modal is currently open */
+  sessionModalOpen?: boolean
 }
 
 /**
@@ -18,31 +38,42 @@ interface MagicCommandHandlers {
  *
  * PERFORMANCE: Uses refs to keep event listener stable across handler changes.
  * The event listener is set up once and uses refs to access current handler versions.
+ *
+ * DEDUPLICATION: When a session modal is open, the main ChatWindow skips listener registration.
+ * The modal ChatWindow (inside SessionChatModal) will handle events instead.
  */
 export function useMagicCommands({
   handleSaveContext,
   handleLoadContext,
   handleCommit,
   handleCommitAndPush,
+  handlePull,
+  handlePush,
   handleOpenPr,
   handleReview,
   handleMerge,
   handleResolveConflicts,
+  handleInvestigateWorkflowRun,
   handleInvestigate,
-  handleCheckoutPR,
-}: MagicCommandHandlers): void {
+  handleReviewComments,
+  isModal = false,
+  sessionModalOpen = false,
+}: UseMagicCommandsOptions): void {
   // Store handlers in ref so event listener always has access to current versions
   const handlersRef = useRef<MagicCommandHandlers>({
     handleSaveContext,
     handleLoadContext,
     handleCommit,
     handleCommitAndPush,
+    handlePull,
+    handlePush,
     handleOpenPr,
     handleReview,
     handleMerge,
     handleResolveConflicts,
+    handleInvestigateWorkflowRun,
     handleInvestigate,
-    handleCheckoutPR,
+    handleReviewComments,
   })
 
   // Update refs in useLayoutEffect to avoid linter warning about ref updates during render
@@ -53,18 +84,31 @@ export function useMagicCommands({
       handleLoadContext,
       handleCommit,
       handleCommitAndPush,
+      handlePull,
+      handlePush,
       handleOpenPr,
       handleReview,
       handleMerge,
       handleResolveConflicts,
+      handleInvestigateWorkflowRun,
       handleInvestigate,
-      handleCheckoutPR,
+      handleReviewComments,
     }
   })
 
   useEffect(() => {
-    const handleMagicCommand = (e: CustomEvent<{ command: string }>) => {
-      const { command } = e.detail
+    // If a session modal is open, don't register listener here — the modal
+    // ChatWindow will handle events instead.
+    if (!isModal && sessionModalOpen) {
+      return
+    }
+
+    const handleMagicCommand = (
+      e: CustomEvent<
+        { command: string; sessionId?: string } & Partial<WorkflowRunDetail>
+      >
+    ) => {
+      const { command, ...rest } = e.detail
       const handlers = handlersRef.current
       switch (command) {
         case 'save-context':
@@ -79,6 +123,12 @@ export function useMagicCommands({
         case 'commit-and-push':
           handlers.handleCommitAndPush()
           break
+        case 'pull':
+          handlers.handlePull()
+          break
+        case 'push':
+          handlers.handlePush()
+          break
         case 'open-pr':
           handlers.handleOpenPr()
           break
@@ -92,10 +142,15 @@ export function useMagicCommands({
           handlers.handleResolveConflicts()
           break
         case 'investigate':
-          handlers.handleInvestigate()
+          handlers.handleInvestigate(
+            (rest as { type: 'issue' | 'pr' }).type ?? 'issue'
+          )
           break
-        case 'checkout-pr':
-          handlers.handleCheckoutPR()
+        case 'investigate-workflow-run':
+          handlers.handleInvestigateWorkflowRun(rest as WorkflowRunDetail)
+          break
+        case 'review-comments':
+          handlers.handleReviewComments((rest as { prompt: string }).prompt)
           break
       }
     }
@@ -109,5 +164,29 @@ export function useMagicCommands({
         'magic-command',
         handleMagicCommand as EventListener
       )
-  }, []) // Empty deps - stable listener using refs
+  }, [isModal, sessionModalOpen]) // Re-register when modal state changes
+
+  // Consume pending magic command set by MagicModal or ReviewCommentsDialog.
+  // Any mounted ChatWindow can consume it (cleared immediately to prevent double-processing).
+  const pendingMagicCommand = useChatStore(state => state.pendingMagicCommand)
+  useEffect(() => {
+    if (!pendingMagicCommand) return
+
+    useChatStore.getState().setPendingMagicCommand(null)
+
+    const handlers = handlersRef.current
+    switch (pendingMagicCommand.command) {
+      case 'merge':
+        handlers.handleMerge()
+        break
+      case 'resolve-conflicts':
+        handlers.handleResolveConflicts()
+        break
+      case 'review-comments':
+        if (pendingMagicCommand.prompt) {
+          handlers.handleReviewComments(pendingMagicCommand.prompt)
+        }
+        break
+    }
+  }, [pendingMagicCommand, isModal])
 }

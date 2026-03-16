@@ -15,6 +15,26 @@ export default defineConfig(async () => ({
   },
   build: {
     chunkSizeWarningLimit: 600, // Prevent warnings for template's bundled components
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+
+          if (id.includes('@xterm')) return 'terminal'
+          if (
+            id.includes('react-markdown') ||
+            id.includes('rehype-raw') ||
+            id.includes('remark-gfm') ||
+            id.includes('remend')
+          ) {
+            return 'markdown'
+          }
+          if (id.includes('@tauri-apps')) return 'tauri'
+
+          return undefined
+        },
+      },
+    },
   },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

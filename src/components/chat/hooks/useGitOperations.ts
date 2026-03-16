@@ -1,17 +1,27 @@
 import { useCallback, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { invoke } from '@/lib/transport'
+import { openExternal } from '@/lib/platform'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { generateId } from '@/lib/uuid'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
+import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys } from '@/services/chat'
 import { saveWorktreePr, projectsQueryKeys } from '@/services/projects'
-import { triggerImmediateGitPoll } from '@/services/git-status'
+import {
+  gitPush,
+  triggerImmediateGitPoll,
+  triggerImmediateRemotePoll,
+  performGitPull,
+} from '@/services/git-status'
+import { prStatusQueryKeys } from '@/services/pr-status'
+import type { PrStatusEvent } from '@/types/pr-status'
 import { isBaseSession } from '@/types/projects'
 import type {
   CreatePrResponse,
   CreateCommitResponse,
+  DetectPrResponse,
   ReviewResponse,
   MergeWorktreeResponse,
   MergeConflictsResponse,
@@ -20,10 +30,15 @@ import type {
   Project,
 } from '@/types/projects'
 import type { Session } from '@/types/chat'
-import { DEFAULT_RESOLVE_CONFLICTS_PROMPT, type AppPreferences } from '@/types/preferences'
+import {
+  DEFAULT_RESOLVE_CONFLICTS_PROMPT,
+  resolveMagicPromptProvider,
+  type AppPreferences,
+} from '@/types/preferences'
 
 interface UseGitOperationsParams {
   activeWorktreeId: string | null | undefined
+  activeSessionId: string | null | undefined
   activeWorktreePath: string | null | undefined
   worktree: Worktree | null | undefined
   project: Project | null | undefined
@@ -36,11 +51,15 @@ interface UseGitOperationsReturn {
   /** Creates commit with AI-generated message (no push) */
   handleCommit: () => Promise<void>
   /** Creates commit with AI-generated message and pushes to remote */
-  handleCommitAndPush: () => Promise<void>
+  handleCommitAndPush: (remote?: string) => Promise<void>
+  /** Pulls changes from remote */
+  handlePull: (remote?: string) => Promise<void>
+  /** Pushes commits to remote */
+  handlePush: (remote?: string) => Promise<void>
   /** Creates PR with AI-generated title and description */
   handleOpenPr: () => Promise<void>
-  /** Runs AI code review */
-  handleReview: () => Promise<void>
+  /** Runs AI code review. If existingSessionId is provided, stores results on that session instead of creating a new one. */
+  handleReview: (existingSessionId?: string) => Promise<void>
   /** Validates and shows merge options dialog */
   handleMerge: () => Promise<void>
   /** Detects existing merge conflicts and opens resolution session */
@@ -63,6 +82,7 @@ interface UseGitOperationsReturn {
  */
 export function useGitOperations({
   activeWorktreeId,
+  activeSessionId,
   activeWorktreePath,
   worktree,
   project,
@@ -81,7 +101,11 @@ export function useGitOperations({
 
     const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
     setWorktreeLoading(activeWorktreeId, 'commit')
-    const toastId = toast.loading('Creating commit...')
+    const prefix =
+      project?.name && worktree?.name
+        ? `${project.name}/${worktree.name}`
+        : (worktree?.name ?? '')
+    const toastId = toast.loading(`Creating commit on ${prefix}...`)
 
     try {
       const result = await invoke<CreateCommitResponse>(
@@ -91,53 +115,199 @@ export function useGitOperations({
           customPrompt: preferences?.magic_prompts?.commit_message,
           push: false,
           model: preferences?.magic_prompt_models?.commit_message_model,
+          customProfileName: resolveMagicPromptProvider(
+            preferences?.magic_prompt_providers,
+            'commit_message_provider',
+            preferences?.default_provider
+          ),
+          reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
         }
       )
 
       // Trigger git status refresh
       triggerImmediateGitPoll()
 
-      toast.success(`Committed: ${result.message.split('\n')[0]}`, {
+      toast.success(`${prefix}: ${result.message.split('\n')[0]}`, {
         id: toastId,
       })
     } catch (error) {
-      toast.error(`Failed to commit: ${error}`, { id: toastId })
+      toast.error(`${prefix}: Failed to commit: ${error}`, { id: toastId })
     } finally {
       clearWorktreeLoading(activeWorktreeId)
     }
-  }, [activeWorktreeId, activeWorktreePath, preferences?.magic_prompts?.commit_message, preferences?.magic_prompt_models?.commit_message_model])
+  }, [
+    activeWorktreeId,
+    activeWorktreePath,
+    project?.name,
+    worktree?.name,
+    preferences?.magic_prompts?.commit_message,
+    preferences?.magic_prompt_models?.commit_message_model,
+    preferences?.magic_prompt_providers,
+    preferences?.default_provider,
+    preferences?.magic_prompt_efforts?.commit_message_effort,
+  ])
 
   // Handle Commit & Push - creates commit with AI-generated message and pushes
-  const handleCommitAndPush = useCallback(async () => {
-    if (!activeWorktreePath || !activeWorktreeId) return
+  const handleCommitAndPush = useCallback(
+    async (remote?: string) => {
+      if (!activeWorktreePath || !activeWorktreeId) return
 
-    const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
-    setWorktreeLoading(activeWorktreeId, 'commit')
-    const toastId = toast.loading('Committing and pushing...')
+      const { setWorktreeLoading, clearWorktreeLoading } =
+        useChatStore.getState()
+      setWorktreeLoading(activeWorktreeId, 'commit')
+      const prefix =
+        project?.name && worktree?.name
+          ? `${project.name}/${worktree.name}`
+          : (worktree?.name ?? '')
+      const toastId = toast.loading(`Committing and pushing on ${prefix}...`)
 
-    try {
-      const result = await invoke<CreateCommitResponse>(
-        'create_commit_with_ai',
-        {
-          worktreePath: activeWorktreePath,
-          customPrompt: preferences?.magic_prompts?.commit_message,
-          push: true,
-          model: preferences?.magic_prompt_models?.commit_message_model,
+      try {
+        const result = await invoke<CreateCommitResponse>(
+          'create_commit_with_ai',
+          {
+            worktreePath: activeWorktreePath,
+            customPrompt: preferences?.magic_prompts?.commit_message,
+            push: true,
+            remote: remote ?? null,
+            prNumber: worktree?.pr_number ?? null,
+            model: preferences?.magic_prompt_models?.commit_message_model,
+            customProfileName: resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              'commit_message_provider',
+              preferences?.default_provider
+            ),
+            reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
+          }
+        )
+
+        // Trigger git status refresh
+        triggerImmediateGitPoll()
+
+        if (result.push_permission_denied) {
+          toast.error(
+            `${prefix}: No permission to push to PR #${worktree?.pr_number}. Create a separate PR instead.`,
+            {
+              id: toastId,
+              action: {
+                label: 'Open PR',
+                onClick: () =>
+                  window.dispatchEvent(
+                    new CustomEvent('magic-command', {
+                      detail: { command: 'open-pr' },
+                    })
+                  ),
+              },
+            }
+          )
+        } else if (result.push_fell_back) {
+          toast.warning(
+            `${prefix}: Could not push to PR branch, pushed to new branch instead`,
+            { id: toastId }
+          )
+        } else if (result.commit_hash) {
+          toast.success(
+            `${prefix}: ${result.message.split('\n')[0]}`,
+            { id: toastId }
+          )
+        } else {
+          toast.success(`${prefix}: Pushed to remote`, { id: toastId })
         }
-      )
+      } catch (error) {
+        toast.error(`${prefix}: Failed: ${error}`, { id: toastId })
+      } finally {
+        clearWorktreeLoading(activeWorktreeId)
+      }
+    },
+    [
+      activeWorktreeId,
+      activeWorktreePath,
+      project?.name,
+      worktree?.name,
+      worktree?.pr_number,
+      preferences?.magic_prompts?.commit_message,
+      preferences?.magic_prompt_models?.commit_message_model,
+      preferences?.magic_prompt_providers,
+      preferences?.default_provider,
+      preferences?.magic_prompt_efforts?.commit_message_effort,
+    ]
+  )
 
-      // Trigger git status refresh
-      triggerImmediateGitPoll()
+  // Handle Pull - pulls changes from remote
+  const handlePull = useCallback(
+    async (remote?: string) => {
+      if (!activeWorktreePath || !activeWorktreeId) return
 
-      toast.success(`Committed and pushed: ${result.message.split('\n')[0]}`, {
-        id: toastId,
+      await performGitPull({
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        baseBranch: project?.default_branch ?? 'main',
+        branchLabel: worktree?.branch,
+        remote,
+        onMergeConflict: () => {
+          window.dispatchEvent(
+            new CustomEvent('magic-command', {
+              detail: { command: 'resolve-conflicts' },
+            })
+          )
+        },
       })
-    } catch (error) {
-      toast.error(`Failed: ${error}`, { id: toastId })
-    } finally {
-      clearWorktreeLoading(activeWorktreeId)
-    }
-  }, [activeWorktreeId, activeWorktreePath, preferences?.magic_prompts?.commit_message, preferences?.magic_prompt_models?.commit_message_model])
+    },
+    [
+      activeWorktreeId,
+      activeWorktreePath,
+      worktree?.branch,
+      project?.default_branch,
+    ]
+  )
+
+  // Handle Push - pushes commits to remote
+  const handlePush = useCallback(
+    async (remote?: string) => {
+      if (!activeWorktreePath || !activeWorktreeId) return
+
+      const { setWorktreeLoading, clearWorktreeLoading } =
+        useChatStore.getState()
+      setWorktreeLoading(activeWorktreeId, 'commit')
+      const branch = worktree?.branch ?? ''
+      const toastId = toast.loading(`Pushing ${branch}...`)
+
+      try {
+        const result = await gitPush(activeWorktreePath, worktree?.pr_number, remote)
+        triggerImmediateGitPoll()
+        if (result.permissionDenied) {
+          toast.error(
+            `No permission to push to PR #${worktree?.pr_number}. Create a separate PR instead.`,
+            {
+              id: toastId,
+              action: {
+                label: 'Open PR',
+                onClick: () =>
+                  window.dispatchEvent(
+                    new CustomEvent('magic-command', {
+                      detail: { command: 'open-pr' },
+                    })
+                  ),
+              },
+            }
+          )
+        } else if (result.fellBack) {
+          toast.warning('Could not push to PR branch, pushed to new branch instead', { id: toastId })
+        } else {
+          toast.success('Changes pushed', { id: toastId })
+        }
+      } catch (error) {
+        toast.error(`Push failed: ${error}`, { id: toastId })
+      } finally {
+        clearWorktreeLoading(activeWorktreeId)
+      }
+    },
+    [
+      activeWorktreeId,
+      activeWorktreePath,
+      worktree?.branch,
+      worktree?.pr_number,
+    ]
+  )
 
   // Handle Open PR - creates PR with AI-generated title and description in background
   const handleOpenPr = useCallback(async () => {
@@ -145,20 +315,30 @@ export function useGitOperations({
 
     const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
     setWorktreeLoading(activeWorktreeId, 'pr')
-    const toastId = toast.loading('Creating PR...')
+    const branch = worktree?.branch ?? ''
+    const toastId = toast.loading(`Creating PR for ${branch}...`)
 
     try {
       const result = await invoke<CreatePrResponse>(
         'create_pr_with_ai_content',
         {
           worktreePath: activeWorktreePath,
+          sessionId: activeSessionId,
           customPrompt: preferences?.magic_prompts?.pr_content,
           model: preferences?.magic_prompt_models?.pr_content_model,
+          customProfileName: resolveMagicPromptProvider(
+            preferences?.magic_prompt_providers,
+            'pr_content_provider',
+            preferences?.default_provider
+          ),
+          reasoningEffort: preferences?.magic_prompt_efforts?.pr_content_effort ?? null,
         }
       )
 
-      // Save PR info to worktree
-      await saveWorktreePr(activeWorktreeId, result.pr_number, result.pr_url)
+      if (!result.existing) {
+        // Save PR info to worktree (backend already saved for existing PRs)
+        await saveWorktreePr(activeWorktreeId, result.pr_number, result.pr_url)
+      }
 
       // Invalidate worktree queries to refresh PR status in toolbar
       queryClient.invalidateQueries({
@@ -168,59 +348,212 @@ export function useGitOperations({
         queryKey: [...projectsQueryKeys.all, 'worktree', activeWorktreeId],
       })
 
-      toast.success(`PR created: ${result.title}`, {
-        id: toastId,
-        action: {
-          label: 'Open',
-          onClick: () => openUrl(result.pr_url),
-        },
-      })
+      toast.success(
+        result.existing
+          ? `PR linked: ${result.title}`
+          : `PR created: ${result.title}`,
+        {
+          id: toastId,
+          action: {
+            label: 'Open',
+            onClick: () => openExternal(result.pr_url),
+          },
+        }
+      )
     } catch (error) {
       toast.error(`Failed to create PR: ${error}`, { id: toastId })
     } finally {
       clearWorktreeLoading(activeWorktreeId)
     }
-  }, [activeWorktreeId, activeWorktreePath, worktree, queryClient, preferences?.magic_prompts?.pr_content, preferences?.magic_prompt_models?.pr_content_model])
+  }, [
+    activeWorktreeId,
+    activeSessionId,
+    activeWorktreePath,
+    worktree,
+    queryClient,
+    preferences?.magic_prompts?.pr_content,
+    preferences?.magic_prompt_models?.pr_content_model,
+    preferences?.magic_prompt_providers,
+    preferences?.default_provider,
+    preferences?.magic_prompt_efforts?.pr_content_effort,
+  ])
 
   // Handle Review - runs AI code review in background
+  // If existingSessionId is provided, stores results on that session (in-place review from ChatWindow)
+  // Creates a new session and stores review results in it
   const handleReview = useCallback(async () => {
-    if (!activeWorktreeId || !activeWorktreePath) return
+      if (!activeWorktreeId || !activeWorktreePath) return
 
-    const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
-    setWorktreeLoading(activeWorktreeId, 'review')
-    const toastId = toast.loading('Running AI code review...')
-
-    try {
-      const result = await invoke<ReviewResponse>('run_review_with_ai', {
-        worktreePath: activeWorktreePath,
-        customPrompt: preferences?.magic_prompts?.code_review,
-        model: preferences?.magic_prompt_models?.code_review_model,
+      const { setWorktreeLoading, clearWorktreeLoading } =
+        useChatStore.getState()
+      setWorktreeLoading(activeWorktreeId, 'review')
+      const branch = worktree?.branch ?? ''
+      const projectName = project?.name ?? 'project'
+      const worktreeName = worktree?.name ?? branch
+      const reviewTarget = `${projectName}/${worktreeName}`
+      const reviewRunId = generateId()
+      let cancelRequested = false
+      const toastId = toast.loading(`Reviewing ${reviewTarget}...`, {
+        cancel: {
+          label: 'Cancel',
+          onClick: () => {
+            cancelRequested = true
+            toast.loading(`Cancelling review for ${reviewTarget}...`, {
+              id: toastId,
+            })
+            invoke<boolean>('cancel_review_with_ai', { reviewRunId })
+              .then(cancelled => {
+                if (cancelled) {
+                  toast.info(`Review cancelled for ${reviewTarget}`, {
+                    id: toastId,
+                  })
+                } else {
+                  toast.info(`No active review to cancel for ${reviewTarget}`, {
+                    id: toastId,
+                  })
+                }
+              })
+              .catch(error => {
+                toast.error(`Failed to cancel review: ${error}`, { id: toastId })
+              })
+          },
+        },
       })
 
-      // Store review results in Zustand (also activates review tab)
-      const { setReviewResults } = useChatStore.getState()
-      setReviewResults(activeWorktreeId, result)
+      // Fire-and-forget: detect and link PR if not already linked
+      if (!worktree?.pr_number) {
+        invoke<DetectPrResponse | null>('detect_and_link_pr', {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+        })
+          .then(result => {
+            if (result && worktree?.project_id) {
+              queryClient.invalidateQueries({
+                queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+              })
+              queryClient.invalidateQueries({
+                queryKey: [...projectsQueryKeys.all, 'worktree', activeWorktreeId],
+              })
+            }
+          })
+          .catch(() => {
+            /* noop - PR detection is best-effort */
+          })
+      }
 
-      const findingCount = result.findings.length
-      const statusEmoji =
-        result.approval_status === 'approved'
-          ? 'Approved'
-          : result.approval_status === 'changes_requested'
-            ? 'Changes requested'
-            : 'Needs discussion'
+      try {
+        const result = await invoke<ReviewResponse>('run_review_with_ai', {
+          worktreePath: activeWorktreePath,
+          customPrompt: preferences?.magic_prompts?.code_review,
+          model: preferences?.magic_prompt_models?.code_review_model,
+          customProfileName: resolveMagicPromptProvider(
+            preferences?.magic_prompt_providers,
+            'code_review_provider',
+            preferences?.default_provider
+          ),
+          reasoningEffort: preferences?.magic_prompt_efforts?.code_review_effort ?? null,
+          reviewRunId,
+        })
 
-      toast.success(
-        `Review complete: ${statusEmoji} (${findingCount} findings)`,
-        {
-          id: toastId,
+        // Always create a new session for the review
+        const newSession = await invoke<Session>('create_session', {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          name: 'Code Review',
+        })
+        const targetSessionId = newSession.id
+
+        // Store review results in Zustand (session-scoped, auto-opens sidebar)
+        const {
+          setReviewResults,
+          setActiveSession,
+          clearActiveWorktree,
+          copySessionSettings,
+          activeSessionIds,
+        } = useChatStore.getState()
+        const currentReviewSessionId = activeSessionIds[activeWorktreeId]
+        setReviewResults(targetSessionId, result)
+
+        // Inherit model/mode/thinking settings from current session
+        if (currentReviewSessionId) copySessionSettings(currentReviewSessionId, targetSessionId)
+
+        // Navigate to ProjectCanvasView and open the review session
+        setActiveSession(activeWorktreeId, targetSessionId)
+        useProjectsStore.getState().selectWorktree(activeWorktreeId)
+        clearActiveWorktree()
+        useUIStore
+          .getState()
+          .markWorktreeForAutoOpenSession(activeWorktreeId, targetSessionId)
+
+        // Persist review results to session file
+        invoke('update_session_state', {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: targetSessionId,
+          reviewResults: result,
+        }).catch(() => {
+          /* noop - best effort persist */
+        })
+
+        // Invalidate sessions query to refresh tab bar
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(activeWorktreeId),
+        })
+
+        const findingCount = result.findings.length
+        toast.success(
+          `Review done on ${projectName}/${worktreeName} (${findingCount} findings)`,
+          {
+            id: toastId,
+            action: {
+              label: 'Open',
+              onClick: () => {
+                if (!activeWorktreePath) return
+                const {
+                  setActiveSession,
+                  clearActiveWorktree,
+                } = useChatStore.getState()
+                useProjectsStore.getState().selectWorktree(activeWorktreeId)
+                clearActiveWorktree()
+                setActiveSession(activeWorktreeId, targetSessionId)
+                useUIStore
+                  .getState()
+                  .markWorktreeForAutoOpenSession(
+                    activeWorktreeId,
+                    targetSessionId
+                  )
+              },
+            },
+          }
+        )
+      } catch (error) {
+        const errorString = String(error)
+        const cancelled =
+          cancelRequested ||
+          errorString.toLowerCase().includes('cancelled') ||
+          errorString.toLowerCase().includes('canceled')
+        if (cancelled) {
+          toast.info(`Review cancelled for ${reviewTarget}`, { id: toastId })
+        } else {
+          toast.error(`Failed to review: ${error}`, { id: toastId })
         }
-      )
-    } catch (error) {
-      toast.error(`Failed to review: ${error}`, { id: toastId })
-    } finally {
-      clearWorktreeLoading(activeWorktreeId)
-    }
-  }, [activeWorktreeId, activeWorktreePath, preferences?.magic_prompts?.code_review, preferences?.magic_prompt_models?.code_review_model])
+      } finally {
+        clearWorktreeLoading(activeWorktreeId)
+      }
+    },
+    [
+      activeWorktreeId,
+      activeWorktreePath,
+      worktree,
+      project?.name,
+      queryClient,
+      preferences?.magic_prompts?.code_review,
+      preferences?.magic_prompt_models?.code_review_model,
+      preferences?.magic_prompt_providers,
+      preferences?.default_provider,
+      preferences?.magic_prompt_efforts?.code_review_effort,
+    ]
+  )
 
   // Handle Merge - validates and shows merge options dialog
   const handleMerge = useCallback(async () => {
@@ -275,15 +608,13 @@ export function useGitOperations({
         return
       }
 
-      toast.warning(
-        `Found conflicts in ${result.conflicts.length} file(s)`,
-        {
-          id: toastId,
-          description: 'Opening conflict resolution session...',
-        }
-      )
+      toast.warning(`Found conflicts in ${result.conflicts.length} file(s)`, {
+        id: toastId,
+        description: 'Opening conflict resolution session...',
+      })
 
-      const { setActiveSession, setInputDraft } = useChatStore.getState()
+      const { setActiveSession, setInputDraft, copySessionSettings, activeSessionIds } = useChatStore.getState()
+      const currentSessionId = activeSessionIds[activeWorktreeId]
 
       // Create a NEW session tab for conflict resolution
       const newSession = await invoke<Session>('create_session', {
@@ -291,6 +622,9 @@ export function useGitOperations({
         worktreePath: worktree.path,
         name: 'Resolve conflicts',
       })
+
+      // Inherit model/mode/thinking settings from current session
+      if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
 
       // Set the new session as active
       setActiveSession(activeWorktreeId, newSession.id)
@@ -301,7 +635,9 @@ export function useGitOperations({
         ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
         : ''
 
-      const resolveInstructions = preferences?.magic_prompts?.resolve_conflicts ?? DEFAULT_RESOLVE_CONFLICTS_PROMPT
+      const resolveInstructions =
+        preferences?.magic_prompts?.resolve_conflicts ??
+        DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
       const conflictPrompt = `I have merge conflicts that need to be resolved.
 
@@ -331,7 +667,9 @@ ${resolveInstructions}`
   const handleResolvePrConflicts = useCallback(async () => {
     if (!activeWorktreeId || !worktree) return
 
-    const toastId = toast.loading('Fetching base branch and checking for conflicts...')
+    const toastId = toast.loading(
+      'Fetching base branch and checking for conflicts...'
+    )
 
     try {
       const result = await invoke<MergeConflictsResponse>(
@@ -340,20 +678,32 @@ ${resolveInstructions}`
       )
 
       if (!result.has_conflicts) {
-        toast.success('No conflicts — base branch merged cleanly', { id: toastId })
+        toast.success('No conflicts — base branch merged cleanly', {
+          id: toastId,
+        })
         triggerImmediateGitPoll()
+
+        // Optimistically clear "Conflicts" button by updating cached PR status
+        const cached = queryClient.getQueryData<PrStatusEvent>(
+          prStatusQueryKeys.worktree(activeWorktreeId)
+        )
+        if (cached) {
+          queryClient.setQueryData(
+            prStatusQueryKeys.worktree(activeWorktreeId),
+            { ...cached, mergeable: 'mergeable' }
+          )
+        }
+        triggerImmediateRemotePoll()
         return
       }
 
-      toast.warning(
-        `Found conflicts in ${result.conflicts.length} file(s)`,
-        {
-          id: toastId,
-          description: 'Opening conflict resolution session...',
-        }
-      )
+      toast.warning(`Found conflicts in ${result.conflicts.length} file(s)`, {
+        id: toastId,
+        description: 'Opening conflict resolution session...',
+      })
 
-      const { setActiveSession, setInputDraft } = useChatStore.getState()
+      const { setActiveSession, setInputDraft, copySessionSettings, activeSessionIds } = useChatStore.getState()
+      const currentSessionId = activeSessionIds[activeWorktreeId]
 
       // Create a NEW session tab for conflict resolution
       const newSession = await invoke<Session>('create_session', {
@@ -361,6 +711,9 @@ ${resolveInstructions}`
         worktreePath: worktree.path,
         name: 'PR: resolve conflicts',
       })
+
+      // Inherit model/mode/thinking settings from current session
+      if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
 
       // Set the new session as active
       setActiveSession(activeWorktreeId, newSession.id)
@@ -372,7 +725,9 @@ ${resolveInstructions}`
         : ''
 
       const baseBranch = project?.default_branch || 'main'
-      const resolveInstructions = preferences?.magic_prompts?.resolve_conflicts ?? DEFAULT_RESOLVE_CONFLICTS_PROMPT
+      const resolveInstructions =
+        preferences?.magic_prompts?.resolve_conflicts ??
+        DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
       const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
@@ -408,7 +763,8 @@ ${resolveInstructions}`
       setShowMergeDialog(false)
       setPendingMergeWorktree(null)
 
-      const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
+      const { setWorktreeLoading, clearWorktreeLoading } =
+        useChatStore.getState()
       setWorktreeLoading(activeWorktreeId, 'merge')
       const toastId = toast.loading('Checking for uncommitted changes...')
       const featureBranch = worktreeData.branch
@@ -480,7 +836,8 @@ ${resolveInstructions}`
             }
           )
 
-          const { setActiveSession, setInputDraft } = useChatStore.getState()
+          const { setActiveSession, setInputDraft, copySessionSettings, activeSessionIds } = useChatStore.getState()
+          const currentSessionId = activeSessionIds[activeWorktreeId]
 
           // Create a NEW session tab on the CURRENT worktree for conflict resolution
           const newSession = await invoke<Session>('create_session', {
@@ -488,6 +845,9 @@ ${resolveInstructions}`
             worktreePath: worktreeData.path,
             name: 'Merge: resolve conflicts',
           })
+
+          // Inherit model/mode/thinking settings from current session
+          if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
 
           // Set the new session as active
           setActiveSession(activeWorktreeId, newSession.id)
@@ -501,7 +861,9 @@ ${resolveInstructions}`
           // Get base branch name from the project
           const baseBranch = project?.default_branch || 'main'
 
-          const resolveInstructions = preferences?.magic_prompts?.resolve_conflicts ?? DEFAULT_RESOLVE_CONFLICTS_PROMPT
+          const resolveInstructions =
+            preferences?.magic_prompts?.resolve_conflicts ??
+            DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
           const conflictPrompt = `I tried to merge this branch (\`${featureBranch}\`) into \`${baseBranch}\`, but there are merge conflicts.
 
@@ -534,12 +896,21 @@ ${resolveInstructions}`
         clearWorktreeLoading(activeWorktreeId)
       }
     },
-    [activeWorktreeId, pendingMergeWorktree, preferences, project, queryClient, inputRef]
+    [
+      activeWorktreeId,
+      pendingMergeWorktree,
+      preferences,
+      project,
+      queryClient,
+      inputRef,
+    ]
   )
 
   return {
     handleCommit,
     handleCommitAndPush,
+    handlePull,
+    handlePush,
     handleOpenPr,
     handleReview,
     handleMerge,

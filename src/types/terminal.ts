@@ -12,4 +12,5 @@ export interface TerminalStartedEvent {
 export interface TerminalStoppedEvent {
   terminal_id: string
   exit_code: number | null
+  signal: string | null
 }

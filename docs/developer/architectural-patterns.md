@@ -202,7 +202,7 @@ const { result } = renderHook(() => useMyHook(), {
 ### Quality Gates
 
 ```bash
-npm run check:all  # All checks must pass
+bun run check:all  # All checks must pass
 ```
 
 ### Documentation-Driven Development

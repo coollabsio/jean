@@ -8,12 +8,13 @@ Testing patterns and utilities for both Rust and TypeScript code, with comprehen
 
 ```bash
 # Run all tests and checks
-npm run check:all
+bun run check:all
 
 # Individual test commands
-npm run test        # TypeScript tests (watch mode)
-npm run test:run    # TypeScript tests (single run)
-npm run rust:test   # Rust tests
+bun run test        # TypeScript tests (watch mode)
+bun run test:run    # TypeScript tests (single run)
+bun run test:e2e    # E2E browser tests (Playwright)
+bun run rust:test   # Rust tests
 ```
 
 ### Writing a Simple Test
@@ -28,6 +29,183 @@ test('renders button with text', () => {
   expect(screen.getByRole('button', { name: 'Click me' })).toBeInTheDocument()
 })
 ```
+
+## E2E Testing
+
+### Architecture
+
+E2E tests run **Playwright against a Vite dev server** (not the native Tauri app). Since macOS WKWebView doesn't expose WebDriver, we mock the Tauri transport layer in the browser:
+
+1. Vite serves the React app on port **1421** using `e2e/vite.config.e2e.ts`
+2. Tauri plugin imports (`@tauri-apps/plugin-*`) are aliased to stubs
+3. `window.__JEAN_E2E_MOCK__` flag is set via `page.addInitScript()`
+4. `src/lib/transport.ts` detects the flag and routes `invoke()` / `listen()` to mock handlers instead of real Tauri IPC
+
+### File Structure
+
+```
+e2e/
+├── fixtures/
+│   ├── tauri-mock.ts        # Playwright fixtures: mockPage, emitEvent, responseOverrides
+│   ├── invoke-handlers.ts   # Static command→response map (all Tauri commands)
+│   └── mock-data.ts         # Mock preferences, worktrees, projects, models
+├── tests/
+│   ├── app-loads.spec.ts
+│   ├── chat-messaging.spec.ts
+│   ├── keyboard-shortcuts.spec.ts
+│   ├── model-selection.spec.ts
+│   ├── navigation.spec.ts
+│   ├── preferences.spec.ts
+│   ├── session-management.spec.ts
+│   └── theme-switching.spec.ts
+├── playwright.config.ts
+└── vite.config.e2e.ts
+```
+
+### Running Tests
+
+```bash
+bun run test:e2e              # Run all E2E tests
+bun run test:e2e -- --ui      # Open Playwright UI mode
+bun run test:e2e -- tests/chat-messaging.spec.ts  # Run specific file
+```
+
+The dev server starts automatically on port 1421. If you already have it running (`bun run dev:e2e`), Playwright reuses it (`reuseExistingServer: true` when not in CI).
+
+### Writing a New Test
+
+```typescript
+// e2e/tests/my-feature.spec.ts
+import { test, activateWorktree } from '../fixtures/tauri-mock'
+import { expect } from '@playwright/test'
+
+test.describe('My Feature', () => {
+  test('does something', async ({ mockPage }) => {
+    // mockPage is a regular Playwright Page with mocks pre-injected
+    await activateWorktree(mockPage, 'My Worktree')
+
+    // Interact with the app
+    await mockPage.getByRole('button', { name: 'Click me' }).click()
+    await expect(mockPage.getByText('Result')).toBeVisible()
+  })
+})
+```
+
+### Mock Transport System
+
+#### Static Handlers (`invoke-handlers.ts`)
+
+Every Tauri command needs an entry here, even if the response is `null`. This is the default response map:
+
+```typescript
+// e2e/fixtures/invoke-handlers.ts
+export const invokeHandlers: Record<string, unknown> = {
+  load_preferences: null, // Overridden by mock-data.ts
+  get_worktrees: [], // Overridden by mock-data.ts
+  get_sessions: { sessions: [], active_session_id: null },
+  rename_session: null,
+  send_chat_message: null,
+  // ... all other commands
+}
+```
+
+When adding a new Tauri command to the app, add its default response here or tests will fail with an unhandled invoke error.
+
+#### Dynamic Handlers (`tauri-mock.ts`)
+
+Some commands need stateful behavior (e.g., creating sessions updates the session list). These are defined as dynamic handlers inside `tauri-mock.ts`'s `addInitScript`:
+
+```typescript
+// Inside addInitScript — runs in browser context
+if (cmd === 'create_session') {
+  const newSession = { id: `session-${Date.now()}`, name: 'New Session', ... }
+  store.sessions.push(newSession)
+  store.active_session_id = newSession.id
+  return newSession
+}
+```
+
+Current dynamic handlers: `get_sessions`, `create_session`, `rename_session`, `set_active_session`, `set_session_model`, `get_session`, `send_chat_message`.
+
+#### Override Precedence
+
+`responseOverrides` (per-test) > dynamic handlers > static handlers:
+
+```typescript
+test('with custom sessions', async ({ mockPage }) => {
+  // This test's responseOverrides will be merged in the fixture
+})
+
+// Use the responseOverrides fixture to override specific commands:
+test.use({
+  responseOverrides: {
+    get_sessions: { sessions: [customSession], active_session_id: 'custom-id' },
+  },
+})
+```
+
+### Event Simulation
+
+Tauri events (like chat streaming) are simulated via the `emitEvent` fixture:
+
+```typescript
+test('streaming response', async ({ mockPage, emitEvent }) => {
+  const sessionId = 'session-1'
+
+  // Simulate chat streaming lifecycle
+  await emitEvent('chat:sending', {
+    session_id: sessionId,
+    worktree_id: 'wt-1',
+  })
+  await emitEvent('chat:chunk', { session_id: sessionId, content: 'Hello ' })
+  await emitEvent('chat:chunk', { session_id: sessionId, content: 'world!' })
+
+  // Check streaming content BEFORE chat:done (content is in Zustand streaming state)
+  await expect(mockPage.getByText('Hello world!')).toBeVisible()
+
+  await emitEvent('chat:done', { session_id: sessionId, worktree_id: 'wt-1' })
+})
+```
+
+**Important**: Verify streaming content _before_ `chat:done`. After `chat:done`, TanStack Query refetches `get_session` which may return empty messages (unless the dynamic handler has the messages stored).
+
+### Common Patterns
+
+#### Activating a Worktree
+
+Most tests need an active worktree before interacting with sessions/chat:
+
+```typescript
+import { activateWorktree } from '../fixtures/tauri-mock'
+
+await activateWorktree(mockPage, 'My Worktree')
+// Now the chat view is visible with session tabs, toolbar, textarea
+```
+
+#### Shadcn Select/Combobox Selectors
+
+Shadcn `<Select>` renders as `button[role="combobox"]`. Find by current value text:
+
+```typescript
+// Find the theme selector showing "System"
+const themeSelect = mockPage.locator('button[role="combobox"]', {
+  hasText: 'System',
+})
+await themeSelect.click()
+await mockPage.getByRole('option', { name: 'Dark' }).click()
+```
+
+#### Force-clicking DnD Sortable Elements
+
+Session tabs use DnD sortable which intercepts pointer events. Use `force: true`:
+
+```typescript
+await input.click({ force: true })
+await mockPage.keyboard.type('New Name')
+await mockPage.keyboard.press('Enter')
+```
+
+### Key Mock Data Settings
 
 ## TypeScript Testing
 
@@ -297,7 +475,7 @@ fn is_valid_filename(filename: &str) -> bool {
     "rust:clippy": "cd src-tauri && cargo clippy -- -D warnings",
     "rust:test": "cd src-tauri && cargo test",
     "test:run": "vitest run",
-    "check:all": "npm run typecheck && npm run lint && npm run format:check && npm run test:run && npm run rust:fmt:check && npm run rust:clippy && npm run rust:test"
+    "check:all": "bun run typecheck && bun run lint && bun run format:check && bun run test:run && bun run rust:fmt:check && bun run rust:clippy && bun run rust:test"
   }
 }
 ```
@@ -321,8 +499,8 @@ jobs:
         with:
           toolchain: stable
 
-      - run: npm ci
-      - run: npm run check:all
+      - run: bun install --frozen-lockfile
+      - run: bun run check:all
 ```
 
 ## Test Organization

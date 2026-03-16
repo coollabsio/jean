@@ -6,7 +6,3 @@ export {
   default as MainWindowContentDefault,
 } from './MainWindowContent'
 export { MainWindow, default as MainWindowDefault } from './MainWindow'
-export {
-  MacOSWindowControls,
-  default as MacOSWindowControlsDefault,
-} from '../titlebar/MacOSWindowControls'

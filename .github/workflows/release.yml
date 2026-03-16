@@ -1,8 +1,8 @@
 name: 'Release Jean'
 
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -25,7 +25,9 @@ jobs:
           - platform: 'macos-latest'
             args: '--target universal-apple-darwin --bundles app,dmg'
           - platform: 'ubuntu-22.04'
-            args: '--bundles deb,appimage,rpm'
+            args: '--bundles deb,rpm'
+          - platform: 'ubuntu-22.04-arm'
+            args: '--bundles deb,rpm'
           - platform: 'windows-latest'
             args: '--bundles msi,nsis'
 
@@ -33,17 +35,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Patch version from release tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.version }}"
+          VERSION="${TAG#v}"
+          echo "Patching version to $VERSION"
+          node -e "const p=require('./package.json'); p.version='$VERSION'; require('fs').writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
+          node -e "const c=require('./src-tauri/tauri.conf.json'); c.version='$VERSION'; require('fs').writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(c,null,2)+'\n')"
+          sed -i.bak "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
+
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 'lts/*'
-          cache: 'npm'
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -58,7 +67,7 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
@@ -73,22 +82,68 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tauriScript: npm run tauri
-          tagName: ${{ github.ref_name || inputs.version }}
-          releaseName: 'Jean ${{ github.ref_name || inputs.version }}'
-          releaseBody: |
-            ## Jean ${{ github.ref_name || inputs.version }}
-
-            ### Installation
-            - **macOS**: Download `.dmg` (universal binary for Intel + Apple Silicon)
-            - **Windows**: Download `.msi` or `.exe` installer
-            - **Linux**: Download `.deb` (Debian/Ubuntu), `.rpm` (Fedora), or `.AppImage` (universal)
-
-            ### Auto-Updates
-            Existing users will receive automatic update notifications.
-
-            **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ github.ref_name || inputs.version }}
-          releaseDraft: true
-          prerelease: false
+          tauriScript: bun run tauri
+          tagName: ${{ github.event.release.tag_name || inputs.version }}
+          releaseId: ${{ github.event.release.id }}
           includeUpdaterJson: true
           args: ${{ matrix.args }} -vv
+
+      # Build AppImage separately with the custom AppRun script that fixes
+      # WebKitGTK/GLib compatibility on Ubuntu 24.04+ and rolling-release distros.
+      # The Tauri action builds deb/rpm above; this step handles AppImage with
+      # the LD_LIBRARY_PATH fix that prevents white screen crashes.
+      # See: https://github.com/coollabsio/jean/issues/54
+      - name: Build AppImage with WebKitGTK fix
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: bash scripts/build-appimage.sh
+
+      - name: Upload AppImage to release
+        if: startsWith(matrix.platform, 'ubuntu')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.version }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          # Find the AppImage regardless of arch suffix (amd64 or aarch64)
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "Jean_${VERSION}_*.AppImage" -print -quit 2>/dev/null)
+          if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then
+            gh release upload "$RELEASE_TAG" "$APPIMAGE" --clobber
+          fi
+
+  update-homebrew-tap:
+    name: Update Homebrew Tap
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+      - name: Extract version
+        id: version
+        run: echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+
+      - name: Wait for DMG availability
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${TAG#v}"
+          DMG_URL="https://github.com/coollabsio/jean/releases/download/$TAG/Jean_${VERSION}_universal.dmg"
+
+          echo "Waiting for DMG at: $DMG_URL"
+          for i in $(seq 1 30); do
+            if curl --output /dev/null --silent --head --fail "$DMG_URL"; then
+              echo "DMG is available"
+              exit 0
+            fi
+            echo "Attempt $i/30: waiting 10s..."
+            sleep 10
+          done
+
+          echo "Error: DMG not available after 5 minutes"
+          exit 1
+
+      - name: Trigger Homebrew tap update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          gh workflow run update-cask.yml \
+            --repo coollabsio/homebrew-jean \
+            --field version='${{ steps.version.outputs.tag }}'

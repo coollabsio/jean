@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
-import type { SaveImageResponse } from '@/types/chat'
+import type { SaveImageResponse, SaveTextResponse } from '@/types/chat'
 import { MAX_IMAGE_SIZE } from '../image-constants'
+import { isNativeApp } from '@/lib/environment'
 
 /** Allowed file extensions for dropped images */
 const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp']
+
+/** Extensions handled as text files (vector formats) */
+const TEXT_IMAGE_EXTENSIONS = ['svg']
 
 interface UseDragAndDropImagesOptions {
   /** Whether drag-and-drop is disabled */
@@ -32,63 +35,119 @@ export function useDragAndDropImages(
   const [isDragging, setIsDragging] = useState(false)
 
   useEffect(() => {
-    if (options?.disabled) return
+    if (options?.disabled || !isNativeApp()) return
 
-    const window = getCurrentWindow()
+    let cancelled = false
+    let unlisten: (() => void) | null = null
 
-    const unlistenPromise = window.onDragDropEvent(event => {
-      if (event.payload.type === 'enter') {
-        // Files entered the window
-        setIsDragging(true)
-      } else if (event.payload.type === 'over') {
-        // Files are hovering - keep drag state active
-        // Note: 'over' event only has position, not paths
-      } else if (event.payload.type === 'drop') {
-        // Files dropped
-        setIsDragging(false)
+    const setup = async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      const appWindow = getCurrentWindow()
 
-        if (!sessionId) {
-          toast.error('No active session')
-          return
+      const unlistenFn = await appWindow.onDragDropEvent(event => {
+        if (event.payload.type === 'enter') {
+          // Files entered the window
+          setIsDragging(true)
+        } else if (event.payload.type === 'over') {
+          // Files are hovering - keep drag state active
+          // Note: 'over' event only has position, not paths
+        } else if (event.payload.type === 'drop') {
+          // Files dropped
+          setIsDragging(false)
+
+          if (!sessionId) {
+            toast.error('No active session')
+            return
+          }
+
+          const paths = event.payload.paths
+          const imagePaths: string[] = []
+          const svgPaths: string[] = []
+          for (const path of paths) {
+            const ext = path.split('.').pop()?.toLowerCase() ?? ''
+            if (ALLOWED_EXTENSIONS.includes(ext)) imagePaths.push(path)
+            else if (TEXT_IMAGE_EXTENSIONS.includes(ext)) svgPaths.push(path)
+          }
+
+          if (imagePaths.length === 0 && svgPaths.length === 0) {
+            toast.error('No image detected', {
+              description:
+                'Only PNG, JPEG, GIF, WebP, SVG files are accepted',
+            })
+            return
+          }
+
+          // Process raster images
+          for (const sourcePath of imagePaths) {
+            processDroppedImage(sourcePath, sessionId)
+          }
+
+          // Process SVGs as text files
+          for (const sourcePath of svgPaths) {
+            processDroppedSvg(sourcePath, sessionId)
+          }
+
+          // Notify if some files were skipped
+          const skippedCount =
+            paths.length - imagePaths.length - svgPaths.length
+          if (skippedCount > 0) {
+            toast.warning(`${skippedCount} file(s) skipped`, {
+              description: 'Only images are accepted',
+            })
+          }
+        } else if (event.payload.type === 'leave') {
+          // Files left the window
+          setIsDragging(false)
         }
+      })
 
-        const paths = event.payload.paths
-        const imagePaths = paths.filter(path => {
-          const ext = path.split('.').pop()?.toLowerCase() ?? ''
-          return ALLOWED_EXTENSIONS.includes(ext)
-        })
-
-        if (imagePaths.length === 0) {
-          toast.error('No image detected', {
-            description: 'Only PNG, JPEG, GIF, WebP files are accepted',
-          })
-          return
-        }
-
-        // Process each image
-        for (const sourcePath of imagePaths) {
-          processDroppedImage(sourcePath, sessionId)
-        }
-
-        // Notify if some files were skipped
-        const skippedCount = paths.length - imagePaths.length
-        if (skippedCount > 0) {
-          toast.warning(`${skippedCount} file(s) skipped`, {
-            description: 'Only images are accepted',
-          })
-        }
-      } else if (event.payload.type === 'leave') {
-        // Files left the window
-        setIsDragging(false)
+      if (!cancelled) {
+        unlisten = unlistenFn
+      } else {
+        unlistenFn()
       }
-    })
+    }
+
+    setup()
 
     return () => {
-      unlistenPromise.then(unlisten => unlisten())
+      cancelled = true
+      unlisten?.()
     }
   }, [sessionId, options?.disabled])
 
   return { isDragging }
+}
+
+/**
+ * Process a dropped SVG file by reading its text content and saving as a text file.
+ */
+async function processDroppedSvg(
+  sourcePath: string,
+  sessionId: string
+): Promise<void> {
+  try {
+    const { readTextFile } = await import('@tauri-apps/plugin-fs')
+    const svgText = await readTextFile(sourcePath)
+
+    const result = await invoke<SaveTextResponse>('save_pasted_text', {
+      content: svgText,
+    })
+
+    const { addPendingTextFile } = useChatStore.getState()
+    addPendingTextFile(sessionId, {
+      id: result.id,
+      path: result.path,
+      filename: sourcePath.split('/').pop() ?? result.filename,
+      size: result.size,
+      content: svgText,
+    })
+  } catch (error) {
+    console.error('Failed to save dropped SVG:', error)
+    toast.error('Failed to save SVG', {
+      description: String(error),
+    })
+  }
 }
 
 /**
@@ -98,19 +157,31 @@ async function processDroppedImage(
   sourcePath: string,
   sessionId: string
 ): Promise<void> {
+  // Add loading placeholder immediately
+  const placeholderId = `loading-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const { addPendingImage, updatePendingImage, removePendingImage } =
+    useChatStore.getState()
+  addPendingImage(sessionId, {
+    id: placeholderId,
+    path: '',
+    filename: 'Processing...',
+    loading: true,
+  })
+
   try {
     const result = await invoke<SaveImageResponse>('save_dropped_image', {
       sourcePath,
     })
 
-    const { addPendingImage } = useChatStore.getState()
-    addPendingImage(sessionId, {
+    updatePendingImage(sessionId, placeholderId, {
       id: result.id,
       path: result.path,
       filename: result.filename,
+      loading: false,
     })
   } catch (error) {
     console.error('Failed to save dropped image:', error)
+    removePendingImage(sessionId, placeholderId)
 
     // Parse error message for user-friendly display
     const errorStr = String(error)

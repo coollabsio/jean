@@ -70,9 +70,11 @@ export function TerminalPanel({ isCollapsed, onExpand }: TerminalPanelProps) {
   }, [terminals, activeWorktreeId])
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full overflow-hidden">
       {worktreeIdsToRender.map(worktreeId => {
-        const path = worktreePaths[worktreeId] ?? (worktreeId === activeWorktreeId ? activeWorktreePath : undefined)
+        const path =
+          worktreePaths[worktreeId] ??
+          (worktreeId === activeWorktreeId ? activeWorktreePath : undefined)
         if (!path) return null
 
         return (

@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { FileIcon } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { FileIcon, FolderIcon } from 'lucide-react'
 import {
   Command,
   CommandEmpty,
@@ -8,10 +16,12 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
-import { useWorktreeFiles } from '@/services/files'
+import { useWorktreeFiles, fileQueryKeys } from '@/services/files'
 import type { WorktreeFile, PendingFile } from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { generateId } from '@/lib/uuid'
 import { getExtensionColor } from '@/lib/file-colors'
+import { fuzzySearchFiles } from '@/lib/fuzzy-search'
 
 export interface FileMentionPopoverHandle {
   moveUp: () => void
@@ -32,8 +42,8 @@ interface FileMentionPopoverProps {
   searchQuery: string
   /** Position for the anchor (relative to textarea container) */
   anchorPosition: { top: number; left: number } | null
-  /** Reference to the container for positioning (reserved for future use) */
-  containerRef?: React.RefObject<HTMLElement | null>
+  /** Width of the container (textarea) for popover sizing */
+  containerWidth?: number
   /** Ref to expose navigation methods to parent */
   handleRef?: React.RefObject<FileMentionPopoverHandle | null>
 }
@@ -45,23 +55,28 @@ export function FileMentionPopover({
   onSelectFile,
   searchQuery,
   anchorPosition,
+  containerWidth,
   handleRef,
 }: FileMentionPopoverProps) {
+  const queryClient = useQueryClient()
   const { data: files = [] } = useWorktreeFiles(worktreePath)
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
 
-  // Filter files based on search query (case-insensitive substring match)
-  const filteredFiles = useMemo(() => {
-    if (!searchQuery) {
-      return files.slice(0, 15) // Show first 15 when no search
+  // Refetch file list each time the popover opens so newly added files appear
+  useEffect(() => {
+    if (open && worktreePath) {
+      queryClient.invalidateQueries({
+        queryKey: fileQueryKeys.worktreeFiles(worktreePath),
+      })
     }
+  }, [open, worktreePath, queryClient])
 
-    const query = searchQuery.toLowerCase()
-    return files
-      .filter(f => f.relative_path.toLowerCase().includes(query))
-      .slice(0, 15) // Limit to 15 results
-  }, [files, searchQuery])
+  // Filter files based on search query (fuzzy match)
+  const filteredFiles = useMemo(
+    () => fuzzySearchFiles(files, searchQuery, 15),
+    [files, searchQuery]
+  )
 
   // Clamp selectedIndex to valid range (handles case when filter reduces results)
   const clampedSelectedIndex = Math.min(
@@ -72,9 +87,10 @@ export function FileMentionPopover({
   const handleSelect = useCallback(
     (file: WorktreeFile) => {
       const pendingFile: PendingFile = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         relativePath: file.relative_path,
         extension: file.extension,
+        isDirectory: file.is_dir,
       }
       onSelectFile(pendingFile)
       onOpenChange(false)
@@ -83,29 +99,21 @@ export function FileMentionPopover({
   )
 
   // Expose navigation methods via ref for parent to call
-  useImperativeHandle(
-    handleRef,
-    () => {
-      console.log('[FileMentionPopover] useImperativeHandle creating handle, filteredFiles.length:', filteredFiles.length)
-      return {
-        moveUp: () => {
-          console.log('[FileMentionPopover] moveUp called, current selectedIndex:', selectedIndex)
-          setSelectedIndex(i => Math.max(i - 1, 0))
-        },
-        moveDown: () => {
-          console.log('[FileMentionPopover] moveDown called, current selectedIndex:', selectedIndex, 'max:', filteredFiles.length - 1)
-          setSelectedIndex(i => Math.min(i + 1, filteredFiles.length - 1))
-        },
-        selectCurrent: () => {
-          console.log('[FileMentionPopover] selectCurrent called, clampedSelectedIndex:', clampedSelectedIndex)
-          if (filteredFiles[clampedSelectedIndex]) {
-            handleSelect(filteredFiles[clampedSelectedIndex])
-          }
-        },
-      }
-    },
-    [filteredFiles, clampedSelectedIndex, handleSelect, selectedIndex]
-  )
+  useImperativeHandle(handleRef, () => {
+    return {
+      moveUp: () => {
+        setSelectedIndex(i => Math.max(i - 1, 0))
+      },
+      moveDown: () => {
+        setSelectedIndex(i => Math.min(i + 1, filteredFiles.length - 1))
+      },
+      selectCurrent: () => {
+        if (filteredFiles[clampedSelectedIndex]) {
+          handleSelect(filteredFiles[clampedSelectedIndex])
+        }
+      },
+    }
+  }, [filteredFiles, clampedSelectedIndex, handleSelect])
 
   // Scroll selected item into view
   useEffect(() => {
@@ -123,18 +131,22 @@ export function FileMentionPopover({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor
+        className="-mx-4 md:-mx-6"
         style={{
           position: 'absolute',
           top: anchorPosition.top,
-          left: anchorPosition.left,
+          left: 0,
+          right: 0,
           pointerEvents: 'none',
         }}
       />
       <PopoverContent
-        className="w-96 p-0"
+        className="p-0"
+        style={containerWidth ? { width: containerWidth } : undefined}
         align="start"
+        collisionPadding={0}
         side="top"
-        sideOffset={4}
+        sideOffset={12}
         onOpenAutoFocus={e => e.preventDefault()}
         onCloseAutoFocus={e => e.preventDefault()}
       >
@@ -159,14 +171,18 @@ export function FileMentionPopover({
                         isSelected && '!bg-accent !text-accent-foreground'
                       )}
                     >
-                      <FileIcon
-                        className={cn(
-                          'h-4 w-4 shrink-0',
-                          getExtensionColor(file.extension)
-                        )}
-                      />
+                      {file.is_dir ? (
+                        <FolderIcon className="h-4 w-4 shrink-0 text-blue-400" />
+                      ) : (
+                        <FileIcon
+                          className={cn(
+                            'h-4 w-4 shrink-0',
+                            getExtensionColor(file.extension)
+                          )}
+                        />
+                      )}
                       <span className="truncate text-sm">
-                        {file.relative_path}
+                        {file.is_dir ? `${file.relative_path}/` : file.relative_path}
                       </span>
                     </CommandItem>
                   )

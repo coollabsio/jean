@@ -154,8 +154,13 @@
 
 /* Blink animation for waiting indicator */
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .animate-blink {
@@ -164,11 +169,90 @@
 
 /* Border spin animation for running indicator */
 @keyframes border-spin {
-  to { stroke-dashoffset: 0; }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 .animate-border-spin {
   animation: border-spin 1s linear infinite;
+}
+
+/* Square spinner: rotating conic-gradient border */
+.square-spinner {
+  --spinner-color: oklch(0.795 0.184 86.047); /* yellow-500 */
+  position: relative;
+  background: color-mix(in srgb, var(--spinner-color) 10%, transparent);
+  border-radius: 2px;
+}
+.square-spinner::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 3px;
+  background: conic-gradient(
+    from var(--spinner-angle, 0deg),
+    transparent 60%,
+    var(--spinner-color) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  padding: 2px;
+  animation: square-spin 1s linear infinite;
+}
+@keyframes square-spin {
+  to {
+    --spinner-angle: 360deg;
+  }
+}
+@property --spinner-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* Animated border for session cards in running state.
+   Uses transform:rotate on an oversized conic-gradient pseudo-element
+   (WebKit doesn't support @property animation needed for the from-angle approach). */
+.card-border-spin {
+  --card-spin-color: oklch(0.795 0.184 86.047); /* yellow-500 */
+  position: relative;
+  overflow: hidden;
+  border-radius: calc(var(--radius) - 2px);
+  padding: 1.5px;
+}
+.card-border-spin::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150%;
+  height: 150%;
+  background: conic-gradient(
+    transparent 0%,
+    transparent 70%,
+    var(--card-spin-color) 100%
+  );
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: card-border-rotate 2s linear infinite;
+}
+@keyframes card-border-rotate {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+.card-border-spin:hover::before {
+  background: var(--card-spin-color);
+  animation: none;
+}
+.card-border-spin--destructive {
+  --card-spin-color: var(--destructive);
 }
 
 /* Animated dots for loading indicator */
@@ -191,6 +275,9 @@
 
 .animate-dots::after {
   content: '';
+  display: inline-block;
+  width: 1.5ch;
+  text-align: left;
   animation: dots 1.5s steps(1, end) infinite;
 }
 
@@ -221,26 +308,67 @@
   animation: collapsible-up 150ms ease-out;
 }
 
+/* Bell ring animation for unread notifications */
+@keyframes bell-ring {
+  0%, 70%, 100% {
+    transform: rotate(0deg);
+  }
+  5% {
+    transform: rotate(14deg);
+  }
+  10% {
+    transform: rotate(-12deg);
+  }
+  15% {
+    transform: rotate(10deg);
+  }
+  20% {
+    transform: rotate(-8deg);
+  }
+  25% {
+    transform: rotate(5deg);
+  }
+  30% {
+    transform: rotate(0deg);
+  }
+}
+
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/50 outline-none;
     box-sizing: border-box;
-    cursor: default;
+  }
+
+  html {
+    @apply bg-background;
   }
 
   body {
     @apply text-foreground;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-height: 100dvh;
+    min-width: 100vw;
+    position: relative;
+  }
+
+  /* Desktop-only styles — applied when body has .native-app class */
+  body.native-app {
     user-select: none;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
-    overscroll-behavior: none;
-    min-height: 100vh;
-    min-width: 100vw;
     overflow: hidden;
-    position: relative;
+    overscroll-behavior: none;
+  }
+
+  body.native-app * {
+    cursor: default;
+  }
+
+  /* Use app background color so native titlebar overlay area blends in */
+  html:has(body.native-app) {
+    background: hsl(var(--background));
   }
 
   svg {
@@ -272,6 +400,21 @@
   .cursor-pointer * {
     cursor: pointer !important;
   }
+}
+
+/* Ensure toast notifications remain clickable above Radix modal overlays.
+   Radix Dialog (modal mode) sets pointer-events:none on <body>;
+   Sonner already renders at z-index:999999999, we just restore pointer events. */
+[data-sonner-toaster],
+[data-sonner-toaster] [data-sonner-toast] {
+  pointer-events: auto !important;
+}
+
+/* Ensures the title bar window controls (minimize, maximize, close) remain clickable
+   above Radix modal overlays (e.g. onboarding dialog). The title bar uses
+   data-tauri-drag-region and z-[60] to sit above the z-50 dialog overlay. */
+[data-tauri-drag-region] {
+  pointer-events: auto !important;
 }
 
 /* Font overrides - outside @layer to ensure higher specificity */
@@ -318,4 +461,42 @@ kbd {
   font-family: var(--font-family-chat) !important;
   font-size: var(--chat-font-size) !important;
   line-height: var(--chat-line-height) !important;
+}
+
+/* Inside chat context (.font-mono), text sizes scale relative to chat font */
+.font-mono .text-xs {
+  font-size: calc(var(--chat-font-size) * 0.85) !important;
+}
+.font-mono .text-sm {
+  font-size: var(--chat-font-size) !important;
+}
+.font-mono .text-base {
+  font-size: var(--chat-font-size) !important;
+}
+.font-mono .text-lg {
+  font-size: calc(var(--chat-font-size) * 1.15) !important;
+}
+.font-mono .text-xl {
+  font-size: calc(var(--chat-font-size) * 1.25) !important;
+}
+.font-mono .text-2xl {
+  font-size: calc(var(--chat-font-size) * 1.5) !important;
+}
+
+/* Hidden scrollbar for horizontally scrollable tab bars */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Custom scrollbar styling to match Radix ScrollArea */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
 }

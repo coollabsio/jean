@@ -1,1 +1,1 @@
-export { WorktreeDashboard } from './WorktreeDashboard'
+export { ProjectCanvasView } from './ProjectCanvasView'

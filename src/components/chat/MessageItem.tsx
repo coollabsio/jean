@@ -1,12 +1,8 @@
 import { memo, useCallback } from 'react'
+import { Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
 import { Markdown } from '@/components/ui/markdown'
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip'
 import type {
   ChatMessage,
   Question,
@@ -24,110 +20,29 @@ import { SkillBadge } from './SkillBadge'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { ExitPlanModeButton } from './ExitPlanModeButton'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 import { ThinkingBlock } from './ThinkingBlock'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { logger } from '@/lib/logger'
+import { formatDuration } from './time-utils'
 import {
   parseReviewFindings,
   hasReviewFindings,
   stripFindingBlocks,
 } from './review-finding-utils'
 import { ReviewFindingsList } from './ReviewFindingBlock'
-
-/** Format timestamp for tooltip display */
-const formatTimestamp = (timestamp: number) => {
-  return new Date(timestamp * 1000).toLocaleString()
-}
-
-/** Regex to extract image paths from message content */
-const IMAGE_ATTACHMENT_REGEX =
-  /\[Image attached: (.+?) - Use the Read tool to view this image\]/g
-
-/** Regex to extract text file paths from message content */
-const TEXT_FILE_ATTACHMENT_REGEX =
-  /\[Text file attached: (.+?) - Use the Read tool to view this file\]/g
-
-/** Extract image paths from message content */
-function extractImagePaths(content: string): string[] {
-  const paths: string[] = []
-  let match
-  while ((match = IMAGE_ATTACHMENT_REGEX.exec(content)) !== null) {
-    if (match[1]) {
-      paths.push(match[1])
-    }
-  }
-  // Reset regex lastIndex for next use
-  IMAGE_ATTACHMENT_REGEX.lastIndex = 0
-  return paths
-}
-
-/** Extract text file paths from message content */
-function extractTextFilePaths(content: string): string[] {
-  const paths: string[] = []
-  let match
-  while ((match = TEXT_FILE_ATTACHMENT_REGEX.exec(content)) !== null) {
-    if (match[1]) {
-      paths.push(match[1])
-    }
-  }
-  // Reset regex lastIndex for next use
-  TEXT_FILE_ATTACHMENT_REGEX.lastIndex = 0
-  return paths
-}
-
-/** Remove image attachment markers from content for cleaner display */
-function stripImageMarkers(content: string): string {
-  return content.replace(IMAGE_ATTACHMENT_REGEX, '').trim()
-}
-
-/** Remove text file attachment markers from content for cleaner display */
-function stripTextFileMarkers(content: string): string {
-  return content.replace(TEXT_FILE_ATTACHMENT_REGEX, '').trim()
-}
-
-/** Regex to extract file mention paths from message content */
-const FILE_MENTION_REGEX =
-  /\[File: (.+?) - Use the Read tool to view this file\]/g
-
-/** Regex to extract skill paths from message content */
-const SKILL_ATTACHMENT_REGEX =
-  /\[Skill: (.+?) - Read and use this skill to guide your response\]/g
-
-/** Extract file mention paths from message content */
-function extractFileMentionPaths(content: string): string[] {
-  const paths: string[] = []
-  let match
-  while ((match = FILE_MENTION_REGEX.exec(content)) !== null) {
-    if (match[1]) {
-      paths.push(match[1])
-    }
-  }
-  // Reset regex lastIndex for next use
-  FILE_MENTION_REGEX.lastIndex = 0
-  return paths
-}
-
-/** Remove file mention markers from content for cleaner display */
-function stripFileMentionMarkers(content: string): string {
-  return content.replace(FILE_MENTION_REGEX, '').trim()
-}
-
-/** Extract skill paths from message content */
-function extractSkillPaths(content: string): string[] {
-  const paths: string[] = []
-  let match
-  while ((match = SKILL_ATTACHMENT_REGEX.exec(content)) !== null) {
-    if (match[1]) {
-      paths.push(match[1])
-    }
-  }
-  // Reset regex lastIndex for next use
-  SKILL_ATTACHMENT_REGEX.lastIndex = 0
-  return paths
-}
-
-/** Remove skill attachment markers from content for cleaner display */
-function stripSkillMarkers(content: string): string {
-  return content.replace(SKILL_ATTACHMENT_REGEX, '').trim()
-}
+import {
+  extractImagePaths,
+  extractTextFilePaths,
+  extractFileMentionPaths,
+  extractDirectoryMentionPaths,
+  extractSkillPaths,
+  stripAllMarkers,
+} from './message-content-utils'
 
 interface MessageItemProps {
   /** The message to render */
@@ -146,6 +61,12 @@ interface MessageItemProps {
   worktreePath: string
   /** Keyboard shortcut to display on approve button */
   approveShortcut: string
+  /** Keyboard shortcut to display on approve yolo button */
+  approveShortcutYolo?: string
+  /** Keyboard shortcut to display on clear context button */
+  approveShortcutClearContext?: string
+  /** Keyboard shortcut to display on clear context build button */
+  approveShortcutClearContextBuild?: string
   /** Ref to attach to approve button for visibility tracking */
   approveButtonRef?: React.RefObject<HTMLButtonElement | null>
   /** Whether Claude is currently streaming (affects last message rendering) */
@@ -154,6 +75,14 @@ interface MessageItemProps {
   onPlanApproval: (messageId: string) => void
   /** Callback when user approves a plan with yolo mode */
   onPlanApprovalYolo?: (messageId: string) => void
+  /** Callback for clear context approval (new session with plan in yolo mode) */
+  onClearContextApproval?: (messageId: string) => void
+  /** Callback for clear context approval (new session with plan in build mode) */
+  onClearContextApprovalBuild?: (messageId: string) => void
+  /** Callback for worktree approval (new worktree with plan in build mode) */
+  onWorktreeBuildApproval?: (messageId: string) => void
+  /** Callback for worktree approval (new worktree with plan in yolo mode) */
+  onWorktreeYoloApproval?: (messageId: string) => void
   /** Callback when user answers a question */
   onQuestionAnswer: (
     toolCallId: string,
@@ -183,6 +112,12 @@ interface MessageItemProps {
   areQuestionsSkipped: (sessionId: string) => boolean
   /** Check if a finding has been fixed */
   isFindingFixed: (sessionId: string, key: string) => boolean
+  /** Callback to copy a user message back to the input field */
+  onCopyToInput?: (message: ChatMessage) => void
+  /** Hide approve buttons (e.g. for Codex which has no native approval flow) */
+  hideApproveButtons?: boolean
+  /** Duration of this assistant message in ms (computed from user→assistant timestamp delta) */
+  durationMs?: number | null
 }
 
 /**
@@ -198,10 +133,17 @@ export const MessageItem = memo(function MessageItem({
   sessionId,
   worktreePath,
   approveShortcut,
+  approveShortcutYolo,
+  approveShortcutClearContext,
+  approveShortcutClearContextBuild,
   approveButtonRef,
   isSending,
   onPlanApproval,
   onPlanApprovalYolo,
+  onClearContextApproval,
+  onClearContextApprovalBuild,
+  onWorktreeBuildApproval,
+  onWorktreeYoloApproval,
   onQuestionAnswer,
   onQuestionSkip,
   onFileClick,
@@ -212,6 +154,9 @@ export const MessageItem = memo(function MessageItem({
   getSubmittedAnswers,
   areQuestionsSkipped,
   isFindingFixed,
+  onCopyToInput,
+  hideApproveButtons,
+  durationMs,
 }: MessageItemProps) {
   // Only show Approve button for the last message with ExitPlanMode
   const isLatestPlanRequest = messageIndex === lastPlanMessageIndex
@@ -223,16 +168,12 @@ export const MessageItem = memo(function MessageItem({
     message.role === 'user' ? extractTextFilePaths(message.content) : []
   const fileMentionPaths =
     message.role === 'user' ? extractFileMentionPaths(message.content) : []
+  const directoryMentionPaths =
+    message.role === 'user' ? extractDirectoryMentionPaths(message.content) : []
   const skillPaths =
     message.role === 'user' ? extractSkillPaths(message.content) : []
   const displayContent =
-    message.role === 'user'
-      ? stripSkillMarkers(
-          stripFileMentionMarkers(
-            stripTextFileMarkers(stripImageMarkers(message.content))
-          )
-        )
-      : message.content
+    message.role === 'user' ? stripAllMarkers(message.content) : message.content
 
   // Show content if it's not empty
   const showContent = displayContent.trim()
@@ -253,11 +194,36 @@ export const MessageItem = memo(function MessageItem({
     onPlanApprovalYolo?.(message.id)
   }, [onPlanApprovalYolo, message.id])
 
+  // Stable callback for clear context approval
+  const handleClearContextApproval = useCallback(() => {
+    onClearContextApproval?.(message.id)
+  }, [onClearContextApproval, message.id])
+
+  // Stable callback for clear context build approval
+  const handleClearContextApprovalBuild = useCallback(() => {
+    onClearContextApprovalBuild?.(message.id)
+  }, [onClearContextApprovalBuild, message.id])
+
+  // Stable callback for worktree build approval
+  const handleWorktreeBuildApproval = useCallback(() => {
+    onWorktreeBuildApproval?.(message.id)
+  }, [onWorktreeBuildApproval, message.id])
+
+  // Stable callback for worktree yolo approval
+  const handleWorktreeYoloApproval = useCallback(() => {
+    onWorktreeYoloApproval?.(message.id)
+  }, [onWorktreeYoloApproval, message.id])
+
   // Stable callback for checking if finding is fixed
   const handleIsFindingFixed = useCallback(
     (findingKey: string) => isFindingFixed(sessionId, findingKey),
     [isFindingFixed, sessionId]
   )
+
+  // Stable callback for copying message to input
+  const handleCopyToInput = useCallback(() => {
+    onCopyToInput?.(message)
+  }, [onCopyToInput, message])
 
   // Content for the message box (shared between user and assistant)
   const messageBoxContent = (
@@ -285,9 +251,17 @@ export const MessageItem = memo(function MessageItem({
         </div>
       )}
 
-      {/* Show attached file mentions (@ mentions) for user messages */}
-      {fileMentionPaths.length > 0 && (
+      {/* Show attached file and directory mentions (@ mentions) for user messages */}
+      {(fileMentionPaths.length > 0 || directoryMentionPaths.length > 0) && (
         <div className="flex flex-wrap gap-2 mb-2">
+          {directoryMentionPaths.map((path, idx) => (
+            <FileMentionBadge
+              key={`${message.id}-dir-${idx}`}
+              path={path}
+              worktreePath={worktreePath}
+              isDirectory
+            />
+          ))}
           {fileMentionPaths.map((path, idx) => (
             <FileMentionBadge
               key={`${message.id}-file-${idx}`}
@@ -305,11 +279,18 @@ export const MessageItem = memo(function MessageItem({
             // Extract skill name from path (e.g., /Users/.../skills/react/SKILL.md -> react)
             const parts = normalizePath(path).split('/')
             const skillsIdx = parts.findIndex(p => p === 'skills')
-            const name = skillsIdx >= 0 && parts[skillsIdx + 1] ? parts[skillsIdx + 1] : path
+            const name =
+              skillsIdx >= 0 && parts[skillsIdx + 1]
+                ? parts[skillsIdx + 1]
+                : path
             return (
               <SkillBadge
                 key={`${message.id}-skill-${idx}`}
-                skill={{ id: `${message.id}-skill-${idx}`, name: name ?? path, path }}
+                skill={{
+                  id: `${message.id}-skill-${idx}`,
+                  name: name ?? path,
+                  path,
+                }}
                 compact
               />
             )
@@ -325,134 +306,177 @@ export const MessageItem = memo(function MessageItem({
         <>
           {/* Build timeline preserving order of text and tools */}
           <div className="space-y-4">
-            {buildTimeline(
-              message.content_blocks,
-              message.tool_calls ?? []
-            ).map(item => {
-              switch (item.type) {
-                case 'thinking':
-                  return (
-                    <ThinkingBlock
-                      key={item.key}
-                      thinking={item.thinking}
-                      isStreaming={false}
-                    />
-                  )
-                case 'text': {
-                  // Check if text contains review findings
-                  if (hasReviewFindings(item.text)) {
-                    const findings = parseReviewFindings(item.text)
-                    const strippedText = stripFindingBlocks(item.text)
-                    return (
-                      <div key={item.key}>
-                        <Markdown>{strippedText}</Markdown>
-                        {findings.length > 0 && (
-                          <ReviewFindingsList
-                            findings={findings}
-                            sessionId={sessionId}
-                            onFix={onFixFinding}
-                            onFixAll={onFixAllFindings}
-                            isFixedFn={handleIsFindingFixed}
-                            disabled={isSending}
-                          />
-                        )}
-                      </div>
-                    )
-                  }
-                  return <Markdown key={item.key}>{item.text}</Markdown>
-                }
-                case 'task':
-                  return (
-                    <TaskCallInline
-                      key={item.key}
-                      taskToolCall={item.taskTool}
-                      subToolCalls={item.subTools}
-                      onFileClick={onFileClick}
-                      isStreaming={false}
-                    />
-                  )
-                case 'standalone':
-                  return (
-                    <ToolCallInline
-                      key={item.key}
-                      toolCall={item.tool}
-                      onFileClick={onFileClick}
-                      isStreaming={false}
-                    />
-                  )
-                case 'stackedGroup':
-                  return (
-                    <StackedGroup
-                      key={item.key}
-                      items={item.items}
-                      onFileClick={onFileClick}
-                      isStreaming={false}
-                    />
-                  )
-                case 'askUserQuestion': {
-                  const isAnswered =
-                    hasFollowUpMessage ||
-                    isQuestionAnswered(message.session_id, item.tool.id)
-                  const input = item.tool.input as {
-                    questions: Question[]
-                  }
-                  return (
-                    <AskUserQuestion
-                      key={item.key}
-                      toolCallId={item.tool.id}
-                      questions={input.questions}
-                      introText={item.introText}
-                      onSubmit={(toolCallId, answers) =>
-                        onQuestionAnswer(toolCallId, answers, input.questions)
-                      }
-                      onSkip={onQuestionSkip}
-                      readOnly={isAnswered}
-                      submittedAnswers={
-                        isAnswered
-                          ? getSubmittedAnswers(
-                              message.session_id,
-                              item.tool.id
-                            )
-                          : undefined
-                      }
-                    />
-                  )
-                }
-                case 'exitPlanMode': {
-                  // Render plan inline in its natural position
-                  // Extract plan from this specific tool's input (not global search)
-                  const toolInput = item.tool.input as { plan?: string } | undefined
-                  const inlinePlan = toolInput?.plan
-                  if (inlinePlan) {
-                    return (
-                      <PlanDisplay
-                        key={item.key}
-                        content={inlinePlan}
-                        defaultCollapsed={
-                          message.plan_approved || hasFollowUpMessage
-                        }
-                      />
-                    )
-                  }
-                  // Fall back to file-based plan (Write to ~/.claude/plans/*.md)
-                  const planFilePath = findPlanFilePath(
-                    message.tool_calls ?? []
-                  )
-                  if (!planFilePath) return null
-                  return (
-                    <PlanDisplay
-                      key={item.key}
-                      filePath={planFilePath}
-                      defaultCollapsed={
-                        message.plan_approved || hasFollowUpMessage
-                      }
-                    />
-                  )
-                }
-                default:
-                  return null
+            {(() => {
+              let timeline
+              try {
+                timeline = buildTimeline(
+                  message.content_blocks,
+                  message.tool_calls ?? []
+                )
+              } catch (e) {
+                logger.error('Failed to build timeline for message', {
+                  messageId: message.id,
+                  error: e,
+                })
+                return (
+                  <div className="text-sm text-muted-foreground italic">
+                    <span>[Message could not be rendered]</span>
+                    {message.content && <Markdown streaming={message.cancelled}>{message.content}</Markdown>}
+                  </div>
+                )
               }
-            })}
+              return timeline.map(item => (
+                <ErrorBoundary
+                  key={item.key}
+                  fallback={
+                    <div className="text-xs text-muted-foreground italic border rounded px-2 py-1">
+                      [Failed to render content]
+                    </div>
+                  }
+                >
+                  {(() => {
+                    switch (item.type) {
+                      case 'thinking':
+                        return (
+                          <ThinkingBlock
+                            thinking={item.thinking}
+                            isStreaming={false}
+                          />
+                        )
+                      case 'text': {
+                        if (hasReviewFindings(item.text)) {
+                          const findings = parseReviewFindings(item.text)
+                          const strippedText = stripFindingBlocks(item.text)
+                          return (
+                            <div>
+                              <Markdown streaming={message.cancelled}>{strippedText}</Markdown>
+                              {findings.length > 0 && (
+                                <ReviewFindingsList
+                                  findings={findings}
+                                  sessionId={sessionId}
+                                  onFix={onFixFinding}
+                                  onFixAll={onFixAllFindings}
+                                  isFixedFn={handleIsFindingFixed}
+                                  disabled={isSending}
+                                />
+                              )}
+                            </div>
+                          )
+                        }
+                        return <Markdown streaming={message.cancelled}>{item.text}</Markdown>
+                      }
+                      case 'task':
+                        return (
+                          <TaskCallInline
+                            taskToolCall={item.taskTool}
+                            subToolCalls={item.subTools}
+                            allToolCalls={message.tool_calls ?? []}
+                            onFileClick={onFileClick}
+                            isStreaming={false}
+                          />
+                        )
+                      case 'standalone':
+                        return (
+                          <ToolCallInline
+                            toolCall={item.tool}
+                            onFileClick={onFileClick}
+                            isStreaming={false}
+                          />
+                        )
+                      case 'stackedGroup':
+                        return (
+                          <StackedGroup
+                            items={item.items}
+                            onFileClick={onFileClick}
+                            isStreaming={false}
+                          />
+                        )
+                      case 'askUserQuestion': {
+                        const isAnswered =
+                          hasFollowUpMessage ||
+                          isQuestionAnswered(message.session_id, item.tool.id)
+                        const input = item.tool.input as {
+                          questions: Question[]
+                        }
+                        return (
+                          <AskUserQuestion
+                            toolCallId={item.tool.id}
+                            questions={input.questions}
+                            introText={item.introText}
+                            hasFollowUpMessage={hasFollowUpMessage}
+                            isSkipped={areQuestionsSkipped(
+                              message.session_id
+                            )}
+                            onSubmit={(toolCallId, answers) =>
+                              onQuestionAnswer(
+                                toolCallId,
+                                answers,
+                                input.questions
+                              )
+                            }
+                            onSkip={onQuestionSkip}
+                            readOnly={isAnswered}
+                            submittedAnswers={
+                              isAnswered
+                                ? getSubmittedAnswers(
+                                    message.session_id,
+                                    item.tool.id
+                                  )
+                                : undefined
+                            }
+                          />
+                        )
+                      }
+                      case 'enterPlanMode':
+                        return (
+                          <ToolCallInline
+                            toolCall={item.tool}
+                            onFileClick={onFileClick}
+                            isStreaming={false}
+                          />
+                        )
+                      case 'exitPlanMode': {
+                        const toolInput = item.tool.input as
+                          | { plan?: string }
+                          | undefined
+                        const inlinePlan = toolInput?.plan
+                        if (inlinePlan) {
+                          return (
+                            <PlanDisplay
+                              content={inlinePlan}
+                              defaultCollapsed={
+                                message.plan_approved || hasFollowUpMessage
+                              }
+                            />
+                          )
+                        }
+                        const planFilePath = findPlanFilePath(
+                          message.tool_calls ?? []
+                        )
+                        if (!planFilePath) return null
+                        return (
+                          <PlanDisplay
+                            filePath={planFilePath}
+                            defaultCollapsed={
+                              message.plan_approved || hasFollowUpMessage
+                            }
+                          />
+                        )
+                      }
+                      case 'unknown':
+                        return (
+                          <div className="text-xs text-muted-foreground border rounded px-2 py-1">
+                            Unsupported content type: &quot;{item.rawType}&quot;
+                            — if you see this, please report it as a bug
+                          </div>
+                        )
+                      default:
+                        return null
+                    }
+                  })()}
+                </ErrorBoundary>
+              ))
+            })()}
           </div>
           {/* Show ExitPlanMode button after all content blocks */}
           <ExitPlanModeButton
@@ -462,8 +486,16 @@ export const MessageItem = memo(function MessageItem({
             hasFollowUpMessage={hasFollowUpMessage}
             onPlanApproval={handlePlanApproval}
             onPlanApprovalYolo={handlePlanApprovalYolo}
+            onClearContextApproval={handleClearContextApproval}
+            onClearContextBuildApproval={handleClearContextApprovalBuild}
+            onWorktreeBuildApproval={handleWorktreeBuildApproval}
+            onWorktreeYoloApproval={handleWorktreeYoloApproval}
             buttonRef={isLatestPlanRequest ? approveButtonRef : undefined}
             shortcut={approveShortcut}
+            shortcutYolo={approveShortcutYolo}
+            shortcutClearContext={approveShortcutClearContext}
+            shortcutClearContextBuild={approveShortcutClearContextBuild}
+            hideApproveButtons={hideApproveButtons}
           />
         </>
       ) : (
@@ -489,7 +521,7 @@ export const MessageItem = memo(function MessageItem({
               {message.role === 'assistant' &&
               hasReviewFindings(displayContent) ? (
                 <>
-                  <Markdown>{stripFindingBlocks(displayContent)}</Markdown>
+                  <Markdown streaming={message.cancelled}>{stripFindingBlocks(displayContent)}</Markdown>
                   <ReviewFindingsList
                     findings={parseReviewFindings(displayContent)}
                     sessionId={sessionId}
@@ -499,8 +531,12 @@ export const MessageItem = memo(function MessageItem({
                     disabled={isSending}
                   />
                 </>
+              ) : message.role === 'user' ? (
+                <div className="whitespace-pre-wrap break-words">
+                  {displayContent}
+                </div>
               ) : (
-                <Markdown>{displayContent}</Markdown>
+                <Markdown streaming={message.cancelled}>{displayContent}</Markdown>
               )}
             </div>
           )}
@@ -515,8 +551,15 @@ export const MessageItem = memo(function MessageItem({
                 hasFollowUpMessage={hasFollowUpMessage}
                 onPlanApproval={handlePlanApproval}
                 onPlanApprovalYolo={handlePlanApprovalYolo}
+                onClearContextApproval={handleClearContextApproval}
+                onClearContextBuildApproval={handleClearContextApprovalBuild}
+                onWorktreeBuildApproval={handleWorktreeBuildApproval}
+                onWorktreeYoloApproval={handleWorktreeYoloApproval}
                 buttonRef={isLatestPlanRequest ? approveButtonRef : undefined}
                 shortcut={approveShortcut}
+                shortcutYolo={approveShortcutYolo}
+                shortcutClearContext={approveShortcutClearContext}
+                shortcutClearContextBuild={approveShortcutClearContextBuild}
               />
             )}
         </>
@@ -537,31 +580,13 @@ export const MessageItem = memo(function MessageItem({
           (cancelled)
         </span>
       )}
-    </>
-  )
 
-  // User message tooltip content
-  const userMessageTooltip = (
-    <TooltipContent side="left" align="start" className="text-xs">
-      <div className="space-y-0.5">
-        <div>
-          <span className="text-muted font-bold">Model:</span>{' '}
-          {message.model ?? 'N/A'}
-        </div>
-        <div>
-          <span className="text-muted font-bold">Think:</span>{' '}
-          {message.thinking_level ?? 'N/A'}
-        </div>
-        <div>
-          <span className="text-muted font-bold">Mode:</span>{' '}
-          {message.execution_mode ?? 'N/A'}
-        </div>
-        <div>
-          <span className="text-muted font-bold">Time:</span>{' '}
-          {formatTimestamp(message.timestamp)}
-        </div>
-      </div>
-    </TooltipContent>
+      {message.role === 'assistant' && durationMs != null && durationMs > 0 && (
+        <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
+          {formatDuration(durationMs)}
+        </span>
+      )}
+    </>
   )
 
   return (
@@ -572,25 +597,31 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {message.role === 'user' ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div
-              className={cn(
-                'text-foreground border border-border rounded-lg px-3 py-2 max-w-[70%] bg-muted/20 min-w-0 break-words',
-                message.cancelled && 'opacity-60'
-              )}
-            >
-              {messageBoxContent}
-            </div>
-          </TooltipTrigger>
-          {userMessageTooltip}
-        </Tooltip>
+        <div className="relative group flex items-start gap-1 max-w-[85%] sm:max-w-[70%]">
+          {/* Copy to clipboard button - appears on hover */}
+          {onCopyToInput && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleCopyToInput}
+                  className="shrink-0 mt-2 p-1 rounded cursor-pointer text-muted-foreground/0 hover:text-muted-foreground hover:bg-muted/50 group-hover:text-muted-foreground/50 transition-colors"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Copy to clipboard</TooltipContent>
+            </Tooltip>
+          )}
+          <div
+            className="text-foreground border border-border rounded-lg px-3 py-2 bg-muted/20 min-w-0 break-words"
+          >
+            {messageBoxContent}
+          </div>
+        </div>
       ) : (
         <div
-          className={cn(
-            'text-muted-foreground w-full min-w-0 break-words',
-            message.cancelled && 'opacity-60'
-          )}
+          className="text-muted-foreground w-full min-w-0 break-words"
         >
           {messageBoxContent}
         </div>

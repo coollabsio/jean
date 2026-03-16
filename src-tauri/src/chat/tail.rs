@@ -8,8 +8,14 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
-/// Polling interval for tailing NDJSON files (50ms)
+/// Default (idle) polling interval for tailing NDJSON files.
+/// Used when the last poll returned no new lines.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Fast polling interval used when the previous poll returned data.
+/// During active streaming, the CLI writes chunks rapidly — polling at 5ms
+/// instead of 50ms reduces per-event latency by up to 45ms.
+pub const POLL_INTERVAL_FAST: Duration = Duration::from_millis(5);
 
 /// Tailer for reading new lines from an NDJSON file.
 ///
@@ -98,6 +104,11 @@ impl NdjsonTailer {
     #[allow(dead_code)] // Used in tests
     pub fn has_incomplete_data(&self) -> bool {
         !self.buffer.is_empty()
+    }
+
+    /// Drain and return any buffered incomplete data.
+    pub fn drain_buffer(&mut self) -> String {
+        std::mem::take(&mut self.buffer)
     }
 }
 
@@ -294,7 +305,7 @@ mod tests {
         let mut tailer = NdjsonTailer::new_from_start(&path).unwrap();
 
         // Write with CRLF line endings (Windows-style)
-        write!(file, "{}\r\n", r#"{"type": "crlf"}"#).unwrap();
+        write!(file, "{{\"type\": \"crlf\"}}\r\n").unwrap();
         file.flush().unwrap();
 
         let lines = tailer.poll().unwrap();
@@ -304,12 +315,14 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_interval_constant() {
-        // Verify the poll interval is a reasonable value
+    fn test_poll_interval_constants() {
+        // Verify the idle poll interval is a reasonable value
         assert_eq!(POLL_INTERVAL, Duration::from_millis(50));
-        // Should be at least 10ms to avoid busy-waiting
         assert!(POLL_INTERVAL >= Duration::from_millis(10));
-        // Should be at most 200ms for responsiveness
         assert!(POLL_INTERVAL <= Duration::from_millis(200));
+
+        // Verify the fast (active) poll interval
+        assert_eq!(POLL_INTERVAL_FAST, Duration::from_millis(5));
+        assert!(POLL_INTERVAL_FAST < POLL_INTERVAL);
     }
 }

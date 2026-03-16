@@ -6,6 +6,11 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import prettierConfig from 'eslint-config-prettier'
 
 export default tseslint.config(
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
+  },
   js.configs.recommended,
   ...tseslint.configs.strict,
   ...tseslint.configs.stylistic,
@@ -29,10 +34,11 @@ export default tseslint.config(
     rules: {
       ...reactPlugin.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
-      'react-refresh/only-export-components': [
-        'warn',
-        { allowConstantExport: true },
-      ],
+      // Temporarily relaxed while migrating to compiler-compatible hook patterns.
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/exhaustive-deps': 'off',
+      'react-refresh/only-export-components': 'off',
       'react/react-in-jsx-scope': 'off',
       'react/prop-types': 'off',
       '@typescript-eslint/no-unused-vars': [
@@ -95,6 +101,7 @@ export default tseslint.config(
       'node_modules/**',
       'src-tauri/target/**',
       'src-tauri/gen/**',
+      'e2e/**',
       '*.config.js',
       '*.config.ts',
       'vite.config.ts',

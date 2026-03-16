@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   Lightbulb,
   ThumbsUp,
-  X,
   CheckCircle2,
   MessageSquare,
   FileCode,
@@ -22,11 +21,13 @@ import {
   Loader2,
   Wrench,
 } from 'lucide-react'
+import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import type { ReviewFinding, ReviewResponse } from '@/types/projects'
 import { cn } from '@/lib/utils'
 
 interface ReviewResultsPanelProps {
-  worktreeId: string
+  sessionId: string
+  onSendFix?: (message: string, executionMode: 'plan' | 'yolo') => void
 }
 
 /** Generate a unique key for a review finding */
@@ -90,7 +91,8 @@ function sortFindingsBySeverity(
   return findings
     .map((finding, originalIndex) => ({ finding, originalIndex }))
     .sort(
-      (a, b) => SEVERITY_ORDER[a.finding.severity] - SEVERITY_ORDER[b.finding.severity]
+      (a, b) =>
+        SEVERITY_ORDER[a.finding.severity] - SEVERITY_ORDER[b.finding.severity]
     )
 }
 
@@ -129,7 +131,12 @@ interface FindingCardProps {
   index: number
   isFixed: boolean
   isFixing: boolean
-  onFix: (finding: ReviewFinding, index: number, customSuggestion?: string) => void
+  onFix: (
+    finding: ReviewFinding,
+    index: number,
+    customSuggestion?: string,
+    executionMode?: 'plan' | 'yolo'
+  ) => void
 }
 
 /** Interactive finding card with fix functionality - memoized to prevent re-renders */
@@ -149,10 +156,13 @@ const FindingCard = memo(function FindingCard({
   // Don't show fix for praise findings
   const canFix = finding.severity !== 'praise'
 
-  const handleFix = useCallback(() => {
-    onFix(finding, index, customSuggestion.trim() || undefined)
-    setIsExpanded(false)
-  }, [finding, index, customSuggestion, onFix])
+  const handleFix = useCallback(
+    (executionMode: 'plan' | 'yolo') => {
+      onFix(finding, index, customSuggestion.trim() || undefined, executionMode)
+      setIsExpanded(false)
+    },
+    [finding, index, customSuggestion, onFix]
+  )
 
   return (
     <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
@@ -190,18 +200,23 @@ const FindingCard = memo(function FindingCard({
                 Fixed
               </Badge>
             )}
-            <span className="text-xs text-muted-foreground shrink-0 font-mono">
-              {finding.file}
-              {finding.line ? `:${finding.line}` : ''}
-            </span>
           </div>
         </CollapsibleTrigger>
 
         {/* Content */}
         <CollapsibleContent>
           <div className="px-4 pb-4 pt-3 space-y-3 border-t border-border/50">
+            {/* File location */}
+            <p className="text-xs font-mono select-text cursor-text">
+              <span className="text-muted-foreground">Affected code: </span>
+              <span className="text-foreground">
+                {finding.file}
+                {finding.line ? `:${finding.line}` : ''}
+              </span>
+            </p>
+
             {/* Description */}
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground select-text cursor-text">
               {finding.description}
             </p>
 
@@ -212,7 +227,7 @@ const FindingCard = memo(function FindingCard({
                   Suggested fix:
                 </p>
                 <div className="rounded-md bg-muted/50 p-2 border">
-                  <pre className="text-xs font-mono whitespace-pre-wrap text-foreground/80">
+                  <pre className="text-xs font-mono whitespace-pre-wrap text-foreground/80 select-text cursor-text">
                     {finding.suggestion}
                   </pre>
                 </div>
@@ -238,7 +253,11 @@ const FindingCard = memo(function FindingCard({
                       Fix sent
                     </Badge>
                   )}
-                  <Button onClick={handleFix} disabled={isFixing} size="sm">
+                  <Button
+                    onClick={() => handleFix('plan')}
+                    disabled={isFixing}
+                    size="sm"
+                  >
                     {isFixing ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -248,6 +267,23 @@ const FindingCard = memo(function FindingCard({
                       <>Fix again</>
                     ) : (
                       <>Fix</>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => handleFix('yolo')}
+                    disabled={isFixing}
+                    size="sm"
+                    variant="destructive"
+                  >
+                    {isFixing ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Fixing...
+                      </>
+                    ) : isFixed ? (
+                      <>Fix again (yolo)</>
+                    ) : (
+                      <>Fix (yolo)</>
                     )}
                   </Button>
                 </div>
@@ -272,19 +308,16 @@ function EmptyState() {
   )
 }
 
-export function ReviewResultsPanel({ worktreeId }: ReviewResultsPanelProps) {
+export function ReviewResultsPanel({ sessionId, onSendFix }: ReviewResultsPanelProps) {
   const [fixingIndices, setFixingIndices] = useState<Set<number>>(new Set())
   const [isFixingAll, setIsFixingAll] = useState(false)
 
   const reviewResults = useChatStore(
-    state => state.reviewResults[worktreeId]
+    state => state.reviewResults[sessionId]
   ) as ReviewResponse | undefined
   const fixedReviewFindings = useChatStore(
-    state => state.fixedReviewFindings[worktreeId]
+    state => state.fixedReviewFindings[sessionId]
   )
-  const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
-
-  const clearReviewResults = useChatStore(state => state.clearReviewResults)
 
   // Check if a finding is fixed
   const isFindingFixed = useCallback(
@@ -295,14 +328,15 @@ export function ReviewResultsPanel({ worktreeId }: ReviewResultsPanelProps) {
     [fixedReviewFindings]
   )
 
-  // Handle fixing a single finding
+  // Handle fixing a single finding - sends fix message via callback
   const handleFixFinding = useCallback(
-    async (
+    (
       finding: ReviewFinding,
       index: number,
-      customSuggestion?: string
+      customSuggestion?: string,
+      executionMode?: 'plan' | 'yolo'
     ) => {
-      if (!activeWorktreePath) return
+      if (!onSendFix) return
 
       setFixingIndices(prev => new Set(prev).add(index))
 
@@ -322,23 +356,11 @@ ${suggestionToApply || '(Please determine the best fix)'}
 
 Please apply this fix to the file.`
 
-        const { markReviewFindingFixed } = useChatStore.getState()
-
         // Mark as fixed
         const findingKey = getReviewFindingKey(finding, index)
-        markReviewFindingFixed(worktreeId, findingKey)
+        useChatStore.getState().markReviewFindingFixed(sessionId, findingKey)
 
-        // Dispatch event to trigger new session creation and message send from ChatWindow
-        window.dispatchEvent(
-          new CustomEvent('review-fix-message', {
-            detail: {
-              worktreeId,
-              worktreePath: activeWorktreePath,
-              message,
-              createNewSession: true,
-            },
-          })
-        )
+        onSendFix(message, executionMode ?? 'plan')
       } finally {
         setFixingIndices(prev => {
           const next = new Set(prev)
@@ -347,27 +369,28 @@ Please apply this fix to the file.`
         })
       }
     },
-    [activeWorktreePath, worktreeId]
+    [sessionId, onSendFix]
   )
 
-  // Handle fixing all unfixed findings
-  const handleFixAll = useCallback(async () => {
-    if (!reviewResults || !activeWorktreePath) return
+  // Handle fixing all unfixed findings - auto-sends fix message in same session
+  const handleFixAll = useCallback(
+    (executionMode: 'plan' | 'yolo') => {
+      if (!reviewResults || !onSendFix) return
 
-    setIsFixingAll(true)
+      setIsFixingAll(true)
 
-    try {
-      // Get unfixed, fixable findings
-      const unfixedFindings = reviewResults.findings
-        .map((finding, index) => ({ finding, index }))
-        .filter(
-          ({ finding, index }) =>
-            finding.severity !== 'praise' && !isFindingFixed(finding, index)
-        )
+      try {
+        // Get unfixed, fixable findings
+        const unfixedFindings = reviewResults.findings
+          .map((finding, index) => ({ finding, index }))
+          .filter(
+            ({ finding, index }) =>
+              finding.severity !== 'praise' && !isFindingFixed(finding, index)
+          )
 
-      if (unfixedFindings.length === 0) return
+        if (unfixedFindings.length === 0) return
 
-      const message = `Fix the following ${unfixedFindings.length} code review findings:
+        const message = `Fix the following ${unfixedFindings.length} code review findings:
 
 ${unfixedFindings
   .map(
@@ -386,29 +409,21 @@ ${finding.suggestion ?? '(Please determine the best fix)'}
 
 Please apply all these fixes to the codebase.`
 
-      const { markReviewFindingFixed } = useChatStore.getState()
+        const { markReviewFindingFixed } = useChatStore.getState()
 
-      // Mark all as fixed
-      for (const { finding, index } of unfixedFindings) {
-        const findingKey = getReviewFindingKey(finding, index)
-        markReviewFindingFixed(worktreeId, findingKey)
+        // Mark all as fixed
+        for (const { finding, index } of unfixedFindings) {
+          const findingKey = getReviewFindingKey(finding, index)
+          markReviewFindingFixed(sessionId, findingKey)
+        }
+
+        onSendFix(message, executionMode)
+      } finally {
+        setIsFixingAll(false)
       }
-
-      // Dispatch event to trigger new session creation and send from ChatWindow
-      window.dispatchEvent(
-        new CustomEvent('review-fix-message', {
-          detail: {
-            worktreeId,
-            worktreePath: activeWorktreePath,
-            message,
-            createNewSession: true,
-          },
-        })
-      )
-    } finally {
-      setIsFixingAll(false)
-    }
-  }, [reviewResults, activeWorktreePath, worktreeId, isFindingFixed])
+    },
+    [reviewResults, sessionId, isFindingFixed, onSendFix]
+  )
 
   if (!reviewResults) {
     return <EmptyState />
@@ -436,15 +451,27 @@ Please apply all these fixes to the codebase.`
   ).length
 
   return (
-    <div className="relative flex h-full flex-col bg-background">
+    <div className="relative flex h-full flex-col bg-background border-l">
+      {/* Sidebar title bar */}
+      <div className="flex items-center justify-between border-b px-4 py-2">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Review
+        </span>
+        <ModalCloseButton
+          size="sm"
+          onClick={() => useChatStore.getState().setReviewSidebarVisible(false)}
+        />
+      </div>
       {/* Header with summary */}
-      <div className="border-b p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-2">
+      <div className="border-b p-3">
+        <div className="space-y-3">
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <div
                 className={cn(
-                  'flex items-center gap-1.5 rounded-full px-2.5 py-1'
+                  'flex items-center gap-1.5 rounded-full px-2.5 py-1',
+                  approvalConfig.label === 'Changes Requested' &&
+                    'bg-yellow-500/10'
                 )}
               >
                 <ApprovalIcon className={cn('h-4 w-4', approvalConfig.color)} />
@@ -462,18 +489,28 @@ Please apply all these fixes to the codebase.`
                   {fixedCount} fixed
                 </Badge>
               )}
+              {unfixedCount > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-amber-500 border-amber-500"
+                >
+                  {unfixedCount} remaining
+                </Badge>
+              )}
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm leading-6 text-muted-foreground select-text cursor-text">
               {reviewResults.summary}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Fix All button */}
-            {unfixedCount > 0 && (
+
+          {/* Fix All buttons */}
+          {unfixedCount > 0 && (
+            <div className="grid grid-cols-1 gap-2">
               <Button
-                onClick={handleFixAll}
-                disabled={isFixingAll || !activeWorktreePath}
+                onClick={() => handleFixAll('plan')}
+                disabled={isFixingAll}
                 size="sm"
+                className="justify-start"
               >
                 {isFixingAll ? (
                   <>
@@ -487,17 +524,27 @@ Please apply all these fixes to the codebase.`
                   </>
                 )}
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 flex-shrink-0"
-              onClick={() => clearReviewResults(worktreeId)}
-              title="Clear review results"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+              <Button
+                onClick={() => handleFixAll('yolo')}
+                disabled={isFixingAll}
+                size="sm"
+                variant="destructive"
+                className="justify-start"
+              >
+                {isFixingAll ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Fixing...
+                  </>
+                ) : (
+                  <>
+                    <Wrench className="h-3.5 w-3.5" />
+                    Auto-fix all (yolo) ({unfixedCount})
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Finding counts */}

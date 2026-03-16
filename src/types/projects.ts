@@ -1,3 +1,5 @@
+import type { LabelData } from '@/types/chat'
+
 /**
  * Type of session (base branch or worktree)
  */
@@ -37,6 +39,22 @@ export interface Project {
   is_folder?: boolean
   /** Path to custom avatar image (relative to app data dir, e.g., "avatars/abc123.png") */
   avatar_path?: string
+  /** MCP server names enabled by default for this project (null/undefined = inherit from global) */
+  enabled_mcp_servers?: string[] | null
+  /** All MCP server names ever seen for this project (prevents re-enabling user-disabled servers) */
+  known_mcp_servers?: string[]
+  /** Custom system prompt appended to every session execution */
+  custom_system_prompt?: string
+  /** Default provider profile name for sessions in this project (undefined = use global default) */
+  default_provider?: string | null
+  /** Default CLI backend for sessions in this project (undefined = use global default) */
+  default_backend?: string | null
+  /** Custom base directory for worktrees (undefined = use default ~/jean) */
+  worktrees_dir?: string | null
+  /** Linear personal API key for fetching issues (per-project) */
+  linear_api_key?: string | null
+  /** Linear team ID to filter issues (undefined/null = show all teams) */
+  linear_team_id?: string | null
 }
 
 /**
@@ -56,7 +74,7 @@ export interface Worktree {
   project_id: string
   /** Random workspace name (e.g., "fuzzy-tiger") */
   name: string
-  /** Absolute path to worktree (~/jean/<project>/<name>) */
+  /** Absolute path to worktree (configurable base dir, defaults to ~/jean/<project>/<name>) */
   path: string
   /** Git branch name (same as workspace name) */
   branch: string
@@ -66,6 +84,8 @@ export interface Worktree {
   setup_output?: string
   /** The setup script that was executed (if any) */
   setup_script?: string
+  /** Whether the setup script succeeded (undefined = no script, true = success, false = failed) */
+  setup_success?: boolean
   /** Type of session (defaults to 'worktree' for backward compatibility) */
   session_type?: SessionType
   /** Status of worktree creation (pending while being created in background) */
@@ -74,6 +94,10 @@ export interface Worktree {
   pr_number?: number
   /** GitHub PR URL (if a PR has been created) */
   pr_url?: string
+  /** GitHub issue number (if created from an issue) */
+  issue_number?: number
+  /** Linear issue identifier (e.g. "ENG-123", if created from a Linear issue) */
+  linear_issue_identifier?: string
   /** Cached PR display status (draft, open, review, merged, closed) */
   cached_pr_status?: string
   /** Cached CI check status (success, failure, pending, error) */
@@ -100,10 +124,14 @@ export interface Worktree {
   cached_worktree_ahead_count?: number
   /** Cached unpushed count (commits not yet pushed to origin/current_branch) */
   cached_unpushed_count?: number
+  /** User-assigned label with color (e.g. "In Progress") */
+  label?: LabelData
   /** Display order within project (lower = higher in list, base sessions ignore this) */
   order: number
   /** Unix timestamp when worktree was archived (undefined = not archived) */
   archived_at?: number
+  /** Unix timestamp when worktree was last opened/viewed by the user */
+  last_opened_at?: number
 }
 
 // =============================================================================
@@ -117,6 +145,8 @@ export interface WorktreeCreatingEvent {
   name: string
   path: string
   branch: string
+  pr_number?: number
+  issue_number?: number
 }
 
 /** Event payload when worktree creation completes */
@@ -145,6 +175,7 @@ export interface WorktreeDeletingEvent {
 export interface WorktreeDeletedEvent {
   id: string
   project_id: string
+  teardown_output?: string
 }
 
 /** Event payload when worktree deletion fails */
@@ -194,11 +225,11 @@ export interface WorktreePathExistsEvent {
     number: number
     title: string
     body?: string
-    comments: Array<{
+    comments: {
       author: { login: string }
       body: string
       createdAt: string
-    }>
+    }[]
   }
 }
 
@@ -217,11 +248,11 @@ export interface WorktreeBranchExistsEvent {
     number: number
     title: string
     body?: string
-    comments: Array<{
+    comments: {
       author: { login: string }
       body: string
       createdAt: string
-    }>
+    }[]
   }
   /** PR context to use when creating a new worktree with the suggested name */
   pr_context?: {
@@ -230,17 +261,17 @@ export interface WorktreeBranchExistsEvent {
     body?: string
     headRefName: string
     baseRefName: string
-    comments: Array<{
+    comments: {
       author: { login: string }
       body: string
       createdAt: string
-    }>
-    reviews: Array<{
+    }[]
+    reviews: {
       author: { login: string }
       body: string
       state: string
       submittedAt: string
-    }>
+    }[]
     diff?: string
   }
 }
@@ -257,6 +288,25 @@ export interface CreatePrResponse {
   pr_url: string
   /** AI-generated PR title */
   title: string
+  /** Whether this PR already existed (was linked, not newly created) */
+  existing: boolean
+}
+
+/** Response from detecting an existing PR for the current branch */
+export interface DetectPrResponse {
+  pr_number: number
+  pr_url: string
+  title: string
+}
+
+// =============================================================================
+// GitHub PR Merge
+// =============================================================================
+
+/** Response from merging a GitHub PR */
+export interface MergePrResponse {
+  merged: boolean
+  message: string
 }
 
 // =============================================================================
@@ -271,6 +321,27 @@ export interface CreateCommitResponse {
   message: string
   /** Whether the commit was pushed to remote */
   pushed: boolean
+  /** Whether the push fell back to creating a new branch (couldn't push to PR branch) */
+  push_fell_back: boolean
+  /** Whether the push failed due to permission/authentication errors */
+  push_permission_denied: boolean
+}
+
+/** Response from reverting the last local commit */
+export interface RevertCommitResponse {
+  /** Hash of the reverted commit */
+  commit_hash: string
+  /** Subject line of the reverted commit */
+  commit_message: string
+}
+
+/** Response from git push */
+export interface GitPushResponse {
+  output: string
+  /** Whether the push fell back to creating a new branch (couldn't push to PR branch) */
+  fellBack: boolean
+  /** Whether the push failed due to permission/authentication errors */
+  permissionDenied: boolean
 }
 
 // =============================================================================
@@ -301,6 +372,26 @@ export interface ReviewResponse {
   findings: ReviewFinding[]
   /** Overall review verdict */
   approval_status: 'approved' | 'changes_requested' | 'needs_discussion'
+}
+
+// =============================================================================
+// Release Notes
+// =============================================================================
+
+/** A GitHub release from gh release list */
+export interface GitHubRelease {
+  tagName: string
+  name: string
+  publishedAt: string
+  isLatest: boolean
+  isDraft: boolean
+  isPrerelease: boolean
+}
+
+/** Response from generate_release_notes command */
+export interface ReleaseNotesResponse {
+  title: string
+  body: string
 }
 
 // =============================================================================

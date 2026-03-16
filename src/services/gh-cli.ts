@@ -6,8 +6,8 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { invoke, useWsConnectionStatus } from '@/lib/transport'
+import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
 import { logger } from '@/lib/logger'
@@ -18,9 +18,9 @@ import type {
   GhInstallProgress,
 } from '@/types/gh-cli'
 
-// Check if running in Tauri context (vs plain browser)
-const isTauri = () =>
-  typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+import { hasBackend } from '@/lib/environment'
+
+const isTauri = hasBackend
 
 // Query keys for GitHub CLI
 export const ghCliQueryKeys = {
@@ -33,7 +33,7 @@ export const ghCliQueryKeys = {
 /**
  * Hook to check if GitHub CLI is installed and get its status
  */
-export function useGhCliStatus() {
+export function useGhCliStatus(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ghCliQueryKeys.status(),
     queryFn: async (): Promise<GhCliStatus> => {
@@ -52,6 +52,7 @@ export function useGhCliStatus() {
         return { installed: false, version: null, path: null }
       }
     },
+    enabled: options?.enabled ?? true,
     staleTime: 1000 * 60 * 5, // 5 minutes
     gcTime: 1000 * 60 * 10, // 10 minutes
     refetchInterval: 1000 * 60 * 60, // Re-check every hour
@@ -92,7 +93,7 @@ export function useGhCliAuth(options?: { enabled?: boolean }) {
 /**
  * Hook to fetch available GitHub CLI versions from GitHub releases
  */
-export function useAvailableGhVersions() {
+export function useAvailableGhVersions(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ghCliQueryKeys.versions(),
     queryFn: async (): Promise<GhReleaseInfo[]> => {
@@ -124,7 +125,8 @@ export function useAvailableGhVersions() {
         throw error
       }
     },
-    staleTime: 1000 * 60 * 15, // 15 minutes
+    enabled: options?.enabled ?? true,
+    staleTime: 1000 * 60 * 15, // Cache for 15 minutes to avoid rate limiting
     gcTime: 1000 * 60 * 30, // 30 minutes
     refetchInterval: 1000 * 60 * 60, // Re-check every hour
   })
@@ -138,10 +140,6 @@ export function useInstallGhCli() {
 
   return useMutation({
     mutationFn: async (version?: string) => {
-      if (!isTauri()) {
-        throw new Error('Cannot install gh CLI outside Tauri context')
-      }
-
       logger.info('Installing GitHub CLI', { version })
       await invoke('install_gh_cli', { version: version ?? null })
     },
@@ -167,6 +165,7 @@ export function useInstallGhCli() {
  */
 export function useGhInstallProgress(): [GhInstallProgress | null, () => void] {
   const [progress, setProgress] = useState<GhInstallProgress | null>(null)
+  const wsConnected = useWsConnectionStatus()
 
   const resetProgress = useCallback(() => {
     setProgress(null)
@@ -180,7 +179,9 @@ export function useGhInstallProgress(): [GhInstallProgress | null, () => void] {
 
     const setupListener = async () => {
       try {
-        logger.info('[useGhInstallProgress] Setting up listener', { listenerId })
+        logger.info('[useGhInstallProgress] Setting up listener', {
+          listenerId,
+        })
         unlistenFn = await listen<GhInstallProgress>(
           'gh-cli:install-progress',
           event => {
@@ -194,7 +195,10 @@ export function useGhInstallProgress(): [GhInstallProgress | null, () => void] {
           }
         )
       } catch (error) {
-        logger.error('[useGhInstallProgress] Failed to setup listener', { listenerId, error })
+        logger.error('[useGhInstallProgress] Failed to setup listener', {
+          listenerId,
+          error,
+        })
       }
     }
 
@@ -206,7 +210,7 @@ export function useGhInstallProgress(): [GhInstallProgress | null, () => void] {
         unlistenFn()
       }
     }
-  }, [])
+  }, [wsConnected])
 
   return [progress, resetProgress]
 }
@@ -252,7 +256,9 @@ export function useGhCliSetup() {
     status: status.data,
     isStatusLoading: status.isLoading,
     versions: versions.data ?? [],
-    isVersionsLoading: versions.isLoading,
+    isVersionsLoading: versions.isFetching,
+    isVersionsError: versions.isError,
+    refetchVersions: versions.refetch,
     needsSetup,
     isInstalling: installMutation.isPending,
     installError: installMutation.error,

@@ -13,12 +13,12 @@
 
 When you finish a task, use the completion script.
 
-Usage: npm task:complete TASK_NAME_OR_NUMBER
+Usage: bun run task:complete TASK_NAME_OR_NUMBER
 
 Examples:
-npm task:complete frontend-performance
-npm task:complete 2
-npm task:complete awesome-feature
+bun run task:complete frontend-performance
+bun run task:complete 2
+bun run task:complete awesome-feature
 
 The script will:
 
@@ -36,4 +36,4 @@ tasks-done/task-2025-11-01-frontend-performance-optimization.md
 
 If you have existing completed tasks without dates, rename them using their last modified date:
 
-Usage: npm task:rename-done
+Usage: bun run task:rename-done

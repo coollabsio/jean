@@ -26,5 +26,5 @@ export function getExtensionColor(ext: string): string {
 export function getExtension(path: string): string {
   const filename = getFilename(path)
   const parts = filename.split('.')
-  return parts.length > 1 ? parts.pop()?.toLowerCase() ?? '' : ''
+  return parts.length > 1 ? (parts.pop()?.toLowerCase() ?? '') : ''
 }

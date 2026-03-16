@@ -3,7 +3,9 @@ import { useTerminalStore } from './terminal-store'
 
 // Mock crypto.randomUUID
 vi.stubGlobal('crypto', {
-  randomUUID: vi.fn(() => 'mock-uuid-' + Math.random().toString(36).slice(2, 9)),
+  randomUUID: vi.fn(
+    () => 'mock-uuid-' + Math.random().toString(36).slice(2, 9)
+  ),
 })
 
 describe('TerminalStore', () => {
@@ -30,7 +32,8 @@ describe('TerminalStore', () => {
     })
 
     it('sets terminal panel open per worktree', () => {
-      const { setTerminalPanelOpen, isTerminalPanelOpen } = useTerminalStore.getState()
+      const { setTerminalPanelOpen, isTerminalPanelOpen } =
+        useTerminalStore.getState()
       const worktreeId = 'test-worktree'
 
       setTerminalPanelOpen(worktreeId, true)
@@ -41,7 +44,8 @@ describe('TerminalStore', () => {
     })
 
     it('toggles terminal visibility', () => {
-      const { toggleTerminal, isTerminalPanelOpen } = useTerminalStore.getState()
+      const { toggleTerminal, isTerminalPanelOpen } =
+        useTerminalStore.getState()
       const worktreeId = 'test-worktree'
 
       toggleTerminal(worktreeId)
@@ -81,24 +85,25 @@ describe('TerminalStore', () => {
     it('adds terminal with command', () => {
       const { addTerminal, getTerminals } = useTerminalStore.getState()
 
-      addTerminal('worktree-1', 'npm run dev')
+      addTerminal('worktree-1', 'bun run dev')
 
       const terminals = getTerminals('worktree-1')
-      expect(terminals[0]?.command).toBe('npm run dev')
-      expect(terminals[0]?.label).toBe('npm')
+      expect(terminals[0]?.command).toBe('bun run dev')
+      expect(terminals[0]?.label).toBe('bun')
     })
 
     it('adds terminal with custom label', () => {
       const { addTerminal, getTerminals } = useTerminalStore.getState()
 
-      addTerminal('worktree-1', 'npm run dev', 'Dev Server')
+      addTerminal('worktree-1', 'bun run dev', 'Dev Server')
 
       const terminals = getTerminals('worktree-1')
       expect(terminals[0]?.label).toBe('Dev Server')
     })
 
     it('removes a terminal', () => {
-      const { addTerminal, removeTerminal, getTerminals } = useTerminalStore.getState()
+      const { addTerminal, removeTerminal, getTerminals } =
+        useTerminalStore.getState()
 
       const id1 = addTerminal('worktree-1')
       const id2 = addTerminal('worktree-1')
@@ -117,11 +122,15 @@ describe('TerminalStore', () => {
       const id2 = addTerminal('worktree-1')
 
       // id2 is now active
-      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(id2)
+      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(
+        id2
+      )
 
       // Remove active terminal, should fall back to id1
       removeTerminal('worktree-1', id2)
-      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(id1)
+      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(
+        id1
+      )
     })
 
     it('sets active terminal', () => {
@@ -131,7 +140,9 @@ describe('TerminalStore', () => {
       addTerminal('worktree-1')
 
       setActiveTerminal('worktree-1', id1)
-      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(id1)
+      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(
+        id1
+      )
     })
 
     it('gets terminals for worktree', () => {
@@ -159,7 +170,8 @@ describe('TerminalStore', () => {
 
   describe('running state', () => {
     it('sets terminal running state', () => {
-      const { addTerminal, setTerminalRunning, isTerminalRunning } = useTerminalStore.getState()
+      const { addTerminal, setTerminalRunning, isTerminalRunning } =
+        useTerminalStore.getState()
 
       const id = addTerminal('worktree-1')
 
@@ -173,7 +185,12 @@ describe('TerminalStore', () => {
     })
 
     it('clears running state when terminal is removed', () => {
-      const { addTerminal, setTerminalRunning, isTerminalRunning, removeTerminal } = useTerminalStore.getState()
+      const {
+        addTerminal,
+        setTerminalRunning,
+        isTerminalRunning,
+        removeTerminal,
+      } = useTerminalStore.getState()
 
       const id = addTerminal('worktree-1')
       setTerminalRunning(id, true)
@@ -187,21 +204,22 @@ describe('TerminalStore', () => {
     it('creates new terminal for command', () => {
       const { startRun, getTerminals } = useTerminalStore.getState()
 
-      const id = startRun('worktree-1', 'npm test')
+      const id = startRun('worktree-1', 'bun test')
 
       const terminals = getTerminals('worktree-1')
       expect(terminals).toHaveLength(1)
       expect(terminals[0]?.id).toBe(id)
-      expect(terminals[0]?.command).toBe('npm test')
+      expect(terminals[0]?.command).toBe('bun test')
     })
 
     it('reuses existing running terminal with same command', () => {
-      const { startRun, setTerminalRunning, getTerminals } = useTerminalStore.getState()
+      const { startRun, setTerminalRunning, getTerminals } =
+        useTerminalStore.getState()
 
-      const id1 = startRun('worktree-1', 'npm test')
+      const id1 = startRun('worktree-1', 'bun test')
       setTerminalRunning(id1, true)
 
-      const id2 = startRun('worktree-1', 'npm test')
+      const id2 = startRun('worktree-1', 'bun test')
 
       expect(id1).toBe(id2)
       expect(getTerminals('worktree-1')).toHaveLength(1)
@@ -210,20 +228,25 @@ describe('TerminalStore', () => {
     it('creates new terminal if existing terminal is not running', () => {
       const { startRun, getTerminals } = useTerminalStore.getState()
 
-      startRun('worktree-1', 'npm test')
+      startRun('worktree-1', 'bun test')
       // Not marked as running
-      const id2 = startRun('worktree-1', 'npm test')
+      const id2 = startRun('worktree-1', 'bun test')
 
       const terminals = getTerminals('worktree-1')
       expect(terminals).toHaveLength(2)
-      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(id2)
+      expect(useTerminalStore.getState().activeTerminalIds['worktree-1']).toBe(
+        id2
+      )
     })
 
     it('shows terminal panel when starting run', () => {
-      useTerminalStore.setState({ terminalVisible: false, terminalPanelOpen: {} })
+      useTerminalStore.setState({
+        terminalVisible: false,
+        terminalPanelOpen: {},
+      })
       const { startRun, isTerminalPanelOpen } = useTerminalStore.getState()
 
-      startRun('worktree-1', 'npm test')
+      startRun('worktree-1', 'bun test')
 
       const state = useTerminalStore.getState()
       expect(state.terminalVisible).toBe(true)
@@ -233,7 +256,8 @@ describe('TerminalStore', () => {
 
   describe('closeAllTerminals', () => {
     it('removes all terminals for worktree and returns IDs', () => {
-      const { addTerminal, closeAllTerminals, getTerminals } = useTerminalStore.getState()
+      const { addTerminal, closeAllTerminals, getTerminals } =
+        useTerminalStore.getState()
 
       const id1 = addTerminal('worktree-1')
       const id2 = addTerminal('worktree-1')
@@ -249,7 +273,12 @@ describe('TerminalStore', () => {
     })
 
     it('clears running state for closed terminals', () => {
-      const { addTerminal, setTerminalRunning, closeAllTerminals, isTerminalRunning } = useTerminalStore.getState()
+      const {
+        addTerminal,
+        setTerminalRunning,
+        closeAllTerminals,
+        isTerminalRunning,
+      } = useTerminalStore.getState()
 
       const id1 = addTerminal('worktree-1')
       const id2 = addTerminal('worktree-1')
@@ -263,7 +292,8 @@ describe('TerminalStore', () => {
     })
 
     it('closes panel for worktree but preserves global visibility', () => {
-      const { addTerminal, closeAllTerminals, isTerminalPanelOpen } = useTerminalStore.getState()
+      const { addTerminal, closeAllTerminals, isTerminalPanelOpen } =
+        useTerminalStore.getState()
 
       addTerminal('worktree-1')
       closeAllTerminals('worktree-1')
@@ -294,8 +324,8 @@ describe('TerminalStore', () => {
     it('extracts first word from command', () => {
       const { addTerminal, getTerminals } = useTerminalStore.getState()
 
-      addTerminal('worktree-1', 'npm run build')
-      expect(getTerminals('worktree-1')[0]?.label).toBe('npm')
+      addTerminal('worktree-1', 'bun run build')
+      expect(getTerminals('worktree-1')[0]?.label).toBe('bun')
     })
 
     it('removes path from command', () => {
@@ -308,7 +338,10 @@ describe('TerminalStore', () => {
     it('truncates long command names', () => {
       const { addTerminal, getTerminals } = useTerminalStore.getState()
 
-      addTerminal('worktree-1', 'verylongcommandnamethatexceedstwentycharacters')
+      addTerminal(
+        'worktree-1',
+        'verylongcommandnamethatexceedstwentycharacters'
+      )
       const label = getTerminals('worktree-1')[0]?.label
       expect(label?.length).toBeLessThanOrEqual(20)
       expect(label?.endsWith('...')).toBe(true)

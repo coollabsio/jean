@@ -165,17 +165,17 @@ All data operations flow through Tauri commands. The app has **146+ backend comm
 
 ### Command Distribution by Module
 
-| Module | Location | Commands | Purpose |
-|--------|----------|----------|---------|
-| Chat | `src-tauri/src/chat/commands.rs` | 40 | Sessions, messages, AI operations |
-| Projects | `src-tauri/src/projects/commands.rs` | 57 | Worktrees, git, file operations |
-| GitHub Issues | `src-tauri/src/projects/github_issues.rs` | 12 | Issue/PR fetching |
-| Saved Contexts | `src-tauri/src/projects/saved_contexts.rs` | 4 | Context persistence |
-| Terminal | `src-tauri/src/terminal/commands.rs` | 8 | PTY management |
-| GH CLI | `src-tauri/src/gh_cli/commands.rs` | 4 | GitHub CLI wrapper |
-| Claude CLI | `src-tauri/src/claude_cli/commands.rs` | 4 | Claude CLI wrapper |
-| Background Tasks | `src-tauri/src/background_tasks/commands.rs` | 8 | Async job management |
-| Core | `src-tauri/src/lib.rs` | 9 | Preferences, UI state |
+| Module           | Location                                     | Commands | Purpose                           |
+| ---------------- | -------------------------------------------- | -------- | --------------------------------- |
+| Chat             | `src-tauri/src/chat/commands.rs`             | 40       | Sessions, messages, AI operations |
+| Projects         | `src-tauri/src/projects/commands.rs`         | 57       | Worktrees, git, file operations   |
+| GitHub Issues    | `src-tauri/src/projects/github_issues.rs`    | 12       | Issue/PR fetching                 |
+| Saved Contexts   | `src-tauri/src/projects/saved_contexts.rs`   | 4        | Context persistence               |
+| Terminal         | `src-tauri/src/terminal/commands.rs`         | 8        | PTY management                    |
+| GH CLI           | `src-tauri/src/gh_cli/commands.rs`           | 4        | GitHub CLI wrapper                |
+| Claude CLI       | `src-tauri/src/claude_cli/commands.rs`       | 4        | Claude CLI wrapper                |
+| Background Tasks | `src-tauri/src/background_tasks/commands.rs` | 8        | Async job management              |
+| Core             | `src-tauri/src/lib.rs`                       | 9        | Preferences, UI state             |
 
 ### Invoking Tauri Commands
 

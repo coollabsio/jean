@@ -1,8 +1,17 @@
-import { memo } from 'react'
+import { memo, useState, useCallback, type ReactNode } from 'react'
 import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
+import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
+import { Copy, Check } from 'lucide-react'
+import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
@@ -10,6 +19,52 @@ interface MarkdownProps {
   /** Enable streaming mode with incomplete markdown handling */
   streaming?: boolean
   className?: string
+}
+
+function extractText(node: ReactNode): string {
+  if (typeof node === 'string') return node
+  if (Array.isArray(node)) return node.map(extractText).join('')
+  if (node && typeof node === 'object' && 'props' in node) {
+    return extractText(
+      (node as { props: { children?: ReactNode } }).props.children
+    )
+  }
+  return ''
+}
+
+function CodeBlock({ children }: { children: ReactNode }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    const text = extractText(children)
+    copyToClipboard(text)
+    toast.success('Copied to clipboard')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [children])
+
+  return (
+    <div className="relative my-5">
+      <pre className="overflow-x-auto rounded-lg bg-muted p-4 pr-10 text-sm">
+        {children}
+      </pre>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCopy}
+            className="absolute right-2 top-2 opacity-50 hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            {copied ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Copy code</TooltipContent>
+      </Tooltip>
+    </div>
+  )
 }
 
 const components: Components = {
@@ -67,10 +122,15 @@ const components: Components = {
   },
 
   // Code blocks
-  pre: ({ children }) => (
-    <pre className="my-5 overflow-x-auto rounded-lg bg-muted p-4 text-sm">
-      {children}
-    </pre>
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+
+  // Images
+  img: ({ src, alt }) => (
+    <img
+      src={src}
+      alt={alt || ''}
+      className="max-w-full h-auto rounded-md my-4"
+    />
   ),
 
   // Links
@@ -123,6 +183,13 @@ const components: Components = {
   td: ({ children }) => <td className="px-4 py-2.5">{children}</td>,
 }
 
+const streamingComponents: Components = {
+  ...components,
+  p: ({ children }) => (
+    <p className="my-0 leading-relaxed first:mt-0 last:mb-0">{children}</p>
+  ),
+}
+
 /**
  * Memoized markdown renderer to prevent expensive re-parsing
  * ReactMarkdown is expensive, so we avoid re-renders when content hasn't changed
@@ -137,7 +204,11 @@ const Markdown = memo(function Markdown({
 
   return (
     <div className={cn('markdown leading-relaxed break-words', className)}>
-      <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown
+        components={streaming ? streamingComponents : components}
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
+      >
         {content}
       </ReactMarkdown>
     </div>

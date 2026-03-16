@@ -202,8 +202,7 @@ export function useUserProfile(userId: string) {
 // Mutation hook
 export function useUpdateUserProfile() {
   return useMutation({
-    mutationFn: (userData: Partial<User>) =>
-      invoke('update_user', userData),
+    mutationFn: (userData: Partial<User>) => invoke('update_user', userData),
     onSuccess: () => {
       // Invalidate and refetch user queries
       queryClient.invalidateQueries({ queryKey: ['user'] })

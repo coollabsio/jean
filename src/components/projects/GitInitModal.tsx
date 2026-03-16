@@ -162,11 +162,14 @@ export function GitInitModal() {
             <div className="space-y-3 rounded-lg border p-3">
               <p className="text-sm font-medium">Git identity not configured</p>
               <p className="text-xs text-muted-foreground">
-                Git requires a name and email for commits. This will be saved globally.
+                Git requires a name and email for commits. This will be saved
+                globally.
               </p>
               <div className="space-y-2">
                 <div className="space-y-1">
-                  <Label htmlFor="git-name" className="text-xs">Name</Label>
+                  <Label htmlFor="git-name" className="text-xs">
+                    Name
+                  </Label>
                   <Input
                     id="git-name"
                     placeholder="Your Name"
@@ -176,7 +179,9 @@ export function GitInitModal() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="git-email" className="text-xs">Email</Label>
+                  <Label htmlFor="git-email" className="text-xs">
+                    Email
+                  </Label>
                   <Input
                     id="git-email"
                     type="email"
@@ -221,7 +226,12 @@ export function GitInitModal() {
           </Button>
           <Button
             onClick={handleInitialize}
-            disabled={isPending || (identityChecked && needsIdentity && (!gitName.trim() || !gitEmail.trim()))}
+            disabled={
+              isPending ||
+              (identityChecked &&
+                needsIdentity &&
+                (!gitName.trim() || !gitEmail.trim()))
+            }
           >
             {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             {savingIdentity

@@ -19,13 +19,13 @@ git clone https://github.com/your-username/tauri-template.git
 cd tauri-template
 
 # Install dependencies
-npm install
+bun install
 
 # Start development server
-npm run dev
+bun run dev
 
 # Run tests and quality checks
-npm run check:all
+bun run check:all
 ```
 
 ## 📋 How to Contribute
@@ -42,7 +42,7 @@ npm run check:all
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/amazing-feature`
 3. Make your changes following our guidelines
-4. Ensure all quality checks pass: `npm run check:all`
+4. Ensure all quality checks pass: `bun run check:all`
 5. Commit using conventional commits (see below)
 6. Push to your fork: `git push origin feature/amazing-feature`
 7. Open a Pull Request
@@ -178,7 +178,7 @@ All PRs must pass:
 - ✅ Rust formatting and clippy
 - ✅ Rust unit tests
 
-Run locally: `npm run check:all`
+Run locally: `bun run check:all`
 
 ## 📦 Commit Guidelines
 

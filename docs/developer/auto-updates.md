@@ -233,7 +233,7 @@ The GitHub Actions workflow automatically:
 
 ### Manual Release Process
 
-1. Run `npm run release:prepare v1.0.1`
+1. Run `bun run release:prepare v1.0.1`
 2. Push tags to trigger GitHub Actions
 3. Wait for build to complete
 4. Manually publish the draft release on GitHub

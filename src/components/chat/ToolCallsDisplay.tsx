@@ -132,6 +132,8 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
           key={mergedToolId}
           toolCallId={mergedToolId}
           questions={mergedQuestions}
+          hasFollowUpMessage={hasFollowUpMessage}
+          isSkipped={areQuestionsSkipped?.(sessionId) ?? false}
           onSubmit={(toolCallId, answers) =>
             onQuestionAnswer?.(toolCallId, answers, mergedQuestions)
           }

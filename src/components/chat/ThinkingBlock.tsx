@@ -22,9 +22,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   isStreaming = false,
 }: ThinkingBlockProps) {
   return (
-    <details className="group border border-border/50 rounded-lg bg-muted/30">
-      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <Brain className={cn('h-4 w-4 text-purple-500')} />
+    <details className="group border border-border/50 rounded-md bg-muted/30">
+      <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+        <Brain className={cn('h-3.5 w-3.5 text-purple-500')} />
         <span>Thinking...</span>
         <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-open:rotate-90" />
       </summary>

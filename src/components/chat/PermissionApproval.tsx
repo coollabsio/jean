@@ -127,16 +127,20 @@ export function PermissionApproval({
     // Extract inner content for containment check (e.g., "Bash(cmd)" → "cmd")
     const innerContent = patterns.map(p => {
       const match = p.match(/^(\w+)\((.+)\)$/)
-      return match ? { tool: match[1] ?? p, content: match[2] ?? p } : { tool: p, content: p }
+      return match
+        ? { tool: match[1] ?? p, content: match[2] ?? p }
+        : { tool: p, content: p }
     })
     const keep = new Set<number>()
 
     for (let i = 0; i < denials.length; i++) {
       let shouldKeep = true
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const itemI = innerContent[i]!
 
       for (let j = 0; j < denials.length; j++) {
         if (i === j) continue
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const itemJ = innerContent[j]!
 
         // Only compare containment for same tool type
@@ -210,6 +214,20 @@ export function PermissionApproval({
       window.removeEventListener('answer-question', handleAnswerQuestion)
   }, [readOnly, selectedIndices.size, handleApprove])
 
+  // Listen for CMD+Y to approve with yolo mode
+  useEffect(() => {
+    if (readOnly || !onApproveYolo) return
+
+    const handler = () => {
+      if (selectedIndices.size > 0) {
+        handleApproveYolo()
+      }
+    }
+
+    window.addEventListener('approve-plan-yolo', handler)
+    return () => window.removeEventListener('approve-plan-yolo', handler)
+  }, [readOnly, selectedIndices.size, handleApproveYolo, onApproveYolo])
+
   // Read-only collapsed view (after approval)
   if (readOnly && approvedPatterns) {
     return (
@@ -230,9 +248,9 @@ export function PermissionApproval({
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="space-y-1 border-t border-border/30 px-4 py-3">
-              {approvedPatterns.map((pattern, i) => (
+              {approvedPatterns.map(pattern => (
                 <div
-                  key={i}
+                  key={pattern}
                   className="font-mono text-xs text-muted-foreground"
                 >
                   {pattern}
@@ -301,9 +319,10 @@ export function PermissionApproval({
       <div className="flex gap-2">
         <Button
           size="sm"
+          variant="outline"
           onClick={handleApprove}
           disabled={selectedIndices.size === 0}
-          className="gap-1"
+          className="gap-1 !bg-primary/80 !border-primary !text-primary-foreground hover:!bg-primary/90"
         >
           <Play className="h-3 w-3" />
           Approve & Continue
@@ -316,13 +335,18 @@ export function PermissionApproval({
         {onApproveYolo && (
           <Button
             size="sm"
-            variant="destructive"
+            variant="outline"
             onClick={handleApproveYolo}
             disabled={selectedIndices.size === 0}
-            className="gap-1"
+            className="gap-1 !bg-destructive !border-destructive !text-white hover:!bg-destructive/90 dark:!bg-destructive/60"
           >
             <Play className="h-3 w-3" />
             Approve (yolo)
+            <Kbd className="ml-1.5 h-4 text-[10px] bg-destructive-foreground/20 text-destructive-foreground">
+              {formatShortcutDisplay(
+                DEFAULT_KEYBINDINGS.approve_plan_yolo ?? 'mod+y'
+              )}
+            </Kbd>
           </Button>
         )}
         {onDeny && (

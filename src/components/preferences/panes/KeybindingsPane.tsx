@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { usePreferences, useSavePreferences } from '@/services/preferences'
+import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { KeyRecorder } from '../KeyRecorder'
 import {
   KEYBINDING_DEFINITIONS,
@@ -54,7 +54,7 @@ const categoryOrder = ['chat', 'navigation', 'git']
 
 export const KeybindingsPane: React.FC = () => {
   const { data: preferences } = usePreferences()
-  const savePreferences = useSavePreferences()
+  const patchPreferences = usePatchPreferences()
 
   const keybindings = preferences?.keybindings ?? DEFAULT_KEYBINDINGS
 
@@ -96,15 +96,14 @@ export const KeybindingsPane: React.FC = () => {
         return
       }
 
-      savePreferences.mutate({
-        ...preferences,
+      patchPreferences.mutate({
         keybindings: {
           ...keybindings,
           [action]: shortcut,
         },
       })
     },
-    [preferences, keybindings, savePreferences, findConflict]
+    [preferences, keybindings, patchPreferences, findConflict]
   )
 
   return (
@@ -128,7 +127,7 @@ export const KeybindingsPane: React.FC = () => {
                   checkConflict={(shortcut: string) =>
                     findConflict(def.action, shortcut)
                   }
-                  disabled={savePreferences.isPending}
+                  disabled={patchPreferences.isPending}
                 />
               ))}
             </div>

@@ -12,6 +12,8 @@ export interface ClaudeCliStatus {
   version: string | null
   /** Path to the CLI binary (if installed) */
   path: string | null
+  /** Whether the CLI supports the `auth` subcommand (older CLIs lack it) */
+  supports_auth_command: boolean
 }
 
 /**
@@ -48,4 +50,19 @@ export interface InstallProgress {
   message: string
   /** Percentage complete (0-100) */
   percent: number
+}
+
+export interface ClaudeUsageWindowSnapshot {
+  usedPercent: number
+  resetsAt: number | null
+}
+
+export interface ClaudeUsageSnapshot {
+  planType: string | null
+  session: ClaudeUsageWindowSnapshot | null
+  weekly: ClaudeUsageWindowSnapshot | null
+  sonnetWeekly: ClaudeUsageWindowSnapshot | null
+  extraUsageSpent: number | null
+  extraUsageLimit: number | null
+  fetchedAt: number
 }

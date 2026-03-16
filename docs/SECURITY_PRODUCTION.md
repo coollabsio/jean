@@ -19,7 +19,7 @@ The template includes placeholder Ed25519 keys in `src-tauri/tauri.conf.json`. T
 1. **Install Tauri CLI** (if not already installed):
 
    ```bash
-   npm install -g @tauri-apps/cli
+   bun add -g @tauri-apps/cli
    ```
 
 2. **Generate new Ed25519 keypair**:

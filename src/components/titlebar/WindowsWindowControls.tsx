@@ -1,38 +1,12 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useCommandContext } from '@/hooks/use-command-context'
 import { executeCommand } from '@/lib/commands'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useWindowMaximized } from '@/hooks/use-window-maximized'
 
 export function WindowsWindowControls() {
   const context = useCommandContext()
-  const [isMaximized, setIsMaximized] = useState(false)
-
-  useEffect(() => {
-    const appWindow = getCurrentWindow()
-
-    // Check initial state
-    appWindow.isMaximized().then(setIsMaximized).catch(() => {})
-
-    // Listen for resize events to detect maximize state changes
-    let unlisten: (() => void) | null = null
-    appWindow
-      .onResized(async () => {
-        try {
-          const maximized = await appWindow.isMaximized()
-          setIsMaximized(maximized)
-        } catch {
-          // ignore
-        }
-      })
-      .then((fn) => {
-        unlisten = fn
-      })
-
-    return () => {
-      if (unlisten) unlisten()
-    }
-  }, [])
+  const isMaximized = useWindowMaximized()
 
   const handleMinimize = useCallback(async () => {
     await executeCommand('window-minimize', context)
@@ -47,7 +21,10 @@ export function WindowsWindowControls() {
   }, [context])
 
   return (
-    <div className="flex items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div
+      className="flex items-center"
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+    >
       {/* Minimize */}
       <button
         type="button"
@@ -77,13 +54,27 @@ export function WindowsWindowControls() {
       >
         {isMaximized ? (
           // Restore icon (overlapping rectangles)
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1"
+          >
             <rect x="2" y="3" width="7" height="7" rx="0.5" />
             <path d="M3 3V1.5a.5.5 0 0 1 .5-.5H9.5a.5.5 0 0 1 .5.5V7.5a.5.5 0 0 1-.5.5H8" />
           </svg>
         ) : (
           // Maximize icon (single rectangle)
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1"
+          >
             <rect x="0.5" y="0.5" width="9" height="9" rx="0.5" />
           </svg>
         )}

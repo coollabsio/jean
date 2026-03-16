@@ -1,17 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { listen } from '@tauri-apps/api/event'
-import { getVersion } from '@tauri-apps/api/app'
-import { check } from '@tauri-apps/plugin-updater'
-import { message } from '@tauri-apps/plugin-dialog'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { invoke } from '@tauri-apps/api/core'
+import { listen, invoke } from '@/lib/transport'
+import { isNativeApp } from '@/lib/environment'
+import { notify } from '@/lib/notifications'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
-import { setActiveWorktreeForPolling } from '@/services/git-status'
+import type { QueuedMessage } from '@/types/chat'
+import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
+import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
 import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
@@ -21,148 +21,77 @@ import {
   type KeybindingAction,
   type KeybindingsMap,
 } from '@/types/keybindings'
-import { isBaseSession, type Project, type Worktree } from '@/types/projects'
 
-// Throttle tracking for worktree switching
-let lastWorktreeSwitchTime = 0
-const WORKTREE_SWITCH_THROTTLE_MS = 100
+export function getTerminalShortcutWorktreeId(): string | null {
+  const activeElement = document.activeElement
+  const terminalFocused =
+    activeElement instanceof HTMLElement && !!activeElement.closest('.xterm')
 
-// Helper to switch worktrees using query cache (includes Session Board as navigation target)
-function switchWorktree(
-  direction: 'next' | 'previous',
-  queryClient: QueryClient
-) {
-  // Throttle rapid switches
-  const now = Date.now()
-  if (now - lastWorktreeSwitchTime < WORKTREE_SWITCH_THROTTLE_MS) return
-  lastWorktreeSwitchTime = now
+  if (!terminalFocused) return null
 
-  const {
-    selectedWorktreeId,
-    selectedProjectId,
-    selectWorktree,
-    selectProject,
-  } = useProjectsStore.getState()
-  const { activeWorktreePath, clearActiveWorktree, setActiveWorktree } =
-    useChatStore.getState()
+  const uiState = useUIStore.getState()
+  const chatState = useChatStore.getState()
+  const terminalState = useTerminalStore.getState()
 
-  const isOnSessionBoard = !activeWorktreePath
+  const worktreeId = uiState.sessionChatModalOpen
+    ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
+    : chatState.activeWorktreeId
 
-  // Determine project ID (from session board selection or current worktree)
-  let projectId: string | null = null
-  if (isOnSessionBoard) {
-    projectId = selectedProjectId
-  } else if (selectedWorktreeId) {
-    const worktreeData = queryClient.getQueryData<Worktree>([
-      ...projectsQueryKeys.all,
-      'worktree',
-      selectedWorktreeId,
-    ])
-    projectId = worktreeData?.project_id ?? null
+  if (!worktreeId) return null
+
+  const terminalOpen =
+    terminalState.terminalPanelOpen[worktreeId] ||
+    terminalState.modalTerminalOpen[worktreeId]
+
+  return terminalOpen ? worktreeId : null
+}
+
+export function addTerminalTabForShortcut(): boolean {
+  const worktreeId = getTerminalShortcutWorktreeId()
+  if (!worktreeId) return false
+
+  useTerminalStore.getState().addTerminal(worktreeId)
+  return true
+}
+
+export function closeActiveTerminalTabForShortcut(): boolean {
+  const worktreeId = getTerminalShortcutWorktreeId()
+  if (!worktreeId) return false
+
+  const terminalStore = useTerminalStore.getState()
+  const activeTerminalId = terminalStore.activeTerminalIds[worktreeId]
+
+  if (!activeTerminalId) return true
+
+  invoke('stop_terminal', { terminalId: activeTerminalId }).catch(() => {
+    /* noop */
+  })
+  disposeTerminal(activeTerminalId)
+  terminalStore.removeTerminal(worktreeId, activeTerminalId)
+
+  const remaining = useTerminalStore.getState().terminals[worktreeId] ?? []
+  if (remaining.length === 0) {
+    terminalStore.setTerminalPanelOpen(worktreeId, false)
+    terminalStore.setTerminalVisible(false)
+    terminalStore.setModalTerminalOpen(worktreeId, false)
   }
 
-  if (!projectId) {
-    logger.debug('No project context for worktree switching')
-    return
+  return true
+}
+
+export function switchActiveTerminalTabByIndexForShortcut(index: number): boolean {
+  const worktreeId = getTerminalShortcutWorktreeId()
+  if (!worktreeId) return false
+
+  const terminalStore = useTerminalStore.getState()
+  const terminals = terminalStore.terminals[worktreeId] ?? []
+  const targetTerminal = terminals[index]
+
+  if (targetTerminal) {
+    terminalStore.setActiveTerminal(worktreeId, targetTerminal.id)
   }
 
-  // Get worktrees for that project from cache
-  const projectWorktrees = queryClient.getQueryData<Worktree[]>(
-    projectsQueryKeys.worktrees(projectId)
-  )
-  if (!projectWorktrees || projectWorktrees.length === 0) {
-    logger.debug('No project worktrees found in cache for switching')
-    return
-  }
-
-  // Sort worktrees same as WorktreeList: base sessions first, then by order field, then by created_at
-  const sortedWorktrees = [...projectWorktrees]
-    .filter(w => w.status !== 'pending' && w.status !== 'deleting')
-    .sort((a, b) => {
-      const aIsBase = isBaseSession(a)
-      const bIsBase = isBaseSession(b)
-      if (aIsBase && !bIsBase) return -1
-      if (!aIsBase && bIsBase) return 1
-      // Sort by order field (lower = higher in list), fall back to created_at (newest first)
-      if (a.order !== b.order) {
-        return a.order - b.order
-      }
-      return b.created_at - a.created_at
-    })
-
-  if (sortedWorktrees.length === 0) {
-    logger.debug('No valid worktrees after filtering')
-    return
-  }
-
-  // Get project for git polling context
-  const projects = queryClient.getQueryData<Project[]>(projectsQueryKeys.list())
-  const project = projects?.find(p => p.id === projectId)
-
-  // Handle navigation FROM Session Board
-  if (isOnSessionBoard) {
-    const targetIndex = direction === 'next' ? 0 : sortedWorktrees.length - 1
-    const newWorktree = sortedWorktrees[targetIndex]
-    if (!newWorktree) return
-    logger.debug('Switching from Session Board to worktree', {
-      to: newWorktree.id,
-      direction,
-    })
-    selectWorktree(newWorktree.id)
-    setActiveWorktree(newWorktree.id, newWorktree.path)
-    setActiveWorktreeForPolling({
-      worktreeId: newWorktree.id,
-      worktreePath: newWorktree.path,
-      baseBranch: project?.default_branch ?? 'main',
-      prNumber: newWorktree.pr_number,
-      prUrl: newWorktree.pr_url,
-    })
-    return
-  }
-
-  // Handle navigation between worktrees (with Session Board boundaries)
-  const currentIndex = sortedWorktrees.findIndex(
-    w => w.id === selectedWorktreeId
-  )
-  if (currentIndex === -1) return
-
-  // Check if navigating TO Session Board
-  if (direction === 'previous' && currentIndex === 0) {
-    // At first worktree, going up → switch to Session Board
-    logger.debug('Switching to Session Board view (up from first worktree)')
-    selectProject(projectId)
-    clearActiveWorktree()
-    selectWorktree(null)
-    return
-  }
-  if (direction === 'next' && currentIndex === sortedWorktrees.length - 1) {
-    // At last worktree, going down → switch to Session Board
-    logger.debug('Switching to Session Board view (down from last worktree)')
-    selectProject(projectId)
-    clearActiveWorktree()
-    selectWorktree(null)
-    return
-  }
-
-  // Normal worktree-to-worktree navigation
-  const newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1
-  const newWorktree = sortedWorktrees[newIndex]
-  if (newWorktree) {
-    logger.debug('Switching worktree', {
-      from: selectedWorktreeId,
-      to: newWorktree.id,
-      direction,
-    })
-    selectWorktree(newWorktree.id)
-    setActiveWorktree(newWorktree.id, newWorktree.path)
-    setActiveWorktreeForPolling({
-      worktreeId: newWorktree.id,
-      worktreePath: newWorktree.path,
-      baseBranch: project?.default_branch ?? 'main',
-      prNumber: newWorktree.pr_number,
-      prUrl: newWorktree.pr_url,
-    })
-  }
+  return true
 }
 
 /**
@@ -177,6 +106,20 @@ function executeKeybindingAction(
   commandContext: ReturnType<typeof useCommandContext>,
   queryClient: QueryClient
 ) {
+  // Canvas-only actions: blocked when the session chat modal is open
+  const CANVAS_ONLY_ACTIONS = new Set<KeybindingAction>([
+    'open_plan',
+    'open_recap',
+    'restore_last_archived',
+    'focus_canvas_search',
+  ])
+  if (
+    CANVAS_ONLY_ACTIONS.has(action) &&
+    useUIStore.getState().sessionChatModalOpen
+  ) {
+    return
+  }
+
   switch (action) {
     case 'focus_chat_input':
       logger.debug('Keybinding: focus_chat_input')
@@ -197,41 +140,138 @@ function executeKeybindingAction(
       logger.debug('Keybinding: open_commit_modal')
       commandContext.openCommitModal()
       break
-    case 'open_pull_request':
-      logger.debug('Keybinding: open_pull_request')
-      commandContext.openPullRequest()
-      break
     case 'open_git_diff':
       logger.debug('Keybinding: open_git_diff')
       window.dispatchEvent(new CustomEvent('open-git-diff'))
       break
-    case 'execute_run':
+    case 'execute_run': {
       logger.debug('Keybinding: execute_run')
-      window.dispatchEvent(new CustomEvent('toggle-workspace-run'))
+      if (!isNativeApp()) break
+
+      // Skip if git diff modal is open
+      const uiStore = useUIStore.getState()
+      if (uiStore.gitDiffModalOpen) break
+
+      const chatStore = useChatStore.getState()
+      const sessionModalOpen = uiStore.sessionChatModalOpen
+
+      // Resolve target worktree: modal > active worktree > selected worktree (canvas/dashboard)
+      const targetWorktreeId =
+        sessionModalOpen && uiStore.sessionChatModalWorktreeId
+          ? uiStore.sessionChatModalWorktreeId
+          : (chatStore.activeWorktreeId ??
+            useProjectsStore.getState().selectedWorktreeId)
+
+      // Resolve path: chat store first, then fall back to worktrees query cache (canvas)
+      let targetWorktreePath = targetWorktreeId
+        ? (chatStore.activeWorktreePath ??
+          chatStore.worktreePaths[targetWorktreeId])
+        : null
+
+      if (!targetWorktreePath && targetWorktreeId) {
+        const projectId = useProjectsStore.getState().selectedProjectId
+        if (projectId) {
+          const worktrees = queryClient.getQueryData<{ id: string; path: string }[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
+          targetWorktreePath = worktrees?.find(w => w.id === targetWorktreeId)?.path ?? null
+        }
+      }
+
+      if (!targetWorktreeId || !targetWorktreePath) {
+        notify('Open a worktree to run', undefined, { type: 'error' })
+        break
+      }
+
+      // Fetch run script - use fetchQuery to handle uncached dashboard worktrees
+      ;(async () => {
+        let runScript = queryClient.getQueryData<string | null>([
+          'run-script',
+          targetWorktreePath,
+        ])
+
+        if (runScript === undefined) {
+          try {
+            runScript = await queryClient.fetchQuery<string | null>({
+              queryKey: ['run-script', targetWorktreePath],
+              queryFn: () =>
+                invoke<string | null>('get_run_script', {
+                  worktreePath: targetWorktreePath,
+                }),
+            })
+          } catch {
+            runScript = null
+          }
+        }
+
+        if (!runScript) {
+          const projectId = useProjectsStore.getState().selectedProjectId
+          toast.error('No run script configured in jean.json', {
+            action: projectId
+              ? {
+                  label: 'Configure',
+                  onClick: () =>
+                    useProjectsStore
+                      .getState()
+                      .openProjectSettings(projectId, 'jean-json'),
+                }
+              : undefined,
+          })
+          return
+        }
+
+        // Start run
+        const terminalId = useTerminalStore
+          .getState()
+          .startRun(targetWorktreeId, runScript)
+
+        if (sessionModalOpen) {
+          // Modal view: open terminal drawer
+          useTerminalStore
+            .getState()
+            .setModalTerminalOpen(targetWorktreeId, true)
+        } else {
+          // Canvas view: start PTY headlessly (no terminal UI mounted yet)
+          startHeadless(terminalId, {
+            worktreeId: targetWorktreeId,
+            worktreePath: targetWorktreePath!,
+            command: runScript,
+          })
+        }
+      })()
       break
+    }
     case 'open_in_modal':
       logger.debug('Keybinding: open_in_modal')
       useUIStore.getState().setOpenInModalOpen(true)
       break
     case 'open_magic_modal': {
       logger.debug('Keybinding: open_magic_modal')
-      const { activeWorktreeId, activeSessionIds, sendingSessionIds } =
-        useChatStore.getState()
-      const activeSessionId = activeWorktreeId
-        ? activeSessionIds[activeWorktreeId]
-        : null
-      const isSending = activeSessionId
-        ? (sendingSessionIds[activeSessionId] ?? false)
-        : false
-      if (!isSending) {
-        useUIStore.getState().setMagicModalOpen(true)
+      const chatStore = useChatStore.getState()
+      const uiStore = useUIStore.getState()
+      const { activeWorktreeId, activeWorktreePath } = chatStore
+
+      // Block only when there's no worktree context at all (e.g., project dashboard with nothing selected)
+      const selectedWorktreeId = useProjectsStore.getState().selectedWorktreeId
+      const worktreeIdToCheck = selectedWorktreeId ?? activeWorktreeId
+
+      if (!worktreeIdToCheck && !activeWorktreePath) {
+        notify('Select a worktree to use magic commands', undefined, {
+          type: 'error',
+        })
+        break
       }
+
+      uiStore.setMagicModalOpen(true)
       break
     }
-    case 'new_session':
+    case 'new_session': {
+      // When terminal is focused, CMD+T should create a terminal tab.
+      if (addTerminalTabForShortcut()) break
       logger.debug('Keybinding: new_session')
       window.dispatchEvent(new CustomEvent('create-new-session'))
       break
+    }
     case 'next_session':
       logger.debug('Keybinding: next_session')
       window.dispatchEvent(
@@ -244,43 +284,152 @@ function executeKeybindingAction(
         new CustomEvent('switch-session', { detail: { direction: 'previous' } })
       )
       break
-    case 'close_session_or_worktree':
+    case 'close_session_or_worktree': {
+      // When terminal is focused, CMD+W should close the active terminal tab.
+      if (closeActiveTerminalTabForShortcut()) break
+      // Default: close session/worktree
       logger.debug('Keybinding: close_session_or_worktree')
       window.dispatchEvent(new CustomEvent('close-session-or-worktree'))
       break
+    }
     case 'new_worktree':
       logger.debug('Keybinding: new_worktree')
       window.dispatchEvent(new CustomEvent('create-new-worktree'))
       break
-    case 'next_worktree':
-      logger.debug('Keybinding: next_worktree')
-      switchWorktree('next', queryClient)
-      break
-    case 'previous_worktree':
-      logger.debug('Keybinding: previous_worktree')
-      switchWorktree('previous', queryClient)
-      break
     case 'cycle_execution_mode': {
       logger.debug('Keybinding: cycle_execution_mode')
-      const { activeWorktreeId, getActiveSession, cycleExecutionMode } =
-        useChatStore.getState()
-      if (activeWorktreeId) {
-        const activeSessionId = getActiveSession(activeWorktreeId)
-        if (activeSessionId) {
-          cycleExecutionMode(activeSessionId)
-        }
-      }
+      window.dispatchEvent(new CustomEvent('cycle-execution-mode'))
       break
     }
-    case 'approve_plan':
+    case 'approve_plan': {
       logger.debug('Keybinding: approve_plan')
+      const planDialogOpen = useUIStore.getState().planDialogOpen
+      if (planDialogOpen) break // Let PlanDialog handle it directly
       window.dispatchEvent(new CustomEvent('approve-plan'))
       window.dispatchEvent(new CustomEvent('answer-question'))
+      break
+    }
+    case 'approve_plan_yolo': {
+      logger.debug('Keybinding: approve_plan_yolo')
+      const planDialogOpenYolo = useUIStore.getState().planDialogOpen
+      if (planDialogOpenYolo) break // Let PlanDialog handle it directly
+      window.dispatchEvent(new CustomEvent('approve-plan-yolo'))
+      break
+    }
+    case 'approve_plan_clear_context': {
+      logger.debug('Keybinding: approve_plan_clear_context')
+      const planDialogOpenClear = useUIStore.getState().planDialogOpen
+      if (planDialogOpenClear) break // Let PlanDialog handle it directly
+      window.dispatchEvent(new CustomEvent('approve-plan-clear-context'))
+      break
+    }
+    case 'approve_plan_clear_context_build': {
+      logger.debug('Keybinding: approve_plan_clear_context_build')
+      const planDialogOpenClearBuild = useUIStore.getState().planDialogOpen
+      if (planDialogOpenClearBuild) break // Let PlanDialog handle it directly
+      window.dispatchEvent(new CustomEvent('approve-plan-clear-context-build'))
+      break
+    }
+    case 'approve_plan_worktree_build': {
+      logger.debug('Keybinding: approve_plan_worktree_build')
+      const planDialogOpenWtBuild = useUIStore.getState().planDialogOpen
+      if (planDialogOpenWtBuild) break
+      window.dispatchEvent(new CustomEvent('approve-plan-worktree-build'))
+      break
+    }
+    case 'approve_plan_worktree_yolo': {
+      logger.debug('Keybinding: approve_plan_worktree_yolo')
+      const planDialogOpenWtYolo = useUIStore.getState().planDialogOpen
+      if (planDialogOpenWtYolo) break
+      window.dispatchEvent(new CustomEvent('approve-plan-worktree-yolo'))
+      break
+    }
+    case 'open_plan':
+      logger.debug('Keybinding: open_plan')
+      window.dispatchEvent(new CustomEvent('open-plan'))
+      break
+    case 'open_recap':
+      logger.debug('Keybinding: open_recap')
+      window.dispatchEvent(new CustomEvent('open-recap'))
       break
     case 'restore_last_archived':
       logger.debug('Keybinding: restore_last_archived')
       window.dispatchEvent(new CustomEvent('restore-last-archived'))
       break
+    case 'focus_canvas_search':
+      logger.debug('Keybinding: focus_canvas_search')
+      window.dispatchEvent(new CustomEvent('focus-canvas-search'))
+      break
+    case 'open_unread_sessions':
+      logger.debug('Keybinding: open_unread_sessions')
+      window.dispatchEvent(new CustomEvent('command:open-unread-sessions'))
+      break
+    case 'toggle_terminal': {
+      logger.debug('Keybinding: toggle_terminal')
+      const uiState = useUIStore.getState()
+      if (uiState.sessionChatModalOpen) {
+        // Modal view → sheet drawer
+        const wid =
+          uiState.sessionChatModalWorktreeId ??
+          useChatStore.getState().activeWorktreeId
+        if (wid) useTerminalStore.getState().toggleModalTerminal(wid)
+      } else {
+        // Standalone view → resizable panel
+        const wid = useChatStore.getState().activeWorktreeId
+        if (wid) useTerminalStore.getState().toggleTerminal(wid)
+      }
+      break
+    }
+    case 'open_provider_dropdown':
+      logger.debug('Keybinding: open_provider_dropdown')
+      window.dispatchEvent(new CustomEvent('open-provider-dropdown'))
+      break
+    case 'open_model_dropdown':
+      logger.debug('Keybinding: open_model_dropdown')
+      window.dispatchEvent(new CustomEvent('open-model-dropdown'))
+      break
+    case 'open_thinking_dropdown':
+      logger.debug('Keybinding: open_thinking_dropdown')
+      window.dispatchEvent(new CustomEvent('open-thinking-dropdown'))
+      break
+    case 'cancel_prompt':
+      logger.debug('Keybinding: cancel_prompt')
+      window.dispatchEvent(new CustomEvent('cancel-prompt'))
+      break
+    case 'scroll_chat_up':
+      window.dispatchEvent(
+        new CustomEvent('scroll-chat', { detail: { direction: 'up' } })
+      )
+      break
+    case 'scroll_chat_down':
+      window.dispatchEvent(
+        new CustomEvent('scroll-chat', { detail: { direction: 'down' } })
+      )
+      break
+    case 'open_github_dashboard':
+      useUIStore.getState().setGitHubDashboardOpen(true)
+      break
+    case 'open_quick_menu':
+      window.dispatchEvent(new CustomEvent('toggle-quick-menu'))
+      break
+    case 'open_usage_dropdown':
+      window.dispatchEvent(new CustomEvent('toggle-usage-menu'))
+      break
+    case 'toggle_session_label': {
+      logger.debug('Keybinding: toggle_session_label')
+      // Works when a session is active (modal open or in session view) or on project canvas
+      const uiStoreForLabel = useUIStore.getState()
+      const chatStoreForLabel = useChatStore.getState()
+      const projectsStoreForLabel = useProjectsStore.getState()
+      if (
+        !uiStoreForLabel.sessionChatModalOpen &&
+        !chatStoreForLabel.activeWorktreePath &&
+        !projectsStoreForLabel.selectedProjectId
+      )
+        break
+      window.dispatchEvent(new CustomEvent('toggle-session-label'))
+      break
+    }
   }
 }
 
@@ -294,7 +443,10 @@ export function useMainWindowEventListeners() {
 
   // Update ref when preferences change
   useEffect(() => {
-    keybindingsRef.current = preferences?.keybindings ?? DEFAULT_KEYBINDINGS
+    keybindingsRef.current = {
+      ...DEFAULT_KEYBINDINGS,
+      ...(preferences?.keybindings ?? {}),
+    }
   }, [preferences?.keybindings])
 
   useEffect(() => {
@@ -303,11 +455,129 @@ export function useMainWindowEventListeners() {
       const shortcut = eventToShortcutString(e)
       if (!shortcut) return
 
+      // Skip single-key shortcuts (no modifier) when focus is in input/textarea
+      const hasModifier = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
+      if (!hasModifier) {
+        const tag = document.activeElement?.tagName
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          (document.activeElement as HTMLElement)?.isContentEditable
+        ) {
+          return
+        }
+      }
+
+      // Cancel prompt should work even when modals are open
+      if (shortcut === keybindingsRef.current.cancel_prompt) {
+        logger.debug('Cancel prompt shortcut matched', { shortcut })
+        e.preventDefault()
+        e.stopPropagation()
+        executeKeybindingAction('cancel_prompt', commandContext, queryClient)
+        return
+      }
+
+      // Skip when a blocking modal/dialog is open - let it handle its own shortcuts
+      const uiState = useUIStore.getState()
+      if (
+        uiState.loadContextModalOpen ||
+        uiState.magicModalOpen ||
+        uiState.openInModalOpen ||
+        uiState.newWorktreeModalOpen ||
+        uiState.commandPaletteOpen ||
+        uiState.preferencesOpen ||
+        uiState.releaseNotesModalOpen ||
+        uiState.updatePrModalOpen
+      )
+        return
+      if (useProjectsStore.getState().projectSettingsDialogOpen) return
+
+      // When terminal is focused, remap shortcuts for terminal-specific actions
+      // and block all others so they don't interfere with terminal usage.
+      {
+        const terminalShortcutWorktreeId = getTerminalShortcutWorktreeId()
+
+        if (terminalShortcutWorktreeId) {
+          const kb = keybindingsRef.current
+          const digitMatch = e.code.match(/^Digit(\d)$/)
+          const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+
+          if (
+            (e.metaKey || e.ctrlKey) &&
+            !e.shiftKey &&
+            !e.altKey &&
+            digit >= 1 &&
+            digit <= 9
+          ) {
+            e.preventDefault()
+            e.stopPropagation()
+            switchActiveTerminalTabByIndexForShortcut(digit - 1)
+            return
+          }
+
+          if (shortcut === kb.new_session) {
+            e.preventDefault()
+            e.stopPropagation()
+            addTerminalTabForShortcut()
+            return
+          }
+          if (shortcut === kb.close_session_or_worktree) {
+            e.preventDefault()
+            e.stopPropagation()
+            closeActiveTerminalTabForShortcut()
+            return
+          }
+          if (shortcut === kb.toggle_terminal || shortcut === kb.cancel_prompt) {
+            // Let these fall through to the normal keybinding handler below
+          } else {
+            // Block all other shortcuts
+            return
+          }
+        }
+      }
+
+      // CMD/Ctrl+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        // Use e.code (physical key) since e.key can vary with CMD held on macOS
+        const digitMatch = e.code.match(/^Digit(\d)$/)
+        const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+        if (digit >= 1 && digit <= 9) {
+          e.preventDefault()
+          e.stopPropagation()
+          if (useUIStore.getState().sessionChatModalOpen) {
+            window.dispatchEvent(
+              new CustomEvent('switch-session', {
+                detail: { index: digit - 1 },
+              })
+            )
+          } else if (
+            useUIStore.getState().githubDashboardOpen &&
+            digit >= 1 &&
+            digit <= 4
+          ) {
+            const TAB_MAP = ['issues', 'prs', 'security', 'advisories']
+            window.dispatchEvent(
+              new CustomEvent('switch-dashboard-tab', {
+                detail: { tab: TAB_MAP[digit - 1] },
+              })
+            )
+          } else {
+            window.dispatchEvent(
+              new CustomEvent('open-worktree-by-index', {
+                detail: { index: digit - 1 },
+              })
+            )
+          }
+          return
+        }
+      }
+
       // Look up matching action in keybindings
       const keybindings = keybindingsRef.current
       for (const [action, binding] of Object.entries(keybindings)) {
         if (binding === shortcut) {
           e.preventDefault()
+          e.stopPropagation()
           executeKeybindingAction(
             action as KeybindingAction,
             commandContext,
@@ -324,6 +594,9 @@ export function useMainWindowEventListeners() {
       const unlisteners = await Promise.all([
         listen('menu-about', async () => {
           logger.debug('About menu event received')
+          if (!isNativeApp()) return
+          const { getVersion } = await import('@tauri-apps/api/app')
+          const { message } = await import('@tauri-apps/plugin-dialog')
           // Show simple about dialog with dynamic version
           const appVersion = await getVersion()
           await message(
@@ -334,13 +607,17 @@ export function useMainWindowEventListeners() {
 
         listen('menu-check-updates', async () => {
           logger.debug('Check for updates menu event received')
+          if (!isNativeApp()) return
           try {
+            const { check } = await import('@tauri-apps/plugin-updater')
             const update = await check()
             if (update) {
-              commandContext.showToast(
-                `Update available: ${update.version}`,
-                'info'
+              // Pass update object to App.tsx for installation handling
+              window.dispatchEvent(
+                new CustomEvent('update-available', { detail: update })
               )
+              // Show the update modal (same as auto-check on startup)
+              useUIStore.getState().setUpdateModalVersion(update.version)
             } else {
               commandContext.showToast(
                 'You are running the latest version',
@@ -373,11 +650,6 @@ export function useMainWindowEventListeners() {
               useUIStore.getState()
             setRightSidebarVisible(!rightSidebarVisible)
           }
-        }),
-
-        listen('menu-open-pull-request', () => {
-          logger.debug('Open pull request menu event received')
-          commandContext.openPullRequest()
         }),
 
         // Branch naming events (automatic branch renaming based on first message)
@@ -441,6 +713,91 @@ export function useMainWindowEventListeners() {
           })
           // Silent failure - don't show toast to avoid interrupting workflow
         }),
+
+        // Queue sync between native + web clients.
+        // When another client enqueues/dequeues, update local Zustand state.
+        listen<{ sessionId: string; queue: QueuedMessage[] }>(
+          'queue:updated',
+          event => {
+            const { sessionId, queue } = event.payload
+            const currentQueue =
+              useChatStore.getState().messageQueues[sessionId] ?? []
+            // Skip if the queue already matches (this client caused the event)
+            if (
+              currentQueue.length === queue.length &&
+              currentQueue[0]?.id === queue[0]?.id
+            )
+              return
+            useChatStore.setState(state => ({
+              messageQueues: {
+                ...state.messageQueues,
+                [sessionId]: queue,
+              },
+            }))
+          }
+        ),
+
+        // Real-time cache sync between native + web clients.
+        // Debounce: collect keys over a 250ms window, then flush once.
+        // This coalesces rapid-fire events (e.g. bulk mutations) into a
+        // single invalidation wave instead of N separate ones.
+        (async () => {
+          const pendingKeys = new Set<string>()
+          let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+          const flushInvalidations = () => {
+            flushTimer = null
+            for (const key of pendingKeys) {
+              switch (key) {
+                case 'sessions':
+                  queryClient.invalidateQueries({
+                    queryKey: chatQueryKeys.all,
+                  })
+                  break
+                case 'projects':
+                  queryClient.invalidateQueries({
+                    queryKey: projectsQueryKeys.all,
+                  })
+                  break
+                case 'preferences':
+                  queryClient.invalidateQueries({
+                    queryKey: ['preferences'],
+                  })
+                  break
+                case 'ui-state':
+                  queryClient.invalidateQueries({
+                    queryKey: ['ui-state'],
+                  })
+                  break
+                case 'contexts':
+                  queryClient.invalidateQueries({
+                    queryKey: ['contexts'],
+                  })
+                  queryClient.invalidateQueries({
+                    queryKey: ['saved-contexts'],
+                  })
+                  break
+              }
+            }
+            pendingKeys.clear()
+          }
+
+          const unlisten = await listen<{ keys: string[] }>(
+            'cache:invalidate',
+            event => {
+              for (const key of event.payload.keys) pendingKeys.add(key)
+              if (flushTimer) clearTimeout(flushTimer)
+              flushTimer = setTimeout(flushInvalidations, 250)
+            }
+          )
+
+          // Return a cleanup function that clears the pending timer
+          // and unregisters the event listener
+          return () => {
+            if (flushTimer) clearTimeout(flushTimer)
+            unlisten()
+          }
+        })(),
       ])
 
       logger.debug(
@@ -449,11 +806,18 @@ export function useMainWindowEventListeners() {
       return unlisteners
     }
 
-    document.addEventListener('keydown', handleKeyDown)
+    // Use capture phase to handle keybindings before dialogs/modals can intercept
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
 
+    let cleaned = false
     let menuUnlisteners: (() => void)[] = []
     setupMenuListeners()
       .then(unlisteners => {
+        if (cleaned) {
+          // Effect was already cleaned up while awaiting — tear down immediately
+          unlisteners.forEach(fn => fn())
+          return
+        }
         menuUnlisteners = unlisteners
         logger.debug('Menu listeners initialized successfully')
       })
@@ -462,7 +826,8 @@ export function useMainWindowEventListeners() {
       })
 
     return () => {
-      document.removeEventListener('keydown', handleKeyDown)
+      cleaned = true
+      document.removeEventListener('keydown', handleKeyDown, { capture: true })
       menuUnlisteners.forEach(unlisten => {
         if (unlisten && typeof unlisten === 'function') {
           unlisten()
@@ -477,33 +842,41 @@ export function useMainWindowEventListeners() {
   useEffect(() => {
     // Skip in development mode - only block quit in production
     if (import.meta.env.DEV) return
+    if (!isNativeApp()) return
 
     let unlisten: (() => void) | null = null
 
-    getCurrentWindow()
-      .onCloseRequested(async event => {
-        try {
-          const hasRunning = await Promise.race([
-            invoke<boolean>('has_running_sessions'),
-            new Promise<boolean>((_, reject) =>
-              setTimeout(() => reject(new Error('timeout')), 2000)
-            ),
-          ])
-          if (hasRunning) {
-            event.preventDefault()
-            window.dispatchEvent(new CustomEvent('quit-confirmation-requested'))
+    const setup = async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      getCurrentWindow()
+        .onCloseRequested(async event => {
+          try {
+            const hasRunning = await Promise.race([
+              invoke<boolean>('has_running_sessions'),
+              new Promise<boolean>((_, reject) =>
+                setTimeout(() => reject(new Error('timeout')), 2000)
+              ),
+            ])
+            if (hasRunning) {
+              event.preventDefault()
+              window.dispatchEvent(
+                new CustomEvent('quit-confirmation-requested')
+              )
+            }
+          } catch (error) {
+            logger.error('Failed to check running sessions', { error })
+            // Allow quit if we can't check (fail open)
           }
-        } catch (error) {
-          logger.error('Failed to check running sessions', { error })
-          // Allow quit if we can't check (fail open)
-        }
-      })
-      .then(fn => {
-        unlisten = fn
-      })
-      .catch(error => {
-        logger.error('Failed to setup close listener', { error })
-      })
+        })
+        .then(fn => {
+          unlisten = fn
+        })
+        .catch(error => {
+          logger.error('Failed to setup close listener', { error })
+        })
+    }
+
+    setup()
 
     return () => {
       unlisten?.()

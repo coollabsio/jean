@@ -6,13 +6,18 @@ interface BorderSpinnerProps {
   bgClassName?: string
 }
 
-export function BorderSpinner({ shape, className, bgClassName }: BorderSpinnerProps) {
-  // Perimeter: circle ≈ 22, square ≈ 28
-  const perimeter = shape === 'circle' ? 22 : 28
+export function BorderSpinner({
+  shape,
+  className,
+  bgClassName,
+}: BorderSpinnerProps) {
+  // Use larger viewBox for better rendering at small sizes
+  // Perimeter: circle ≈ 75 (2πr where r=12), square ≈ 88
+  const perimeter = shape === 'circle' ? 75 : 88
 
   return (
     <svg
-      viewBox="0 0 8 8"
+      viewBox="0 0 28 28"
       className={cn('shrink-0', className)}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -20,14 +25,20 @@ export function BorderSpinner({ shape, className, bgClassName }: BorderSpinnerPr
       {shape === 'circle' ? (
         <>
           {/* Background circle */}
-          <circle cx="4" cy="4" r="3.5" className={bgClassName} />
+          <circle
+            cx="14"
+            cy="14"
+            r="12"
+            className={bgClassName}
+            fill="transparent"
+          />
           {/* Animated stroke */}
           <circle
-            cx="4"
-            cy="4"
-            r="3.5"
+            cx="14"
+            cy="14"
+            r="12"
             stroke="currentColor"
-            strokeWidth="1.5"
+            strokeWidth="2"
             strokeLinecap="round"
             className="animate-border-spin"
             style={{
@@ -39,16 +50,24 @@ export function BorderSpinner({ shape, className, bgClassName }: BorderSpinnerPr
       ) : (
         <>
           {/* Background square */}
-          <rect x="0.5" y="0.5" width="7" height="7" rx="1.5" className={bgClassName} />
+          <rect
+            x="2"
+            y="2"
+            width="24"
+            height="24"
+            rx="4"
+            className={bgClassName}
+            fill="transparent"
+          />
           {/* Animated stroke */}
           <rect
-            x="0.5"
-            y="0.5"
-            width="7"
-            height="7"
-            rx="1.5"
+            x="2"
+            y="2"
+            width="24"
+            height="24"
+            rx="4"
             stroke="currentColor"
-            strokeWidth="1.5"
+            strokeWidth="2"
             strokeLinecap="round"
             className="animate-border-spin"
             style={{

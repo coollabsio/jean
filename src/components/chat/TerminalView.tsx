@@ -1,14 +1,18 @@
 import { useEffect, useRef, useCallback, memo } from 'react'
 import { Plus, X, Minus, Terminal, ChevronUp } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStore, type TerminalInstance } from '@/store/terminal-store'
 import {
   disposeTerminal,
   disposeAllWorktreeTerminals,
 } from '@/lib/terminal-instances'
+import { Kbd } from '@/components/ui/kbd'
+import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
 import '@xterm/xterm/css/xterm.css'
+
+const EMPTY_TERMINALS: TerminalInstance[] = []
 
 interface TerminalViewProps {
   worktreeId: string
@@ -16,6 +20,8 @@ interface TerminalViewProps {
   isCollapsed?: boolean
   isWorktreeActive?: boolean
   onExpand?: () => void
+  /** Hide minimize and close-all buttons (for use in drawer) */
+  hideControls?: boolean
 }
 
 /** Individual terminal tab content */
@@ -96,8 +102,11 @@ export function TerminalView({
   isCollapsed = false,
   isWorktreeActive = true,
   onExpand,
+  hideControls = false,
 }: TerminalViewProps) {
-  const terminals = useTerminalStore(state => state.terminals[worktreeId] ?? [])
+  const terminals = useTerminalStore(
+    state => state.terminals[worktreeId] ?? EMPTY_TERMINALS
+  )
   const activeTerminalId = useTerminalStore(
     state => state.activeTerminalIds[worktreeId]
   )
@@ -111,16 +120,17 @@ export function TerminalView({
     setTerminalPanelOpen,
   } = useTerminalStore.getState()
 
-  // Auto-create first terminal if none exists AND panel wasn't explicitly closed
-  // terminalPanelOpen[worktreeId] === false means user explicitly closed all terminals
-  // terminalPanelOpen[worktreeId] === undefined means never opened (should auto-create)
+  // Auto-create a terminal only on initial mount (not when tabs are closed)
+  const mountedRef = useRef(false)
   useEffect(() => {
-    const { terminalPanelOpen } = useTerminalStore.getState()
-    const explicitlyClosed = terminalPanelOpen[worktreeId] === false
-    if (terminals.length === 0 && !explicitlyClosed) {
-      addTerminal(worktreeId)
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      const existing = useTerminalStore.getState().terminals[worktreeId] ?? []
+      if (existing.length === 0) {
+        addTerminal(worktreeId)
+      }
     }
-  }, [terminals.length, worktreeId, addTerminal])
+  }, [worktreeId, addTerminal])
 
   const handleAddTerminal = useCallback(() => {
     addTerminal(worktreeId)
@@ -139,14 +149,14 @@ export function TerminalView({
       disposeTerminal(terminalId)
       // Remove from store
       removeTerminal(worktreeId, terminalId)
-      // If this was the last terminal, close the panel for THIS worktree only
-      // Don't set terminalVisible=false as that's global and affects other worktrees
       const remaining = useTerminalStore.getState().terminals[worktreeId] ?? []
       if (remaining.length === 0) {
         setTerminalPanelOpen(worktreeId, false)
+        setTerminalVisible(false)
+        useTerminalStore.getState().setModalTerminalOpen(worktreeId, false)
       }
     },
-    [worktreeId, removeTerminal, setTerminalPanelOpen]
+    [worktreeId, removeTerminal, setTerminalPanelOpen, setTerminalVisible]
   )
 
   const handleSelectTerminal = useCallback(
@@ -203,12 +213,14 @@ export function TerminalView({
 
   return (
     <div className="flex h-full flex-col bg-[#1a1a1a]">
-      {/* Tab bar */}
-      <div className="flex items-center border-b border-neutral-700">
+      {/* Tab bar - fixed height for consistency */}
+      <div className="flex h-8 items-stretch border-b border-neutral-700">
         <div className="flex min-w-0 items-center overflow-x-auto">
-          {terminals.map(terminal => {
+          {terminals.map((terminal, index) => {
             const isActive = terminal.id === activeTerminalId
             const isRunning = runningTerminals.has(terminal.id)
+            const shortcutLabel =
+              index < 9 ? formatShortcutDisplay(`mod+${index + 1}`) : null
 
             return (
               <button
@@ -227,6 +239,18 @@ export function TerminalView({
                   <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
                 )}
                 <span className="max-w-[100px] truncate">{terminal.label}</span>
+                {shortcutLabel && (
+                  <Kbd
+                    className={cn(
+                      'h-3.5 px-1 text-[9px]',
+                      isActive
+                        ? 'bg-neutral-700 text-neutral-200'
+                        : 'bg-neutral-800/80 text-neutral-400'
+                    )}
+                  >
+                    {shortcutLabel}
+                  </Kbd>
+                )}
                 {/* Close button - always visible */}
                 <span
                   role="button"
@@ -250,40 +274,44 @@ export function TerminalView({
               </button>
             )
           })}
-
-          {/* Add terminal button */}
-          <button
-            type="button"
-            onClick={handleAddTerminal}
-            className="flex h-full shrink-0 items-center px-2 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-neutral-300"
-            aria-label="New terminal"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
         </div>
+
+        {/* Add terminal button - outside scroll container for full height */}
+        <button
+          type="button"
+          onClick={handleAddTerminal}
+          className="flex shrink-0 items-center px-2 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-neutral-300"
+          aria-label="New terminal"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Minimize button */}
-        <button
-          type="button"
-          onClick={handleMinimize}
-          className="flex h-full shrink-0 items-center px-2 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-neutral-300"
-          aria-label="Minimize terminal"
-        >
-          <Minus className="h-3.5 w-3.5" />
-        </button>
+        {!hideControls && (
+          <>
+            {/* Minimize button */}
+            <button
+              type="button"
+              onClick={handleMinimize}
+              className="flex h-full shrink-0 items-center px-2 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-neutral-300"
+              aria-label="Minimize terminal"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
 
-        {/* Close all button */}
-        <button
-          type="button"
-          onClick={handleCloseAll}
-          className="flex h-full shrink-0 items-center px-2 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-red-400"
-          aria-label="Close all terminals"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+            {/* Close all button */}
+            <button
+              type="button"
+              onClick={handleCloseAll}
+              className="flex h-full shrink-0 items-center px-2 text-neutral-400 transition-colors hover:bg-neutral-800/50 hover:text-red-400"
+              aria-label="Close all terminals"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Terminal content area */}

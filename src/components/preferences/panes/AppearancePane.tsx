@@ -1,8 +1,7 @@
-import React, { useCallback, useState, useEffect } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
-import { Input } from '@/components/ui/input'
+import { Slider } from '@/components/ui/slider'
 import {
   Select,
   SelectContent,
@@ -11,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useTheme } from '@/hooks/use-theme'
-import { usePreferences, useSavePreferences } from '@/services/preferences'
+import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import {
   uiFontOptions,
   chatFontOptions,
@@ -19,67 +18,16 @@ import {
   syntaxThemeLightOptions,
   fileEditModeOptions,
   FONT_SIZE_DEFAULT,
+  ZOOM_LEVEL_DEFAULT,
+  uiFontScaleTicks,
+  chatFontScaleTicks,
+  zoomLevelTicks,
   type UIFont,
   type ChatFont,
   type SyntaxTheme,
   type FileEditMode,
 } from '@/types/preferences'
-
-// Helper to get valid font size, handling legacy string values or invalid numbers
-function getValidFontSize(value: unknown): number {
-  if (typeof value === 'number' && !isNaN(value) && value > 0) {
-    return value
-  }
-  return FONT_SIZE_DEFAULT
-}
-
-// Font size input that only saves on blur to allow editing
-const FontSizeInput: React.FC<{
-  value: unknown
-  onChange: (value: number) => void
-  disabled?: boolean
-}> = ({ value, onChange, disabled }) => {
-  const validValue = getValidFontSize(value)
-  const [localValue, setLocalValue] = useState(String(validValue))
-
-  // Sync local state when external value changes
-  useEffect(() => {
-    setLocalValue(String(validValue))
-  }, [validValue])
-
-  const handleBlur = () => {
-    const parsed = parseInt(localValue, 10)
-    if (!isNaN(parsed) && parsed > 0) {
-      onChange(parsed)
-    } else {
-      // Reset to valid value if invalid
-      setLocalValue(String(validValue))
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleBlur()
-      ;(e.target as HTMLInputElement).blur()
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-2">
-      <Input
-        type="number"
-        min={1}
-        value={localValue}
-        onChange={e => setLocalValue(e.target.value)}
-        onBlur={handleBlur}
-        onKeyDown={handleKeyDown}
-        disabled={disabled}
-        className="w-20 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
-      />
-      <span className="text-sm text-muted-foreground">px</span>
-    </div>
-  )
-}
+import { isMacOS } from '@/lib/platform'
 
 const SettingsSection: React.FC<{
   title: string
@@ -99,8 +47,8 @@ const InlineField: React.FC<{
   description?: string
   children: React.ReactNode
 }> = ({ label, description, children }) => (
-  <div className="flex items-center gap-4">
-    <div className="w-96 shrink-0 space-y-0.5">
+  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+    <div className="space-y-0.5 sm:w-96 sm:shrink-0">
       <Label className="text-sm text-foreground">{label}</Label>
       {description && (
         <p className="text-xs text-muted-foreground">{description}</p>
@@ -110,70 +58,79 @@ const InlineField: React.FC<{
   </div>
 )
 
+const ScalingField: React.FC<{
+  label: string
+  description?: string
+  children: React.ReactNode
+}> = ({ label, description, children }) => (
+  <div className="space-y-2">
+    <div className="space-y-0.5">
+      <Label className="text-sm text-foreground">{label}</Label>
+      {description && (
+        <p className="text-xs text-muted-foreground">{description}</p>
+      )}
+    </div>
+    {children}
+  </div>
+)
+
+const modKey = isMacOS ? 'Cmd' : 'Ctrl'
+
 export const AppearancePane: React.FC = () => {
   const { theme, setTheme } = useTheme()
   const { data: preferences } = usePreferences()
-  const savePreferences = useSavePreferences()
+  const patchPreferences = usePatchPreferences()
+
+  // Zoom uses commit-only saving to avoid flickering the webview during drag.
+  // localZoom tracks slider position, preferences are saved only on release.
+  const prefsZoom = preferences?.zoom_level ?? ZOOM_LEVEL_DEFAULT
+  const [localZoom, setLocalZoom] = useState<number | null>(null)
+  const zoomValue = localZoom ?? prefsZoom
 
   const handleThemeChange = useCallback(
     async (value: 'light' | 'dark' | 'system') => {
-      // Update the theme provider immediately for instant UI feedback
       setTheme(value)
-
-      // Persist the theme preference to disk
-      if (preferences) {
-        savePreferences.mutate({ ...preferences, theme: value })
-      }
+      patchPreferences.mutate({ theme: value })
     },
-    [setTheme, savePreferences, preferences]
+    [setTheme, patchPreferences]
   )
 
   const handleFontSizeChange = useCallback(
     (field: 'ui_font_size' | 'chat_font_size', value: number) => {
-      if (preferences && !isNaN(value) && value > 0) {
-        savePreferences.mutate({ ...preferences, [field]: value })
+      if (!isNaN(value) && value > 0) {
+        patchPreferences.mutate({ [field]: value })
       }
     },
-    [savePreferences, preferences]
+    [patchPreferences]
+  )
+
+  const handleZoomCommit = useCallback(
+    (value: number) => {
+      setLocalZoom(null)
+      patchPreferences.mutate({ zoom_level: value })
+    },
+    [patchPreferences]
   )
 
   const handleFontChange = useCallback(
     (field: 'ui_font' | 'chat_font', value: UIFont | ChatFont) => {
-      if (preferences) {
-        savePreferences.mutate({ ...preferences, [field]: value })
-      }
+      patchPreferences.mutate({ [field]: value })
     },
-    [savePreferences, preferences]
-  )
-
-  const handleSessionGroupingChange = useCallback(
-    (checked: boolean) => {
-      if (preferences) {
-        savePreferences.mutate({
-          ...preferences,
-          session_grouping_enabled: checked,
-        })
-      }
-    },
-    [savePreferences, preferences]
+    [patchPreferences]
   )
 
   const handleSyntaxThemeChange = useCallback(
     (field: 'syntax_theme_dark' | 'syntax_theme_light', value: SyntaxTheme) => {
-      if (preferences) {
-        savePreferences.mutate({ ...preferences, [field]: value })
-      }
+      patchPreferences.mutate({ [field]: value })
     },
-    [savePreferences, preferences]
+    [patchPreferences]
   )
 
   const handleFileEditModeChange = useCallback(
     (value: FileEditMode) => {
-      if (preferences) {
-        savePreferences.mutate({ ...preferences, file_edit_mode: value })
-      }
+      patchPreferences.mutate({ file_edit_mode: value })
     },
-    [savePreferences, preferences]
+    [patchPreferences]
   )
 
   return (
@@ -187,9 +144,9 @@ export const AppearancePane: React.FC = () => {
             <Select
               value={theme}
               onValueChange={handleThemeChange}
-              disabled={savePreferences.isPending}
+              disabled={patchPreferences.isPending}
             >
-              <SelectTrigger className="w-40">
+              <SelectTrigger>
                 <SelectValue placeholder="Select theme" />
               </SelectTrigger>
               <SelectContent>
@@ -207,9 +164,12 @@ export const AppearancePane: React.FC = () => {
             <Select
               value={preferences?.syntax_theme_dark ?? 'vitesse-black'}
               onValueChange={value =>
-                handleSyntaxThemeChange('syntax_theme_dark', value as SyntaxTheme)
+                handleSyntaxThemeChange(
+                  'syntax_theme_dark',
+                  value as SyntaxTheme
+                )
               }
-              disabled={savePreferences.isPending}
+              disabled={patchPreferences.isPending}
             >
               <SelectTrigger className="w-52">
                 <SelectValue placeholder="Select theme" />
@@ -231,9 +191,12 @@ export const AppearancePane: React.FC = () => {
             <Select
               value={preferences?.syntax_theme_light ?? 'github-light'}
               onValueChange={value =>
-                handleSyntaxThemeChange('syntax_theme_light', value as SyntaxTheme)
+                handleSyntaxThemeChange(
+                  'syntax_theme_light',
+                  value as SyntaxTheme
+                )
               }
-              disabled={savePreferences.isPending}
+              disabled={patchPreferences.isPending}
             >
               <SelectTrigger className="w-52">
                 <SelectValue placeholder="Select theme" />
@@ -258,7 +221,7 @@ export const AppearancePane: React.FC = () => {
               onValueChange={value =>
                 handleFontChange('ui_font', value as UIFont)
               }
-              disabled={savePreferences.isPending}
+              disabled={patchPreferences.isPending}
             >
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="Select font" />
@@ -279,7 +242,7 @@ export const AppearancePane: React.FC = () => {
               onValueChange={value =>
                 handleFontChange('chat_font', value as ChatFont)
               }
-              disabled={savePreferences.isPending}
+              disabled={patchPreferences.isPending}
             >
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="Select font" />
@@ -293,37 +256,55 @@ export const AppearancePane: React.FC = () => {
               </SelectContent>
             </Select>
           </InlineField>
-
-          <InlineField label="UI text size" description="Size in pixels">
-            <FontSizeInput
-              value={preferences?.ui_font_size}
-              onChange={value => handleFontSizeChange('ui_font_size', value)}
-              disabled={savePreferences.isPending}
-            />
-          </InlineField>
-
-          <InlineField label="Chat text size" description="Size in pixels">
-            <FontSizeInput
-              value={preferences?.chat_font_size}
-              onChange={value => handleFontSizeChange('chat_font_size', value)}
-              disabled={savePreferences.isPending}
-            />
-          </InlineField>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Layout">
-        <div className="space-y-4">
-          <InlineField
-            label="Group sessions by status"
-            description="Group session tabs into dropdowns when you have many sessions"
+      <SettingsSection title="Scaling">
+        <div className="space-y-5">
+          <ScalingField
+            label="UI font scaling"
+            description="Increase or decrease the size of the interface font"
           >
-            <Switch
-              checked={preferences?.session_grouping_enabled ?? true}
-              onCheckedChange={handleSessionGroupingChange}
-              disabled={savePreferences.isPending}
+            <Slider
+              ticks={uiFontScaleTicks}
+              value={preferences?.ui_font_size ?? FONT_SIZE_DEFAULT}
+              onValueChange={value =>
+                handleFontSizeChange('ui_font_size', value)
+              }
+              disabled={patchPreferences.isPending}
             />
-          </InlineField>
+          </ScalingField>
+
+          <ScalingField
+            label="Chat font scaling"
+            description="Increase or decrease the size of the chat font"
+          >
+            <Slider
+              ticks={chatFontScaleTicks}
+              value={preferences?.chat_font_size ?? FONT_SIZE_DEFAULT}
+              onValueChange={value =>
+                handleFontSizeChange('chat_font_size', value)
+              }
+              disabled={patchPreferences.isPending}
+            />
+          </ScalingField>
+
+          <ScalingField
+            label="Zoom level"
+            description="Control the zoom level to adjust the size of the interface"
+          >
+            <Slider
+              ticks={zoomLevelTicks}
+              value={zoomValue}
+              onValueChange={setLocalZoom}
+              onValueCommit={handleZoomCommit}
+              disabled={patchPreferences.isPending}
+            />
+            <p className="text-xs text-muted-foreground">
+              You can change the zoom level with {modKey} +/- and reset to the
+              default zoom with {modKey}+0.
+            </p>
+          </ScalingField>
         </div>
       </SettingsSection>
 
@@ -338,7 +319,7 @@ export const AppearancePane: React.FC = () => {
               onValueChange={value =>
                 handleFileEditModeChange(value as FileEditMode)
               }
-              disabled={savePreferences.isPending}
+              disabled={patchPreferences.isPending}
             >
               <SelectTrigger className="w-52">
                 <SelectValue placeholder="Select mode" />

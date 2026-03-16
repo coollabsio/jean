@@ -5,9 +5,9 @@
  * and the individual CLI reinstall modal.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { Download, CheckCircle2, Loader2, AlertCircle } from 'lucide-react'
+import { Download, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useTerminal } from '@/hooks/useTerminal'
-import { disposeTerminal } from '@/lib/terminal-instances'
+import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 
 export interface SetupStateProps {
   cliName: string
@@ -31,6 +31,8 @@ export interface SetupStateProps {
   selectedVersion: string | null
   currentVersion?: string | null
   isLoading: boolean
+  isError?: boolean
+  onRetry?: () => void
   onVersionChange: (version: string) => void
   onInstall: () => void
 }
@@ -41,6 +43,8 @@ export function SetupState({
   selectedVersion,
   currentVersion,
   isLoading,
+  isError,
+  onRetry,
   onVersionChange,
   onInstall,
 }: SetupStateProps) {
@@ -48,7 +52,6 @@ export function SetupState({
     <div className="space-y-6">
       {currentVersion && (
         <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
-          <CheckCircle2 className="size-4 text-green-500" />
           <span className="text-sm">
             Currently installed:{' '}
             <span className="font-medium">v{currentVersion}</span>
@@ -57,13 +60,38 @@ export function SetupState({
       )}
 
       <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">
-          Select Version
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-foreground">
+            Select Version
+          </label>
+          {!isLoading && !isError && versions.length > 0 && onRetry && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-muted-foreground"
+              onClick={() => onRetry()}
+            >
+              <RefreshCw className="size-3" />
+              Refresh
+            </Button>
+          )}
+        </div>
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             Loading versions...
+          </div>
+        ) : isError || (!isLoading && versions.length === 0) ? (
+          <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+            <span className="text-sm text-muted-foreground">
+              Failed to load versions. This may be due to GitHub API rate limiting.
+            </span>
+            {onRetry && (
+              <Button variant="ghost" size="sm" onClick={() => onRetry()}>
+                <RefreshCw className="size-3.5" />
+                Retry
+              </Button>
+            )}
           </div>
         ) : (
           <Select
@@ -93,7 +121,9 @@ export function SetupState({
           </Select>
         )}
         <p className="text-xs text-muted-foreground">
-          {cliName} will be installed in Jean&apos;s application data folder.
+          {cliName} will be installed separately in Jean&apos;s application data
+          folder — it won&apos;t affect your global installation. Authentication
+          and configuration from your global {cliName} setup will be used.
         </p>
       </div>
 
@@ -121,20 +151,17 @@ export function InstallingState({ cliName, progress }: InstallingStateProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col items-center gap-4">
-        <Loader2 className="size-10 animate-spin text-primary" />
-        <div className="text-center">
-          <p className="font-medium">{message}</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Please wait while {cliName} is being installed...
-          </p>
-        </div>
+      <div className="text-center">
+        <p className="font-medium">{message}</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Please wait while {cliName} is being installed...
+        </p>
       </div>
 
       {/* Progress bar */}
       <div className="w-full bg-secondary rounded-full h-2">
         <div
-          className="bg-primary h-2 rounded-full transition-all duration-300"
+          className="bg-primary h-2 rounded-full transition-[width] duration-300"
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -159,12 +186,9 @@ export function ErrorState({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col items-center gap-4">
-        <AlertCircle className="size-10 text-destructive" />
-        <div className="text-center">
-          <p className="font-medium text-destructive">Installation Failed</p>
-          <p className="text-sm text-muted-foreground mt-1">{errorMessage}</p>
-        </div>
+      <div className="text-center">
+        <p className="font-medium text-destructive">Installation Failed</p>
+        <p className="text-sm text-muted-foreground mt-1">{errorMessage}</p>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -193,14 +217,11 @@ export interface AuthCheckingStateProps {
 export function AuthCheckingState({ cliName }: AuthCheckingStateProps) {
   return (
     <div className="space-y-6">
-      <div className="flex flex-col items-center gap-4">
-        <Loader2 className="size-10 animate-spin text-primary" />
-        <div className="text-center">
-          <p className="font-medium">Checking Authentication</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Verifying {cliName} login status...
-          </p>
-        </div>
+      <div className="text-center">
+        <p className="font-medium">Checking Authentication</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Verifying {cliName} login status...
+        </p>
       </div>
     </div>
   )
@@ -210,7 +231,9 @@ export interface AuthLoginStateProps {
   cliName: string
   terminalId: string
   command: string
+  commandArgs?: string[] | null
   onComplete: () => void
+  onRetry?: () => void
   onSkip?: () => void
 }
 
@@ -218,17 +241,24 @@ export function AuthLoginState({
   cliName,
   terminalId,
   command,
+  commandArgs,
   onComplete,
+  onRetry,
   onSkip,
 }: AuthLoginStateProps) {
   const observerRef = useRef<ResizeObserver | null>(null)
   const initialized = useRef(false)
+  const [exitStatus, setExitStatus] = useState<{
+    exitCode: number | null
+    signal: string | null
+  } | null>(null)
 
   const { initTerminal, fit } = useTerminal({
     terminalId,
     worktreeId: 'cli-login',
     worktreePath: '/tmp',
     command,
+    commandArgs,
   })
 
   const containerCallbackRef = useCallback(
@@ -259,13 +289,33 @@ export function AuthLoginState({
     [initTerminal, fit]
   )
 
+  // Auto-advance when the auth process exits successfully
+  useEffect(() => {
+    setOnStopped(terminalId, (exitCode, signal) => {
+      if (exitCode === 0) {
+        // Brief delay so user can see the success output
+        setTimeout(() => onComplete(), 1500)
+        return
+      }
+
+      setExitStatus({ exitCode, signal })
+    })
+    return () => setOnStopped(terminalId, undefined)
+  }, [terminalId, onComplete])
+
+  useEffect(() => {
+    setExitStatus(null)
+  }, [terminalId])
+
   // Cleanup observer and terminal on unmount
   useEffect(() => {
     return () => {
       if (observerRef.current) {
         observerRef.current.disconnect()
       }
-      invoke('stop_terminal', { terminalId }).catch(() => {})
+      invoke('stop_terminal', { terminalId }).catch(() => {
+        /* noop */
+      })
       disposeTerminal(terminalId)
     }
   }, [terminalId])
@@ -284,15 +334,46 @@ export function AuthLoginState({
         className="w-full h-[300px] rounded-md bg-[#1a1a1a] overflow-hidden"
       />
 
+      {exitStatus && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
+          <p className="text-sm font-medium text-destructive">
+            Login process exited unexpectedly
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {exitStatus.signal
+              ? `Signal: ${exitStatus.signal}`
+              : `Exit code: ${exitStatus.exitCode ?? 'unknown'}`}
+          </p>
+        </div>
+      )}
+
       <div className="flex gap-2">
-        <Button onClick={onComplete} className="flex-1" size="lg">
-          I've Completed Login
-        </Button>
+        {exitStatus ? (
+          <>
+            <Button onClick={onComplete} className="flex-1" size="lg">
+              Check Login Status
+            </Button>
+            {onRetry && (
+              <Button
+                onClick={onRetry}
+                variant="outline"
+                className="flex-1"
+                size="lg"
+              >
+                Retry Login
+              </Button>
+            )}
+          </>
+        ) : (
+          <Button onClick={onComplete} className="flex-1" size="lg">
+            I&apos;ve Completed Login
+          </Button>
+        )}
         {onSkip && (
           <Button
             onClick={onSkip}
             variant="outline"
-            className="flex-1"
+            className={exitStatus ? '' : 'flex-1'}
             size="lg"
           >
             Skip for Now

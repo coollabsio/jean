@@ -7,6 +7,7 @@ use super::{
     MIN_REMOTE_POLL_INTERVAL,
 };
 use crate::projects::git_status::ActiveWorktreeInfo;
+use serde::Deserialize;
 
 /// Set the application focus state
 ///
@@ -116,5 +117,71 @@ pub fn trigger_immediate_remote_poll(
     state: State<'_, BackgroundTaskManager>,
 ) -> Result<(), String> {
     state.trigger_immediate_remote_poll();
+    Ok(())
+}
+
+/// Info about a worktree with an open PR, for sweep polling
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrWorktreeInfo {
+    pub worktree_id: String,
+    pub worktree_path: String,
+    pub base_branch: String,
+    pub pr_number: u32,
+    pub pr_url: String,
+}
+
+/// Set all worktrees with open PRs for background sweep polling.
+///
+/// The sweep polls these worktrees round-robin at a slow interval (5 min)
+/// to detect PR merges even when the worktree isn't actively selected.
+#[tauri::command]
+pub fn set_pr_worktrees_for_polling(
+    state: State<'_, BackgroundTaskManager>,
+    worktrees: Vec<PrWorktreeInfo>,
+) -> Result<(), String> {
+    let infos: Vec<ActiveWorktreeInfo> = worktrees
+        .into_iter()
+        .map(|w| ActiveWorktreeInfo {
+            worktree_id: w.worktree_id,
+            worktree_path: w.worktree_path,
+            base_branch: w.base_branch,
+            pr_number: Some(w.pr_number),
+            pr_url: Some(w.pr_url),
+        })
+        .collect();
+    state.set_pr_worktrees(infos);
+    Ok(())
+}
+
+/// Info about a worktree for git status sweep polling
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllWorktreeInfo {
+    pub worktree_id: String,
+    pub worktree_path: String,
+    pub base_branch: String,
+}
+
+/// Set all worktrees for background git status sweep polling.
+///
+/// The sweep polls these worktrees round-robin at a slow interval (60s)
+/// to keep uncommitted diff stats up to date even when not actively selected.
+#[tauri::command]
+pub fn set_all_worktrees_for_polling(
+    state: State<'_, BackgroundTaskManager>,
+    worktrees: Vec<AllWorktreeInfo>,
+) -> Result<(), String> {
+    let infos: Vec<ActiveWorktreeInfo> = worktrees
+        .into_iter()
+        .map(|w| ActiveWorktreeInfo {
+            worktree_id: w.worktree_id,
+            worktree_path: w.worktree_path,
+            base_branch: w.base_branch,
+            pr_number: None,
+            pr_url: None,
+        })
+        .collect();
+    state.set_all_worktrees(infos);
     Ok(())
 }

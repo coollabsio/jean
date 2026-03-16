@@ -2,13 +2,23 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { FileText, Loader2, AlertCircle, Columns2, Rows3 } from 'lucide-react'
 import { FileDiff } from '@pierre/diffs/react'
 import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { getGitDiff } from '@/services/git-status'
 import { useTheme } from '@/hooks/use-theme'
 import { usePreferences } from '@/services/preferences'
 import type { GitDiff } from '@/types/git-diff'
 import { getFilename } from '@/lib/path-utils'
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip'
 
 interface FileDiffModalProps {
   /** Absolute path to the file to show diff for, or null to close */
@@ -152,10 +162,12 @@ export function FileDiffModal({
       },
       themeType: resolvedThemeType,
       diffStyle,
+      overflow: 'wrap' as const,
       enableLineSelection: false,
       disableFileHeader: true,
       unsafeCSS: `
-        pre { font-family: var(--font-family-sans) !important; font-size: var(--ui-font-size) !important; line-height: var(--ui-line-height) !important; }
+        pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
+        * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
       `,
     }),
     [
@@ -172,7 +184,7 @@ export function FileDiffModal({
   return (
     <Dialog open={!!filePath} onOpenChange={open => !open && onClose()}>
       <DialogContent
-        className="!max-w-[calc(100vw-4rem)] !w-[calc(100vw-4rem)] h-[85vh] p-4 bg-background/95 backdrop-blur-sm overflow-hidden flex flex-col"
+        className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm overflow-hidden flex flex-col"
         style={{ fontSize: 'var(--ui-font-size)' }}
       >
         <DialogTitle className="flex items-center gap-2 shrink-0">
@@ -195,36 +207,48 @@ export function FileDiffModal({
           )}
           {/* View mode toggle */}
           <div className="flex items-center bg-muted rounded-lg p-1 ml-2">
-            <button
-              type="button"
-              onClick={() => setDiffStyle('split')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                diffStyle === 'split'
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-              title="Side-by-side view"
-            >
-              <Columns2 className="h-3.5 w-3.5" />
-              Split
-            </button>
-            <button
-              type="button"
-              onClick={() => setDiffStyle('unified')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                diffStyle === 'unified'
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-              title="Unified view"
-            >
-              <Rows3 className="h-3.5 w-3.5" />
-              Stacked
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setDiffStyle('split')}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors',
+                    diffStyle === 'split'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Columns2 className="h-3.5 w-3.5" />
+                  Split
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Side-by-side view</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setDiffStyle('unified')}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors',
+                    diffStyle === 'unified'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Rows3 className="h-3.5 w-3.5" />
+                  Stacked
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Unified view</TooltipContent>
+            </Tooltip>
           </div>
         </DialogTitle>
+        <DialogDescription className="sr-only">
+          Shows git diff details for {displayFilename}, including additions,
+          deletions, and view mode controls.
+        </DialogDescription>
 
         {/* Content area */}
         <div className="flex-1 min-h-0 mt-2 overflow-y-auto">

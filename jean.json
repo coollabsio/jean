@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "setup": "npm i",
-    "run": "npm run tauri:dev"
+    "setup": "bun install",
+    "run": "bun run tauri:dev"
   }
 }

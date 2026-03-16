@@ -3,19 +3,28 @@
 ## Prerequisites
 
 - **Node.js** LTS (v20+)
-- **npm** (comes with Node)
+- **bun** ([https://bun.sh](https://bun.sh))
 - **Rust** stable toolchain ([rustup.rs](https://rustup.rs))
 
 ### Platform-specific dependencies
 
 **macOS**: Xcode Command Line Tools
+
 ```bash
 xcode-select --install
 ```
 
-**Linux** (Debian/Ubuntu):
+**Linux** (Debian/Ubuntu/Linux Mint):
+
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+
+# Ubuntu/Linux Mint: prefer Ayatana AppIndicator (avoids conflicts between old libappindicator3 and Ayatana packages)
+sudo apt install libayatana-appindicator3-dev
+
+# Debian/older distros (if Ayatana packages are unavailable):
+# sudo apt install libappindicator3-dev
 ```
 
 **Linux Remote Desktop (RDP/xrdp)**: See [Linux Remote Development](#linux-remote-development-rdpxrdp) section below.
@@ -30,10 +39,10 @@ git clone https://github.com/coollabsio/jean.git
 cd jean
 
 # Install dependencies
-npm install
+bun install
 
 # Start development
-npm run tauri:dev
+bun run tauri:dev # Also keeps the web-access dist rebuilt in the background
 ```
 
 ## Project Structure
@@ -58,23 +67,24 @@ jean/
 
 ## Development Commands
 
-| Command | Description |
-|---------|-------------|
-| `npm run tauri:dev` | Start app in development mode |
-| `npm run tauri:dev:rdp` | Start in dev mode with RDP/remote desktop support |
-| `npm run check:all` | **Run all quality checks (must pass before PR)** |
-| `npm run typecheck` | TypeScript type checking |
-| `npm run lint` | ESLint (zero warnings enforced) |
-| `npm run lint:fix` | Auto-fix lint issues |
-| `npm run format` | Format code with Prettier |
-| `npm run test` | Run Vitest in watch mode |
-| `npm run test:run` | Run tests once |
-| `npm run rust:clippy` | Rust linting (warnings = errors) |
-| `npm run rust:fmt` | Format Rust code |
+| Command                 | Description                                       |
+| ----------------------- | ------------------------------------------------- |
+| `bun run tauri:dev`     | Start app in development mode and rebuild web dist |
+| `bun run tauri:dev:rdp` | Start in dev mode with RDP/remote desktop support |
+| `bun run check:all`     | **Run all quality checks (must pass before PR)**  |
+| `bun run typecheck`     | TypeScript type checking                          |
+| `bun run lint`          | ESLint (zero warnings enforced)                   |
+| `bun run lint:fix`      | Auto-fix lint issues                              |
+| `bun run format`        | Format code with Prettier                         |
+| `bun run test`          | Run Vitest in watch mode                          |
+| `bun run test:run`      | Run tests once                                    |
+| `bun run rust:clippy`   | Rust linting (warnings = errors)                  |
+| `bun run rust:fmt`      | Format Rust code                                  |
 
 ## Code Style
 
 ### TypeScript/React
+
 - **Strict mode** enabled
 - **ESLint** with zero warnings tolerance
 - **Prettier** formatting:
@@ -84,6 +94,7 @@ jean/
   - Trailing commas (ES5)
 
 ### Rust
+
 - **rustfmt** for formatting
 - **clippy** with warnings as errors
 
@@ -92,12 +103,15 @@ jean/
 Before contributing, familiarize yourself with these patterns (see `docs/developer/` for details):
 
 ### State Management
+
 ```
 useState (component) → Zustand (global UI) → TanStack Query (persistent data)
 ```
 
 ### Callback Pattern (Important!)
+
 Use `getState()` in callbacks to avoid render cascades:
+
 ```typescript
 // Good - stable callback
 const handleAction = useCallback(() => {
@@ -111,17 +125,19 @@ const handleAction = useCallback(() => setData(newData), [data, setData])
 ```
 
 ### Backend Communication
+
 All Tauri commands are wrapped in TanStack Query hooks in `src/services/`.
 
 ## Testing
 
 - **Frontend**: Vitest + React Testing Library
 - **Backend**: `cargo test`
-- **Run before PR**: `npm run check:all`
+- **Run before PR**: `bun run check:all`
 
 ## Linux Remote Development (RDP/xrdp)
 
 When developing on Linux via remote desktop (RDP/xrdp), you may encounter noisy EGL/Mesa/ZINK warnings like:
+
 - `libEGL warning: failed to create dri2 screen`
 - `MESA: ZINK: failed to choose pdev`
 
@@ -129,15 +145,16 @@ This is common in VM/RDP environments where GPU acceleration is unavailable. Use
 
 ```bash
 # Auto-detects RDP session and enables software rendering
-npm run tauri:dev:rdp
+bun run tauri:dev:rdp
 
 # Force software rendering (useful if auto-detection doesn't work)
-npm run tauri:dev:rdp -- --force
+bun run tauri:dev:rdp -- --force
 ```
 
 Or manually set environment variables:
+
 ```bash
-LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11 npm run tauri:dev
+LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11 bun run tauri:dev
 ```
 
 **Note**: Software rendering is slower than hardware acceleration, but in RDP setups hardware acceleration is typically unavailable anyway. This approach provides cleaner logs and more consistent startup.
@@ -147,7 +164,7 @@ LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11 npm run tauri:dev
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
 3. Make your changes
-4. Run `npm run check:all` - all checks must pass
+4. Run `bun run check:all` - all checks must pass
 5. Commit with clear messages
 6. Push and open a Pull Request
 

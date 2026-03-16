@@ -16,6 +16,7 @@ pub async fn start_terminal(
     cols: u16,
     rows: u16,
     command: Option<String>,
+    command_args: Option<Vec<String>>,
 ) -> Result<(), String> {
     log::trace!("start_terminal called for terminal: {terminal_id}");
 
@@ -24,7 +25,15 @@ pub async fn start_terminal(
         return Err("Terminal already exists".to_string());
     }
 
-    spawn_terminal(&app, terminal_id, worktree_path, cols, rows, command)
+    spawn_terminal(
+        &app,
+        terminal_id,
+        worktree_path,
+        cols,
+        rows,
+        command,
+        command_args,
+    )
 }
 
 /// Get the run script from jean.json for a worktree

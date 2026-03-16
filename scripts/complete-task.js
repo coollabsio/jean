@@ -110,13 +110,13 @@ function showHelp() {
 Task Completion Script
 
 Usage:
-  npm task:complete TASK_NAME       Complete a task
-  npm task:rename-done              Rename all existing completed tasks
+  bun run task:complete TASK_NAME       Complete a task
+  bun run task:rename-done              Rename all existing completed tasks
 
 Examples:
-  npm task:complete frontend-performance
-  npm task:complete 2
-  npm task:rename-done
+  bun run task:complete frontend-performance
+  bun run task:complete 2
+  bun run task:rename-done
 
 Notes:
   - Task name can be partial

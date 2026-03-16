@@ -2,12 +2,16 @@
 
 use crate::platform::silent_command;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use std::path::PathBuf;
+use tauri::AppHandle;
 
-use super::config::{ensure_gh_cli_dir, get_gh_cli_binary_path};
+use super::config::{ensure_gh_cli_dir, get_gh_cli_binary_path, resolve_gh_binary};
+use crate::http_server::EmitExt;
 
 /// GitHub API URL for releases
 const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/cli/cli/releases";
+const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
+const GITHUB_API_VERSION: &str = "2022-11-28";
 
 /// Status of the GitHub CLI installation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +115,7 @@ pub async fn check_gh_cli_installed(app: AppHandle) -> Result<GhCliStatus, Strin
 
 /// Get available GitHub CLI versions from GitHub releases API
 #[tauri::command]
-pub async fn get_available_gh_versions() -> Result<Vec<GhReleaseInfo>, String> {
+pub async fn get_available_gh_versions(app: AppHandle) -> Result<Vec<GhReleaseInfo>, String> {
     log::trace!("Fetching available GitHub CLI versions from GitHub API");
 
     let client = reqwest::Client::builder()
@@ -119,8 +123,16 @@ pub async fn get_available_gh_versions() -> Result<Vec<GhReleaseInfo>, String> {
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let response = client
+    let token = resolve_github_api_token(&app);
+    let mut request = client
         .get(GITHUB_RELEASES_API)
+        .header("Accept", GITHUB_API_ACCEPT)
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION);
+    if let Some(ref token) = token {
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("Failed to fetch releases: {e}"))?;
@@ -157,6 +169,50 @@ pub async fn get_available_gh_versions() -> Result<Vec<GhReleaseInfo>, String> {
 
     log::trace!("Found {} GitHub CLI versions", versions.len());
     Ok(versions)
+}
+
+/// Resolve a GitHub API token from environment or gh auth.
+///
+/// Priority:
+/// 1) GH_TOKEN / GITHUB_TOKEN env vars
+/// 2) `gh auth token` from Jean-managed gh binary
+/// 3) `gh auth token` from PATH
+pub fn resolve_github_api_token(app: &AppHandle) -> Option<String> {
+    for key in ["GH_TOKEN", "GITHUB_TOKEN"] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let managed_gh = resolve_gh_binary(app);
+    if managed_gh.exists() {
+        candidates.push(managed_gh);
+    } else if let Ok(path) = get_gh_cli_binary_path(app) {
+        if path.exists() {
+            candidates.push(path);
+        }
+    }
+    candidates.push(PathBuf::from("gh"));
+
+    for program in candidates {
+        let output = match silent_command(&program).args(["auth", "token"]).output() {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+
+    None
 }
 
 /// Get the platform string for the current system (for gh releases)
@@ -283,7 +339,10 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     emit_progress(&app, "installing", "Installing GitHub CLI...", 60);
 
     // Move binary to final location
-    std::fs::copy(&extracted_binary_path, &binary_path)
+    // Use write_binary_file to handle Windows file-locking (OS error 32)
+    let binary_content = std::fs::read(&extracted_binary_path)
+        .map_err(|e| format!("Failed to read extracted binary: {e}"))?;
+    crate::platform::write_binary_file(&binary_path, &binary_content)
         .map_err(|e| format!("Failed to copy binary: {e}"))?;
 
     // Clean up temp directory
@@ -539,7 +598,7 @@ fn emit_progress(app: &AppHandle, stage: &str, message: &str, percent: u8) {
         percent,
     };
 
-    if let Err(e) = app.emit("gh-cli:install-progress", &progress) {
+    if let Err(e) = app.emit_all("gh-cli:install-progress", &progress) {
         log::warn!("Failed to emit install progress: {}", e);
     }
 }

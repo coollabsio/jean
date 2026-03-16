@@ -2,10 +2,40 @@
 
 use std::process::Command;
 
+/// Escape a string for safe use in a shell command.
+/// Wraps in single quotes and escapes any embedded single quotes.
+#[cfg(unix)]
+pub fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Ensures macOS PATH has been fixed from the user's login shell.
+/// Uses `std::sync::Once` so the shell is only spawned on the first call.
+/// This must NOT call `silent_command()` internally to avoid recursion.
+#[cfg(target_os = "macos")]
+pub fn ensure_macos_path() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let start = std::time::Instant::now();
+        crate::fix_macos_path();
+        log::info!(
+            "fix_macos_path() completed in {:?} (lazy, on first CLI invocation)",
+            start.elapsed()
+        );
+    });
+}
+
 /// Creates a Command that won't open a console window on Windows.
 /// Use for all background operations (git, gh, claude CLI, etc.).
 /// Do NOT use for commands that intentionally open UI (terminals, editors, file explorers).
 pub fn silent_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    // Ensure macOS GUI app has the user's full PATH before spawning any subprocess.
+    // Lazy + cached via Once — only the first call pays the shell-spawn cost (~100-500ms).
+    #[cfg(target_os = "macos")]
+    ensure_macos_path();
+
+    #[allow(unused_mut)]
     let mut cmd = Command::new(program);
     #[cfg(windows)]
     {
@@ -129,6 +159,52 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(format!("taskkill failed: {}", stderr))
+    }
+}
+
+/// Write binary data to a file path, handling Windows file-locking.
+///
+/// On Windows, if the target file is in use by another process (e.g., background version
+/// checks), `File::create` fails with OS error 32. This function works around it by:
+/// 1. Writing to a `.tmp` file in the same directory
+/// 2. Renaming the existing file to `.old` (Windows allows renaming locked files)
+/// 3. Renaming the `.tmp` file to the target path
+/// 4. Best-effort cleanup of the `.old` file
+///
+/// On Unix, this simply writes directly (overwriting is safe even for running binaries).
+pub fn write_binary_file(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let temp_path = path.with_extension("tmp");
+        let old_path = path.with_extension("old");
+
+        // Write new binary to temp file
+        std::fs::write(&temp_path, content)
+            .map_err(|e| format!("Failed to write temp file: {e}"))?;
+
+        // Move existing file out of the way (Windows allows renaming locked files)
+        if path.exists() {
+            let _ = std::fs::remove_file(&old_path);
+            if let Err(e) = std::fs::rename(path, &old_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(format!("Failed to replace existing file: {e}"));
+            }
+        }
+
+        // Move temp file into place
+        if let Err(e) = std::fs::rename(&temp_path, path) {
+            let _ = std::fs::rename(&old_path, path);
+            return Err(format!("Failed to install new file: {e}"));
+        }
+
+        // Best-effort cleanup
+        let _ = std::fs::remove_file(&old_path);
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {e}"))
     }
 }
 

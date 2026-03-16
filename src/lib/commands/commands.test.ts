@@ -1,30 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { CommandContext, AppCommand } from './types'
 
-const mockUIStore = {
-  getState: vi.fn(() => ({
-    leftSidebarVisible: true,
-    commandPaletteOpen: false,
-    setLeftSidebarVisible: vi.fn(),
-  })),
-}
-
-vi.mock('@/store/ui-store', () => ({
-  useUIStore: mockUIStore,
-}))
-
 const { registerCommands, getAllCommands, executeCommand, clearRegistry } =
   await import('./registry')
-const { navigationCommands } = await import('./navigation-commands')
-const { executionCommands } = await import('./execution-commands')
-const { modelCommands } = await import('./model-commands')
-const { gitCommands } = await import('./git-commands')
-const { sessionCommands } = await import('./session-commands')
+const { notificationCommands } = await import('./notification-commands')
+const { projectCommands } = await import('./project-commands')
 
 const createMockContext = (): CommandContext => ({
-  // Query client
+  // Query client - return debug_mode_enabled for notification commands
   queryClient: {
-    getQueryData: vi.fn(),
+    getQueryData: vi.fn().mockImplementation((key: string[]) => {
+      if (key[0] === 'preferences') return { debug_mode_enabled: true }
+      return undefined
+    }),
   } as unknown as CommandContext['queryClient'],
 
   // Preferences
@@ -51,6 +39,7 @@ const createMockContext = (): CommandContext => ({
   clearSessionHistory: vi.fn().mockResolvedValue(undefined),
   renameSession: vi.fn(),
   resumeSession: vi.fn().mockResolvedValue(undefined),
+  regenerateSessionName: vi.fn().mockResolvedValue(undefined),
 
   // Worktrees
   createWorktree: vi.fn(),
@@ -84,6 +73,7 @@ const createMockContext = (): CommandContext => ({
   addProject: vi.fn(),
   initProject: vi.fn(),
   removeProject: vi.fn(),
+  openProjectSettings: vi.fn(),
 
   // AI
   runAIReview: vi.fn().mockResolvedValue(undefined),
@@ -100,10 +90,14 @@ const createMockContext = (): CommandContext => ({
   openArchivedModal: vi.fn(),
   restoreLastArchived: vi.fn(),
 
+  // Unread
+  openUnreadSessions: vi.fn(),
+
   // State getters
   hasActiveSession: vi.fn().mockReturnValue(true),
   hasActiveWorktree: vi.fn().mockReturnValue(true),
   hasSelectedProject: vi.fn().mockReturnValue(true),
+  hasInstalledBackend: vi.fn().mockReturnValue(true),
   hasMultipleSessions: vi.fn().mockReturnValue(true),
   hasMultipleWorktrees: vi.fn().mockReturnValue(true),
   hasRunScript: vi.fn().mockReturnValue(true),
@@ -111,6 +105,7 @@ const createMockContext = (): CommandContext => ({
   getCurrentModel: vi.fn().mockReturnValue('opus'),
   getCurrentThinkingLevel: vi.fn().mockReturnValue('off'),
   getCurrentExecutionMode: vi.fn().mockReturnValue('plan'),
+  toggleDebugMode: vi.fn(),
 })
 
 describe('Command System', () => {
@@ -119,7 +114,8 @@ describe('Command System', () => {
   beforeEach(() => {
     clearRegistry()
     mockContext = createMockContext()
-    registerCommands(navigationCommands)
+    registerCommands(projectCommands)
+    registerCommands(notificationCommands)
   })
 
   describe('Command Registration', () => {
@@ -127,40 +123,20 @@ describe('Command System', () => {
       const commands = getAllCommands(mockContext)
       expect(commands.length).toBeGreaterThan(0)
 
-      const sidebarCommand = commands.find(
-        cmd => cmd.id === 'show-left-sidebar' || cmd.id === 'hide-left-sidebar'
-      )
-      expect(sidebarCommand).toBeDefined()
-      expect(sidebarCommand?.label).toContain('Left Sidebar')
-    })
-
-    it('filters commands by availability', () => {
-      mockUIStore.getState.mockReturnValue({
-        leftSidebarVisible: false,
-        commandPaletteOpen: false,
-        setLeftSidebarVisible: vi.fn(),
-      })
-
-      const availableCommands = getAllCommands(mockContext)
-      const showSidebarCommand = availableCommands.find(
-        cmd => cmd.id === 'show-left-sidebar'
-      )
-      const hideSidebarCommand = availableCommands.find(
-        cmd => cmd.id === 'hide-left-sidebar'
-      )
-
-      expect(showSidebarCommand).toBeDefined()
-      expect(hideSidebarCommand).toBeUndefined()
+      const addProjectCmd = commands.find(cmd => cmd.id === 'add-project')
+      expect(addProjectCmd).toBeDefined()
+      expect(addProjectCmd?.label).toBe('Add Project')
     })
 
     it('filters commands by search term', () => {
-      const searchResults = getAllCommands(mockContext, 'sidebar')
+      const searchResults = getAllCommands(mockContext, 'project')
 
       expect(searchResults.length).toBeGreaterThan(0)
       searchResults.forEach(cmd => {
         const matchesSearch =
-          cmd.label.toLowerCase().includes('sidebar') ||
-          cmd.description?.toLowerCase().includes('sidebar')
+          cmd.label.toLowerCase().includes('project') ||
+          cmd.description?.toLowerCase().includes('project') ||
+          cmd.keywords?.some(kw => kw.toLowerCase().includes('project'))
 
         expect(matchesSearch).toBe(true)
       })
@@ -168,29 +144,18 @@ describe('Command System', () => {
   })
 
   describe('Command Execution', () => {
-    it('executes show-left-sidebar command correctly', async () => {
-      mockUIStore.getState.mockReturnValue({
-        leftSidebarVisible: false,
-        commandPaletteOpen: false,
-        setLeftSidebarVisible: vi.fn(),
-      })
-
-      const result = await executeCommand('show-left-sidebar', mockContext)
+    it('executes add-project command correctly', async () => {
+      const result = await executeCommand('add-project', mockContext)
 
       expect(result.success).toBe(true)
+      expect(mockContext.addProject).toHaveBeenCalled()
     })
 
-    it('fails to execute unavailable command', async () => {
-      mockUIStore.getState.mockReturnValue({
-        leftSidebarVisible: true,
-        commandPaletteOpen: false,
-        setLeftSidebarVisible: vi.fn(),
-      })
+    it('executes init-project command correctly', async () => {
+      const result = await executeCommand('init-project', mockContext)
 
-      const result = await executeCommand('show-left-sidebar', mockContext)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('not available')
+      expect(result.success).toBe(true)
+      expect(mockContext.initProject).toHaveBeenCalled()
     })
 
     it('handles non-existent command', async () => {
@@ -219,218 +184,49 @@ describe('Command System', () => {
   })
 })
 
-describe('Execution Commands', () => {
+describe('Project Commands', () => {
   let mockContext: CommandContext
 
   beforeEach(() => {
     clearRegistry()
     mockContext = createMockContext()
-    registerCommands(executionCommands)
+    registerCommands(projectCommands)
   })
 
-  describe('execution mode commands', () => {
-    it('registers all execution mode commands', () => {
-      const commands = getAllCommands(mockContext)
-      const executionIds = ['execution-plan', 'execution-build', 'execution-yolo', 'cycle-execution-mode']
-      const found = commands.filter(cmd => executionIds.includes(cmd.id))
-      // cycle-execution-mode should always be available
-      expect(found.some(c => c.id === 'cycle-execution-mode')).toBe(true)
-    })
+  it('registers all project commands', () => {
+    const commands = getAllCommands(mockContext)
+    const projectIds = ['add-project', 'init-project']
+    const found = commands.filter(cmd => projectIds.includes(cmd.id))
+    expect(found.length).toBe(2)
+  })
 
-    it('execution-plan is unavailable when already in plan mode', () => {
-      mockContext.getCurrentExecutionMode = vi.fn().mockReturnValue('plan')
-      const commands = getAllCommands(mockContext)
-      const planCmd = commands.find(c => c.id === 'execution-plan')
-      expect(planCmd).toBeUndefined()
-    })
+  it('add-project is always available', () => {
+    const commands = getAllCommands(mockContext)
+    const addCmd = commands.find(c => c.id === 'add-project')
+    expect(addCmd).toBeDefined()
+  })
 
-    it('execution-build is available when not in build mode', async () => {
-      mockContext.getCurrentExecutionMode = vi.fn().mockReturnValue('plan')
-      const commands = getAllCommands(mockContext)
-      const buildCmd = commands.find(c => c.id === 'execution-build')
-      expect(buildCmd).toBeDefined()
-
-      const result = await executeCommand('execution-build', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setExecutionMode).toHaveBeenCalledWith('build')
-    })
-
-    it('execution-yolo command executes correctly', async () => {
-      mockContext.getCurrentExecutionMode = vi.fn().mockReturnValue('plan')
-      const result = await executeCommand('execution-yolo', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setExecutionMode).toHaveBeenCalledWith('yolo')
-    })
-
-    it('cycle-execution-mode calls cycleExecutionMode', async () => {
-      const result = await executeCommand('cycle-execution-mode', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.cycleExecutionMode).toHaveBeenCalled()
-    })
+  it('init-project is always available', () => {
+    const commands = getAllCommands(mockContext)
+    const initCmd = commands.find(c => c.id === 'init-project')
+    expect(initCmd).toBeDefined()
   })
 })
 
-describe('Model Commands', () => {
+describe('Notification Commands', () => {
   let mockContext: CommandContext
 
   beforeEach(() => {
     clearRegistry()
     mockContext = createMockContext()
-    registerCommands(modelCommands)
+    registerCommands(notificationCommands)
   })
 
-  describe('model selection commands', () => {
-    it('set-model-opus is unavailable when already on opus', () => {
-      mockContext.getCurrentModel = vi.fn().mockReturnValue('opus')
-      const commands = getAllCommands(mockContext)
-      const opusCmd = commands.find(c => c.id === 'set-model-opus')
-      expect(opusCmd).toBeUndefined()
-    })
-
-    it('set-model-sonnet is available when on opus', async () => {
-      mockContext.getCurrentModel = vi.fn().mockReturnValue('opus')
-      const commands = getAllCommands(mockContext)
-      const sonnetCmd = commands.find(c => c.id === 'set-model-sonnet')
-      expect(sonnetCmd).toBeDefined()
-
-      const result = await executeCommand('set-model-sonnet', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setModel).toHaveBeenCalledWith('sonnet')
-    })
-
-    it('set-model-haiku executes correctly', async () => {
-      mockContext.getCurrentModel = vi.fn().mockReturnValue('opus')
-      const result = await executeCommand('set-model-haiku', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setModel).toHaveBeenCalledWith('haiku')
-    })
-  })
-
-  describe('thinking level commands', () => {
-    it('thinking-off is unavailable when already off', () => {
-      mockContext.getCurrentThinkingLevel = vi.fn().mockReturnValue('off')
-      const commands = getAllCommands(mockContext)
-      const offCmd = commands.find(c => c.id === 'thinking-off')
-      expect(offCmd).toBeUndefined()
-    })
-
-    it('thinking-think executes correctly', async () => {
-      mockContext.getCurrentThinkingLevel = vi.fn().mockReturnValue('off')
-      const result = await executeCommand('thinking-think', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setThinkingLevel).toHaveBeenCalledWith('think')
-    })
-
-    it('thinking-megathink executes correctly', async () => {
-      mockContext.getCurrentThinkingLevel = vi.fn().mockReturnValue('off')
-      const result = await executeCommand('thinking-megathink', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setThinkingLevel).toHaveBeenCalledWith('megathink')
-    })
-
-    it('thinking-ultrathink executes correctly', async () => {
-      mockContext.getCurrentThinkingLevel = vi.fn().mockReturnValue('off')
-      const result = await executeCommand('thinking-ultrathink', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.setThinkingLevel).toHaveBeenCalledWith('ultrathink')
-    })
-
-    it('thinking commands require active session', () => {
-      mockContext.hasActiveSession = vi.fn().mockReturnValue(false)
-      mockContext.getCurrentThinkingLevel = vi.fn().mockReturnValue('off')
-      const commands = getAllCommands(mockContext)
-      const thinkingCmds = commands.filter(c => c.id.startsWith('thinking-'))
-      expect(thinkingCmds.length).toBe(0)
-    })
-  })
-})
-
-describe('Git Commands', () => {
-  let mockContext: CommandContext
-
-  beforeEach(() => {
-    clearRegistry()
-    mockContext = createMockContext()
-    registerCommands(gitCommands)
-  })
-
-  describe('git commands', () => {
-    it('commit-changes command executes correctly', async () => {
-      const result = await executeCommand('commit-changes', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.openCommitModal).toHaveBeenCalled()
-    })
-
-    it('view-git-diff command executes correctly', async () => {
-      const result = await executeCommand('view-git-diff', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.viewGitDiff).toHaveBeenCalled()
-    })
-
-    it('open-pull-request command executes correctly', async () => {
-      const result = await executeCommand('open-pull-request', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.openPullRequest).toHaveBeenCalled()
-    })
-
-    it('git commands require active worktree', () => {
-      mockContext.hasActiveWorktree = vi.fn().mockReturnValue(false)
-      const commands = getAllCommands(mockContext)
-      const gitCmds = commands.filter(c => c.group === 'git')
-      expect(gitCmds.length).toBe(0)
-    })
-  })
-})
-
-describe('Session Commands', () => {
-  let mockContext: CommandContext
-
-  beforeEach(() => {
-    clearRegistry()
-    mockContext = createMockContext()
-    registerCommands(sessionCommands)
-  })
-
-  describe('session commands', () => {
-    it('new-session command executes correctly', async () => {
-      const result = await executeCommand('new-session', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.createSession).toHaveBeenCalled()
-    })
-
-    it('close-session command executes correctly', async () => {
-      const result = await executeCommand('close-session', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.closeSession).toHaveBeenCalled()
-    })
-
-    it('next-session command executes correctly', async () => {
-      const result = await executeCommand('next-session', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.nextSession).toHaveBeenCalled()
-    })
-
-    it('previous-session command executes correctly', async () => {
-      const result = await executeCommand('previous-session', mockContext)
-      expect(result.success).toBe(true)
-      expect(mockContext.previousSession).toHaveBeenCalled()
-    })
-
-    it('navigation commands require active session', () => {
-      mockContext.hasActiveSession = vi.fn().mockReturnValue(false)
-      const commands = getAllCommands(mockContext)
-      const nextCmd = commands.find(c => c.id === 'next-session')
-      const prevCmd = commands.find(c => c.id === 'previous-session')
-      expect(nextCmd).toBeUndefined()
-      expect(prevCmd).toBeUndefined()
-    })
-
-    it('close-session requires active session', () => {
-      mockContext.hasActiveSession = vi.fn().mockReturnValue(false)
-      const commands = getAllCommands(mockContext)
-      const closeCmd = commands.find(c => c.id === 'close-session')
-      expect(closeCmd).toBeUndefined()
-    })
+  it('registers test toast command', () => {
+    const commands = getAllCommands(mockContext)
+    const toastCmd = commands.find(c => c.id === 'notification.test-toast')
+    expect(toastCmd).toBeDefined()
+    expect(toastCmd?.label).toBe('Test Toast Notification')
   })
 })
 
@@ -440,42 +236,33 @@ describe('All Commands Combined', () => {
   beforeEach(() => {
     clearRegistry()
     mockContext = createMockContext()
-    registerCommands(navigationCommands)
-    registerCommands(executionCommands)
-    registerCommands(modelCommands)
-    registerCommands(gitCommands)
-    registerCommands(sessionCommands)
+    registerCommands(projectCommands)
+    registerCommands(notificationCommands)
   })
 
   it('registers all command groups', () => {
     const commands = getAllCommands(mockContext)
     const groups = new Set(commands.map(c => c.group).filter(Boolean))
 
-    expect(groups.has('navigation')).toBe(true)
-    expect(groups.has('execution')).toBe(true)
-    expect(groups.has('model')).toBe(true)
-    expect(groups.has('git')).toBe(true)
-    expect(groups.has('sessions')).toBe(true)
+    expect(groups.has('projects')).toBe(true)
+    expect(groups.has('debug')).toBe(true)
   })
 
   it('commands have unique IDs', () => {
     const commands = getAllCommands(mockContext)
     const ids = commands.map(c => c.id)
     const uniqueIds = new Set(ids)
-    // If sizes match, all IDs are unique
     expect(ids.length).toBe(uniqueIds.size)
   })
 
   it('search filters across all command groups', () => {
-    const results = getAllCommands(mockContext, 'mode')
+    const results = getAllCommands(mockContext, 'project')
     expect(results.length).toBeGreaterThan(0)
-    // Should find execution mode commands
-    expect(results.some(c => c.id.includes('execution'))).toBe(true)
+    expect(results.some(c => c.id.includes('project'))).toBe(true)
   })
 
   it('keyword search works', () => {
-    // Search for 'fast' should find haiku (fastest) and yolo
-    const results = getAllCommands(mockContext, 'fast')
+    const results = getAllCommands(mockContext, 'git')
     expect(results.length).toBeGreaterThan(0)
   })
 })

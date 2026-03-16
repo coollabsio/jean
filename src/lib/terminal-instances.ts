@@ -10,8 +10,10 @@
 
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { openExternal } from '@/lib/platform'
+import { invoke } from '@/lib/transport'
+import { listen, type UnlistenFn } from '@/lib/transport'
 import { useTerminalStore } from '@/store/terminal-store'
 import type {
   TerminalOutputEvent,
@@ -26,7 +28,9 @@ interface PersistentTerminal {
   worktreeId: string
   worktreePath: string
   command: string | null
+  commandArgs: string[] | null
   initialized: boolean // PTY has been started
+  onStopped?: (exitCode: number | null, signal: string | null) => void
 }
 
 // Module-level Map - persists across React mount/unmount cycles
@@ -46,6 +50,7 @@ export function getOrCreateTerminal(
     worktreeId: string
     worktreePath: string
     command?: string | null
+    commandArgs?: string[] | null
   }
 ): PersistentTerminal {
   const existing = instances.get(terminalId)
@@ -53,14 +58,15 @@ export function getOrCreateTerminal(
     return existing
   }
 
-  const { worktreeId, worktreePath, command = null } = options
+  const { worktreeId, worktreePath, command = null, commandArgs = null } = options
   const { setTerminalRunning } = useTerminalStore.getState()
 
   // Create xterm.js Terminal instance
   const terminal = new Terminal({
     cursorBlink: true,
     fontSize: 13,
-    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
+    fontFamily:
+      'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace',
     theme: {
       background: '#1a1a1a',
       foreground: '#e5e5e5',
@@ -70,8 +76,38 @@ export function getOrCreateTerminal(
     allowProposedApi: true,
   })
 
+  // Block most app shortcuts when terminal is focused. Only let specific CMD
+  // combos bubble to the global handler for terminal-specific actions.
+  // Ctrl+C/D/Z/L etc. always reach the PTY for terminal signal handling.
+  terminal.attachCustomKeyEventHandler(event => {
+    if (event.metaKey) {
+      const code = event.code
+      // CMD+` → toggle terminal panel
+      if (code === 'Backquote') return false
+      // CMD+T → new terminal tab
+      if (!event.shiftKey && !event.altKey && code === 'KeyT') return false
+      // CMD+W → close terminal tab
+      if (!event.shiftKey && !event.altKey && code === 'KeyW') return false
+      // CMD+1..9 → switch terminal tab
+      if (!event.shiftKey && !event.altKey && /^Digit[1-9]$/.test(code)) {
+        return false
+      }
+      // CMD+Alt+Backspace → cancel prompt
+      if (event.altKey && (code === 'Backspace' || code === 'Delete'))
+        return false
+      // All other CMD shortcuts: xterm consumes them (prevents app actions)
+      return true
+    }
+    return true
+  })
+
   const fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
+  terminal.loadAddon(
+    new WebLinksAddon((_event, uri) => {
+      openExternal(uri)
+    })
+  )
 
   // Handle user input - forward to PTY
   terminal.onData(data => {
@@ -98,7 +134,38 @@ export function getOrCreateTerminal(
     if (event.payload.terminal_id === terminalId) {
       setTerminalRunning(terminalId, false)
       const exitCode = event.payload.exit_code
-      terminal.writeln(`\r\n\x1b[90m[Process exited with code ${exitCode ?? 'unknown'}]\x1b[0m`)
+      const signal = event.payload.signal
+      const exitLabel =
+        signal != null
+          ? `signal ${signal}`
+          : `code ${exitCode ?? 'unknown'}`
+      terminal.writeln(`\r\n\x1b[90m[Process exited with ${exitLabel}]\x1b[0m`)
+      const inst = instances.get(terminalId)
+      inst?.onStopped?.(exitCode, signal)
+
+      // Auto-close terminal tab on:
+      // 1. Successful exit (code 0) — any terminal
+      // 2. SIGINT (Ctrl+C) — only for "run" terminals (have a command)
+      const isInterrupt = signal != null && signal.includes('Interrupt')
+      const isRunTerminal = inst?.command != null
+      if (inst && (exitCode === 0 || (isInterrupt && isRunTerminal))) {
+        const wId = inst.worktreeId
+        setTimeout(() => {
+          if (!instances.has(terminalId)) return // Already disposed
+          // eslint-disable-next-line @typescript-eslint/no-empty-function
+          invoke('stop_terminal', { terminalId }).catch(() => {})
+          disposeTerminal(terminalId)
+          const { removeTerminal, setTerminalPanelOpen } =
+            useTerminalStore.getState()
+          removeTerminal(wId, terminalId)
+          const remaining = useTerminalStore.getState().terminals[wId] ?? []
+          if (remaining.length === 0) {
+            setTerminalPanelOpen(wId, false)
+            useTerminalStore.getState().setTerminalVisible(false)
+            useTerminalStore.getState().setModalTerminalOpen(wId, false)
+          }
+        }, 0)
+      }
     }
   }).then(unlisten => listeners.push(unlisten))
 
@@ -109,7 +176,15 @@ export function getOrCreateTerminal(
     worktreeId,
     worktreePath,
     command,
+    commandArgs,
     initialized: false,
+  }
+
+  // Apply any pending onStopped callback registered before creation
+  const pendingCb = pendingOnStopped.get(terminalId)
+  if (pendingCb) {
+    instance.onStopped = pendingCb
+    pendingOnStopped.delete(terminalId)
   }
 
   instances.set(terminalId, instance)
@@ -119,7 +194,9 @@ export function getOrCreateTerminal(
 /**
  * Get terminal instance by ID.
  */
-export function getInstance(terminalId: string): PersistentTerminal | undefined {
+export function getInstance(
+  terminalId: string
+): PersistentTerminal | undefined {
   return instances.get(terminalId)
 }
 
@@ -134,11 +211,14 @@ export async function attachToContainer(
 ): Promise<void> {
   const instance = instances.get(terminalId)
   if (!instance) {
-    console.error('[terminal-instances] attachToContainer: instance not found:', terminalId)
+    console.error(
+      '[terminal-instances] attachToContainer: instance not found:',
+      terminalId
+    )
     return
   }
 
-  const { terminal, fitAddon, worktreePath, command, initialized } = instance
+  const { terminal, fitAddon, worktreePath, command, commandArgs, initialized } = instance
   const terminalElement = terminal.element
 
   if (!terminalElement) {
@@ -156,12 +236,16 @@ export async function attachToContainer(
 
     if (!initialized) {
       // First time - check if PTY already exists (reconnecting after app restart)
-      const ptyExists = await invoke<boolean>('has_active_terminal', { terminalId })
+      const ptyExists = await invoke<boolean>('has_active_terminal', {
+        terminalId,
+      })
 
       if (ptyExists) {
         // PTY exists - just resize and mark as running
         useTerminalStore.getState().setTerminalRunning(terminalId, true)
-        await invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
+        await invoke('terminal_resize', { terminalId, cols, rows }).catch(
+          console.error
+        )
       } else {
         // Start new PTY process
         await invoke('start_terminal', {
@@ -170,6 +254,7 @@ export async function attachToContainer(
           cols,
           rows,
           command,
+          commandArgs,
         }).catch(error => {
           console.error('[terminal-instances] start_terminal failed:', error)
           terminal.writeln(`\x1b[31mFailed to start terminal: ${error}\x1b[0m`)
@@ -179,10 +264,38 @@ export async function attachToContainer(
       instance.initialized = true
     } else {
       // Already initialized - just resize
-      await invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
+      await invoke('terminal_resize', { terminalId, cols, rows }).catch(
+        console.error
+      )
     }
 
     terminal.focus()
+  })
+}
+
+/**
+ * Start a terminal PTY without attaching to DOM.
+ * Creates the xterm instance (for event listeners + output buffering) and spawns
+ * the PTY immediately. When the user later opens the session, attachToContainer
+ * will detect the running PTY via has_active_terminal and reconnect.
+ */
+export function startHeadless(
+  terminalId: string,
+  options: { worktreeId: string; worktreePath: string; command: string; commandArgs?: string[] | null }
+): void {
+  const instance = getOrCreateTerminal(terminalId, options)
+  if (instance.initialized) return // Already started
+
+  instance.initialized = true
+  invoke('start_terminal', {
+    terminalId,
+    worktreePath: options.worktreePath,
+    cols: 80,
+    rows: 24,
+    command: options.command,
+    commandArgs: options.commandArgs ?? null,
+  }).catch(error => {
+    console.error('[terminal-instances] headless start_terminal failed:', error)
   })
 }
 
@@ -269,4 +382,31 @@ export function disposeAllWorktreeTerminals(worktreeId: string): void {
  */
 export function hasInstance(terminalId: string): boolean {
   return instances.has(terminalId)
+}
+
+// Pending onStopped callbacks for terminals not yet created
+const pendingOnStopped = new Map<
+  string,
+  (exitCode: number | null, signal: string | null) => void
+>()
+
+/**
+ * Register a callback for when a terminal's process exits.
+ * Can be called before or after terminal creation.
+ */
+export function setOnStopped(
+  terminalId: string,
+  cb:
+    | ((exitCode: number | null, signal: string | null) => void)
+    | undefined
+): void {
+  const instance = instances.get(terminalId)
+  if (instance) {
+    instance.onStopped = cb
+  }
+  if (cb) {
+    pendingOnStopped.set(terminalId, cb)
+  } else {
+    pendingOnStopped.delete(terminalId)
+  }
 }

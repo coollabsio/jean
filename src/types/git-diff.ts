@@ -48,10 +48,35 @@ export interface DiffFile {
   hunks: DiffHunk[]
 }
 
+/** Metadata for a single commit */
+export interface CommitInfo {
+  /** Full 40-char SHA */
+  sha: string
+  /** Abbreviated 7-char SHA */
+  shortSha: string
+  /** Subject line of the commit message */
+  message: string
+  /** Author name */
+  authorName: string
+  /** Author date in ISO 8601 format */
+  authorDate: string
+  /** Total lines added */
+  additions: number
+  /** Total lines removed */
+  deletions: number
+}
+
+/** Paginated commit history result */
+export interface CommitHistoryResult {
+  commits: CommitInfo[]
+  totalCount: number
+  hasMore: boolean
+}
+
 /** Complete diff response */
 export interface GitDiff {
-  /** Type of diff: "uncommitted" or "branch" */
-  diff_type: 'uncommitted' | 'branch'
+  /** Type of diff: "uncommitted", "branch", or "commit" */
+  diff_type: 'uncommitted' | 'branch' | 'commit'
   /** Base ref (e.g., "origin/main" or "HEAD") */
   base_ref: string
   /** Target ref (e.g., "HEAD" or "working directory") */

@@ -12,6 +12,7 @@ interface UseTerminalOptions {
   worktreeId: string
   worktreePath: string
   command?: string | null
+  commandArgs?: string[] | null
 }
 
 /**
@@ -26,6 +27,7 @@ export function useTerminal({
   worktreeId,
   worktreePath,
   command,
+  commandArgs,
 }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const attachedRef = useRef(false)
@@ -41,7 +43,7 @@ export function useTerminal({
 
       // Get or create persistent terminal instance
       // (creates xterm + listeners if new, returns existing otherwise)
-      getOrCreateTerminal(terminalId, { worktreeId, worktreePath, command })
+      getOrCreateTerminal(terminalId, { worktreeId, worktreePath, command, commandArgs })
 
       // Attach terminal to this container
       // (opens if first time, moves DOM element if re-attaching)
@@ -49,7 +51,7 @@ export function useTerminal({
 
       attachedRef.current = true
     },
-    [terminalId, worktreeId, worktreePath, command]
+    [terminalId, worktreeId, worktreePath, command, commandArgs]
   )
 
   const fit = useCallback(() => {

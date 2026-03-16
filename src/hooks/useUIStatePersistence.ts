@@ -4,6 +4,7 @@ import { useProjects } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { logger } from '@/lib/logger'
 import type { UIState } from '@/types/ui-state'
 
@@ -52,7 +53,7 @@ export function useUIStatePersistence() {
   // Initialize debounced save function
   useEffect(() => {
     debouncedSaveRef.current = debounce((state: UIState) => {
-      logger.debug('Saving UI state (debounced)', { state })
+      logger.debug('Saving UI state (debounced)')
       saveUIState(state)
     }, 500)
 
@@ -69,34 +70,51 @@ export function useUIStatePersistence() {
     const {
       activeWorktreeId,
       activeWorktreePath,
+      lastActiveWorktreeId,
       activeSessionIds,
-      reviewResults,
-      viewingReviewTab,
-      fixedReviewFindings,
+      reviewSidebarVisible,
       pendingDigestSessionIds,
+      lastOpenedPerProject,
     } = useChatStore.getState()
-    const { expandedProjectIds, expandedFolderIds, selectedProjectId } =
-      useProjectsStore.getState()
+    const {
+      expandedProjectIds,
+      expandedFolderIds,
+      selectedProjectId,
+      projectAccessTimestamps,
+      dashboardWorktreeCollapseOverrides,
+    } = useProjectsStore.getState()
     const { leftSidebarSize, leftSidebarVisible } = useUIStore.getState()
+    const { modalTerminalOpen, modalTerminalWidth } =
+      useTerminalStore.getState()
 
     return {
       active_worktree_id: activeWorktreeId,
       active_worktree_path: activeWorktreePath,
+      last_active_worktree_id: lastActiveWorktreeId,
       active_project_id: selectedProjectId,
       expanded_project_ids: Array.from(expandedProjectIds),
       expanded_folder_ids: Array.from(expandedFolderIds),
       left_sidebar_size: leftSidebarSize,
       left_sidebar_visible: leftSidebarVisible,
       active_session_ids: activeSessionIds,
-      // Worktree-scoped state (kept in ui-state.json)
-      review_results: reviewResults,
-      viewing_review_tab: viewingReviewTab,
-      // Convert Sets to arrays for JSON serialization
-      fixed_review_findings: Object.fromEntries(
-        Object.entries(fixedReviewFindings).map(([k, v]) => [k, Array.from(v)])
-      ),
+      // Review sidebar visibility
+      review_sidebar_visible: reviewSidebarVisible,
       // Convert pendingDigestSessionIds record to array of session IDs
       pending_digest_session_ids: Object.keys(pendingDigestSessionIds),
+      // Modal terminal drawer state
+      modal_terminal_open: modalTerminalOpen,
+      modal_terminal_width: modalTerminalWidth,
+      // Project access timestamps for recency sorting
+      project_access_timestamps: projectAccessTimestamps,
+      // Dashboard worktree collapse overrides
+      dashboard_worktree_collapse_overrides: dashboardWorktreeCollapseOverrides,
+      // Last opened worktree+session per project (convert camelCase → snake_case keys)
+      last_opened_per_project: Object.fromEntries(
+        Object.entries(lastOpenedPerProject).map(([projectId, entry]) => [
+          projectId,
+          { worktree_id: entry.worktreeId, session_id: entry.sessionId },
+        ])
+      ),
       version: 1, // Reset for first release
     }
   }, [])
@@ -171,24 +189,18 @@ export function useUIStatePersistence() {
       useUIStore.getState().setLeftSidebarVisible(uiState.left_sidebar_visible)
     }
 
-    // Force sidebar open when no projects exist (first-time launch)
-    if (projects.length === 0) {
-      logger.debug('No projects found, forcing sidebar open')
-      useUIStore.getState().setLeftSidebarVisible(true)
-    }
-
     // Restore active project first (selectProject clears selectedWorktreeId)
     // This must happen BEFORE restoring the active worktree
     if (uiState.active_project_id) {
-      const projectExists = projects.some(p => p.id === uiState.active_project_id)
+      const projectExists = projects.some(
+        p => p.id === uiState.active_project_id
+      )
       if (projectExists) {
         logger.debug('Restoring active project', {
           id: uiState.active_project_id,
         })
-        const { selectProject, expandProject } = useProjectsStore.getState()
+        const { selectProject } = useProjectsStore.getState()
         selectProject(uiState.active_project_id)
-        // Ensure the project is expanded so the worktree is visible
-        expandProject(uiState.active_project_id)
       } else {
         logger.debug('Active project no longer exists', {
           id: uiState.active_project_id,
@@ -219,6 +231,15 @@ export function useUIStatePersistence() {
       // 3. The worktree list from the backend is the source of truth
     }
 
+    // Restore last active worktree ID (for dashboard session selection)
+    // This must happen AFTER setActiveWorktree which also sets it,
+    // but covers the case where the user was on the dashboard (no active worktree)
+    if (uiState.last_active_worktree_id) {
+      useChatStore
+        .getState()
+        .setLastActiveWorktreeId(uiState.last_active_worktree_id)
+    }
+
     // Restore active sessions per worktree
     // Defensive: ensure active_session_ids is an object (might be null/undefined from backend)
     const activeSessionIds = uiState.active_session_ids ?? {}
@@ -226,7 +247,7 @@ export function useUIStatePersistence() {
       logger.debug('Restoring active sessions', { activeSessionIds })
       const { setActiveSession } = useChatStore.getState()
       for (const [worktreeId, sessionId] of Object.entries(activeSessionIds)) {
-        setActiveSession(worktreeId, sessionId)
+        setActiveSession(worktreeId, sessionId, { markOpened: false })
       }
     }
 
@@ -234,34 +255,11 @@ export function useUIStatePersistence() {
     // pending_permission_denials, denied_message_context, reviewing_sessions) is now
     // loaded from Session files by useSessionStatePersistence hook.
 
-    // Restore AI review results per worktree
-    const reviewResults = uiState.review_results ?? {}
-    if (Object.keys(reviewResults).length > 0) {
-      logger.debug('Restoring review results', {
-        worktreeCount: Object.keys(reviewResults).length,
+    // Restore review sidebar visibility
+    if (uiState.review_sidebar_visible != null) {
+      useChatStore.setState({
+        reviewSidebarVisible: uiState.review_sidebar_visible,
       })
-      useChatStore.setState({ reviewResults })
-    }
-
-    // Restore viewing review tab state
-    const viewingReviewTab = uiState.viewing_review_tab ?? {}
-    if (Object.keys(viewingReviewTab).length > 0) {
-      logger.debug('Restoring viewing review tab state', {
-        count: Object.keys(viewingReviewTab).length,
-      })
-      useChatStore.setState({ viewingReviewTab })
-    }
-
-    // Restore fixed review findings (convert arrays back to Sets)
-    const fixedReviewFindings = uiState.fixed_review_findings ?? {}
-    if (Object.keys(fixedReviewFindings).length > 0) {
-      logger.debug('Restoring fixed review findings', {
-        worktreeCount: Object.keys(fixedReviewFindings).length,
-      })
-      const converted = Object.fromEntries(
-        Object.entries(fixedReviewFindings).map(([k, v]) => [k, new Set(v)])
-      )
-      useChatStore.setState({ fixedReviewFindings: converted })
     }
 
     // Restore pending digest session IDs (convert array to record with true values)
@@ -276,8 +274,64 @@ export function useUIStatePersistence() {
       useChatStore.setState({ pendingDigestSessionIds: converted })
     }
 
+    // Restore modal terminal drawer state
+    const modalTerminalOpen = uiState.modal_terminal_open ?? {}
+    if (Object.keys(modalTerminalOpen).length > 0) {
+      logger.debug('Restoring modal terminal open state', {
+        count: Object.keys(modalTerminalOpen).length,
+      })
+      useTerminalStore.setState({ modalTerminalOpen })
+    }
+    if (uiState.modal_terminal_width != null) {
+      logger.debug('Restoring modal terminal width', {
+        width: uiState.modal_terminal_width,
+      })
+      useTerminalStore.setState({
+        modalTerminalWidth: uiState.modal_terminal_width,
+      })
+    }
+
+    // Restore project access timestamps
+    const projectAccessTimestamps = uiState.project_access_timestamps ?? {}
+    if (Object.keys(projectAccessTimestamps).length > 0) {
+      logger.debug('Restoring project access timestamps', {
+        count: Object.keys(projectAccessTimestamps).length,
+      })
+      useProjectsStore
+        .getState()
+        .setProjectAccessTimestamps(projectAccessTimestamps)
+    }
+
+    // Restore dashboard worktree collapse overrides
+    const collapseOverrides =
+      uiState.dashboard_worktree_collapse_overrides ?? {}
+    if (Object.keys(collapseOverrides).length > 0) {
+      logger.debug('Restoring dashboard worktree collapse overrides', {
+        count: Object.keys(collapseOverrides).length,
+      })
+      useProjectsStore.setState({
+        dashboardWorktreeCollapseOverrides: collapseOverrides,
+      })
+    }
+
+    // Restore last opened worktree+session per project (convert snake_case → camelCase keys)
+    const lastOpenedPerProject = uiState.last_opened_per_project ?? {}
+    if (Object.keys(lastOpenedPerProject).length > 0) {
+      logger.debug('Restoring last opened per project', {
+        count: Object.keys(lastOpenedPerProject).length,
+      })
+      const converted = Object.fromEntries(
+        Object.entries(lastOpenedPerProject).map(([projectId, entry]) => [
+          projectId,
+          { worktreeId: entry.worktree_id, sessionId: entry.session_id },
+        ])
+      )
+      useChatStore.setState({ lastOpenedPerProject: converted })
+    }
+
     queueMicrotask(() => {
       setIsInitialized(true)
+      useUIStore.getState().setUIStateInitialized(true)
     })
     logger.info('UI state initialization complete')
   }, [uiStateLoaded, uiState, projects, projectsLoaded, isInitialized])
@@ -291,29 +345,51 @@ export function useUIStatePersistence() {
     let prevExpandedProjectIds = useProjectsStore.getState().expandedProjectIds
     let prevExpandedFolderIds = useProjectsStore.getState().expandedFolderIds
     let prevSelectedProjectId = useProjectsStore.getState().selectedProjectId
+    let prevProjectAccessTimestamps =
+      useProjectsStore.getState().projectAccessTimestamps
+    let prevDashboardCollapseOverrides =
+      useProjectsStore.getState().dashboardWorktreeCollapseOverrides
     let prevLeftSidebarSize = useUIStore.getState().leftSidebarSize
     let prevLeftSidebarVisible = useUIStore.getState().leftSidebarVisible
     let prevWorktreeId = useChatStore.getState().activeWorktreeId
     let prevWorktreePath = useChatStore.getState().activeWorktreePath
+    let prevLastActiveWorktreeId = useChatStore.getState().lastActiveWorktreeId
     let prevActiveSessionIds = useChatStore.getState().activeSessionIds
-    // Worktree-scoped state (NOT session-specific - those are handled by useSessionStatePersistence)
-    let prevReviewResults = useChatStore.getState().reviewResults
-    let prevViewingReviewTab = useChatStore.getState().viewingReviewTab
-    let prevFixedReviewFindings = useChatStore.getState().fixedReviewFindings
+    let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevPendingDigestSessionIds =
       useChatStore.getState().pendingDigestSessionIds
+    let prevLastOpenedPerProject =
+      useChatStore.getState().lastOpenedPerProject
+    let prevModalTerminalOpen = useTerminalStore.getState().modalTerminalOpen
+    let prevModalTerminalWidth = useTerminalStore.getState().modalTerminalWidth
 
     // Subscribe to projects-store changes (expanded projects, folders, and selected project)
     const unsubProjects = useProjectsStore.subscribe(state => {
       // Check if expandedProjectIds, expandedFolderIds, or selectedProjectId changed
-      const projectIdsChanged = state.expandedProjectIds !== prevExpandedProjectIds
+      const projectIdsChanged =
+        state.expandedProjectIds !== prevExpandedProjectIds
       const folderIdsChanged = state.expandedFolderIds !== prevExpandedFolderIds
-      const selectedProjectChanged = state.selectedProjectId !== prevSelectedProjectId
+      const selectedProjectChanged =
+        state.selectedProjectId !== prevSelectedProjectId
+      const accessTimestampsChanged =
+        state.projectAccessTimestamps !== prevProjectAccessTimestamps
+      const collapseOverridesChanged =
+        state.dashboardWorktreeCollapseOverrides !==
+        prevDashboardCollapseOverrides
 
-      if (projectIdsChanged || folderIdsChanged || selectedProjectChanged) {
+      if (
+        projectIdsChanged ||
+        folderIdsChanged ||
+        selectedProjectChanged ||
+        accessTimestampsChanged ||
+        collapseOverridesChanged
+      ) {
         prevExpandedProjectIds = state.expandedProjectIds
         prevExpandedFolderIds = state.expandedFolderIds
         prevSelectedProjectId = state.selectedProjectId
+        prevProjectAccessTimestamps = state.projectAccessTimestamps
+        prevDashboardCollapseOverrides =
+          state.dashboardWorktreeCollapseOverrides
         const currentState = getCurrentUIState()
         debouncedSaveRef.current?.(currentState)
       }
@@ -339,31 +415,43 @@ export function useUIStatePersistence() {
       // Check if active worktree or active sessions changed
       const worktreeChanged =
         state.activeWorktreeId !== prevWorktreeId ||
-        state.activeWorktreePath !== prevWorktreePath
+        state.activeWorktreePath !== prevWorktreePath ||
+        state.lastActiveWorktreeId !== prevLastActiveWorktreeId
       const sessionsChanged = state.activeSessionIds !== prevActiveSessionIds
-      // Worktree-scoped state (NOT session-specific)
-      const reviewResultsChanged =
-        state.reviewResults !== prevReviewResults ||
-        state.viewingReviewTab !== prevViewingReviewTab
-      const reviewFindingsChanged =
-        state.fixedReviewFindings !== prevFixedReviewFindings
+      const reviewSidebarChanged =
+        state.reviewSidebarVisible !== prevReviewSidebarVisible
       const pendingDigestChanged =
         state.pendingDigestSessionIds !== prevPendingDigestSessionIds
+      const lastOpenedChanged =
+        state.lastOpenedPerProject !== prevLastOpenedPerProject
 
       if (
         worktreeChanged ||
         sessionsChanged ||
-        reviewResultsChanged ||
-        reviewFindingsChanged ||
-        pendingDigestChanged
+        reviewSidebarChanged ||
+        pendingDigestChanged ||
+        lastOpenedChanged
       ) {
         prevWorktreeId = state.activeWorktreeId
         prevWorktreePath = state.activeWorktreePath
+        prevLastActiveWorktreeId = state.lastActiveWorktreeId
         prevActiveSessionIds = state.activeSessionIds
-        prevReviewResults = state.reviewResults
-        prevViewingReviewTab = state.viewingReviewTab
-        prevFixedReviewFindings = state.fixedReviewFindings
+        prevReviewSidebarVisible = state.reviewSidebarVisible
         prevPendingDigestSessionIds = state.pendingDigestSessionIds
+        prevLastOpenedPerProject = state.lastOpenedPerProject
+        const currentState = getCurrentUIState()
+        debouncedSaveRef.current?.(currentState)
+      }
+    })
+
+    // Subscribe to terminal-store changes (modal terminal drawer state)
+    const unsubTerminal = useTerminalStore.subscribe(state => {
+      const openChanged = state.modalTerminalOpen !== prevModalTerminalOpen
+      const widthChanged = state.modalTerminalWidth !== prevModalTerminalWidth
+
+      if (openChanged || widthChanged) {
+        prevModalTerminalOpen = state.modalTerminalOpen
+        prevModalTerminalWidth = state.modalTerminalWidth
         const currentState = getCurrentUIState()
         debouncedSaveRef.current?.(currentState)
       }
@@ -375,6 +463,7 @@ export function useUIStatePersistence() {
       unsubProjects()
       unsubUI()
       unsubChat()
+      unsubTerminal()
       debouncedSaveRef.current?.cancel()
       logger.debug('UI state persistence subscriptions cleaned up')
     }

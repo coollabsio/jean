@@ -8,14 +8,16 @@
 //! - **Remote**: API calls like PR status via `gh` (slower, rate-limited)
 
 use std::collections::HashMap;
+use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::gh_cli::config::resolve_gh_binary;
+use crate::http_server::EmitExt;
 use crate::projects::git_status::{get_branch_status, ActiveWorktreeInfo, GitBranchStatus};
 use crate::projects::pr_status::{get_pr_status, PrStatus};
 
@@ -50,6 +52,48 @@ pub const MAX_REMOTE_POLL_INTERVAL: u64 = 600;
 /// Default remote polling interval in seconds (1 minute)
 pub const DEFAULT_REMOTE_POLL_INTERVAL: u64 = 60;
 
+// ============================================================================
+// Sweep polling constants (round-robin PR checks for non-active worktrees)
+// ============================================================================
+
+/// Default sweep polling interval in seconds (5 minutes)
+pub const DEFAULT_SWEEP_POLL_INTERVAL: u64 = 300;
+
+/// Default git sweep polling interval in seconds (60 seconds)
+/// This controls how often non-active worktrees get their git status polled (round-robin).
+pub const DEFAULT_GIT_SWEEP_INTERVAL: u64 = 60;
+
+/// Default usage polling interval in seconds (5 minutes)
+/// This refreshes Claude/Codex usage caches on the backend.
+pub const DEFAULT_USAGE_POLL_INTERVAL: u64 = 300;
+
+/// Default combined-context cleanup interval in seconds (1 hour)
+pub const DEFAULT_CLEANUP_POLL_INTERVAL: u64 = 3600;
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn dev_usage_poll_override_enabled() -> bool {
+    match env::var("JEAN_DEV_USAGE_POLL") {
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    }
+}
+
+fn usage_polling_enabled() -> bool {
+    if cfg!(debug_assertions) {
+        return dev_usage_poll_override_enabled();
+    }
+    true
+}
+
 /// Manages background tasks for the application
 ///
 /// The task manager runs a polling loop that periodically checks git status
@@ -75,6 +119,24 @@ pub struct BackgroundTaskManager {
     last_local_poll_times: Arc<Mutex<HashMap<String, u64>>>,
     /// Per-worktree timestamps of last remote poll
     last_remote_poll_times: Arc<Mutex<HashMap<String, u64>>>,
+    /// All worktrees with open PRs (for sweep polling of non-active worktrees)
+    pr_worktrees: Arc<Mutex<Vec<ActiveWorktreeInfo>>>,
+    /// Index for round-robin sweep
+    sweep_index: Arc<AtomicU64>,
+    /// Timestamp of last sweep poll
+    last_sweep_poll_time: Arc<AtomicU64>,
+    /// All worktrees for git status sweep polling (non-active worktrees)
+    all_worktrees: Arc<Mutex<Vec<ActiveWorktreeInfo>>>,
+    /// Index for round-robin git sweep
+    git_sweep_index: Arc<AtomicU64>,
+    /// Timestamp of last git sweep poll
+    last_git_sweep_time: Arc<AtomicU64>,
+    /// Timestamp of last usage cache refresh poll
+    last_usage_poll_time: Arc<AtomicU64>,
+    /// Guard to avoid overlapping usage refresh jobs
+    usage_poll_in_flight: Arc<AtomicBool>,
+    /// Timestamp of last combined-context cleanup sweep
+    last_cleanup_poll_time: Arc<AtomicU64>,
 }
 
 impl BackgroundTaskManager {
@@ -91,6 +153,18 @@ impl BackgroundTaskManager {
             immediate_remote_poll: Arc::new(AtomicBool::new(false)),
             last_local_poll_times: Arc::new(Mutex::new(HashMap::new())),
             last_remote_poll_times: Arc::new(Mutex::new(HashMap::new())),
+            pr_worktrees: Arc::new(Mutex::new(Vec::new())),
+            sweep_index: Arc::new(AtomicU64::new(0)),
+            last_sweep_poll_time: Arc::new(AtomicU64::new(0)),
+            all_worktrees: Arc::new(Mutex::new(Vec::new())),
+            git_sweep_index: Arc::new(AtomicU64::new(0)),
+            last_git_sweep_time: Arc::new(AtomicU64::new(0)),
+            // Initialize to "now" so startup does not trigger an immediate usage refresh.
+            last_usage_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
+            usage_poll_in_flight: Arc::new(AtomicBool::new(false)),
+            // Initialize to "now" so startup does not trigger an immediate cleanup
+            // (the startup cleanup in cleanup_old_archives already handles that).
+            last_cleanup_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
         }
     }
 
@@ -115,15 +189,107 @@ impl BackgroundTaskManager {
         let immediate_remote_poll = Arc::clone(&self.immediate_remote_poll);
         let last_local_poll_times = Arc::clone(&self.last_local_poll_times);
         let last_remote_poll_times = Arc::clone(&self.last_remote_poll_times);
+        let pr_worktrees = Arc::clone(&self.pr_worktrees);
+        let sweep_index = Arc::clone(&self.sweep_index);
+        let last_sweep_poll_time = Arc::clone(&self.last_sweep_poll_time);
+        let all_worktrees = Arc::clone(&self.all_worktrees);
+        let git_sweep_index = Arc::clone(&self.git_sweep_index);
+        let last_git_sweep_time = Arc::clone(&self.last_git_sweep_time);
+        let last_usage_poll_time = Arc::clone(&self.last_usage_poll_time);
+        let usage_poll_in_flight = Arc::clone(&self.usage_poll_in_flight);
+        let last_cleanup_poll_time = Arc::clone(&self.last_cleanup_poll_time);
+        let usage_poll_enabled = usage_polling_enabled();
 
         thread::spawn(move || {
             log::trace!("Background task polling loop started");
+            if cfg!(debug_assertions) {
+                if usage_poll_enabled {
+                    log::trace!(
+                        "Background usage polling enabled in dev via JEAN_DEV_USAGE_POLL override"
+                    );
+                } else {
+                    log::trace!("Background usage polling disabled in dev");
+                }
+            }
 
             loop {
                 // Check for shutdown signal
                 if shutdown.load(Ordering::Relaxed) {
                     log::trace!("Background task manager shutting down");
                     break;
+                }
+
+                // ================================================================
+                // Usage polling (backend cache refresh every 5 minutes)
+                // Runs independently from app focus/worktree polling.
+                // ================================================================
+                if usage_poll_enabled {
+                    let now = now_unix_secs();
+                    let last_usage = last_usage_poll_time.load(Ordering::Relaxed);
+                    let time_since_usage = now.saturating_sub(last_usage);
+
+                    if time_since_usage >= DEFAULT_USAGE_POLL_INTERVAL
+                        && !usage_poll_in_flight.swap(true, Ordering::Relaxed)
+                    {
+                        last_usage_poll_time.store(now, Ordering::Relaxed);
+                        let app_handle = app.clone();
+                        let in_flight_guard = Arc::clone(&usage_poll_in_flight);
+                        tauri::async_runtime::spawn(async move {
+                            log::trace!("Background usage refresh tick");
+                            refresh_usage_caches(&app_handle).await;
+                            in_flight_guard.store(false, Ordering::Relaxed);
+                        });
+                    }
+                }
+
+                // ================================================================
+                // Combined-context cleanup (orphan sweep every hour)
+                // Runs independently from app focus/worktree polling.
+                // ================================================================
+                {
+                    let now = now_unix_secs();
+                    let last_cleanup = last_cleanup_poll_time.load(Ordering::Relaxed);
+                    let time_since_cleanup = now.saturating_sub(last_cleanup);
+
+                    if time_since_cleanup >= DEFAULT_CLEANUP_POLL_INTERVAL {
+                        last_cleanup_poll_time.store(now, Ordering::Relaxed);
+                        let app_handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            log::trace!("Background cleanup tick (combined-contexts + pasted files)");
+                            match crate::chat::storage::cleanup_orphaned_combined_contexts(
+                                &app_handle,
+                            ) {
+                                Ok(deleted) => {
+                                    if deleted > 0 {
+                                        log::debug!(
+                                            "Background cleanup: removed {deleted} orphaned combined-context files"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Background combined-context cleanup failed: {e}"
+                                    );
+                                }
+                            }
+                            match crate::chat::storage::cleanup_orphaned_pasted_files(
+                                &app_handle,
+                            ) {
+                                Ok(deleted) => {
+                                    if deleted > 0 {
+                                        log::debug!(
+                                            "Background cleanup: removed {deleted} orphaned pasted files"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Background pasted-files cleanup failed: {e}"
+                                    );
+                                }
+                            }
+                        });
+                    }
                 }
 
                 // Only poll when app is focused
@@ -138,11 +304,8 @@ impl BackgroundTaskManager {
                     guard.clone()
                 };
 
-                if worktree_info.is_none() {
-                    log::trace!("No active worktree for polling");
-                    thread::sleep(Duration::from_secs(1));
-                    continue;
-                }
+                // Active worktree ID for excluding from sweep
+                let active_worktree_id = worktree_info.as_ref().map(|i| i.worktree_id.clone());
 
                 if let Some(info) = worktree_info {
                     log::trace!(
@@ -258,6 +421,116 @@ impl BackgroundTaskManager {
                     }
                 }
 
+                // ================================================================
+                // Sweep polling (round-robin PR checks for non-active worktrees)
+                // Runs even when no worktree is selected on the canvas
+                // ================================================================
+                {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let last_sweep = last_sweep_poll_time.load(Ordering::Relaxed);
+                    let time_since_sweep = now.saturating_sub(last_sweep);
+
+                    if time_since_sweep >= DEFAULT_SWEEP_POLL_INTERVAL {
+                        let worktrees = pr_worktrees.lock().unwrap().clone();
+
+                        // Filter out the currently active worktree (already polled above)
+                        let candidates: Vec<_> = worktrees
+                            .iter()
+                            .filter(|w| active_worktree_id.as_ref() != Some(&w.worktree_id))
+                            .filter(|w| w.pr_number.is_some() && w.pr_url.is_some())
+                            .collect();
+
+                        if !candidates.is_empty() {
+                            let idx = sweep_index.fetch_add(1, Ordering::Relaxed) as usize
+                                % candidates.len();
+                            let candidate = candidates[idx];
+
+                            if let (Some(pr_num), Some(pr_url)) =
+                                (&candidate.pr_number, &candidate.pr_url)
+                            {
+                                log::trace!(
+                                    "Sweep: polling PR #{} for worktree {}",
+                                    pr_num,
+                                    candidate.worktree_id
+                                );
+
+                                let gh = resolve_gh_binary(&app);
+                                match get_pr_status(
+                                    &candidate.worktree_path,
+                                    *pr_num,
+                                    pr_url,
+                                    &candidate.worktree_id,
+                                    &gh,
+                                ) {
+                                    Ok(status) => {
+                                        if let Err(e) = emit_pr_status(&app, status) {
+                                            log::error!("Sweep: failed to emit PR status: {e}");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Sweep: failed PR status for #{}: {e}", pr_num);
+                                    }
+                                }
+                            }
+                        }
+
+                        last_sweep_poll_time.store(now, Ordering::Relaxed);
+                    }
+                }
+
+                // ================================================================
+                // Git status sweep (round-robin git status for non-active worktrees)
+                // Runs even when no worktree is selected on the canvas
+                // ================================================================
+                {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let last_git_sweep = last_git_sweep_time.load(Ordering::Relaxed);
+                    let time_since_git_sweep = now.saturating_sub(last_git_sweep);
+
+                    if time_since_git_sweep >= DEFAULT_GIT_SWEEP_INTERVAL {
+                        let worktrees = all_worktrees.lock().unwrap().clone();
+
+                        // Filter out the currently active worktree (already polled above)
+                        let candidates: Vec<_> = worktrees
+                            .iter()
+                            .filter(|w| active_worktree_id.as_ref() != Some(&w.worktree_id))
+                            .collect();
+
+                        if !candidates.is_empty() {
+                            let idx = git_sweep_index.fetch_add(1, Ordering::Relaxed) as usize
+                                % candidates.len();
+                            let candidate = candidates[idx];
+
+                            log::trace!(
+                                "Git sweep: polling git status for worktree {}",
+                                candidate.worktree_id
+                            );
+
+                            match get_branch_status(candidate) {
+                                Ok(status) => {
+                                    if let Err(e) = emit_git_status(&app, status) {
+                                        log::error!("Git sweep: failed to emit git status: {e}");
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Git sweep: failed git status for {}: {e}",
+                                        candidate.worktree_id
+                                    );
+                                }
+                            }
+                        }
+
+                        last_git_sweep_time.store(now, Ordering::Relaxed);
+                    }
+                }
+
                 // Wait for a short interval before next check
                 // Use 1-second sleep intervals to respond to shutdown/focus/immediate changes quickly
                 let interval = poll_interval_secs.load(Ordering::Relaxed);
@@ -314,10 +587,10 @@ impl BackgroundTaskManager {
                     MIN_LOCAL_POLL_DEBOUNCE
                 );
 
-                // If enough time has passed, trigger immediate poll
-                if time_since >= MIN_LOCAL_POLL_DEBOUNCE {
-                    self.immediate_poll.store(true, Ordering::Relaxed);
-                }
+                // Always trigger immediate local and remote poll on focus regain
+                // Branch changes and PR status updates happen while the app is unfocused
+                self.immediate_poll.store(true, Ordering::Relaxed);
+                self.immediate_remote_poll.store(true, Ordering::Relaxed);
             } else {
                 log::trace!("App gained focus: no active worktree");
             }
@@ -386,6 +659,29 @@ impl BackgroundTaskManager {
         self.immediate_poll.store(true, Ordering::Relaxed);
     }
 
+    /// Set all worktrees with open PRs for sweep polling.
+    ///
+    /// The sweep polls these worktrees round-robin at a slower interval
+    /// to detect PR merges even when the worktree isn't actively selected.
+    pub fn set_pr_worktrees(&self, worktrees: Vec<ActiveWorktreeInfo>) {
+        log::trace!("Setting {} PR worktrees for sweep polling", worktrees.len());
+        let mut guard = self.pr_worktrees.lock().unwrap();
+        *guard = worktrees;
+    }
+
+    /// Set all worktrees for git status sweep polling.
+    ///
+    /// The sweep polls these worktrees round-robin at a slow interval (60s)
+    /// to keep uncommitted diff stats up to date even when not actively selected.
+    pub fn set_all_worktrees(&self, worktrees: Vec<ActiveWorktreeInfo>) {
+        log::trace!(
+            "Setting {} worktrees for git status sweep polling",
+            worktrees.len()
+        );
+        let mut guard = self.all_worktrees.lock().unwrap();
+        *guard = worktrees;
+    }
+
     /// Trigger an immediate remote poll
     ///
     /// This bypasses the normal remote polling interval.
@@ -396,14 +692,53 @@ impl BackgroundTaskManager {
     }
 }
 
+async fn refresh_usage_caches(app: &AppHandle) {
+    // Claude usage polling disabled — auth bug causes repeated logouts
+    // (see UsagePane.tsx). Keep refresh_claude_usage_cache() for re-enabling later.
+
+    if let Err(e) = refresh_codex_usage_cache(app).await {
+        log::trace!("Background usage refresh (Codex) skipped/failed: {e}");
+    }
+}
+
+async fn refresh_claude_usage_cache(app: &AppHandle) -> Result<(), String> {
+    let status = crate::claude_cli::check_claude_cli_installed(app.clone()).await?;
+    if !status.installed {
+        return Ok(());
+    }
+
+    let auth = crate::claude_cli::check_claude_cli_auth(app.clone()).await?;
+    if !auth.authenticated {
+        return Ok(());
+    }
+
+    let _ = crate::claude_cli::get_claude_usage_with_source("background").await?;
+    Ok(())
+}
+
+async fn refresh_codex_usage_cache(app: &AppHandle) -> Result<(), String> {
+    let status = crate::codex_cli::check_codex_cli_installed(app.clone()).await?;
+    if !status.installed {
+        return Ok(());
+    }
+
+    let auth = crate::codex_cli::check_codex_cli_auth(app.clone()).await?;
+    if !auth.authenticated {
+        return Ok(());
+    }
+
+    let _ = crate::codex_cli::get_codex_usage().await?;
+    Ok(())
+}
+
 /// Emit a git status event to the frontend
 fn emit_git_status(app: &AppHandle, status: GitBranchStatus) -> Result<(), String> {
-    app.emit("git:status-update", &status)
+    app.emit_all("git:status-update", &status)
         .map_err(|e| format!("Failed to emit git:status-update event: {e}"))
 }
 
 /// Emit a PR status event to the frontend
 fn emit_pr_status(app: &AppHandle, status: PrStatus) -> Result<(), String> {
-    app.emit("pr:status-update", &status)
+    app.emit_all("pr:status-update", &status)
         .map_err(|e| format!("Failed to emit pr:status-update event: {e}"))
 }

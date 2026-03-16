@@ -35,6 +35,7 @@ function getDepth(projects: Project[], itemId: string): number {
   let current = projects.find(p => p.id === itemId)
   while (current?.parent_id) {
     depth++
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     current = projects.find(p => p.id === current!.parent_id)
   }
   return depth
@@ -99,12 +100,9 @@ function SortableItem({
   overFolderId,
   insertBeforeId,
 }: SortableItemProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    isDragging,
-  } = useSortable({ id: item.id })
+  const { attributes, listeners, setNodeRef, isDragging } = useSortable({
+    id: item.id,
+  })
 
   const style: React.CSSProperties = {
     opacity: isDragging ? 0.3 : 1,
@@ -127,7 +125,11 @@ function SortableItem({
           {...listeners}
           className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
         >
-          <FolderTreeItem folder={item} depth={depth} isDropTarget={isOverFolder}>
+          <FolderTreeItem
+            folder={item}
+            depth={depth}
+            isDropTarget={isOverFolder}
+          >
             {isExpanded && (
               <NestedItems
                 projects={allProjects}
@@ -215,9 +217,7 @@ function RootDropZone({ isOver }: { isOver: boolean }) {
       ref={setNodeRef}
       className={cn(
         'mx-2 mt-1 rounded border-2 border-dashed transition-colors flex items-center justify-center py-2',
-        isOver
-          ? 'border-primary/50 bg-primary/5'
-          : 'border-muted-foreground/25'
+        isOver ? 'border-primary/50 bg-primary/5' : 'border-muted-foreground/25'
       )}
     >
       <span className="text-[11px] text-muted-foreground/50 select-none">
@@ -295,9 +295,10 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
       // Check if dragging over a folder (skip if at max depth)
       if (overItem && isFolder(overItem) && activeId !== over.id) {
         const folderDepth = getDepth(projects, overItem.id)
-        const subtreeDepth = activeItemObj && isFolder(activeItemObj)
-          ? getMaxSubtreeDepth(projects, activeItemObj.id)
-          : 0
+        const subtreeDepth =
+          activeItemObj && isFolder(activeItemObj)
+            ? getMaxSubtreeDepth(projects, activeItemObj.id)
+            : 0
         if (folderDepth + 1 + subtreeDepth <= MAX_NESTING_DEPTH) {
           setOverFolderId(over.id as string)
           setInsertBeforeId(null)
@@ -311,11 +312,18 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
       setOverFolderId(null)
 
       // Show insertion indicator for same-level reorder
-      if (overItem && activeItemObj && over.id !== active.id && !isFolder(overItem)) {
+      if (
+        overItem &&
+        activeItemObj &&
+        over.id !== active.id &&
+        !isFolder(overItem)
+      ) {
         // Determine insert position based on dragged item center vs over item center
         const activeRect = active.rect.current.translated
         const overRect = over.rect
-        const activeCenter = activeRect ? activeRect.top + activeRect.height / 2 : 0
+        const activeCenter = activeRect
+          ? activeRect.top + activeRect.height / 2
+          : 0
         const overCenter = overRect.top + overRect.height / 2
 
         // Get siblings at the over item's level
@@ -359,7 +367,10 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
       // Dropping on root drop zone = move to root
       if (over.id === 'root-drop-zone') {
         if (activeItem.parent_id !== undefined) {
-          moveItem.mutate({ itemId: active.id as string, newParentId: undefined })
+          moveItem.mutate({
+            itemId: active.id as string,
+            newParentId: undefined,
+          })
         }
         return
       }
@@ -431,6 +442,15 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
 
       // Same-level reorder
       if (overItem && activeItem.parent_id === overItem.parent_id) {
+        // Recalculate insert position based on center-point (same logic as handleDragOver)
+        const activeRect = active.rect.current.translated
+        const overRect = over.rect
+        const activeCenter = activeRect
+          ? activeRect.top + activeRect.height / 2
+          : 0
+        const overCenter = overRect.top + overRect.height / 2
+        const insertAfter = activeCenter >= overCenter
+
         const parentId = activeItem.parent_id
         const siblings = projects
           .filter(p => p.parent_id === parentId)
@@ -441,9 +461,17 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
           })
 
         const oldIndex = siblings.findIndex(p => p.id === active.id)
-        const newIndex = siblings.findIndex(p => p.id === over.id)
+        let newIndex = siblings.findIndex(p => p.id === over.id)
 
         if (oldIndex === -1 || newIndex === -1) return
+
+        // Adjust for insert-after when dragging UP (oldIndex > newIndex)
+        // arrayMove places item AT newIndex, but indicator showed AFTER the target
+        if (insertAfter && oldIndex > newIndex) {
+          newIndex += 1
+        }
+
+        if (oldIndex === newIndex) return
 
         const reorderedItems = arrayMove(siblings, oldIndex, newIndex)
         const itemIds = reorderedItems.map(p => p.id)
@@ -470,7 +498,10 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
             </span>
           </div>
         )}
-        <SortableContext items={allItemIds} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          items={allItemIds}
+          strategy={verticalListSortingStrategy}
+        >
           {rootFolders.map(item => (
             <SortableItem
               key={item.id}
@@ -510,17 +541,22 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
         </SortableContext>
 
         {/* Root drop zone - visible when dragging an item that's inside a folder */}
-        {activeId && projects.find(p => p.id === activeId)?.parent_id !== undefined && (
-          <RootDropZone isOver={isOverRoot} />
-        )}
+        {activeId &&
+          projects.find(p => p.id === activeId)?.parent_id !== undefined && (
+            <RootDropZone isOver={isOverRoot} />
+          )}
 
         <DragOverlay dropAnimation={null}>
           {activeItem && (
             <div className="rounded bg-accent px-3 py-1.5 text-sm font-medium shadow-md flex items-center gap-1.5 opacity-90">
-              {isFolder(activeItem) && <Folder className="size-3.5 text-muted-foreground" />}
+              {isFolder(activeItem) && (
+                <Folder className="size-3.5 text-muted-foreground" />
+              )}
               {!isFolder(activeItem) && (
                 <div className="flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
-                  <span className="text-[10px] font-medium uppercase">{activeItem.name[0]}</span>
+                  <span className="text-[10px] font-medium uppercase">
+                    {activeItem.name[0]}
+                  </span>
                 </div>
               )}
               <span className="truncate">{activeItem.name}</span>

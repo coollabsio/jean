@@ -2,6 +2,7 @@ import * as React from 'react'
 import { X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { generateId } from '@/lib/uuid'
 import { Badge } from './badge'
 
 export interface Tag {
@@ -53,7 +54,7 @@ const TagInput = React.forwardRef<HTMLDivElement, TagInputProps>(
       }
 
       const newTag: Tag = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         text: trimmedValue,
       }
 

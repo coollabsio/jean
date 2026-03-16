@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Terminal, Wand2 } from 'lucide-react'
 import {
   Command,
@@ -11,6 +18,8 @@ import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { useClaudeSkills, useClaudeCommands } from '@/services/skills'
 import type { ClaudeSkill, ClaudeCommand, PendingSkill } from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { generateId } from '@/lib/uuid'
+import { fuzzySearchItems } from '@/lib/fuzzy-search'
 
 export interface SlashPopoverHandle {
   moveUp: () => void
@@ -31,8 +40,12 @@ interface SlashPopoverProps {
   searchQuery: string
   /** Position for the anchor (relative to textarea container) */
   anchorPosition: { top: number; left: number } | null
+  /** Reference to the form container for stable positioning */
+  containerRef?: React.RefObject<HTMLElement | null>
   /** Whether slash is at prompt start (enables commands) */
   isAtPromptStart: boolean
+  /** Worktree path for loading project-level commands/skills */
+  worktreePath?: string | null
   /** Ref to expose navigation methods to parent */
   handleRef?: React.RefObject<SlashPopoverHandle | null>
 }
@@ -48,44 +61,29 @@ export function SlashPopover({
   onSelectCommand,
   searchQuery,
   anchorPosition,
+  containerRef,
   isAtPromptStart,
+  worktreePath,
   handleRef,
 }: SlashPopoverProps) {
-  const { data: skills = [] } = useClaudeSkills()
-  const { data: commands = [] } = useClaudeCommands()
+  const { data: skills = [] } = useClaudeSkills(worktreePath)
+  const { data: commands = [] } = useClaudeCommands(worktreePath)
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
 
-  // Filter and combine items based on search query and context
+  // Filter and combine items based on search query and context (fuzzy match)
   const filteredItems = useMemo(() => {
-    const query = searchQuery.toLowerCase()
     const items: ListItem[] = []
 
     // Add commands first (only if at prompt start)
     if (isAtPromptStart) {
-      const filteredCommands = query
-        ? commands.filter(
-            c =>
-              c.name.toLowerCase().includes(query) ||
-              c.description?.toLowerCase().includes(query)
-          )
-        : commands
-
-      filteredCommands.slice(0, 10).forEach(cmd => {
+      fuzzySearchItems(commands, searchQuery, 10).forEach(cmd => {
         items.push({ type: 'command', data: cmd })
       })
     }
 
     // Add skills
-    const filteredSkills = query
-      ? skills.filter(
-          s =>
-            s.name.toLowerCase().includes(query) ||
-            s.description?.toLowerCase().includes(query)
-        )
-      : skills
-
-    filteredSkills.slice(0, 10).forEach(skill => {
+    fuzzySearchItems(skills, searchQuery, 10).forEach(skill => {
       items.push({ type: 'skill', data: skill })
     })
 
@@ -101,7 +99,7 @@ export function SlashPopover({
   const handleSelectSkill = useCallback(
     (skill: ClaudeSkill) => {
       const pendingSkill: PendingSkill = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         name: skill.name,
         path: skill.path,
       }
@@ -129,30 +127,27 @@ export function SlashPopover({
     } else {
       handleSelectSkill(item.data)
     }
-  }, [filteredItems, clampedSelectedIndex, handleSelectCommand, handleSelectSkill])
+  }, [
+    filteredItems,
+    clampedSelectedIndex,
+    handleSelectCommand,
+    handleSelectSkill,
+  ])
 
   // Expose navigation methods via ref for parent to call
-  useImperativeHandle(
-    handleRef,
-    () => {
-      console.log('[SlashPopover] useImperativeHandle creating handle, filteredItems.length:', filteredItems.length)
-      return {
-        moveUp: () => {
-          console.log('[SlashPopover] moveUp called, current selectedIndex:', selectedIndex)
-          setSelectedIndex(i => Math.max(i - 1, 0))
-        },
-        moveDown: () => {
-          console.log('[SlashPopover] moveDown called, current selectedIndex:', selectedIndex, 'max:', filteredItems.length - 1)
-          setSelectedIndex(i => Math.min(i + 1, filteredItems.length - 1))
-        },
-        selectCurrent: () => {
-          console.log('[SlashPopover] selectCurrent called, clampedSelectedIndex:', clampedSelectedIndex)
-          selectHighlighted()
-        },
-      }
-    },
-    [filteredItems.length, selectHighlighted, selectedIndex, clampedSelectedIndex]
-  )
+  useImperativeHandle(handleRef, () => {
+    return {
+      moveUp: () => {
+        setSelectedIndex(i => Math.max(i - 1, 0))
+      },
+      moveDown: () => {
+        setSelectedIndex(i => Math.min(i + 1, filteredItems.length - 1))
+      },
+      selectCurrent: () => {
+        selectHighlighted()
+      },
+    }
+  }, [filteredItems.length, selectHighlighted])
 
   // Scroll selected item into view
   useEffect(() => {
@@ -165,18 +160,44 @@ export function SlashPopover({
     selectedItem?.scrollIntoView({ block: 'nearest' })
   }, [clampedSelectedIndex])
 
+  // Calculate anchor position relative to form container for stable positioning
+  // When skill badges appear above the textarea, the ChatInput div shifts down.
+  // By anchoring to the form's top, the popover stays in the same position.
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const [stableAnchorTop, setStableAnchorTop] = useState(0)
+
+  useEffect(() => {
+    if (
+      !open ||
+      !anchorPosition ||
+      !containerRef?.current ||
+      !anchorRef.current
+    ) {
+      return
+    }
+    const formRect = containerRef.current.getBoundingClientRect()
+    const wrapperRect = anchorRef.current.parentElement?.getBoundingClientRect()
+    if (wrapperRect) {
+      // Negative offset to position at form top instead of ChatInput top
+      setStableAnchorTop(formRect.top - wrapperRect.top)
+    }
+  }, [open, anchorPosition, containerRef])
+
   if (!open || !anchorPosition) return null
 
   // Split items by type for grouped rendering
   const commandItems = filteredItems.filter(item => item.type === 'command')
   const skillItems = filteredItems.filter(item => item.type === 'skill')
 
+  const resolvedTop = containerRef ? stableAnchorTop : anchorPosition.top
+
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor
+        ref={anchorRef}
         style={{
           position: 'absolute',
-          top: anchorPosition.top,
+          top: resolvedTop,
           left: anchorPosition.left,
           pointerEvents: 'none',
         }}
@@ -185,7 +206,7 @@ export function SlashPopover({
         className="w-80 p-0"
         align="start"
         side="top"
-        sideOffset={4}
+        sideOffset={12}
         onOpenAutoFocus={e => e.preventDefault()}
         onCloseAutoFocus={e => e.preventDefault()}
       >

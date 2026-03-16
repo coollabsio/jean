@@ -10,6 +10,7 @@ import {
   getGitPollInterval,
   triggerImmediateGitPoll,
   gitPull,
+  getGitRemotes,
   setRemotePollInterval,
   getRemotePollInterval,
   triggerImmediateRemotePoll,
@@ -21,11 +22,8 @@ import {
 const mockInvoke = vi.fn()
 const mockListen = vi.fn()
 
-vi.mock('@tauri-apps/api/core', () => ({
+vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
-}))
-
-vi.mock('@tauri-apps/api/event', () => ({
   listen: (...args: unknown[]) => mockListen(...args),
 }))
 
@@ -42,8 +40,10 @@ const createTestQueryClient = () =>
   })
 
 const createWrapper = (queryClient: QueryClient) => {
-  return ({ children }: { children: React.ReactNode }) =>
+  const Wrapper = ({ children }: { children: React.ReactNode }) =>
     createElement(QueryClientProvider, { client: queryClient }, children)
+  Wrapper.displayName = 'TestQueryClientWrapper'
+  return Wrapper
 }
 
 describe('git-status service', () => {
@@ -67,7 +67,10 @@ describe('git-status service', () => {
     })
 
     it('returns correct worktree key', () => {
-      expect(gitStatusQueryKeys.worktree('wt-123')).toEqual(['git-status', 'wt-123'])
+      expect(gitStatusQueryKeys.worktree('wt-123')).toEqual([
+        'git-status',
+        'wt-123',
+      ])
     })
   })
 
@@ -77,7 +80,9 @@ describe('git-status service', () => {
 
       await setAppFocusState(true)
 
-      expect(mockInvoke).toHaveBeenCalledWith('set_app_focus_state', { focused: true })
+      expect(mockInvoke).toHaveBeenCalledWith('set_app_focus_state', {
+        focused: true,
+      })
     })
 
     it('skips when not in Tauri', async () => {
@@ -104,13 +109,16 @@ describe('git-status service', () => {
 
       await setActiveWorktreeForPolling(info)
 
-      expect(mockInvoke).toHaveBeenCalledWith('set_active_worktree_for_polling', {
-        worktreeId: 'wt-123',
-        worktreePath: '/path/to/worktree',
-        baseBranch: 'main',
-        prNumber: 42,
-        prUrl: 'https://github.com/org/repo/pull/42',
-      })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'set_active_worktree_for_polling',
+        {
+          worktreeId: 'wt-123',
+          worktreePath: '/path/to/worktree',
+          baseBranch: 'main',
+          prNumber: 42,
+          prUrl: 'https://github.com/org/repo/pull/42',
+        }
+      )
     })
 
     it('calls invoke with nulls when clearing', async () => {
@@ -118,13 +126,16 @@ describe('git-status service', () => {
 
       await setActiveWorktreeForPolling(null)
 
-      expect(mockInvoke).toHaveBeenCalledWith('set_active_worktree_for_polling', {
-        worktreeId: null,
-        worktreePath: null,
-        baseBranch: null,
-        prNumber: null,
-        prUrl: null,
-      })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'set_active_worktree_for_polling',
+        {
+          worktreeId: null,
+          worktreePath: null,
+          baseBranch: null,
+          prNumber: null,
+          prUrl: null,
+        }
+      )
     })
 
     it('defaults prNumber and prUrl to null', async () => {
@@ -138,13 +149,16 @@ describe('git-status service', () => {
 
       await setActiveWorktreeForPolling(info)
 
-      expect(mockInvoke).toHaveBeenCalledWith('set_active_worktree_for_polling', {
-        worktreeId: 'wt-123',
-        worktreePath: '/path/to/worktree',
-        baseBranch: 'main',
-        prNumber: null,
-        prUrl: null,
-      })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'set_active_worktree_for_polling',
+        {
+          worktreeId: 'wt-123',
+          worktreePath: '/path/to/worktree',
+          baseBranch: 'main',
+          prNumber: null,
+          prUrl: null,
+        }
+      )
     })
   })
 
@@ -154,7 +168,9 @@ describe('git-status service', () => {
 
       await setGitPollInterval(30)
 
-      expect(mockInvoke).toHaveBeenCalledWith('set_git_poll_interval', { seconds: 30 })
+      expect(mockInvoke).toHaveBeenCalledWith('set_git_poll_interval', {
+        seconds: 30,
+      })
     })
   })
 
@@ -196,14 +212,20 @@ describe('git-status service', () => {
       const result = await gitPull('/path/to/repo', 'main')
 
       expect(result).toBe('Already up to date.')
-      expect(mockInvoke).toHaveBeenCalledWith('git_pull', { worktreePath: '/path/to/repo', baseBranch: 'main' })
+      expect(mockInvoke).toHaveBeenCalledWith('git_pull', {
+        worktreePath: '/path/to/repo',
+        baseBranch: 'main',
+        remote: null,
+      })
     })
 
     it('throws when not in Tauri', async () => {
       const { isTauri } = vi.mocked(await import('@/services/projects'))
       isTauri.mockReturnValue(false)
 
-      await expect(gitPull('/path', 'main')).rejects.toThrow('Git pull only available in Tauri')
+      await expect(gitPull('/path', 'main')).rejects.toThrow(
+        'Git pull only available in Tauri'
+      )
     })
   })
 
@@ -213,7 +235,38 @@ describe('git-status service', () => {
 
       await setRemotePollInterval(120)
 
-      expect(mockInvoke).toHaveBeenCalledWith('set_remote_poll_interval', { seconds: 120 })
+      expect(mockInvoke).toHaveBeenCalledWith('set_remote_poll_interval', {
+        seconds: 120,
+      })
+    })
+  })
+
+  describe('getGitRemotes', () => {
+    it('returns remotes with origin first', async () => {
+      mockInvoke.mockResolvedValueOnce([
+        { name: 'upstream' },
+        { name: 'origin' },
+        { name: 'fork' },
+      ])
+
+      const result = await getGitRemotes('/path/to/repo')
+
+      expect(result).toEqual([
+        { name: 'origin' },
+        { name: 'upstream' },
+        { name: 'fork' },
+      ])
+      expect(mockInvoke).toHaveBeenCalledWith('get_git_remotes', {
+        repoPath: '/path/to/repo',
+      })
+    })
+
+    it('keeps order unchanged when origin is missing', async () => {
+      mockInvoke.mockResolvedValueOnce([{ name: 'upstream' }, { name: 'fork' }])
+
+      const result = await getGitRemotes('/path/to/repo')
+
+      expect(result).toEqual([{ name: 'upstream' }, { name: 'fork' }])
     })
   })
 
@@ -248,7 +301,10 @@ describe('git-status service', () => {
 
   describe('getGitDiff', () => {
     it('calls invoke with uncommitted diff type', async () => {
-      const mockDiff = { files: [], summary: { total_additions: 0, total_deletions: 0 } }
+      const mockDiff = {
+        files: [],
+        summary: { total_additions: 0, total_deletions: 0 },
+      }
       mockInvoke.mockResolvedValueOnce(mockDiff)
 
       const result = await getGitDiff('/path/to/repo', 'uncommitted')
@@ -262,7 +318,10 @@ describe('git-status service', () => {
     })
 
     it('calls invoke with branch diff type and base branch', async () => {
-      const mockDiff = { files: [], summary: { total_additions: 10, total_deletions: 5 } }
+      const mockDiff = {
+        files: [],
+        summary: { total_additions: 10, total_deletions: 5 },
+      }
       mockInvoke.mockResolvedValueOnce(mockDiff)
 
       const result = await getGitDiff('/path/to/repo', 'branch', 'main')
@@ -279,7 +338,9 @@ describe('git-status service', () => {
       const { isTauri } = vi.mocked(await import('@/services/projects'))
       isTauri.mockReturnValue(false)
 
-      await expect(getGitDiff('/path', 'uncommitted')).rejects.toThrow('Git diff only available in Tauri')
+      await expect(getGitDiff('/path', 'uncommitted')).rejects.toThrow(
+        'Git diff only available in Tauri'
+      )
     })
   })
 

@@ -1,5 +1,16 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Settings, Palette, Keyboard, Wand2, FlaskConical } from 'lucide-react'
+import {
+  Settings,
+  Palette,
+  Keyboard,
+  Wand2,
+  Plug,
+  Blocks,
+  BarChart3,
+  Puzzle,
+  FlaskConical,
+  Globe,
+} from 'lucide-react'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -14,6 +25,14 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { ModalCloseButton } from '@/components/ui/modal-close-button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sidebar,
   SidebarContent,
@@ -29,13 +48,28 @@ import { GeneralPane } from './panes/GeneralPane'
 import { AppearancePane } from './panes/AppearancePane'
 import { KeybindingsPane } from './panes/KeybindingsPane'
 import { MagicPromptsPane } from './panes/MagicPromptsPane'
+import { McpServersPane } from './panes/McpServersPane'
+import { ProvidersPane } from './panes/ProvidersPane'
+import { UsagePane } from './panes/UsagePane'
+import { IntegrationsPane } from './panes/IntegrationsPane'
 import { ExperimentalPane } from './panes/ExperimentalPane'
+import { WebAccessPane } from './panes/WebAccessPane'
 
 const navigationItems = [
   {
     id: 'general' as const,
     name: 'General',
     icon: Settings,
+  },
+  {
+    id: 'providers' as const,
+    name: 'Providers',
+    icon: Blocks,
+  },
+  {
+    id: 'usage' as const,
+    name: 'Usage',
+    icon: BarChart3,
   },
   {
     id: 'appearance' as const,
@@ -46,6 +80,7 @@ const navigationItems = [
     id: 'keybindings' as const,
     name: 'Keybindings',
     icon: Keyboard,
+    desktopOnly: true,
   },
   {
     id: 'magic-prompts' as const,
@@ -53,9 +88,25 @@ const navigationItems = [
     icon: Wand2,
   },
   {
+    id: 'mcp-servers' as const,
+    name: 'MCP Servers',
+    icon: Plug,
+  },
+  {
+    id: 'integrations' as const,
+    name: 'Integrations',
+    icon: Puzzle,
+  },
+  {
     id: 'experimental' as const,
     name: 'Experimental',
     icon: FlaskConical,
+  },
+  {
+    id: 'web-access' as const,
+    name: 'Web Access (Experimental)',
+    icon: Globe,
+    desktopOnly: true,
   },
 ]
 
@@ -69,8 +120,18 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'Keybindings'
     case 'magic-prompts':
       return 'Magic Prompts'
+    case 'mcp-servers':
+      return 'MCP Servers'
+    case 'providers':
+      return 'Providers'
+    case 'usage':
+      return 'Usage'
+    case 'integrations':
+      return 'Integrations'
     case 'experimental':
       return 'Experimental'
+    case 'web-access':
+      return 'Web Access (Experimental)'
     default:
       return 'General'
   }
@@ -78,7 +139,9 @@ const getPaneTitle = (pane: PreferencePane): string => {
 
 export function PreferencesDialog() {
   const [activePane, setActivePane] = useState<PreferencePane>('general')
-  const { preferencesOpen, setPreferencesOpen, preferencesPane } = useUIStore()
+  const preferencesOpen = useUIStore(state => state.preferencesOpen)
+  const setPreferencesOpen = useUIStore(state => state.setPreferencesOpen)
+  const preferencesPane = useUIStore(state => state.preferencesPane)
 
   // Handle open state change and navigate to specific pane if requested
   const handleOpenChange = useCallback(
@@ -94,19 +157,23 @@ export function PreferencesDialog() {
   // Sync activePane from preferencesPane when dialog opens to a specific pane
   useEffect(() => {
     if (preferencesOpen && preferencesPane) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActivePane(preferencesPane)
     }
   }, [preferencesOpen, preferencesPane])
 
   return (
     <Dialog open={preferencesOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="overflow-hidden p-0 !max-w-[calc(100vw-4rem)] !w-[calc(100vw-4rem)] max-h-[85vh] font-sans rounded-xl">
+      <DialogContent
+        showCloseButton={false}
+        className="overflow-hidden p-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-xl font-sans"
+      >
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
           Customize your application preferences here.
         </DialogDescription>
 
-        <SidebarProvider className="items-start">
+        <SidebarProvider className="!min-h-0 !h-full items-stretch overflow-hidden">
           <Sidebar collapsible="none" className="hidden md:flex">
             <SidebarContent>
               <SidebarGroup>
@@ -136,13 +203,36 @@ export function PreferencesDialog() {
 
           <main className="flex flex-1 flex-col overflow-hidden">
             <header className="flex h-16 shrink-0 items-center gap-2">
-              <div className="flex items-center gap-2 px-4">
-                <Breadcrumb>
+              <div className="flex flex-1 items-center gap-2 px-4">
+                {/* Mobile pane selector */}
+                <Select
+                  value={activePane}
+                  onValueChange={v => setActivePane(v as PreferencePane)}
+                >
+                  <SelectTrigger className="md:hidden w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {navigationItems
+                      .filter(item => !item.desktopOnly)
+                      .map(item => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <ModalCloseButton
+                  size="lg"
+                  className="md:hidden"
+                  onClick={() => handleOpenChange(false)}
+                />
+                <Breadcrumb className="hidden md:block">
                   <BreadcrumbList>
-                    <BreadcrumbItem className="hidden md:block">
+                    <BreadcrumbItem>
                       <BreadcrumbLink href="#">Settings</BreadcrumbLink>
                     </BreadcrumbItem>
-                    <BreadcrumbSeparator className="hidden md:block" />
+                    <BreadcrumbSeparator />
                     <BreadcrumbItem>
                       <BreadcrumbPage>
                         {getPaneTitle(activePane)}
@@ -150,15 +240,24 @@ export function PreferencesDialog() {
                     </BreadcrumbItem>
                   </BreadcrumbList>
                 </Breadcrumb>
+                <ModalCloseButton
+                  className="hidden md:inline-flex ml-auto"
+                  onClick={() => handleOpenChange(false)}
+                />
               </div>
             </header>
 
-            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 max-h-[calc(85vh-4rem)]">
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 min-h-0 custom-scrollbar">
               {activePane === 'general' && <GeneralPane />}
               {activePane === 'appearance' && <AppearancePane />}
               {activePane === 'keybindings' && <KeybindingsPane />}
               {activePane === 'magic-prompts' && <MagicPromptsPane />}
+              {activePane === 'mcp-servers' && <McpServersPane />}
+              {activePane === 'providers' && <ProvidersPane />}
+              {activePane === 'usage' && <UsagePane />}
+              {activePane === 'integrations' && <IntegrationsPane />}
               {activePane === 'experimental' && <ExperimentalPane />}
+              {activePane === 'web-access' && <WebAccessPane />}
             </div>
           </main>
         </SidebarProvider>

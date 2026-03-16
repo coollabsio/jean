@@ -1,5 +1,10 @@
 import type { ToolCall, ContentBlock, Todo } from '@/types/chat'
-import { isTodoWrite } from '@/types/chat'
+import { isTodoWrite, isCollabToolCall } from '@/types/chat'
+
+/** Check if a tool is a task/agent container (Claude CLI uses both names) */
+function isAgentTool(name: string): boolean {
+  return name === 'Task' || name === 'Agent'
+}
 
 /**
  * Normalize todos for display - marks in_progress as completed when message is done
@@ -39,14 +44,17 @@ export type GroupedToolCall =
   | { type: 'standalone'; tool: ToolCall }
 
 /**
- * Check if a tool call is a special interactive tool that should be rendered separately
- * (AskUserQuestion, ExitPlanMode, and TodoWrite have their own UI components)
+ * Check if a tool call is a special tool that should not render in the timeline.
+ * AskUserQuestion and ExitPlanMode have dedicated inline render paths.
+ * TodoWrite and CodexTodoList are shown via dedicated todo UI.
  */
 function isSpecialTool(toolCall: ToolCall): boolean {
   return (
     toolCall.name === 'AskUserQuestion' ||
     toolCall.name === 'ExitPlanMode' ||
-    toolCall.name === 'TodoWrite'
+    toolCall.name === 'EnterPlanMode' ||
+    toolCall.name === 'TodoWrite' ||
+    toolCall.name === 'CodexTodoList'
   )
 }
 
@@ -63,11 +71,11 @@ export function groupToolCalls(toolCalls: ToolCall[]): GroupedToolCall[] {
 
   for (const tool of toolCalls) {
     // Skip special tools - they're handled separately
-    if (isSpecialTool(tool)) {
+    if (isSpecialTool(tool) || isCollabToolCall(tool)) {
       continue
     }
 
-    if (tool.name === 'Task') {
+    if (isAgentTool(tool.name)) {
       // Finish previous task if any
       if (currentTask) {
         result.push({ type: 'task', ...currentTask })
@@ -108,7 +116,9 @@ export type TimelineItem =
   | { type: 'standalone'; tool: ToolCall; key: string }
   | { type: 'stackedGroup'; items: StackableItem[]; key: string }
   | { type: 'askUserQuestion'; tool: ToolCall; introText?: string; key: string }
+  | { type: 'enterPlanMode'; tool: ToolCall; key: string }
   | { type: 'exitPlanMode'; tool: ToolCall; key: string }
+  | { type: 'unknown'; rawType: string; rawData: unknown; key: string }
 
 /**
  * Merge consecutive stackable items (thinking + standalone tools) into stackedGroup
@@ -200,7 +210,7 @@ export function buildTimeline(
     if (tc.parent_tool_use_id && !isSpecialTool(tc)) {
       // Only set if parent is a Task tool (not just any tool)
       const parentTool = toolCallMap.get(tc.parent_tool_use_id)
-      if (parentTool?.name === 'Task') {
+      if (parentTool && isAgentTool(parentTool.name)) {
         subToolParent.set(tc.id, tc.parent_tool_use_id)
       }
     }
@@ -218,7 +228,7 @@ export function buildTimeline(
       const tool = toolCallMap.get(block.tool_call_id)
       if (!tool || isSpecialTool(tool)) continue
 
-      if (tool.name === 'Task') {
+      if (isAgentTool(tool.name)) {
         currentTaskId = tool.id
       } else if (currentTaskId && !subToolParent.has(tool.id)) {
         // Only set if not already set by parent_tool_use_id (backward compat)
@@ -304,8 +314,24 @@ export function buildTimeline(
         })
         continue
       }
+      if (toolCall.name === 'EnterPlanMode') {
+        result.push({
+          type: 'enterPlanMode',
+          tool: toolCall,
+          key: `enter-plan-${toolCall.id}`,
+        })
+        continue
+      }
       if (isTodoWrite(toolCall)) {
         // TodoWrite is handled separately (shown above textarea)
+        continue
+      }
+      if (toolCall.name === 'CodexTodoList') {
+        // Codex todo list is handled separately (shown above textarea)
+        continue
+      }
+      if (isCollabToolCall(toolCall)) {
+        // Collab tools shown in AgentWidget panel, not timeline
         continue
       }
 
@@ -315,7 +341,7 @@ export function buildTimeline(
       }
 
       // Handle Task tools - collect their sub-tools
-      if (toolCall.name === 'Task') {
+      if (isAgentTool(toolCall.name)) {
         if (renderedTasks.has(toolCall.id)) continue
         renderedTasks.add(toolCall.id)
 
@@ -342,6 +368,15 @@ export function buildTimeline(
           key: `tool-${toolCall.id}`,
         })
       }
+    } else {
+      // Unknown content block type — render a visible indicator
+      result.push({
+        type: 'unknown',
+        rawType:
+          ((block as Record<string, unknown>).type as string) ?? 'unknown',
+        rawData: block,
+        key: `unknown-${i}`,
+      })
     }
   }
 
@@ -350,8 +385,23 @@ export function buildTimeline(
 }
 
 /**
+ * Find the plan content from ExitPlanMode tool calls
+ * This is the primary source for plan content (inline in tool input)
+ *
+ * @param toolCalls - All tool calls from the message
+ * @returns The plan content if found, null otherwise
+ */
+export function findPlanContent(toolCalls: ToolCall[]): string | null {
+  const exitPlanTool = toolCalls.find(tc => tc.name === 'ExitPlanMode')
+  if (!exitPlanTool) return null
+  const input = exitPlanTool.input as { plan?: string } | undefined
+  return input?.plan ?? null
+}
+
+/**
  * Find the plan file path from tool calls
  * Looks for Write tool calls that target ~/.claude/plans/*.md files
+ * (Fallback for old-style file-based plans)
  *
  * @param toolCalls - All tool calls from the message
  * @returns The plan file path if found, null otherwise

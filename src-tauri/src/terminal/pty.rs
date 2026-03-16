@@ -15,6 +15,10 @@ fn get_user_shell() -> String {
 }
 
 /// Spawn a terminal, optionally running a command
+///
+/// When `command_args` is provided alongside `command`, the binary at `command`
+/// is invoked directly with the given args (no shell wrapper). This avoids
+/// argument-parsing issues on Windows where PowerShell mangles quoted paths.
 pub fn spawn_terminal(
     app: &AppHandle,
     terminal_id: String,
@@ -22,10 +26,14 @@ pub fn spawn_terminal(
     cols: u16,
     rows: u16,
     command: Option<String>,
+    command_args: Option<Vec<String>>,
 ) -> Result<(), String> {
     log::trace!("Spawning terminal {terminal_id} at {worktree_path}");
     if let Some(ref cmd) = command {
         log::trace!("Running command: {cmd}");
+    }
+    if let Some(ref args) = command_args {
+        log::trace!("Command args: {args:?}");
     }
 
     let pty_system = native_pty_system();
@@ -46,29 +54,50 @@ pub fn spawn_terminal(
 
     // Build command - either run a specific command or start interactive shell
     let mut cmd = if let Some(ref run_command) = command {
-        // Run the command in shell, then keep shell open for inspection
-        let mut c = CommandBuilder::new(&shell);
-        #[cfg(windows)]
-        {
-            c.arg("-Command");
-            c.arg(format!(
-                "{run_command}; Write-Host ''; Write-Host '[Command finished. Press Ctrl+D to close]'; Read-Host"
-            ));
+        if let Some(ref args) = command_args {
+            // Direct binary invocation — bypass shell to avoid argument mangling.
+            // Validate absolute paths exist upfront for a clear error message.
+            if run_command.starts_with('/') && !std::path::Path::new(run_command).exists() {
+                return Err(format!("Binary not found: {run_command}"));
+            }
+            let mut c = CommandBuilder::new(run_command);
+            for arg in args {
+                c.arg(arg);
+            }
+            c
+        } else {
+            // Run the command wrapped in a shell
+            let mut c = CommandBuilder::new(&shell);
+            #[cfg(windows)]
+            {
+                c.arg("-Command");
+                c.arg(run_command.to_string());
+            }
+            #[cfg(not(windows))]
+            {
+                c.arg("-c");
+                c.arg(run_command);
+            }
+            c
         }
-        #[cfg(not(windows))]
-        {
-            c.arg("-c");
-            // Run the command; if it exits, show message and wait for user
-            // Note: Caller is responsible for properly quoting paths with spaces
-            c.arg(format!(
-                "{run_command}; echo ''; echo '[Command finished. Press Ctrl+D to close]'; cat"
-            ));
-        }
-        c
     } else {
         CommandBuilder::new(&shell)
     };
-    cmd.cwd(&worktree_path);
+    // Use the requested working directory if it exists, otherwise fall back to
+    // the system temp directory. This is critical on Windows where `/tmp` doesn't
+    // exist — CLI login terminals pass `/tmp` as a placeholder path.
+    let cwd = if std::path::Path::new(&worktree_path).is_dir() {
+        worktree_path.clone()
+    } else {
+        let fallback = std::env::temp_dir().to_string_lossy().to_string();
+        log::warn!(
+            "Worktree path '{}' does not exist, falling back to '{}'",
+            worktree_path,
+            fallback
+        );
+        fallback
+    };
+    cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("JEAN_WORKTREE_PATH", &worktree_path);
@@ -146,18 +175,27 @@ pub fn spawn_terminal(
 
         // Terminal has exited, get exit code and cleanup
         if let Some(mut session) = unregister_terminal(&terminal_id_clone) {
-            let exit_code = session.child.wait().ok().and_then(|s| {
-                if s.success() {
-                    Some(0)
-                } else {
-                    // portable-pty ExitStatus doesn't expose code directly
-                    None
-                }
-            });
+            let (exit_code, signal) = session
+                .child
+                .wait()
+                .map(|s| {
+                    if s.success() {
+                        (Some(0), None)
+                    } else {
+                        // Display format: "Terminated by {signal}" or "Exited with code {code}"
+                        let display = format!("{s}");
+                        let signal = display
+                            .strip_prefix("Terminated by ")
+                            .map(|sig| sig.to_string());
+                        (Some(s.exit_code() as i32), signal)
+                    }
+                })
+                .unwrap_or((None, None));
 
             let stopped_event = TerminalStoppedEvent {
                 terminal_id: terminal_id_clone,
                 exit_code,
+                signal,
             };
             if let Err(e) = app_clone.emit("terminal:stopped", &stopped_event) {
                 log::error!("Failed to emit terminal:stopped event: {e}");
@@ -221,6 +259,7 @@ pub fn kill_terminal(app: &AppHandle, terminal_id: &str) -> Result<bool, String>
         let stopped_event = TerminalStoppedEvent {
             terminal_id: terminal_id.to_string(),
             exit_code: None,
+            signal: None,
         };
         if let Err(e) = app.emit("terminal:stopped", &stopped_event) {
             log::error!("Failed to emit terminal:stopped event: {e}");

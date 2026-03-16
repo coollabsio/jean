@@ -35,7 +35,7 @@ async function prepareRelease() {
 
   if (!version || !version.match(/^v?\d+\.\d+\.\d+$/)) {
     console.error('❌ Usage: node scripts/prepare-release.js v1.0.0')
-    console.error('   or: npm run prepare-release v1.0.0')
+    console.error('   or: bun run prepare-release v1.0.0')
     process.exit(1)
   }
 
@@ -60,7 +60,7 @@ async function prepareRelease() {
 
     // Run all checks first
     console.log('\n🔍 Running pre-release checks...')
-    exec('npm run check:all')
+    exec('bun run check:all')
     console.log('✅ All checks passed')
 
     // Update package.json
@@ -97,9 +97,9 @@ async function prepareRelease() {
     )
     console.log(`   ${oldTauriVersion} → ${cleanVersion}`)
 
-    // Run npm install to update lock files
+    // Run bun install to update lock files
     console.log('\n📦 Updating lock files...')
-    exec('npm install', { silent: true })
+    exec('bun install', { silent: true })
     console.log('✅ Lock files updated')
 
     // Verify configurations
@@ -125,21 +125,21 @@ async function prepareRelease() {
     console.log('✅ Rust compilation check passed')
 
     console.log(`\n🎉 Successfully prepared release ${tagVersion}!`)
-    console.log('\n📋 Git commands to execute:')
-    console.log(`   git add .`)
-    console.log(`   git commit -m "chore: release ${tagVersion}"`)
-    console.log(`   git tag ${tagVersion}`)
-    console.log(`   git push origin main --tags`)
-
-    console.log('\n🚀 After pushing:')
-    console.log('   • GitHub Actions will automatically build the release')
-    console.log('   • A draft release will be created on GitHub')
-    console.log("   • You'll need to manually publish the draft release")
+    console.log('\n📋 Next steps:')
+    console.log(`   1. git add .`)
+    console.log(`   2. git commit -m "chore: release ${tagVersion}"`)
+    console.log(`   3. git push origin main`)
+    console.log(`   4. Go to GitHub > Releases > "Create a new release"`)
+    console.log(
+      `   5. Create tag ${tagVersion}, write release notes, and publish`
+    )
+    console.log('\n🚀 After publishing the GitHub Release:')
+    console.log('   • GitHub Actions will automatically build all platforms')
+    console.log('   • Artifacts will be uploaded to the release')
     console.log('   • Users will receive auto-update notifications')
 
-    // Interactive execution option
     const answer = await askQuestion(
-      '\n❓ Would you like me to execute these git commands? (y/N): '
+      '\n❓ Would you like me to commit and push? (y/N): '
     )
 
     if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
@@ -151,24 +151,16 @@ async function prepareRelease() {
       console.log('💾 Creating commit...')
       exec(`git commit -m "chore: release ${tagVersion}"`)
 
-      console.log('🏷️  Creating tag...')
-      exec(`git tag ${tagVersion}`)
-
       console.log('📤 Pushing to remote...')
-      exec('git push origin main --tags')
+      exec('git push origin main')
 
-      console.log(`\n🎊 Release ${tagVersion} has been published!`)
+      console.log(`\n✅ Changes pushed! Now create the release on GitHub:`)
+      console.log(`   → Create tag ${tagVersion} and publish the release`)
       console.log(
-        '📱 Check GitHub Actions: https://github.com/YOUR_USERNAME/YOUR_REPO/actions'
-      )
-      console.log(
-        '📦 Draft release will appear at: https://github.com/YOUR_USERNAME/YOUR_REPO/releases'
-      )
-      console.log(
-        '\n⚠️  Remember: You need to manually publish the draft release on GitHub!'
+        '   → GitHub Actions will build and upload artifacts automatically'
       )
     } else {
-      console.log('\n📝 Git commands saved for manual execution.')
+      console.log('\n📝 Commands saved for manual execution.')
       console.log("   Run them when you're ready to release.")
     }
   } catch (error) {

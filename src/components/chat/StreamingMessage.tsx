@@ -6,9 +6,7 @@ import type {
   Question,
   QuestionAnswer,
   ThinkingLevel,
-  ExecutionMode,
 } from '@/types/chat'
-import { isAskUserQuestion, isExitPlanMode } from '@/types/chat'
 import { AskUserQuestion } from './AskUserQuestion'
 import { ToolCallInline, TaskCallInline, StackedGroup } from './ToolCallInline'
 import { buildTimeline, findPlanFilePath } from './tool-call-utils'
@@ -17,6 +15,8 @@ import { ExitPlanModeButton } from './ExitPlanModeButton'
 import { PlanDisplay } from './PlanFileDisplay'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
 import { ThinkingBlock } from './ThinkingBlock'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { logger } from '@/lib/logger'
 
 interface StreamingMessageProps {
   /** Session ID for the streaming message */
@@ -27,12 +27,16 @@ interface StreamingMessageProps {
   toolCalls: ToolCall[]
   /** Raw streaming content (fallback for old format) */
   streamingContent: string
-  /** Execution mode that was active when message was sent */
-  streamingExecutionMode: ExecutionMode
   /** Current thinking level setting */
   selectedThinkingLevel: ThinkingLevel
   /** Keyboard shortcut for approve button */
   approveShortcut: string
+  /** Keyboard shortcut for approve yolo button */
+  approveShortcutYolo?: string
+  /** Keyboard shortcut for clear context button */
+  approveShortcutClearContext?: string
+  /** Keyboard shortcut for clear context and build button */
+  approveShortcutClearContextBuild?: string
   /** Callback when user answers a question */
   onQuestionAnswer: (
     toolCallId: string,
@@ -60,6 +64,16 @@ interface StreamingMessageProps {
   onStreamingPlanApproval: () => void
   /** Callback when user approves streaming plan with yolo mode */
   onStreamingPlanApprovalYolo?: () => void
+  /** Callback for clear context approval during streaming */
+  onStreamingClearContextApproval?: () => void
+  /** Callback for clear context and build approval during streaming */
+  onStreamingClearContextApprovalBuild?: () => void
+  /** Callback for worktree build approval during streaming */
+  onStreamingWorktreeBuildApproval?: () => void
+  /** Callback for worktree yolo approval during streaming */
+  onStreamingWorktreeYoloApproval?: () => void
+  /** Hide approve buttons (e.g. for Codex which has no native approval flow) */
+  hideApproveButtons?: boolean
 }
 
 /**
@@ -71,8 +85,10 @@ export const StreamingMessage = memo(function StreamingMessage({
   contentBlocks,
   toolCalls,
   streamingContent,
-  streamingExecutionMode,
   approveShortcut,
+  approveShortcutYolo,
+  approveShortcutClearContext,
+  approveShortcutClearContextBuild,
   onQuestionAnswer,
   onQuestionSkip,
   onFileClick,
@@ -83,142 +99,229 @@ export const StreamingMessage = memo(function StreamingMessage({
   isStreamingPlanApproved,
   onStreamingPlanApproval,
   onStreamingPlanApprovalYolo,
+  onStreamingClearContextApproval,
+  onStreamingClearContextApprovalBuild,
+  onStreamingWorktreeBuildApproval,
+  onStreamingWorktreeYoloApproval,
+  hideApproveButtons,
 }: StreamingMessageProps) {
-  // DEBUG: Log callback chain
-  console.log(
-    '[StreamingMessage] render, onStreamingPlanApproval:',
-    typeof onStreamingPlanApproval
-  )
   return (
     <div className="text-muted-foreground">
       {/* Render streaming content blocks inline if available */}
       {contentBlocks.length > 0 ? (
         (() => {
-          const timeline = buildTimeline(contentBlocks, toolCalls)
-          // Find last incomplete item index for spinner (only show spinner on last one)
-          const lastIncompleteIndex = timeline.reduce((lastIdx, item, idx) => {
-            if (item.type === 'task' && !item.taskTool.output) return idx
-            if (item.type === 'standalone' && !item.tool.output) return idx
-            if (item.type === 'stackedGroup' && item.items.some(i => i.type === 'tool' && !i.tool.output)) return idx
-            return lastIdx
-          }, -1)
+          let timeline
+          try {
+            timeline = buildTimeline(contentBlocks, toolCalls)
+          } catch (e) {
+            logger.error('Failed to build streaming timeline', {
+              sessionId,
+              error: e,
+            })
+            return (
+              <div className="text-sm text-muted-foreground italic">
+                [Streaming content could not be rendered]
+              </div>
+            )
+          }
+          // Find all incomplete item indices for spinner (show on all in-progress tools)
+          // Use === undefined check since empty string is a valid "completed" output (e.g. Read tools)
+          const incompleteIndices = new Set<number>()
+          timeline.forEach((item, idx) => {
+            if (item.type === 'task' && item.taskTool.output === undefined)
+              incompleteIndices.add(idx)
+            else if (item.type === 'standalone' && item.tool.output === undefined)
+              incompleteIndices.add(idx)
+            else if (
+              item.type === 'stackedGroup' &&
+              item.items.some(
+                i => i.type === 'tool' && i.tool.output === undefined
+              )
+            )
+              incompleteIndices.add(idx)
+          })
 
           return (
-        <>
-          {/* Build timeline preserving order of text and tools */}
-          <div className="space-y-4">
-            {timeline.map((item, index) => {
-              const isLastIncomplete = index === lastIncompleteIndex
-              switch (item.type) {
-                case 'thinking':
+            <>
+              {/* Build timeline preserving order of text and tools */}
+              <div className="space-y-4">
+                {timeline.map((item, index) => {
+                  const isIncomplete = incompleteIndices.has(index)
                   return (
-                    <ThinkingBlock
+                    <ErrorBoundary
                       key={item.key}
-                      thinking={item.thinking}
-                      isStreaming={true}
-                    />
-                  )
-                case 'text':
-                  return (
-                    <Markdown key={item.key} streaming>
-                      {item.text}
-                    </Markdown>
-                  )
-                case 'task':
-                  return (
-                    <TaskCallInline
-                      key={item.key}
-                      taskToolCall={item.taskTool}
-                      subToolCalls={item.subTools}
-                      onFileClick={onFileClick}
-                      isStreaming={true}
-                      isLastIncomplete={isLastIncomplete}
-                    />
-                  )
-                case 'standalone':
-                  return (
-                    <ToolCallInline
-                      key={item.key}
-                      toolCall={item.tool}
-                      onFileClick={onFileClick}
-                      isStreaming={true}
-                      isLastIncomplete={isLastIncomplete}
-                    />
-                  )
-                case 'stackedGroup':
-                  return (
-                    <StackedGroup
-                      key={item.key}
-                      items={item.items}
-                      onFileClick={onFileClick}
-                      isStreaming={true}
-                      isLastIncomplete={isLastIncomplete}
-                    />
-                  )
-                case 'askUserQuestion': {
-                  // Render during streaming - Claude blocks waiting for user input
-                  const isAnswered = isQuestionAnswered(sessionId, item.tool.id)
-                  const input = item.tool.input as {
-                    questions: Question[]
-                  }
-                  return (
-                    <AskUserQuestion
-                      key={item.key}
-                      toolCallId={item.tool.id}
-                      questions={input.questions}
-                      introText={item.introText}
-                      onSubmit={(toolCallId, answers) =>
-                        onQuestionAnswer(toolCallId, answers, input.questions)
+                      fallback={
+                        <div className="text-xs text-muted-foreground italic border rounded px-2 py-1">
+                          [Failed to render content]
+                        </div>
                       }
-                      onSkip={onQuestionSkip}
-                      readOnly={isAnswered}
-                      submittedAnswers={
-                        isAnswered
-                          ? getSubmittedAnswers(sessionId, item.tool.id)
-                          : undefined
-                      }
-                    />
-                  )
-                }
-                case 'exitPlanMode': {
-                  // Render plan content + approval button during streaming
-                  // Extract plan from this specific tool's input (not global search)
-                  const toolInput = item.tool.input as { plan?: string } | undefined
-                  const inlinePlan = toolInput?.plan
-                  const planFilePath = !inlinePlan
-                    ? findPlanFilePath(toolCalls)
-                    : null
-                  const isApproved = isStreamingPlanApproved(sessionId)
+                    >
+                      {(() => {
+                        switch (item.type) {
+                          case 'thinking':
+                            return (
+                              <ThinkingBlock
+                                thinking={item.thinking}
+                                isStreaming={true}
+                              />
+                            )
+                          case 'text': {
+                            // Split at last newline: completed lines → markdown, trailing partial → plain div
+                            // This prevents reflow when remend reinterprets incomplete markdown
+                            const lastNewline = item.text.lastIndexOf('\n')
+                            const rawComplete = lastNewline !== -1 ? item.text.slice(0, lastNewline + 1) : ''
+                            // Trim trailing whitespace so markdown doesn't render a trailing <br> from "  \n"
+                            const completePart = rawComplete.trimEnd()
+                            const trailingPart = lastNewline !== -1 ? item.text.slice(lastNewline + 1) : item.text
+                            return (
+                              <div>
+                                {completePart && <Markdown streaming>{completePart}</Markdown>}
+                                {trailingPart && (
+                                  <p className="my-0 leading-relaxed">{trailingPart}</p>
+                                )}
+                              </div>
+                            )
+                          }
+                          case 'task':
+                            return (
+                              <TaskCallInline
+                                taskToolCall={item.taskTool}
+                                subToolCalls={item.subTools}
+                                allToolCalls={toolCalls}
+                                onFileClick={onFileClick}
+                                isStreaming={true}
+                                isIncomplete={isIncomplete}
+                              />
+                            )
+                          case 'standalone':
+                            return (
+                              <ToolCallInline
+                                toolCall={item.tool}
+                                onFileClick={onFileClick}
+                                isStreaming={true}
+                                isIncomplete={isIncomplete}
+                              />
+                            )
+                          case 'stackedGroup':
+                            return (
+                              <StackedGroup
+                                items={item.items}
+                                onFileClick={onFileClick}
+                                isStreaming={true}
+                                isIncomplete={isIncomplete}
+                              />
+                            )
+                          case 'askUserQuestion': {
+                            const isAnswered = isQuestionAnswered(
+                              sessionId,
+                              item.tool.id
+                            )
+                            const input = item.tool.input as {
+                              questions: Question[]
+                            }
+                            return (
+                              <AskUserQuestion
+                                toolCallId={item.tool.id}
+                                questions={input.questions}
+                                introText={item.introText}
+                                onSubmit={(toolCallId, answers) =>
+                                  onQuestionAnswer(
+                                    toolCallId,
+                                    answers,
+                                    input.questions
+                                  )
+                                }
+                                onSkip={onQuestionSkip}
+                                readOnly={isAnswered}
+                                submittedAnswers={
+                                  isAnswered
+                                    ? getSubmittedAnswers(
+                                        sessionId,
+                                        item.tool.id
+                                      )
+                                    : undefined
+                                }
+                              />
+                            )
+                          }
+                          case 'enterPlanMode':
+                            return (
+                              <ToolCallInline
+                                toolCall={item.tool}
+                                onFileClick={onFileClick}
+                                isStreaming={true}
+                                isIncomplete={false}
+                              />
+                            )
+                          case 'exitPlanMode': {
+                            const toolInput = item.tool.input as
+                              | { plan?: string }
+                              | undefined
+                            const inlinePlan = toolInput?.plan
+                            const planFilePath = !inlinePlan
+                              ? findPlanFilePath(toolCalls)
+                              : null
+                            const isApproved =
+                              isStreamingPlanApproved(sessionId)
 
-                  return (
-                    <div key={item.key}>
-                      {inlinePlan ? (
-                        <PlanDisplay
-                          content={inlinePlan}
-                          defaultCollapsed={isApproved}
-                        />
-                      ) : planFilePath ? (
-                        <PlanDisplay
-                          filePath={planFilePath}
-                          defaultCollapsed={isApproved}
-                        />
-                      ) : null}
-                      <ExitPlanModeButton
-                        toolCalls={toolCalls}
-                        isApproved={isApproved}
-                        onPlanApproval={onStreamingPlanApproval}
-                        onPlanApprovalYolo={onStreamingPlanApprovalYolo}
-                        shortcut={approveShortcut}
-                      />
-                    </div>
+                            return (
+                              <div data-plan-display>
+                                {inlinePlan ? (
+                                  <PlanDisplay
+                                    content={inlinePlan}
+                                    defaultCollapsed={isApproved}
+                                  />
+                                ) : planFilePath ? (
+                                  <PlanDisplay
+                                    filePath={planFilePath}
+                                    defaultCollapsed={isApproved}
+                                  />
+                                ) : null}
+                                <ExitPlanModeButton
+                                  toolCalls={toolCalls}
+                                  isApproved={isApproved}
+                                  onPlanApproval={onStreamingPlanApproval}
+                                  onPlanApprovalYolo={
+                                    onStreamingPlanApprovalYolo
+                                  }
+                                  onClearContextApproval={
+                                    onStreamingClearContextApproval
+                                  }
+                                  onClearContextBuildApproval={
+                                    onStreamingClearContextApprovalBuild
+                                  }
+                                  onWorktreeBuildApproval={
+                                    onStreamingWorktreeBuildApproval
+                                  }
+                                  onWorktreeYoloApproval={
+                                    onStreamingWorktreeYoloApproval
+                                  }
+                                  shortcut={approveShortcut}
+                                  shortcutYolo={approveShortcutYolo}
+                                  shortcutClearContext={approveShortcutClearContext}
+                                  shortcutClearContextBuild={approveShortcutClearContextBuild}
+                                  hideApproveButtons={hideApproveButtons}
+                                />
+                              </div>
+                            )
+                          }
+                          case 'unknown':
+                            return (
+                              <div className="text-xs text-muted-foreground border rounded px-2 py-1">
+                                Unsupported content type: &quot;{item.rawType}
+                                &quot; — if you see this, please report it as a
+                                bug
+                              </div>
+                            )
+                          default:
+                            return null
+                        }
+                      })()}
+                    </ErrorBoundary>
                   )
-                }
-                default:
-                  return null
-              }
-            })}
-          </div>
-        </>
+                })}
+              </div>
+            </>
           )
         })()
       ) : (
@@ -248,22 +351,6 @@ export const StreamingMessage = memo(function StreamingMessage({
         onFileClick={onEditedFileClick}
       />
 
-      {/* Show status indicator - waiting when question pending, planning/vibing otherwise */}
-      <div className="text-sm text-muted-foreground/60 mt-4">
-        <span className="animate-dots">
-          {toolCalls.some(
-            tc =>
-              (isAskUserQuestion(tc) || isExitPlanMode(tc)) &&
-              !isQuestionAnswered(sessionId, tc.id)
-          )
-            ? 'Waiting for your input'
-            : streamingExecutionMode === 'plan'
-              ? 'Planning'
-              : streamingExecutionMode === 'yolo'
-                ? 'Yoloing'
-                : 'Vibing'}
-        </span>
-      </div>
     </div>
   )
 })

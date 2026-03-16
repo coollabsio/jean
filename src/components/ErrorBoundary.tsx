@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { saveCrashState } from '@/lib/recovery'
 import { logger } from '@/lib/logger'
+import { copyToClipboard } from '@/lib/clipboard'
 
 interface Props {
   children: ReactNode
@@ -18,10 +19,15 @@ interface State {
  * Automatically saves crash data to recovery files for debugging
  * Shows a user-friendly error message instead of a blank screen
  */
-export class ErrorBoundary extends Component<Props, State> {
+export class ErrorBoundary extends Component<
+  Props,
+  State & { copied: boolean }
+> {
+  private copyTimeout: ReturnType<typeof setTimeout> | null = null
+
   constructor(props: Props) {
     super(props)
-    this.state = { hasError: false }
+    this.state = { hasError: false, copied: false }
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -128,8 +134,27 @@ export class ErrorBoundary extends Component<Props, State> {
                   Error Details (Development Only)
                 </summary>
                 <div className="mt-2 p-3 bg-muted rounded-md text-xs font-mono">
-                  <div className="text-destructive font-semibold mb-1">
-                    {this.state.error.name}: {this.state.error.message}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-destructive font-semibold mb-1">
+                      {this.state.error.name}: {this.state.error.message}
+                    </div>
+                    <button
+                      onClick={() => {
+                        const err = this.state.error
+                        if (!err) return
+                        const text = `${err.name}: ${err.message}\n${err.stack ?? ''}`
+                        copyToClipboard(text)
+                        this.setState({ copied: true })
+                        if (this.copyTimeout) clearTimeout(this.copyTimeout)
+                        this.copyTimeout = setTimeout(
+                          () => this.setState({ copied: false }),
+                          2000
+                        )
+                      }}
+                      className="shrink-0 px-2 py-1 text-xs rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+                    >
+                      {this.state.copied ? 'Copied!' : 'Copy'}
+                    </button>
                   </div>
                   {this.state.error.stack && (
                     <pre className="whitespace-pre-wrap text-muted-foreground overflow-auto">

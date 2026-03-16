@@ -219,7 +219,7 @@ export function ReviewFindingBlock({
                   >
                     {finding.suggestions.map((suggestion, idx) => (
                       <div
-                        key={idx}
+                        key={suggestion.label}
                         className={cn(
                           'rounded-md border p-2',
                           selectedOption === String(idx)

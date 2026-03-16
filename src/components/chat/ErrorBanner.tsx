@@ -22,7 +22,7 @@ export const ErrorBanner = memo(function ErrorBanner({
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="font-medium">Request failed</p>
-          <p className="mt-1 whitespace-pre-wrap break-words text-destructive/80">
+          <p className="mt-1 select-text whitespace-pre-wrap break-words text-destructive/80">
             {error}
           </p>
         </div>

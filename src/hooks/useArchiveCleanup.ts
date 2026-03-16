@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { usePreferences } from '@/services/preferences'
@@ -50,7 +50,11 @@ export function useArchiveCleanup() {
 
         const deletedContexts = result.deleted_contexts ?? 0
 
-        if (result.deleted_worktrees > 0 || result.deleted_sessions > 0 || deletedContexts > 0) {
+        if (
+          result.deleted_worktrees > 0 ||
+          result.deleted_sessions > 0 ||
+          deletedContexts > 0
+        ) {
           // Invalidate archive queries to refresh UI
           queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
           queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
@@ -68,7 +72,9 @@ export function useArchiveCleanup() {
             )
           }
           if (deletedContexts > 0) {
-            parts.push(`${deletedContexts} context${deletedContexts === 1 ? '' : 's'}`)
+            parts.push(
+              `${deletedContexts} context${deletedContexts === 1 ? '' : 's'}`
+            )
           }
 
           toast.info(`Cleaned up ${parts.join(' and ')} from archive`, {

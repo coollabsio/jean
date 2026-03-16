@@ -1,22 +1,28 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { invoke } from '@/lib/transport'
+import { generateId } from '@/lib/uuid'
 import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
 import { Kbd } from '@/components/ui/kbd'
 import { useChatStore } from '@/store/chat-store'
-import { getFilename } from '@/lib/path-utils'
+import { getFilename, getExtension } from '@/lib/path-utils'
 import type {
   PendingFile,
   PendingSkill,
   ClaudeCommand,
   SaveImageResponse,
   SaveTextResponse,
+  ReadTextResponse,
   ExecutionMode,
 } from '@/types/chat'
 import {
   FileMentionPopover,
   type FileMentionPopoverHandle,
 } from './FileMentionPopover'
+import { queryClient } from '@/lib/query-client'
+import { fileQueryKeys } from '@/services/files'
+import type { WorktreeFile } from '@/types/chat'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
 
 import { MAX_IMAGE_SIZE, ALLOWED_IMAGE_TYPES } from './image-constants'
@@ -24,19 +30,22 @@ import { MAX_IMAGE_SIZE, ALLOWED_IMAGE_TYPES } from './image-constants'
 /** Maximum text file size in bytes (10MB) */
 const MAX_TEXT_SIZE = 10 * 1024 * 1024
 
-/** Threshold for saving pasted text as file (500 chars) */
-const TEXT_PASTE_THRESHOLD = 500
+/** Threshold for saving pasted text as file (2000 chars) */
+const TEXT_PASTE_THRESHOLD = 2000
 
 interface ChatInputProps {
   activeSessionId: string | undefined
   activeWorktreePath: string | undefined
   isSending: boolean
   executionMode: ExecutionMode
+  canSwitchBackendWithTab?: boolean
   focusChatShortcut: string
   onSubmit: (e: React.FormEvent) => void
   onCancel: () => void
-  onCommandExecute?: (commandName: string) => void
+  onSwitchBackendWithTab?: () => void
+  onCommandExecute?: (command: ClaudeCommand) => void
   onHasValueChange?: (hasValue: boolean) => void
+  onRegisterClearHandler?: (clearHandler: (() => void) | null) => void
   formRef: React.RefObject<HTMLFormElement | null>
   inputRef: React.RefObject<HTMLTextAreaElement | null>
 }
@@ -46,17 +55,23 @@ export const ChatInput = memo(function ChatInput({
   activeWorktreePath,
   isSending,
   executionMode,
+  canSwitchBackendWithTab = false,
   focusChatShortcut,
   onSubmit,
   onCancel,
+  onSwitchBackendWithTab,
   onCommandExecute,
   onHasValueChange,
+  onRegisterClearHandler,
   formRef,
   inputRef,
 }: ChatInputProps) {
+  const isMobile = useIsMobile()
+
   // PERFORMANCE: Use uncontrolled input pattern - track value in ref, not state
   // This avoids React re-renders on every keystroke
   const valueRef = useRef<string>('')
+
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined
   )
@@ -67,6 +82,7 @@ export const ChatInput = memo(function ChatInput({
   const [fileMentionAnchor, setFileMentionAnchor] = useState<{
     top: number
     left: number
+    containerWidth: number
   } | null>(null)
   const [atTriggerIndex, setAtTriggerIndex] = useState<number | null>(null)
 
@@ -77,11 +93,19 @@ export const ChatInput = memo(function ChatInput({
     top: number
     left: number
   } | null>(null)
-  const [slashTriggerIndex, setSlashTriggerIndex] = useState<number | null>(null)
+  const [slashTriggerIndex, setSlashTriggerIndex] = useState<number | null>(
+    null
+  )
 
   // Refs to expose navigation methods from popovers
   const fileMentionHandleRef = useRef<FileMentionPopoverHandle | null>(null)
   const slashPopoverHandleRef = useRef<SlashPopoverHandle | null>(null)
+
+  // Stable ref for parent callback to avoid re-subscribing effects
+  const onHasValueChangeRef = useRef(onHasValueChange)
+  useEffect(() => {
+    onHasValueChangeRef.current = onHasValueChange
+  }, [onHasValueChange])
 
   // Track empty state for showing keyboard hint (only re-renders at boundary)
   const [showHint, setShowHint] = useState(() => {
@@ -100,7 +124,7 @@ export const ChatInput = memo(function ChatInput({
     valueRef.current = draft
 
     // Notify parent of current value (on mount AND session change)
-    onHasValueChange?.(Boolean(draft.trim()))
+    onHasValueChangeRef.current?.(Boolean(draft.trim()))
 
     // Only update showHint if session actually changed (not on mount)
     if (lastSessionRef.current !== activeSessionId) {
@@ -111,11 +135,8 @@ export const ChatInput = memo(function ChatInput({
 
     if (inputRef.current) {
       inputRef.current.value = draft
-      // Reset height for restored content
-      inputRef.current.style.height = 'auto'
-      inputRef.current.style.height = `${inputRef.current.scrollHeight}px`
     }
-  }, [activeSessionId, inputRef, onHasValueChange])
+  }, [activeSessionId, inputRef])
 
   // Listen for command:focus-chat-input event from command palette
   useEffect(() => {
@@ -139,11 +160,12 @@ export const ChatInput = memo(function ChatInput({
 
       // React to external clears (draft went from non-empty to empty)
       if (prevDraft && !draft && inputRef.current?.value) {
+        // Cancel pending debounced writes so cleared drafts don't get restored.
+        clearTimeout(debouncedSaveRef.current)
         inputRef.current.value = ''
         valueRef.current = ''
-        inputRef.current.style.height = 'auto'
         setShowHint(true)
-        onHasValueChange?.(false)
+        onHasValueChangeRef.current?.(false)
       }
 
       // React to external restores (draft went from empty to non-empty)
@@ -151,13 +173,26 @@ export const ChatInput = memo(function ChatInput({
       if (!prevDraft && draft && inputRef.current && !inputRef.current.value) {
         inputRef.current.value = draft
         valueRef.current = draft
-        inputRef.current.style.height = 'auto'
-        inputRef.current.style.height = `${inputRef.current.scrollHeight}px`
         setShowHint(false)
-        onHasValueChange?.(true)
+        onHasValueChangeRef.current?.(true)
       }
     })
-  }, [activeSessionId, inputRef, onHasValueChange])
+  }, [activeSessionId, inputRef])
+
+  const clearInputState = useCallback(() => {
+    clearTimeout(debouncedSaveRef.current)
+    if (inputRef.current) {
+      inputRef.current.value = ''
+    }
+    valueRef.current = ''
+    setShowHint(true)
+    onHasValueChangeRef.current?.(false)
+  }, [inputRef])
+
+  useEffect(() => {
+    onRegisterClearHandler?.(clearInputState)
+    return () => onRegisterClearHandler?.(null)
+  }, [clearInputState, onRegisterClearHandler])
 
   // Handle textarea value changes
   const handleChange = useCallback(
@@ -175,15 +210,10 @@ export const ChatInput = memo(function ChatInput({
       }, 1000)
 
       // Update hint visibility only at empty/non-empty boundary (minimal re-renders)
-      // Also notify parent of hasValue change for send button styling
       const isEmpty = !value.trim()
-      setShowHint(prev => {
-        if (prev !== isEmpty) {
-          onHasValueChange?.(!isEmpty)
-          return isEmpty
-        }
-        return prev
-      })
+      setShowHint(prev => (prev !== isEmpty ? isEmpty : prev))
+      // Notify parent of hasValue change for send button styling
+      onHasValueChangeRef.current?.(!isEmpty)
 
       // Sync pending files with @mentions in input
       // Remove any pending files whose @filename is no longer in the text
@@ -222,18 +252,8 @@ export const ChatInput = memo(function ChatInput({
           setFileMentionQuery('')
           setFileMentionOpen(true)
 
-          // Calculate anchor position relative to form
-          const textarea = e.target
-          const form = formRef.current
-          if (form) {
-            const formRect = form.getBoundingClientRect()
-            const textareaRect = textarea.getBoundingClientRect()
-            // Position above the textarea, at the left edge
-            setFileMentionAnchor({
-              top: textareaRect.top - formRect.top - 8,
-              left: textareaRect.left - formRect.left + 16,
-            })
-          }
+          // Anchor at the top-left of the form so popover appears above the input
+          setFileMentionAnchor({ top: 0, left: 0, containerWidth: formRef.current?.offsetWidth ?? 0 })
         }
       } else if (atTriggerIndex !== null && fileMentionOpen) {
         // Continuing to type after @, update query
@@ -251,6 +271,29 @@ export const ChatInput = memo(function ChatInput({
         } else {
           setFileMentionQuery(query)
         }
+      } else if (!fileMentionOpen) {
+        // Re-detect @mention: scan backward from cursor for @ preceded by whitespace/start
+        // This handles editing an already-completed mention (e.g. backspacing into @filename)
+        let scanPos = cursorPos - 1
+        while (
+          scanPos >= 0 &&
+          value[scanPos] !== ' ' &&
+          value[scanPos] !== '\n'
+        ) {
+          if (value[scanPos] === '@') {
+            const charBefore = value[scanPos - 1]
+            if (scanPos === 0 || charBefore === ' ' || charBefore === '\n') {
+              const query = value.slice(scanPos + 1, cursorPos)
+              setAtTriggerIndex(scanPos)
+              setFileMentionQuery(query)
+              setFileMentionOpen(true)
+              // Anchor at the top-left of the form so popover appears above the input
+              setFileMentionAnchor({ top: 0, left: 0, containerWidth: formRef.current?.offsetWidth ?? 0 })
+            }
+            break
+          }
+          scanPos--
+        }
       }
 
       // Detect / trigger for slash commands and skills (only if @ popover not open)
@@ -267,17 +310,8 @@ export const ChatInput = memo(function ChatInput({
             setSlashQuery('')
             setSlashPopoverOpen(true)
 
-            // Calculate anchor position relative to form
-            const textarea = e.target
-            const form = formRef.current
-            if (form) {
-              const formRect = form.getBoundingClientRect()
-              const textareaRect = textarea.getBoundingClientRect()
-              setSlashAnchor({
-                top: textareaRect.top - formRect.top - 8,
-                left: textareaRect.left - formRect.left + 16,
-              })
-            }
+            // Anchor at the top-left of the form so popover appears above the input
+            setSlashAnchor({ top: 0, left: 16 })
           }
         } else if (slashTriggerIndex !== null && slashPopoverOpen) {
           // Continuing to type after /, update query
@@ -298,10 +332,6 @@ export const ChatInput = memo(function ChatInput({
         }
       }
 
-      // Auto-resize textarea based on content
-      const textarea = e.target
-      textarea.style.height = 'auto'
-      textarea.style.height = `${textarea.scrollHeight}px`
     },
     [
       activeSessionId,
@@ -309,40 +339,26 @@ export const ChatInput = memo(function ChatInput({
       fileMentionOpen,
       slashTriggerIndex,
       slashPopoverOpen,
-      formRef,
-      onHasValueChange,
     ]
   )
 
   // Handle keyboard events
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      console.log('[ChatInput] handleKeyDown:', {
-        key: e.key,
-        fileMentionOpen,
-        slashPopoverOpen,
-        fileMentionHandleRef: !!fileMentionHandleRef.current,
-        slashPopoverHandleRef: !!slashPopoverHandleRef.current,
-      })
-
       // When file mention popover is open, handle navigation
       if (fileMentionOpen) {
-        console.log('[ChatInput] File mention popover open, handling key:', e.key)
         switch (e.key) {
           case 'ArrowDown':
             e.preventDefault()
-            console.log('[ChatInput] Calling fileMentionHandleRef.moveDown()')
             fileMentionHandleRef.current?.moveDown()
             return
           case 'ArrowUp':
             e.preventDefault()
-            console.log('[ChatInput] Calling fileMentionHandleRef.moveUp()')
             fileMentionHandleRef.current?.moveUp()
             return
           case 'Enter':
           case 'Tab':
             e.preventDefault()
-            console.log('[ChatInput] Calling fileMentionHandleRef.selectCurrent()')
             fileMentionHandleRef.current?.selectCurrent()
             return
           case 'Escape':
@@ -355,22 +371,18 @@ export const ChatInput = memo(function ChatInput({
 
       // When slash popover is open, handle navigation
       if (slashPopoverOpen) {
-        console.log('[ChatInput] Slash popover open, handling key:', e.key)
         switch (e.key) {
           case 'ArrowDown':
             e.preventDefault()
-            console.log('[ChatInput] Calling slashPopoverHandleRef.moveDown()')
             slashPopoverHandleRef.current?.moveDown()
             return
           case 'ArrowUp':
             e.preventDefault()
-            console.log('[ChatInput] Calling slashPopoverHandleRef.moveUp()')
             slashPopoverHandleRef.current?.moveUp()
             return
           case 'Enter':
           case 'Tab':
             e.preventDefault()
-            console.log('[ChatInput] Calling slashPopoverHandleRef.selectCurrent()')
             slashPopoverHandleRef.current?.selectCurrent()
             return
           case 'Escape':
@@ -382,19 +394,39 @@ export const ChatInput = memo(function ChatInput({
         }
       }
 
-      // Cmd+Option+Backspace (Mac) / Ctrl+Alt+Backspace (Windows/Linux) cancels the running Claude process
+      // TAB toggles Claude/Codex backend when available.
+      // Keep Shift+Tab for global "cycle execution mode" keybinding.
       if (
-        e.key === 'Backspace' &&
-        (e.metaKey || e.ctrlKey) &&
-        e.altKey &&
-        isSending
+        e.key === 'Tab' &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        canSwitchBackendWithTab &&
+        onSwitchBackendWithTab
       ) {
         e.preventDefault()
+        onSwitchBackendWithTab()
+        return
+      }
+
+      // Fallback cancel shortcut handling while input is focused.
+      // Global listeners should handle this already, but this avoids misses when
+      // keybinding state is stale or a platform reports forward-delete.
+      if (
+        isSending &&
+        (e.metaKey || e.ctrlKey) &&
+        e.altKey &&
+        (e.key === 'Backspace' || e.key === 'Delete')
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
         onCancel()
         return
       }
-      // Enter without shift sends the message
-      if (e.key === 'Enter' && !e.shiftKey) {
+
+      // Enter without shift sends the message (on mobile, Enter adds a newline instead)
+      if (e.key === 'Enter' && !e.shiftKey && !isMobile) {
         e.preventDefault()
         // Cancel any pending debounced save
         clearTimeout(debouncedSaveRef.current)
@@ -410,17 +442,121 @@ export const ChatInput = memo(function ChatInput({
         setShowHint(true)
         const textarea = e.target as HTMLTextAreaElement
         textarea.value = ''
-        textarea.style.height = 'auto'
       }
       // Shift+Enter adds a new line (default behavior)
     },
-    [activeSessionId, fileMentionOpen, slashPopoverOpen, isSending, onCancel, onSubmit]
+    [
+      activeSessionId,
+      fileMentionOpen,
+      slashPopoverOpen,
+      isSending,
+      onCancel,
+      onSubmit,
+      canSwitchBackendWithTab,
+      onSwitchBackendWithTab,
+      isMobile,
+    ]
   )
 
   // Handle paste events
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent) => {
       if (!activeSessionId) return
+
+      // Check for jean-prompt clipboard format (copied from a sent message)
+      const html = e.clipboardData?.getData('text/html')
+      if (html) {
+        const match = html.match(/data-jean-prompt="([^"]+)"/)
+        if (match?.[1]) {
+          // Read text synchronously before preventDefault - clipboardData
+          // is only available during the event handler, not after await
+          const text = e.clipboardData?.getData('text/plain') ?? ''
+          e.preventDefault()
+          try {
+            const metadata = JSON.parse(decodeURIComponent(match[1])) as {
+              images?: string[]
+              textFiles?: string[]
+              files?: string[]
+              skills?: { name: string; path: string }[]
+            }
+
+            // Insert the plain text into the textarea first
+            if (text && inputRef.current) {
+              const textarea = inputRef.current
+              const start = textarea.selectionStart
+              const end = textarea.selectionEnd
+              const current = textarea.value
+              textarea.value =
+                current.slice(0, start) + text + current.slice(end)
+              valueRef.current = textarea.value
+              textarea.selectionStart = textarea.selectionEnd =
+                start + text.length
+              // Save draft
+              useChatStore
+                .getState()
+                .setInputDraft(activeSessionId, textarea.value)
+              onHasValueChangeRef.current?.(Boolean(textarea.value.trim()))
+            }
+
+            const {
+              addPendingImage,
+              addPendingFile,
+              addPendingSkill,
+              addPendingTextFile,
+            } = useChatStore.getState()
+
+            // Restore images (they already exist on disk)
+            for (const path of metadata.images ?? []) {
+              addPendingImage(activeSessionId, {
+                id: generateId(),
+                path,
+                filename: getFilename(path),
+              })
+            }
+
+            // Restore text files (read content from disk)
+            for (const path of metadata.textFiles ?? []) {
+              try {
+                const response = await invoke<ReadTextResponse>(
+                  'read_pasted_text',
+                  { path }
+                )
+                addPendingTextFile(activeSessionId, {
+                  id: generateId(),
+                  path,
+                  filename: getFilename(path),
+                  size: response.size,
+                  content: response.content,
+                })
+              } catch {
+                // File may no longer exist, skip
+              }
+            }
+
+            // Restore file mentions
+            for (const path of metadata.files ?? []) {
+              addPendingFile(activeSessionId, {
+                id: generateId(),
+                relativePath: path,
+                extension: getExtension(path),
+                isDirectory: false,
+              })
+            }
+
+            // Restore skills
+            for (const skill of metadata.skills ?? []) {
+              addPendingSkill(activeSessionId, {
+                id: generateId(),
+                name: skill.name,
+                path: skill.path,
+              })
+            }
+          } catch {
+            // Invalid JSON, fall through to normal paste
+          }
+          return
+        }
+      }
 
       const items = e.clipboardData?.items
       if (!items) return
@@ -431,10 +567,39 @@ export const ChatInput = memo(function ChatInput({
         if (!item.type.startsWith('image/')) continue
         hasImage = true
 
+        // SVGs are XML text — route through text file path instead of raster image pipeline
+        if (item.type === 'image/svg+xml') {
+          const file = item.getAsFile()
+          if (!file) continue
+          e.preventDefault()
+
+          try {
+            const svgText = await file.text()
+            const result = await invoke<SaveTextResponse>(
+              'save_pasted_text',
+              { content: svgText }
+            )
+            const { addPendingTextFile } = useChatStore.getState()
+            addPendingTextFile(activeSessionId, {
+              id: result.id,
+              path: result.path,
+              filename: result.filename,
+              size: result.size,
+              content: svgText,
+            })
+          } catch (error) {
+            console.error('Failed to save SVG:', error)
+            toast.error('Failed to save SVG', {
+              description: String(error),
+            })
+          }
+          continue
+        }
+
         // Check if it's an allowed type
         if (!ALLOWED_IMAGE_TYPES.includes(item.type)) {
           toast.error('Unsupported image type', {
-            description: `Allowed types: PNG, JPEG, GIF, WebP`,
+            description: `Allowed types: PNG, JPEG, GIF, WebP, SVG`,
           })
           continue
         }
@@ -463,8 +628,19 @@ export const ChatInput = memo(function ChatInput({
           const base64Data = dataUrl.split(',')[1]
           if (!base64Data) return
 
+          // Add loading placeholder immediately
+          const placeholderId = `loading-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+          const { addPendingImage, updatePendingImage, removePendingImage } =
+            useChatStore.getState()
+          addPendingImage(activeSessionId, {
+            id: placeholderId,
+            path: '',
+            filename: 'Processing...',
+            loading: true,
+          })
+
           try {
-            // Save to disk via Tauri command (saves to app data dir)
+            // Save to disk via Tauri command (resizes/compresses)
             const result = await invoke<SaveImageResponse>(
               'save_pasted_image',
               {
@@ -473,15 +649,16 @@ export const ChatInput = memo(function ChatInput({
               }
             )
 
-            // Add to pending images
-            const { addPendingImage } = useChatStore.getState()
-            addPendingImage(activeSessionId, {
+            // Replace loading placeholder with actual image
+            updatePendingImage(activeSessionId, placeholderId, {
               id: result.id,
               path: result.path,
               filename: result.filename,
+              loading: false,
             })
           } catch (error) {
             console.error('Failed to save image:', error)
+            removePendingImage(activeSessionId, placeholderId)
             toast.error('Failed to save image', {
               description: String(error),
             })
@@ -493,8 +670,46 @@ export const ChatInput = memo(function ChatInput({
       // If we handled an image, don't also process text
       if (hasImage) return
 
+      // Native clipboard fallback (Linux/WebKitGTK doesn't expose image items via Web API)
+      const clipboardText = e.clipboardData?.getData('text/plain')
+      const clipboardHtml = e.clipboardData?.getData('text/html')
+      if (!clipboardText && !clipboardHtml) {
+        e.preventDefault()
+        const placeholderId = `clipboard-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+        const { addPendingImage, updatePendingImage, removePendingImage } =
+          useChatStore.getState()
+        addPendingImage(activeSessionId, {
+          id: placeholderId,
+          path: '',
+          filename: 'Processing...',
+          loading: true,
+        })
+        try {
+          const result = await invoke<SaveImageResponse | null>(
+            'read_clipboard_image'
+          )
+          if (result) {
+            updatePendingImage(activeSessionId, placeholderId, {
+              id: result.id,
+              path: result.path,
+              filename: result.filename,
+              loading: false,
+            })
+            return
+          }
+          // No image in clipboard — remove placeholder
+          removePendingImage(activeSessionId, placeholderId)
+        } catch (error) {
+          console.error('Failed to read clipboard image natively:', error)
+          removePendingImage(activeSessionId, placeholderId)
+          toast.error('Failed to paste image', {
+            description: String(error),
+          })
+        }
+      }
+
       // Check for large text paste
-      const text = e.clipboardData?.getData('text/plain')
+      const text = clipboardText
       if (text && text.length >= TEXT_PASTE_THRESHOLD) {
         // Prevent default paste (we're handling it as a file)
         e.preventDefault()
@@ -530,8 +745,70 @@ export const ChatInput = memo(function ChatInput({
           })
         }
       }
+
+      // Auto-resolve @file mentions in regular (small) text pastes
+      if (text && text.length < TEXT_PASTE_THRESHOLD && activeWorktreePath) {
+        const mentionRegex = /@(\S+)/g
+        let mentionMatch
+        const mentions: string[] = []
+        while ((mentionMatch = mentionRegex.exec(text)) !== null) {
+          if (mentionMatch[1]) mentions.push(mentionMatch[1])
+        }
+
+        if (mentions.length > 0) {
+          // Get file list: cache-first, async fallback
+          let fileList: WorktreeFile[] | undefined =
+            queryClient.getQueryData(
+              fileQueryKeys.worktreeFiles(activeWorktreePath)
+            )
+          if (!fileList) {
+            try {
+              fileList = await invoke<WorktreeFile[]>('list_worktree_files', {
+                worktreePath: activeWorktreePath,
+                maxFiles: 5000,
+              })
+              queryClient.setQueryData(
+                fileQueryKeys.worktreeFiles(activeWorktreePath),
+                fileList
+              )
+            } catch {
+              fileList = []
+            }
+          }
+
+          if (fileList.length > 0) {
+            const byFullPath = new Map<string, WorktreeFile>()
+            const byFilename = new Map<string, WorktreeFile[]>()
+            for (const f of fileList) {
+              byFullPath.set(f.relative_path, f)
+              const name = getFilename(f.relative_path)
+              const arr = byFilename.get(name)
+              if (arr) arr.push(f)
+              else byFilename.set(name, [f])
+            }
+
+            const { addPendingFile } = useChatStore.getState()
+            for (const mention of mentions) {
+              let resolved = byFullPath.get(mention)
+              if (!resolved) {
+                const candidates = byFilename.get(mention)
+                if (candidates?.length === 1) resolved = candidates[0]
+              }
+              if (resolved) {
+                addPendingFile(activeSessionId, {
+                  id: generateId(),
+                  relativePath: resolved.relative_path,
+                  extension: resolved.extension,
+                  isDirectory: resolved.is_dir,
+                })
+              }
+            }
+          }
+        }
+      }
+
     },
-    [activeSessionId]
+    [activeSessionId, activeWorktreePath, inputRef]
   )
 
   // Handle file selection from @ mention popover
@@ -596,6 +873,12 @@ export const ChatInput = memo(function ChatInput({
         inputRef.current.value = newValue
         valueRef.current = newValue
 
+        // Cancel pending debounced save (it still has the old "/query" value)
+        // and sync cleaned value to store immediately
+        clearTimeout(debouncedSaveRef.current)
+        useChatStore.getState().setInputDraft(activeSessionId, newValue)
+        onHasValueChangeRef.current?.(Boolean(newValue.trim()))
+
         // Set cursor position where the slash was
         requestAnimationFrame(() => {
           inputRef.current?.setSelectionRange(triggerIndex, triggerIndex)
@@ -616,11 +899,16 @@ export const ChatInput = memo(function ChatInput({
   // Handle command selection from / mention popover (executes immediately)
   const handleCommandSelect = useCallback(
     (command: ClaudeCommand) => {
+      // Cancel pending debounced save (it still has the old "/command" value)
+      clearTimeout(debouncedSaveRef.current)
+
       // Clear input
       if (inputRef.current) {
         inputRef.current.value = ''
         valueRef.current = ''
-        inputRef.current.style.height = 'auto'
+      }
+      if (activeSessionId) {
+        useChatStore.getState().setInputDraft(activeSessionId, '')
       }
 
       // Reset slash popover state
@@ -630,15 +918,16 @@ export const ChatInput = memo(function ChatInput({
       setShowHint(true)
 
       // Notify parent to execute command
-      onCommandExecute?.(`/${command.name}`)
+      onCommandExecute?.(command)
     },
-    [inputRef, onCommandExecute]
+    [activeSessionId, inputRef, onCommandExecute]
   )
 
   // Determine if slash is at prompt start (for enabling commands)
   const isSlashAtPromptStart =
     slashTriggerIndex !== null &&
     (slashTriggerIndex === 0 ||
+      // eslint-disable-next-line react-hooks/refs
       valueRef.current.slice(0, slashTriggerIndex).trim() === '')
 
   return (
@@ -647,12 +936,16 @@ export const ChatInput = memo(function ChatInput({
         ref={inputRef}
         placeholder={
           isSending
-            ? 'Type to queue next message...'
+            ? executionMode === 'yolo'
+              ? 'Yolo: Type to queue next message...'
+              : executionMode === 'plan'
+                ? 'Plan: Type to queue next message...'
+                : 'Build: Type to queue next message...'
             : executionMode === 'plan'
-              ? 'Plan a task, @mention files...'
+              ? 'Planning: Plan a task, @mention files...'
               : executionMode === 'yolo'
-                ? 'What do you want Claude to do? (no restrictions!)...'
-                : 'Ask to make changes, @mention files...'
+                ? 'Yolo: No limits, only your imagination and tokens...'
+                : 'Build: Ask to make changes, @mention files...'
         }
         // PERFORMANCE: Uncontrolled input - no value prop
         // Value is managed via valueRef and direct DOM manipulation
@@ -661,12 +954,12 @@ export const ChatInput = memo(function ChatInput({
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         disabled={false}
-        className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent dark:bg-transparent p-0 font-mono text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-        rows={2}
-        autoFocus
+        className="custom-scrollbar min-h-[40px] max-h-[240px] w-full resize-none overflow-y-auto border-0 bg-transparent dark:bg-transparent p-0 font-mono text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        rows={1}
+        autoFocus={!isMobile}
       />
       {showHint && (
-        <span className="absolute top-0 right-0 flex items-center gap-1.5 text-xs text-muted-foreground opacity-40">
+        <span className="absolute top-0 right-0 hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground opacity-40">
           <Kbd>{focusChatShortcut}</Kbd>
           <span>to focus</span>
         </span>
@@ -680,7 +973,7 @@ export const ChatInput = memo(function ChatInput({
         onSelectFile={handleFileSelect}
         searchQuery={fileMentionQuery}
         anchorPosition={fileMentionAnchor}
-        containerRef={formRef}
+        containerWidth={fileMentionAnchor?.containerWidth}
         handleRef={fileMentionHandleRef}
       />
 
@@ -692,7 +985,9 @@ export const ChatInput = memo(function ChatInput({
         onSelectCommand={handleCommandSelect}
         searchQuery={slashQuery}
         anchorPosition={slashAnchor}
+        containerRef={formRef}
         isAtPromptStart={isSlashAtPromptStart}
+        worktreePath={activeWorktreePath}
         handleRef={slashPopoverHandleRef}
       />
     </div>

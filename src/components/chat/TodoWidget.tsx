@@ -23,6 +23,8 @@ interface TodoWidgetProps {
   isStreaming?: boolean
   /** Callback to dismiss the widget */
   onClose?: () => void
+  /** Whether to start expanded (default: false) */
+  defaultOpen?: boolean
 }
 
 /**
@@ -35,8 +37,9 @@ export function TodoWidget({
   className,
   isStreaming = false,
   onClose,
+  defaultOpen = false,
 }: TodoWidgetProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(defaultOpen)
 
   const completedCount = todos.filter(t => t.status === 'completed').length
   const totalCount = todos.length
@@ -46,11 +49,11 @@ export function TodoWidget({
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className={className}>
       <div
         className={cn(
-          'my-1 rounded-md border border-border/50 bg-muted/30',
-          isOpen && 'bg-muted/50'
+          'mt-1 rounded-md border border-border bg-sidebar',
+          isOpen && 'bg-sidebar'
         )}
       >
-        <div className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+        <div className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
           <CollapsibleTrigger className="flex flex-1 items-center gap-2 hover:bg-muted/50 cursor-pointer select-none -ml-3 -my-2 pl-3 py-2 rounded-l-md">
             <ChevronRight
               className={cn(
@@ -91,8 +94,8 @@ export function TodoWidget({
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2">
             <ul className="space-y-1">
-              {todos.map((todo, index) => (
-                <TodoItem key={index} todo={todo} />
+              {todos.map(todo => (
+                <TodoItem key={todo.content} todo={todo} />
               ))}
             </ul>
           </div>
@@ -108,7 +111,7 @@ interface TodoItemProps {
 
 function TodoItem({ todo }: TodoItemProps) {
   return (
-    <li className="flex items-start gap-2 py-0.5 text-sm">
+    <li className="flex items-start gap-2 py-0.5 text-xs">
       <span className="mt-0.5 shrink-0">
         {todo.status === 'completed' ? (
           <CheckCircle2 className="h-4 w-4 text-green-500" />
