@@ -12,6 +12,7 @@ import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 import {
   Search,
+  X,
   MoreHorizontal,
   Settings,
   Plus,
@@ -98,6 +99,7 @@ import {
 import { usePreferences } from '@/services/preferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
+import { useIsMobile } from '@/hooks/use-mobile'
 const GitDiffModal = lazy(() =>
   import('@/components/chat/GitDiffModal').then(mod => ({
     default: mod.GitDiffModal,
@@ -501,6 +503,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const openInEditor = useOpenWorktreeInEditor()
 
   const [searchQuery, setSearchQuery] = useState('')
+  const isMobile = useIsMobile()
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
 
   // Get project info
   const { data: projects = [], isLoading: projectsLoading } = useProjects()
@@ -605,24 +609,22 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       const sessionData = sessionsByWorktreeId.get(worktree.id)
       const sessions = sessionData?.sessions ?? []
 
-      // Base sessions are always visible (not searchable)
-      const isBase = isBaseSession(worktree)
-
-      // Filter sessions based on search query
+      // Filter sessions based on search query (includes labels)
       const filteredSessions =
-        searchQuery.trim() && !isBase
-          ? sessions.filter(
-              session =>
-                session.name
+        searchQuery.trim()
+          ? sessions.filter(session => {
+              const q = searchQuery.toLowerCase()
+              return (
+                session.name.toLowerCase().includes(q) ||
+                worktree.name.toLowerCase().includes(q) ||
+                worktree.branch.toLowerCase().includes(q) ||
+                (session.label?.name ?? '').toLowerCase().includes(q) ||
+                (storeState.sessionLabels[session.id]?.name ?? '')
                   .toLowerCase()
-                  .includes(searchQuery.toLowerCase()) ||
-                worktree.name
-                  .toLowerCase()
-                  .includes(searchQuery.toLowerCase()) ||
-                worktree.branch
-                  .toLowerCase()
-                  .includes(searchQuery.toLowerCase())
-            )
+                  .includes(q) ||
+                (worktree.label?.name ?? '').toLowerCase().includes(q)
+              )
+            })
           : sessions
 
       // Compute card data for each session
@@ -792,11 +794,23 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
   // Listen for focus-canvas-search event
   useEffect(() => {
-    const handleFocusSearch = () => searchInputRef.current?.focus()
+    const handleFocusSearch = () => {
+      if (isMobile) {
+        setIsMobileSearchOpen(true)
+      }
+      setTimeout(() => searchInputRef.current?.focus(), 0)
+    }
     window.addEventListener('focus-canvas-search', handleFocusSearch)
     return () =>
       window.removeEventListener('focus-canvas-search', handleFocusSearch)
-  }, [])
+  }, [isMobile])
+
+  // Auto-focus search input when mobile search overlay opens
+  useEffect(() => {
+    if (isMobileSearchOpen) {
+      requestAnimationFrame(() => searchInputRef.current?.focus())
+    }
+  }, [isMobileSearchOpen])
 
   // Track session modal open state for magic command keybindings
   useEffect(() => {
@@ -1591,7 +1605,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     <div className="relative flex h-full flex-col">
       <div className="flex-1 flex flex-col overflow-auto">
         {/* Header with Search - sticky over content */}
-        <div className="sticky top-0 z-10 flex items-center gap-4 bg-background/60 backdrop-blur-md px-4 py-3 border-b border-border/30 min-h-[61px]">
+        <div className="sticky top-0 z-10 relative grid grid-cols-[auto_1fr_auto] items-center gap-4 bg-background/60 backdrop-blur-md px-4 py-2 sm:py-3 border-b border-border/30 sm:min-h-[61px]">
           <div className="flex flex-col shrink-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-lg font-semibold">{project.name}</h2>
@@ -1708,6 +1722,21 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {/* Mobile: magnifier icon inline with badges */}
+              {isMobile && (worktreeSections.length > 0 || searchQuery) && !isMobileSearchOpen && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative h-7 w-7 text-muted-foreground"
+                  onClick={() => setIsMobileSearchOpen(true)}
+                  aria-label="Open search"
+                >
+                  <Search className="h-4 w-4" />
+                  {searchQuery && (
+                    <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-primary" />
+                  )}
+                </Button>
+              )}
             </div>
             <p className="text-xs text-muted-foreground whitespace-nowrap">
               {projectSummary.totalReady > 0 ? (
@@ -1727,24 +1756,71 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           </div>
           {(worktreeSections.length > 0 || searchQuery) && (
             <>
-              <div className="flex-1 flex justify-center max-w-md mx-auto">
-                <div className="relative w-full">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    ref={searchInputRef}
-                    placeholder="Search worktrees and sessions..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    aria-label="Search worktrees and sessions"
-                    name="worktree-search"
-                    className="pl-9 bg-transparent border-border/30"
-                  />
-                </div>
-              </div>
+              {/* Desktop: inline search bar */}
+              {!isMobile && (
+                <>
+                  <div className="flex justify-center">
+                    <div className="relative w-full max-w-md">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        ref={searchInputRef}
+                        placeholder="Search worktrees and sessions..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        aria-label="Search worktrees and sessions"
+                        name="worktree-search"
+                        className="pl-9 bg-transparent border-border/30"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 justify-end">
+                    <OpenInButton worktreePath={project.path} />
+                  </div>
+                </>
+              )}
 
-              <div className="flex items-center gap-2 shrink-0">
-                <OpenInButton worktreePath={project.path} />
-              </div>
+              {/* Mobile: full-width search overlay */}
+              {isMobile && isMobileSearchOpen && (
+                <div className="absolute inset-0 z-20 flex items-center gap-2 bg-background/95 backdrop-blur-md px-4">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      ref={searchInputRef}
+                      placeholder="Search worktrees and sessions..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          setIsMobileSearchOpen(false)
+                        }
+                      }}
+                      aria-label="Search worktrees and sessions"
+                      name="worktree-search"
+                      className="pl-9 bg-transparent border-border/30"
+                    />
+                  </div>
+                  {searchQuery && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground"
+                      onClick={() => setSearchQuery('')}
+                      aria-label="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 text-muted-foreground text-sm"
+                    onClick={() => setIsMobileSearchOpen(false)}
+                    aria-label="Close search"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </div>

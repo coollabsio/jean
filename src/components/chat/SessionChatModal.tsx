@@ -63,6 +63,7 @@ import { isBaseSession } from '@/types/projects'
 import type { Session } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
+import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
 const GitDiffModal = lazy(() =>
   import('./GitDiffModal').then(mod => ({ default: mod.GitDiffModal }))
@@ -708,7 +709,7 @@ export function SessionChatModal({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <h2 className="text-sm font-medium shrink-0">
-                {project && (
+                {project && !isMobile && (
                   <span className="text-muted-foreground font-normal">
                     <button
                       type="button"
@@ -725,17 +726,17 @@ export function SessionChatModal({
               <GitStatusBadges
                 behindCount={behindCount}
                 unpushedCount={unpushedCount}
-                diffAdded={uncommittedAdded}
-                diffRemoved={uncommittedRemoved}
-                branchDiffAdded={isBase ? 0 : branchDiffAdded}
-                branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
+                diffAdded={isMobile ? 0 : uncommittedAdded}
+                diffRemoved={isMobile ? 0 : uncommittedRemoved}
+                branchDiffAdded={isBase || isMobile ? 0 : branchDiffAdded}
+                branchDiffRemoved={isBase || isMobile ? 0 : branchDiffRemoved}
                 onPull={handlePull}
                 onPush={handlePush}
                 onDiffClick={handleUncommittedDiffClick}
                 onBranchDiffClick={handleBranchDiffClick}
               />
               {project && (
-                <div className="hidden items-center gap-2 sm:flex">
+                <div className="hidden items-center gap-2 md:flex">
                   <NewIssuesBadge
                     projectPath={project.path}
                     projectId={project.id}
@@ -752,6 +753,12 @@ export function SessionChatModal({
                   worktree={worktree}
                   projectId={project.id}
                   projectPath={project.path}
+                  uncommittedAdded={uncommittedAdded}
+                  uncommittedRemoved={uncommittedRemoved}
+                  branchDiffAdded={isBase ? 0 : branchDiffAdded}
+                  branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
+                  onUncommittedDiffClick={handleUncommittedDiffClick}
+                  onBranchDiffClick={handleBranchDiffClick}
                 />
               )}
             </div>
@@ -960,8 +967,7 @@ export function SessionChatModal({
                     {currentResumeCommand && (
                       <DropdownMenuItem
                         onSelect={() => {
-                          void navigator.clipboard
-                            .writeText(currentResumeCommand)
+                          void copyToClipboard(currentResumeCommand)
                             .then(() => toast.success('Resume command copied'))
                             .catch(() =>
                               toast.error('Failed to copy resume command')
@@ -1160,8 +1166,7 @@ export function SessionChatModal({
                         {resumeCommand && (
                           <ContextMenuItem
                             onSelect={() => {
-                              void navigator.clipboard
-                                .writeText(resumeCommand)
+                              void copyToClipboard(resumeCommand)
                                 .then(() =>
                                   toast.success('Resume command copied')
                                 )

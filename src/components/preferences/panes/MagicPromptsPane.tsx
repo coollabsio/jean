@@ -285,13 +285,16 @@ const PROMPT_SECTIONS: PromptSection[] = [
         description:
           'Prompt for generating commit messages from staged changes.',
         variables: [
+          {
+            name: '{diff_stat}',
+            description: 'Compact file change summary (git diff --stat)',
+          },
           { name: '{status}', description: 'Git status output' },
           { name: '{diff}', description: 'Staged changes diff' },
           {
             name: '{recent_commits}',
             description: 'Recent commit messages for style',
           },
-          { name: '{remote_info}', description: 'Remote repository info' },
         ],
         defaultValue: DEFAULT_COMMIT_MESSAGE_PROMPT,
         defaultModel: 'sonnet',

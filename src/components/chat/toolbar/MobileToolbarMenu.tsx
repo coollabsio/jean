@@ -17,11 +17,13 @@ import {
   Hammer,
   MoreHorizontal,
   Pencil,
+  Plug,
   Sparkles,
   Zap,
 } from 'lucide-react'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -39,8 +41,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import type { CustomCliProfile } from '@/types/preferences'
-import type { EffortLevel, ExecutionMode, ThinkingLevel } from '@/types/chat'
+import type { CustomCliProfile, CliBackend } from '@/types/preferences'
+import type { EffortLevel, ExecutionMode, McpServerInfo, ThinkingLevel } from '@/types/chat'
+import { groupServersByBackend, BACKEND_LABELS } from '@/services/mcp'
 import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
 import { CheckStatusButton } from '@/components/chat/toolbar/CheckStatusButton'
 import {
@@ -101,6 +104,11 @@ interface MobileToolbarMenuProps {
   handleModelChange: (value: string) => void
   handleEffortLevelChange: (value: string) => void
   handleThinkingLevelChange: (value: string) => void
+
+  availableMcpServers: McpServerInfo[]
+  enabledMcpServers: string[]
+  activeMcpCount: number
+  onToggleMcpServer: (name: string) => void
 }
 
 export function MobileToolbarMenu({
@@ -147,6 +155,10 @@ export function MobileToolbarMenu({
   handleModelChange,
   handleEffortLevelChange,
   handleThinkingLevelChange,
+  availableMcpServers,
+  enabledMcpServers,
+  activeMcpCount,
+  onToggleMcpServer,
 }: MobileToolbarMenuProps) {
   const isMobile = useIsMobile()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -558,6 +570,60 @@ export function MobileToolbarMenu({
                 Yolo
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="[&>svg:last-child]:!ml-2">
+            <Plug className={cn(
+              'mr-2 h-4 w-4',
+              activeMcpCount > 0 && 'text-emerald-600 dark:text-emerald-400'
+            )} />
+            <span>MCP</span>
+            <span className="ml-auto w-16 text-right text-xs text-muted-foreground">
+              {activeMcpCount > 0 ? `${activeMcpCount} on` : 'off'}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {availableMcpServers.length > 0 ? (() => {
+              const grouped = groupServersByBackend(availableMcpServers)
+              const backends = Object.keys(grouped) as CliBackend[]
+              const showHeaders = backends.length > 1
+              return backends.map((backend, idx) => (
+                <div key={backend}>
+                  {showHeaders && (
+                    <>
+                      {idx > 0 && <DropdownMenuSeparator />}
+                      <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium py-1">
+                        {BACKEND_LABELS[backend] ?? backend}
+                      </DropdownMenuLabel>
+                    </>
+                  )}
+                  {(grouped[backend] ?? []).map(server => (
+                    <DropdownMenuCheckboxItem
+                      key={`${backend}-${server.name}`}
+                      checked={!server.disabled && enabledMcpServers.includes(server.name)}
+                      onCheckedChange={() => onToggleMcpServer(server.name)}
+                      disabled={server.disabled}
+                      className={server.disabled ? 'opacity-50' : undefined}
+                    >
+                      {server.name}
+                      <span className="ml-auto pl-4 text-xs text-muted-foreground">
+                        {server.disabled ? 'disabled' : server.scope}
+                      </span>
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </div>
+              ))
+            })() : (
+              <DropdownMenuItem disabled>
+                <span className="text-xs text-muted-foreground">
+                  No MCP servers configured
+                </span>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         </DropdownMenuContent>

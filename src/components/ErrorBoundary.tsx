@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { saveCrashState } from '@/lib/recovery'
 import { logger } from '@/lib/logger'
+import { copyToClipboard } from '@/lib/clipboard'
 
 interface Props {
   children: ReactNode
@@ -142,7 +143,7 @@ export class ErrorBoundary extends Component<
                         const err = this.state.error
                         if (!err) return
                         const text = `${err.name}: ${err.message}\n${err.stack ?? ''}`
-                        navigator.clipboard.writeText(text)
+                        copyToClipboard(text)
                         this.setState({ copied: true })
                         if (this.copyTimeout) clearTimeout(this.copyTimeout)
                         this.copyTimeout = setTimeout(

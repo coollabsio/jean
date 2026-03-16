@@ -37,6 +37,7 @@ interface UsePlanDialogApprovalParams {
   isCodexBackendRef: RefObject<boolean>
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
+  selectedBackendRef: RefObject<'claude' | 'codex' | 'opencode'>
 }
 
 /**
@@ -60,6 +61,7 @@ export function usePlanDialogApproval({
   isCodexBackendRef,
   mcpServersDataRef,
   enabledMcpServersRef,
+  selectedBackendRef,
 }: UsePlanDialogApprovalParams) {
   const queryClient = useQueryClient()
 
@@ -211,7 +213,8 @@ export function usePlanDialogApproval({
             : undefined,
         mcpConfig: buildMcpConfigJson(
           mcpServersDataRef.current ?? [],
-          enabledMcpServersRef.current
+          enabledMcpServersRef.current,
+          (backendOverride as string) ?? selectedBackendRef.current
         ),
         queuedAt: Date.now(),
       }

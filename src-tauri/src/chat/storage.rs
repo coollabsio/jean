@@ -434,6 +434,200 @@ pub fn cleanup_orphaned_session_data(app: &AppHandle) -> Result<u32, String> {
     Ok(deleted)
 }
 
+/// Delete combined-context files for a specific session.
+/// Best-effort: logs warnings on failure, never returns an error.
+pub fn cleanup_combined_context_files(app: &AppHandle, session_id: &str) {
+    let app_data_dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            log::warn!("Failed to get app data dir for combined-context cleanup: {e}");
+            return;
+        }
+    };
+
+    let combined_dir = app_data_dir.join("combined-contexts");
+
+    for suffix in &["combined.md", "codex-combined.md"] {
+        let file_path = combined_dir.join(format!("{session_id}-{suffix}"));
+        if file_path.exists() {
+            if let Err(e) = fs::remove_file(&file_path) {
+                log::warn!(
+                    "Failed to delete combined-context file {}: {e}",
+                    file_path.display()
+                );
+            } else {
+                log::trace!("Deleted combined-context file: {}", file_path.display());
+            }
+        }
+    }
+}
+
+/// Delete orphaned combined-context files whose session IDs are not
+/// referenced by any worktree index file.
+/// Returns the number of deleted files.
+pub fn cleanup_orphaned_combined_contexts(app: &AppHandle) -> Result<u32, String> {
+    // Collect all referenced session IDs from index files
+    let index_dir = get_index_dir(app)?;
+    let mut referenced_ids = std::collections::HashSet::new();
+
+    if let Ok(entries) = fs::read_dir(&index_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(index) =
+                        serde_json::from_str::<crate::chat::types::WorktreeIndex>(&content)
+                    {
+                        for session in &index.sessions {
+                            referenced_ids.insert(session.id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Scan combined-contexts directory
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+    let combined_dir = app_data_dir.join("combined-contexts");
+
+    if !combined_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut deleted = 0u32;
+
+    if let Ok(entries) = fs::read_dir(&combined_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                // Extract session ID from filename patterns:
+                //   {session_id}-combined.md
+                //   {session_id}-codex-combined.md
+                // Check -codex-combined.md FIRST (it's a superset of -combined.md)
+                let session_id = if let Some(id) = filename.strip_suffix("-codex-combined.md") {
+                    Some(id)
+                } else if let Some(id) = filename.strip_suffix("-combined.md") {
+                    Some(id)
+                } else {
+                    None
+                };
+
+                if let Some(session_id) = session_id {
+                    if !referenced_ids.contains(session_id) {
+                        log::trace!("Deleting orphaned combined-context file: {filename}");
+                        if let Err(e) = fs::remove_file(&path) {
+                            log::warn!(
+                                "Failed to delete orphaned combined-context file {filename}: {e}"
+                            );
+                        } else {
+                            deleted += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if deleted > 0 {
+        log::debug!("Cleaned up {deleted} orphaned combined-context files");
+    }
+
+    Ok(deleted)
+}
+
+/// Delete orphaned pasted image and text files that are not referenced by any
+/// session's messages. Returns the number of deleted files.
+pub fn cleanup_orphaned_pasted_files(app: &AppHandle) -> Result<u32, String> {
+    // Collect all referenced session IDs from index files
+    let index_dir = get_index_dir(app)?;
+    let mut referenced_session_ids = std::collections::HashSet::new();
+
+    if let Ok(entries) = fs::read_dir(&index_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(index) =
+                        serde_json::from_str::<crate::chat::types::WorktreeIndex>(&content)
+                    {
+                        for session in &index.sessions {
+                            referenced_session_ids.insert(session.id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Collect all referenced pasted file paths from session messages
+    let mut referenced_paths = std::collections::HashSet::new();
+
+    for session_id in &referenced_session_ids {
+        let messages =
+            super::run_log::load_session_messages(app, session_id).unwrap_or_default();
+        for message in &messages {
+            for path in super::commands::extract_image_paths(&message.content) {
+                referenced_paths.insert(path);
+            }
+            for path in super::commands::extract_text_file_paths(&message.content) {
+                referenced_paths.insert(path);
+            }
+        }
+    }
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+
+    let mut deleted = 0u32;
+
+    // Scan pasted-images/ and pasted-texts/ directories
+    for dir_name in &["pasted-images", "pasted-texts"] {
+        let dir = app_data_dir.join(dir_name);
+        if !dir.exists() {
+            continue;
+        }
+
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                // Skip non-files and temp files
+                if !path.is_file()
+                    || path.extension().is_some_and(|ext| ext == "tmp")
+                {
+                    continue;
+                }
+
+                let path_str = path.to_str().unwrap_or_default().to_string();
+                if !referenced_paths.contains(&path_str) {
+                    log::trace!(
+                        "Deleting orphaned pasted file: {}",
+                        path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                    );
+                    if let Err(e) = fs::remove_file(&path) {
+                        log::warn!("Failed to delete orphaned pasted file: {e}");
+                    } else {
+                        deleted += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if deleted > 0 {
+        log::debug!("Cleaned up {deleted} orphaned pasted files");
+    }
+
+    Ok(deleted)
+}
+
 // ============================================================================
 // High-Level Session API (Backward Compatibility)
 // ============================================================================

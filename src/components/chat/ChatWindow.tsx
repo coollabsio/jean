@@ -115,6 +115,7 @@ import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import { isNativeApp } from '@/lib/environment'
 import { supportsAdaptiveThinking } from '@/lib/model-utils'
+import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
 import { useClaudeCliStatus } from '@/services/claude-cli'
 import { usePrStatus, usePrStatusEvents } from '@/services/pr-status'
 import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
@@ -782,7 +783,8 @@ export function ChatWindow({
     () =>
       buildMcpConfigJson(
         mcpServersDataRef.current,
-        enabledMcpServersRef.current
+        enabledMcpServersRef.current,
+        selectedBackendRef.current
       ),
     []
   )
@@ -898,6 +900,7 @@ export function ChatWindow({
       isCodexBackendRef,
       mcpServersDataRef,
       enabledMcpServersRef,
+      selectedBackendRef,
     })
 
   // Clear context approval handler for PlanDialog
@@ -1803,16 +1806,11 @@ export function ChatWindow({
     const htmlContent = `<span data-jean-prompt="${encodeURIComponent(metadata)}">${cleanText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
 
     try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/plain': new Blob([cleanText], { type: 'text/plain' }),
-          'text/html': new Blob([htmlContent], { type: 'text/html' }),
-        }),
-      ])
+      await copyHtmlToClipboard(htmlContent, cleanText)
       toast.success('Prompt copied')
     } catch {
       // Fallback to plain text
-      await navigator.clipboard.writeText(cleanText)
+      await copyToClipboard(cleanText)
       toast.success('Text copied (without attachments)')
     }
   }, [])
@@ -1916,6 +1914,7 @@ export function ChatWindow({
     isCodexBackendRef,
     mcpServersDataRef,
     enabledMcpServersRef,
+    selectedBackendRef,
     setInputDraft,
     sendMessageNow,
   })

@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { X, FileText, Copy, Pencil, Check } from 'lucide-react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import type { PendingTextFile } from '@/types/chat'
 import {
   Dialog,
@@ -79,7 +80,7 @@ export function TextFilePreview({
   )
 
   const handleCopy = useCallback((content: string) => {
-    navigator.clipboard.writeText(content)
+    copyToClipboard(content)
     toast.success('Copied to clipboard')
   }, [])
 

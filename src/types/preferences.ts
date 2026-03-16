@@ -1,5 +1,6 @@
 import type { ThinkingLevel, EffortLevel, ExecutionMode } from './chat'
 import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from './keybindings'
+import { isMacOS, isWindows } from '../lib/platform'
 
 // =============================================================================
 // Notification Sounds
@@ -188,23 +189,19 @@ export const DEFAULT_PR_CONTENT_PROMPT = `<task>Generate a pull request title an
 </diff>`
 
 /** Default prompt for commit message generation */
-export const DEFAULT_COMMIT_MESSAGE_PROMPT = `<task>Generate a commit message for the following changes</task>
+export const DEFAULT_COMMIT_MESSAGE_PROMPT = `Generate a conventional commit message for these staged changes.
 
-<git_status>
+Files changed:
+{diff_stat}
+
+Git status:
 {status}
-</git_status>
 
-<staged_diff>
+Diff:
 {diff}
-</staged_diff>
 
-<recent_commits>
-{recent_commits}
-</recent_commits>
-
-<remote_info>
-{remote_info}
-</remote_info>`
+Recent commits (style reference):
+{recent_commits}`
 
 /** Default prompt for code review */
 export const DEFAULT_CODE_REVIEW_PROMPT = `<task>Review the following code changes and provide structured feedback</task>
@@ -893,7 +890,7 @@ export interface AppPreferences {
   selected_model: ClaudeModel // Claude model ID passed to --model flag
   thinking_level: ThinkingLevel // Thinking level: 'off' | 'think' | 'megathink' | 'ultrathink'
   default_effort_level: EffortLevel // Effort level for Opus 4.6 adaptive thinking: 'low' | 'medium' | 'high' | 'max'
-  terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'iterm2'
+  terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'iterm2' | 'powershell' | 'windows-terminal'
   editor: EditorApp // Editor app: 'zed' | 'vscode' | 'cursor' | 'xcode'
   open_in: OpenInDefault // Default Open In action: 'editor' | 'terminal' | 'finder' | 'github'
   auto_branch_naming: boolean // Automatically generate branch names from first message
@@ -1055,15 +1052,19 @@ export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
 
 export type ClaudeModel =
   | 'opus'
+  | 'claude-opus-4-6[1m]'
   | 'opus-4.5'
   | 'sonnet'
+  | 'claude-sonnet-4-6[1m]'
   | 'sonnet-4.5'
   | 'haiku'
 
 export const modelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'opus', label: 'Claude Opus 4.6' },
+  { value: 'claude-opus-4-6[1m]', label: 'Claude Opus 4.6 (1M)' },
   { value: 'opus-4.5', label: 'Claude Opus 4.5' },
   { value: 'sonnet', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-sonnet-4-6[1m]', label: 'Claude Sonnet 4.6 (1M)' },
   { value: 'sonnet-4.5', label: 'Claude Sonnet 4.5' },
   { value: 'haiku', label: 'Claude Haiku' },
 ]
@@ -1175,37 +1176,66 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'opencode', label: 'OpenCode' },
 ]
 
+
 export type TerminalApp =
   | 'terminal'
   | 'warp'
   | 'ghostty'
   | 'iterm2'
-  | 'windows-terminal'
   | 'powershell'
-  | 'cmd'
+  | 'windows-terminal'
+
+type Platform = 'mac' | 'windows' | 'linux'
+
+function getCurrentPlatform(): Platform {
+  if (isMacOS) return 'mac'
+  if (isWindows) return 'windows'
+  return 'linux'
+}
+
+const allTerminalOptions: {
+  value: TerminalApp
+  label: string
+  platforms: Platform[]
+}[] = [
+  { value: 'terminal', label: 'Terminal', platforms: ['mac', 'linux'] },
+  { value: 'warp', label: 'Warp', platforms: ['mac', 'windows'] },
+  { value: 'ghostty', label: 'Ghostty', platforms: ['mac', 'linux'] },
+  { value: 'iterm2', label: 'iTerm2', platforms: ['mac'] },
+  { value: 'powershell', label: 'PowerShell', platforms: ['windows'] },
+  {
+    value: 'windows-terminal',
+    label: 'Windows Terminal',
+    platforms: ['windows'],
+  },
+]
 
 export const terminalOptions: { value: TerminalApp; label: string }[] =
-  navigator.platform.startsWith('Win')
-    ? [
-        { value: 'windows-terminal', label: 'Windows Terminal' },
-        { value: 'powershell', label: 'PowerShell' },
-        { value: 'cmd', label: 'Command Prompt' },
-      ]
-    : [
-        { value: 'terminal', label: 'Terminal' },
-        { value: 'warp', label: 'Warp' },
-        { value: 'ghostty', label: 'Ghostty' },
-        { value: 'iterm2', label: 'iTerm2' },
-      ]
+  allTerminalOptions.filter(opt => opt.platforms.includes(getCurrentPlatform()))
 
 export type EditorApp = 'zed' | 'vscode' | 'cursor' | 'xcode'
 
-export const editorOptions: { value: EditorApp; label: string }[] = [
-  { value: 'zed', label: 'Zed' },
-  { value: 'vscode', label: 'VS Code' },
-  { value: 'cursor', label: 'Cursor' },
-  { value: 'xcode', label: 'Xcode' },
+const allEditorOptions: {
+  value: EditorApp
+  label: string
+  platforms: Platform[]
+}[] = [
+  { value: 'zed', label: 'Zed', platforms: ['mac', 'windows', 'linux'] },
+  {
+    value: 'vscode',
+    label: 'VS Code',
+    platforms: ['mac', 'windows', 'linux'],
+  },
+  {
+    value: 'cursor',
+    label: 'Cursor',
+    platforms: ['mac', 'windows', 'linux'],
+  },
+  { value: 'xcode', label: 'Xcode', platforms: ['mac'] },
 ]
+
+export const editorOptions: { value: EditorApp; label: string }[] =
+  allEditorOptions.filter(opt => opt.platforms.includes(getCurrentPlatform()))
 
 export type OpenInDefault = 'editor' | 'terminal' | 'finder' | 'github'
 
@@ -1404,12 +1434,14 @@ export const syntaxThemeLightOptions: { value: SyntaxTheme; label: string }[] =
 
 // Helper functions to get display labels
 export function getTerminalLabel(terminal: TerminalApp | undefined): string {
-  const option = terminalOptions.find(opt => opt.value === terminal)
+  // Search all options (not just platform-filtered) so saved cross-platform values resolve
+  const option = allTerminalOptions.find(opt => opt.value === terminal)
   return option?.label ?? 'Terminal'
 }
 
 export function getEditorLabel(editor: EditorApp | undefined): string {
-  const option = editorOptions.find(opt => opt.value === editor)
+  // Search all options (not just platform-filtered) so saved cross-platform values resolve
+  const option = allEditorOptions.find(opt => opt.value === editor)
   return option?.label ?? 'Editor'
 }
 
@@ -1418,7 +1450,7 @@ export const defaultPreferences: AppPreferences = {
   selected_model: 'opus',
   thinking_level: 'ultrathink',
   default_effort_level: 'high',
-  terminal: 'terminal',
+  terminal: isWindows ? 'powershell' : 'terminal',
   editor: 'zed',
   open_in: 'editor',
   auto_branch_naming: true,

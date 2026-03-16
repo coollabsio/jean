@@ -300,7 +300,8 @@ export function useMessageSending({
               : undefined,
           mcpConfig: buildMcpConfigJson(
             mcpServersDataRef.current ?? [],
-            enabledMcpServersRef.current
+            enabledMcpServersRef.current,
+            selectedBackendRef.current
           ),
           parallelExecutionPrompt:
             preferences?.parallel_execution_prompt_enabled
@@ -427,7 +428,8 @@ export function useMessageSending({
             : undefined,
         mcpConfig: buildMcpConfigJson(
           mcpServersDataRef.current ?? [],
-          enabledMcpServersRef.current
+          enabledMcpServersRef.current,
+          selectedBackendRef.current
         ),
         backend:
           selectedBackendRef.current !== 'claude'

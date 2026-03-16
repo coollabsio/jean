@@ -137,7 +137,7 @@ export function LoadContextModal({
   // Track the previous open state to detect when modal opens
   const prevOpenRef = useRef(false)
 
-  // Determine default tab and reset state when modal opens
+  // Determine default tab and reset state when modal opens/closes
   useEffect(() => {
     if (open && !prevOpenRef.current) {
       // Dynamic default tab based on loaded data
@@ -209,6 +209,29 @@ export function LoadContextModal({
       }
       queryClient.invalidateQueries({ queryKey: ['session-context'] })
     }
+
+    // When modal closes, invalidate loaded context queries so the toolbar refreshes
+    if (!open && prevOpenRef.current && activeSessionId) {
+      queryClient.invalidateQueries({
+        queryKey: githubQueryKeys.loadedContexts(activeSessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubQueryKeys.loadedPrContexts(activeSessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubQueryKeys.attachedContexts(activeSessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubQueryKeys.loadedSecurityContexts(activeSessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: githubQueryKeys.loadedAdvisoryContexts(activeSessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: linearQueryKeys.loadedContexts(activeSessionId),
+      })
+    }
+
     prevOpenRef.current = open
   }, [
     open,

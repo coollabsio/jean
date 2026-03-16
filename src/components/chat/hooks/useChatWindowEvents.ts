@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
@@ -129,10 +130,14 @@ export function useChatWindowEvents({
   beginKeyboardScroll,
   endKeyboardScroll,
 }: UseChatWindowEventsParams) {
-  // Focus input on mount, session change, or worktree change
+  const isMobile = useIsMobile()
+
+  // Focus input on mount, session change, or worktree change (skip on mobile to avoid keyboard popup)
   useEffect(() => {
-    inputRef.current?.focus()
-  }, [activeSessionId, activeWorktreeId, inputRef])
+    if (!isMobile) {
+      inputRef.current?.focus()
+    }
+  }, [activeSessionId, activeWorktreeId, inputRef, isMobile])
 
   // Scroll to bottom on worktree switch
   useEffect(() => {

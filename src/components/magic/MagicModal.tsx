@@ -15,6 +15,7 @@ import {
   Bug,
   RefreshCw,
   Sparkles,
+  Undo2,
 } from 'lucide-react'
 import {
   Dialog,
@@ -42,6 +43,7 @@ import {
 } from '@/services/git-status'
 import type {
   CreateCommitResponse,
+  RevertCommitResponse,
   CreatePrResponse,
   DetectPrResponse,
   MergeConflictsResponse,
@@ -76,12 +78,14 @@ type MagicOption =
   | 'investigate-pr'
   | 'merge-pr'
   | 'review-comments'
+  | 'revert-last-commit'
 
 /** Options that work on canvas without an open session (git-only operations) */
 const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'create-recap',
   'commit',
   'commit-and-push',
+  'revert-last-commit',
   'pull',
   'push',
   'open-pr',
@@ -149,6 +153,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           label: 'Commit & Push',
           icon: GitCommitHorizontal,
           key: 'P',
+        },
+        {
+          id: 'revert-last-commit',
+          label: 'Revert Commit',
+          icon: Undo2,
+          key: 'Z',
         },
       ],
     },
@@ -246,6 +256,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   i: 'investigate-issue',
   a: 'investigate-pr',
   n: 'merge-pr',
+  z: 'revert-last-commit',
 }
 
 export function MagicModal() {
@@ -392,6 +403,24 @@ export function MagicModal() {
             await doCommit(true)
           } else {
             await pickRemoteOrRun(remote => doCommit(true, remote))
+          }
+          break
+        }
+        case 'revert-last-commit': {
+          const revertToastId = toast.loading('Reverting last commit...')
+          try {
+            const result = await invoke<RevertCommitResponse>(
+              'revert_last_local_commit',
+              { worktreePath: worktree.path }
+            )
+            triggerImmediateGitPoll()
+            if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
+            toast.success(
+              `Reverted: ${result.commit_message}`,
+              { id: revertToastId }
+            )
+          } catch (error) {
+            toast.error(`Failed to revert: ${error}`, { id: revertToastId })
           }
           break
         }

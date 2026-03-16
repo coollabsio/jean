@@ -67,6 +67,9 @@ pub const DEFAULT_GIT_SWEEP_INTERVAL: u64 = 60;
 /// This refreshes Claude/Codex usage caches on the backend.
 pub const DEFAULT_USAGE_POLL_INTERVAL: u64 = 300;
 
+/// Default combined-context cleanup interval in seconds (1 hour)
+pub const DEFAULT_CLEANUP_POLL_INTERVAL: u64 = 3600;
+
 fn now_unix_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -132,6 +135,8 @@ pub struct BackgroundTaskManager {
     last_usage_poll_time: Arc<AtomicU64>,
     /// Guard to avoid overlapping usage refresh jobs
     usage_poll_in_flight: Arc<AtomicBool>,
+    /// Timestamp of last combined-context cleanup sweep
+    last_cleanup_poll_time: Arc<AtomicU64>,
 }
 
 impl BackgroundTaskManager {
@@ -157,6 +162,9 @@ impl BackgroundTaskManager {
             // Initialize to "now" so startup does not trigger an immediate usage refresh.
             last_usage_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
             usage_poll_in_flight: Arc::new(AtomicBool::new(false)),
+            // Initialize to "now" so startup does not trigger an immediate cleanup
+            // (the startup cleanup in cleanup_old_archives already handles that).
+            last_cleanup_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
         }
     }
 
@@ -189,6 +197,7 @@ impl BackgroundTaskManager {
         let last_git_sweep_time = Arc::clone(&self.last_git_sweep_time);
         let last_usage_poll_time = Arc::clone(&self.last_usage_poll_time);
         let usage_poll_in_flight = Arc::clone(&self.usage_poll_in_flight);
+        let last_cleanup_poll_time = Arc::clone(&self.last_cleanup_poll_time);
         let usage_poll_enabled = usage_polling_enabled();
 
         thread::spawn(move || {
@@ -229,6 +238,56 @@ impl BackgroundTaskManager {
                             log::trace!("Background usage refresh tick");
                             refresh_usage_caches(&app_handle).await;
                             in_flight_guard.store(false, Ordering::Relaxed);
+                        });
+                    }
+                }
+
+                // ================================================================
+                // Combined-context cleanup (orphan sweep every hour)
+                // Runs independently from app focus/worktree polling.
+                // ================================================================
+                {
+                    let now = now_unix_secs();
+                    let last_cleanup = last_cleanup_poll_time.load(Ordering::Relaxed);
+                    let time_since_cleanup = now.saturating_sub(last_cleanup);
+
+                    if time_since_cleanup >= DEFAULT_CLEANUP_POLL_INTERVAL {
+                        last_cleanup_poll_time.store(now, Ordering::Relaxed);
+                        let app_handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            log::trace!("Background cleanup tick (combined-contexts + pasted files)");
+                            match crate::chat::storage::cleanup_orphaned_combined_contexts(
+                                &app_handle,
+                            ) {
+                                Ok(deleted) => {
+                                    if deleted > 0 {
+                                        log::debug!(
+                                            "Background cleanup: removed {deleted} orphaned combined-context files"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Background combined-context cleanup failed: {e}"
+                                    );
+                                }
+                            }
+                            match crate::chat::storage::cleanup_orphaned_pasted_files(
+                                &app_handle,
+                            ) {
+                                Ok(deleted) => {
+                                    if deleted > 0 {
+                                        log::debug!(
+                                            "Background cleanup: removed {deleted} orphaned pasted files"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Background pasted-files cleanup failed: {e}"
+                                    );
+                                }
+                            }
                         });
                     }
                 }

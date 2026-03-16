@@ -956,7 +956,7 @@ export const ChatInput = memo(function ChatInput({
         disabled={false}
         className="custom-scrollbar min-h-[40px] max-h-[240px] w-full resize-none overflow-y-auto border-0 bg-transparent dark:bg-transparent p-0 font-mono text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
         rows={1}
-        autoFocus
+        autoFocus={!isMobile}
       />
       {showHint && (
         <span className="absolute top-0 right-0 hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground opacity-40">
@@ -987,6 +987,7 @@ export const ChatInput = memo(function ChatInput({
         anchorPosition={slashAnchor}
         containerRef={formRef}
         isAtPromptStart={isSlashAtPromptStart}
+        worktreePath={activeWorktreePath}
         handleRef={slashPopoverHandleRef}
       />
     </div>

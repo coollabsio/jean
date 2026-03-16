@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { FileText, Loader2, Copy } from 'lucide-react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   Dialog,
   DialogContent,
@@ -66,7 +67,7 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
 
   const handleCopy = useCallback(() => {
     if (content) {
-      navigator.clipboard.writeText(content)
+      copyToClipboard(content)
       toast.success('Copied to clipboard')
     }
   }, [content])

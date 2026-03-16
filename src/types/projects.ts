@@ -327,6 +327,14 @@ export interface CreateCommitResponse {
   push_permission_denied: boolean
 }
 
+/** Response from reverting the last local commit */
+export interface RevertCommitResponse {
+  /** Hash of the reverted commit */
+  commit_hash: string
+  /** Subject line of the reverted commit */
+  commit_message: string
+}
+
 /** Response from git push */
 export interface GitPushResponse {
   output: string

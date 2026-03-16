@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useChatStore } from '@/store/chat-store'
+import { copyToClipboard } from '@/lib/clipboard'
 import { AlertTriangle, Copy, Check } from 'lucide-react'
 
 interface ChatErrorFallbackProps {
@@ -71,7 +72,7 @@ function CopyErrorButton({ error }: { error: Error }) {
 
   const handleCopy = useCallback(() => {
     const text = error.message + (error.stack ? `\n\n${error.stack}` : '')
-    navigator.clipboard.writeText(text)
+    copyToClipboard(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [error])

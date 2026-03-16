@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { openExternal } from '@/lib/platform'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   Dialog,
   DialogContent,
@@ -114,7 +115,7 @@ export function UpdatePrDialog() {
 
   const handleCopy = useCallback(async () => {
     const text = `# ${generatedTitle}\n\n${generatedBody}`
-    await navigator.clipboard.writeText(text)
+    await copyToClipboard(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [generatedTitle, generatedBody])

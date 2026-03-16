@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import remend from 'remend'
 import { Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   Tooltip,
   TooltipTrigger,
@@ -36,7 +37,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
 
   const handleCopy = useCallback(() => {
     const text = extractText(children)
-    navigator.clipboard.writeText(text)
+    copyToClipboard(text)
     toast.success('Copied to clipboard')
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)

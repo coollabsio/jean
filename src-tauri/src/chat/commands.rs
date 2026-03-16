@@ -10,8 +10,9 @@ use super::naming::{spawn_naming_task, NamingRequest};
 use super::registry::{cancel_process, cancel_process_if_running};
 use super::run_log;
 use super::storage::{
-    delete_session_data, get_base_index_path, get_data_dir, get_index_path, get_session_dir,
-    load_metadata, load_sessions, save_metadata, with_existing_metadata_mut, with_sessions_mut,
+    cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
+    get_index_path, get_session_dir, load_metadata, load_sessions, save_metadata,
+    with_existing_metadata_mut, with_sessions_mut,
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
@@ -599,7 +600,7 @@ pub async fn update_session_state(
 
 /// Extract pasted image paths from message content
 /// Matches: [Image attached: /path/to/image.png - Use the Read tool to view this image]
-fn extract_image_paths(content: &str) -> Vec<String> {
+pub(crate) fn extract_image_paths(content: &str) -> Vec<String> {
     use regex::Regex;
     // Lazy static would be better, but for simplicity we'll compile here
     let re = Regex::new(r"\[Image attached: (.+?) - Use the Read tool to view this image\]")
@@ -611,7 +612,7 @@ fn extract_image_paths(content: &str) -> Vec<String> {
 
 /// Extract pasted text file paths from message content
 /// Matches: [Text file attached: /path/to/file.txt - Use the Read tool to view this file]
-fn extract_text_file_paths(content: &str) -> Vec<String> {
+pub(crate) fn extract_text_file_paths(content: &str) -> Vec<String> {
     use regex::Regex;
     let re = Regex::new(r"\[Text file attached: (.+?) - Use the Read tool to view this file\]")
         .expect("Invalid regex");
@@ -684,6 +685,9 @@ pub async fn close_session(
     {
         log::warn!("Failed to cleanup saved contexts for session: {e}");
     }
+
+    // Clean up combined-context files for this session
+    cleanup_combined_context_files(&app, &session_id);
 
     // Resolve default backend for fallback session creation
     let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
@@ -1040,6 +1044,9 @@ pub async fn delete_archived_session(
     {
         log::warn!("Failed to cleanup saved contexts for session: {e}");
     }
+
+    // Clean up combined-context files for this session
+    cleanup_combined_context_files(&app, &session_id);
 
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         let session_idx = sessions
@@ -2567,8 +2574,22 @@ pub async fn send_chat_message(
         });
     }
 
-    // Create assistant message with tool calls and content blocks
+    // Pre-compute completion state flags before moving unified_response fields
     let has_content = !unified_response.content.is_empty();
+    let was_cancelled = unified_response.cancelled;
+    let has_blocking_tool = unified_response
+        .tool_calls
+        .iter()
+        .any(|tc| tc.name == "AskUserQuestion" || tc.name == "ExitPlanMode");
+    let has_question_tool = unified_response
+        .tool_calls
+        .iter()
+        .any(|tc| tc.name == "AskUserQuestion");
+    let is_plan_mode_with_content = matches!(response_backend, Backend::Codex | Backend::Opencode)
+        && execution_mode.as_deref() == Some("plan")
+        && has_content;
+
+    // Create assistant message with tool calls and content blocks
     let assistant_msg_id = Uuid::new_v4().to_string();
     let assistant_msg = ChatMessage {
         id: assistant_msg_id.clone(),
@@ -2591,7 +2612,7 @@ pub async fn send_chat_message(
     // Messages are loaded from NDJSON on demand via load_session_messages().
 
     // Finalize run log (complete or cancel based on response status)
-    if unified_response.cancelled {
+    if was_cancelled {
         let cancel_resume_sid =
             if response_backend != Backend::Claude || resume_id_for_log.is_empty() {
                 None
@@ -2632,16 +2653,43 @@ pub async fn send_chat_message(
                     }
                 }
             }
+
+            // Persist completion state (single authoritative write).
+            // This eliminates the dual-client race where both native and web frontends
+            // independently call update_session_state with conflicting decisions.
+            // Flags are pre-computed above before unified_response fields are moved.
+            if was_cancelled {
+                // Cancelled: don't change waiting/reviewing state
+            } else if has_blocking_tool {
+                session.waiting_for_input = true;
+                session.is_reviewing = false;
+                session.waiting_for_input_type = Some(
+                    if has_question_tool {
+                        "question"
+                    } else {
+                        "plan"
+                    }
+                    .to_string(),
+                );
+            } else if is_plan_mode_with_content {
+                // Codex/OpenCode plan-mode with content → waiting for plan approval
+                session.waiting_for_input = true;
+                session.is_reviewing = false;
+                session.waiting_for_input_type = Some("plan".to_string());
+            } else {
+                // Normal completion
+                session.waiting_for_input = false;
+                session.is_reviewing = true;
+                session.waiting_for_input_type = None;
+            }
         }
         Ok(())
     })?;
 
-    // NOTE: Plan-waiting state for Codex/Opencode is now signaled via the
-    // `waiting_for_plan` field in the chat:done event, and persisted by the
-    // frontend's chat:done handler. The previous approach of setting it here
-    // raced with the frontend (chat:done fires before this code runs).
+    // Emit cache invalidation so all clients (native + web) refetch authoritative state
+    emit_sessions_cache_invalidation(&app);
 
-    if unified_response.cancelled {
+    if was_cancelled {
         log::info!("[SendChat] EXIT session={session_id} reason=cancelled_with_content");
     } else {
         log::info!("[SendChat] EXIT session={session_id} reason=success");
@@ -2665,6 +2713,9 @@ pub async fn clear_session_history(
     if let Err(e) = delete_session_data(&app, &session_id) {
         log::warn!("Failed to delete session data: {e}");
     }
+
+    // Clean up combined-context files for this session
+    cleanup_combined_context_files(&app, &session_id);
 
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {

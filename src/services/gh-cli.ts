@@ -128,6 +128,7 @@ export function useAvailableGhVersions(options?: { enabled?: boolean }) {
     enabled: options?.enabled ?? true,
     staleTime: 1000 * 60 * 15, // Cache for 15 minutes to avoid rate limiting
     gcTime: 1000 * 60 * 30, // 30 minutes
+    refetchInterval: 1000 * 60 * 60, // Re-check every hour
   })
 }
 

@@ -207,7 +207,7 @@ const FindingCard = memo(function FindingCard({
         <CollapsibleContent>
           <div className="px-4 pb-4 pt-3 space-y-3 border-t border-border/50">
             {/* File location */}
-            <p className="text-xs font-mono">
+            <p className="text-xs font-mono select-text cursor-text">
               <span className="text-muted-foreground">Affected code: </span>
               <span className="text-foreground">
                 {finding.file}
@@ -216,7 +216,7 @@ const FindingCard = memo(function FindingCard({
             </p>
 
             {/* Description */}
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground select-text cursor-text">
               {finding.description}
             </p>
 
@@ -227,7 +227,7 @@ const FindingCard = memo(function FindingCard({
                   Suggested fix:
                 </p>
                 <div className="rounded-md bg-muted/50 p-2 border">
-                  <pre className="text-xs font-mono whitespace-pre-wrap text-foreground/80">
+                  <pre className="text-xs font-mono whitespace-pre-wrap text-foreground/80 select-text cursor-text">
                     {finding.suggestion}
                   </pre>
                 </div>
@@ -498,7 +498,7 @@ Please apply all these fixes to the codebase.`
                 </Badge>
               )}
             </div>
-            <p className="text-sm leading-6 text-muted-foreground">
+            <p className="text-sm leading-6 text-muted-foreground select-text cursor-text">
               {reviewResults.summary}
             </p>
           </div>

@@ -7,7 +7,6 @@ import { useIsMobile } from '@/hooks/use-mobile'
 
 interface SendCancelButtonProps {
   isSending: boolean
-  hasPendingQuestions: boolean
   canSend: boolean
   executionMode: string
   queuedMessageCount?: number
@@ -22,7 +21,6 @@ const MODE_LABELS: Record<string, string> = {
 
 export function SendCancelButton({
   isSending,
-  hasPendingQuestions,
   canSend,
   executionMode,
   queuedMessageCount,
@@ -59,7 +57,7 @@ export function SendCancelButton({
       <TooltipTrigger asChild>
         <button
           type="submit"
-          disabled={hasPendingQuestions || !canSend}
+          disabled={!canSend}
           className={cn(
             'flex h-8 items-center justify-center gap-1.5 rounded-r-lg px-3 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50',
             canSend

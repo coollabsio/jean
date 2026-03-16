@@ -313,7 +313,8 @@ export function useInvestigateHandlers({
             : undefined,
           mcpConfig: buildMcpConfigJson(
             mcpServersDataRef.current ?? [],
-            enabledMcpServersRef.current
+            enabledMcpServersRef.current,
+            investigateBackend
           ),
           customProfileName: resolvedInvestigateProfile,
           parallelExecutionPrompt:
@@ -547,7 +548,8 @@ export function useInvestigateHandlers({
               : undefined,
             mcpConfig: buildMcpConfigJson(
               mcpServersDataRef.current ?? [],
-              enabledMcpServersRef.current
+              enabledMcpServersRef.current,
+              investigateBackend
             ),
             customProfileName: resolvedInvestigateProfile,
             parallelExecutionPrompt:
@@ -712,7 +714,8 @@ export function useInvestigateHandlers({
               : undefined,
             mcpConfig: buildMcpConfigJson(
               mcpServersDataRef.current ?? [],
-              enabledMcpServersRef.current
+              enabledMcpServersRef.current,
+              reviewCommentsBackend
             ),
             customProfileName: resolvedProfile,
             parallelExecutionPrompt:

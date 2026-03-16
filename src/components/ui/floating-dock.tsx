@@ -9,6 +9,8 @@ import {
   Terminal,
   Sparkles,
   FileText,
+  Github,
+  GitPullRequest,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -33,13 +35,17 @@ import {
   PopoverContent,
 } from '@/components/ui/popover'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { invoke } from '@/lib/transport'
 import { useWsConnectionStatus } from '@/lib/transport'
 import { isNativeApp } from '@/lib/environment'
+import { openExternal, preOpenWindow } from '@/lib/platform'
+import { copyToClipboard } from '@/lib/clipboard'
 import { useUIStore } from '@/store/ui-store'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { chatQueryKeys } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
+import { useWorktree, type GitHubRemote } from '@/services/projects'
 import { useCodexCliAuth, useCodexCliStatus, useCodexUsage } from '@/services/codex-cli'
 import type { WorktreeSessions } from '@/types/chat'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
@@ -131,6 +137,7 @@ export function FloatingDock() {
   const { data: preferences } = usePreferences()
   const queryClient = useQueryClient()
 
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
@@ -140,6 +147,7 @@ export function FloatingDock() {
   const currentWorktreeId = sessionChatModalOpen
     ? (sessionChatModalWorktreeId ?? activeWorktreeId ?? selectedWorktreeId)
     : (activeWorktreeId ?? selectedWorktreeId)
+  const { data: worktree } = useWorktree(isMobile ? currentWorktreeId : null)
   const activeSessionId = useChatStore(state =>
     currentWorktreeId ? state.activeSessionIds[currentWorktreeId] : undefined
   )
@@ -235,11 +243,54 @@ export function FloatingDock() {
   const handleCopyResumeCommand = useCallback(() => {
     const commandToCopy = getActiveResumeCommand() ?? resumeCommand
     if (!commandToCopy) return
-    void navigator.clipboard
-      .writeText(commandToCopy)
+    void copyToClipboard(commandToCopy)
       .then(() => toast.success('Resume command copied'))
       .catch(() => toast.error('Failed to copy resume command'))
   }, [getActiveResumeCommand, resumeCommand])
+
+  const handleOpenGitHub = useCallback(() => {
+    const branch = worktree?.branch
+    if (!branch) {
+      if (isNativeApp()) {
+        if (selectedProjectId) {
+          invoke('open_project_on_github', { projectId: selectedProjectId })
+        }
+      } else {
+        // Web access: get URL and open client-side (open_project_on_github opens on the server)
+        const targetPath = worktree?.path
+        if (targetPath) {
+          const win = preOpenWindow()
+          invoke<string>('get_github_repo_url', { repoPath: targetPath })
+            .then(url => openExternal(url, win))
+            .catch(() => { win?.close(); toast.error('Failed to open GitHub') })
+        }
+      }
+      return
+    }
+    const targetPath = worktree?.path
+    if (!targetPath) return
+    // Pre-open window to avoid mobile popup blockers
+    const win = preOpenWindow()
+    invoke<GitHubRemote[]>('get_github_remotes', { repoPath: targetPath })
+      .then(remotes => {
+        if (!remotes || remotes.length <= 1) {
+          const url = remotes?.[0]?.url
+          if (url) openExternal(`${url}/tree/${branch}`, win)
+          else win?.close()
+        } else {
+          win?.close()
+          useUIStore.getState().openRemotePicker(targetPath, remoteName => {
+            const remote = remotes.find(r => r.name === remoteName)
+            if (remote) openExternal(`${remote.url}/tree/${branch}`)
+          })
+        }
+      })
+      .catch(() => { win?.close(); toast.error('Failed to fetch remotes') })
+  }, [worktree?.branch, worktree?.path, selectedProjectId])
+
+  const handleOpenPR = useCallback(() => {
+    if (worktree?.pr_url) openExternal(worktree.pr_url)
+  }, [worktree?.pr_url])
 
   // Listen for keyboard shortcut event
   useEffect(() => {
@@ -275,7 +326,8 @@ export function FloatingDock() {
   const isWebAccess = !isNativeApp()
   const showConnectionIndicator = isWebAccess
   const showKeybindingHints = isNativeApp() && !isMobile
-  const popoverSide = isLg ? 'top' : 'right' as const
+  const popoverSide = (isMobile || isLg) ? 'top' : 'right' as const
+  const popoverAlign = isMobile ? 'end' : 'start' as const
 
   return (
     <div className="absolute bottom-4 right-4 z-10 flex flex-row items-center gap-0.5 rounded-full border border-border/30 bg-background/60 backdrop-blur-md px-1 py-0.5 sm:left-4 sm:right-auto sm:flex-col sm:rounded-2xl sm:px-0.5 sm:py-1 xl:flex-row xl:rounded-full xl:px-1 xl:py-0.5">
@@ -300,7 +352,7 @@ export function FloatingDock() {
         </Tooltip>
         <DropdownMenuContent
           side={popoverSide}
-          align="start"
+          align={popoverAlign}
           className="min-w-[200px]"
           onEscapeKeyDown={e => e.stopPropagation()}
         >
@@ -335,6 +387,21 @@ export function FloatingDock() {
             <FileText className="mr-2 h-4 w-4" />
             View Plan
           </DropdownMenuItem>
+          {isMobile && currentWorktreeId && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleOpenGitHub}>
+                <Github className="mr-2 h-4 w-4" />
+                GitHub
+              </DropdownMenuItem>
+              {worktree?.pr_url && (
+                <DropdownMenuItem onClick={handleOpenPR}>
+                  <GitPullRequest className="mr-2 h-4 w-4" />
+                  PR #{worktree.pr_number}
+                </DropdownMenuItem>
+              )}
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -381,7 +448,7 @@ export function FloatingDock() {
           </Tooltip>
           <DropdownMenuContent
             side={popoverSide}
-            align="start"
+            align={popoverAlign}
             className="min-w-[180px]"
             onEscapeKeyDown={e => e.stopPropagation()}
           >

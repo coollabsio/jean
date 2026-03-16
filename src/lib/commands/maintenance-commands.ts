@@ -34,14 +34,16 @@ export const maintenanceCommands: AppCommand[] = [
         ])
         const retentionDays = prefs?.archive_retention_days ?? 30
 
-        const result = await invoke<CleanupResult>('cleanup_old_archives', {
-          retentionDays,
-        })
+        const [result, combinedDeleted] = await Promise.all([
+          invoke<CleanupResult>('cleanup_old_archives', { retentionDays }),
+          invoke<number>('cleanup_combined_contexts'),
+        ])
 
         const total =
           result.deleted_worktrees +
           result.deleted_sessions +
-          (result.deleted_contexts ?? 0)
+          (result.deleted_contexts ?? 0) +
+          combinedDeleted
 
         if (total > 0) {
           const parts: string[] = []
@@ -58,6 +60,11 @@ export const maintenanceCommands: AppCommand[] = [
           if (result.deleted_contexts > 0) {
             parts.push(
               `${result.deleted_contexts} context${result.deleted_contexts === 1 ? '' : 's'}`
+            )
+          }
+          if (combinedDeleted > 0) {
+            parts.push(
+              `${combinedDeleted} combined-context file${combinedDeleted === 1 ? '' : 's'}`
             )
           }
 

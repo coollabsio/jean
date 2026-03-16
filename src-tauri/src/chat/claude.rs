@@ -412,6 +412,7 @@ fn build_claude_args(
         if !config.is_empty() {
             args.push("--mcp-config".to_string());
             args.push(config.to_string());
+            args.push("--strict-mcp-config".to_string());
 
             // Auto-allow all tools from configured MCP servers
             // Pattern "mcp__<name>" matches all tools from that server

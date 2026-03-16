@@ -1,41 +1,12 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useCommandContext } from '@/hooks/use-command-context'
 import { executeCommand } from '@/lib/commands'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useWindowMaximized } from '@/hooks/use-window-maximized'
 
 export function WindowsWindowControls() {
   const context = useCommandContext()
-  const [isMaximized, setIsMaximized] = useState(false)
-
-  useEffect(() => {
-    const appWindow = getCurrentWindow()
-
-    // Check initial state
-    appWindow
-      .isMaximized()
-      .then(setIsMaximized)
-      .catch(() => undefined)
-
-    // Listen for resize events to detect maximize state changes
-    let unlisten: (() => void) | null = null
-    appWindow
-      .onResized(async () => {
-        try {
-          const maximized = await appWindow.isMaximized()
-          setIsMaximized(maximized)
-        } catch {
-          // ignore
-        }
-      })
-      .then(fn => {
-        unlisten = fn
-      })
-
-    return () => {
-      if (unlisten) unlisten()
-    }
-  }, [])
+  const isMaximized = useWindowMaximized()
 
   const handleMinimize = useCallback(async () => {
     await executeCommand('window-minimize', context)

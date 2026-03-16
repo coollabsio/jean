@@ -29,6 +29,7 @@ import {
 import type { Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { isNativeApp } from '@/lib/environment'
+import { getFileManagerName } from '@/lib/platform'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
 interface WorktreeContextMenuProps {
@@ -99,7 +100,7 @@ export function WorktreeContextMenu({
         {isNativeApp() && (
           <ContextMenuItem onClick={handleOpenInFinder}>
             <FolderOpen className="mr-2 h-4 w-4" />
-            Open in Finder
+            Open in {getFileManagerName()}
           </ContextMenuItem>
         )}
 

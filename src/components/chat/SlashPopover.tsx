@@ -44,6 +44,8 @@ interface SlashPopoverProps {
   containerRef?: React.RefObject<HTMLElement | null>
   /** Whether slash is at prompt start (enables commands) */
   isAtPromptStart: boolean
+  /** Worktree path for loading project-level commands/skills */
+  worktreePath?: string | null
   /** Ref to expose navigation methods to parent */
   handleRef?: React.RefObject<SlashPopoverHandle | null>
 }
@@ -61,10 +63,11 @@ export function SlashPopover({
   anchorPosition,
   containerRef,
   isAtPromptStart,
+  worktreePath,
   handleRef,
 }: SlashPopoverProps) {
-  const { data: skills = [] } = useClaudeSkills()
-  const { data: commands = [] } = useClaudeCommands()
+  const { data: skills = [] } = useClaudeSkills(worktreePath)
+  const { data: commands = [] } = useClaudeCommands(worktreePath)
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
 

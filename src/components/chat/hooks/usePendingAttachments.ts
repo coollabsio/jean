@@ -29,6 +29,7 @@ interface UsePendingAttachmentsParams {
   isCodexBackendRef: RefObject<boolean>
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
+  selectedBackendRef: RefObject<'claude' | 'codex' | 'opencode'>
   setInputDraft: (sessionId: string, draft: string) => void
   sendMessageNow: (queuedMsg: QueuedMessage) => void
 }
@@ -49,6 +50,7 @@ export function usePendingAttachments({
   isCodexBackendRef,
   mcpServersDataRef,
   enabledMcpServersRef,
+  selectedBackendRef,
   setInputDraft,
   sendMessageNow,
 }: UsePendingAttachmentsParams) {
@@ -136,7 +138,8 @@ export function usePendingAttachments({
                 : undefined,
             mcpConfig: buildMcpConfigJson(
               mcpServersDataRef.current ?? [],
-              enabledMcpServersRef.current
+              enabledMcpServersRef.current,
+              selectedBackendRef.current
             ),
             commandAllowedTools: resolved.allowed_tools,
             queuedAt: Date.now(),

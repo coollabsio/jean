@@ -307,6 +307,13 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "revert_last_local_commit" => {
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let result =
+                crate::projects::revert_last_local_commit(worktree_path).await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
         "run_review_with_ai" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let magic_prompt: Option<String> = field_opt(&args, "magicPrompt", "magic_prompt")?;
@@ -1099,6 +1106,11 @@ pub async fn dispatch_command(
             to_value(result)
         }
 
+        "cleanup_combined_contexts" => {
+            let result = crate::projects::cleanup_combined_contexts(app.clone()).await?;
+            to_value(result)
+        }
+
         // =====================================================================
         // HTTP Server control (exposed so web clients can check status)
         // =====================================================================
@@ -1315,11 +1327,13 @@ pub async fn dispatch_command(
         // Skills & Search
         // =====================================================================
         "list_claude_skills" => {
-            let result = crate::projects::list_claude_skills().await?;
+            let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
+            let result = crate::projects::list_claude_skills(worktree_path).await?;
             to_value(result)
         }
         "list_claude_commands" => {
-            let result = crate::projects::list_claude_commands().await?;
+            let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
+            let result = crate::projects::list_claude_commands(worktree_path).await?;
             to_value(result)
         }
         "search_github_issues" => {

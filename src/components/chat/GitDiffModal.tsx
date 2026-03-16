@@ -206,6 +206,8 @@ export function GitDiffModal({
   const [diff, setDiff] = useState<GitDiff | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [cachedBranchStats, setCachedBranchStats] = useState<DiffStats | null>(null)
+  const [cachedUncommittedStats, setCachedUncommittedStats] = useState<DiffStats | null>(null)
   const [diffStyle, setDiffStyle] = useState<DiffStyle>(
     window.innerWidth < 768 ? 'unified' : 'split'
   )
@@ -285,6 +287,14 @@ export function GitDiffModal({
     []
   )
 
+  // Cache backend stats per tab so they persist across tab switches
+  useEffect(() => {
+    if (!diff) return
+    const stats: DiffStats = { added: diff.total_additions, removed: diff.total_deletions }
+    if (activeDiffType === 'branch') setCachedBranchStats(stats)
+    else if (activeDiffType === 'uncommitted') setCachedUncommittedStats(stats)
+  }, [diff, activeDiffType])
+
   /** Map @pierre/diffs file type back to backend git status */
   const diffTypeToStatus = useCallback((type: string): string => {
     switch (type) {
@@ -343,6 +353,8 @@ export function GitDiffModal({
       setFileFilter('')
       setIsSwitching(false)
       setShowMobileSidebar(false)
+      setCachedBranchStats(null)
+      setCachedUncommittedStats(null)
       if (switchTimeoutRef.current) {
         clearTimeout(switchTimeoutRef.current)
       }
@@ -526,6 +538,7 @@ export function GitDiffModal({
     return fromPatch
   }, [parsedFiles, diff?.files])
 
+
   // Filter files by search pattern
   const filteredFiles = useMemo(() => {
     if (!fileFilter) return flattenedFiles
@@ -694,10 +707,11 @@ export function GitDiffModal({
   const hasUncommitted = uncommittedStats !== undefined
   const hasBranchDiff = branchStats !== undefined
   const showSwitcher = hasUncommitted && hasBranchDiff
-  const uncommittedAdded = uncommittedStats?.added ?? 0
-  const uncommittedRemoved = uncommittedStats?.removed ?? 0
-  const branchAdded = branchStats?.added ?? 0
-  const branchRemoved = branchStats?.removed ?? 0
+  // Prefer cached stats (from loaded diff) over polling stats for consistency across tab switches
+  const uncommittedAdded = cachedUncommittedStats?.added ?? uncommittedStats?.added ?? 0
+  const uncommittedRemoved = cachedUncommittedStats?.removed ?? uncommittedStats?.removed ?? 0
+  const branchAdded = cachedBranchStats?.added ?? branchStats?.added ?? 0
+  const branchRemoved = cachedBranchStats?.removed ?? branchStats?.removed ?? 0
 
   // Handle switching between diff types
   const handleSwitchDiffType = useCallback(

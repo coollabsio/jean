@@ -4,6 +4,7 @@ import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type { LabelData } from '@/types/chat'
 import { isSessionStateHydrating } from '@/lib/session-state-hydration'
+import { isBackendPersisting } from '@/lib/backend-persist-guard'
 
 /**
  * Saves reviewing/waiting state immediately when it changes.
@@ -53,16 +54,21 @@ export function useImmediateSessionStateSave() {
           reviewingSessions
         )) {
           if (prevReviewingRef.current[sessionId] !== isReviewing) {
-            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-              isReviewing,
-            })
+            // Skip if backend is persisting completion state for this session
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                isReviewing,
+              })
+            }
           }
         }
         for (const sessionId of Object.keys(prevReviewingRef.current)) {
           if (!(sessionId in reviewingSessions)) {
-            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-              isReviewing: false,
-            })
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                isReviewing: false,
+              })
+            }
           }
         }
         prevReviewingRef.current = reviewingSessions
@@ -73,16 +79,21 @@ export function useImmediateSessionStateSave() {
           waitingForInputSessionIds
         )) {
           if (prevWaitingRef.current[sessionId] !== isWaiting) {
-            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-              waitingForInput: isWaiting,
-            })
+            // Skip if backend is persisting completion state for this session
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                waitingForInput: isWaiting,
+              })
+            }
           }
         }
         for (const sessionId of Object.keys(prevWaitingRef.current)) {
           if (!(sessionId in waitingForInputSessionIds)) {
-            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
-              waitingForInput: false,
-            })
+            if (!isBackendPersisting(sessionId)) {
+              saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+                waitingForInput: false,
+              })
+            }
           }
         }
         prevWaitingRef.current = waitingForInputSessionIds
