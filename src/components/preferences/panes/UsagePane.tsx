@@ -309,15 +309,6 @@ export const UsagePane: React.FC = () => {
         </div>
       </div>
 
-      {rtkEnabled && (
-        <SettingsSection title="RTK">
-          <p className="text-sm text-muted-foreground">
-            RTK estimates how many tokens its command rewriting avoided across supported backends.
-          </p>
-          {renderRtkContent(rtkGain)}
-        </SettingsSection>
-      )}
-
       <SettingsSection title="Claude">
         <p className="text-sm text-muted-foreground">
           Claude usage tracking is temporarily disabled due to an authentication bug that causes repeated logouts.
@@ -400,6 +391,15 @@ export const UsagePane: React.FC = () => {
           <p className="text-sm text-muted-foreground">No usage data available.</p>
         )}
       </SettingsSection>
+
+      {rtkEnabled && (
+        <SettingsSection title="RTK">
+          <p className="text-sm text-muted-foreground">
+            RTK estimates how many tokens its command rewriting avoided across supported backends.
+          </p>
+          {renderRtkContent(rtkGain)}
+        </SettingsSection>
+      )}
     </div>
   )
 }

@@ -36,7 +36,11 @@ function migrateKeybindings(
 
 import { hasBackend } from '@/lib/environment'
 
-const isTauri = hasBackend
+const hasBackendAvailable = hasBackend
+
+function shouldBypassBackend(): boolean {
+  return import.meta.env.DEV && !hasBackendAvailable()
+}
 
 // Query keys for preferences
 export const preferencesQueryKeys = {
@@ -50,7 +54,7 @@ export function usePreferences() {
     queryKey: preferencesQueryKeys.preferences(),
     queryFn: async (): Promise<AppPreferences> => {
       // Return defaults when running outside Tauri (e.g., bun run dev in browser)
-      if (!isTauri()) {
+      if (shouldBypassBackend()) {
         logger.debug('Not in Tauri context, using default preferences')
         return defaultPreferences
       }
@@ -95,7 +99,7 @@ export function usePatchPreferences() {
 
   return useMutation({
     mutationFn: async (patch: Partial<AppPreferences>) => {
-      if (!isTauri()) {
+      if (shouldBypassBackend()) {
         logger.debug(
           'Not in Tauri context, preferences not persisted to disk',
           { patch }
@@ -119,6 +123,32 @@ export function usePatchPreferences() {
         throw error
       }
     },
+    onMutate: async patch => {
+      await queryClient.cancelQueries({
+        queryKey: preferencesQueryKeys.preferences(),
+      })
+
+      const previous = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences()
+      )
+
+      if (previous) {
+        queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+          ...previous,
+          ...patch,
+        })
+      }
+
+      return { previous }
+    },
+    onError: (_error, _patch, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          preferencesQueryKeys.preferences(),
+          context.previous
+        )
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: preferencesQueryKeys.preferences(),
@@ -134,7 +164,7 @@ export function useSavePreferences() {
   return useMutation({
     mutationFn: async (preferences: AppPreferences) => {
       // Skip persistence when running outside Tauri (e.g., bun run dev in browser)
-      if (!isTauri()) {
+      if (shouldBypassBackend()) {
         logger.debug(
           'Not in Tauri context, preferences not persisted to disk',
           { preferences }

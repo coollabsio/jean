@@ -2143,12 +2143,27 @@ fn rtk_init_commands() -> [&'static [&'static str]; 2] {
 
 fn initialize_rtk_integrations() {
     for args in rtk_init_commands() {
-        match crate::platform::silent_command("rtk").args(args).output() {
+        let mut command = match crate::rtk::silent_rtk_command() {
+            Ok(command) => command,
+            Err(e) => {
+                log::warn!("RTK initialization skipped: {e}");
+                return;
+            }
+        };
+
+        match command.args(args).output() {
             Ok(output) if output.status.success() => {
                 log::info!("RTK initialized successfully: rtk {}", args.join(" "));
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if stderr.contains("unexpected argument '--opencode'") {
+                    log::info!(
+                        "RTK init flag unsupported by installed RTK version; skipping: rtk {}",
+                        args.join(" ")
+                    );
+                    continue;
+                }
                 if stderr.is_empty() {
                     log::warn!(
                         "RTK initialization failed (status={}): rtk {}",
