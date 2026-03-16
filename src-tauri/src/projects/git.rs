@@ -1189,6 +1189,119 @@ pub fn fetch_pr_to_branch(
     Ok(())
 }
 
+fn is_invalid_ref_char(c: char) -> bool {
+    c.is_ascii_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+}
+
+fn is_valid_ref_component(component: &str) -> bool {
+    !component.is_empty()
+        && !component.starts_with('.')
+        && !component.ends_with('.')
+        && !component.ends_with(".lock")
+}
+
+fn is_valid_ref_name(name: &str) -> bool {
+    if name.is_empty()
+        || name.starts_with('/')
+        || name.ends_with('/')
+        || name.contains("//")
+        || name.ends_with('.')
+    {
+        return false;
+    }
+
+    let mut prev = None;
+    for c in name.chars() {
+        if is_invalid_ref_char(c) {
+            return false;
+        }
+
+        if (c == '.' && prev == Some('.')) || (c == '{' && prev == Some('@')) {
+            return false;
+        }
+
+        prev = Some(c);
+    }
+
+    name.split('/').all(is_valid_ref_component)
+}
+
+fn sanitize_ref_component(component: &str) -> String {
+    if component.is_empty() {
+        return "-".to_string();
+    }
+
+    let mut result = component.to_string();
+
+    while result.starts_with('.') {
+        result.replace_range(..1, "-");
+    }
+
+    while result.ends_with('.') {
+        result.pop();
+        result.push('-');
+    }
+
+    while result.ends_with(".lock") {
+        let new_len = result.len() - ".lock".len();
+        result.truncate(new_len);
+        result.push_str("-lock");
+    }
+
+    if result.is_empty() {
+        "-".to_string()
+    } else {
+        result
+    }
+}
+
+/// Sanitize a string for use as a git ref name.
+/// Preserves valid ref names and only rewrites characters or sequences Git rejects.
+pub fn sanitize_ref_name(name: &str) -> String {
+    if is_valid_ref_name(name) {
+        return name.to_string();
+    }
+
+    let mut sanitized = String::with_capacity(name.len());
+    let mut prev_original = None;
+    let mut prev_emitted_was_hyphen = false;
+    let mut prev_hyphen_from_invalid = false;
+
+    for c in name.chars() {
+        let (emitted, from_invalid) = if is_invalid_ref_char(c)
+            || (c == '.' && prev_original == Some('.'))
+            || (c == '{' && prev_original == Some('@'))
+        {
+            ('-', true)
+        } else {
+            (c, false)
+        };
+
+        if emitted == '-' && prev_emitted_was_hyphen && (prev_hyphen_from_invalid || from_invalid) {
+            prev_original = Some(c);
+            continue;
+        }
+
+        sanitized.push(emitted);
+        prev_emitted_was_hyphen = emitted == '-';
+        prev_hyphen_from_invalid = emitted == '-' && from_invalid;
+        prev_original = Some(c);
+    }
+
+    let result = sanitized
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .map(sanitize_ref_component)
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if result.is_empty() {
+        "-".to_string()
+    } else {
+        result
+    }
+}
+
 /// Checkout an existing branch in a worktree
 pub fn checkout_branch(worktree_path: &str, branch: &str) -> Result<(), String> {
     let output = silent_command("git")
@@ -2383,5 +2496,59 @@ mod tests {
             repo: "my-project".to_string(),
         };
         assert_eq!(id.to_key(), "my-org-my-project");
+    }
+
+    // ========================================================================
+    // sanitize_ref_name tests
+    // ========================================================================
+
+    #[test]
+    fn test_sanitize_ref_name_spaces() {
+        assert_eq!(
+            sanitize_ref_name("admin-sister-app-registration-UI 2"),
+            "admin-sister-app-registration-UI-2"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_ref_name_valid_unchanged() {
+        assert_eq!(sanitize_ref_name("feature/my-branch"), "feature/my-branch");
+        assert_eq!(sanitize_ref_name("fix_thing"), "fix_thing");
+        assert_eq!(sanitize_ref_name("feature+api"), "feature+api");
+        assert_eq!(sanitize_ref_name("user@2,stable=1"), "user@2,stable=1");
+    }
+
+    #[test]
+    fn test_sanitize_ref_name_preserves_valid_hyphen_runs() {
+        assert_eq!(
+            sanitize_ref_name("release--candidate"),
+            "release--candidate"
+        );
+        assert_eq!(sanitize_ref_name("-hotfix"), "-hotfix");
+        assert_eq!(sanitize_ref_name("foo-"), "foo-");
+        assert_eq!(sanitize_ref_name("--"), "--");
+    }
+
+    #[test]
+    fn test_sanitize_ref_name_special_chars() {
+        assert_eq!(sanitize_ref_name("branch~1"), "branch-1");
+        assert_eq!(sanitize_ref_name("branch^2"), "branch-2");
+        assert_eq!(sanitize_ref_name("a:b:c"), "a-b-c");
+        assert_eq!(sanitize_ref_name("branch@{1}"), "branch@-1");
+        assert_eq!(sanitize_ref_name("foo.lock"), "foo-lock");
+    }
+
+    #[test]
+    fn test_sanitize_ref_name_collapses_hyphens() {
+        assert_eq!(sanitize_ref_name("a  b"), "a-b");
+        assert_eq!(sanitize_ref_name("a - b"), "a-b");
+    }
+
+    #[test]
+    fn test_sanitize_ref_name_normalizes_invalid_components() {
+        assert_eq!(sanitize_ref_name("feature/.tmp"), "feature/-tmp");
+        assert_eq!(sanitize_ref_name("feature//tmp"), "feature/tmp");
+        assert_eq!(sanitize_ref_name("/foo/"), "foo");
+        assert_eq!(sanitize_ref_name(".."), "--");
     }
 }

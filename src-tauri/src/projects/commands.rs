@@ -909,16 +909,14 @@ pub async fn create_worktree(
 
                 // Check if PR head branch name collides with a locally checked-out branch
                 // (e.g. PR from fork with head "main" when local "main" is already checked out)
-                let branch_collision = git::branch_exists(&project_path, &ctx.head_ref_name);
+                let safe_head_ref = git::sanitize_ref_name(&ctx.head_ref_name);
+                let branch_collision = git::branch_exists(&project_path, &safe_head_ref);
                 let local_branch_name = if branch_collision {
-                    let alt = format!("pr-{}-{}", ctx.number, ctx.head_ref_name);
-                    log::trace!(
-                        "Branch '{}' already exists, using '{alt}' instead",
-                        ctx.head_ref_name
-                    );
+                    let alt = format!("pr-{}-{safe_head_ref}", ctx.number);
+                    log::trace!("Branch '{safe_head_ref}' already exists, using '{alt}' instead",);
                     alt
                 } else {
-                    ctx.head_ref_name.clone()
+                    safe_head_ref
                 };
 
                 // Clean up stale branch from a previous checkout of this PR
@@ -2073,13 +2071,14 @@ pub async fn checkout_pr(
             // Determine safe local branch name for gh pr checkout -b
             // If pr_head_ref (e.g. "main") already exists locally, use an alternative
             // to avoid "refusing to fetch into branch" errors when the branch is checked out
-            let branch_collision = git::branch_exists(&project_path, &pr_head_ref);
+            let safe_head_ref = git::sanitize_ref_name(&pr_head_ref);
+            let branch_collision = git::branch_exists(&project_path, &safe_head_ref);
             let local_branch_name = if branch_collision {
-                let alt = format!("pr-{pr_number}-{pr_head_ref}");
-                log::trace!("Branch '{pr_head_ref}' already exists, using '{alt}' instead");
+                let alt = format!("pr-{pr_number}-{safe_head_ref}");
+                log::trace!("Branch '{safe_head_ref}' already exists, using '{alt}' instead");
                 alt
             } else {
-                pr_head_ref.clone()
+                safe_head_ref
             };
 
             // Clean up stale branch from a previous checkout of this PR
@@ -4494,9 +4493,7 @@ pub async fn detect_and_link_pr(
 
     if let Ok(view_out) = view_output {
         if view_out.status.success() {
-            if let Ok(view_json) =
-                serde_json::from_slice::<serde_json::Value>(&view_out.stdout)
-            {
+            if let Ok(view_json) = serde_json::from_slice::<serde_json::Value>(&view_out.stdout) {
                 let pr_number = view_json["number"].as_u64().unwrap_or(0) as u32;
                 let pr_url = view_json["url"].as_str().unwrap_or("").to_string();
                 let title = view_json["title"].as_str().unwrap_or("").to_string();
@@ -4506,9 +4503,7 @@ pub async fn detect_and_link_pr(
 
                     // Save PR info to worktree
                     if let Ok(mut data) = load_projects_data(&app) {
-                        if let Some(wt) =
-                            data.worktrees.iter_mut().find(|w| w.id == worktree_id)
-                        {
+                        if let Some(wt) = data.worktrees.iter_mut().find(|w| w.id == worktree_id) {
                             wt.pr_number = Some(pr_number);
                             wt.pr_url = Some(pr_url.clone());
                             let _ = save_projects_data(&app, &data);
