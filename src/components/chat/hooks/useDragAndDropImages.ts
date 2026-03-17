@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
@@ -20,6 +20,10 @@ interface UseDragAndDropImagesOptions {
 interface UseDragAndDropImagesResult {
   /** Whether files are currently being dragged over the window */
   isDragging: boolean
+  /** Absolute paths of non-image files that were just dropped */
+  droppedFilePaths: string[]
+  /** Clear the dropped file paths after they've been consumed */
+  clearDroppedFilePaths: () => void
 }
 
 /**
@@ -33,6 +37,8 @@ export function useDragAndDropImages(
   options?: UseDragAndDropImagesOptions
 ): UseDragAndDropImagesResult {
   const [isDragging, setIsDragging] = useState(false)
+  const [droppedFilePaths, setDroppedFilePaths] = useState<string[]>([])
+  const clearDroppedFilePaths = useCallback(() => setDroppedFilePaths([]), [])
 
   useEffect(() => {
     if (options?.disabled || !isNativeApp()) return
@@ -63,18 +69,12 @@ export function useDragAndDropImages(
           const paths = event.payload.paths
           const imagePaths: string[] = []
           const svgPaths: string[] = []
+          const otherPaths: string[] = []
           for (const path of paths) {
             const ext = path.split('.').pop()?.toLowerCase() ?? ''
             if (ALLOWED_EXTENSIONS.includes(ext)) imagePaths.push(path)
             else if (TEXT_IMAGE_EXTENSIONS.includes(ext)) svgPaths.push(path)
-          }
-
-          if (imagePaths.length === 0 && svgPaths.length === 0) {
-            toast.error('No image detected', {
-              description:
-                'Only PNG, JPEG, GIF, WebP, SVG files are accepted',
-            })
-            return
+            else otherPaths.push(path)
           }
 
           // Process raster images
@@ -87,13 +87,9 @@ export function useDragAndDropImages(
             processDroppedSvg(sourcePath, sessionId)
           }
 
-          // Notify if some files were skipped
-          const skippedCount =
-            paths.length - imagePaths.length - svgPaths.length
-          if (skippedCount > 0) {
-            toast.warning(`${skippedCount} file(s) skipped`, {
-              description: 'Only images are accepted',
-            })
+          // Insert non-image file paths into chat input
+          if (otherPaths.length > 0) {
+            setDroppedFilePaths(otherPaths)
           }
         } else if (event.payload.type === 'leave') {
           // Files left the window
@@ -116,7 +112,7 @@ export function useDragAndDropImages(
     }
   }, [sessionId, options?.disabled])
 
-  return { isDragging }
+  return { isDragging, droppedFilePaths, clearDroppedFilePaths }
 }
 
 /**

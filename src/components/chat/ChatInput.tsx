@@ -48,6 +48,10 @@ interface ChatInputProps {
   onRegisterClearHandler?: (clearHandler: (() => void) | null) => void
   formRef: React.RefObject<HTMLFormElement | null>
   inputRef: React.RefObject<HTMLTextAreaElement | null>
+  /** Non-image file paths dropped into the window */
+  droppedFilePaths?: string[]
+  /** Called after dropped file paths have been inserted into the input */
+  onDroppedFilePathsConsumed?: () => void
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -65,6 +69,8 @@ export const ChatInput = memo(function ChatInput({
   onRegisterClearHandler,
   formRef,
   inputRef,
+  droppedFilePaths,
+  onDroppedFilePathsConsumed,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
 
@@ -151,6 +157,30 @@ export const ChatInput = memo(function ChatInput({
         handleFocusChatInput
       )
   }, [inputRef])
+
+  // Insert dropped non-image file paths into the textarea
+  useEffect(() => {
+    if (!droppedFilePaths?.length) return
+    const textarea = inputRef.current
+    if (!textarea) return
+
+    const paths = droppedFilePaths.map(p => `"${p}"`).join(' ')
+    const current = valueRef.current
+    const newValue = current ? `${current} ${paths}` : paths
+    textarea.value = newValue
+    valueRef.current = newValue
+    textarea.selectionStart = textarea.selectionEnd = newValue.length
+    textarea.focus()
+
+    // Update draft and hint state
+    if (activeSessionId) {
+      useChatStore.getState().setInputDraft(activeSessionId, newValue)
+    }
+    setShowHint(false)
+    onHasValueChangeRef.current?.(true)
+
+    onDroppedFilePathsConsumed?.()
+  }, [droppedFilePaths, onDroppedFilePathsConsumed, activeSessionId, inputRef])
 
   // Sync DOM when store draft is cleared or restored externally
   useEffect(() => {
