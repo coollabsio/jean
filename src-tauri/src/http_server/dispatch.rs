@@ -1524,6 +1524,27 @@ pub async fn dispatch_command(
                     .await?;
             to_value(result)
         }
+        "move_session_to_worktree" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let from_worktree_id: String = field(&args, "fromWorktreeId", "from_worktree_id")?;
+            let to_worktree_id: String = field(&args, "toWorktreeId", "to_worktree_id")?;
+            let migrate_changes: bool = from_field(&args, "migrateChanges").unwrap_or(false);
+            let from_worktree_path: String =
+                field(&args, "fromWorktreePath", "from_worktree_path")?;
+            let to_worktree_path: String = field(&args, "toWorktreePath", "to_worktree_path")?;
+            crate::chat::move_session_to_worktree(
+                app.clone(),
+                session_id,
+                from_worktree_id,
+                to_worktree_id,
+                migrate_changes,
+                from_worktree_path,
+                to_worktree_path,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["sessions"]);
+            Ok(Value::Null)
+        }
         "unarchive_session" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

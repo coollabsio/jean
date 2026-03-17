@@ -2758,6 +2758,7 @@ pub fn run() {
             chat::update_session_state,
             chat::close_session,
             chat::archive_session,
+            chat::move_session_to_worktree,
             chat::unarchive_session,
             chat::restore_session_with_base,
             chat::delete_archived_session,

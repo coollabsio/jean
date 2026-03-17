@@ -65,6 +65,8 @@ export interface SessionCardProps {
   onRenameStart?: (sessionId: string, currentName: string) => void
   onRenameSubmit?: (sessionId: string) => void
   onRenameCancel?: () => void
+  otherWorktrees?: { id: string; name: string; path: string; branch: string }[]
+  onMoveToWorktree?: (targetWorktreeId: string, targetWorktreeName: string, targetWorktreePath: string) => void
 }
 
 export const statusConfig: Record<

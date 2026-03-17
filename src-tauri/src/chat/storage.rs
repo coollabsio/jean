@@ -936,6 +936,83 @@ pub fn restore_base_sessions(
 }
 
 // ============================================================================
+// Move Session Between Worktrees
+// ============================================================================
+
+/// Move a session from one worktree to another.
+/// Updates both worktree indices and the session metadata atomically.
+pub fn move_session_to_worktree(
+    app: &AppHandle,
+    session_id: &str,
+    from_worktree_id: &str,
+    to_worktree_id: &str,
+) -> Result<(), String> {
+    if from_worktree_id == to_worktree_id {
+        return Ok(());
+    }
+
+    // Lock both indices in alphabetical order to prevent deadlocks
+    let (first_id, second_id) = if from_worktree_id < to_worktree_id {
+        (from_worktree_id, to_worktree_id)
+    } else {
+        (to_worktree_id, from_worktree_id)
+    };
+
+    let first_lock = get_index_lock(first_id);
+    let _first_guard = first_lock.lock().unwrap();
+    let second_lock = get_index_lock(second_id);
+    let _second_guard = second_lock.lock().unwrap();
+
+    // Load both indices
+    let mut from_index = load_index_internal(app, from_worktree_id)?;
+    let mut to_index = load_index_internal(app, to_worktree_id)?;
+
+    // Find and remove the session entry from source
+    let entry_pos = from_index
+        .sessions
+        .iter()
+        .position(|e| e.id == session_id)
+        .ok_or_else(|| format!("Session {session_id} not found in worktree {from_worktree_id}"))?;
+    let mut entry = from_index.sessions.remove(entry_pos);
+
+    // Set order to append at end of target
+    let max_order = to_index.sessions.iter().map(|e| e.order).max().unwrap_or(0);
+    entry.order = max_order + 1;
+
+    // Add to target index
+    to_index.sessions.push(entry);
+
+    // If the moved session was the active one in source, pick next available
+    if from_index.active_session_id.as_deref() == Some(session_id) {
+        from_index.active_session_id = from_index.sessions.first().map(|e| e.id.clone());
+    }
+
+    // Save both indices
+    save_index_internal(app, &from_index)?;
+    save_index_internal(app, &to_index)?;
+
+    // Update session metadata: worktree_id + clear CLI session IDs
+    // CLI session IDs are tied to the original worktree's working directory
+    // and cannot be resumed from a different worktree, so we must clear them.
+    // The message history is preserved in the NDJSON run logs.
+    let metadata_lock = get_metadata_lock(session_id);
+    let _metadata_guard = metadata_lock.lock().unwrap();
+    if let Some(mut metadata) = load_metadata_internal(app, session_id)? {
+        metadata.worktree_id = to_worktree_id.to_string();
+        metadata.claude_session_id = None;
+        metadata.codex_thread_id = None;
+        metadata.opencode_session_id = None;
+        save_metadata_internal(app, &metadata)?;
+    }
+
+    log::info!(
+        "Moved session {session_id} from worktree {from_worktree_id} to {to_worktree_id}"
+    );
+
+    Ok(())
+}
+
+// ============================================================================
 // Saved Contexts (unchanged from original)
 // ============================================================================
 

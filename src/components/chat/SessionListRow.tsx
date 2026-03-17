@@ -1,6 +1,7 @@
 import { forwardRef, useCallback } from 'react'
 import {
   Archive,
+  ArrowRightLeft,
   Eye,
   EyeOff,
   FileText,
@@ -24,6 +25,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { getResumeCommand, statusConfig, type SessionCardProps } from './session-card-utils'
@@ -51,6 +55,8 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
       onRenameStart,
       onRenameSubmit,
       onRenameCancel,
+      otherWorktrees,
+      onMoveToWorktree,
     },
     ref
   ) {
@@ -272,6 +278,27 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
             <Archive className="mr-2 h-4 w-4" />
             Archive Session
           </ContextMenuItem>
+          {onMoveToWorktree && otherWorktrees && otherWorktrees.length > 0 && (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <ArrowRightLeft className="mr-2 h-4 w-4" />
+                Move to Worktree
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-48">
+                {otherWorktrees.map(wt => (
+                  <ContextMenuItem
+                    key={wt.id}
+                    onSelect={() => onMoveToWorktree(wt.id, wt.name, wt.path)}
+                  >
+                    <span className="truncate">{wt.name}</span>
+                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[100px]">
+                      {wt.branch}
+                    </span>
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          )}
           {resumeCommand && (
             <ContextMenuItem
               onSelect={() => {

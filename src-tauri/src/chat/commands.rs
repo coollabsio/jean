@@ -832,6 +832,101 @@ pub async fn archive_session(
     Ok(new_active)
 }
 
+/// Move a session from one worktree to another, optionally migrating uncommitted changes
+#[tauri::command]
+pub async fn move_session_to_worktree(
+    app: AppHandle,
+    session_id: String,
+    from_worktree_id: String,
+    to_worktree_id: String,
+    migrate_changes: bool,
+    from_worktree_path: String,
+    to_worktree_path: String,
+) -> Result<(), String> {
+    log::trace!(
+        "Moving session {session_id} from {from_worktree_id} to {to_worktree_id} (migrate_changes: {migrate_changes})"
+    );
+
+    // Stash changes from source worktree if requested
+    let stashed = if migrate_changes {
+        match crate::projects::git::git_stash(&from_worktree_path) {
+            Ok(msg) => {
+                // "No local changes to save" means nothing was stashed
+                !msg.contains("No local changes to save")
+            }
+            Err(e) => {
+                log::warn!("Failed to stash changes: {e}");
+                return Err(format!("Failed to stash changes from source worktree: {e}"));
+            }
+        }
+    } else {
+        false
+    };
+
+    // Build a conversation transcript from run logs before the move,
+    // so the new CLI session has context of the prior conversation.
+    // The claude_session_id is cleared during move, so without this transcript
+    // Claude CLI would start a completely fresh conversation.
+    if let Ok(messages) = super::run_log::load_session_messages(&app, &session_id) {
+        if !messages.is_empty() {
+            let mut transcript = String::from(
+                "# Previous Conversation (migrated session)\n\n\
+                 This session was moved from another worktree. Below is the conversation history.\n\n"
+            );
+            for msg in &messages {
+                match msg.role {
+                    super::types::MessageRole::User => {
+                        transcript.push_str("## User\n\n");
+                        transcript.push_str(&msg.content);
+                        transcript.push_str("\n\n");
+                    }
+                    super::types::MessageRole::Assistant => {
+                        transcript.push_str("## Assistant\n\n");
+                        // Include text content only (tool calls are noise)
+                        if !msg.content.is_empty() {
+                            transcript.push_str(&msg.content);
+                        } else {
+                            transcript.push_str("*(tool use only)*");
+                        }
+                        transcript.push_str("\n\n");
+                    }
+                }
+            }
+
+            // Save as a per-session context file that gets auto-loaded
+            if let Ok(contexts_dir) = super::storage::get_saved_contexts_dir(&app) {
+                let context_filename = format!("{session_id}-context-migration-transcript.md");
+                let context_path = contexts_dir.join(&context_filename);
+                if let Err(e) = std::fs::write(&context_path, &transcript) {
+                    log::warn!("Failed to write migration transcript: {e}");
+                } else {
+                    log::info!("Saved migration transcript for session {session_id} ({} messages)", messages.len());
+                }
+            }
+        }
+    }
+
+    // Move the session in storage
+    super::storage::move_session_to_worktree(&app, &session_id, &from_worktree_id, &to_worktree_id)?;
+
+    // Apply stashed changes to target worktree
+    if stashed {
+        match crate::projects::git::git_stash_pop(&to_worktree_path) {
+            Ok(_) => {
+                log::trace!("Successfully applied stashed changes to target worktree");
+            }
+            Err(e) => {
+                // Don't fail the move — changes are safely in the stash
+                log::warn!("Failed to apply stashed changes to target worktree: {e}. Changes remain in git stash.");
+                // We still emit success but the frontend will show a warning
+            }
+        }
+    }
+
+    emit_sessions_cache_invalidation(&app);
+    Ok(())
+}
+
 /// Unarchive a session (restore it to the session list)
 #[tauri::command]
 pub async fn unarchive_session(
