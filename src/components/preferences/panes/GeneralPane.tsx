@@ -2000,6 +2000,26 @@ export const GeneralPane: React.FC = () => {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="Chat">
+        <div className="space-y-4">
+          <InlineField
+            label="Show full file paths"
+            description="Display full relative paths in file mention badges instead of just filenames (useful for monorepos)"
+          >
+            <Switch
+              checked={preferences?.show_full_file_path ?? false}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  patchPreferences.mutate({
+                    show_full_file_path: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Auto-generate">
         <div className="space-y-4">
           <InlineField
