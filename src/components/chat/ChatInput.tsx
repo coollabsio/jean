@@ -934,6 +934,7 @@ export const ChatInput = memo(function ChatInput({
     <div className="relative">
       <Textarea
         ref={inputRef}
+        spellCheck
         placeholder={
           isSending
             ? executionMode === 'yolo'
