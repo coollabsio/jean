@@ -1,4 +1,4 @@
-import type { ClaudeModel, CustomCliProfile } from '@/types/preferences'
+import type { CustomCliProfile } from '@/types/preferences'
 import type { ThinkingLevel, EffortLevel, ExecutionMode } from '@/types/chat'
 import type { McpServerInfo } from '@/types/chat'
 import type {
@@ -80,7 +80,7 @@ export interface ChatToolbarProps {
   onSetDiffRequest: (request: DiffRequest) => void
   installedBackends: ('claude' | 'codex' | 'opencode')[]
   onBackendChange: (backend: 'claude' | 'codex' | 'opencode') => void
-  onModelChange: (model: ClaudeModel) => void
+  onModelChange: (model: string) => void
   onProviderChange: (provider: string | null) => void
   customCliProfiles: CustomCliProfile[]
   onThinkingLevelChange: (level: ThinkingLevel) => void

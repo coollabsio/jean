@@ -69,6 +69,7 @@ import type { CliBackend } from '@/types/preferences'
 import {
   EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  type ModelOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   getPrStatusDisplay,
@@ -88,7 +89,7 @@ interface DesktopToolbarControlsProps {
   sessionHasMessages?: boolean
   providerLocked?: boolean
   customCliProfiles: CustomCliProfile[]
-  filteredModelOptions: { value: string; label: string }[]
+  filteredModelOptions: ModelOption[]
   selectedModelLabel: string
   isCodex: boolean
 
@@ -226,6 +227,18 @@ export function DesktopToolbarControls({
         option.value.toLowerCase().includes(query)
     )
   }, [filteredModelOptions, modelSearchQuery])
+  const groupedModelOptions = useMemo(() => {
+    const groups: { backend: CliBackend; options: ModelOption[] }[] = []
+    for (const option of visibleModelOptions) {
+      const group = groups.find(entry => entry.backend === option.backend)
+      if (group) {
+        group.options.push(option)
+      } else {
+        groups.push({ backend: option.backend, options: [option] })
+      }
+    }
+    return groups
+  }, [visibleModelOptions])
 
   useEffect(() => {
     if (!modelDropdownOpen) return
@@ -791,7 +804,9 @@ export function DesktopToolbarControls({
           onEscapeKeyDown={e => e.stopPropagation()}
           onCloseAutoFocus={focusChatInput}
         >
-          {providerLocked && customCliProfiles.length > 0 && (
+          {providerLocked &&
+            selectedBackend === 'claude' &&
+            customCliProfiles.length > 0 && (
             <>
               <DropdownMenuLabel className="text-xs text-muted-foreground">
                 Provider: {providerDisplayName}
@@ -819,8 +834,9 @@ export function DesktopToolbarControls({
                 } else if (event.key === 'Enter') {
                   event.preventDefault()
                   event.stopPropagation()
-                  if (visibleModelOptions.length > 0) {
-                    handleModelChange(visibleModelOptions[0]!.value)
+                  const firstOption = visibleModelOptions[0]
+                  if (firstOption) {
+                    handleModelChange(firstOption.value)
                   }
                 } else {
                   event.stopPropagation()
@@ -831,21 +847,29 @@ export function DesktopToolbarControls({
             />
           </div>
           <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup
-            className="max-h-[19rem] overflow-y-auto"
-            value={selectedModel}
-            onValueChange={handleModelChange}
-          >
-            {visibleModelOptions.length > 0 ? (
-              visibleModelOptions.map(option => (
-                <DropdownMenuRadioItem key={option.value} value={option.value}>
-                  {option.label}
-                </DropdownMenuRadioItem>
-              ))
-            ) : (
-              <DropdownMenuItem disabled>No models found</DropdownMenuItem>
-            )}
-          </DropdownMenuRadioGroup>
+          {visibleModelOptions.length > 0 ? (
+            <DropdownMenuRadioGroup
+              className="max-h-[19rem] overflow-y-auto"
+              value={selectedModel}
+              onValueChange={handleModelChange}
+            >
+              {groupedModelOptions.map((group, index) => (
+                <div key={group.backend}>
+                  {index > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    {BACKEND_LABELS[group.backend]}
+                  </DropdownMenuLabel>
+                  {group.options.map(option => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </div>
+              ))}
+            </DropdownMenuRadioGroup>
+          ) : (
+            <DropdownMenuItem disabled>No models found</DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

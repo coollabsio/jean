@@ -9,7 +9,6 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import { useAllBackendsMcpHealth } from '@/services/mcp'
-import type { ClaudeModel } from '@/types/preferences'
 import type { EffortLevel, ThinkingLevel } from '@/types/chat'
 import type { ChatToolbarProps } from '@/components/chat/toolbar/types'
 import { MobileToolbarMenu } from '@/components/chat/toolbar/MobileToolbarMenu'
@@ -22,6 +21,7 @@ import {
   MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  type ModelOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import { useToolbarDropdownShortcuts } from '@/components/chat/toolbar/useToolbarDropdownShortcuts'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
@@ -131,12 +131,13 @@ export const ChatToolbar = memo(function ChatToolbar({
   })
 
   const { data: availableOpencodeModels } = useAvailableOpencodeModels({
-    enabled: selectedBackend === 'opencode',
+    enabled: installedBackends.includes('opencode'),
   })
-  const opencodeModelOptions =
+  const opencodeModelOptions: ModelOption[] =
     availableOpencodeModels?.map(model => ({
       value: model,
       label: formatOpencodeModelLabel(model),
+      backend: 'opencode',
     })) ?? OPENCODE_MODEL_OPTIONS
 
   const { isCodex, activeMcpCount, filteredModelOptions, selectedModelLabel } =
@@ -145,6 +146,7 @@ export const ChatToolbar = memo(function ChatToolbar({
       selectedProvider,
       selectedModel,
       opencodeModelOptions,
+      installedBackends,
       customCliProfiles,
       availableMcpServers,
       enabledMcpServers,
@@ -163,7 +165,7 @@ export const ChatToolbar = memo(function ChatToolbar({
 
   const handleModelChange = useCallback(
     (value: string) => {
-      onModelChange(value as ClaudeModel)
+      onModelChange(value)
     },
     [onModelChange]
   )
@@ -181,7 +183,7 @@ export const ChatToolbar = memo(function ChatToolbar({
           selectedModel === 'opus-fast' ||
           selectedModel === 'claude-opus-4-6[1m]-fast')
       ) {
-        onModelChange('opus' as ClaudeModel)
+        onModelChange('opus')
       }
     },
     [onProviderChange, onModelChange, selectedModel]

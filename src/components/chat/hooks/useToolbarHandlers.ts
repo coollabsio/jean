@@ -4,6 +4,7 @@ import { useChatStore, DEFAULT_MODEL } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { chatQueryKeys } from '@/services/chat'
+import { resolveBackend } from '@/lib/model-utils'
 import type { QueryClient } from '@tanstack/react-query'
 import type {
   ThinkingLevel,
@@ -76,23 +77,42 @@ export function useToolbarHandlers({
   const handleToolbarModelChange = useCallback(
     (model: string) => {
       if (activeSessionId && activeWorktreeId && activeWorktreePath) {
+        const backend = resolveBackend(model)
+        useChatStore.getState().setSelectedBackend(activeSessionId, backend)
         useChatStore.getState().setSelectedModel(activeSessionId, model)
         queryClient.setQueryData(
           chatQueryKeys.session(activeSessionId),
           (old: Session | null | undefined) =>
             old ? applySessionSettingToSession(old, 'model', model) : old
         )
-        setSessionModel.mutate({
+        invoke('broadcast_session_setting', {
           sessionId: activeSessionId,
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          model,
-        })
+          key: 'backend',
+          value: backend,
+        }).catch(() => undefined)
         invoke('broadcast_session_setting', {
           sessionId: activeSessionId,
           key: 'model',
           value: model,
         }).catch(() => undefined)
+        setSessionBackend.mutate(
+          {
+            sessionId: activeSessionId,
+            worktreeId: activeWorktreeId,
+            worktreePath: activeWorktreePath,
+            backend,
+          },
+          {
+            onSuccess: () => {
+              setSessionModel.mutate({
+                sessionId: activeSessionId,
+                worktreeId: activeWorktreeId,
+                worktreePath: activeWorktreePath,
+                model,
+              })
+            },
+          }
+        )
       }
       window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
@@ -101,6 +121,7 @@ export function useToolbarHandlers({
       activeWorktreeId,
       activeWorktreePath,
       queryClient,
+      setSessionBackend,
       setSessionModel,
     ]
   )

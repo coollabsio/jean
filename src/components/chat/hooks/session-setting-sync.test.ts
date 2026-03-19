@@ -25,8 +25,21 @@ describe('applySessionSettingToSession', () => {
 
   it('updates model', () => {
     expect(applySessionSettingToSession(baseSession, 'model', 'gpt-5.4')).toMatchObject({
-      backend: 'claude',
+      backend: 'codex',
       selected_model: 'gpt-5.4',
+    })
+  })
+
+  it('infers opencode backend from model changes', () => {
+    expect(
+      applySessionSettingToSession(
+        baseSession,
+        'model',
+        'opencode/gpt-5.3-codex'
+      )
+    ).toMatchObject({
+      backend: 'opencode',
+      selected_model: 'opencode/gpt-5.3-codex',
     })
   })
 

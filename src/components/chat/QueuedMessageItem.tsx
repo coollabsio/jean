@@ -17,10 +17,10 @@ import { SkillBadge } from '@/components/chat/SkillBadge'
 import { normalizePath } from '@/lib/path-utils'
 import type { QueuedMessage } from '@/types/chat'
 import {
-  MODEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
 } from '@/components/chat/ChatToolbar'
+import { getModelOptionLabel } from '@/components/chat/toolbar/toolbar-options'
 import {
   Tooltip,
   TooltipTrigger,
@@ -165,8 +165,7 @@ export const QueuedMessageItem = memo(function QueuedMessageItem({
           {/* Model badge */}
           <span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground">
             <Sparkles className="h-2.5 w-2.5" />
-            {MODEL_OPTIONS.find(o => o.value === message.model)?.label ??
-              message.model}
+            {getModelOptionLabel(message.model)}
           </span>
           {/* Mode badge */}
           <span

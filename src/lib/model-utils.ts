@@ -8,6 +8,7 @@
  */
 
 import { compareVersions } from './version-utils'
+import { isCodexModel, isOpenCodeModel } from '@/types/preferences'
 
 /** Minimum CLI version that supports Claude 4.6 adaptive thinking */
 const ADAPTIVE_THINKING_MIN_CLI_VERSION = '2.1.32'
@@ -16,8 +17,8 @@ const ADAPTIVE_THINKING_MIN_CLI_VERSION = '2.1.32'
  * Resolve which CLI backend to use based on the model string.
  */
 export function resolveBackend(model: string): 'claude' | 'codex' | 'opencode' {
-  if (model.startsWith('opencode/')) return 'opencode'
-  if (model.startsWith('codex') || model.includes('codex')) return 'codex'
+  if (isOpenCodeModel(model)) return 'opencode'
+  if (isCodexModel(model)) return 'codex'
   return 'claude'
 }
 

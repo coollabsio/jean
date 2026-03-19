@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -69,6 +69,7 @@ import { openExternal } from '@/lib/platform'
 import {
   EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  type ModelOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   getPrStatusDisplay,
@@ -93,7 +94,7 @@ interface MobileToolbarMenuProps {
   isCodex: boolean
   executionMode: ExecutionMode
   customCliProfiles: CustomCliProfile[]
-  filteredModelOptions: { value: string; label: string }[]
+  filteredModelOptions: ModelOption[]
 
   uncommittedAdded: number
   uncommittedRemoved: number
@@ -231,6 +232,18 @@ export function MobileToolbarMenu({
         )
       })
     : filteredModelOptions
+  const groupedModelOptions = useMemo(() => {
+    const groups: { backend: CliBackend; options: ModelOption[] }[] = []
+    for (const option of visibleModelOptions) {
+      const group = groups.find(entry => entry.backend === option.backend)
+      if (group) {
+        group.options.push(option)
+      } else {
+        groups.push({ backend: option.backend, options: [option] })
+      }
+    }
+    return groups
+  }, [visibleModelOptions])
 
   return (
     <>
@@ -780,7 +793,9 @@ export function MobileToolbarMenu({
                 </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                {providerLocked && customCliProfiles.length > 0 && (
+                {providerLocked &&
+                  selectedBackend === 'claude' &&
+                  customCliProfiles.length > 0 && (
                   <>
                     <DropdownMenuLabel className="text-xs text-muted-foreground">
                       Provider: {providerDisplayName}
@@ -792,10 +807,18 @@ export function MobileToolbarMenu({
                   value={selectedModel}
                   onValueChange={handleModelChange}
                 >
-                  {filteredModelOptions.map(option => (
-                    <DropdownMenuRadioItem key={option.value} value={option.value}>
-                      {option.label}
-                    </DropdownMenuRadioItem>
+                  {groupedModelOptions.map((group, index) => (
+                    <div key={group.backend}>
+                      {index > 0 && <DropdownMenuSeparator />}
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">
+                        {BACKEND_LABELS[group.backend]}
+                      </DropdownMenuLabel>
+                      {group.options.map(option => (
+                        <DropdownMenuRadioItem key={option.value} value={option.value}>
+                          {option.label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </div>
                   ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
@@ -972,27 +995,36 @@ export function MobileToolbarMenu({
                 autoFocus
               />
             </div>
-            {providerLocked && customCliProfiles.length > 0 && (
+            {providerLocked &&
+              selectedBackend === 'claude' &&
+              customCliProfiles.length > 0 && (
               <div className="px-2 pb-1 text-xs text-muted-foreground">
                 Provider: {providerDisplayName}
               </div>
             )}
-            {visibleModelOptions.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground',
-                  selectedModel === option.value && 'bg-accent text-accent-foreground'
-                )}
-                onClick={() => {
-                  handleModelChange(option.value)
-                  setModelSheetOpen(false)
-                }}
-              >
-                <span className="flex-1">{option.label}</span>
-                {selectedModel === option.value && <Check className="h-4 w-4" />}
-              </button>
+            {groupedModelOptions.map(group => (
+              <div key={group.backend} className="pb-2">
+                <div className="px-2 pb-1 text-xs text-muted-foreground">
+                  {BACKEND_LABELS[group.backend]}
+                </div>
+                {group.options.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground',
+                      selectedModel === option.value && 'bg-accent text-accent-foreground'
+                    )}
+                    onClick={() => {
+                      handleModelChange(option.value)
+                      setModelSheetOpen(false)
+                    }}
+                  >
+                    <span className="flex-1">{option.label}</span>
+                    {selectedModel === option.value && <Check className="h-4 w-4" />}
+                  </button>
+                ))}
+              </div>
             ))}
             {visibleModelOptions.length === 0 && (
               <div className="px-3 py-4 text-sm text-muted-foreground">

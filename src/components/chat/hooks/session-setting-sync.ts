@@ -1,4 +1,5 @@
 import type { Backend, ExecutionMode, Session, ThinkingLevel } from '@/types/chat'
+import { resolveBackend } from '@/lib/model-utils'
 
 export type SessionSettingKey =
   | 'backend'
@@ -21,6 +22,7 @@ export function applySessionSettingToSession(
     case 'model':
       return {
         ...session,
+        backend: resolveBackend(value) as Backend,
         selected_model: value,
       }
     case 'thinkingLevel':
