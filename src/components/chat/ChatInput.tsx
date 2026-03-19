@@ -4,6 +4,7 @@ import { invoke } from '@/lib/transport'
 import { generateId } from '@/lib/uuid'
 import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
+import { usePreferences } from '@/services/preferences'
 import { Kbd } from '@/components/ui/kbd'
 import { useChatStore } from '@/store/chat-store'
 import { getFilename, getExtension } from '@/lib/path-utils'
@@ -67,6 +68,7 @@ export const ChatInput = memo(function ChatInput({
   inputRef,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
+  const { data: preferences } = usePreferences()
 
   // PERFORMANCE: Use uncontrolled input pattern - track value in ref, not state
   // This avoids React re-renders on every keystroke
@@ -934,7 +936,7 @@ export const ChatInput = memo(function ChatInput({
     <div className="relative">
       <Textarea
         ref={inputRef}
-        spellCheck
+        spellCheck={preferences?.spellcheck_enabled ?? true}
         placeholder={
           isSending
             ? executionMode === 'yolo'
