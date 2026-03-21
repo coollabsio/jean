@@ -15,7 +15,11 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useWorktrees, useAppDataDir } from '@/services/projects'
+import {
+  useWorktrees,
+  useAppDataDir,
+  useSyncProjectWorktrees,
+} from '@/services/projects'
 import {
   useFetchWorktreesStatus,
   useGitStatus,
@@ -96,6 +100,9 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   // Project is only selected if it's the selected project AND no worktree is active
   const isSelected = selectedProjectId === project.id && !activeWorktreeId
   const showStatusBadges = !isMobile && (isExpanded || isSelected)
+
+  // Sync existing git worktrees when the user is interacting with this project
+  useSyncProjectWorktrees(project.id, isSelected || isExpanded)
 
   const handleClick = useCallback(() => {
     selectProject(project.id)

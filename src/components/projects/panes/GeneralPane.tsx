@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
+import { logger } from '@/lib/logger'
 import { cn } from '@/lib/utils'
 import {
   Command,
@@ -37,6 +38,7 @@ import {
   useAppDataDir,
   useSetProjectAvatar,
   useRemoveProjectAvatar,
+  syncProjectWorktrees,
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useLinearTeams, linearQueryKeys } from '@/services/linear'
@@ -200,6 +202,15 @@ export function GeneralPane({
     localWorktreesDir !== null &&
     localWorktreesDir !== (project?.worktrees_dir ?? '')
 
+  const syncProjectWorktreesAfterSave = useCallback(() => {
+    void syncProjectWorktrees(projectId).catch(error => {
+      logger.error('Failed to sync existing worktrees after settings update', {
+        error,
+        projectId,
+      })
+    })
+  }, [projectId])
+
   const handleSaveWorktreesDir = useCallback(() => {
     if (localWorktreesDir === null) return
     updateSettings.mutate(
@@ -207,16 +218,31 @@ export function GeneralPane({
         projectId,
         worktreesDir: localWorktreesDir.trim(),
       },
-      { onSuccess: () => setLocalWorktreesDir(null) }
+      {
+        onSuccess: () => {
+          setLocalWorktreesDir(null)
+          syncProjectWorktreesAfterSave()
+        },
+      }
     )
-  }, [localWorktreesDir, projectId, updateSettings])
+  }, [
+    localWorktreesDir,
+    projectId,
+    syncProjectWorktreesAfterSave,
+    updateSettings,
+  ])
 
   const handleResetWorktreesDir = useCallback(() => {
     updateSettings.mutate(
       { projectId, worktreesDir: '' },
-      { onSuccess: () => setLocalWorktreesDir(null) }
+      {
+        onSuccess: () => {
+          setLocalWorktreesDir(null)
+          syncProjectWorktreesAfterSave()
+        },
+      }
     )
-  }, [projectId, updateSettings])
+  }, [projectId, syncProjectWorktreesAfterSave, updateSettings])
 
   const displayedLinearApiKey =
     localLinearApiKey ?? project?.linear_api_key ?? ''

@@ -148,6 +148,51 @@ export function useWorktree(worktreeId: string | null) {
   })
 }
 
+/**
+ * Sync existing git worktrees for a project into Jean's persisted records.
+ */
+export async function syncProjectWorktrees(projectId: string): Promise<void> {
+  if (!isTauri()) {
+    throw new Error('Not in Tauri context')
+  }
+
+  logger.debug('Syncing project worktrees', { projectId })
+  await invoke('sync_project_worktrees', { projectId })
+  logger.info('Project worktrees synced', { projectId })
+}
+
+/**
+ * Hook to opportunistically sync existing git worktrees while the user is
+ * interacting with a project.
+ */
+export function useSyncProjectWorktrees(
+  projectId: string | null,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: ['worktrees-sync', projectId],
+    queryFn: async () => {
+      if (!projectId) {
+        return null
+      }
+
+      try {
+        await syncProjectWorktrees(projectId)
+      } catch (error) {
+        logger.error('Failed to auto-sync project worktrees', {
+          error,
+          projectId,
+        })
+      }
+
+      return { syncedAt: Date.now() }
+    },
+    enabled: !!projectId && enabled && isTauri(),
+    staleTime: 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 5,
+  })
+}
+
 // ============================================================================
 // Project Mutations
 // ============================================================================
