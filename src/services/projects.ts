@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger'
 import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
 import type {
   Project,
+  SyncProjectWorktreesResult,
   Worktree,
   DetectPrResponse,
   WorktreeCreatingEvent,
@@ -151,14 +152,23 @@ export function useWorktree(worktreeId: string | null) {
 /**
  * Sync existing git worktrees for a project into Jean's persisted records.
  */
-export async function syncProjectWorktrees(projectId: string): Promise<void> {
+export async function syncProjectWorktrees(
+  projectId: string
+): Promise<SyncProjectWorktreesResult> {
   if (!isTauri()) {
     throw new Error('Not in Tauri context')
   }
 
   logger.debug('Syncing project worktrees', { projectId })
-  await invoke('sync_project_worktrees', { projectId })
-  logger.info('Project worktrees synced', { projectId })
+  const result = await invoke<SyncProjectWorktreesResult>(
+    'sync_project_worktrees',
+    { projectId }
+  )
+  logger.info('Project worktrees synced', {
+    projectId,
+    importedCount: result.importedCount,
+  })
+  return result
 }
 
 /**
@@ -190,6 +200,63 @@ export function useSyncProjectWorktrees(
     enabled: !!projectId && enabled && isTauri(),
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 5,
+  })
+}
+
+/**
+ * Hook to manually refresh/import existing git worktrees for a project.
+ */
+export function useRefreshProjectWorktrees(projectId: string) {
+  return useMutation<
+    SyncProjectWorktreesResult,
+    unknown,
+    undefined,
+    { toastId: string | number }
+  >({
+    mutationFn: async () => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      return syncProjectWorktrees(projectId)
+    },
+    onMutate: () => ({
+      toastId: toast.loading('Refreshing project worktrees...'),
+    }),
+    onSuccess: (result, _variables, context) => {
+      logger.info('Project worktrees refreshed manually', {
+        projectId,
+        importedCount: result.importedCount,
+      })
+
+      const worktreeLabel =
+        result.importedCount === 1 ? 'worktree' : 'worktrees'
+      const message =
+        result.importedCount > 0
+          ? `Imported ${result.importedCount} existing ${worktreeLabel}`
+          : 'No new worktrees found'
+
+      toast.success(message, { id: context?.toastId })
+    },
+    onError: (error, _variables, context) => {
+      const message =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : 'Unknown error occurred'
+
+      logger.error('Failed to refresh project worktrees', {
+        error,
+        message,
+        projectId,
+      })
+
+      toast.error('Failed to refresh project worktrees', {
+        id: context?.toastId,
+        description: message,
+      })
+    },
   })
 }
 

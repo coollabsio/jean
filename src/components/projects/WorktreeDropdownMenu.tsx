@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   Play,
   Plus,
+  RefreshCw,
   Settings,
   ShieldAlert,
   Sparkles,
@@ -51,6 +52,7 @@ import {
   useRepositoryAdvisories,
   useWorkflowRuns,
 } from '@/services/github'
+import { useRefreshProjectWorktrees } from '@/services/projects'
 import { isNativeApp } from '@/lib/environment'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
@@ -132,6 +134,7 @@ export function WorktreeDropdownMenu({
   const workflowRunCount = workflowRuns?.runs.length ?? 0
   const failedWorkflowCount = workflowRuns?.failedCount ?? 0
   const isMobile = useIsMobile()
+  const refreshProjectWorktrees = useRefreshProjectWorktrees(projectId)
   const hasDiff = uncommittedAdded > 0 || uncommittedRemoved > 0
   const hasBranchDiff = branchDiffAdded > 0 || branchDiffRemoved > 0
   const hasGitHubStatusItems =
@@ -229,6 +232,19 @@ export function WorktreeDropdownMenu({
           >
             <Settings className="mr-2 h-4 w-4" />
             Project Settings
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => refreshProjectWorktrees.mutate(undefined)}
+            disabled={refreshProjectWorktrees.isPending}
+          >
+            <RefreshCw
+              className={
+                refreshProjectWorktrees.isPending
+                  ? 'mr-2 h-4 w-4 animate-spin'
+                  : 'mr-2 h-4 w-4'
+              }
+            />
+            Refresh Project Worktrees
           </DropdownMenuItem>
 
           {hasMessages && (

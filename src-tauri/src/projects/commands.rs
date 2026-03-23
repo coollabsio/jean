@@ -132,7 +132,9 @@ fn find_importable_worktree_path(
 
     importable_paths
         .iter()
-        .find(|candidate| normalize_worktree_path(Path::new(candidate)) == normalized_requested_path)
+        .find(|candidate| {
+            normalize_worktree_path(Path::new(candidate)) == normalized_requested_path
+        })
         .cloned()
 }
 
@@ -1348,8 +1350,8 @@ pub async fn create_worktree(
             // Check for jean.json setup script upfront so we can include it in the
             // initial worktree record. This lets the frontend know a setup script
             // will run (setup_script is set, but setup_output is still None).
-            let pending_setup_script = git::read_jean_config(&project_path)
-                .and_then(|config| config.scripts.setup);
+            let pending_setup_script =
+                git::read_jean_config(&project_path).and_then(|config| config.scripts.setup);
 
             // Save to storage and emit worktree:created BEFORE running setup script
             // so the UI can open immediately and the user can start typing.
@@ -3130,9 +3132,19 @@ pub async fn import_worktree(
     Ok(worktree)
 }
 
+/// Result payload for syncing existing Git worktrees into Jean records.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProjectWorktreesResult {
+    pub imported_count: usize,
+}
+
 /// Import any existing git worktrees for a project that Jean is not yet tracking.
 #[tauri::command]
-pub async fn sync_project_worktrees(app: AppHandle, project_id: String) -> Result<(), String> {
+pub async fn sync_project_worktrees(
+    app: AppHandle,
+    project_id: String,
+) -> Result<SyncProjectWorktreesResult, String> {
     log::trace!("Syncing existing worktrees for project: {project_id}");
 
     let mut data = load_projects_data(&app)?;
@@ -3141,10 +3153,11 @@ pub async fn sync_project_worktrees(app: AppHandle, project_id: String) -> Resul
         .ok_or_else(|| format!("Project not found: {project_id}"))?
         .clone();
     let imported_worktrees = sync_importable_worktrees(&mut data, &project)?;
+    let imported_count = imported_worktrees.len();
 
-    if imported_worktrees.is_empty() {
+    if imported_count == 0 {
         log::trace!("No missing worktrees found for project: {project_id}");
-        return Ok(());
+        return Ok(SyncProjectWorktreesResult { imported_count });
     }
 
     save_projects_data(&app, &data)?;
@@ -3162,9 +3175,9 @@ pub async fn sync_project_worktrees(app: AppHandle, project_id: String) -> Resul
 
     log::trace!(
         "Imported {} existing worktree(s) for project: {project_id}",
-        imported_worktrees.len()
+        imported_count
     );
-    Ok(())
+    Ok(SyncProjectWorktreesResult { imported_count })
 }
 
 /// Permanently delete an archived worktree (removes git worktree/branch from disk)
@@ -3537,20 +3550,16 @@ pub async fn open_worktree_in_terminal(
                 } else if crate::platform::executable_exists("warp") {
                     "warp".to_string()
                 } else {
-                    return Err(format!(
-                        "Warp not found. Checked: {known_path} and PATH"
-                    ));
+                    return Err(format!("Warp not found. Checked: {known_path} and PATH"));
                 };
                 log::trace!("Using Warp at: {warp_exe}");
                 std::process::Command::new(&warp_exe)
                     .current_dir(&worktree_path)
                     .spawn()
             }
-            "windows-terminal" => {
-                std::process::Command::new("wt")
-                    .args(["-d", &worktree_path])
-                    .spawn()
-            }
+            "windows-terminal" => std::process::Command::new("wt")
+                .args(["-d", &worktree_path])
+                .spawn(),
             _ => {
                 // Default: PowerShell
                 std::process::Command::new("powershell")
@@ -5191,7 +5200,11 @@ fn truncate_diff_at_file_boundaries(diff: &str, max_chars: usize) -> String {
 /// Get git diff between current branch and target branch
 fn get_branch_diff(repo_path: &str, target_branch: &str, head_ref: &str) -> Result<String, String> {
     let output = silent_command("git")
-        .args(["diff", "-U10", &format!("origin/{target_branch}...{head_ref}")])
+        .args([
+            "diff",
+            "-U10",
+            &format!("origin/{target_branch}...{head_ref}"),
+        ])
         .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to get git diff: {e}"))?;
@@ -5207,9 +5220,17 @@ fn get_branch_diff(repo_path: &str, target_branch: &str, head_ref: &str) -> Resu
 }
 
 /// Get commit messages between current branch and target branch
-fn get_branch_commits(repo_path: &str, target_branch: &str, head_ref: &str) -> Result<String, String> {
+fn get_branch_commits(
+    repo_path: &str,
+    target_branch: &str,
+    head_ref: &str,
+) -> Result<String, String> {
     let output = silent_command("git")
-        .args(["log", "--oneline", &format!("origin/{target_branch}..{head_ref}")])
+        .args([
+            "log",
+            "--oneline",
+            &format!("origin/{target_branch}..{head_ref}"),
+        ])
         .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to get git log: {e}"))?;
@@ -5223,7 +5244,11 @@ fn get_branch_commits(repo_path: &str, target_branch: &str, head_ref: &str) -> R
 }
 
 /// Count commits between current branch and target branch
-fn count_branch_commits(repo_path: &str, target_branch: &str, head_ref: &str) -> Result<u32, String> {
+fn count_branch_commits(
+    repo_path: &str,
+    target_branch: &str,
+    head_ref: &str,
+) -> Result<u32, String> {
     let output = silent_command("git")
         .args([
             "rev-list",
@@ -6178,8 +6203,6 @@ fn get_recent_commits(repo_path: &str, count: u32) -> Result<String, String> {
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
-
-
 
 /// Stage all changes
 fn stage_all_changes(repo_path: &str) -> Result<(), String> {
@@ -8703,7 +8726,11 @@ fn resolve_command_interpolations(content: &str, working_dir: &str) -> String {
 
 /// Get home directory with Windows USERPROFILE fallback
 fn get_home_dir() -> Option<std::path::PathBuf> {
-    dirs::home_dir().or_else(|| std::env::var("USERPROFILE").ok().map(std::path::PathBuf::from))
+    dirs::home_dir().or_else(|| {
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(std::path::PathBuf::from)
+    })
 }
 
 /// Collect skills from a directory into a map (later inserts override earlier ones)
@@ -8832,9 +8859,7 @@ fn collect_commands_from_dir(
 /// List Claude CLI skills from ~/.claude/skills/ and optionally <worktree>/.claude/skills/
 /// Skills are directories containing a SKILL.md file
 #[tauri::command]
-pub async fn list_claude_skills(
-    worktree_path: Option<String>,
-) -> Result<Vec<ClaudeSkill>, String> {
+pub async fn list_claude_skills(worktree_path: Option<String>) -> Result<Vec<ClaudeSkill>, String> {
     log::trace!("Listing Claude CLI skills (worktree: {worktree_path:?})");
 
     let mut skills_map = std::collections::HashMap::new();
@@ -9062,7 +9087,9 @@ pub struct RevertCommitResponse {
 }
 
 #[tauri::command]
-pub async fn revert_last_local_commit(worktree_path: String) -> Result<RevertCommitResponse, String> {
+pub async fn revert_last_local_commit(
+    worktree_path: String,
+) -> Result<RevertCommitResponse, String> {
     // Get the current HEAD commit hash and message before reverting
     let log_output = silent_command("git")
         .args(["log", "-1", "--format=%H%n%s"])
@@ -9131,15 +9158,13 @@ mod tests {
         run_git(&["init"], &repo_path);
         run_git(&["config", "user.name", "Jean Test"], &repo_path);
         run_git(&["config", "user.email", "jean@example.com"], &repo_path);
-        std::fs::write(repo_path.join("README.md"), "hello")
-            .expect("README should be written");
+        std::fs::write(repo_path.join("README.md"), "hello").expect("README should be written");
         run_git(&["add", "README.md"], &repo_path);
         run_git(&["commit", "-m", "Initial commit"], &repo_path);
         run_git(&["branch", "-M", "main"], &repo_path);
 
         let worktrees_root = temp_dir.path().join("worktrees");
-        std::fs::create_dir_all(&worktrees_root)
-            .expect("worktrees directory should be created");
+        std::fs::create_dir_all(&worktrees_root).expect("worktrees directory should be created");
 
         let mut worktree_paths = Vec::with_capacity(worktree_names.len());
         for worktree_name in worktree_names {
@@ -9150,7 +9175,14 @@ mod tests {
                 .to_string();
 
             run_git(
-                &["worktree", "add", "-b", worktree_name, &worktree_path_str, "main"],
+                &[
+                    "worktree",
+                    "add",
+                    "-b",
+                    worktree_name,
+                    &worktree_path_str,
+                    "main",
+                ],
                 &repo_path,
             );
             worktree_paths.push(worktree_path_str);
@@ -9300,6 +9332,17 @@ Body
 
     mod sync_importable_worktrees {
         use super::*;
+        #[test]
+        fn should_serialize_sync_result_with_camel_case_count() {
+            let value = serde_json::to_value(SyncProjectWorktreesResult { imported_count: 2 })
+                .expect("sync result should serialize");
+
+            assert_eq!(
+                value.get("importedCount").and_then(|count| count.as_u64()),
+                Some(2)
+            );
+            assert!(value.get("imported_count").is_none());
+        }
 
         #[test]
         fn should_exclude_project_root_and_already_tracked_paths() {
@@ -9318,20 +9361,23 @@ Body
 
             assert_eq!(importable_paths, vec![worktree_paths[1].clone()]);
             assert!(!importable_paths.iter().any(|path| path == &project.path));
-            assert!(!importable_paths.iter().any(|path| path == &tracked_worktree.path));
+            assert!(!importable_paths
+                .iter()
+                .any(|path| path == &tracked_worktree.path));
         }
 
         #[test]
         fn should_return_none_for_unrelated_worktree_path() {
-            let (_temp_dir, project, _worktree_paths) =
-                setup_repo_with_worktrees(&["feature-one"]);
+            let (_temp_dir, project, _worktree_paths) = setup_repo_with_worktrees(&["feature-one"]);
             let (_other_temp_dir, _other_project, other_worktree_paths) =
                 setup_repo_with_worktrees(&["feature-two"]);
             let importable_paths =
                 collect_importable_worktree_paths(&project, &HashSet::new()).unwrap();
 
-            let unrelated_path =
-                find_importable_worktree_path(Path::new(&other_worktree_paths[0]), &importable_paths);
+            let unrelated_path = find_importable_worktree_path(
+                Path::new(&other_worktree_paths[0]),
+                &importable_paths,
+            );
 
             assert!(unrelated_path.is_none());
         }
@@ -9359,8 +9405,7 @@ Body
 
         #[test]
         fn should_be_no_op_when_all_importable_worktrees_are_already_tracked() {
-            let (_temp_dir, project, _worktree_paths) =
-                setup_repo_with_worktrees(&["feature-one"]);
+            let (_temp_dir, project, _worktree_paths) = setup_repo_with_worktrees(&["feature-one"]);
             let mut data = ProjectsData {
                 projects: vec![project.clone()],
                 worktrees: Vec::new(),

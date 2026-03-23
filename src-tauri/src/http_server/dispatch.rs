@@ -155,8 +155,8 @@ pub async fn dispatch_command(
         }
         "sync_project_worktrees" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
-            crate::projects::sync_project_worktrees(app.clone(), project_id).await?;
-            to_value(())
+            let result = crate::projects::sync_project_worktrees(app.clone(), project_id).await?;
+            to_value(result)
         }
         "archive_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
@@ -317,8 +317,7 @@ pub async fn dispatch_command(
         }
         "revert_last_local_commit" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let result =
-                crate::projects::revert_last_local_commit(worktree_path).await?;
+            let result = crate::projects::revert_last_local_commit(worktree_path).await?;
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }

@@ -136,6 +136,11 @@ export interface Worktree {
   last_opened_at?: number
 }
 
+/** Result payload for syncing Git worktrees into Jean project records */
+export interface SyncProjectWorktreesResult {
+  importedCount: number
+}
+
 // =============================================================================
 // Worktree Creation Events (from Rust backend)
 // =============================================================================

@@ -97,7 +97,7 @@ export const defaultResponses: Record<string, unknown> = {
   trigger_immediate_git_poll: null,
   trigger_immediate_remote_poll: null,
   fetch_worktrees_status: null,
-  sync_project_worktrees: null,
+  sync_project_worktrees: { importedCount: 0 },
 
   // MCP
   get_mcp_servers: [],
