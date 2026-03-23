@@ -2,9 +2,9 @@ use ignore::WalkBuilder;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::mpsc;
 use std::sync::Mutex;
@@ -35,7 +35,7 @@ use super::linear_issues::{
 use super::names::generate_unique_workspace_name;
 use super::storage::{get_project_worktrees_dir, load_projects_data, save_projects_data};
 use super::types::{
-    JeanConfig, MergeType, Project, SessionType, Worktree, WorktreeArchivedEvent,
+    JeanConfig, MergeType, Project, ProjectsData, SessionType, Worktree, WorktreeArchivedEvent,
     WorktreeBranchExistsEvent, WorktreeCreateErrorEvent, WorktreeCreatedEvent,
     WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent, WorktreeDeletingEvent,
     WorktreePathExistsEvent, WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent,
@@ -78,6 +78,147 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn normalize_worktree_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn tracked_worktree_paths(data: &ProjectsData, project_id: &str) -> HashSet<PathBuf> {
+    data.worktrees_for_project(project_id)
+        .into_iter()
+        .map(|worktree| normalize_worktree_path(Path::new(&worktree.path)))
+        .collect()
+}
+
+fn filter_importable_worktree_paths(
+    project_root: &Path,
+    tracked_paths: &HashSet<PathBuf>,
+    git_worktree_paths: Vec<String>,
+) -> Vec<String> {
+    git_worktree_paths
+        .into_iter()
+        .filter(|path| {
+            let worktree_path = Path::new(path);
+            if !worktree_path.exists() || !worktree_path.is_dir() {
+                return false;
+            }
+
+            let normalized_path = normalize_worktree_path(worktree_path);
+            normalized_path != project_root && !tracked_paths.contains(&normalized_path)
+        })
+        .collect()
+}
+
+fn collect_importable_worktree_paths(
+    project: &Project,
+    tracked_paths: &HashSet<PathBuf>,
+) -> Result<Vec<String>, String> {
+    let git_worktree_paths = git::list_worktrees(&project.path)?;
+    let project_root = normalize_worktree_path(Path::new(&project.path));
+
+    Ok(filter_importable_worktree_paths(
+        &project_root,
+        tracked_paths,
+        git_worktree_paths,
+    ))
+}
+
+fn find_importable_worktree_path(
+    requested_path: &Path,
+    importable_paths: &[String],
+) -> Option<String> {
+    let normalized_requested_path = normalize_worktree_path(requested_path);
+
+    importable_paths
+        .iter()
+        .find(|candidate| normalize_worktree_path(Path::new(candidate)) == normalized_requested_path)
+        .cloned()
+}
+
+fn persist_imported_worktree_record(
+    data: &mut ProjectsData,
+    project: &Project,
+    worktree_path: &str,
+) -> Result<Worktree, String> {
+    let normalized_worktree_path = normalize_worktree_path(Path::new(worktree_path));
+    if data.worktrees.iter().any(|existing| {
+        normalize_worktree_path(Path::new(&existing.path)) == normalized_worktree_path
+    }) {
+        return Err(format!(
+            "A worktree with this path is already tracked: {worktree_path}"
+        ));
+    }
+
+    let branch = git::get_current_branch(worktree_path)?;
+    let name = Path::new(worktree_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("Invalid worktree path: {worktree_path}"))?
+        .to_string();
+    let max_order = data
+        .worktrees
+        .iter()
+        .filter(|worktree| worktree.project_id == project.id)
+        .map(|worktree| worktree.order)
+        .max()
+        .unwrap_or(0);
+
+    let worktree = Worktree {
+        id: Uuid::new_v4().to_string(),
+        project_id: project.id.clone(),
+        name,
+        path: worktree_path.to_string(),
+        branch,
+        created_at: now(),
+        setup_output: None,
+        setup_script: None,
+        setup_success: None,
+        session_type: SessionType::Worktree,
+        pr_number: None,
+        pr_url: None,
+        issue_number: None,
+        linear_issue_identifier: None,
+        cached_pr_status: None,
+        cached_check_status: None,
+        cached_behind_count: None,
+        cached_ahead_count: None,
+        cached_status_at: None,
+        cached_uncommitted_added: None,
+        cached_uncommitted_removed: None,
+        cached_branch_diff_added: None,
+        cached_branch_diff_removed: None,
+        cached_base_branch_ahead_count: None,
+        cached_base_branch_behind_count: None,
+        cached_worktree_ahead_count: None,
+        cached_unpushed_count: None,
+        order: max_order + 1,
+        archived_at: None,
+        label: None,
+        last_opened_at: None,
+    };
+
+    data.add_worktree(worktree.clone());
+    Ok(worktree)
+}
+
+fn sync_importable_worktrees(
+    data: &mut ProjectsData,
+    project: &Project,
+) -> Result<Vec<Worktree>, String> {
+    let tracked_paths = tracked_worktree_paths(data, &project.id);
+    let importable_paths = collect_importable_worktree_paths(project, &tracked_paths)?;
+    let mut imported_worktrees = Vec::with_capacity(importable_paths.len());
+
+    for worktree_path in importable_paths {
+        imported_worktrees.push(persist_imported_worktree_record(
+            data,
+            project,
+            &worktree_path,
+        )?);
+    }
+
+    Ok(imported_worktrees)
 }
 
 pub(crate) fn allow_project_in_asset_scope(app: &AppHandle, project_path: &str) {
@@ -2934,7 +3075,7 @@ pub async fn list_archived_worktrees(app: AppHandle) -> Result<Vec<Worktree>, St
 /// Import an existing git worktree directory into Jean
 ///
 /// Used when a directory exists at the worktree path but isn't tracked by Jean.
-/// Validates that the path is a valid git worktree and extracts the branch name.
+/// Validates that the path belongs to the selected project's git worktree list.
 #[tauri::command]
 pub async fn import_worktree(
     app: AppHandle,
@@ -2955,82 +3096,27 @@ pub async fn import_worktree(
         return Err(format!("Path is not a directory: {path}"));
     }
 
-    // Check if this is a git directory (has .git file or directory)
-    let git_indicator = worktree_path.join(".git");
-    if !git_indicator.exists() {
-        return Err(format!("Path is not a git worktree or repository: {path}"));
-    }
-
-    // Get the current branch name from git
-    let branch = git::get_current_branch(&path)?;
-
-    // Extract the worktree name from the path (last component)
-    let name = worktree_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| format!("Invalid path: {path}"))?
-        .to_string();
-
     let mut data = load_projects_data(&app)?;
-
-    // Verify project exists
-    let _ = data
+    let project = data
         .find_project(&project_id)
-        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+        .ok_or_else(|| format!("Project not found: {project_id}"))?
+        .clone();
 
-    // Check if a worktree with this path already exists
-    if data.worktrees.iter().any(|w| w.path == path) {
+    let normalized_worktree_path = normalize_worktree_path(worktree_path);
+    let tracked_paths = tracked_worktree_paths(&data, &project_id);
+    if tracked_paths.contains(&normalized_worktree_path) {
         return Err(format!(
             "A worktree with this path is already tracked: {path}"
         ));
     }
+    let importable_paths = collect_importable_worktree_paths(&project, &tracked_paths)?;
+    let importable_path = find_importable_worktree_path(worktree_path, &importable_paths)
+        .ok_or_else(|| format!("Path is not an existing git worktree for project: {path}"))?;
 
-    // Get max order for worktrees in this project
-    let max_order = data
-        .worktrees
-        .iter()
-        .filter(|w| w.project_id == project_id)
-        .map(|w| w.order)
-        .max()
-        .unwrap_or(0);
-
-    // Create the worktree record
-    let worktree = Worktree {
-        id: Uuid::new_v4().to_string(),
-        project_id: project_id.clone(),
-        name,
-        path: path.clone(),
-        branch,
-        created_at: now(),
-        setup_output: None,
-        setup_script: None,
-        setup_success: None,
-        session_type: SessionType::Worktree,
-        pr_number: None,
-        pr_url: None,
-        issue_number: None,
-        linear_issue_identifier: None,
-        cached_pr_status: None,
-        cached_check_status: None,
-        cached_behind_count: None,
-        cached_ahead_count: None,
-        cached_status_at: None,
-        cached_uncommitted_added: None,
-        cached_uncommitted_removed: None,
-        cached_branch_diff_added: None,
-        cached_branch_diff_removed: None,
-        cached_base_branch_ahead_count: None,
-        cached_base_branch_behind_count: None,
-        cached_worktree_ahead_count: None,
-        cached_unpushed_count: None,
-        order: max_order + 1,
-        archived_at: None,
-        label: None,
-        last_opened_at: None,
-    };
-
-    data.add_worktree(worktree.clone());
+    let worktree = persist_imported_worktree_record(&mut data, &project, &importable_path)?;
     save_projects_data(&app, &data)?;
+    allow_project_in_asset_scope(&app, &project.path);
+    allow_project_in_asset_scope(&app, &worktree.path);
 
     // Emit created event
     let event = WorktreeCreatedEvent {
@@ -3042,6 +3128,43 @@ pub async fn import_worktree(
 
     log::trace!("Successfully imported worktree: {}", worktree.id);
     Ok(worktree)
+}
+
+/// Import any existing git worktrees for a project that Jean is not yet tracking.
+#[tauri::command]
+pub async fn sync_project_worktrees(app: AppHandle, project_id: String) -> Result<(), String> {
+    log::trace!("Syncing existing worktrees for project: {project_id}");
+
+    let mut data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?
+        .clone();
+    let imported_worktrees = sync_importable_worktrees(&mut data, &project)?;
+
+    if imported_worktrees.is_empty() {
+        log::trace!("No missing worktrees found for project: {project_id}");
+        return Ok(());
+    }
+
+    save_projects_data(&app, &data)?;
+    allow_project_in_asset_scope(&app, &project.path);
+    for worktree in &imported_worktrees {
+        allow_project_in_asset_scope(&app, &worktree.path);
+    }
+
+    if let Err(error) = app.emit_all(
+        "worktrees:changed",
+        &serde_json::json!({ "project_id": project.id.clone() }),
+    ) {
+        log::error!("Failed to emit worktrees:changed event: {error}");
+    }
+
+    log::trace!(
+        "Imported {} existing worktree(s) for project: {project_id}",
+        imported_worktrees.len()
+    );
+    Ok(())
 }
 
 /// Permanently delete an archived worktree (removes git worktree/branch from disk)
@@ -9023,6 +9146,83 @@ pub async fn revert_last_local_commit(worktree_path: String) -> Result<RevertCom
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn run_git(args: &[&str], cwd: &Path) {
+        let output = silent_command("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap_or_else(|error| panic!("Failed to run git {:?}: {error}", args));
+
+        assert!(
+            output.status.success(),
+            "git {:?} failed\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn setup_repo_with_worktrees(worktree_names: &[&str]) -> (TempDir, Project, Vec<String>) {
+        let temp_dir = TempDir::new().expect("temporary directory should be created");
+        let repo_path = temp_dir.path().join("repo");
+        std::fs::create_dir_all(&repo_path).expect("repo directory should be created");
+
+        run_git(&["init"], &repo_path);
+        run_git(&["config", "user.name", "Jean Test"], &repo_path);
+        run_git(&["config", "user.email", "jean@example.com"], &repo_path);
+        std::fs::write(repo_path.join("README.md"), "hello")
+            .expect("README should be written");
+        run_git(&["add", "README.md"], &repo_path);
+        run_git(&["commit", "-m", "Initial commit"], &repo_path);
+        run_git(&["branch", "-M", "main"], &repo_path);
+
+        let worktrees_root = temp_dir.path().join("worktrees");
+        std::fs::create_dir_all(&worktrees_root)
+            .expect("worktrees directory should be created");
+
+        let mut worktree_paths = Vec::with_capacity(worktree_names.len());
+        for worktree_name in worktree_names {
+            let worktree_path = worktrees_root.join(worktree_name);
+            let worktree_path_str = worktree_path
+                .to_str()
+                .expect("worktree path should be valid UTF-8")
+                .to_string();
+
+            run_git(
+                &["worktree", "add", "-b", worktree_name, &worktree_path_str, "main"],
+                &repo_path,
+            );
+            worktree_paths.push(worktree_path_str);
+        }
+
+        let project = Project {
+            id: "project-1".to_string(),
+            name: "repo".to_string(),
+            path: repo_path
+                .to_str()
+                .expect("repo path should be valid UTF-8")
+                .to_string(),
+            default_branch: "main".to_string(),
+            added_at: 0,
+            order: 0,
+            parent_id: None,
+            is_folder: false,
+            avatar_path: None,
+            enabled_mcp_servers: None,
+            known_mcp_servers: Vec::new(),
+            custom_system_prompt: None,
+            default_provider: None,
+            default_backend: None,
+            worktrees_dir: None,
+            linear_api_key: None,
+            linear_team_id: None,
+            linked_project_ids: Vec::new(),
+        };
+
+        (temp_dir, project, worktree_paths)
+    }
 
     #[test]
     fn test_parse_command_content_with_allowed_tools_list() {
@@ -9137,5 +9337,82 @@ Body
 
         let result = extract_structured_output(output);
         assert!(result.is_ok());
+    }
+
+    mod sync_importable_worktrees {
+        use super::*;
+
+        #[test]
+        fn should_exclude_project_root_and_already_tracked_paths() {
+            let (_temp_dir, project, worktree_paths) =
+                setup_repo_with_worktrees(&["feature-one", "feature-two"]);
+            let mut data = ProjectsData {
+                projects: vec![project.clone()],
+                worktrees: Vec::new(),
+            };
+
+            let tracked_worktree =
+                persist_imported_worktree_record(&mut data, &project, &worktree_paths[0]).unwrap();
+            let tracked_paths = tracked_worktree_paths(&data, &project.id);
+            let importable_paths =
+                collect_importable_worktree_paths(&project, &tracked_paths).unwrap();
+
+            assert_eq!(importable_paths, vec![worktree_paths[1].clone()]);
+            assert!(!importable_paths.iter().any(|path| path == &project.path));
+            assert!(!importable_paths.iter().any(|path| path == &tracked_worktree.path));
+        }
+
+        #[test]
+        fn should_return_none_for_unrelated_worktree_path() {
+            let (_temp_dir, project, _worktree_paths) =
+                setup_repo_with_worktrees(&["feature-one"]);
+            let (_other_temp_dir, _other_project, other_worktree_paths) =
+                setup_repo_with_worktrees(&["feature-two"]);
+            let importable_paths =
+                collect_importable_worktree_paths(&project, &HashSet::new()).unwrap();
+
+            let unrelated_path =
+                find_importable_worktree_path(Path::new(&other_worktree_paths[0]), &importable_paths);
+
+            assert!(unrelated_path.is_none());
+        }
+
+        #[test]
+        fn should_import_multiple_missing_worktrees() {
+            let (_temp_dir, project, worktree_paths) =
+                setup_repo_with_worktrees(&["feature-one", "feature-two"]);
+            let mut data = ProjectsData {
+                projects: vec![project.clone()],
+                worktrees: Vec::new(),
+            };
+
+            let imported_worktrees = sync_importable_worktrees(&mut data, &project).unwrap();
+            let imported_paths: std::collections::HashSet<&str> = imported_worktrees
+                .iter()
+                .map(|worktree| worktree.path.as_str())
+                .collect();
+
+            assert_eq!(imported_worktrees.len(), 2);
+            assert_eq!(data.worktrees.len(), 2);
+            assert!(imported_paths.contains(worktree_paths[0].as_str()));
+            assert!(imported_paths.contains(worktree_paths[1].as_str()));
+        }
+
+        #[test]
+        fn should_be_no_op_when_all_importable_worktrees_are_already_tracked() {
+            let (_temp_dir, project, _worktree_paths) =
+                setup_repo_with_worktrees(&["feature-one"]);
+            let mut data = ProjectsData {
+                projects: vec![project.clone()],
+                worktrees: Vec::new(),
+            };
+
+            let first_import = sync_importable_worktrees(&mut data, &project).unwrap();
+            let second_import = sync_importable_worktrees(&mut data, &project).unwrap();
+
+            assert_eq!(first_import.len(), 1);
+            assert!(second_import.is_empty());
+            assert_eq!(data.worktrees.len(), 1);
+        }
     }
 }

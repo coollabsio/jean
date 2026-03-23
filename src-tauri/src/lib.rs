@@ -2676,6 +2676,7 @@ pub fn run() {
             projects::reorder_projects,
             projects::reorder_worktrees,
             projects::fetch_worktrees_status,
+            projects::sync_project_worktrees,
             // Claude CLI skills & commands
             projects::list_claude_skills,
             projects::list_claude_commands,

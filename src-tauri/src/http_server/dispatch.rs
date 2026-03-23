@@ -153,6 +153,11 @@ pub async fn dispatch_command(
             crate::projects::fetch_worktrees_status(app.clone(), project_id).await?;
             to_value(())
         }
+        "sync_project_worktrees" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::sync_project_worktrees(app.clone(), project_id).await?;
+            to_value(())
+        }
         "archive_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::archive_worktree(app.clone(), worktree_id).await?;
