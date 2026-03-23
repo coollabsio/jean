@@ -19,6 +19,12 @@ export type CliUpdateModalType = 'claude' | 'gh' | 'codex' | 'opencode' | null
 
 export type CliLoginModalType = 'claude' | 'gh' | 'codex' | 'opencode' | null
 
+export interface MinimizedCliUpdate {
+  type: 'claude' | 'gh' | 'codex' | 'opencode'
+  mode: 'reinstall' | 'login'
+  terminalId?: string
+}
+
 interface UIState {
   leftSidebarVisible: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
@@ -79,6 +85,8 @@ interface UIState {
   featureTourOpen: boolean
   /** Whether UI state has been restored from persisted storage */
   uiStateInitialized: boolean
+  /** Minimized CLI update running in background — shown as indicator in title bar */
+  minimizedCliUpdate: MinimizedCliUpdate | null
   /** Pending app update that user skipped — shown as indicator in title bar */
   pendingUpdateVersion: string | null
   /** When non-null, shows the update available modal */
@@ -151,6 +159,8 @@ interface UIState {
   setPlanDialogOpen: (open: boolean) => void
   setFeatureTourOpen: (open: boolean) => void
   setUIStateInitialized: (initialized: boolean) => void
+  minimizeCliUpdate: (info: MinimizedCliUpdate) => void
+  clearMinimizedCliUpdate: () => void
   setPendingUpdateVersion: (version: string | null) => void
   setUpdateModalVersion: (version: string | null) => void
   githubDashboardOpen: boolean
@@ -213,6 +223,7 @@ export const useUIStore = create<UIState>()(
       planDialogOpen: false,
       featureTourOpen: false,
       uiStateInitialized: false,
+      minimizedCliUpdate: null,
       pendingUpdateVersion: null,
       updateModalVersion: null,
       githubDashboardOpen: false,
@@ -637,6 +648,19 @@ export const useUIStore = create<UIState>()(
           { uiStateInitialized: initialized },
           undefined,
           'setUIStateInitialized'
+        ),
+
+      minimizeCliUpdate: (info: MinimizedCliUpdate) =>
+        set({ minimizedCliUpdate: info }, undefined, 'minimizeCliUpdate'),
+
+      clearMinimizedCliUpdate: () =>
+        set(
+          state => {
+            if (!state.minimizedCliUpdate) return state
+            return { minimizedCliUpdate: null }
+          },
+          undefined,
+          'clearMinimizedCliUpdate'
         ),
 
       setPendingUpdateVersion: (version: string | null) =>

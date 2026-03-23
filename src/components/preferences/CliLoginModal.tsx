@@ -4,6 +4,9 @@
  * Modal with embedded xterm terminal for CLI login flows.
  * Used for `claude` and `gh auth login` commands that require
  * interactive terminal access.
+ *
+ * Supports minimizing to a titlebar indicator so upgrades
+ * can run in the background while the user continues working.
  */
 
 import { useCallback, useEffect, useRef, useMemo, useState } from 'react'
@@ -27,6 +30,7 @@ import { useUIStore } from '@/store/ui-store'
 import { useShallow } from 'zustand/react/shallow'
 import { useTerminal } from '@/hooks/useTerminal'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
+import { Minus } from 'lucide-react'
 
 export function CliLoginModal() {
   const [retryKey, setRetryKey] = useState(0)
@@ -73,6 +77,7 @@ function CliLoginModalContent({
   const queryClient = useQueryClient()
   const initialized = useRef(false)
   const observerRef = useRef<ResizeObserver | null>(null)
+  const minimizingRef = useRef(false)
   const [exitStatus, setExitStatus] = useState<{
     exitCode: number | null
     signal: string | null
@@ -167,6 +172,8 @@ function CliLoginModalContent({
       if (observerRef.current) {
         observerRef.current.disconnect()
       }
+      // When minimizing, keep PTY alive — MinimizedCliUpdate handles cleanup
+      if (minimizingRef.current) return
       invoke('stop_terminal', { terminalId }).catch(() => {
         // Terminal may already be stopped
       })
@@ -178,6 +185,12 @@ function CliLoginModalContent({
   const handleOpenChange = useCallback(
     async (open: boolean) => {
       if (!open) {
+        // When minimizing, skip PTY cleanup — MinimizedCliUpdate handles it
+        if (minimizingRef.current) {
+          onClose()
+          return
+        }
+
         // Stop PTY process
         try {
           await invoke('stop_terminal', { terminalId })
@@ -205,6 +218,18 @@ function CliLoginModalContent({
     [terminalId, onClose, cliType, queryClient]
   )
 
+  // Minimize to titlebar indicator — PTY keeps running in background
+  const handleMinimize = useCallback(() => {
+    minimizingRef.current = true
+    // Clear the onStopped callback — MinimizedCliUpdate will register its own
+    setOnStopped(terminalId, undefined)
+    const { minimizeCliUpdate, closeCliLoginModal } = useUIStore.getState()
+    if (cliType) {
+      minimizeCliUpdate({ type: cliType, mode: 'login', terminalId })
+    }
+    closeCliLoginModal()
+  }, [cliType, terminalId])
+
   // Auto-close modal on success, show error on failure
   useEffect(() => {
     setOnStopped(terminalId, (exitCode, signal) => {
@@ -230,6 +255,14 @@ function CliLoginModalContent({
   return (
     <Dialog open={true} onOpenChange={handleOpenChange}>
       <DialogContent className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col">
+        {/* Minimize button positioned to the left of the Dialog close (X) button */}
+        <button
+          onClick={handleMinimize}
+          title="Minimize to background"
+          className="ring-offset-background focus:ring-ring absolute top-4 right-14 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 focus:ring-2 focus:ring-offset-2 focus:outline-hidden cursor-pointer"
+        >
+          <Minus className="size-4" />
+        </button>
         <DialogHeader>
           <DialogTitle>{cliName} Login</DialogTitle>
           <DialogDescription>

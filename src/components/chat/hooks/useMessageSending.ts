@@ -2,6 +2,7 @@ import { useCallback, type RefObject } from 'react'
 import { generateId } from '@/lib/uuid'
 import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys, cancelChatMessage, persistEnqueue } from '@/services/chat'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { DEFAULT_PARALLEL_EXECUTION_PROMPT } from '@/types/preferences'
@@ -150,6 +151,23 @@ export function useMessageSending({
   const sendMessageNow = useCallback(
     (queuedMsg: QueuedMessage) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+
+      // Block sending if the CLI for this backend is being updated
+      const cliType = (queuedMsg.backend ?? 'claude') as 'claude' | 'codex' | 'opencode'
+      const uiState = useUIStore.getState()
+      const isUpdating =
+        uiState.minimizedCliUpdate?.type === cliType ||
+        (uiState.cliUpdateModalOpen && uiState.cliUpdateModalType === cliType) ||
+        (uiState.cliLoginModalOpen && uiState.cliLoginModalType === cliType)
+      if (isUpdating) {
+        const cliNames: Record<string, string> = {
+          claude: 'Claude CLI',
+          codex: 'Codex CLI',
+          opencode: 'OpenCode CLI',
+        }
+        toast.error(`${cliNames[cliType]} is currently being updated. Please wait for the update to complete.`)
+        return
+      }
 
       console.log(`[Send] sendMessageNow sessionId=${activeSessionId} worktreeId=${activeWorktreeId}`)
 

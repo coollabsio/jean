@@ -8,6 +8,7 @@
  * open one will have hooks running (prevents duplicate event listeners).
  */
 
+import { useCallback } from 'react'
 import { useUIStore } from '@/store/ui-store'
 import {
   ClaudeCliReinstallModal,
@@ -27,6 +28,16 @@ export function CliUpdateModal() {
     }
   }
 
+  const handleMinimize = useCallback(() => {
+    const { minimizeCliUpdate, closeCliUpdateModal: close } =
+      useUIStore.getState()
+    const type = useUIStore.getState().cliUpdateModalType
+    if (type) {
+      minimizeCliUpdate({ type, mode: 'reinstall' })
+    }
+    close()
+  }, [])
+
   // Render both modals - each has lazy mounting (returns null when closed)
   // Only the one matching cliUpdateModalType will actually render hooks
   return (
@@ -34,18 +45,22 @@ export function CliUpdateModal() {
       <ClaudeCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'claude'}
         onOpenChange={handleOpenChange}
+        onMinimize={handleMinimize}
       />
       <GhCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'gh'}
         onOpenChange={handleOpenChange}
+        onMinimize={handleMinimize}
       />
       <CodexCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'codex'}
         onOpenChange={handleOpenChange}
+        onMinimize={handleMinimize}
       />
       <OpenCodeCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'opencode'}
         onOpenChange={handleOpenChange}
+        onMinimize={handleMinimize}
       />
     </>
   )

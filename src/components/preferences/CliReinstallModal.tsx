@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Minus } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,7 @@ interface CliSetupInterface {
 interface ModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onMinimize?: () => void
 }
 
 type ModalStep = 'setup' | 'installing' | 'complete'
@@ -60,14 +61,14 @@ type ModalStep = 'setup' | 'installing' | 'complete'
  * Claude CLI specific modal - calls ONLY useClaudeCliSetup
  * This ensures only one event listener is active
  */
-export function ClaudeCliReinstallModal({ open, onOpenChange }: ModalProps) {
+export function ClaudeCliReinstallModal({ open, onOpenChange, onMinimize }: ModalProps) {
   if (!open) return null
   return (
-    <ClaudeCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+    <ClaudeCliReinstallModalContent open={open} onOpenChange={onOpenChange} onMinimize={onMinimize} />
   )
 }
 
-function ClaudeCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+function ClaudeCliReinstallModalContent({ open, onOpenChange, onMinimize }: ModalProps) {
   const setup = useClaudeCliSetup()
   return (
     <CliReinstallModalUI
@@ -75,6 +76,7 @@ function ClaudeCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
       cliType="claude"
       open={open}
       onOpenChange={onOpenChange}
+      onMinimize={onMinimize}
     />
   )
 }
@@ -83,12 +85,12 @@ function ClaudeCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
  * GitHub CLI specific modal - calls ONLY useGhCliSetup
  * This ensures only one event listener is active
  */
-export function GhCliReinstallModal({ open, onOpenChange }: ModalProps) {
+export function GhCliReinstallModal({ open, onOpenChange, onMinimize }: ModalProps) {
   if (!open) return null
-  return <GhCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  return <GhCliReinstallModalContent open={open} onOpenChange={onOpenChange} onMinimize={onMinimize} />
 }
 
-function GhCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+function GhCliReinstallModalContent({ open, onOpenChange, onMinimize }: ModalProps) {
   const setup = useGhCliSetup()
   return (
     <CliReinstallModalUI
@@ -96,6 +98,7 @@ function GhCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
       cliType="gh"
       open={open}
       onOpenChange={onOpenChange}
+      onMinimize={onMinimize}
     />
   )
 }
@@ -104,14 +107,14 @@ function GhCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
  * Codex CLI specific modal - calls ONLY useCodexCliSetup
  * This ensures only one event listener is active
  */
-export function CodexCliReinstallModal({ open, onOpenChange }: ModalProps) {
+export function CodexCliReinstallModal({ open, onOpenChange, onMinimize }: ModalProps) {
   if (!open) return null
   return (
-    <CodexCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+    <CodexCliReinstallModalContent open={open} onOpenChange={onOpenChange} onMinimize={onMinimize} />
   )
 }
 
-function CodexCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+function CodexCliReinstallModalContent({ open, onOpenChange, onMinimize }: ModalProps) {
   const setup = useCodexCliSetup()
   return (
     <CliReinstallModalUI
@@ -119,6 +122,7 @@ function CodexCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
       cliType="codex"
       open={open}
       onOpenChange={onOpenChange}
+      onMinimize={onMinimize}
     />
   )
 }
@@ -127,14 +131,14 @@ function CodexCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
  * OpenCode CLI specific modal - calls ONLY useOpenCodeCliSetup
  * This ensures only one event listener is active
  */
-export function OpenCodeCliReinstallModal({ open, onOpenChange }: ModalProps) {
+export function OpenCodeCliReinstallModal({ open, onOpenChange, onMinimize }: ModalProps) {
   if (!open) return null
   return (
-    <OpenCodeCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+    <OpenCodeCliReinstallModalContent open={open} onOpenChange={onOpenChange} onMinimize={onMinimize} />
   )
 }
 
-function OpenCodeCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+function OpenCodeCliReinstallModalContent({ open, onOpenChange, onMinimize }: ModalProps) {
   const setup = useOpenCodeCliSetup()
   return (
     <CliReinstallModalUI
@@ -142,6 +146,7 @@ function OpenCodeCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
       cliType="opencode"
       open={open}
       onOpenChange={onOpenChange}
+      onMinimize={onMinimize}
     />
   )
 }
@@ -154,6 +159,7 @@ interface CliReinstallModalUIProps {
   cliType: 'claude' | 'gh' | 'codex' | 'opencode'
   open: boolean
   onOpenChange: (open: boolean) => void
+  onMinimize?: () => void
 }
 
 function CliReinstallModalUI({
@@ -161,6 +167,7 @@ function CliReinstallModalUI({
   cliType,
   open,
   onOpenChange,
+  onMinimize,
 }: CliReinstallModalUIProps) {
   const cliName =
     cliType === 'claude'
@@ -268,6 +275,16 @@ function CliReinstallModalUI({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[450px]" preventClose>
+        {/* Minimize button positioned to the left of the Dialog close (X) button */}
+        {step === 'installing' && onMinimize && (
+          <button
+            onClick={onMinimize}
+            title="Minimize to background"
+            className="ring-offset-background focus:ring-ring absolute top-4 right-14 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 focus:ring-2 focus:ring-offset-2 focus:outline-hidden cursor-pointer"
+          >
+            <Minus className="size-4" />
+          </button>
+        )}
         <DialogHeader>
           <DialogTitle>
             {step === 'complete'

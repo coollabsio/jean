@@ -138,6 +138,38 @@ Native notifications require the `notification:default` permission in `src-tauri
 }
 ```
 
+## Titlebar Progress Indicators
+
+For long-running background operations that the user has minimized, Jean uses inline titlebar indicators instead of toasts. These appear as small pills in the top-right of the titlebar, next to the app version.
+
+### MinimizedCliUpdate
+
+**Location**: `src/components/titlebar/MinimizedCliUpdate.tsx`
+
+Shows progress for CLI upgrades that have been minimized from their modal. Displays a spinner, CLI name, and progress percentage (or "updating..."). Auto-clears on completion with a success/error toast.
+
+```typescript
+// Rendered directly in TitleBar.tsx (not lazy — titlebar is always mounted)
+<MinimizedCliUpdate />
+```
+
+The component self-guards — returns `null` when no minimized update is active. State is managed via `minimizedCliUpdate` in `ui-store.ts`.
+
+**Interactions:**
+- **Reinstall mode**: Clicking the indicator re-opens the upgrade modal (restorable)
+- **Login mode**: Not restorable (PTY detached) — user waits for completion or dismisses with X
+- **Dismiss (X)**: For login mode, also stops the PTY and disposes the terminal instance
+
+**CLI usage guard**: While a CLI is being updated, sending messages with that backend is blocked and an error toast is shown. See `auto-updates.md` for details.
+
+### When to Use Each Pattern
+
+| Pattern | Use Case |
+|---------|----------|
+| **Toast** (`sonner`) | Short-lived feedback (save, copy, quick action result) |
+| **Native notification** | System-level alerts when app may not be focused |
+| **Titlebar indicator** | Long-running background operations the user has minimized |
+
 ## Best Practices
 
 1. **Choose the right type**: Use toast for in-app feedback, native for system-level alerts

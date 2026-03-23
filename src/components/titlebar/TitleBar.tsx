@@ -23,6 +23,7 @@ import { usePreferences } from '@/services/preferences'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import { isNativeApp } from '@/lib/environment'
 import { UnreadBell } from '@/components/unread/UnreadBell'
+import { MinimizedCliUpdate } from '@/components/titlebar/MinimizedCliUpdate'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 
@@ -186,6 +187,7 @@ export function TitleBar({
             <TooltipContent>GitHub</TooltipContent>
           </Tooltip>
         )}
+        <MinimizedCliUpdate />
         {appVersion && <UpdateIndicator />}
         {appVersion && (
           <button

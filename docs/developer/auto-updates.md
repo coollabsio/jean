@@ -333,6 +333,52 @@ All updates are cryptographically signed:
 3. **Antivirus software**: Check if antivirus is blocking installation
 4. **System updates**: Ensure system is compatible with new version
 
+## CLI Upgrade Minimization
+
+Separate from the app auto-update system, Jean manages CLI tools (Claude CLI, GitHub CLI, Codex CLI, OpenCode CLI) that can be upgraded via toast notifications. These upgrades run through two modal types:
+
+- **CliReinstallModal**: Progress-bar dialog for jean-managed installs (download binary from GitHub)
+- **CliLoginModal**: Full-screen xterm terminal for Homebrew/PATH-based upgrades (`brew upgrade`, `claude update`)
+
+Both modals support **minimization** — clicking the Minus button in the modal header closes the modal but keeps the upgrade running in the background. A small indicator pill appears in the titlebar (top-right, next to the app update indicator) showing:
+
+- CLI name and progress percentage (for reinstall mode)
+- CLI name and "updating..." (for terminal/login mode)
+
+On completion, the indicator auto-clears and shows a success/error toast. Users can also dismiss the indicator with the X button.
+
+### Minimize Button Positioning
+
+The minimize button (Minus icon) is positioned absolutely (`absolute top-4 right-14`) to sit to the left of the Dialog's built-in close (X) button (`absolute top-4 right-5`). Both use identical styling for visual consistency. The minimize button is rendered outside `DialogHeader` as a sibling of the dialog content.
+
+### CLI Usage Guard During Updates
+
+When a CLI is being updated (minimized, reinstall modal open, or login modal open), message sending is blocked for that CLI's backend. The guard lives in `useMessageSending.ts`:
+
+```typescript
+const cliType = (queuedMsg.backend ?? 'claude') as 'claude' | 'codex' | 'opencode'
+const uiState = useUIStore.getState()
+const isUpdating =
+  uiState.minimizedCliUpdate?.type === cliType ||
+  (uiState.cliUpdateModalOpen && uiState.cliUpdateModalType === cliType) ||
+  (uiState.cliLoginModalOpen && uiState.cliLoginModalType === cliType)
+```
+
+If the CLI is updating, the user sees an error toast: *"[CLI Name] is currently being updated. Please wait for the update to complete."*
+
+### Restore from Minimized State
+
+- **Reinstall mode**: Clicking the titlebar indicator re-opens the `CliUpdateModal`, which picks up fresh progress events
+- **Login mode**: The PTY terminal UI was detached on minimize and cannot be re-attached, so clicking does nothing — the user can only dismiss with the X button or wait for completion
+
+### Implementation
+
+- **State**: `minimizedCliUpdate` in `ui-store.ts` tracks the minimized upgrade
+- **Indicator**: `MinimizedCliUpdate` component in `src/components/titlebar/MinimizedCliUpdate.tsx`
+- **Event listeners**: Reinstall mode listens to `${type}-cli:install-progress`, login mode uses `setOnStopped()` on the terminal instance
+- **PTY safety**: `CliLoginModal` uses a `minimizingRef` to skip PTY cleanup on minimize (the `MinimizedCliUpdate` component handles cleanup on completion)
+- **Send guard**: `useMessageSending.ts` checks `minimizedCliUpdate`, `cliUpdateModalOpen`, and `cliLoginModalOpen` before sending messages
+
 ## Future Enhancements
 
 ### Planned Improvements
