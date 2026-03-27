@@ -1788,6 +1788,10 @@ pub async fn dispatch_command(
             let result = crate::codex_cli::get_codex_usage().await?;
             to_value(result)
         }
+        "get_rtk_gain" => {
+            let result = crate::rtk::get_rtk_gain(app.clone()).await?;
+            to_value(result)
+        }
         "install_codex_cli" => {
             let version: Option<String> = from_field_opt(&args, "version")?;
             crate::codex_cli::install_codex_cli(app.clone(), version).await?;

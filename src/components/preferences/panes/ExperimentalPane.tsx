@@ -118,7 +118,7 @@ export const ExperimentalPane: React.FC = () => {
       <SettingsSection title="Developer Tools">
         <InlineField
           label="Enable RTK AI"
-          description="Turn on RTK command rewriting for Claude sessions."
+          description="Enable RTK's native integrations for Claude, Codex, and OpenCode."
         >
           <Switch
             checked={preferences?.rtk_ai_enabled ?? false}

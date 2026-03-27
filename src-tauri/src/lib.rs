@@ -1410,7 +1410,16 @@ async fn patch_preferences(app: AppHandle, patch: Value) -> Result<(), String> {
     }
     let merged: AppPreferences =
         serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))?;
-    save_preferences(app, merged).await
+    let should_initialize_rtk = !current.rtk_ai_enabled && merged.rtk_ai_enabled;
+    save_preferences(app.clone(), merged).await?;
+
+    if should_initialize_rtk {
+        tauri::async_runtime::spawn(async move {
+            let _ = tokio::task::spawn_blocking(crate::rtk::initialize_rtk_integration).await;
+        });
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -2732,6 +2741,7 @@ pub fn run() {
             codex_cli::get_codex_usage,
             codex_cli::get_available_codex_versions,
             codex_cli::install_codex_cli,
+            rtk::get_rtk_gain,
             // OpenCode CLI management commands
             opencode_cli::check_opencode_cli_installed,
             opencode_cli::check_opencode_cli_auth,
