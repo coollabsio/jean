@@ -1411,11 +1411,18 @@ async fn patch_preferences(app: AppHandle, patch: Value) -> Result<(), String> {
     let merged: AppPreferences =
         serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))?;
     let should_initialize_rtk = !current.rtk_ai_enabled && merged.rtk_ai_enabled;
+    let should_uninstall_rtk = current.rtk_ai_enabled && !merged.rtk_ai_enabled;
     save_preferences(app.clone(), merged).await?;
 
     if should_initialize_rtk {
         tauri::async_runtime::spawn(async move {
             let _ = tokio::task::spawn_blocking(crate::rtk::initialize_rtk_integration).await;
+        });
+    }
+
+    if should_uninstall_rtk {
+        tauri::async_runtime::spawn(async move {
+            let _ = tokio::task::spawn_blocking(crate::rtk::uninstall_rtk_integration).await;
         });
     }
 

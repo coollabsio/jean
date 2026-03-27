@@ -258,6 +258,15 @@ pub fn initialize_rtk_integration() {
     }
 }
 
+pub fn uninstall_rtk_integration() {
+    for args in [
+        ["init", "-g", "--uninstall"].as_slice(),
+        ["init", "-g", "--codex", "--uninstall"].as_slice(),
+    ] {
+        run_init_command(args);
+    }
+}
+
 #[tauri::command]
 pub async fn get_rtk_gain(app: AppHandle) -> Result<RtkGainSnapshot, String> {
     let preferences = crate::load_preferences(app)
