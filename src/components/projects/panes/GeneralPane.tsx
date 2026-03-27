@@ -99,6 +99,7 @@ export function GeneralPane({
   const setProjectAvatar = useSetProjectAvatar()
   const removeProjectAvatar = useRemoveProjectAvatar()
 
+  const [localName, setLocalName] = useState<string | null>(null)
   const [branchPopoverOpen, setBranchPopoverOpen] = useState(false)
   const [localSystemPrompt, setLocalSystemPrompt] = useState<string | null>(
     null
@@ -135,6 +136,18 @@ export function GeneralPane({
     project?.avatar_path && appDataDir && !imgError
       ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
       : null
+
+  const displayedName = localName ?? project?.name ?? ''
+  const nameChanged =
+    localName !== null && localName !== (project?.name ?? '')
+
+  const handleSaveName = useCallback(() => {
+    if (localName === null) return
+    updateSettings.mutate(
+      { projectId, name: localName.trim() },
+      { onSuccess: () => setLocalName(null) }
+    )
+  }, [localName, projectId, updateSettings])
 
   const selectedBranch = project?.default_branch ?? ''
   const displayedSystemPrompt =
@@ -256,6 +269,31 @@ export function GeneralPane({
 
   return (
     <div className="space-y-6">
+      <SettingsSection title="Project Name">
+        <InlineField
+          label="Display Name"
+          description="Rename the project without changing the underlying folder"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              value={displayedName}
+              onChange={e => setLocalName(e.target.value)}
+              className="flex-1 text-sm"
+            />
+            <Button
+              size="sm"
+              onClick={handleSaveName}
+              disabled={!nameChanged || updateSettings.isPending}
+            >
+              {updateSettings.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              Save
+            </Button>
+          </div>
+        </InlineField>
+      </SettingsSection>
+
       <SettingsSection title="Avatar">
         <InlineField
           label="Project Avatar"

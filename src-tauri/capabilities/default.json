@@ -23,6 +23,7 @@
     "log:default",
     "notification:default",
     "process:default",
-    "core:webview:allow-set-webview-zoom"
+    "core:webview:allow-set-webview-zoom",
+    "window-state:default"
   ]
 }

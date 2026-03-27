@@ -33,6 +33,31 @@ export const claudeCliQueryKeys = {
   versions: () => [...claudeCliQueryKeys.all, 'versions'] as const,
 }
 
+/**
+ * Hook to detect Claude CLI in system PATH
+ */
+export function useClaudePathDetection(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...claudeCliQueryKeys.all, 'path-detection'],
+    queryFn: async (): Promise<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }> => {
+      if (!isTauri()) {
+        return { found: false, path: null, version: null, package_manager: null }
+      }
+      try {
+        const result = await invoke<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }>('detect_claude_in_path')
+        console.debug('[ONBOARDING:SVC] claude path detection:', result)
+        return result
+      } catch (err) {
+        console.debug('[ONBOARDING:SVC] claude path detection failed:', err)
+        return { found: false, path: null, version: null, package_manager: null }
+      }
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: 1000 * 60 * 30, // 30 min cache
+    gcTime: 1000 * 60 * 60,
+  })
+}
+
 function getUsageStaleTime(snapshot?: ClaudeUsageSnapshot): number {
   if (!snapshot?.fetchedAt) return 0
   const expiresAtMs = snapshot.fetchedAt * 1000 + USAGE_REFRESH_MS
@@ -58,11 +83,11 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
       }
 
       try {
-        logger.debug('Checking Claude CLI installation status')
+        console.debug('[ONBOARDING:SVC] claude: checking installed status...')
         const status = await invoke<ClaudeCliStatus>(
           'check_claude_cli_installed'
         )
-        logger.info('Claude CLI status', { status })
+        console.debug('[ONBOARDING:SVC] claude: status =', status)
         return status
       } catch (error) {
         logger.error('Failed to check Claude CLI status', { error })
@@ -89,9 +114,9 @@ export function useClaudeCliAuth(options?: { enabled?: boolean }) {
       }
 
       try {
-        logger.debug('Checking Claude CLI authentication status')
+        console.debug('[ONBOARDING:SVC] claude: checking auth status...')
         const status = await invoke<ClaudeAuthStatus>('check_claude_cli_auth')
-        logger.info('Claude CLI auth status', { status })
+        console.debug('[ONBOARDING:SVC] claude: auth =', status)
         return status
       } catch (error) {
         logger.error('Failed to check Claude CLI auth', { error })

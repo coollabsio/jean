@@ -417,7 +417,7 @@ export function MainWindow() {
         {/* Custom resize handle for left sidebar */}
         {leftSidebarVisible && isInitialized && (
           <div
-            className="relative h-full w-px hover:bg-border"
+            className="relative h-full w-px bg-border"
             onMouseDown={handleResizeStart}
           >
             {/* Invisible wider hit area for easier clicking */}

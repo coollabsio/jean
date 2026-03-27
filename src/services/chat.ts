@@ -1417,7 +1417,29 @@ export function useSendMessage() {
         return
       }
 
-      // Real errors — rollback to previous state
+      // Check if CLI produced streaming content before the error.
+      // If so, the CLI likely ran — don't destroy the conversation by
+      // rolling back to pre-send state. Instead, refetch from disk (#209).
+      const hasStreamedContent = !!useChatStore.getState().streamingContents[sessionId]
+      if (hasStreamedContent) {
+        logger.warn('Error after CLI produced content, refetching instead of rollback', {
+          sessionId,
+          error: errorMessage,
+        })
+        setError(sessionId, errorMessage || 'Unknown error occurred')
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.session(sessionId),
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        toast.error('An error occurred, but your conversation was preserved.', {
+          description: errorMessage,
+        })
+        return
+      }
+
+      // Real errors with no streamed content — rollback to previous state
       setError(sessionId, errorMessage || 'Unknown error occurred')
 
       if (context?.previous) {

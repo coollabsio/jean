@@ -9,13 +9,14 @@ import {
   useOpenWorktreeInFinder,
   useOpenWorktreeInTerminal,
   useOpenWorktreeInEditor,
-  useRunScript,
+  useRunScripts,
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useSessions } from '@/services/chat'
 import { useProjectsStore } from '@/store/projects-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
 import type { SessionDigest } from '@/types/chat'
 
 interface UseWorktreeMenuActionsProps {
@@ -34,7 +35,7 @@ export function useWorktreeMenuActions({
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInEditor = useOpenWorktreeInEditor()
-  const { data: runScript } = useRunScript(worktree.path)
+  const { data: runScripts = [] } = useRunScripts(worktree.path)
   const { data: preferences } = usePreferences()
   const { data: sessionsData } = useSessions(worktree.id, worktree.path)
   const isBase = isBaseSession(worktree)
@@ -45,10 +46,22 @@ export function useWorktreeMenuActions({
   )
 
   const handleRun = useCallback(() => {
-    if (runScript) {
-      useTerminalStore.getState().startRun(worktree.id, runScript)
+    const first = runScripts[0]
+    if (first) {
+      useTerminalStore.getState().startRun(worktree.id, first)
+      useUIStore.getState().setSessionChatModalOpen(true, worktree.id)
+      useTerminalStore.getState().setModalTerminalOpen(worktree.id, true)
     }
-  }, [runScript, worktree.id])
+  }, [runScripts, worktree.id])
+
+  const handleRunCommand = useCallback(
+    (cmd: string) => {
+      useTerminalStore.getState().startRun(worktree.id, cmd)
+      useUIStore.getState().setSessionChatModalOpen(true, worktree.id)
+      useTerminalStore.getState().setModalTerminalOpen(worktree.id, true)
+    },
+    [worktree.id]
+  )
 
   const handleOpenTerminalPanel = useCallback(() => {
     useTerminalStore.getState().addTerminal(worktree.id)
@@ -137,11 +150,12 @@ export function useWorktreeMenuActions({
     setShowDeleteConfirm,
     isBase,
     hasMessages,
-    runScript,
+    runScripts,
     preferences,
 
     // Handlers
     handleRun,
+    handleRunCommand,
     handleOpenTerminalPanel,
     handleOpenInFinder,
     handleOpenInTerminal,

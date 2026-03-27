@@ -33,6 +33,31 @@ export const codexCliQueryKeys = {
   versions: () => [...codexCliQueryKeys.all, 'versions'] as const,
 }
 
+/**
+ * Hook to detect Codex CLI in system PATH
+ */
+export function useCodexPathDetection(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...codexCliQueryKeys.all, 'path-detection'],
+    queryFn: async (): Promise<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }> => {
+      if (!isTauri()) {
+        return { found: false, path: null, version: null, package_manager: null }
+      }
+      try {
+        const result = await invoke<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }>('detect_codex_in_path')
+        console.debug('[ONBOARDING:SVC] codex path detection:', result)
+        return result
+      } catch (err) {
+        console.debug('[ONBOARDING:SVC] codex path detection failed:', err)
+        return { found: false, path: null, version: null, package_manager: null }
+      }
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: 1000 * 60 * 30,
+    gcTime: 1000 * 60 * 60,
+  })
+}
+
 function getUsageStaleTime(snapshot?: CodexUsageSnapshot): number {
   if (!snapshot?.fetchedAt) return 0
   const expiresAtMs = snapshot.fetchedAt * 1000 + USAGE_REFRESH_MS
@@ -57,8 +82,12 @@ export function useCodexCliStatus(options?: { enabled?: boolean }) {
       }
 
       try {
-        return await invoke<CodexCliStatus>('check_codex_cli_installed')
+        console.debug('[ONBOARDING:SVC] codex: checking installed status...')
+        const status = await invoke<CodexCliStatus>('check_codex_cli_installed')
+        console.debug('[ONBOARDING:SVC] codex: status =', status)
+        return status
       } catch (error) {
+        console.debug('[ONBOARDING:SVC] codex: status check FAILED:', error)
         logger.error('Failed to check Codex CLI status', { error })
         return { installed: false, version: null, path: null }
       }
@@ -82,8 +111,12 @@ export function useCodexCliAuth(options?: { enabled?: boolean }) {
       }
 
       try {
-        return await invoke<CodexAuthStatus>('check_codex_cli_auth')
+        console.debug('[ONBOARDING:SVC] codex: checking auth status...')
+        const status = await invoke<CodexAuthStatus>('check_codex_cli_auth')
+        console.debug('[ONBOARDING:SVC] codex: auth =', status)
+        return status
       } catch (error) {
+        console.debug('[ONBOARDING:SVC] codex: auth check FAILED:', error)
         logger.error('Failed to check Codex CLI auth', { error })
         return {
           authenticated: false,

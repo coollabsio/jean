@@ -7,6 +7,7 @@ import {
   Github,
   GitPullRequest,
   CircleDot,
+  Globe,
 } from 'lucide-react'
 import {
   Dialog,
@@ -22,9 +23,10 @@ import {
   useOpenWorktreeInFinder,
   useOpenWorktreeInTerminal,
   useOpenWorktreeInEditor,
-  GitHubRemote,
+  type GitHubRemote,
   useProjects,
   useWorktree,
+  usePorts,
 } from '@/services/projects'
 import { useLoadedIssueContexts, useLoadedPRContexts } from '@/services/github'
 import { usePreferences } from '@/services/preferences'
@@ -39,6 +41,7 @@ interface ModalOption {
   label: string
   icon: typeof Code
   key?: string
+  metaKey?: boolean
   url?: string
 }
 
@@ -78,6 +81,21 @@ export function OpenInModal() {
   const { data: loadedIssues } = useLoadedIssueContexts(activeSessionId)
 
   const isNative = isNativeApp()
+
+  const targetPath = useMemo(() => {
+    if (worktree?.path) return worktree.path
+    if (selectedWorktreeId) {
+      const path = useChatStore.getState().getWorktreePath(selectedWorktreeId)
+      if (path) return path
+    }
+    if (selectedProjectId && projects) {
+      const project = projects.find(p => p.id === selectedProjectId)
+      if (project) return project.path
+    }
+    return null
+  }, [worktree?.path, selectedWorktreeId, selectedProjectId, projects])
+
+  const { data: ports } = usePorts(targetPath)
 
   // Base options (Editor, Terminal, Finder, GitHub)
   const baseOptions = useMemo(() => {
@@ -163,13 +181,6 @@ export function OpenInModal() {
     return items
   }, [loadedPRs, loadedIssues])
 
-  const allOptions = useMemo(
-    () => [...baseOptions, ...contextOptions],
-    [baseOptions, contextOptions]
-  )
-
-  const useWideLayout = contextOptions.length > 4
-
   useEffect(() => {
     if (!openInModalOpen) {
       hasInitializedRef.current = false
@@ -187,21 +198,35 @@ export function OpenInModal() {
     [setOpenInModalOpen, isNative]
   )
 
-  const targetPath = useMemo(() => {
-    if (worktree?.path) return worktree.path
-    if (selectedWorktreeId) {
-      const path = useChatStore.getState().getWorktreePath(selectedWorktreeId)
-      if (path) return path
-    }
-    if (selectedProjectId && projects) {
-      const project = projects.find(p => p.id === selectedProjectId)
-      if (project) return project.path
-    }
-    return null
-  }, [worktree?.path, selectedWorktreeId, selectedProjectId, projects])
+  const portOptions: ModalOption[] = useMemo(() => {
+    if (!ports || ports.length === 0) return []
+    return ports.map((p, i) => ({
+      id: `port-${p.port}`,
+      label: `${p.label} (:${p.port})`,
+      icon: Globe,
+      key: i < 9 ? String(i + 1) : undefined,
+      metaKey: true,
+      url: `http://localhost:${p.port}`,
+    }))
+  }, [ports])
+
+  const allOptions = useMemo(
+    () => [...baseOptions, ...portOptions, ...contextOptions],
+    [baseOptions, portOptions, contextOptions]
+  )
+
+  const useWideLayout = portOptions.length + contextOptions.length > 4
 
   const executeAction = useCallback(
     (optionId: string) => {
+      // Handle port options
+      const portOpt = portOptions.find(o => o.id === optionId)
+      if (portOpt?.url) {
+        openExternal(portOpt.url)
+        setOpenInModalOpen(false)
+        return
+      }
+
       // Handle context options (PR/issue URLs)
       const contextOpt = contextOptions.find(o => o.id === optionId)
       if (contextOpt?.url) {
@@ -271,6 +296,7 @@ export function OpenInModal() {
       setOpenInModalOpen(false)
     },
     [
+      portOptions,
       contextOptions,
       targetPath,
       openInEditor,
@@ -288,10 +314,14 @@ export function OpenInModal() {
     (e: React.KeyboardEvent) => {
       const key = e.key.toLowerCase()
       const allIds = allOptions.map(opt => opt.id)
+      const hasMeta = e.metaKey || e.ctrlKey
 
-      // Quick select with shortcut keys
+      // Quick select with shortcut keys (metaKey options require Cmd/Ctrl)
       const matchedOption = allOptions.find(
-        opt => opt.key && opt.key.toLowerCase() === key
+        opt =>
+          opt.key &&
+          opt.key.toLowerCase() === key &&
+          (opt.metaKey ? hasMeta : !hasMeta)
       )
       if (matchedOption) {
         e.preventDefault()
@@ -344,7 +374,7 @@ export function OpenInModal() {
         </div>
         {option.key && (
           <kbd className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded ml-2 shrink-0">
-            {option.key}
+            {option.metaKey ? `⌘${option.key}` : option.key}
           </kbd>
         )}
       </button>
@@ -371,6 +401,15 @@ export function OpenInModal() {
         </DialogHeader>
 
         <div className="pb-2">{baseOptions.map(renderOption)}</div>
+
+        {portOptions.length > 0 && (
+          <div className="border-t pb-2">
+            <div className="px-4 pt-2 pb-1">
+              <span className="text-xs text-muted-foreground">Ports</span>
+            </div>
+            {portOptions.map(renderOption)}
+          </div>
+        )}
 
         {contextOptions.length > 0 && (
           <div className="border-t pb-2">

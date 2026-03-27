@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAllSessions } from '@/services/chat'
 import { useProjectsStore } from '@/store/projects-store'
@@ -126,10 +126,6 @@ export function UnreadSessionsDrawer({
   const panelRef = useRef<HTMLDivElement>(null)
   const [focusedIndex, setFocusedIndex] = useState(-1)
   const { data: allSessions, isLoading } = useAllSessions(open)
-  const selectedProjectId = useProjectsStore(
-    state => state.selectedProjectId
-  )
-
   // Invalidate cached data each time panel opens so manually-read sessions disappear
   useEffect(() => {
     if (open) {
@@ -162,39 +158,6 @@ export function UnreadSessionsDrawer({
 
     return results.sort((a, b) => b.session.updated_at - a.session.updated_at)
   }, [allSessions])
-
-  // Group by project, current project first
-  const groupedItems = useMemo(() => {
-    const groups = new Map<
-      string,
-      { projectId: string; projectName: string; items: UnreadItem[] }
-    >()
-
-    for (const item of unreadItems) {
-      const existing = groups.get(item.projectId)
-      if (existing) {
-        existing.items.push(item)
-      } else {
-        groups.set(item.projectId, {
-          projectId: item.projectId,
-          projectName: item.projectName,
-          items: [item],
-        })
-      }
-    }
-
-    return Array.from(groups.values()).sort((a, b) => {
-      if (a.projectId === selectedProjectId) return -1
-      if (b.projectId === selectedProjectId) return 1
-      return a.projectName.localeCompare(b.projectName)
-    })
-  }, [unreadItems, selectedProjectId])
-
-  // Flat list of items across groups for keyboard navigation
-  const flatItems = useMemo(
-    () => groupedItems.flatMap(g => g.items),
-    [groupedItems]
-  )
 
   const markSessionsReadOptimistically = useCallback(
     (sessionIds: string[]) => {
@@ -236,12 +199,12 @@ export function UnreadSessionsDrawer({
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
       window.dispatchEvent(new CustomEvent('session-opened'))
       setFocusedIndex(i => {
-        const newTotal = flatItems.length - 1
+        const newTotal = unreadItems.length - 1
         if (newTotal <= 0) return -1
         return Math.min(i, newTotal - 1)
       })
     },
-    [queryClient, flatItems.length, markSessionsReadOptimistically]
+    [queryClient, unreadItems.length, markSessionsReadOptimistically]
   )
 
   const handleSelect = useCallback(
@@ -297,7 +260,7 @@ export function UnreadSessionsDrawer({
         return
       }
 
-      const total = flatItems.length
+      const total = unreadItems.length
       if (!total) return
 
       switch (e.key) {
@@ -311,19 +274,19 @@ export function UnreadSessionsDrawer({
           break
         case 'Enter':
           e.preventDefault()
-          if (focusedIndex >= 0 && flatItems[focusedIndex]) {
-            handleSelect(flatItems[focusedIndex])
+          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
+            handleSelect(unreadItems[focusedIndex])
           }
           break
         case 'Backspace':
           e.preventDefault()
-          if (focusedIndex >= 0 && flatItems[focusedIndex]) {
-            handleMarkOneRead(flatItems[focusedIndex])
+          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
+            handleMarkOneRead(unreadItems[focusedIndex])
           }
           break
       }
     },
-    [flatItems, focusedIndex, handleSelect, handleMarkOneRead, onOpenChange]
+    [unreadItems, focusedIndex, handleSelect, handleMarkOneRead, onOpenChange]
   )
 
   // Scroll focused item into view
@@ -336,9 +299,6 @@ export function UnreadSessionsDrawer({
 
   if (!open) return null
 
-  // Build flat index for rendering
-  let itemIndex = 0
-
   return (
     <div className="fixed inset-0 z-[80]" onClick={() => onOpenChange(false)}>
       <div
@@ -346,7 +306,7 @@ export function UnreadSessionsDrawer({
         tabIndex={-1}
         onClick={e => e.stopPropagation()}
         onKeyDown={handleKeyDown}
-        className="absolute left-1/2 top-12 -translate-x-1/2 w-[min(420px,calc(100vw-2rem))] bg-popover border rounded-lg shadow-lg animate-in fade-in-0 slide-in-from-top-2 duration-200 outline-none"
+        className="absolute left-1/2 top-12 -translate-x-1/2 w-[min(480px,calc(100vw-2rem))] bg-popover border rounded-lg shadow-lg animate-in fade-in-0 slide-in-from-top-2 duration-200 outline-none"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b">
@@ -390,53 +350,40 @@ export function UnreadSessionsDrawer({
           </div>
         ) : (
           <div className="max-h-[min(400px,60vh)] overflow-y-auto p-1">
-            {groupedItems.map(group => (
-              <div key={group.projectId}>
-                <div
+            {unreadItems.map((item, idx) => {
+              const status = getSessionStatus(item.session)
+              const StatusIcon = status?.icon ?? CheckCircle2
+
+              return (
+                <button
+                  key={item.session.id}
+                  type="button"
+                  data-unread-drawer-index={idx}
+                  onClick={() => handleSelect(item)}
+                  onMouseEnter={() => setFocusedIndex(idx)}
                   className={cn(
-                    'text-[10px] font-medium uppercase tracking-wider px-2 pt-1.5 pb-0.5',
-                    'text-muted-foreground'
+                    'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-center gap-2',
+                    focusedIndex === idx && 'bg-accent'
                   )}
                 >
-                  {group.projectName}
-                </div>
-                {group.items.map(item => {
-                  const status = getSessionStatus(item.session)
-                  const StatusIcon = status?.icon ?? CheckCircle2
-                  const idx = itemIndex++
-
-                  return (
-                    <button
-                      key={item.session.id}
-                      type="button"
-                      data-unread-drawer-index={idx}
-                      onClick={() => handleSelect(item)}
-                      onMouseEnter={() => setFocusedIndex(idx)}
-                      className={cn(
-                        'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-center gap-2',
-                        focusedIndex === idx && 'bg-accent'
-                      )}
-                    >
-                      <StatusIcon
-                        className={cn(
-                          'h-3.5 w-3.5 shrink-0',
-                          status?.className ?? 'text-muted-foreground'
-                        )}
-                      />
-                      <span className="text-sm truncate flex-1 min-w-0">
-                        {item.session.name}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground/60 shrink-0">
-                        {item.worktreeName}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground/40 shrink-0">
-                        {formatRelativeTime(item.session.updated_at)}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
+                  <StatusIcon
+                    className={cn(
+                      'h-3.5 w-3.5 shrink-0',
+                      status?.className ?? 'text-muted-foreground'
+                    )}
+                  />
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/50 shrink-0">
+                    {item.projectName}
+                  </span>
+                  <span className="text-[13px] truncate flex-1 min-w-0">
+                    {item.session.name}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground/40 shrink-0">
+                    {formatRelativeTime(item.session.updated_at)}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

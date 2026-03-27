@@ -37,6 +37,8 @@ interface LabelModalProps {
   onApply?: (label: LabelData | null) => void
   /** Additional labels to include in the custom labels list (e.g. worktree labels) */
   extraLabels?: LabelData[]
+  /** Callback when a label's color is edited (e.g. to propagate to worktree labels) */
+  onColorChange?: (labelName: string, newColor: string) => void
 }
 
 export function LabelModal({
@@ -46,6 +48,7 @@ export function LabelModal({
   currentLabel,
   onApply,
   extraLabels,
+  onColorChange,
 }: LabelModalProps) {
   const [inputValue, setInputValue] = useState('')
   const [selectedColor, setSelectedColor] = useState(
@@ -54,6 +57,7 @@ export function LabelModal({
   const [isCreatingCustom, setIsCreatingCustom] = useState(false)
   const [editingLabelName, setEditingLabelName] = useState<string | null>(null)
   const [focusedIndex, setFocusedIndex] = useState(0)
+  const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({})
 
   const sessionLabels = useChatStore(state => state.sessionLabels)
 
@@ -80,6 +84,8 @@ export function LabelModal({
   // Get the label data for current label (for preset labels, use default yellow)
   const getLabelData = useCallback(
     (name: string): LabelData => {
+      // Check local color overrides first (instant feedback before async refetch)
+      if (colorOverrides[name]) return { name, color: colorOverrides[name] }
       // Check if this label name exists in sessionLabels or extraLabels (has a color)
       const existing = Object.values(sessionLabels).find(l => l.name === name)
       if (existing) return existing
@@ -88,7 +94,7 @@ export function LabelModal({
       // Preset labels get yellow by default
       return { name, color: '#eab308' }
     },
-    [sessionLabels]
+    [sessionLabels, colorOverrides, extraLabels]
   )
 
   // Update all sessions that use a given label name to use a new color
@@ -135,9 +141,11 @@ export function LabelModal({
   const saveEditedColor = useCallback(() => {
     if (!editingLabelName) return
     updateAllSessionsWithLabel(editingLabelName, selectedColor)
+    onColorChange?.(editingLabelName, selectedColor)
+    setColorOverrides(prev => ({ ...prev, [editingLabelName]: selectedColor }))
     toast.success(`Color updated for "${editingLabelName}"`)
     setEditingLabelName(null)
-  }, [editingLabelName, selectedColor, updateAllSessionsWithLabel])
+  }, [editingLabelName, selectedColor, updateAllSessionsWithLabel, onColorChange])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

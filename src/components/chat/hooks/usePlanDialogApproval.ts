@@ -38,6 +38,7 @@ interface UsePlanDialogApprovalParams {
   mcpServersDataRef: RefObject<McpServerInfo[] | undefined>
   enabledMcpServersRef: RefObject<string[]>
   selectedBackendRef: RefObject<'claude' | 'codex' | 'opencode'>
+  markAtBottom: () => void
 }
 
 /**
@@ -62,6 +63,7 @@ export function usePlanDialogApproval({
   mcpServersDataRef,
   enabledMcpServersRef,
   selectedBackendRef,
+  markAtBottom,
 }: UsePlanDialogApprovalParams) {
   const queryClient = useQueryClient()
 
@@ -128,6 +130,11 @@ export function usePlanDialogApproval({
       clearToolCalls(activeSessionId)
       clearStreamingContentBlocks(activeSessionId)
       setSessionReviewing(activeSessionId, false)
+
+      // Mark as at-bottom so Tier 4 / Tier 2 auto-scroll kicks in when
+      // streaming starts. Don't physically scroll — let native CSS scroll
+      // anchoring handle the plan collapse layout shift smoothly.
+      markAtBottom()
 
       // Chain: mark_plan_approved → update_session_state → broadcast
       // On WebSocket, commands dispatch concurrently. update_session_state emits
@@ -238,6 +245,7 @@ export function usePlanDialogApproval({
       isCodexBackendRef,
       mcpServersDataRef,
       enabledMcpServersRef,
+      markAtBottom,
     ]
   )
 

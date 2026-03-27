@@ -133,6 +133,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -142,7 +143,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -153,6 +154,10 @@ describe('preferences service', () => {
         rtk_ai_enabled: false,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -256,6 +261,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -265,7 +271,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -276,6 +282,10 @@ describe('preferences service', () => {
         rtk_ai_enabled: false,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -345,6 +355,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -355,7 +366,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -365,6 +376,10 @@ describe('preferences service', () => {
         yolo_thinking_level: null,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
 
@@ -435,6 +450,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -444,7 +460,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -454,6 +470,10 @@ describe('preferences service', () => {
         yolo_thinking_level: null,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -526,6 +546,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -535,7 +556,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -545,6 +566,10 @@ describe('preferences service', () => {
         yolo_thinking_level: null,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -617,6 +642,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -626,7 +652,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -636,6 +662,10 @@ describe('preferences service', () => {
         yolo_thinking_level: null,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -706,6 +736,7 @@ describe('preferences service', () => {
         custom_cli_profiles: [],
         default_provider: null,
 
+        auto_save_context: true,
         auto_pull_base_branch: true,
         confirm_session_close: true,
         default_execution_mode: 'plan',
@@ -715,7 +746,7 @@ describe('preferences service', () => {
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
-        restore_last_session: false,
+        restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
         yolo_model: null,
@@ -725,6 +756,10 @@ describe('preferences service', () => {
         yolo_thinking_level: null,
         linear_api_key: null,
         magic_models_auto_initialized: false,
+        claude_cli_source: 'jean',
+        codex_cli_source: 'jean',
+        opencode_cli_source: 'jean',
+        gh_cli_source: 'jean',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

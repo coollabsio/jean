@@ -18,10 +18,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+MACHINE_ARCH="$(uname -m)"  # "x86_64" or "aarch64"
 BUNDLE_DIR="$PROJECT_DIR/src-tauri/target/release/bundle/appimage"
 APPDIR="$BUNDLE_DIR/Jean.AppDir"
 CUSTOM_APPRUN="$SCRIPT_DIR/appimage-webkit-fix.sh"
-LINUXDEPLOY_BIN="${HOME}/.cache/tauri/linuxdeploy-x86_64.AppImage"
+LINUXDEPLOY_BIN="${HOME}/.cache/tauri/linuxdeploy-${MACHINE_ARCH}.AppImage"
 LINUXDEPLOY_PLUGIN_BIN="${HOME}/.cache/tauri/linuxdeploy-plugin-appimage.AppImage"
 
 if [ "$(uname -s)" != "Linux" ]; then
@@ -33,7 +34,7 @@ fi
 
 echo "==> Building AppImage via Tauri..."
 cd "$PROJECT_DIR"
-NO_STRIP=true tauri build --bundles appimage 2>&1 || {
+NO_STRIP=true bun run tauri build --bundles appimage 2>&1 || {
     echo "Tauri build failed, trying manual linuxdeploy fallback..."
     if [ ! -x "$LINUXDEPLOY_BIN" ]; then
         echo "ERROR: linuxdeploy not found/executable at $LINUXDEPLOY_BIN"
@@ -61,8 +62,8 @@ chmod +x "$APPDIR/AppRun"
 echo "==> Repackaging AppImage..."
 cd "$BUNDLE_DIR"
 
-# Remove the old AppImage files
-rm -f Jean_*_amd64.AppImage Jean-x86_64.AppImage
+# Remove old AppImage files
+rm -f Jean_*_amd64.AppImage Jean_*_arm64.AppImage Jean-x86_64.AppImage Jean-aarch64.AppImage
 
 if [ ! -x "$LINUXDEPLOY_PLUGIN_BIN" ]; then
     echo "ERROR: linuxdeploy appimage plugin not found/executable at $LINUXDEPLOY_PLUGIN_BIN"
@@ -70,13 +71,19 @@ if [ ! -x "$LINUXDEPLOY_PLUGIN_BIN" ]; then
 fi
 
 # Keep NO_STRIP in the repack phase too (Arch/Fedora RELR compatibility).
-NO_STRIP=1 ARCH=x86_64 "$LINUXDEPLOY_PLUGIN_BIN" --appdir Jean.AppDir 2>&1
+NO_STRIP=1 ARCH="$MACHINE_ARCH" "$LINUXDEPLOY_PLUGIN_BIN" --appdir Jean.AppDir 2>&1
 
 # Rename to standard naming convention
-if [ -f "Jean-x86_64.AppImage" ]; then
+ARCH_LABEL="amd64"
+if [ "$MACHINE_ARCH" = "aarch64" ]; then
+    ARCH_LABEL="arm64"
+fi
+
+OUTPUT_NAME="Jean-${MACHINE_ARCH}.AppImage"
+if [ -f "$OUTPUT_NAME" ]; then
     VERSION=$(grep '"version"' "$PROJECT_DIR/src-tauri/tauri.conf.json" | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
-    FINAL_NAME="Jean_${VERSION}_amd64.AppImage"
-    mv "Jean-x86_64.AppImage" "$FINAL_NAME"
+    FINAL_NAME="Jean_${VERSION}_${ARCH_LABEL}.AppImage"
+    mv "$OUTPUT_NAME" "$FINAL_NAME"
     echo "==> AppImage built successfully: $BUNDLE_DIR/$FINAL_NAME"
 else
     echo "ERROR: Repackaging failed"

@@ -25,11 +25,38 @@ pub enum MergeType {
     Rebase,
 }
 
+/// A port entry in jean.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortEntry {
+    pub port: u16,
+    pub label: String,
+}
+
 /// Jean configuration from jean.json
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JeanConfig {
     #[serde(default)]
     pub scripts: JeanScripts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports: Option<Vec<PortEntry>>,
+}
+
+/// Run script(s) — supports both a single string and an array of strings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RunScript {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl RunScript {
+    /// Normalize into a Vec<String>, regardless of variant
+    pub fn into_vec(self) -> Vec<String> {
+        match self {
+            RunScript::Single(s) => vec![s],
+            RunScript::Multiple(v) => v,
+        }
+    }
 }
 
 /// Scripts section of jean.json
@@ -39,8 +66,8 @@ pub struct JeanScripts {
     pub setup: Option<String>,
     /// Script to run before worktree deletion
     pub teardown: Option<String>,
-    /// Script to run the dev environment
-    pub run: Option<String>,
+    /// Script(s) to run the dev environment — string or array of strings
+    pub run: Option<RunScript>,
 }
 
 /// A git project that has been added to Jean, or a folder for organizing projects
@@ -93,6 +120,9 @@ pub struct Project {
     /// Linear team ID to filter issues (None = show all teams)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_team_id: Option<String>,
+    /// IDs of linked projects for cross-project context sharing
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_project_ids: Vec<String>,
 }
 
 /// A git worktree created for a project
@@ -408,6 +438,21 @@ pub struct WorktreeCreatingEvent {
 pub struct WorktreeCreatedEvent {
     /// The fully created worktree
     pub worktree: Worktree,
+}
+
+/// Event emitted when worktree setup script completes (after worktree:created)
+#[derive(Clone, Serialize)]
+pub struct WorktreeSetupCompleteEvent {
+    /// The worktree ID
+    pub id: String,
+    /// The project ID
+    pub project_id: String,
+    /// Output from the setup script (stdout + stderr)
+    pub setup_output: String,
+    /// The setup script command that was executed
+    pub setup_script: String,
+    /// Whether the setup script succeeded
+    pub setup_success: bool,
 }
 
 /// Event emitted when worktree creation fails

@@ -20,11 +20,6 @@ import { Kbd } from '@/components/ui/kbd'
 import { StatusIndicator } from '@/components/ui/status-indicator'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -32,7 +27,6 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { getResumeCommand, statusConfig, type SessionCardProps } from './session-card-utils'
-import { useIsMobile } from '@/hooks/use-mobile'
 
 export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
   function SessionListRow(
@@ -61,7 +55,6 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
     ref
   ) {
     const config = statusConfig[card.status]
-    const isMobile = useIsMobile()
     const hasRecap = card.hasRecap
     const hasPlan = !!(card.planFilePath || card.planContent)
     const resumeCommand = getResumeCommand(card.session)
@@ -147,46 +140,6 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
               >
                 {card.label.name}
               </span>
-            )}
-
-            {/* Recap icon */}
-            {!isMobile && hasRecap && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 shrink-0 "
-                    onClick={e => {
-                      e.stopPropagation()
-                      onRecapView()
-                    }}
-                  >
-                    <Sparkles className="h-3 w-3" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>View recap (R)</TooltipContent>
-              </Tooltip>
-            )}
-
-            {/* Plan icon */}
-            {!isMobile && hasPlan && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 shrink-0 "
-                    onClick={e => {
-                      e.stopPropagation()
-                      onPlanView()
-                    }}
-                  >
-                    <FileText className="h-3 w-3" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>View plan (P)</TooltipContent>
-              </Tooltip>
             )}
 
             {/* Approve buttons */}

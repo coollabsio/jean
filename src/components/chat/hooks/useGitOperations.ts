@@ -100,6 +100,11 @@ export function useGitOperations({
     if (!activeWorktreePath || !activeWorktreeId) return
 
     const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
+    const { gitDiffSelectedFiles, clearGitDiffSelectedFiles } = useUIStore.getState()
+    const specificFiles = gitDiffSelectedFiles.size > 0
+      ? Array.from(gitDiffSelectedFiles)
+      : null
+
     setWorktreeLoading(activeWorktreeId, 'commit')
     const prefix =
       project?.name && worktree?.name
@@ -121,11 +126,14 @@ export function useGitOperations({
             preferences?.default_provider
           ),
           reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
+          specificFiles,
         }
       )
 
-      // Trigger git status refresh
+      // Clear selected files and trigger refresh
+      clearGitDiffSelectedFiles()
       triggerImmediateGitPoll()
+      window.dispatchEvent(new CustomEvent('git-commit-completed'))
 
       toast.success(`${prefix}: ${result.message.split('\n')[0]}`, {
         id: toastId,
@@ -154,6 +162,11 @@ export function useGitOperations({
 
       const { setWorktreeLoading, clearWorktreeLoading } =
         useChatStore.getState()
+      const { gitDiffSelectedFiles, clearGitDiffSelectedFiles } = useUIStore.getState()
+      const specificFiles = gitDiffSelectedFiles.size > 0
+        ? Array.from(gitDiffSelectedFiles)
+        : null
+
       setWorktreeLoading(activeWorktreeId, 'commit')
       const prefix =
         project?.name && worktree?.name
@@ -177,11 +190,14 @@ export function useGitOperations({
               preferences?.default_provider
             ),
             reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
+            specificFiles,
           }
         )
 
-        // Trigger git status refresh
+        // Clear selected files and trigger refresh
+        clearGitDiffSelectedFiles()
         triggerImmediateGitPoll()
+        window.dispatchEvent(new CustomEvent('git-commit-completed'))
 
         if (result.push_permission_denied) {
           toast.error(

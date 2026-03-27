@@ -5,12 +5,11 @@ import {
   useMemo,
   useRef,
   useState,
-  lazy,
-  Suspense,
   type RefObject,
 } from 'react'
 import {
   Archive,
+  ChevronDown,
   Code,
   Eye,
   EyeOff,
@@ -51,7 +50,7 @@ import {
   useRenameSession,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
-import { useWorktree, useProjects, useRunScript } from '@/services/projects'
+import { useWorktree, useProjects, useRunScripts } from '@/services/projects'
 import {
   useGitStatus,
   gitPush,
@@ -65,10 +64,6 @@ import { isNativeApp } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
-const GitDiffModal = lazy(() =>
-  import('./GitDiffModal').then(mod => ({ default: mod.GitDiffModal }))
-)
-import type { DiffRequest } from '@/types/git-diff'
 import { ChatWindow } from './ChatWindow'
 import { ModalTerminalDrawer } from './ModalTerminalDrawer'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
@@ -77,6 +72,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -86,6 +84,7 @@ import {
   useOpenBranchOnGitHub,
 } from '@/services/projects'
 import { getOpenInDefaultLabel } from '@/types/preferences'
+import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import {
   getResumeCommand,
   statusConfig,
@@ -233,7 +232,17 @@ export function SessionChatModal({
     [sessionsData?.sessions]
   )
   const { data: preferences } = usePreferences()
-  const { data: runScript } = useRunScript(worktreePath)
+  const { data: runScripts = [] } = useRunScripts(worktreePath)
+  const hasRunningTerminal = useTerminalStore(state => {
+    const terminals = state.terminals[worktreeId] ?? []
+    return terminals.some(t => state.runningTerminals.has(t.id))
+  })
+  const terminalShortcut = formatShortcutDisplay(
+    preferences?.keybindings?.toggle_terminal ?? DEFAULT_KEYBINDINGS.toggle_terminal
+  )
+  const runShortcut = formatShortcutDisplay(
+    preferences?.keybindings?.execute_run ?? DEFAULT_KEYBINDINGS.execute_run
+  )
   const createSession = useCreateSession()
 
   // Horizontal scroll on session tabs
@@ -341,8 +350,6 @@ export function SessionChatModal({
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInFinder = useOpenWorktreeInFinder()
   const openOnGitHub = useOpenBranchOnGitHub()
-
-  const [diffRequest, setDiffRequest] = useState<DiffRequest | null>(null)
 
   const hasSetActiveRef = useRef<string | null>(null)
 
@@ -646,31 +653,36 @@ export function SessionChatModal({
   )
 
   const handleUncommittedDiffClick = useCallback(() => {
-    setDiffRequest({
-      type: 'uncommitted',
-      worktreePath,
-      baseBranch: defaultBranch,
-    })
-  }, [setDiffRequest, worktreePath, defaultBranch])
+    window.dispatchEvent(
+      new CustomEvent('open-git-diff', { detail: { type: 'uncommitted' } })
+    )
+  }, [])
 
   const handleBranchDiffClick = useCallback(() => {
-    setDiffRequest({
-      type: 'branch',
-      worktreePath,
-      baseBranch: defaultBranch,
-    })
-  }, [setDiffRequest, worktreePath, defaultBranch])
+    window.dispatchEvent(
+      new CustomEvent('open-git-diff', { detail: { type: 'branch' } })
+    )
+  }, [])
 
   const handleRun = useCallback(() => {
-    if (!runScript) {
+    const first = runScripts[0]
+    if (!first) {
       notify('No run script configured in jean.json', undefined, {
         type: 'error',
       })
       return
     }
-    useTerminalStore.getState().startRun(worktreeId, runScript)
+    useTerminalStore.getState().startRun(worktreeId, first)
     useTerminalStore.getState().setModalTerminalOpen(worktreeId, true)
-  }, [worktreeId, runScript])
+  }, [worktreeId, runScripts])
+
+  const handleRunCommand = useCallback(
+    (cmd: string) => {
+      useTerminalStore.getState().startRun(worktreeId, cmd)
+      useTerminalStore.getState().setModalTerminalOpen(worktreeId, true)
+    },
+    [worktreeId]
+  )
 
   // Close on Escape key
   useEffect(() => {
@@ -777,50 +789,6 @@ export function SessionChatModal({
                         size="sm"
                         className="h-7 px-2 text-xs"
                         onClick={() => {
-                          const { reviewResults, toggleReviewSidebar } =
-                            useChatStore.getState()
-                          const hasReviewResults =
-                            currentSessionId &&
-                            (reviewResults[currentSessionId] ||
-                              currentSession?.review_results)
-                          if (hasReviewResults) {
-                            if (
-                              currentSessionId &&
-                              !reviewResults[currentSessionId] &&
-                              currentSession?.review_results
-                            ) {
-                              useChatStore
-                                .getState()
-                                .setReviewResults(
-                                  currentSessionId,
-                                  currentSession.review_results
-                                )
-                            }
-                            toggleReviewSidebar()
-                          } else {
-                            window.dispatchEvent(
-                              new CustomEvent('magic-command', {
-                                detail: {
-                                  command: 'review',
-                                  sessionId: currentSessionId,
-                                },
-                              })
-                            )
-                          }
-                        }}
-                      >
-                        <Eye className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Review</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => {
                           useTerminalStore
                             .getState()
                             .toggleModalTerminal(worktreeId)
@@ -829,9 +797,9 @@ export function SessionChatModal({
                         <Terminal className="h-3 w-3" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Terminal</TooltipContent>
+                    <TooltipContent>Terminal{' '}<kbd className="ml-1 text-[0.625rem] opacity-60">{terminalShortcut}</kbd></TooltipContent>
                   </Tooltip>
-                  {runScript && (
+                  {runScripts.length === 1 && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -840,11 +808,50 @@ export function SessionChatModal({
                           className="h-7 px-2 text-xs"
                           onClick={handleRun}
                         >
-                          <Play className="h-3 w-3" />
+                          <Play className={`h-3 w-3 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>Run</TooltipContent>
+                      <TooltipContent>{hasRunningTerminal ? 'Running' : 'Run'}{' '}<kbd className="ml-1 text-[0.625rem] opacity-60">{runShortcut}</kbd></TooltipContent>
                     </Tooltip>
+                  )}
+                  {runScripts.length > 1 && (
+                    <div className="flex items-center">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 rounded-r-none px-2 text-xs"
+                            onClick={handleRun}
+                          >
+                            <Play className={`h-3 w-3 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{hasRunningTerminal ? 'Running' : 'Run first command'}{' '}<kbd className="ml-1 text-[0.625rem] opacity-60">{runShortcut}</kbd></TooltipContent>
+                      </Tooltip>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 rounded-l-none border-l border-border/50 px-1 text-xs"
+                          >
+                            <ChevronDown className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {runScripts.map((cmd, i) => (
+                            <DropdownMenuItem
+                              key={i}
+                              onSelect={() => handleRunCommand(cmd)}
+                              className="font-mono text-xs"
+                            >
+                              {cmd}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   )}
                 </div>
               )}
@@ -912,43 +919,6 @@ export function SessionChatModal({
                     )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onSelect={() => {
-                        const { reviewResults, toggleReviewSidebar } =
-                          useChatStore.getState()
-                        const hasReviewResults =
-                          currentSessionId &&
-                          (reviewResults[currentSessionId] ||
-                            currentSession?.review_results)
-                        if (hasReviewResults) {
-                          if (
-                            currentSessionId &&
-                            !reviewResults[currentSessionId] &&
-                            currentSession?.review_results
-                          ) {
-                            useChatStore
-                              .getState()
-                              .setReviewResults(
-                                currentSessionId,
-                                currentSession.review_results
-                              )
-                          }
-                          toggleReviewSidebar()
-                        } else {
-                          window.dispatchEvent(
-                            new CustomEvent('magic-command', {
-                              detail: {
-                                command: 'review',
-                                sessionId: currentSessionId,
-                              },
-                            })
-                          )
-                        }
-                      }}
-                    >
-                      <Eye className="h-4 w-4" />
-                      Review
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
                       onSelect={() =>
                         useTerminalStore
                           .getState()
@@ -958,11 +928,30 @@ export function SessionChatModal({
                       <Terminal className="h-4 w-4" />
                       Terminal
                     </DropdownMenuItem>
-                    {runScript && (
+                    {runScripts.length === 1 && (
                       <DropdownMenuItem onSelect={handleRun}>
-                        <Play className="h-4 w-4" />
+                        <Play className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
                         Run
                       </DropdownMenuItem>
+                    )}
+                    {runScripts.length > 1 && (
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <Play className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
+                          Run
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          {runScripts.map((cmd, i) => (
+                            <DropdownMenuItem
+                              key={i}
+                              onSelect={() => handleRunCommand(cmd)}
+                              className="font-mono text-xs"
+                            >
+                              {cmd}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
                     )}
                     {currentResumeCommand && (
                       <DropdownMenuItem
@@ -1083,7 +1072,7 @@ export function SessionChatModal({
                               className="w-full min-w-0 bg-transparent text-xs outline-none"
                             />
                           ) : (
-                            session.name
+                            <span className="truncate max-w-48">{session.name}</span>
                           )}
                           {renamingSessionId !== session.id && (
                             <DismissButton
@@ -1231,44 +1220,6 @@ export function SessionChatModal({
               </div>
               <ScrollBar orientation="horizontal" className="h-1" />
             </ScrollArea>
-            {!isMobile && (
-              <div className="flex items-center gap-0.5">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        window.dispatchEvent(new CustomEvent('open-recap'))
-                      }
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
-                      aria-label="Recap"
-                    >
-                      <Sparkles
-                        className={cn('h-3 w-3', hasRecap && 'text-yellow-500')}
-                      />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Recap (R)</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        window.dispatchEvent(new CustomEvent('open-plan'))
-                      }
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
-                      aria-label="Plan"
-                    >
-                      <FileText
-                        className={cn('h-3 w-3', hasPlan && 'text-yellow-500')}
-                      />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Plan (P)</TooltipContent>
-                </Tooltip>
-              </div>
-            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1302,22 +1253,6 @@ export function SessionChatModal({
             worktreeId={worktreeId}
             worktreePath={worktreePath}
           />
-        )}
-        {diffRequest && (
-          <Suspense fallback={null}>
-            <GitDiffModal
-              diffRequest={diffRequest}
-              onClose={() => setDiffRequest(null)}
-              uncommittedStats={{
-                added: uncommittedAdded,
-                removed: uncommittedRemoved,
-              }}
-              branchStats={{
-                added: branchDiffAdded,
-                removed: branchDiffRemoved,
-              }}
-            />
-          </Suspense>
         )}
       </div>
       <LabelModal

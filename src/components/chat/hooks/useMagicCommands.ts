@@ -13,6 +13,7 @@ export interface WorkflowRunDetail {
 interface MagicCommandHandlers {
   handleSaveContext: () => void
   handleLoadContext: () => void
+  handleLinkedProjects: () => void
   handleCommit: () => void
   handleCommitAndPush: () => void
   handlePull: () => void
@@ -45,6 +46,7 @@ interface UseMagicCommandsOptions extends MagicCommandHandlers {
 export function useMagicCommands({
   handleSaveContext,
   handleLoadContext,
+  handleLinkedProjects,
   handleCommit,
   handleCommitAndPush,
   handlePull,
@@ -63,6 +65,7 @@ export function useMagicCommands({
   const handlersRef = useRef<MagicCommandHandlers>({
     handleSaveContext,
     handleLoadContext,
+    handleLinkedProjects,
     handleCommit,
     handleCommitAndPush,
     handlePull,
@@ -82,6 +85,7 @@ export function useMagicCommands({
     handlersRef.current = {
       handleSaveContext,
       handleLoadContext,
+      handleLinkedProjects,
       handleCommit,
       handleCommitAndPush,
       handlePull,
@@ -116,6 +120,9 @@ export function useMagicCommands({
           break
         case 'load-context':
           handlers.handleLoadContext()
+          break
+        case 'linked-projects':
+          handlers.handleLinkedProjects()
           break
         case 'commit':
           handlers.handleCommit()
@@ -166,12 +173,11 @@ export function useMagicCommands({
       )
   }, [isModal, sessionModalOpen]) // Re-register when modal state changes
 
-  // Consume pending magic command set by MagicModal.
-  // Only the non-modal ChatWindow should consume it.
+  // Consume pending magic command set by MagicModal or ReviewCommentsDialog.
+  // Any mounted ChatWindow can consume it (cleared immediately to prevent double-processing).
   const pendingMagicCommand = useChatStore(state => state.pendingMagicCommand)
   useEffect(() => {
     if (!pendingMagicCommand) return
-    if (isModal) return
 
     useChatStore.getState().setPendingMagicCommand(null)
 

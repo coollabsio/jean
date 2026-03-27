@@ -183,28 +183,29 @@ function executeKeybindingAction(
         break
       }
 
-      // Fetch run script - use fetchQuery to handle uncached dashboard worktrees
+      // Fetch run scripts - use fetchQuery to handle uncached dashboard worktrees
       ;(async () => {
-        let runScript = queryClient.getQueryData<string | null>([
-          'run-script',
+        let runScripts = queryClient.getQueryData<string[]>([
+          'run-scripts',
           targetWorktreePath,
         ])
 
-        if (runScript === undefined) {
+        if (runScripts === undefined) {
           try {
-            runScript = await queryClient.fetchQuery<string | null>({
-              queryKey: ['run-script', targetWorktreePath],
+            runScripts = await queryClient.fetchQuery<string[]>({
+              queryKey: ['run-scripts', targetWorktreePath],
               queryFn: () =>
-                invoke<string | null>('get_run_script', {
+                invoke<string[]>('get_run_scripts', {
                   worktreePath: targetWorktreePath,
                 }),
             })
           } catch {
-            runScript = null
+            runScripts = []
           }
         }
 
-        if (!runScript) {
+        const firstScript = runScripts?.[0]
+        if (!firstScript) {
           const projectId = useProjectsStore.getState().selectedProjectId
           toast.error('No run script configured in jean.json', {
             action: projectId
@@ -223,7 +224,7 @@ function executeKeybindingAction(
         // Start run
         const terminalId = useTerminalStore
           .getState()
-          .startRun(targetWorktreeId, runScript)
+          .startRun(targetWorktreeId, firstScript)
 
         if (sessionModalOpen) {
           // Modal view: open terminal drawer
@@ -235,7 +236,7 @@ function executeKeybindingAction(
           startHeadless(terminalId, {
             worktreeId: targetWorktreeId,
             worktreePath: targetWorktreePath!,
-            command: runScript,
+            command: firstScript,
           })
         }
       })()
@@ -650,6 +651,11 @@ export function useMainWindowEventListeners() {
               useUIStore.getState()
             setRightSidebarVisible(!rightSidebarVisible)
           }
+        }),
+
+        listen('menu-magic-menu', () => {
+          logger.debug('Magic menu event received from native menu')
+          executeKeybindingAction('open_magic_modal', commandContext, queryClient)
         }),
 
         // Branch naming events (automatic branch renaming based on first message)

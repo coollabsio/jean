@@ -50,6 +50,10 @@ pub struct ServerStatus {
 #[derive(Deserialize)]
 struct WsAuth {
     token: Option<String>,
+    /// Comma-separated worktreeId:sessionId pairs from the browser's current state.
+    /// Used by /api/init to load the correct active sessions even when
+    /// ui_state.json on disk is stale (debounced save hasn't flushed yet).
+    active_sessions: Option<String>,
 }
 
 /// Resolve the dist directory path at runtime.
@@ -345,11 +349,45 @@ async fn init_handler(Query(params): Query<WsAuth>, State(state): State<AppState
             .unwrap_or(false)
     };
 
+    // Parse browser-provided active session IDs (worktreeId:sessionId pairs).
+    // These override ui_state.json which may be stale due to debounced save.
+    let browser_active_sessions: std::collections::HashMap<String, String> =
+        params.active_sessions
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .filter_map(|pair| {
+                let pair = pair.trim();
+                let (wt, sess) = pair.split_once(':')?;
+                if wt.is_empty() || sess.is_empty() {
+                    return None;
+                }
+                Some((wt.to_string(), sess.to_string()))
+            })
+            .collect();
+
     // Extract ui_state early so we can use it to fetch active sessions
     let mut ui_state = match &ui_state_result {
         Ok(ui_state) => Some(ui_state.clone()),
         Err(_) => None,
     };
+
+    // Merge browser's active sessions into ui_state (browser is more recent
+    // than disk when ui_state.json save is debounced).
+    if !browser_active_sessions.is_empty() {
+        if let Some(ref mut ui) = ui_state {
+            for (worktree_id, session_id) in &browser_active_sessions {
+                if is_active_session_valid(worktree_id, session_id) {
+                    log::debug!(
+                        "Using browser active session {session_id} for worktree {worktree_id}"
+                    );
+                    ui.active_session_ids
+                        .insert(worktree_id.clone(), session_id.clone());
+                }
+            }
+        }
+    }
+
     let mut cleaned_active_sessions: Vec<(String, Option<String>)> = Vec::new();
 
     // Clean up stale active_session_ids that reference deleted/archived sessions.

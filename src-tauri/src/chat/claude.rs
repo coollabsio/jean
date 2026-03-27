@@ -248,6 +248,16 @@ pub fn apply_custom_profile_settings(cmd: &mut std::process::Command, profile_na
     }
 }
 
+/// Strip a `-fast` suffix from the model string.
+/// Returns `(actual_model, is_fast)`.
+/// E.g. `"opus-fast"` → `("opus", true)`, `"opus"` → `("opus", false)`.
+fn split_fast_model(model: &str) -> (&str, bool) {
+    match model.strip_suffix("-fast") {
+        Some(base) => (base, true),
+        None => (model, false),
+    }
+}
+
 /// Build CLI arguments for Claude CLI.
 ///
 /// Returns a tuple of (args, env_vars) where env_vars are (key, value) pairs.
@@ -319,11 +329,15 @@ fn build_claude_args(
         }
     }
 
-    // Model
-    if let Some(m) = model {
+    // Model (strip "-fast" suffix: "opus-fast" → model="opus" + fastMode setting)
+    let is_fast = if let Some(m) = model {
+        let (actual_model, fast) = split_fast_model(m);
         args.push("--model".to_string());
-        args.push(m.to_string());
-    }
+        args.push(actual_model.to_string());
+        fast
+    } else {
+        false
+    };
 
     // Permission mode
     let perm_mode = match execution_mode.unwrap_or("plan") {
@@ -367,7 +381,7 @@ fn build_claude_args(
         }
         // If Off, don't send any thinking/effort settings (but still send custom profile if present)
     } else {
-        // Traditional thinking levels (Opus 4.5, Sonnet, Haiku)
+        // Traditional thinking levels (Sonnet, Haiku)
         if let Some(level) = thinking_level {
             let obj = settings_json.get_or_insert_with(|| serde_json::json!({}));
             if let Some(map) = obj.as_object_mut() {
@@ -380,6 +394,14 @@ fn build_claude_args(
             if let Some(tokens) = level.thinking_tokens() {
                 env_vars.push(("MAX_THINKING_TOKENS".to_string(), tokens.to_string()));
             }
+        }
+    }
+
+    // Fast mode: inject "fastMode": true into settings JSON
+    if is_fast {
+        let obj = settings_json.get_or_insert_with(|| serde_json::json!({}));
+        if let Some(map) = obj.as_object_mut() {
+            map.insert("fastMode".to_string(), serde_json::Value::Bool(true));
         }
     }
 
@@ -967,6 +989,7 @@ pub fn tail_claude_output(
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut completed = false;
     let mut cancelled = false;
+    let mut user_cancelled = false; // True only for explicit user cancel (not process death)
     let mut usage: Option<UsageData> = None;
     let mut error_lines: Vec<String> = Vec::new();
 
@@ -1389,6 +1412,7 @@ pub fn tail_claude_output(
         // for the dead_process_timeout
         if !super::registry::is_process_running(session_id) {
             log::trace!("Session {session_id} cancelled externally, stopping tail");
+            user_cancelled = true;
             cancelled = true;
             break;
         }
@@ -1480,9 +1504,12 @@ pub fn tail_claude_output(
         );
     }
 
-    // Emit done event only if not cancelled
-    // (cancel_process already emitted chat:cancelled, avoid double event)
-    if !cancelled {
+    // Emit done event unless the user explicitly cancelled (cancel_process
+    // already emitted chat:cancelled in that case, avoid double event).
+    // When the process died naturally (not user cancel) but produced content,
+    // we still emit chat:done so the frontend properly transitions from
+    // streaming to persisted state (#209).
+    if !user_cancelled {
         let done_event = DoneEvent {
             session_id: session_id.to_string(),
             worktree_id: worktree_id.to_string(),
@@ -1551,5 +1578,25 @@ mod tests {
         prefs.rtk_ai_enabled = true;
         assert!(claude_rtk_enabled(Some(&prefs)));
         assert!(!claude_rtk_enabled(None));
+    }
+
+    #[test]
+    fn split_fast_model_strips_suffix() {
+        assert_eq!(split_fast_model("opus-fast"), ("opus", true));
+        assert_eq!(
+            split_fast_model("claude-opus-4-6[1m]-fast"),
+            ("claude-opus-4-6[1m]", true)
+        );
+    }
+
+    #[test]
+    fn split_fast_model_passes_through_normal_models() {
+        assert_eq!(split_fast_model("opus"), ("opus", false));
+        assert_eq!(
+            split_fast_model("claude-opus-4-6[1m]"),
+            ("claude-opus-4-6[1m]", false)
+        );
+        assert_eq!(split_fast_model("sonnet"), ("sonnet", false));
+        assert_eq!(split_fast_model("haiku"), ("haiku", false));
     }
 }

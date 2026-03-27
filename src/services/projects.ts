@@ -20,6 +20,7 @@ import type {
   WorktreePermanentlyDeletedEvent,
   WorktreePathExistsEvent,
   WorktreeBranchExistsEvent,
+  WorktreeSetupCompleteEvent,
 } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -951,7 +952,7 @@ export function useWorktreeEvents() {
       })
     )
 
-    // Listen for successful creation
+    // Listen for successful creation (fires before setup script runs)
     unlistenPromises.push(
       listen<WorktreeCreatedEvent>('worktree:created', event => {
         const { worktree } = event.payload
@@ -961,9 +962,6 @@ export function useWorktreeEvents() {
         })
 
         clearPendingTimeout(worktree.id)
-
-        const setupFailed =
-          worktree.setup_output && worktree.setup_success === false
 
         const openWorktreeAction = {
           label: 'Open',
@@ -993,30 +991,60 @@ export function useWorktreeEvents() {
           },
         }
 
-        if (setupFailed) {
-          toast.error('Setup script failed', {
-            id: `worktree-creating-${worktree.id}`,
-            description: 'Worktree was created but the setup script exited with an error.',
-            action: openWorktreeAction,
-          })
-        } else {
-          toast.success('Worktree ready', {
-            id: `worktree-creating-${worktree.id}`,
-            action: openWorktreeAction,
-          })
-        }
+        toast.success('Worktree ready', {
+          id: `worktree-creating-${worktree.id}`,
+          action: openWorktreeAction,
+        })
 
         handleWorktreeReady(worktree, queryClient)
+      })
+    )
 
-        // Add setup script output to chat store if present
-        if (worktree.setup_output) {
-          const { addSetupScriptResult } = useChatStore.getState()
-          addSetupScriptResult(worktree.id, {
-            worktreeName: worktree.name,
-            worktreePath: worktree.path,
-            script: worktree.setup_script ?? '',
-            output: worktree.setup_output,
-            success: worktree.setup_success !== false,
+    // Listen for setup script completion (fires after worktree:created)
+    unlistenPromises.push(
+      listen<WorktreeSetupCompleteEvent>('worktree:setup_complete', event => {
+        const { id, project_id, setup_output, setup_script, setup_success } =
+          event.payload
+        logger.info('Worktree setup script complete', {
+          id,
+          success: setup_success,
+        })
+
+        // Update worktree in query cache with setup results
+        const updateWorktree = (worktree: Worktree): Worktree => ({
+          ...worktree,
+          setup_output,
+          setup_script,
+          setup_success,
+        })
+        queryClient.setQueryData<Worktree[]>(
+          projectsQueryKeys.worktrees(project_id),
+          old => old?.map(w => (w.id === id ? updateWorktree(w) : w))
+        )
+        queryClient.setQueryData<Worktree>(
+          [...projectsQueryKeys.all, 'worktree', id],
+          old => (old ? updateWorktree(old) : old)
+        )
+
+        // Get worktree info from cache for the setup result display
+        const cachedWorktree = queryClient
+          .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(project_id))
+          ?.find(w => w.id === id)
+
+        // Add setup script output to chat store
+        const { addSetupScriptResult } = useChatStore.getState()
+        addSetupScriptResult(id, {
+          worktreeName: cachedWorktree?.name ?? id,
+          worktreePath: cachedWorktree?.path ?? '',
+          script: setup_script,
+          output: setup_output,
+          success: setup_success,
+        })
+
+        if (!setup_success) {
+          toast.error('Setup script failed', {
+            description:
+              'Worktree is ready but the setup script exited with an error.',
           })
         }
       })
@@ -2033,14 +2061,34 @@ export function useOpenWorktreeInEditor() {
 }
 
 /**
+ * A port entry from jean.json
+ */
+export interface PortEntry {
+  port: number
+  label: string
+}
+
+/**
  * Jean.json config shape
  */
 export interface JeanConfig {
   scripts: {
     setup: string | null
     teardown: string | null
-    run: string | null
+    run: string | string[] | null
   }
+  ports?: PortEntry[] | null
+}
+
+/**
+ * Normalize a run script value (string | string[] | null) into a string array
+ */
+export function normalizeRunScripts(
+  run: string | string[] | null | undefined
+): string[] {
+  if (!run) return []
+  if (typeof run === 'string') return [run]
+  return run
 }
 
 /**
@@ -2079,7 +2127,8 @@ export function useSaveJeanConfig() {
     },
     onSuccess: (_, { projectPath }) => {
       queryClient.invalidateQueries({ queryKey: ['jean-config', projectPath] })
-      queryClient.invalidateQueries({ queryKey: ['run-script'] })
+      queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
+      queryClient.invalidateQueries({ queryKey: ['ports'] })
     },
     onError: error => {
       toast.error('Failed to save jean.json', {
@@ -2090,23 +2139,41 @@ export function useSaveJeanConfig() {
 }
 
 /**
- * Hook to get the run script from jean.json for a worktree
+ * Hook to get the run script(s) from jean.json for a worktree.
+ * Returns string[] (empty = none configured).
  */
-export function useRunScript(worktreePath: string | null) {
-  return useQuery<string | null>({
-    queryKey: ['run-script', worktreePath],
+export function useRunScripts(worktreePath: string | null) {
+  return useQuery<string[]>({
+    queryKey: ['run-scripts', worktreePath],
     queryFn: async () => {
-      if (!isTauri() || !worktreePath) return null
+      if (!isTauri() || !worktreePath) return []
 
-      logger.debug('Fetching run script', { worktreePath })
-      const script = await invoke<string | null>('get_run_script', {
+      logger.debug('Fetching run scripts', { worktreePath })
+      const scripts = await invoke<string[]>('get_run_scripts', {
         worktreePath,
       })
-      logger.debug('Run script result', { script })
-      return script
+      logger.debug('Run scripts result', { scripts })
+      return scripts
     },
     enabled: !!worktreePath,
     staleTime: 30_000, // Cache for 30 seconds
+  })
+}
+
+/**
+ * Hook to get configured ports from jean.json for a worktree.
+ * Returns PortEntry[] (empty = none configured).
+ */
+export function usePorts(worktreePath: string | null) {
+  return useQuery<PortEntry[]>({
+    queryKey: ['ports', worktreePath],
+    queryFn: async () => {
+      if (!isTauri() || !worktreePath) return []
+      const ports = await invoke<PortEntry[]>('get_ports', { worktreePath })
+      return ports
+    },
+    enabled: !!worktreePath,
+    staleTime: 30_000,
   })
 }
 
@@ -2367,9 +2434,11 @@ export function useUpdateProjectSettings() {
   return useMutation({
     mutationFn: async ({
       projectId,
+      name,
       defaultBranch,
       enabledMcpServers,
       knownMcpServers,
+      linkedProjectIds,
       customSystemPrompt,
       defaultProvider,
       defaultBackend,
@@ -2378,6 +2447,7 @@ export function useUpdateProjectSettings() {
       linearTeamId,
     }: {
       projectId: string
+      name?: string
       defaultBranch?: string
       enabledMcpServers?: string[]
       knownMcpServers?: string[]
@@ -2387,14 +2457,16 @@ export function useUpdateProjectSettings() {
       worktreesDir?: string
       linearApiKey?: string
       linearTeamId?: string
+      linkedProjectIds?: string[]
     }): Promise<Project> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
-      logger.debug('Updating project settings', { projectId, defaultBranch })
+      logger.debug('Updating project settings', { projectId, name, defaultBranch })
       const project = await invoke<Project>('update_project_settings', {
         projectId,
+        name,
         defaultBranch,
         enabledMcpServers,
         knownMcpServers,
@@ -2404,6 +2476,7 @@ export function useUpdateProjectSettings() {
         worktreesDir,
         linearApiKey,
         linearTeamId,
+        linkedProjectIds,
       })
       logger.info('Project settings updated', { project })
       return project

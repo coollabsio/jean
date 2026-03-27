@@ -146,7 +146,7 @@ export const AppearancePane: React.FC = () => {
               onValueChange={handleThemeChange}
               disabled={patchPreferences.isPending}
             >
-              <SelectTrigger>
+              <SelectTrigger className="min-w-96">
                 <SelectValue placeholder="Select theme" />
               </SelectTrigger>
               <SelectContent>
@@ -171,7 +171,7 @@ export const AppearancePane: React.FC = () => {
               }
               disabled={patchPreferences.isPending}
             >
-              <SelectTrigger className="w-52">
+              <SelectTrigger className="w-96">
                 <SelectValue placeholder="Select theme" />
               </SelectTrigger>
               <SelectContent>
@@ -198,7 +198,7 @@ export const AppearancePane: React.FC = () => {
               }
               disabled={patchPreferences.isPending}
             >
-              <SelectTrigger className="w-52">
+              <SelectTrigger className="w-96">
                 <SelectValue placeholder="Select theme" />
               </SelectTrigger>
               <SelectContent>
@@ -223,7 +223,7 @@ export const AppearancePane: React.FC = () => {
               }
               disabled={patchPreferences.isPending}
             >
-              <SelectTrigger className="w-44">
+              <SelectTrigger className="w-96">
                 <SelectValue placeholder="Select font" />
               </SelectTrigger>
               <SelectContent>
@@ -244,7 +244,7 @@ export const AppearancePane: React.FC = () => {
               }
               disabled={patchPreferences.isPending}
             >
-              <SelectTrigger className="w-44">
+              <SelectTrigger className="w-96">
                 <SelectValue placeholder="Select font" />
               </SelectTrigger>
               <SelectContent>
@@ -321,7 +321,7 @@ export const AppearancePane: React.FC = () => {
               }
               disabled={patchPreferences.isPending}
             >
-              <SelectTrigger className="w-52">
+              <SelectTrigger className="w-96">
                 <SelectValue placeholder="Select mode" />
               </SelectTrigger>
               <SelectContent>

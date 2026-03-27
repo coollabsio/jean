@@ -29,18 +29,23 @@ export function SendCancelButton({
   const isMobile = useIsMobile()
 
   if (isSending) {
-    return (
+    const cancelButton = (
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             onClick={onCancel}
-            className="flex h-8 items-center justify-center gap-1.5 rounded-r-lg px-3 text-xs font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90"
+            className={cn(
+              'flex h-8 items-center justify-center gap-1.5 px-3 text-xs font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90',
+              !canSend && 'rounded-r-lg'
+            )}
           >
             <span>{queuedMessageCount ? 'Skip to Next' : 'Cancel'}</span>
-            <Kbd className="ml-0.5 h-4 text-[10px] bg-primary-foreground/20 text-primary-foreground">
-              {isMacOS ? `${getModifierSymbol()}⌥⌫` : 'Ctrl+Alt+⌫'}
-            </Kbd>
+            {!isMobile && (
+              <Kbd className="ml-0.5 h-4 text-[10px] bg-primary-foreground/20 text-primary-foreground">
+                {isMacOS ? `${getModifierSymbol()}⌥⌫` : 'Ctrl+Alt+⌫'}
+              </Kbd>
+            )}
           </button>
         </TooltipTrigger>
         <TooltipContent>
@@ -50,6 +55,31 @@ export function SendCancelButton({
         </TooltipContent>
       </Tooltip>
     )
+
+    if (canSend) {
+      return (
+        <div className="flex items-center">
+          {cancelButton}
+          <div className="h-4 w-px shrink-0 bg-border/50" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="submit"
+                className="flex h-8 items-center justify-center gap-1.5 rounded-r-lg px-2.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+              >
+                <span>Queue</span>
+                <Rocket className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isMobile ? 'Queue message' : 'Queue message (Enter)'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )
+    }
+
+    return cancelButton
   }
 
   return (

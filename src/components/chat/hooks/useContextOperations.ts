@@ -4,7 +4,8 @@ import { useUIStore } from '@/store/ui-store'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { SaveContextResponse, SavedContextsResponse } from '@/types/chat'
-import type { Worktree } from '@/types/projects'
+import type { Project, Worktree } from '@/types/projects'
+import { projectsQueryKeys } from '@/services/projects'
 import {
   resolveMagicPromptProvider,
   type AppPreferences,
@@ -54,8 +55,9 @@ export function useContextOperations({
   const handleSaveContext = useCallback(async () => {
     if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
-    // Get project name from worktree
-    const projectName = worktree?.name ?? 'unknown-project'
+    // Get project display name (e.g., "royal-camel") instead of worktree name (e.g., "main")
+    const projects = queryClient.getQueryData<Project[]>(projectsQueryKeys.list())
+    const projectName = projects?.find(p => p.id === worktree?.project_id)?.name ?? worktree?.name ?? 'unknown-project'
 
     // Check if this session already has a saved context
     const cachedContexts = queryClient.getQueryData<SavedContextsResponse>([

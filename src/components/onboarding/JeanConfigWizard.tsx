@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileCode2 } from 'lucide-react'
+import { FileCode2, Plus, X } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -35,7 +35,8 @@ function JeanConfigWizardContent() {
 
   const [setupScript, setSetupScript] = useState('')
   const [teardownScript, setTeardownScript] = useState('')
-  const [runScript, setRunScript] = useState('')
+  const [runScripts, setRunScripts] = useState<string[]>([''])
+  const [ports, setPorts] = useState<{ port: string; label: string }[]>([])
 
   const markSeen = () => {
     if (preferences && !preferences.has_seen_jean_config_wizard) {
@@ -46,14 +47,25 @@ function JeanConfigWizardContent() {
   const handleSave = async () => {
     if (!project?.path) return
 
+    const filtered = runScripts.filter(s => s.trim())
+    let run: string | string[] | null = null
+    if (filtered.length === 1) run = filtered[0] ?? null
+    else if (filtered.length > 1) run = filtered
+
+    const validPorts = ports
+      .filter(p => p.port.trim() && p.label.trim())
+      .map(p => ({ port: Number(p.port), label: p.label.trim() }))
+      .filter(p => !isNaN(p.port) && p.port > 0 && p.port <= 65535)
+
     await saveConfig.mutateAsync({
       projectPath: project.path,
       config: {
         scripts: {
           setup: setupScript.trim() || null,
           teardown: teardownScript.trim() || null,
-          run: runScript.trim() || null,
+          run,
         },
+        ports: validPorts.length > 0 ? validPorts : null,
       },
     })
 
@@ -66,7 +78,11 @@ function JeanConfigWizardContent() {
     closeJeanConfigWizard()
   }
 
-  const hasContent = setupScript.trim() || teardownScript.trim() || runScript.trim()
+  const hasContent =
+    setupScript.trim() ||
+    teardownScript.trim() ||
+    runScripts.some(s => s.trim()) ||
+    ports.some(p => p.port.trim() && p.label.trim())
 
   return (
     <Dialog
@@ -161,20 +177,96 @@ function JeanConfigWizardContent() {
             </p>
           </div>
 
-          {/* Run script */}
+          {/* Run script(s) */}
           <div className="space-y-1.5">
-            <Label htmlFor="wizard-run-script" className="text-sm">
-              Run Script
-            </Label>
-            <Input
-              id="wizard-run-script"
-              placeholder="e.g. npm run dev"
-              value={runScript}
-              onChange={e => setRunScript(e.target.value)}
-              className="font-mono text-sm"
-            />
+            <Label className="text-sm">Run Script</Label>
+            {runScripts.map((cmd, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <Input
+                  placeholder="e.g. npm run dev"
+                  value={cmd}
+                  onChange={e => {
+                    const next = [...runScripts]
+                    next[i] = e.target.value
+                    setRunScripts(next)
+                  }}
+                  className="font-mono text-sm"
+                />
+                {runScripts.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() =>
+                      setRunScripts(runScripts.filter((_, j) => j !== i))
+                    }
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setRunScripts([...runScripts, ''])}
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              Add command
+            </Button>
             <p className="text-xs text-muted-foreground">
               Launches your dev environment in the terminal
+            </p>
+          </div>
+
+          {/* Ports */}
+          <div className="space-y-1.5">
+            <Label className="text-sm">Ports</Label>
+            {ports.map((entry, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <Input
+                  placeholder="Port"
+                  type="number"
+                  value={entry.port}
+                  onChange={e => {
+                    const next = [...ports]
+                    next[i] = { ...entry, port: e.target.value }
+                    setPorts(next)
+                  }}
+                  className="font-mono text-sm w-24"
+                />
+                <Input
+                  placeholder="Label"
+                  value={entry.label}
+                  onChange={e => {
+                    const next = [...ports]
+                    next[i] = { ...entry, label: e.target.value }
+                    setPorts(next)
+                  }}
+                  className="text-sm"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => setPorts(ports.filter((_, j) => j !== i))}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setPorts([...ports, { port: '', label: '' }])}
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              Add port
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Open configured ports in browser via CMD+O
             </p>
           </div>
         </div>

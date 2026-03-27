@@ -1041,6 +1041,24 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                     if completed {
                         run.status = RunStatus::Completed;
                         metadata.is_reviewing = true;
+
+                        // Recover claude_session_id from JSONL so the session can
+                        // resume with full context (#209). This handles the case
+                        // where send_chat_message errored before persisting the
+                        // resume ID to the session index.
+                        if run.claude_session_id.is_none() {
+                            if let Some(sid) =
+                                extract_session_id_from_jsonl(app, &session_id, &run.run_id)
+                            {
+                                log::trace!(
+                                    "Recovered claude_session_id from JSONL for run {} in session {}",
+                                    run.run_id,
+                                    session_id
+                                );
+                                run.claude_session_id = Some(sid.clone());
+                                metadata.claude_session_id = Some(sid);
+                            }
+                        }
                     } else {
                         run.status = RunStatus::Crashed;
                     }
@@ -1088,7 +1106,7 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
 
 /// Check if a run's JSONL file contains a "type":"result" line,
 /// indicating the CLI process completed successfully (vs crashing).
-fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &str) -> bool {
+pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &str) -> bool {
     let session_dir = match get_session_dir(app, session_id) {
         Ok(d) => d,
         Err(_) => return false,
@@ -1119,6 +1137,44 @@ fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &str)
         }
     }
     false
+}
+
+/// Extract the Claude session ID from a run's JSONL file.
+/// Looks for the `"session_id"` field in the result line (last ~8KB of file).
+/// Returns None if the file doesn't exist, can't be read, or has no session ID.
+pub fn extract_session_id_from_jsonl(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    run_id: &str,
+) -> Option<String> {
+    let session_dir = get_session_dir(app, session_id).ok()?;
+    let jsonl_path = session_dir.join(format!("{run_id}.jsonl"));
+    let file = File::open(&jsonl_path).ok()?;
+
+    // Read from the end — the session_id is typically in the result line near EOF.
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let reader = if file_len > 8192 {
+        use std::io::{Seek, SeekFrom};
+        let mut f = file;
+        let _ = f.seek(SeekFrom::End(-8192));
+        BufReader::new(f)
+    } else {
+        BufReader::new(file)
+    };
+
+    let mut last_session_id = None;
+    for line in reader.lines().flatten() {
+        // Look for session_id in JSON lines (typically in result or system lines)
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(sid) = val.get("session_id").and_then(|v| v.as_str()) {
+                if !sid.is_empty() {
+                    last_session_id = Some(sid.to_string());
+                }
+            }
+        }
+    }
+
+    last_session_id
 }
 
 /// Find all runs with status = Running (incomplete runs that need recovery)

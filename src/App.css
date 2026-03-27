@@ -86,7 +86,7 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.97 0 0);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -123,7 +123,7 @@
   --chart-3: #6b16ed;
   --chart-4: #dc2626;
   --chart-5: #3b82f6;
-  --sidebar: #161616; /* slightly lighter than background */
+  --sidebar: #101010; /* matches background */
   --sidebar-foreground: #fafafa;
   --sidebar-primary: #fcd452; /* yellow */
   --sidebar-primary-foreground: #101010;
@@ -308,6 +308,14 @@
   animation: collapsible-up 150ms ease-out;
 }
 
+/* Force GPU compositing layer on scroll viewport to prevent WebKit blank-screen bug.
+   Without this, rapid programmatic scrollTop changes during CSS collapse animations
+   can leave the viewport visually blank until a user scroll gesture forces a repaint. */
+.will-change-scroll {
+  will-change: scroll-position;
+  -webkit-transform: translateZ(0);
+}
+
 /* Bell ring animation for unread notifications */
 @keyframes bell-ring {
   0%, 70%, 100% {
@@ -331,6 +339,20 @@
   30% {
     transform: rotate(0deg);
   }
+}
+
+/* Pulsing glow for running terminal icon indicator */
+@keyframes icon-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px rgba(250, 204, 21, 0.5));
+  }
+  50% {
+    filter: drop-shadow(0 0 5px rgba(250, 204, 21, 0.8));
+  }
+}
+
+.animate-icon-glow {
+  animation: icon-glow 2s ease-in-out infinite;
 }
 
 @layer base {
@@ -486,6 +508,12 @@ kbd {
 /* Hidden scrollbar for horizontally scrollable tab bars */
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Number input spinner — invert arrows in dark mode so they're visible */
+.dark input[type='number']::-webkit-inner-spin-button,
+.dark input[type='number']::-webkit-outer-spin-button {
+  filter: invert(1);
+}
 
 /* Custom scrollbar styling to match Radix ScrollArea */
 .custom-scrollbar::-webkit-scrollbar {

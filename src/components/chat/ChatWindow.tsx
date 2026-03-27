@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke, listen } from '@/lib/transport'
-import { GitBranch, GitMerge, Layers } from 'lucide-react'
+import { GitBranch, GitMerge, Layers, Loader2 } from 'lucide-react'
 import {
   useSession,
   useSessions,
@@ -37,7 +37,7 @@ import {
   markPlanApproved as markPlanApprovedService,
   chatQueryKeys,
 } from '@/services/chat'
-import { useWorktree, useProjects, useRunScript } from '@/services/projects'
+import { useWorktree, useProjects, useRunScripts } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import type { Worktree, WorktreeCreatedEvent, WorktreeCreateErrorEvent } from '@/types/projects'
 import {
@@ -101,6 +101,7 @@ import {
   VirtualizedMessageList,
   type VirtualizedMessageListHandle,
 } from './VirtualizedMessageList'
+import { RecentContexts } from './RecentContexts'
 import {
   extractImagePaths,
   extractTextFilePaths,
@@ -130,6 +131,11 @@ const GitDiffModal = lazy(() =>
 const LoadContextModal = lazy(() =>
   import('../magic/LoadContextModal').then(mod => ({
     default: mod.LoadContextModal,
+  }))
+)
+const LinkedProjectsModal = lazy(() =>
+  import('../magic/LinkedProjectsModal').then(mod => ({
+    default: mod.LinkedProjectsModal,
   }))
 )
 import {
@@ -254,6 +260,7 @@ export function ChatWindow({
   const hasReviewResults = useChatStore(state =>
     activeSessionId ? !!state.reviewResults[activeSessionId] : false
   )
+  const showReviewFullWidth = hasReviewResults && reviewSidebarVisible
   // Whether session is in review state (used to hide "restored session" indicator after prompt finishes)
   const isSessionReviewing = useChatStore(state =>
     activeSessionId
@@ -477,8 +484,8 @@ export function ChatWindow({
     (worktree?.cached_check_status as CheckStatus | undefined)
   const mergeableStatus = prStatus?.mergeable ?? undefined
 
-  // Run script for this worktree (used by CMD+R keybinding)
-  const { data: runScript } = useRunScript(activeWorktreePath ?? null)
+  // Run scripts for this worktree (used by CMD+R keybinding)
+  const { data: runScripts = [] } = useRunScripts(activeWorktreePath ?? null)
 
   // Per-session provider selection: persisted session → zustand → project default → global default
   const projectDefaultProvider = project?.default_provider ?? null
@@ -901,6 +908,7 @@ export function ChatWindow({
       mcpServersDataRef,
       enabledMcpServersRef,
       selectedBackendRef,
+      markAtBottom,
     })
 
   // Clear context approval handler for PlanDialog
@@ -1671,10 +1679,20 @@ export function ChatWindow({
       worktreeProjectId: worktree?.project_id,
     })
 
+  // Linked projects modal state
+  const linkedProjectsModalOpen = useUIStore(state => state.linkedProjectsModalOpen)
+  const handleLinkedProjects = useCallback(() => {
+    useUIStore.getState().setLinkedProjectsModalOpen(true)
+  }, [])
+  const handleLinkedProjectsModalChange = useCallback((open: boolean) => {
+    useUIStore.getState().setLinkedProjectsModalOpen(open)
+  }, [])
+
   // Listen for magic-command events from MagicModal
   useMagicCommands({
     handleSaveContext,
     handleLoadContext,
+    handleLinkedProjects,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
@@ -1765,6 +1783,7 @@ export function ChatWindow({
     createSession,
     queryClient,
     scrollToBottom,
+    markAtBottom,
     inputRef,
     pendingPlanMessage,
     projectIdRef,
@@ -1844,7 +1863,7 @@ export function ChatWindow({
     patchPreferences,
     handleSaveContext,
     handleLoadContext,
-    runScript,
+    runScripts,
     hasStreamingPlan,
     pendingPlanMessage,
     handleStreamingPlanApproval,
@@ -2002,9 +2021,14 @@ export function ChatWindow({
       )}
     >
       <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
+        {showReviewFullWidth && activeSessionId ? (
+          <div className="flex-1 min-h-0">
+            <ReviewResultsPanel sessionId={activeSessionId} onSendFix={handleReviewFix} />
+          </div>
+        ) : (
         <ResizablePanelGroup direction="horizontal" className="flex-1">
             <ResizablePanel
-              defaultSize={hasReviewResults && reviewSidebarVisible ? 50 : 100}
+              defaultSize={100}
               minSize={40}
             >
               <ResizablePanelGroup direction="vertical" className="h-full">
@@ -2036,6 +2060,7 @@ export function ChatWindow({
                       <ScrollArea
                         className="h-full w-full"
                         viewportRef={scrollViewportRef}
+                        viewportClassName="will-change-scroll"
                         onScroll={handleScroll}
                       >
                         <div className="mx-auto max-w-7xl px-4 pt-4 pb-6 md:px-6 min-w-0 w-full">
@@ -2057,6 +2082,19 @@ export function ChatWindow({
                                   />
                                 </div>
                               )}
+                            {/* Setup script running indicator */}
+                            {worktree?.setup_script &&
+                              !setupScriptResult && (
+                                <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
+                                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                  <span>
+                                    Running setup script:{' '}
+                                    <code className="rounded bg-muted px-1 py-0.5">
+                                      {worktree.setup_script}
+                                    </code>
+                                  </span>
+                                </div>
+                              )}
                             {/* Setup script output from jean.json */}
                             {setupScriptResult && activeWorktreeId && (
                               <SetupScriptOutput
@@ -2073,6 +2111,14 @@ export function ChatWindow({
                                 Loading...
                               </div>
                             ) : (
+                              <>
+                              {messages.length === 0 && !isSending && activeSessionId && (
+                                <RecentContexts
+                                  sessionId={activeSessionId}
+                                  queryClient={queryClient}
+                                  projectId={worktree?.project_id}
+                                />
+                              )}
                               <VirtualizedMessageList
                                 ref={virtualizedListRef}
                                 messages={messages}
@@ -2111,6 +2157,7 @@ export function ChatWindow({
                                 }
                                 completedDurationMs={completedDurationMs}
                               />
+                              </>
                             )}
                             {/* Streaming response + elapsed timer in one wrapper to avoid space-y-4 gap */}
                             {isSending && activeSessionId && (
@@ -2197,6 +2244,7 @@ export function ChatWindow({
                               <QueuedMessagesList
                                 messages={currentQueuedMessages}
                                 sessionId={activeSessionId}
+                                worktreePath={activeWorktreePath}
                                 onRemove={handleRemoveQueuedMessage}
                                 onForceSend={handleForceSendQueued}
                                 isSessionIdle={!isSending}
@@ -2518,6 +2566,7 @@ export function ChatWindow({
               </>
             )}
           </ResizablePanelGroup>
+        )}
 
         {/* File content modal for viewing files from tool calls */}
         <FileContentModal
@@ -2556,6 +2605,15 @@ export function ChatWindow({
             worktreePath={activeWorktreePath ?? null}
             activeSessionId={activeSessionId ?? null}
             projectName={worktree?.name ?? 'unknown-project'}
+            projectId={worktree?.project_id ?? null}
+          />
+        </Suspense>
+
+        {/* Linked Projects modal for managing cross-project links */}
+        <Suspense fallback={null}>
+          <LinkedProjectsModal
+            open={linkedProjectsModalOpen}
+            onOpenChange={handleLinkedProjectsModalChange}
             projectId={worktree?.project_id ?? null}
           />
         </Suspense>

@@ -26,6 +26,31 @@ pub fn ensure_macos_path() {
     });
 }
 
+/// Detect the package manager that installed a binary by resolving symlinks.
+///
+/// Returns `Some("homebrew")` if the canonical path contains `/homebrew/` or `/Cellar/`,
+/// `Some("npm")` if it contains `/node_modules/`, `None` otherwise.
+pub fn detect_package_manager(binary_path: &std::path::Path) -> Option<String> {
+    let canonical = std::fs::canonicalize(binary_path).ok()?;
+    let canonical_str = canonical.to_string_lossy();
+
+    if canonical_str.contains("/homebrew/") || canonical_str.contains("/Cellar/") {
+        return Some("homebrew".to_string());
+    }
+
+    // Check bun before generic node_modules — bun's global installs also use node_modules/
+    // e.g. ~/.bun/install/global/node_modules/@openai/codex/bin/codex.js
+    if canonical_str.contains("/.bun/") {
+        return Some("bun".to_string());
+    }
+
+    if canonical_str.contains("/node_modules/") {
+        return Some("npm".to_string());
+    }
+
+    None
+}
+
 /// Creates a Command that won't open a console window on Windows.
 /// Use for all background operations (git, gh, claude CLI, etc.).
 /// Do NOT use for commands that intentionally open UI (terminals, editors, file explorers).
@@ -171,16 +196,20 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
 /// 3. Renaming the `.tmp` file to the target path
 /// 4. Best-effort cleanup of the `.old` file
 ///
-/// On Unix, this simply writes directly (overwriting is safe even for running binaries).
+/// On macOS, overwriting a running binary in-place (same inode) causes the kernel's code-signing
+/// enforcement to taint the inode, resulting in SIGKILL for all subsequent executions from that
+/// path. To avoid this, we always write to a temp file and atomically rename it into place,
+/// which allocates a new inode while the old one stays alive for any running process.
 pub fn write_binary_file(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    let temp_path = path.with_extension("tmp");
+
+    // Write new binary to temp file (always a new inode)
+    std::fs::write(&temp_path, content)
+        .map_err(|e| format!("Failed to write temp file: {e}"))?;
+
     #[cfg(windows)]
     {
-        let temp_path = path.with_extension("tmp");
         let old_path = path.with_extension("old");
-
-        // Write new binary to temp file
-        std::fs::write(&temp_path, content)
-            .map_err(|e| format!("Failed to write temp file: {e}"))?;
 
         // Move existing file out of the way (Windows allows renaming locked files)
         if path.exists() {
@@ -204,7 +233,13 @@ pub fn write_binary_file(path: &std::path::Path, content: &[u8]) -> Result<(), S
 
     #[cfg(not(windows))]
     {
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {e}"))
+        // Atomic rename: replaces the directory entry so `path` points to the new inode.
+        // The old inode (if any running process has it mapped) stays alive until that process exits.
+        if let Err(e) = std::fs::rename(&temp_path, path) {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("Failed to install new file: {e}"));
+        }
+        Ok(())
     }
 }
 

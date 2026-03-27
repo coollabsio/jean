@@ -194,11 +194,37 @@ export function useScrollManagement({
     }
   }, [isSending])
 
-  // [Tier 4] After streaming ends, ensure we're pinned to the actual bottom.
-  // Uses double-rAF (2 frames ≈ 33ms) instead of 150ms setTimeout to catch
-  // late layout shifts from streaming → final content reflow.
+  // [Tier 4] Scroll management on streaming transitions.
+  // - Start: scroll to bottom so auto-scroll works for queued messages
+  //   (queue processor doesn't have access to scrollToBottom).
+  // - End: pin to actual bottom to catch late layout shifts from
+  //   streaming → final content reflow (double-rAF ≈ 33ms).
   const wasSendingRef = useRef(false)
   useEffect(() => {
+    // Streaming just started — ensure we're at bottom so ResizeObserver auto-scroll works.
+    // Covers: queued messages executed by useQueueProcessor, plan approvals, direct sends.
+    // Single rAF is sufficient because PlanDisplay now collapses instantly (skipAnimation)
+    // when triggered programmatically, so no second layout shift to wait for.
+    if (!wasSendingRef.current && isSending) {
+      isAtBottomRef.current = true
+      setIsAtBottom(true)
+      let cancelled = false
+      const viewport = scrollViewportRef.current
+      if (viewport) {
+        requestAnimationFrame(() => {
+          if (cancelled) return
+          if (isAtBottomRef.current) {
+            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
+          }
+        })
+      }
+      wasSendingRef.current = !!isSending
+      return () => {
+        cancelled = true
+      }
+    }
+
+    // Streaming just ended — pin to actual bottom
     if (wasSendingRef.current && !isSending && isAtBottomRef.current) {
       let cancelled = false
       requestAnimationFrame(() => {
@@ -213,7 +239,7 @@ export function useScrollManagement({
           }
         })
       })
-      wasSendingRef.current = false
+      wasSendingRef.current = !!isSending
       return () => {
         cancelled = true
       }

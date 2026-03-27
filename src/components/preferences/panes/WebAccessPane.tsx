@@ -218,16 +218,11 @@ export const WebAccessPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-4">
-        <p className="text-sm text-muted-foreground">
-          <strong className="text-yellow-600 dark:text-yellow-400">
-            Experimental.
-          </strong>{' '}
-          Enable HTTP server to access Jean from a web browser on your local
-          network. All commands are routed over WebSocket with token
-          authentication.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Enable HTTP server to access Jean from a web browser on your local
+        network. All commands are routed over WebSocket with token
+        authentication.
+      </p>
 
       <SettingsSection title="Server">
         <div className="space-y-4">

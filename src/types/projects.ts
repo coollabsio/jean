@@ -55,6 +55,8 @@ export interface Project {
   linear_api_key?: string | null
   /** Linear team ID to filter issues (undefined/null = show all teams) */
   linear_team_id?: string | null
+  /** IDs of linked projects for cross-project context sharing */
+  linked_project_ids?: string[]
 }
 
 /**
@@ -152,6 +154,15 @@ export interface WorktreeCreatingEvent {
 /** Event payload when worktree creation completes */
 export interface WorktreeCreatedEvent {
   worktree: Worktree
+}
+
+/** Event payload when worktree setup script completes (after worktree:created) */
+export interface WorktreeSetupCompleteEvent {
+  id: string
+  project_id: string
+  setup_output: string
+  setup_script: string
+  setup_success: boolean
 }
 
 /** Event payload when worktree creation fails */

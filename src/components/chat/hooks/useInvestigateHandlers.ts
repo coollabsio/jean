@@ -496,7 +496,7 @@ export function useInvestigateHandlers({
         addSendingSession(targetSessionId)
         setSelectedModel(targetSessionId, investigateModel)
         setSelectedProvider(targetSessionId, investigateProvider)
-        setExecutingMode(targetSessionId, executionModeRef.current)
+        setExecutingMode(targetSessionId, 'yolo')
 
         setSessionBackend.mutate({
           sessionId: targetSessionId,
@@ -541,7 +541,7 @@ export function useInvestigateHandlers({
             worktreePath,
             message: prompt,
             model: investigateModel,
-            executionMode: executionModeRef.current,
+            executionMode: 'yolo',
             thinkingLevel: selectedThinkingLevelRef.current,
             effortLevel: investigateUseAdaptive
               ? selectedEffortLevelRef.current

@@ -106,7 +106,7 @@ export const StreamingMessage = memo(function StreamingMessage({
   hideApproveButtons,
 }: StreamingMessageProps) {
   return (
-    <div className="text-muted-foreground">
+    <div className="text-foreground/90">
       {/* Render streaming content blocks inline if available */}
       {contentBlocks.length > 0 ? (
         (() => {

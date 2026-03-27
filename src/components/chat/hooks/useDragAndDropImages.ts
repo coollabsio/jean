@@ -12,6 +12,9 @@ const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp']
 /** Extensions handled as text files (vector formats) */
 const TEXT_IMAGE_EXTENSIONS = ['svg']
 
+/** Tracks image paths currently being processed to prevent duplicates */
+const processingPaths = new Set<string>()
+
 interface UseDragAndDropImagesOptions {
   /** Whether drag-and-drop is disabled */
   disabled?: boolean
@@ -44,6 +47,7 @@ export function useDragAndDropImages(
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
       const appWindow = getCurrentWindow()
 
+      let lastDropTime = 0
       const unlistenFn = await appWindow.onDragDropEvent(event => {
         if (event.payload.type === 'enter') {
           // Files entered the window
@@ -55,12 +59,17 @@ export function useDragAndDropImages(
           // Files dropped
           setIsDragging(false)
 
+          // Guard against duplicate drop events (macOS can fire twice)
+          const now = Date.now()
+          if (now - lastDropTime < 500) return
+          lastDropTime = now
+
           if (!sessionId) {
             toast.error('No active session')
             return
           }
 
-          const paths = event.payload.paths
+          const paths = [...new Set(event.payload.paths)]
           const imagePaths: string[] = []
           const svgPaths: string[] = []
           for (const path of paths) {
@@ -126,6 +135,10 @@ async function processDroppedSvg(
   sourcePath: string,
   sessionId: string
 ): Promise<void> {
+  // Guard against duplicate processing of the same file
+  if (processingPaths.has(sourcePath)) return
+  processingPaths.add(sourcePath)
+
   try {
     const { readTextFile } = await import('@tauri-apps/plugin-fs')
     const svgText = await readTextFile(sourcePath)
@@ -147,6 +160,8 @@ async function processDroppedSvg(
     toast.error('Failed to save SVG', {
       description: String(error),
     })
+  } finally {
+    processingPaths.delete(sourcePath)
   }
 }
 
@@ -157,6 +172,10 @@ async function processDroppedImage(
   sourcePath: string,
   sessionId: string
 ): Promise<void> {
+  // Guard against duplicate processing of the same file
+  if (processingPaths.has(sourcePath)) return
+  processingPaths.add(sourcePath)
+
   // Add loading placeholder immediately
   const placeholderId = `loading-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   const { addPendingImage, updatePendingImage, removePendingImage } =
@@ -198,5 +217,7 @@ async function processDroppedImage(
         description: errorStr,
       })
     }
+  } finally {
+    processingPaths.delete(sourcePath)
   }
 }

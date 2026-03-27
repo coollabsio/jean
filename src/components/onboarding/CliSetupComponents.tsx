@@ -5,8 +5,11 @@
  * and the individual CLI reinstall modal.
  */
 
+/* eslint-disable no-console */
+const dbg = (...args: unknown[]) => console.debug('[ONBOARDING:CLI]', ...args)
+
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { Download, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -82,16 +85,31 @@ export function SetupState({
             Loading versions...
           </div>
         ) : isError || (!isLoading && versions.length === 0) ? (
-          <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-destructive/30 bg-destructive/5">
-            <span className="text-sm text-muted-foreground">
-              Failed to load versions. This may be due to GitHub API rate limiting.
-            </span>
-            {onRetry && (
-              <Button variant="ghost" size="sm" onClick={() => onRetry()}>
-                <RefreshCw className="size-3.5" />
-                Retry
-              </Button>
-            )}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+              <span className="text-sm text-muted-foreground">
+                Failed to load versions. This may be due to GitHub API rate
+                limiting.
+              </span>
+              {onRetry && (
+                <Button variant="ghost" size="sm" onClick={() => onRetry()}>
+                  <RefreshCw className="size-3.5" />
+                  Retry
+                </Button>
+              )}
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">
+                Or enter a version manually (e.g., 2.74.0)
+              </label>
+              <input
+                type="text"
+                placeholder="2.74.0"
+                value={selectedVersion ?? ''}
+                onChange={e => onVersionChange(e.target.value.trim())}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
           </div>
         ) : (
           <Select
@@ -215,6 +233,11 @@ export interface AuthCheckingStateProps {
 }
 
 export function AuthCheckingState({ cliName }: AuthCheckingStateProps) {
+  useEffect(() => {
+    dbg('AuthCheckingState MOUNTED for', cliName)
+    return () => dbg('AuthCheckingState UNMOUNTED for', cliName)
+  }, [cliName])
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -272,7 +295,7 @@ export function AuthLoginState({
 
       const observer = new ResizeObserver(entries => {
         const entry = entries[0]
-        if (!entry || entry.contentRect.width === 0) return
+        if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return
 
         if (!initialized.current) {
           initialized.current = true
@@ -289,19 +312,27 @@ export function AuthLoginState({
     [initTerminal, fit]
   )
 
+  useEffect(() => {
+    dbg('AuthLoginState MOUNTED:', cliName, 'terminalId:', terminalId, 'command:', command, 'args:', commandArgs)
+    return () => dbg('AuthLoginState UNMOUNTED:', cliName, 'terminalId:', terminalId)
+  }, [cliName, terminalId, command, commandArgs])
+
   // Auto-advance when the auth process exits successfully
   useEffect(() => {
     setOnStopped(terminalId, (exitCode, signal) => {
+      dbg('AuthLoginState terminal stopped:', cliName, 'exitCode:', exitCode, 'signal:', signal)
       if (exitCode === 0) {
+        dbg('AuthLoginState: exit 0, calling onComplete in 1.5s')
         // Brief delay so user can see the success output
         setTimeout(() => onComplete(), 1500)
         return
       }
 
+      dbg('AuthLoginState: non-zero exit, showing error')
       setExitStatus({ exitCode, signal })
     })
     return () => setOnStopped(terminalId, undefined)
-  }, [terminalId, onComplete])
+  }, [terminalId, onComplete, cliName])
 
   useEffect(() => {
     setExitStatus(null)
@@ -383,3 +414,73 @@ export function AuthLoginState({
     </div>
   )
 }
+
+export interface CliPathSelectorProps {
+  cliName: string
+  pathVersion: string | null
+  pathPath: string | null
+  isLoading: boolean
+  onSelectPath: () => void
+  onSelectJean: () => void
+}
+
+export function CliPathSelector({
+  cliName,
+  pathVersion,
+  pathPath,
+  isLoading,
+  onSelectPath,
+  onSelectJean,
+}: CliPathSelectorProps) {
+  useEffect(() => {
+    dbg('CliPathSelector MOUNTED:', cliName, 'pathVersion:', pathVersion, 'pathPath:', pathPath, 'isLoading:', isLoading)
+    return () => dbg('CliPathSelector UNMOUNTED:', cliName)
+  }, [cliName, pathVersion, pathPath, isLoading])
+
+  return (
+    <div className="space-y-4">
+      <div className="text-center text-sm text-muted-foreground">
+        We detected {cliName} in your system PATH
+      </div>
+
+      <div className="space-y-3">
+        <button
+          onClick={() => {
+            dbg('CliPathSelector: user selected PATH for', cliName)
+            onSelectPath()
+          }}
+          disabled={isLoading}
+          className="w-full p-4 rounded-lg border-2 border-primary/50 hover:border-primary bg-primary/5 hover:bg-primary/10 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <div className="font-medium">Use system {cliName}</div>
+          <div className="text-sm text-muted-foreground">
+            Version: {pathVersion || 'unknown'}
+          </div>
+          {pathPath && (
+            <div className="text-xs text-muted-foreground mt-1 break-all">
+              {pathPath}
+            </div>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            dbg('CliPathSelector: user selected JEAN for', cliName)
+            onSelectJean()
+          }}
+          disabled={isLoading}
+          className="w-full p-4 rounded-lg border-2 border-border hover:border-primary/50 hover:bg-muted transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <div className="font-medium">Install with Jean</div>
+          <div className="text-sm text-muted-foreground">
+            Jean will manage the installation
+          </div>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** @deprecated Use CliPathSelector instead */
+export const ClaudePathSelector = (props: Omit<CliPathSelectorProps, 'cliName'>) =>
+  CliPathSelector({ ...props, cliName: 'Claude CLI' })

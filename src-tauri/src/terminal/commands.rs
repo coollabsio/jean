@@ -19,6 +19,13 @@ pub async fn start_terminal(
     command_args: Option<Vec<String>>,
 ) -> Result<(), String> {
     log::trace!("start_terminal called for terminal: {terminal_id}");
+    if command.is_some() || command_args.is_some() {
+        log::debug!(
+            "start_terminal {terminal_id}: worktree_path={worktree_path}, command={:?}, command_args={:?}",
+            command,
+            command_args
+        );
+    }
 
     // Check if terminal already exists
     if has_terminal(&terminal_id) {
@@ -36,10 +43,21 @@ pub async fn start_terminal(
     )
 }
 
-/// Get the run script from jean.json for a worktree
+/// Get the run script(s) from jean.json for a worktree
 #[tauri::command]
-pub async fn get_run_script(worktree_path: String) -> Option<String> {
-    read_jean_config(&worktree_path).and_then(|config| config.scripts.run)
+pub async fn get_run_scripts(worktree_path: String) -> Vec<String> {
+    read_jean_config(&worktree_path)
+        .and_then(|config| config.scripts.run)
+        .map(|r| r.into_vec())
+        .unwrap_or_default()
+}
+
+/// Get configured ports from jean.json for a worktree
+#[tauri::command]
+pub async fn get_ports(worktree_path: String) -> Vec<crate::projects::types::PortEntry> {
+    read_jean_config(&worktree_path)
+        .and_then(|config| config.ports)
+        .unwrap_or_default()
 }
 
 /// Write data to a terminal (stdin)

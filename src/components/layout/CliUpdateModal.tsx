@@ -8,7 +8,13 @@
  * open one will have hooks running (prevents duplicate event listeners).
  */
 
+import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
+import { claudeCliQueryKeys } from '@/services/claude-cli'
+import { ghCliQueryKeys } from '@/services/gh-cli'
+import { codexCliQueryKeys } from '@/services/codex-cli'
+import { opencodeCliQueryKeys } from '@/services/opencode-cli'
+import { githubQueryKeys } from '@/services/github'
 import {
   ClaudeCliReinstallModal,
   GhCliReinstallModal,
@@ -17,12 +23,25 @@ import {
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
+  const queryClient = useQueryClient()
   const cliUpdateModalOpen = useUIStore(state => state.cliUpdateModalOpen)
   const cliUpdateModalType = useUIStore(state => state.cliUpdateModalType)
   const closeCliUpdateModal = useUIStore(state => state.closeCliUpdateModal)
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
+      // Invalidate caches so settings page refreshes after install/update
+      if (cliUpdateModalType === 'claude') {
+        queryClient.invalidateQueries({ queryKey: claudeCliQueryKeys.all })
+      } else if (cliUpdateModalType === 'gh') {
+        queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.all })
+        queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
+      } else if (cliUpdateModalType === 'codex') {
+        queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.all })
+      } else if (cliUpdateModalType === 'opencode') {
+        queryClient.invalidateQueries({ queryKey: opencodeCliQueryKeys.all })
+      }
+
       closeCliUpdateModal()
     }
   }

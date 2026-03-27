@@ -38,7 +38,8 @@ use super::types::{
     JeanConfig, MergeType, Project, SessionType, Worktree, WorktreeArchivedEvent,
     WorktreeBranchExistsEvent, WorktreeCreateErrorEvent, WorktreeCreatedEvent,
     WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent, WorktreeDeletingEvent,
-    WorktreePathExistsEvent, WorktreePermanentlyDeletedEvent, WorktreeUnarchivedEvent,
+    WorktreePathExistsEvent, WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent,
+    WorktreeUnarchivedEvent,
 };
 use crate::claude_cli::resolve_cli_binary;
 use crate::codex_cli::resolve_cli_binary as resolve_codex_cli_binary;
@@ -218,6 +219,7 @@ pub async fn add_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        linked_project_ids: Vec::new(),
     };
 
     data.add_project(project.clone());
@@ -377,6 +379,7 @@ pub async fn init_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        linked_project_ids: Vec::new(),
     };
 
     data.add_project(project.clone());
@@ -430,6 +433,7 @@ pub async fn clone_project(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        linked_project_ids: Vec::new(),
     };
 
     data.add_project(project.clone());
@@ -473,6 +477,11 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
     for worktree_id in &archived_worktree_ids {
         data.remove_worktree(worktree_id);
         log::trace!("Removed archived worktree: {worktree_id}");
+    }
+
+    // Clean up reciprocal linked project references
+    for other in &mut data.projects {
+        other.linked_project_ids.retain(|id| id != &project_id);
     }
 
     // Remove project
@@ -1195,31 +1204,14 @@ pub async fn create_worktree(
                 }
             }
 
-            // Check for jean.json and run setup script
-            let (setup_output, setup_script, setup_success) =
-                if let Some(config) = git::read_jean_config(&project_path) {
-                    if let Some(script) = config.scripts.setup {
-                        log::trace!("Background: Found jean.json with setup script, executing...");
-                        match git::run_setup_script(
-                            &worktree_path_clone,
-                            &project_path,
-                            &final_branch,
-                            &script,
-                        ) {
-                            Ok(output) => (Some(output), Some(script), Some(true)),
-                            Err(e) => {
-                                log::warn!("Background: Setup script failed (continuing): {e}");
-                                (Some(e), Some(script), Some(false))
-                            }
-                        }
-                    } else {
-                        (None, None, None)
-                    }
-                } else {
-                    (None, None, None)
-                };
+            // Check for jean.json setup script upfront so we can include it in the
+            // initial worktree record. This lets the frontend know a setup script
+            // will run (setup_script is set, but setup_output is still None).
+            let pending_setup_script = git::read_jean_config(&project_path)
+                .and_then(|config| config.scripts.setup);
 
-            // Save to storage
+            // Save to storage and emit worktree:created BEFORE running setup script
+            // so the UI can open immediately and the user can start typing.
             if let Ok(mut data) = load_projects_data(&app_clone) {
                 // Get max order for worktrees in this project
                 let max_order = data
@@ -1230,17 +1222,18 @@ pub async fn create_worktree(
                     .max()
                     .unwrap_or(0);
 
-                // Create the final worktree record
+                // Create the worktree record (setup_script set if jean.json has one,
+                // but setup_output is None — signals "setup pending" to frontend)
                 let worktree = Worktree {
                     id: worktree_id_clone.clone(),
                     project_id: project_id_clone.clone(),
                     name: name_clone.clone(),
                     path: worktree_path_clone.clone(),
-                    branch: final_branch,
+                    branch: final_branch.clone(),
                     created_at,
-                    setup_output,
-                    setup_script,
-                    setup_success,
+                    setup_output: None,
+                    setup_script: pending_setup_script.clone(),
+                    setup_success: None,
                     session_type: SessionType::Worktree,
                     pr_number: pr_context_clone.as_ref().map(|ctx| ctx.number),
                     pr_url: None,
@@ -1281,7 +1274,7 @@ pub async fn create_worktree(
                     return;
                 }
 
-                // Emit success event
+                // Emit success event — UI opens immediately
                 log::trace!(
                     "Background: Worktree created successfully: {}",
                     worktree.name
@@ -1299,6 +1292,52 @@ pub async fn create_worktree(
                 };
                 if let Err(emit_err) = app_clone.emit_all("worktree:error", &error_event) {
                     log::error!("Failed to emit worktree:error event: {emit_err}");
+                }
+                return;
+            }
+
+            // Run setup script AFTER emitting worktree:created (user can already type)
+            if let Some(script) = pending_setup_script {
+                log::trace!("Background: Found jean.json with setup script, executing...");
+                let (setup_output, setup_success) = match git::run_setup_script(
+                    &worktree_path_clone,
+                    &project_path,
+                    &final_branch,
+                    &script,
+                ) {
+                    Ok(output) => (output, true),
+                    Err(e) => {
+                        log::warn!("Background: Setup script failed (continuing): {e}");
+                        (e, false)
+                    }
+                };
+
+                // Update worktree in storage with setup results
+                if let Ok(mut data) = load_projects_data(&app_clone) {
+                    if let Some(wt) = data
+                        .worktrees
+                        .iter_mut()
+                        .find(|w| w.id == worktree_id_clone)
+                    {
+                        wt.setup_output = Some(setup_output.clone());
+                        wt.setup_script = Some(script.clone());
+                        wt.setup_success = Some(setup_success);
+                    }
+                    if let Err(e) = save_projects_data(&app_clone, &data) {
+                        log::warn!("Background: Failed to save setup results: {e}");
+                    }
+                }
+
+                // Emit setup complete event
+                let setup_event = WorktreeSetupCompleteEvent {
+                    id: worktree_id_clone,
+                    project_id: project_id_clone,
+                    setup_output,
+                    setup_script: script,
+                    setup_success,
+                };
+                if let Err(e) = app_clone.emit_all("worktree:setup_complete", &setup_event) {
+                    log::error!("Failed to emit worktree:setup_complete event: {e}");
                 }
             }
         })); // end catch_unwind
@@ -2481,6 +2520,20 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
         // Remove the git worktree (this can be slow for large repos)
         if let Err(e) = git::remove_worktree(&project_path, &worktree_path) {
             log::error!("Background: Failed to remove worktree: {e}");
+
+            // Re-add worktree to storage since deletion failed
+            match load_projects_data(&app_clone) {
+                Ok(mut data) => {
+                    data.add_worktree(worktree_for_restore);
+                    if let Err(save_err) = save_projects_data(&app_clone, &data) {
+                        log::error!("Failed to restore worktree in storage: {save_err}");
+                    }
+                }
+                Err(load_err) => {
+                    log::error!("Failed to load projects data for restore: {load_err}");
+                }
+            }
+
             let error_event = WorktreeDeleteErrorEvent {
                 id: worktree_id_clone,
                 project_id: project_id_clone,
@@ -2597,8 +2650,9 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
             let wt_id = session.id.clone();
             if let Err(e) = crate::chat::with_sessions_mut(&app, &wt_path, &wt_id, |sessions| {
                 for s in &mut sessions.sessions {
-                    if s.archived_at.is_some() {
+                    if s.archived_by_base_close == Some(true) {
                         s.archived_at = None;
+                        s.archived_by_base_close = None;
                     }
                 }
                 Ok(())
@@ -2696,6 +2750,7 @@ async fn close_base_session_internal(
                     );
                     if session.archived_at.is_none() {
                         session.archived_at = Some(ts);
+                        session.archived_by_base_close = Some(true);
                         archived_count += 1;
                         log::info!("[BASE_CLOSE] -> Archived session '{}'", session.name);
                     }
@@ -3240,19 +3295,14 @@ pub async fn open_worktree_in_terminal(
 
         let script = match terminal_app.as_str() {
             "warp" => {
-                // Warp uses a different AppleScript approach
-                format!(
-                    r#"tell application "Warp"
-                        activate
-                        tell application "System Events"
-                            keystroke "t" using command down
-                            delay 0.3
-                            keystroke "cd '{}' && clear"
-                            keystroke return
-                        end tell
-                    end tell"#,
-                    escaped_path
-                )
+                let output = std::process::Command::new("open")
+                    .arg(format!("warp://action/new_tab?path={escaped_path}"))
+                    .spawn();
+
+                match output {
+                    Ok(_) => return Ok(()),
+                    Err(e) => return Err(format_open_error("Warp", &e)),
+                }
             }
             "ghostty" => {
                 // Opening a directory path with Ghostty creates a new tab
@@ -3456,6 +3506,18 @@ pub async fn open_worktree_in_editor(
             "xcode" => std::process::Command::new("xed")
                 .arg(&worktree_path)
                 .spawn(),
+            "intellij" => match std::process::Command::new("idea")
+                .arg(&worktree_path)
+                .spawn()
+            {
+                Ok(child) => Ok(child),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::process::Command::new("open")
+                        .args(["-a", "IntelliJ IDEA", &worktree_path])
+                        .spawn()
+                }
+                Err(e) => Err(e),
+            },
             _ => match std::process::Command::new("code")
                 .arg(&worktree_path)
                 .spawn()
@@ -3496,6 +3558,10 @@ pub async fn open_worktree_in_editor(
                 .args(["/c", "cursor", &worktree_path])
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn(),
+            "intellij" => std::process::Command::new("cmd")
+                .args(["/c", "idea", &worktree_path])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
             "xcode" => {
                 return Err("Xcode is only available on macOS".to_string());
             }
@@ -3525,6 +3591,9 @@ pub async fn open_worktree_in_editor(
                 .arg(&worktree_path)
                 .spawn(),
             "cursor" => std::process::Command::new("cursor")
+                .arg(&worktree_path)
+                .spawn(),
+            "intellij" => std::process::Command::new("idea")
                 .arg(&worktree_path)
                 .spawn(),
             "xcode" => {
@@ -3977,6 +4046,7 @@ pub async fn get_project_branches(
 pub async fn update_project_settings(
     app: AppHandle,
     project_id: String,
+    name: Option<String>,
     default_branch: Option<String>,
     enabled_mcp_servers: Option<Vec<String>>,
     known_mcp_servers: Option<Vec<String>>,
@@ -3986,6 +4056,7 @@ pub async fn update_project_settings(
     worktrees_dir: Option<String>,
     linear_api_key: Option<String>,
     linear_team_id: Option<String>,
+    linked_project_ids: Option<Vec<String>>,
 ) -> Result<Project, String> {
     log::trace!("Updating settings for project: {project_id}");
 
@@ -3994,6 +4065,15 @@ pub async fn update_project_settings(
     let project = data
         .find_project_mut(&project_id)
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    if let Some(new_name) = name {
+        let new_name = new_name.trim().to_string();
+        if new_name.is_empty() {
+            return Err("Project name cannot be empty".to_string());
+        }
+        log::trace!("Renaming project from '{}' to '{new_name}'", project.name);
+        project.name = new_name;
+    }
 
     if let Some(branch) = default_branch {
         log::trace!(
@@ -4056,7 +4136,54 @@ pub async fn update_project_settings(
         };
     }
 
-    let updated_project = project.clone();
+    // Handle linked_project_ids with bidirectional sync
+    if let Some(ids) = linked_project_ids {
+        // Filter out self-references and deduplicate
+        let clean_ids: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            ids.into_iter()
+                .filter(|id| id != &project_id && seen.insert(id.clone()))
+                .collect()
+        };
+
+        let old_ids = project.linked_project_ids.clone();
+        project.linked_project_ids = clean_ids.clone();
+
+        // Compute added and removed for reciprocal updates
+        let added: Vec<String> = clean_ids
+            .iter()
+            .filter(|id| !old_ids.contains(id))
+            .cloned()
+            .collect();
+        let removed: Vec<String> = old_ids
+            .iter()
+            .filter(|id| !clean_ids.contains(id))
+            .cloned()
+            .collect();
+
+        let pid = project_id.clone();
+
+        // Add reciprocal links for newly added projects
+        for add_id in &added {
+            if let Some(other) = data.find_project_mut(add_id) {
+                if !other.linked_project_ids.contains(&pid) {
+                    other.linked_project_ids.push(pid.clone());
+                }
+            }
+        }
+        // Remove reciprocal links for removed projects
+        for rem_id in &removed {
+            if let Some(other) = data.find_project_mut(rem_id) {
+                other.linked_project_ids.retain(|id| id != &pid);
+            }
+        }
+    }
+
+    // Re-fetch the project after potential mutations from bidirectional sync
+    let updated_project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found after update: {project_id}"))?
+        .clone();
     save_projects_data(&app, &data)?;
 
     log::trace!("Successfully updated project settings");
@@ -5931,6 +6058,43 @@ fn get_recent_commits(repo_path: &str, count: u32) -> Result<String, String> {
 
 
 
+/// Stage only specific files. Resets the index first to ensure a clean state.
+fn stage_specific_files(repo_path: &str, files: &[String]) -> Result<(), String> {
+    // Reset staging area to ensure only the specified files are staged
+    let reset_output = silent_command("git")
+        .args(["reset", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to reset staging area: {e}"))?;
+
+    if !reset_output.status.success() {
+        let stderr = String::from_utf8_lossy(&reset_output.stderr);
+        // "Failed to resolve 'HEAD'" happens on initial commit — safe to ignore
+        if !stderr.contains("Failed to resolve") {
+            return Err(format!("Failed to reset staging area: {stderr}"));
+        }
+    }
+
+    // Stage only the specified files
+    let mut args = vec!["add", "--"];
+    for f in files {
+        args.push(f.as_str());
+    }
+
+    let output = silent_command("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to stage files: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to stage files: {stderr}"));
+    }
+
+    Ok(())
+}
+
 /// Stage all changes
 fn stage_all_changes(repo_path: &str) -> Result<(), String> {
     let output = silent_command("git")
@@ -6142,6 +6306,7 @@ pub async fn create_commit_with_ai(
     model: Option<String>,
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
+    specific_files: Option<Vec<String>>,
 ) -> Result<CreateCommitResponse, String> {
     log::trace!("Creating commit for: {worktree_path}");
 
@@ -6167,8 +6332,11 @@ pub async fn create_commit_with_ai(
         return Err("No changes to commit".to_string());
     }
 
-    // 2. Stage all changes
-    stage_all_changes(&worktree_path)?;
+    // 2. Stage changes (specific files or all)
+    match &specific_files {
+        Some(files) if !files.is_empty() => stage_specific_files(&worktree_path, files)?,
+        _ => stage_all_changes(&worktree_path)?,
+    }
 
     // 3. Get staged diff
     let diff = get_staged_diff(&worktree_path)?;
@@ -7942,6 +8110,7 @@ pub async fn create_folder(
         worktrees_dir: None,
         linear_api_key: None,
         linear_team_id: None,
+        linked_project_ids: Vec::new(),
     };
 
     data.add_project(folder.clone());

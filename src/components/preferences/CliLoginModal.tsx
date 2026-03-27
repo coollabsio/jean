@@ -7,8 +7,10 @@
  */
 
 import { useCallback, useEffect, useRef, useMemo, useState } from 'react'
-import { invoke } from '@/lib/transport'
+import { invoke, listen } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
+import { logger } from '@/lib/logger'
+import { claudeCliQueryKeys } from '@/services/claude-cli'
 import { ghCliQueryKeys } from '@/services/gh-cli'
 import { codexCliQueryKeys } from '@/services/codex-cli'
 import { opencodeCliQueryKeys } from '@/services/opencode-cli'
@@ -16,7 +18,6 @@ import { githubQueryKeys } from '@/services/github'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -28,12 +29,13 @@ import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 
 export function CliLoginModal() {
   const [retryKey, setRetryKey] = useState(0)
-  const { isOpen, cliType, command, commandArgs, closeModal } = useUIStore(
+  const { isOpen, cliType, command, commandArgs, action, closeModal } = useUIStore(
     useShallow(state => ({
       isOpen: state.cliLoginModalOpen,
       cliType: state.cliLoginModalType,
       command: state.cliLoginModalCommand,
       commandArgs: state.cliLoginModalCommandArgs,
+      action: state.cliLoginModalAction,
       closeModal: state.closeCliLoginModal,
     }))
   )
@@ -47,6 +49,7 @@ export function CliLoginModal() {
       cliType={cliType}
       command={command}
       commandArgs={commandArgs}
+      action={action}
       onClose={closeModal}
       onRetry={() => setRetryKey(k => k + 1)}
     />
@@ -57,6 +60,7 @@ interface CliLoginModalContentProps {
   cliType: 'claude' | 'gh' | 'codex' | 'opencode' | null
   command: string
   commandArgs: string[] | null
+  action: 'login' | 'update'
   onClose: () => void
   onRetry: () => void
 }
@@ -65,6 +69,7 @@ function CliLoginModalContent({
   cliType,
   command,
   commandArgs,
+  action,
   onClose,
   onRetry,
 }: CliLoginModalContentProps) {
@@ -92,6 +97,25 @@ function CliLoginModalContent({
     return id
   }, [])
 
+  // Buffer last N lines of terminal output for debug logging on error
+  const outputBufferRef = useRef<string[]>([])
+  const MAX_OUTPUT_LINES = 50
+
+  useEffect(() => {
+    const unlisten = listen<{ terminal_id: string; data: string }>(
+      'terminal:output',
+      event => {
+        if (event.payload.terminal_id !== terminalId) return
+        const lines = event.payload.data.split('\n')
+        outputBufferRef.current.push(...lines)
+        if (outputBufferRef.current.length > MAX_OUTPUT_LINES) {
+          outputBufferRef.current = outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
+        }
+      }
+    )
+    return () => { unlisten.then(fn => fn()) }
+  }, [terminalId])
+
   // Use a synthetic worktreeId for CLI login (not associated with any real worktree)
   const { initTerminal, fit } = useTerminal({
     terminalId,
@@ -114,14 +138,18 @@ function CliLoginModalContent({
 
       const observer = new ResizeObserver(entries => {
         const entry = entries[0]
+        const { width, height } = entry?.contentRect ?? { width: 0, height: 0 }
 
-        if (!entry || entry.contentRect.width === 0) {
+        console.log(`[CliLoginModal] ResizeObserver: ${width}x${height}, initialized=${initialized.current}`)
+
+        if (!entry || width === 0 || height === 0) {
           return
         }
 
         // Initialize on first valid size
         if (!initialized.current) {
           initialized.current = true
+          console.log(`[CliLoginModal] Initializing terminal at ${width}x${height}`)
           initTerminal(container)
           return
         }
@@ -162,16 +190,16 @@ function CliLoginModalContent({
         // Dispose xterm instance
         disposeTerminal(terminalId)
 
-        // Invalidate caches so views auto-refetch after login
-        if (cliType === 'gh') {
-          queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.auth() })
+        // Invalidate caches so views auto-refetch after login/update
+        if (cliType === 'claude') {
+          queryClient.invalidateQueries({ queryKey: claudeCliQueryKeys.all })
+        } else if (cliType === 'gh') {
+          queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.all })
           queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
         } else if (cliType === 'codex') {
-          queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.auth() })
+          queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.all })
         } else if (cliType === 'opencode') {
-          queryClient.invalidateQueries({
-            queryKey: opencodeCliQueryKeys.auth(),
-          })
+          queryClient.invalidateQueries({ queryKey: opencodeCliQueryKeys.all })
         }
 
         onClose()
@@ -183,9 +211,19 @@ function CliLoginModalContent({
   // Auto-close modal on success, show error on failure
   useEffect(() => {
     setOnStopped(terminalId, (exitCode, signal) => {
+      const output = outputBufferRef.current.join('\n').trim()
+      const logBase =
+        `[CliLoginModal] ${cliName} exited code=${exitCode} signal=${signal ?? 'none'}` +
+        ` command=${command} args=${JSON.stringify(commandArgs)}`
+      const logOutput = output
+        ? `\nTerminal output (last ${MAX_OUTPUT_LINES} lines):\n${output}`
+        : '\nNo terminal output captured'
+
       if (exitCode === 0) {
+        logger.debug(logBase + logOutput)
         setTimeout(() => handleOpenChange(false), 1500)
       } else {
+        logger.error(logBase + logOutput)
         setExitStatus({ exitCode, signal })
       }
     })
@@ -196,10 +234,7 @@ function CliLoginModalContent({
     <Dialog open={true} onOpenChange={handleOpenChange}>
       <DialogContent className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col">
         <DialogHeader>
-          <DialogTitle>{cliName} Login</DialogTitle>
-          <DialogDescription>
-            Complete the login process in the terminal below.
-          </DialogDescription>
+          <DialogTitle>{cliName} {action === 'update' ? 'Update' : 'Login'}</DialogTitle>
         </DialogHeader>
 
         <div
@@ -211,7 +246,7 @@ function CliLoginModalContent({
           <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">
             <div>
               <p className="text-sm font-medium text-destructive">
-                Login process exited unexpectedly
+                {action === 'update' ? 'Update' : 'Login'} process exited unexpectedly
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {exitStatus.signal

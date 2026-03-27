@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Sparkles,
   Undo2,
+  Link2,
 } from 'lucide-react'
 import {
   Dialog,
@@ -63,6 +64,7 @@ import { useQueryClient } from '@tanstack/react-query'
 type MagicOption =
   | 'save-context'
   | 'load-context'
+  | 'linked-projects'
   | 'create-recap'
   | 'commit'
   | 'commit-and-push'
@@ -96,6 +98,7 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge',
   'merge-pr',
   'resolve-conflicts',
+  'linked-projects',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
@@ -135,6 +138,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           label: 'Load Context',
           icon: FolderOpen,
           key: 'L',
+        },
+        {
+          id: 'linked-projects',
+          label: 'Linked Projects',
+          icon: Link2,
+          key: 'K',
         },
         {
           id: 'create-recap',
@@ -184,7 +193,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
         { id: 'review', label: 'Review', icon: Eye, key: 'R' },
         {
           id: 'review-comments',
-          label: 'Review Comments',
+          label: 'PR Comments',
           icon: MessageSquare,
           key: 'V',
         },
@@ -241,6 +250,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
 const KEY_TO_OPTION: Record<string, MagicOption> = {
   s: 'save-context',
   l: 'load-context',
+  k: 'linked-projects',
   t: 'create-recap',
   c: 'commit',
   p: 'commit-and-push',
@@ -349,6 +359,10 @@ export function MagicModal() {
       const doCommit = async (isPush: boolean, remote?: string) => {
         setWorktreeLoading(selectedWorktreeId, 'commit')
         const branch = worktree.branch ?? ''
+        const { gitDiffSelectedFiles, clearGitDiffSelectedFiles } = useUIStore.getState()
+        const specificFiles = gitDiffSelectedFiles.size > 0
+          ? Array.from(gitDiffSelectedFiles)
+          : null
         const toastId = toast.loading(
           isPush
             ? `Committing and pushing on ${branch}...`
@@ -370,9 +384,12 @@ export function MagicModal() {
                 preferences?.default_provider
               ),
               reasoningEffort: preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
+              specificFiles,
             }
           )
+          clearGitDiffSelectedFiles()
           triggerImmediateGitPoll()
+          window.dispatchEvent(new CustomEvent('git-commit-completed'))
           if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
           if (result.push_fell_back) {
             toast.warning('Could not push to PR branch, pushed to new branch instead', {
@@ -584,7 +601,7 @@ export function MagicModal() {
             )
 
             const {
-              setActiveWorktree,
+              registerWorktreePath,
               setActiveSession,
               setInputDraft,
               copySessionSettings,
@@ -601,10 +618,14 @@ export function MagicModal() {
             // Inherit model/mode/thinking settings from current session
             if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
 
-            // Navigate to session in chat view
-            useProjectsStore.getState().selectWorktree(selectedWorktreeId)
-            setActiveWorktree(selectedWorktreeId, worktree.path)
+            // Open in SessionChatModal on canvas (not full ChatWindow)
+            registerWorktreePath(selectedWorktreeId, worktree.path)
             setActiveSession(selectedWorktreeId, newSession.id)
+            window.dispatchEvent(
+              new CustomEvent('open-worktree-modal', {
+                detail: { worktreeId: selectedWorktreeId, worktreePath: worktree.path },
+              })
+            )
 
             // Build conflict resolution prompt
             const conflictFiles = result.conflicts.join('\n- ')
@@ -821,6 +842,18 @@ ${resolveInstructions}`
           return
         }
         useUIStore.getState().setReleaseNotesModalOpen(true)
+        setMagicModalOpen(false)
+        return
+      }
+
+      // linked-projects only needs a project selected, not a worktree
+      if (option === 'linked-projects') {
+        if (!selectedProjectId) {
+          notify('No project selected', undefined, { type: 'error' })
+          setMagicModalOpen(false)
+          return
+        }
+        useUIStore.getState().setLinkedProjectsModalOpen(true)
         setMagicModalOpen(false)
         return
       }

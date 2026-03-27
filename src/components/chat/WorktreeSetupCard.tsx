@@ -13,7 +13,7 @@ export interface WorktreeSetupCardProps {
 function getStatusText(worktree: Worktree): string {
   if (worktree.pr_number) return `Checking out PR #${worktree.pr_number}...`
   if (worktree.issue_number) return 'Setting up branch...'
-  return 'Running setup script...'
+  return 'Creating worktree...'
 }
 
 /**

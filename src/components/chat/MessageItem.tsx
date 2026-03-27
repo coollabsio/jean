@@ -621,7 +621,7 @@ export const MessageItem = memo(function MessageItem({
         </div>
       ) : (
         <div
-          className="text-muted-foreground w-full min-w-0 break-words"
+          className="text-foreground/90 w-full min-w-0 break-words"
         >
           {messageBoxContent}
         </div>

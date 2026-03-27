@@ -187,17 +187,31 @@ export async function preloadInitialData(): Promise<InitialData | null> {
 /**
  * Re-fetch initial data via HTTP (bypasses memoization).
  * Used on WebSocket reconnect to bulk-reload fresh state.
+ *
+ * @param activeSessionIds - Browser's current active session IDs per worktree.
+ *   Sent to the server so it loads the correct sessions even when ui_state.json
+ *   is stale (debounced save hasn't flushed yet).
  */
-export async function refetchInitialData(): Promise<InitialData | null> {
+export async function refetchInitialData(
+  activeSessionIds?: Record<string, string>
+): Promise<InitialData | null> {
   if (isNativeApp()) return null
 
   const urlToken = new URLSearchParams(window.location.search).get('token')
   const token = urlToken || localStorage.getItem('jean-http-token') || ''
 
   try {
-    const url = token
-      ? `/api/init?token=${encodeURIComponent(token)}`
-      : '/api/init'
+    const params = new URLSearchParams()
+    if (token) params.set('token', token)
+    if (activeSessionIds && Object.keys(activeSessionIds).length > 0) {
+      // Encode as worktreeId:sessionId pairs
+      const pairs = Object.entries(activeSessionIds)
+        .map(([wId, sId]) => `${wId}:${sId}`)
+        .join(',')
+      params.set('active_sessions', pairs)
+    }
+    const qs = params.toString()
+    const url = qs ? `/api/init?${qs}` : '/api/init'
     const response = await fetch(url)
     if (!response.ok) return null
     return (await response.json()) as InitialData
@@ -267,6 +281,10 @@ class WsTransport {
   private _connected = false
   private _connecting = false
   private _authError: string | null = null
+  private _dataReady = false
+  private _tokenValidated = false
+  private _lastConnectTime = 0
+  private _reconnectPrefetch: Promise<InitialData | null> | null = null
   private _subscribers = new Set<() => void>()
 
   get connected(): boolean {
@@ -277,9 +295,24 @@ class WsTransport {
     return this._authError
   }
 
+  get dataReady(): boolean {
+    return this._dataReady
+  }
+
   private setConnected(value: boolean): void {
     this._connected = value
     setWsConnected(value)
+    if (!value) {
+      // Mark data as not ready when disconnected — overlay should stay
+      // visible until seedCache() completes after reconnect.
+      this._dataReady = false
+    }
+    this.notifySubscribers()
+  }
+
+  setDataReady(value: boolean): void {
+    if (this._dataReady === value) return
+    this._dataReady = value
     this.notifySubscribers()
   }
 
@@ -298,9 +331,25 @@ class WsTransport {
     return () => this._subscribers.delete(callback)
   }
 
+  /**
+   * Consume the reconnect prefetch (if available).
+   * Returns the in-flight /api/init promise that was started during the
+   * backoff wait, or null if no prefetch is pending.
+   */
+  consumeReconnectData(): Promise<InitialData | null> | null {
+    const prefetch = this._reconnectPrefetch
+    this._reconnectPrefetch = null
+    return prefetch
+  }
+
   /** Get current connection snapshot for useSyncExternalStore. */
   getSnapshot(): boolean {
     return this._connected
+  }
+
+  /** Get current data-ready snapshot for useSyncExternalStore. */
+  getDataReadySnapshot(): boolean {
+    return this._dataReady
   }
 
   /** Get current auth error snapshot for useSyncExternalStore. */
@@ -331,11 +380,21 @@ class WsTransport {
       window.history.replaceState({}, '', url.toString())
     }
 
-    // Validate token via HTTP before establishing WebSocket
     this._connecting = true
-    this.validateAndConnect(token).finally(() => {
+
+    // On reconnect with a previously-validated token, skip auth HTTP
+    // round-trip and go straight to WebSocket. If the token has been
+    // revoked, the WS handshake will fail and onclose will fire —
+    // we detect that (rapid close within 2s) and fall back to full
+    // validation on the next attempt.
+    if (this._tokenValidated && token) {
+      this.connectWs(token)
       this._connecting = false
-    })
+    } else {
+      this.validateAndConnect(token).finally(() => {
+        this._connecting = false
+      })
+    }
   }
 
   private async validateAndConnect(token: string): Promise<void> {
@@ -348,6 +407,7 @@ class WsTransport {
       if (!res.ok) {
         // Invalid token — clear it, set error, don't reconnect
         localStorage.removeItem('jean-http-token')
+        this._tokenValidated = false
         this.setAuthError(
           token
             ? "Invalid access token. Check the URL in Jean's Web Access settings."
@@ -364,6 +424,7 @@ class WsTransport {
 
     // Token valid (or not required) — clear any previous auth error and connect
     this.setAuthError(null)
+    this._tokenValidated = true
     this.connectWs(token)
   }
 
@@ -390,6 +451,7 @@ class WsTransport {
 
     this.ws.onopen = () => {
       this.clearConnectWatchdog()
+      this._lastConnectTime = Date.now()
       this.setConnected(true)
       this.reconnectAttempt = 0
 
@@ -413,6 +475,13 @@ class WsTransport {
     this.ws.onclose = () => {
       this.clearConnectWatchdog()
       this.ws = null
+
+      // If the socket closed within 2s of opening, the token may have been
+      // revoked — force full auth validation on the next attempt.
+      if (this._lastConnectTime && Date.now() - this._lastConnectTime < 2000) {
+        this._tokenValidated = false
+      }
+
       this.setConnected(false)
 
       // Clear event buffer — stale events from a dead connection
@@ -431,6 +500,16 @@ class WsTransport {
       // Clear queued-but-unsent messages to prevent reconnect from
       // flushing stale commands that spawn duplicate CLI processes.
       this.queue = []
+
+      // Start prefetching /api/init during the backoff wait so data is
+      // ready by the time the WebSocket reconnects. Uses a short delay
+      // to debounce rapid disconnects.
+      this._reconnectPrefetch = null
+      setTimeout(() => {
+        if (!this._connected) {
+          this._reconnectPrefetch = refetchInitialData()
+        }
+      }, 50)
 
       this.scheduleReconnect()
     }
@@ -597,8 +676,12 @@ class WsTransport {
     // Don't reconnect if there's an auth error — user needs to fix the token
     if (this._authError) return
 
-    // Exponential backoff: 1s, 2s, 4s, 8s, ... max 30s
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempt, 30_000)
+    // Exponential backoff: 100ms, 500ms, 1s, 2s, 4s, ... max 30s
+    // First attempt is fast (100ms) for brief disconnections.
+    const delay =
+      this.reconnectAttempt === 0
+        ? 100
+        : Math.min(500 * 2 ** (this.reconnectAttempt - 1), 30_000)
     this.reconnectAttempt++
 
     this.reconnectTimer = setTimeout(() => {
@@ -646,6 +729,7 @@ if (
 
 const subscribe = (cb: () => void) => wsTransport.subscribe(cb)
 const getSnapshot = () => wsTransport.getSnapshot()
+const getDataReadySnapshot = () => wsTransport.getDataReadySnapshot()
 const getAuthErrorSnapshot = () => wsTransport.getAuthErrorSnapshot()
 
 // E2E mock: always report connected, no auth errors
@@ -664,6 +748,31 @@ export function useWsConnectionStatus(): boolean {
     isE2eMocked ? noopSubscribe : subscribe,
     isE2eMocked ? () => true : getSnapshot
   )
+}
+
+/**
+ * React hook that returns whether reconnect data has been fully seeded.
+ * Stays false from disconnect until seedCache() completes.
+ * Only meaningful in browser mode (!isNativeApp()).
+ */
+export function useWsDataReady(): boolean {
+  return useSyncExternalStore(
+    isE2eMocked ? noopSubscribe : subscribe,
+    isE2eMocked ? () => true : getDataReadySnapshot
+  )
+}
+
+/** Mark WebSocket data as ready (called by App.tsx after seedCache). */
+export function setWsDataReady(value: boolean): void {
+  wsTransport.setDataReady(value)
+}
+
+/**
+ * Consume the reconnect prefetch started during the backoff wait.
+ * Returns the in-flight /api/init promise, or null if none pending.
+ */
+export function consumeReconnectData(): Promise<InitialData | null> | null {
+  return wsTransport.consumeReconnectData()
 }
 
 /**

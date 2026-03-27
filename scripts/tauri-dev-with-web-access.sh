@@ -31,7 +31,7 @@ wait_for_web_dist() {
   while (( SECONDS < deadline )); do
     if [[ -f "${dist_index}" ]]; then
       local dist_mtime=0
-      dist_mtime=$(stat -f %m "${dist_index}" 2>/dev/null || stat -c %Y "${dist_index}" 2>/dev/null || echo 0)
+      dist_mtime=$(stat -c %Y "${dist_index}" 2>/dev/null || stat -f %m "${dist_index}" 2>/dev/null || echo 0)
       if (( dist_mtime >= DIST_BUILD_STARTED_AT )); then
         return 0
       fi

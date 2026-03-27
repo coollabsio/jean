@@ -304,6 +304,9 @@ export function WorktreeItem({
     (sessionId: string) => {
       selectProject(projectId)
       selectWorktree(worktree.id)
+      // Clear active worktree so MainWindowContent renders ProjectCanvasView
+      // (which hosts SessionChatModal with topbar + session tabs)
+      useChatStore.getState().clearActiveWorktree()
       useChatStore.getState().setActiveSession(worktree.id, sessionId)
       // Open session modal in ProjectCanvasView
       setTimeout(() => {
@@ -370,6 +373,9 @@ export function WorktreeItem({
   const handleClick = useCallback(() => {
     selectProject(projectId)
     selectWorktree(worktree.id)
+    // Clear active worktree so MainWindowContent renders ProjectCanvasView
+    // (which hosts SessionChatModal with topbar + session tabs)
+    useChatStore.getState().clearActiveWorktree()
 
     // Open session modal with the first active session
     const sessions = sessionsData?.sessions ?? []
@@ -378,18 +384,20 @@ export function WorktreeItem({
     const targetSessionId = activeSessionId ?? activeSessions[0]?.id
     if (targetSessionId) {
       useChatStore.getState().setActiveSession(worktree.id, targetSessionId)
-      setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent('open-session-modal', {
-            detail: {
-              sessionId: targetSessionId,
-              worktreeId: worktree.id,
-              worktreePath: worktree.path,
-            },
-          })
-        )
-      }, 50)
     }
+    // Always open modal — SessionChatModal fetches sessions independently
+    // and falls back to first available session when no activeSessionId is set
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('open-session-modal', {
+          detail: {
+            sessionId: targetSessionId ?? '',
+            worktreeId: worktree.id,
+            worktreePath: worktree.path,
+          },
+        })
+      )
+    }, 50)
 
     // Close sidebar on mobile after navigation
     if (isMobile) {

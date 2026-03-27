@@ -31,6 +31,31 @@ export const ghCliQueryKeys = {
 }
 
 /**
+ * Hook to detect GitHub CLI in system PATH
+ */
+export function useGhPathDetection(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...ghCliQueryKeys.all, 'path-detection'],
+    queryFn: async (): Promise<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }> => {
+      if (!isTauri()) {
+        return { found: false, path: null, version: null, package_manager: null }
+      }
+      try {
+        const result = await invoke<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }>('detect_gh_in_path')
+        console.debug('[ONBOARDING:SVC] gh path detection:', result)
+        return result
+      } catch (err) {
+        console.debug('[ONBOARDING:SVC] gh path detection failed:', err)
+        return { found: false, path: null, version: null, package_manager: null }
+      }
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: 1000 * 60 * 30,
+    gcTime: 1000 * 60 * 60,
+  })
+}
+
+/**
  * Hook to check if GitHub CLI is installed and get its status
  */
 export function useGhCliStatus(options?: { enabled?: boolean }) {
@@ -43,9 +68,9 @@ export function useGhCliStatus(options?: { enabled?: boolean }) {
       }
 
       try {
-        logger.debug('Checking GitHub CLI installation status')
+        console.debug('[ONBOARDING:SVC] gh: checking installed status...')
         const status = await invoke<GhCliStatus>('check_gh_cli_installed')
-        logger.info('GitHub CLI status', { status })
+        console.debug('[ONBOARDING:SVC] gh: status =', status)
         return status
       } catch (error) {
         logger.error('Failed to check GitHub CLI status', { error })
@@ -72,9 +97,9 @@ export function useGhCliAuth(options?: { enabled?: boolean }) {
       }
 
       try {
-        logger.debug('Checking GitHub CLI authentication status')
+        console.debug('[ONBOARDING:SVC] gh: checking auth status...')
         const status = await invoke<GhAuthStatus>('check_gh_cli_auth')
-        logger.info('GitHub CLI auth status', { status })
+        console.debug('[ONBOARDING:SVC] gh: auth =', status)
         return status
       } catch (error) {
         logger.error('Failed to check GitHub CLI auth', { error })

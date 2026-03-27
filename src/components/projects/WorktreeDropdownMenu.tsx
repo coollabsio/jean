@@ -35,6 +35,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
@@ -86,9 +89,10 @@ export function WorktreeDropdownMenu({
     setShowDeleteConfirm,
     isBase,
     hasMessages,
-    runScript,
+    runScripts,
     preferences,
     handleRun,
+    handleRunCommand,
     handleOpenInFinder,
     handleOpenInTerminal,
     handleOpenInEditor,
@@ -187,11 +191,30 @@ export function WorktreeDropdownMenu({
             New Session
           </DropdownMenuItem>
 
-          {isNativeApp() && runScript && (
+          {isNativeApp() && runScripts.length === 1 && (
             <DropdownMenuItem onClick={handleRun}>
               <Play className="mr-2 h-4 w-4" />
               Run
             </DropdownMenuItem>
+          )}
+          {isNativeApp() && runScripts.length > 1 && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Play className="mr-4 h-4 w-4" />
+                Run
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {runScripts.map((cmd, i) => (
+                  <DropdownMenuItem
+                    key={i}
+                    onSelect={() => handleRunCommand(cmd)}
+                    className="font-mono text-xs"
+                  >
+                    {cmd}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           )}
 
           <DropdownMenuItem onClick={handleOpenJeanConfig}>

@@ -532,6 +532,97 @@ function DiffView({
   )
 }
 
+/** A single Codex file change entry */
+interface CodexFileChange {
+  diff?: string
+  kind?: { type?: string; move_path?: string | null }
+  path?: string
+}
+
+/** Renders a pre-computed unified diff patch with colored +/- lines */
+function PatchDiffView({ patch }: { patch: string }) {
+  const lines = patch.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop()
+  }
+
+  return (
+    <div className="rounded border border-border/30 overflow-auto max-h-64">
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className={cn(
+            'px-2 font-mono',
+            line.startsWith('@@') && 'text-blue-400 bg-blue-500/10',
+            line.startsWith('+') &&
+              !line.startsWith('@@') &&
+              'bg-green-500/15 text-green-400',
+            line.startsWith('-') && 'bg-red-500/15 text-red-400'
+          )}
+        >
+          {line}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Renders one or more Codex file changes with diffs */
+function FileChangeDiffView({ input }: { input: unknown }) {
+  const changes: CodexFileChange[] = Array.isArray(input)
+    ? (input as CodexFileChange[])
+    : input && typeof input === 'object'
+      ? [input as CodexFileChange]
+      : []
+
+  if (changes.length === 0) {
+    return <span>No file changes</span>
+  }
+
+  return (
+    <div className="space-y-3">
+      {changes.map((change, idx) => {
+        const filename = change.path ? getFilename(change.path) : `file ${idx + 1}`
+        const changeType = change.kind?.type ?? 'update'
+        const typeColor =
+          changeType === 'create'
+            ? 'text-green-500'
+            : changeType === 'delete'
+              ? 'text-red-500'
+              : changeType === 'rename'
+                ? 'text-yellow-500'
+                : 'text-blue-500'
+
+        return (
+          <div key={change.path ?? idx}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className={cn('font-mono truncate', typeColor)}>{filename}</span>
+              <span
+                className={cn(
+                  'text-[0.625rem] uppercase font-medium px-1 rounded',
+                  typeColor
+                )}
+              >
+                {changeType}
+              </span>
+              {change.kind?.move_path && (
+                <span className="text-muted-foreground/60 truncate">
+                  → {getFilename(change.kind.move_path)}
+                </span>
+              )}
+            </div>
+            {change.diff ? (
+              <PatchDiffView patch={change.diff} />
+            ) : (
+              <div className="text-muted-foreground/50 italic">No diff available</div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function getToolDisplay(toolCall: ToolCall): ToolDisplay {
   const input = toolCall.input as Record<string, unknown>
 
@@ -777,7 +868,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         label: 'File Change',
         detail,
         filePath,
-        expandedContent: JSON.stringify(toolCall.input, null, 2),
+        expandedContent: <FileChangeDiffView input={toolCall.input} />,
       }
     }
 

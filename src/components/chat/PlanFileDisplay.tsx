@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils'
 import { getFilename } from '@/lib/path-utils'
 import {
   Collapsible,
-  CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 
@@ -32,8 +31,9 @@ interface PlanDisplayInlineProps extends PlanDisplayBaseProps {
 type PlanDisplayProps = PlanDisplayFileProps | PlanDisplayInlineProps
 
 /**
- * Display plan content in a collapsible section
- * Can render inline content directly or fetch from a file path
+ * Display plan content in a collapsible section.
+ * Uses conditional rendering (no CSS animation) to avoid scroll timing races
+ * when plans collapse programmatically (approval or follow-up message).
  */
 export function PlanDisplay({
   content: inlineContent,
@@ -42,6 +42,15 @@ export function PlanDisplay({
   defaultCollapsed = false,
 }: PlanDisplayProps) {
   const [isOpen, setIsOpen] = useState(!defaultCollapsed)
+
+  // Render-time sync: when defaultCollapsed transitions to true, close immediately
+  // in the same render frame (no useEffect delay). React re-renders before commit.
+  // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed)
+  if (defaultCollapsed && !prevDefaultCollapsed) {
+    setPrevDefaultCollapsed(true)
+    setIsOpen(false)
+  }
 
   // Extract filename from path for display (only for file-based plans)
   const filename = filePath ? getFilename(filePath) : null
@@ -118,13 +127,13 @@ export function PlanDisplay({
           )}
         />
       </CollapsibleTrigger>
-      <CollapsibleContent>
+      {isOpen && (
         <div className="border-t border-border/50 px-3 py-3">
           <div>
             <Markdown className="text-sm">{content}</Markdown>
           </div>
         </div>
-      </CollapsibleContent>
+      )}
     </Collapsible>
   )
 }

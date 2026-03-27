@@ -51,6 +51,27 @@ pub async fn attach_saved_context(
     // Destination file: {session_id}-context-{slug}.md
     let dest_file = saved_contexts_dir.join(format!("{session_id}-context-{slug}.md"));
 
+    // If already attached for this session, return existing info without re-copying
+    if dest_file.exists() {
+        let metadata = std::fs::metadata(&dest_file)
+            .map_err(|e| format!("Failed to get file metadata: {e}"))?;
+        let size = metadata.len();
+        let created_at = metadata
+            .created()
+            .or_else(|_| metadata.modified())
+            .map_err(|e| format!("Failed to get file time: {e}"))?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Failed to convert time: {e}"))?
+            .as_secs();
+        log::trace!("Context '{slug}' already attached for session {session_id}, skipping copy");
+        return Ok(AttachedSavedContext {
+            slug,
+            name,
+            size,
+            created_at,
+        });
+    }
+
     // Write content to destination
     std::fs::write(&dest_file, &content)
         .map_err(|e| format!("Failed to write attached context file: {e}"))?;

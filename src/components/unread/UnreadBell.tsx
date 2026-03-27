@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/popover'
 import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAllSessions } from '@/services/chat'
 import { useProjectsStore } from '@/store/projects-store'
@@ -109,10 +109,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const queryClient = useQueryClient()
   const unreadCount = useUnreadCount()
   const { data: allSessions, isLoading } = useAllSessions(open)
-  const selectedProjectId = useProjectsStore(
-    state => state.selectedProjectId
-  )
-
   // Listen for command palette event to open the popover
   useEffect(() => {
     const handler = () => setOpen(true)
@@ -121,11 +117,12 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       window.removeEventListener('command:open-unread-sessions', handler)
   }, [])
 
-  // Reset open state when all sessions are read so the popover
-  // doesn't auto-reappear when a new unread session arrives
-  useEffect(() => {
-    if (unreadCount === 0) setOpen(false)
-  }, [unreadCount])
+  // Synchronous reset: guarantees open=false is committed before unreadCount
+  // can bounce back (e.g. optimistic update overwritten by in-flight refetch).
+  // A useEffect would fire after render, missing fast 1→0→1 transitions.
+  if (unreadCount === 0 && open) {
+    setOpen(false)
+  }
 
   // Invalidate cache each time popover opens
   useEffect(() => {
@@ -164,36 +161,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       (a, b) => b.session.updated_at - a.session.updated_at
     )
   }, [allSessions])
-
-  const groupedItems = useMemo(() => {
-    const groups = new Map<
-      string,
-      { projectId: string; projectName: string; items: UnreadItem[] }
-    >()
-    for (const item of unreadItems) {
-      const existing = groups.get(item.projectId)
-      if (existing) {
-        existing.items.push(item)
-      } else {
-        groups.set(item.projectId, {
-          projectId: item.projectId,
-          projectName: item.projectName,
-          items: [item],
-        })
-      }
-    }
-    return Array.from(groups.values()).sort((a, b) => {
-      if (a.projectId === selectedProjectId) return -1
-      if (b.projectId === selectedProjectId) return 1
-      return a.projectName.localeCompare(b.projectName)
-    })
-  }, [unreadItems, selectedProjectId])
-
-  // Flat list of items across groups for keyboard navigation
-  const flatItems = useMemo(
-    () => groupedItems.flatMap(g => g.items),
-    [groupedItems]
-  )
 
   const markSessionsReadOptimistically = useCallback(
     (sessionIds: string[]) => {
@@ -236,12 +203,12 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       window.dispatchEvent(new CustomEvent('session-opened'))
       // Adjust focus: stay at same index or move up if at end
       setFocusedIndex(i => {
-        const newTotal = flatItems.length - 1
+        const newTotal = unreadItems.length - 1
         if (newTotal <= 0) return -1
         return Math.min(i, newTotal - 1)
       })
     },
-    [queryClient, flatItems.length, markSessionsReadOptimistically]
+    [queryClient, unreadItems.length, markSessionsReadOptimistically]
   )
 
   const handleSelect = useCallback((item: UnreadItem) => {
@@ -291,7 +258,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const total = flatItems.length
+      const total = unreadItems.length
       if (!total) return
 
       switch (e.key) {
@@ -305,19 +272,19 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           break
         case 'Enter':
           e.preventDefault()
-          if (focusedIndex >= 0 && flatItems[focusedIndex]) {
-            handleSelect(flatItems[focusedIndex])
+          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
+            handleSelect(unreadItems[focusedIndex])
           }
           break
         case 'Backspace':
           e.preventDefault()
-          if (focusedIndex >= 0 && flatItems[focusedIndex]) {
-            handleMarkOneRead(flatItems[focusedIndex])
+          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
+            handleMarkOneRead(unreadItems[focusedIndex])
           }
           break
       }
     },
-    [flatItems, focusedIndex, handleSelect, handleMarkOneRead]
+    [unreadItems, focusedIndex, handleSelect, handleMarkOneRead]
   )
 
   // Scroll focused item into view
@@ -337,9 +304,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       </span>
     )
   }
-
-  // Build flat index for rendering
-  let itemIndex = 0
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -364,7 +328,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         ref={contentRef}
         align="center"
         sideOffset={6}
-        className="w-[380px] p-0"
+        className="w-[min(440px,calc(100vw-2rem))] p-0"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         onEscapeKeyDown={e => e.stopPropagation()}
@@ -396,48 +360,44 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           </div>
         ) : (
           <div className="max-h-[min(400px,60vh)] overflow-y-auto p-1">
-            {groupedItems.map(group => (
-              <div key={group.projectId}>
-                <div className="text-[10px] font-medium uppercase tracking-wider px-2 pt-1.5 pb-0.5 text-muted-foreground">
-                  {group.projectName}
-                </div>
-                {group.items.map(item => {
-                  const status = getSessionStatus(item.session)
-                  const StatusIcon = status?.icon ?? CheckCircle2
-                  const idx = itemIndex++
+            {unreadItems.map((item, idx) => {
+              const status = getSessionStatus(item.session)
+              const StatusIcon = status?.icon ?? CheckCircle2
 
-                  return (
-                    <button
-                      key={item.session.id}
-                      type="button"
-                      data-unread-index={idx}
-                      onClick={() => handleSelect(item)}
-                      onMouseEnter={() => setFocusedIndex(idx)}
-                      className={cn(
-                        'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-center gap-2',
-                        focusedIndex === idx && 'bg-accent'
-                      )}
-                    >
-                      <StatusIcon
-                        className={cn(
-                          'h-3.5 w-3.5 shrink-0',
-                          status?.className ?? 'text-muted-foreground'
-                        )}
-                      />
-                      <span className="text-sm truncate flex-1 min-w-0">
-                        {item.session.name}
+              return (
+                <button
+                  key={item.session.id}
+                  type="button"
+                  data-unread-index={idx}
+                  onClick={() => handleSelect(item)}
+                  onMouseEnter={() => setFocusedIndex(idx)}
+                  className={cn(
+                    'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-start gap-2',
+                    focusedIndex === idx && 'bg-accent'
+                  )}
+                >
+                  <StatusIcon
+                    className={cn(
+                      'h-3.5 w-3.5 shrink-0 mt-0.5',
+                      status?.className ?? 'text-muted-foreground'
+                    )}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/50 shrink-0">
+                        {item.projectName}
                       </span>
-                      <span className="text-[11px] text-muted-foreground/60 min-w-0 max-w-[40%] truncate">
-                        {item.worktreeName}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground/40 shrink-0">
+                      <span className="text-[11px] text-muted-foreground/40 shrink-0 ml-auto">
                         {formatRelativeTime(item.session.updated_at)}
                       </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
+                    </div>
+                    <span className="text-[13px] truncate block">
+                      {item.session.name}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </PopoverContent>

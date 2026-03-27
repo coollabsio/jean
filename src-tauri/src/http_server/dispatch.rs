@@ -114,12 +114,15 @@ pub async fn dispatch_command(
         }
         "update_project_settings" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
+            let name: Option<String> = from_field_opt(&args, "name")?;
             let default_branch: Option<String> =
                 field_opt(&args, "defaultBranch", "default_branch")?;
             let result = crate::projects::update_project_settings(
                 app.clone(),
                 project_id,
+                name,
                 default_branch,
+                None,
                 None,
                 None,
                 None,
@@ -293,6 +296,8 @@ pub async fn dispatch_command(
                 field_opt(&args, "customProfileName", "custom_profile_name")?;
             let reasoning_effort: Option<String> =
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
+            let specific_files: Option<Vec<String>> =
+                field_opt(&args, "specificFiles", "specific_files")?;
             let result = crate::projects::create_commit_with_ai(
                 app.clone(),
                 worktree_path,
@@ -303,6 +308,7 @@ pub async fn dispatch_command(
                 model,
                 custom_profile_name,
                 reasoning_effort,
+                specific_files,
             )
             .await?;
             to_value(result)
@@ -654,7 +660,8 @@ pub async fn dispatch_command(
         "attach_saved_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let source_path: String = field(&args, "sourcePath", "source_path")?;
-            let context_slug: String = field(&args, "contextSlug", "context_slug")?;
+            let context_slug: String = from_field(&args, "slug")
+                .or_else(|_| field(&args, "contextSlug", "context_slug"))?;
             crate::projects::attach_saved_context(
                 app.clone(),
                 session_id,
@@ -667,7 +674,8 @@ pub async fn dispatch_command(
         }
         "remove_saved_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
-            let context_slug: String = field(&args, "contextSlug", "context_slug")?;
+            let context_slug: String = from_field(&args, "slug")
+                .or_else(|_| field(&args, "contextSlug", "context_slug"))?;
             crate::projects::remove_saved_context(app.clone(), session_id, context_slug).await?;
             emit_cache_invalidation(app, &["contexts"]);
             Ok(Value::Null)
@@ -680,7 +688,8 @@ pub async fn dispatch_command(
         }
         "get_saved_context_content" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
-            let context_slug: String = field(&args, "contextSlug", "context_slug")?;
+            let context_slug: String = from_field(&args, "slug")
+                .or_else(|_| field(&args, "contextSlug", "context_slug"))?;
             let result =
                 crate::projects::get_saved_context_content(app.clone(), session_id, context_slug)
                     .await?;
@@ -1433,9 +1442,14 @@ pub async fn dispatch_command(
             // NATIVE ONLY: No terminals in browser mode
             to_value(false)
         }
-        "get_run_script" => {
+        "get_run_scripts" => {
             // NATIVE ONLY: Terminals don't work in browser mode
-            Ok(Value::Null)
+            Ok(Value::Array(vec![]))
+        }
+        "get_ports" => {
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let result = crate::terminal::get_ports(worktree_path).await;
+            to_value(result)
         }
 
         // =====================================================================
@@ -1688,6 +1702,10 @@ pub async fn dispatch_command(
             let result = crate::claude_cli::check_claude_cli_auth(app.clone()).await?;
             to_value(result)
         }
+        "detect_claude_in_path" => {
+            let result = crate::claude_cli::detect_claude_in_path(app.clone()).await?;
+            to_value(result)
+        }
         "get_claude_usage" => {
             let result = crate::claude_cli::get_claude_usage().await?;
             to_value(result)
@@ -1705,12 +1723,16 @@ pub async fn dispatch_command(
             let result = crate::opencode_cli::check_opencode_cli_installed(app.clone()).await?;
             to_value(result)
         }
+        "detect_opencode_in_path" => {
+            let result = crate::opencode_cli::detect_opencode_in_path(app.clone()).await?;
+            to_value(result)
+        }
         "check_opencode_cli_auth" => {
             let result = crate::opencode_cli::check_opencode_cli_auth(app.clone()).await?;
             to_value(result)
         }
         "get_available_opencode_versions" => {
-            let result = crate::opencode_cli::get_available_opencode_versions().await?;
+            let result = crate::opencode_cli::get_available_opencode_versions(app.clone()).await?;
             to_value(result)
         }
         "install_opencode_cli" => {
@@ -1724,6 +1746,10 @@ pub async fn dispatch_command(
         }
         "check_gh_cli_installed" => {
             let result = crate::gh_cli::check_gh_cli_installed(app.clone()).await?;
+            to_value(result)
+        }
+        "detect_gh_in_path" => {
+            let result = crate::gh_cli::detect_gh_in_path(app.clone()).await?;
             to_value(result)
         }
         "check_gh_cli_auth" => {
@@ -1774,6 +1800,10 @@ pub async fn dispatch_command(
         // =====================================================================
         "check_codex_cli_installed" => {
             let result = crate::codex_cli::check_codex_cli_installed(app.clone()).await?;
+            to_value(result)
+        }
+        "detect_codex_in_path" => {
+            let result = crate::codex_cli::detect_codex_in_path(app.clone()).await?;
             to_value(result)
         }
         "check_codex_cli_auth" => {

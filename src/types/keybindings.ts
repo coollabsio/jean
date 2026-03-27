@@ -396,6 +396,8 @@ export function formatShortcutDisplay(
           return 'Tab'
         case 'escape':
           return 'Esc'
+        case 'backquote':
+          return '`'
         default:
           return part.toUpperCase()
       }

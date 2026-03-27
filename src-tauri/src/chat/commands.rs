@@ -2390,9 +2390,52 @@ pub async fn send_chat_message(
                 }
                 // If the flag was set, the cancel_process path already marked the run as Cancelled
             } else {
-                // Non-OpenCode error: mark as crashed too
-                if let Err(mark_err) = run_log_writer.mark_crashed() {
-                    log::warn!("Failed to mark run as crashed after thread error: {mark_err}");
+                // Non-OpenCode error: check if CLI actually completed despite the
+                // thread error (e.g. tailing timed out but CLI finished). If so,
+                // salvage the run as Completed with the resume ID (#209).
+                if run_log::jsonl_has_result_line(&app, &session_id, &run_id) {
+                    log::info!(
+                        "[SendChat] CLI completed despite thread error for session={session_id}, salvaging run"
+                    );
+                    let resume_sid =
+                        run_log::extract_session_id_from_jsonl(&app, &session_id, &run_id);
+                    let salvage_msg_id = Uuid::new_v4().to_string();
+                    if let Err(complete_err) = run_log_writer.complete(
+                        &salvage_msg_id,
+                        resume_sid.as_deref(),
+                        None,
+                    ) {
+                        log::warn!("Failed to complete salvaged run: {complete_err}");
+                    }
+                    // Also persist resume ID to session index so --resume works
+                    if let Some(ref sid) = resume_sid {
+                        if let Err(save_err) = with_sessions_mut(
+                            &app,
+                            &worktree_path,
+                            &worktree_id,
+                            |sessions| {
+                                if let Some(session) =
+                                    sessions.find_session_mut(&session_id)
+                                {
+                                    session.claude_session_id = Some(sid.clone());
+                                    session.is_reviewing = true;
+                                    session.waiting_for_input = false;
+                                }
+                                Ok(())
+                            },
+                        ) {
+                            log::warn!(
+                                "Failed to save salvaged resume ID (will recover on restart): {save_err}"
+                            );
+                        }
+                    }
+                    emit_sessions_cache_invalidation(&app);
+                } else {
+                    if let Err(mark_err) = run_log_writer.mark_crashed() {
+                        log::warn!(
+                            "Failed to mark run as crashed after thread error: {mark_err}"
+                        );
+                    }
                 }
             }
             return Err(e);
@@ -2400,8 +2443,24 @@ pub async fn send_chat_message(
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
             super::registry::cleanup_session_registrations(&session_id);
-            if let Err(mark_err) = run_log_writer.mark_crashed() {
-                log::warn!("Failed to mark run as crashed after thread panic: {mark_err}");
+            // Check if CLI completed despite thread panic (#209)
+            if run_log::jsonl_has_result_line(&app, &session_id, &run_id) {
+                log::info!(
+                    "[SendChat] CLI completed despite thread panic for session={session_id}, salvaging run"
+                );
+                let resume_sid =
+                    run_log::extract_session_id_from_jsonl(&app, &session_id, &run_id);
+                let salvage_msg_id = Uuid::new_v4().to_string();
+                if let Err(complete_err) =
+                    run_log_writer.complete(&salvage_msg_id, resume_sid.as_deref(), None)
+                {
+                    log::warn!("Failed to complete salvaged run after panic: {complete_err}");
+                }
+                emit_sessions_cache_invalidation(&app);
+            } else {
+                if let Err(mark_err) = run_log_writer.mark_crashed() {
+                    log::warn!("Failed to mark run as crashed after thread panic: {mark_err}");
+                }
             }
             return Err(
                 "CLI execution thread closed unexpectedly (possible crash or panic)".to_string(),
@@ -2599,8 +2658,13 @@ pub async fn send_chat_message(
 
     // Atomically save session metadata (resume ID for session continuity)
     // Note: Messages are NOT saved here - they're in NDJSON only
-    // Only persist if the run produced meaningful content
-    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+    // Only persist if the run produced meaningful content.
+    // IMPORTANT: This is non-fatal — the critical data (run completion, JSONL content)
+    // is already persisted by run_log_writer.complete() above. If this fails, the
+    // resume ID and completion state will be recovered on next app startup via
+    // recover_incomplete_runs(). Making this fatal would cause the frontend to roll
+    // back the conversation cache even though the CLI ran successfully (#209).
+    if let Err(e) = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
             if !resume_id_for_log.is_empty() && has_content {
                 match response_backend {
@@ -2646,7 +2710,11 @@ pub async fn send_chat_message(
             }
         }
         Ok(())
-    })?;
+    }) {
+        log::error!(
+            "[SendChat] Failed to save session state for session={session_id} (non-fatal, will recover on restart): {e}"
+        );
+    }
 
     // Emit cache invalidation so all clients (native + web) refetch authoritative state
     emit_sessions_cache_invalidation(&app);
@@ -3512,7 +3580,7 @@ pub async fn write_file_content(path: String, content: String) -> Result<(), Str
 
 /// Open a file in the user's preferred editor
 ///
-/// Uses the editor preference (zed, vscode, cursor, xcode) to open files.
+/// Uses the editor preference (zed, vscode, cursor, xcode, intellij) to open files.
 #[tauri::command]
 pub async fn open_file_in_default_app(path: String, editor: Option<String>) -> Result<(), String> {
     let editor_app = editor.unwrap_or_else(|| "zed".to_string());
@@ -3523,6 +3591,7 @@ pub async fn open_file_in_default_app(path: String, editor: Option<String>) -> R
         "cursor" => "Cursor ('cursor')",
         "zed" => "Zed ('zed')",
         "xcode" => "Xcode ('xed')",
+        "intellij" => "IntelliJ IDEA ('idea')",
         _ => editor_app.as_str(),
     };
 
@@ -3548,6 +3617,15 @@ pub async fn open_file_in_default_app(path: String, editor: Option<String>) -> R
                 Err(e) => Err(e),
             },
             "xcode" => std::process::Command::new("xed").arg(&path).spawn(),
+            "intellij" => match std::process::Command::new("idea").arg(&path).spawn() {
+                Ok(child) => Ok(child),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::process::Command::new("open")
+                        .args(["-a", "IntelliJ IDEA", &path])
+                        .spawn()
+                }
+                Err(e) => Err(e),
+            },
             _ => match std::process::Command::new("code").arg(&path).spawn() {
                 Ok(child) => Ok(child),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -3582,6 +3660,10 @@ pub async fn open_file_in_default_app(path: String, editor: Option<String>) -> R
                 .args(["/c", "cursor", &path])
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn(),
+            "intellij" => std::process::Command::new("cmd")
+                .args(["/c", "idea", &path])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
             "xcode" => return Err("Xcode is only available on macOS".to_string()),
             _ => std::process::Command::new("cmd")
                 .args(["/c", "code", &path])
@@ -3603,6 +3685,7 @@ pub async fn open_file_in_default_app(path: String, editor: Option<String>) -> R
         let result = match editor_app.as_str() {
             "zed" => std::process::Command::new("zed").arg(&path).spawn(),
             "cursor" => std::process::Command::new("cursor").arg(&path).spawn(),
+            "intellij" => std::process::Command::new("idea").arg(&path).spawn(),
             "xcode" => return Err("Xcode is only available on macOS".to_string()),
             _ => std::process::Command::new("code").arg(&path).spawn(),
         };
@@ -3656,6 +3739,16 @@ fn parse_context_filename(path: &std::path::Path) -> Option<SavedContext> {
     // Must end with .md
     if !filename.ends_with(".md") {
         return None;
+    }
+
+    // Skip session-attached context files ({uuid}-context-{slug}.md)
+    if filename.contains("-context-") {
+        // Check if prefix before "-context-" looks like a UUID (36 chars with hyphens)
+        if let Some(prefix) = filename.split("-context-").next() {
+            if prefix.len() == 36 && prefix.chars().filter(|c| *c == '-').count() == 4 {
+                return None;
+            }
+        }
     }
 
     // Get file metadata
@@ -4098,6 +4191,24 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
         text_content.len()
     );
 
+    // If no StructuredOutput found, try stripping markdown code fences
+    if !text_content.is_empty() {
+        let trimmed = text_content.trim();
+        let stripped = trimmed
+            .strip_prefix("```json")
+            .or_else(|| trimmed.strip_prefix("```"))
+            .unwrap_or(trimmed)
+            .trim()
+            .strip_suffix("```")
+            .unwrap_or(trimmed)
+            .trim();
+
+        if stripped.starts_with('{') {
+            log::trace!("Extracted JSON from text content (code fence stripped)");
+            return Ok(stripped.to_string());
+        }
+    }
+
     if text_content.is_empty() {
         log::error!("No content found in stream-json output. Raw output: {output}");
         return Err("No text content found in Claude response".to_string());
@@ -4195,9 +4306,11 @@ fn execute_summarization_claude(
         model_str,
         "--no-session-persistence",
         "--max-turns",
-        "1",
+        "2", // Need 2 turns: one for thinking, one for structured output
         "--json-schema",
         CONTEXT_SUMMARY_SCHEMA,
+        "--permission-mode",
+        "plan", // Prevent tool use that could waste turns
     ]);
 
     cmd.stdin(Stdio::piped())
@@ -4258,8 +4371,13 @@ fn execute_summarization_claude(
 
     // Parse the JSON response
     serde_json::from_str(&text_content).map_err(|e| {
+        let preview = if text_content.len() > 200 {
+            format!("{}...", &text_content[..200])
+        } else {
+            text_content.to_string()
+        };
         log::error!(
-            "Failed to parse JSON response: {e}, content: {text_content}, stdout: {stdout}"
+            "Failed to parse JSON response: {e}, content preview: {preview}, full stdout: {stdout}"
         );
         format!("Failed to parse structured response: {e}")
     })
@@ -4965,8 +5083,13 @@ fn execute_digest_claude(
 
     // Parse the JSON response
     serde_json::from_str(&text_content).map_err(|e| {
+        let preview = if text_content.len() > 200 {
+            format!("{}...", &text_content[..200])
+        } else {
+            text_content.to_string()
+        };
         log::error!(
-            "Failed to parse JSON response: {e}, content: {text_content}, stdout: {stdout}"
+            "Failed to parse JSON response: {e}, content preview: {preview}, full stdout: {stdout}"
         );
         format!("Failed to parse structured response: {e}")
     })

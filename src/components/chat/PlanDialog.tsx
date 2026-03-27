@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Pencil, RotateCcw } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { readPlanFile } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import { getFilename } from '@/lib/path-utils'

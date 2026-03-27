@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { Loader2, GitBranch, FolderOpen, AlertCircle } from 'lucide-react'
 import {
   Dialog,

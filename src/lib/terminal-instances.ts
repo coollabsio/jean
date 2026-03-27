@@ -232,7 +232,13 @@ export async function attachToContainer(
   // Fit terminal to container and start/reconnect PTY
   requestAnimationFrame(async () => {
     fitAddon.fit()
-    const { cols, rows } = terminal
+    // Enforce minimum dimensions — degenerate sizes (e.g. rows=0 during dialog
+    // animation) cause portable_pty to crash with an internal assertion failure.
+    const rawCols = terminal.cols
+    const rawRows = terminal.rows
+    let cols = rawCols < 2 ? 80 : rawCols
+    let rows = rawRows < 2 ? 24 : rawRows
+    console.log(`[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${initialized}, container=${container.clientWidth}x${container.clientHeight}`)
 
     if (!initialized) {
       // First time - check if PTY already exists (reconnecting after app restart)

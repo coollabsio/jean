@@ -107,25 +107,31 @@ export function useNewWorktreeData(
     if (parseItemNumber(searchQuery) !== null) {
       return exactIssue ? [exactIssue] : []
     }
+    const stateFilteredSearch = includeClosed
+      ? searchedIssues
+      : searchedIssues?.filter(i => i.state === 'OPEN')
     return prependExactMatch(
       mergeWithSearchResults(
         filterIssues(issues ?? [], searchQuery),
-        searchedIssues
+        stateFilteredSearch
       ),
       exactIssue
     )
-  }, [issues, searchQuery, searchedIssues, exactIssue])
+  }, [issues, searchQuery, searchedIssues, exactIssue, includeClosed])
 
   // Filtered PRs
   const filteredPRs = useMemo(() => {
     if (parseItemNumber(searchQuery) !== null) {
       return exactPR ? [exactPR] : []
     }
+    const stateFilteredSearch = includeClosed
+      ? searchedPRs
+      : searchedPRs?.filter(p => p.state === 'OPEN')
     return prependExactMatch(
-      mergeWithSearchResults(filterPRs(prs ?? [], searchQuery), searchedPRs),
+      mergeWithSearchResults(filterPRs(prs ?? [], searchQuery), stateFilteredSearch),
       exactPR
     )
-  }, [prs, searchQuery, searchedPRs, exactPR])
+  }, [prs, searchQuery, searchedPRs, exactPR, includeClosed])
 
   // Branches
   const {

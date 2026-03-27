@@ -5,6 +5,9 @@
  * one AI backend CLI (Claude/Codex/OpenCode) plus mandatory GitHub CLI.
  */
 
+/* eslint-disable no-console */
+const dbg = (...args: unknown[]) => console.debug('[ONBOARDING]', ...args)
+
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Dialog,
@@ -16,19 +19,21 @@ import {
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useUIStore } from '@/store/ui-store'
-import { useClaudeCliSetup, useClaudeCliAuth } from '@/services/claude-cli'
-import { useCodexCliSetup, useCodexCliAuth } from '@/services/codex-cli'
+import { useClaudeCliSetup, useClaudeCliAuth, useClaudePathDetection } from '@/services/claude-cli'
+import { useCodexCliSetup, useCodexCliAuth, useCodexPathDetection } from '@/services/codex-cli'
 import {
   useOpenCodeCliSetup,
   useOpenCodeCliAuth,
+  useOpenCodePathDetection,
 } from '@/services/opencode-cli'
-import { useGhCliSetup, useGhCliAuth } from '@/services/gh-cli'
+import { useGhCliSetup, useGhCliAuth, useGhPathDetection } from '@/services/gh-cli'
 import {
   SetupState,
   InstallingState,
   ErrorState,
   AuthCheckingState,
   AuthLoginState,
+  CliPathSelector,
 } from './CliSetupComponents'
 import { toast } from 'sonner'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
@@ -123,8 +128,12 @@ function OnboardingDialogContent() {
   const patchPreferences = usePatchPreferences()
 
   const claudeSetup = useClaudeCliSetup()
+  const pathDetection = useClaudePathDetection()
+  const codexPathDetection = useCodexPathDetection()
+  const opencodePathDetection = useOpenCodePathDetection()
   const codexSetup = useCodexCliSetup()
   const opencodeSetup = useOpenCodeCliSetup()
+  const ghPathDetection = useGhPathDetection()
   const ghSetup = useGhCliSetup()
 
   const claudeAuth = useClaudeCliAuth({
@@ -136,7 +145,13 @@ function OnboardingDialogContent() {
   })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
 
-  const [step, setStep] = useState<OnboardingStep>('backend-select')
+  const [step, _setStepRaw] = useState<OnboardingStep>('backend-select')
+  const stepRef = useRef<OnboardingStep>('backend-select')
+  const setStep = useCallback((next: OnboardingStep) => {
+    dbg('step:', stepRef.current, '→', next)
+    stepRef.current = next
+    _setStepRaw(next)
+  }, [])
   const [selectedBackends, setSelectedBackends] = useState<AIBackend[]>([])
   const [, setActiveBackendIndex] = useState(0)
 
@@ -149,6 +164,10 @@ function OnboardingDialogContent() {
   const [codexInstallFailed, setCodexInstallFailed] = useState(false)
   const [opencodeInstallFailed, setOpencodeInstallFailed] = useState(false)
   const [ghInstallFailed, setGhInstallFailed] = useState(false)
+  const [claudePathSelected, setClaudePathSelected] = useState(false)
+  const [codexPathSelected, setCodexPathSelected] = useState(false)
+  const [opencodePathSelected, setOpencodePathSelected] = useState(false)
+  const [ghPathSelected, setGhPathSelected] = useState(false)
   const [claudeLoginAttempt, setClaudeLoginAttempt] = useState(0)
   const [codexLoginAttempt, setCodexLoginAttempt] = useState(0)
   const [opencodeLoginAttempt, setOpencodeLoginAttempt] = useState(0)
@@ -206,17 +225,16 @@ function OnboardingDialogContent() {
 
   const isBackendReady = useCallback(
     (backend: AIBackend) => {
+      let ready = false
       if (backend === 'claude') {
-        return (
-          !!claudeSetup.status?.installed && !!claudeAuth.data?.authenticated
-        )
+        ready = !!claudeSetup.status?.installed && !!claudeAuth.data?.authenticated
+      } else if (backend === 'codex') {
+        ready = !!codexSetup.status?.installed && !!codexAuth.data?.authenticated
+      } else {
+        ready = !!opencodeSetup.status?.installed && !!opencodeAuth.data?.authenticated
       }
-      if (backend === 'codex') {
-        return !!codexSetup.status?.installed && !!codexAuth.data?.authenticated
-      }
-      return (
-        !!opencodeSetup.status?.installed && !!opencodeAuth.data?.authenticated
-      )
+      dbg('isBackendReady:', backend, '→', ready)
+      return ready
     },
     [
       claudeSetup.status?.installed,
@@ -230,20 +248,22 @@ function OnboardingDialogContent() {
 
   const getNextStepForBackend = useCallback(
     (backend: AIBackend): OnboardingStep | null => {
+      let result: OnboardingStep | null = null
       if (backend === 'claude') {
-        if (!claudeSetup.status?.installed) return 'claude-setup'
-        if (!claudeAuth.data?.authenticated) return 'claude-auth-checking'
-        return null
+        if (!claudeSetup.status?.installed) result = 'claude-setup'
+        else if (!claudeAuth.data?.authenticated) result = 'claude-auth-checking'
+      } else if (backend === 'codex') {
+        if (!codexSetup.status?.installed) result = 'codex-setup'
+        else if (!codexAuth.data?.authenticated) result = 'codex-auth-checking'
+      } else {
+        if (!opencodeSetup.status?.installed) result = 'opencode-setup'
+        else if (!opencodeAuth.data?.authenticated) result = 'opencode-auth-checking'
       }
-      if (backend === 'codex') {
-        if (!codexSetup.status?.installed) return 'codex-setup'
-        if (!codexAuth.data?.authenticated) return 'codex-auth-checking'
-        return null
-      }
-
-      if (!opencodeSetup.status?.installed) return 'opencode-setup'
-      if (!opencodeAuth.data?.authenticated) return 'opencode-auth-checking'
-      return null
+      dbg('getNextStepForBackend:', backend, '→', result, {
+        installed: backend === 'claude' ? claudeSetup.status?.installed : backend === 'codex' ? codexSetup.status?.installed : opencodeSetup.status?.installed,
+        authenticated: backend === 'claude' ? claudeAuth.data?.authenticated : backend === 'codex' ? codexAuth.data?.authenticated : opencodeAuth.data?.authenticated,
+      })
+      return result
     },
     [
       claudeSetup.status?.installed,
@@ -263,19 +283,23 @@ function OnboardingDialogContent() {
 
   const moveToNextBackendOrGh = useCallback(
     (currentBackend: AIBackend) => {
+      dbg('moveToNextBackendOrGh:', currentBackend, 'selectedBackends:', selectedBackends)
       const currentIndex = selectedBackends.indexOf(currentBackend)
       for (let i = currentIndex + 1; i < selectedBackends.length; i += 1) {
         const backend = selectedBackends[i]
         if (!backend) continue
         const nextStep = getNextStepForBackend(backend)
         if (nextStep) {
+          dbg('moveToNextBackendOrGh: next backend =', backend, 'step =', nextStep)
           setActiveBackendIndex(i)
           setStep(nextStep)
           return
         }
       }
 
-      setStep(getNextStepAfterBackends())
+      const afterBackends = getNextStepAfterBackends()
+      dbg('moveToNextBackendOrGh: all backends done, next =', afterBackends)
+      setStep(afterBackends)
     },
     [selectedBackends, getNextStepForBackend, getNextStepAfterBackends]
   )
@@ -293,6 +317,21 @@ function OnboardingDialogContent() {
       (opencodeAuth.isLoading || opencodeAuth.isFetching)) ||
     (ghSetup.status?.installed && (ghAuth.isLoading || ghAuth.isFetching))
 
+  dbg('loadingInitialState:', loadingInitialState, {
+    claudeStatusLoading: claudeSetup.isStatusLoading,
+    codexStatusLoading: codexSetup.isStatusLoading,
+    opencodeStatusLoading: opencodeSetup.isStatusLoading,
+    ghStatusLoading: ghSetup.isStatusLoading,
+    claudeInstalled: claudeSetup.status?.installed,
+    codexInstalled: codexSetup.status?.installed,
+    opencodeInstalled: opencodeSetup.status?.installed,
+    ghInstalled: ghSetup.status?.installed,
+    claudeAuthLoading: claudeAuth.isLoading,
+    codexAuthLoading: codexAuth.isLoading,
+    opencodeAuthLoading: opencodeAuth.isLoading,
+    ghAuthLoading: ghAuth.isLoading,
+  })
+
   useEffect(() => {
     if (!onboardingOpen) {
       initializedFlowRef.current = false
@@ -300,9 +339,11 @@ function OnboardingDialogContent() {
     }
 
     if (loadingInitialState || initializedFlowRef.current) {
+      dbg('init effect: skipped (loading:', loadingInitialState, 'initialized:', initializedFlowRef.current, ')')
       return
     }
 
+    dbg('init effect: INITIALIZING FLOW')
     initializedFlowRef.current = true
 
     queueMicrotask(() => {
@@ -310,6 +351,10 @@ function OnboardingDialogContent() {
       setCodexInstallFailed(false)
       setOpencodeInstallFailed(false)
       setGhInstallFailed(false)
+      setClaudePathSelected(false)
+      setCodexPathSelected(false)
+      setOpencodePathSelected(false)
+      setGhPathSelected(false)
       setClaudeLoginAttempt(0)
       setCodexLoginAttempt(0)
       setOpencodeLoginAttempt(0)
@@ -317,6 +362,7 @@ function OnboardingDialogContent() {
     })
 
     if (onboardingStartStep === 'gh') {
+      dbg('init effect: startStep=gh → gh-setup')
       queueMicrotask(() => {
         setStep('gh-setup')
         setOnboardingStartStep(null)
@@ -325,6 +371,7 @@ function OnboardingDialogContent() {
     }
 
     if (onboardingStartStep === 'claude') {
+      dbg('init effect: startStep=claude → claude-setup')
       queueMicrotask(() => {
         setSelectedBackends(['claude'])
         setActiveBackendIndex(0)
@@ -336,12 +383,14 @@ function OnboardingDialogContent() {
 
     const readyBackends = AI_BACKENDS.filter(isBackendReady)
     const ghReady = !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
+    dbg('init effect: readyBackends:', readyBackends, 'ghReady:', ghReady, 'manuallyTriggered:', onboardingManuallyTriggered)
 
     // When manually triggered, start at backend-select so users can
     // install additional CLIs (e.g. Codex) even if minimum requirements are met.
     // But if ALL backends are already installed, skip to GH or complete.
     if (onboardingManuallyTriggered) {
       const uninstalledBackends = AI_BACKENDS.filter(b => !isBackendReady(b))
+      dbg('init effect: manual trigger, uninstalled:', uninstalledBackends)
       if (uninstalledBackends.length > 0) {
         queueMicrotask(() => setStep('backend-select'))
         return
@@ -352,11 +401,13 @@ function OnboardingDialogContent() {
     }
 
     if (ghReady && readyBackends.length > 0) {
+      dbg('init effect: all ready → complete')
       queueMicrotask(() => setStep('complete'))
       return
     }
 
     if (readyBackends.length > 0) {
+      dbg('init effect: some backends ready → skip to after backends')
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
         setStep(getNextStepAfterBackends())
@@ -364,6 +415,7 @@ function OnboardingDialogContent() {
       return
     }
 
+    dbg('init effect: nothing ready → backend-select')
     queueMicrotask(() => setStep('backend-select'))
   }, [
     onboardingOpen,
@@ -380,11 +432,22 @@ function OnboardingDialogContent() {
   // Handle AI backend auth check steps
   useEffect(() => {
     if (step !== 'claude-auth-checking') return
+    dbg('claude-auth-checking effect:', {
+      isLoading: claudeAuth.isLoading,
+      isFetching: claudeAuth.isFetching,
+      status: claudeAuth.status,
+      fetchStatus: claudeAuth.fetchStatus,
+      authenticated: claudeAuth.data?.authenticated,
+      error: claudeAuth.error,
+      enabled: !!claudeSetup.status?.installed,
+    })
     if (claudeAuth.isLoading || claudeAuth.isFetching) return
 
     if (claudeAuth.data?.authenticated) {
+      dbg('claude auth OK → moveToNextBackendOrGh')
       queueMicrotask(() => moveToNextBackendOrGh('claude'))
     } else {
+      dbg('claude auth NOT OK → claude-auth-login')
       queueMicrotask(() => setStep('claude-auth-login'))
     }
   }, [
@@ -392,16 +455,32 @@ function OnboardingDialogContent() {
     claudeAuth.isLoading,
     claudeAuth.isFetching,
     claudeAuth.data?.authenticated,
+    claudeAuth.status,
+    claudeAuth.fetchStatus,
+    claudeAuth.error,
+    claudeSetup.status?.installed,
     moveToNextBackendOrGh,
+    setStep,
   ])
 
   useEffect(() => {
     if (step !== 'codex-auth-checking') return
+    dbg('codex-auth-checking effect:', {
+      isLoading: codexAuth.isLoading,
+      isFetching: codexAuth.isFetching,
+      status: codexAuth.status,
+      fetchStatus: codexAuth.fetchStatus,
+      authenticated: codexAuth.data?.authenticated,
+      error: codexAuth.error,
+      enabled: !!codexSetup.status?.installed,
+    })
     if (codexAuth.isLoading || codexAuth.isFetching) return
 
     if (codexAuth.data?.authenticated) {
+      dbg('codex auth OK → moveToNextBackendOrGh')
       queueMicrotask(() => moveToNextBackendOrGh('codex'))
     } else {
+      dbg('codex auth NOT OK → codex-auth-login')
       queueMicrotask(() => setStep('codex-auth-login'))
     }
   }, [
@@ -409,16 +488,32 @@ function OnboardingDialogContent() {
     codexAuth.isLoading,
     codexAuth.isFetching,
     codexAuth.data?.authenticated,
+    codexAuth.status,
+    codexAuth.fetchStatus,
+    codexAuth.error,
+    codexSetup.status?.installed,
     moveToNextBackendOrGh,
+    setStep,
   ])
 
   useEffect(() => {
     if (step !== 'opencode-auth-checking') return
+    dbg('opencode-auth-checking effect:', {
+      isLoading: opencodeAuth.isLoading,
+      isFetching: opencodeAuth.isFetching,
+      status: opencodeAuth.status,
+      fetchStatus: opencodeAuth.fetchStatus,
+      authenticated: opencodeAuth.data?.authenticated,
+      error: opencodeAuth.error,
+      enabled: !!opencodeSetup.status?.installed,
+    })
     if (opencodeAuth.isLoading || opencodeAuth.isFetching) return
 
     if (opencodeAuth.data?.authenticated) {
+      dbg('opencode auth OK → moveToNextBackendOrGh')
       queueMicrotask(() => moveToNextBackendOrGh('opencode'))
     } else {
+      dbg('opencode auth NOT OK → opencode-auth-login')
       queueMicrotask(() => setStep('opencode-auth-login'))
     }
   }, [
@@ -426,19 +521,35 @@ function OnboardingDialogContent() {
     opencodeAuth.isLoading,
     opencodeAuth.isFetching,
     opencodeAuth.data?.authenticated,
+    opencodeAuth.status,
+    opencodeAuth.fetchStatus,
+    opencodeAuth.error,
+    opencodeSetup.status?.installed,
     moveToNextBackendOrGh,
+    setStep,
   ])
 
   useEffect(() => {
     if (step !== 'gh-auth-checking') return
+    dbg('gh-auth-checking effect:', {
+      isLoading: ghAuth.isLoading,
+      isFetching: ghAuth.isFetching,
+      status: ghAuth.status,
+      fetchStatus: ghAuth.fetchStatus,
+      authenticated: ghAuth.data?.authenticated,
+      error: ghAuth.error,
+      enabled: !!ghSetup.status?.installed,
+    })
     if (ghAuth.isLoading || ghAuth.isFetching) return
 
     if (ghAuth.data?.authenticated) {
+      dbg('gh auth OK → complete')
       queueMicrotask(() => setStep('complete'))
     } else {
+      dbg('gh auth NOT OK → gh-auth-login')
       queueMicrotask(() => setStep('gh-auth-login'))
     }
-  }, [step, ghAuth.isLoading, ghAuth.isFetching, ghAuth.data?.authenticated])
+  }, [step, ghAuth.isLoading, ghAuth.isFetching, ghAuth.data?.authenticated, ghAuth.status, ghAuth.fetchStatus, ghAuth.error, ghSetup.status?.installed, setStep])
 
   const handleBackendToggle = useCallback(
     (backend: AIBackend, checked: boolean) => {
@@ -454,6 +565,7 @@ function OnboardingDialogContent() {
   )
 
   const handleBackendSelectionContinue = useCallback(() => {
+    dbg('handleBackendSelectionContinue: selectedBackends =', selectedBackends)
     if (selectedBackends.length === 0 && !onboardingManuallyTriggered) {
       toast.warning('Select at least one AI backend to continue.')
       return
@@ -464,39 +576,124 @@ function OnboardingDialogContent() {
       if (!backend) continue
       const nextStep = getNextStepForBackend(backend)
       if (nextStep) {
+        dbg('handleBackendSelectionContinue: first backend =', backend, 'step =', nextStep)
         setActiveBackendIndex(i)
         setStep(nextStep)
         return
       }
     }
 
-    setStep(getNextStepAfterBackends())
+    const afterBackends = getNextStepAfterBackends()
+    dbg('handleBackendSelectionContinue: all backends ready, next =', afterBackends)
+    setStep(afterBackends)
   }, [selectedBackends, onboardingManuallyTriggered, getNextStepForBackend, getNextStepAfterBackends])
 
   const handleClaudeInstall = useCallback(() => {
+    dbg('handleClaudeInstall: version =', claudeVersion)
     if (!claudeVersion) return
     setStep('claude-installing')
     claudeSetup.install(claudeVersion, {
       onSuccess: () => {
+        dbg('handleClaudeInstall: SUCCESS, moving to auth-checking')
         setStep('claude-auth-checking')
         claudeAuth.refetch()
       },
       onError: () => {
+        dbg('handleClaudeInstall: FAILED')
         setClaudeInstallFailed(true)
         setStep('claude-setup')
       },
     })
   }, [claudeVersion, claudeSetup, claudeAuth])
 
+  const handleClaudePathSelect = useCallback(() => {
+    dbg('handleClaudePathSelect: saving claude_cli_source=path')
+    setClaudePathSelected(true)
+    if (preferences) {
+      patchPreferences.mutate({ claude_cli_source: 'path' }, {
+        onSuccess: () => {
+          dbg('handleClaudePathSelect: preference saved, refetching auth')
+          setStep('claude-auth-checking')
+          claudeAuth.refetch()
+        },
+        onError: (err) => {
+          dbg('handleClaudePathSelect: FAILED to save preference', err)
+          setClaudePathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      })
+    }
+  }, [preferences, patchPreferences, claudeAuth, setStep])
+
+  const handleCodexPathSelect = useCallback(() => {
+    dbg('handleCodexPathSelect: saving codex_cli_source=path')
+    setCodexPathSelected(true)
+    if (preferences) {
+      patchPreferences.mutate({ codex_cli_source: 'path' }, {
+        onSuccess: () => {
+          dbg('handleCodexPathSelect: preference saved, refetching auth')
+          setStep('codex-auth-checking')
+          codexAuth.refetch()
+        },
+        onError: (err) => {
+          dbg('handleCodexPathSelect: FAILED to save preference', err)
+          setCodexPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      })
+    }
+  }, [preferences, patchPreferences, codexAuth, setStep])
+
+  const handleOpencodePathSelect = useCallback(() => {
+    dbg('handleOpencodePathSelect: saving opencode_cli_source=path')
+    setOpencodePathSelected(true)
+    if (preferences) {
+      patchPreferences.mutate({ opencode_cli_source: 'path' }, {
+        onSuccess: () => {
+          dbg('handleOpencodePathSelect: preference saved, refetching auth')
+          setStep('opencode-auth-checking')
+          opencodeAuth.refetch()
+        },
+        onError: (err) => {
+          dbg('handleOpencodePathSelect: FAILED to save preference', err)
+          setOpencodePathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      })
+    }
+  }, [preferences, patchPreferences, opencodeAuth, setStep])
+
+  const handleGhPathSelect = useCallback(() => {
+    dbg('handleGhPathSelect: saving gh_cli_source=path')
+    setGhPathSelected(true)
+    if (preferences) {
+      patchPreferences.mutate({ gh_cli_source: 'path' }, {
+        onSuccess: () => {
+          dbg('handleGhPathSelect: preference saved, refetching auth')
+          setStep('gh-auth-checking')
+          ghAuth.refetch()
+        },
+        onError: (err) => {
+          dbg('handleGhPathSelect: FAILED to save preference', err)
+          setGhPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      })
+    }
+  }, [preferences, patchPreferences, ghAuth, setStep])
+
   const handleCodexInstall = useCallback(() => {
+    dbg('handleCodexInstall: version =', codexVersion)
     if (!codexVersion) return
     setStep('codex-installing')
     codexSetup.install(codexVersion, {
       onSuccess: () => {
+        dbg('handleCodexInstall: SUCCESS, moving to auth-checking')
         setStep('codex-auth-checking')
         codexAuth.refetch()
       },
       onError: () => {
+        dbg('handleCodexInstall: FAILED')
         setCodexInstallFailed(true)
         setStep('codex-setup')
       },
@@ -504,14 +701,17 @@ function OnboardingDialogContent() {
   }, [codexVersion, codexSetup, codexAuth])
 
   const handleOpencodeInstall = useCallback(() => {
+    dbg('handleOpencodeInstall: version =', opencodeVersion)
     if (!opencodeVersion) return
     setStep('opencode-installing')
     opencodeSetup.install(opencodeVersion, {
       onSuccess: () => {
+        dbg('handleOpencodeInstall: SUCCESS, moving to auth-checking')
         setStep('opencode-auth-checking')
         opencodeAuth.refetch()
       },
       onError: () => {
+        dbg('handleOpencodeInstall: FAILED')
         setOpencodeInstallFailed(true)
         setStep('opencode-setup')
       },
@@ -519,14 +719,17 @@ function OnboardingDialogContent() {
   }, [opencodeVersion, opencodeSetup, opencodeAuth])
 
   const handleGhInstall = useCallback(() => {
+    dbg('handleGhInstall: version =', ghVersion)
     if (!ghVersion) return
     setStep('gh-installing')
     ghSetup.install(ghVersion, {
       onSuccess: () => {
+        dbg('handleGhInstall: SUCCESS, moving to auth-checking')
         setStep('gh-auth-checking')
         ghAuth.refetch()
       },
       onError: () => {
+        dbg('handleGhInstall: FAILED')
         setGhInstallFailed(true)
         setStep('gh-setup')
       },
@@ -534,24 +737,32 @@ function OnboardingDialogContent() {
   }, [ghVersion, ghSetup, ghAuth])
 
   const handleClaudeLoginComplete = useCallback(async () => {
+    dbg('handleClaudeLoginComplete: refetching auth')
     setStep('claude-auth-checking')
-    await claudeAuth.refetch()
-  }, [claudeAuth])
+    const result = await claudeAuth.refetch()
+    dbg('handleClaudeLoginComplete: refetch result =', result.data)
+  }, [claudeAuth, setStep])
 
   const handleCodexLoginComplete = useCallback(async () => {
+    dbg('handleCodexLoginComplete: refetching auth')
     setStep('codex-auth-checking')
-    await codexAuth.refetch()
-  }, [codexAuth])
+    const result = await codexAuth.refetch()
+    dbg('handleCodexLoginComplete: refetch result =', result.data)
+  }, [codexAuth, setStep])
 
   const handleOpencodeLoginComplete = useCallback(async () => {
+    dbg('handleOpencodeLoginComplete: refetching auth')
     setStep('opencode-auth-checking')
-    await opencodeAuth.refetch()
-  }, [opencodeAuth])
+    const result = await opencodeAuth.refetch()
+    dbg('handleOpencodeLoginComplete: refetch result =', result.data)
+  }, [opencodeAuth, setStep])
 
   const handleGhLoginComplete = useCallback(async () => {
+    dbg('handleGhLoginComplete: refetching auth')
     setStep('gh-auth-checking')
-    await ghAuth.refetch()
-  }, [ghAuth])
+    const result = await ghAuth.refetch()
+    dbg('handleGhLoginComplete: refetch result =', result.data)
+  }, [ghAuth, setStep])
 
   const handleClaudeLoginRetry = useCallback(() => {
     setClaudeLoginAttempt(prev => prev + 1)
@@ -695,14 +906,31 @@ function OnboardingDialogContent() {
     opencodeSetup.status?.installed && step === 'opencode-setup'
   const isGhReinstall = ghSetup.status?.installed && step === 'gh-setup'
 
-  const claudeLoginCommand = claudeSetup.status?.path ?? ''
+  // When CLI source is 'path', use the path detection result for login command
+  // (the Jean-managed status.path may be empty if Jean hasn't installed the CLI)
+  const claudeLoginCommand = (claudePathSelected && pathDetection.data?.path)
+    ? pathDetection.data.path
+    : (claudeSetup.status?.path ?? '')
   const claudeLoginArgs = claudeSetup.status?.supports_auth_command ? ['auth', 'login'] : ['login']
-  const codexLoginCommand = codexSetup.status?.path ?? ''
+  const codexLoginCommand = (codexPathSelected && codexPathDetection.data?.path)
+    ? codexPathDetection.data.path
+    : (codexSetup.status?.path ?? '')
   const codexLoginArgs = ['login']
-  const opencodeLoginCommand = opencodeSetup.status?.path ?? ''
+  const opencodeLoginCommand = (opencodePathSelected && opencodePathDetection.data?.path)
+    ? opencodePathDetection.data.path
+    : (opencodeSetup.status?.path ?? '')
   const opencodeLoginArgs = ['auth', 'login']
-  const ghLoginCommand = ghSetup.status?.path ?? ''
+  const ghLoginCommand = (ghPathSelected && ghPathDetection.data?.path)
+    ? ghPathDetection.data.path
+    : (ghSetup.status?.path ?? '')
   const ghLoginArgs = ['auth', 'login']
+
+  dbg('login commands:', {
+    claude: { cmd: claudeLoginCommand, args: claudeLoginArgs, path: claudeSetup.status?.path, pathSelected: claudePathSelected, detectedPath: pathDetection.data?.path },
+    codex: { cmd: codexLoginCommand, args: codexLoginArgs, path: codexSetup.status?.path, pathSelected: codexPathSelected, detectedPath: codexPathDetection.data?.path },
+    opencode: { cmd: opencodeLoginCommand, args: opencodeLoginArgs, path: opencodeSetup.status?.path, pathSelected: opencodePathSelected, detectedPath: opencodePathDetection.data?.path },
+    gh: { cmd: ghLoginCommand, args: ghLoginArgs, path: ghSetup.status?.path, pathSelected: ghPathSelected, detectedPath: ghPathDetection.data?.path },
+  })
 
   const getDialogContent = () => {
     if (step === 'backend-select') {
@@ -723,13 +951,16 @@ function OnboardingDialogContent() {
     }
 
     if (step === 'gh-setup' || step === 'gh-installing') {
+      const hasPathCli = ghPathDetection.data?.found
       return {
         title: isGhReinstall
           ? 'Change GitHub CLI Version'
-          : 'Install GitHub CLI',
+          : 'Setup GitHub CLI',
         description: isGhReinstall
           ? 'Select a version to install. This will replace the current installation.'
-          : 'GitHub CLI is required for GitHub integration.',
+          : hasPathCli
+            ? 'Choose to use your system GitHub CLI or install with Jean.'
+            : 'GitHub CLI is required for GitHub integration.',
       }
     }
 
@@ -747,24 +978,57 @@ function OnboardingDialogContent() {
 
     if (
       step === 'claude-setup' ||
-      step === 'claude-installing' ||
-      step === 'codex-setup' ||
-      step === 'codex-installing' ||
-      step === 'opencode-setup' ||
-      step === 'opencode-installing'
+      step === 'claude-installing'
     ) {
-      const isReinstall =
-        (currentBackend === 'claude' && isClaudeReinstall) ||
-        (currentBackend === 'codex' && isCodexReinstall) ||
-        (currentBackend === 'opencode' && isOpencodeReinstall)
+      const isReinstall = isClaudeReinstall
 
       return {
         title: isReinstall
           ? `Change ${backendName} Version`
-          : `Install ${backendName}`,
+          : `Setup ${backendName}`,
         description: isReinstall
           ? 'Select a version to install. This will replace the current installation.'
-          : `Select a version to install.`,
+          : pathDetection.data?.found
+            ? 'Choose to use your system Claude or install with Jean.'
+            : 'Select a version to install.',
+      }
+    }
+
+    if (
+      step === 'codex-setup' ||
+      step === 'codex-installing'
+    ) {
+      const isReinstall = isCodexReinstall
+      const hasPathCli = codexPathDetection.data?.found
+
+      return {
+        title: isReinstall
+          ? `Change ${backendName} Version`
+          : `Setup ${backendName}`,
+        description: isReinstall
+          ? 'Select a version to install. This will replace the current installation.'
+          : hasPathCli
+            ? 'Choose to use your system Codex or install with Jean.'
+            : 'Select a version to install.',
+      }
+    }
+
+    if (
+      step === 'opencode-setup' ||
+      step === 'opencode-installing'
+    ) {
+      const isReinstall = isOpencodeReinstall
+      const hasPathCli = opencodePathDetection.data?.found
+
+      return {
+        title: isReinstall
+          ? `Change ${backendName} Version`
+          : `Setup ${backendName}`,
+        description: isReinstall
+          ? 'Select a version to install. This will replace the current installation.'
+          : hasPathCli
+            ? 'Choose to use your system OpenCode or install with Jean.'
+            : 'Select a version to install.',
       }
     }
 
@@ -899,42 +1163,106 @@ function OnboardingDialogContent() {
             <AuthCheckingState cliName="OpenCode CLI" />
           ) : step === 'gh-auth-checking' ? (
             <AuthCheckingState cliName="GitHub CLI" />
-          ) : step === 'claude-auth-login' ? (
-            <AuthLoginState
+          ) : step === 'claude-setup' && pathDetection.data?.found && !claudePathSelected ? (
+            <CliPathSelector
               cliName="Claude CLI"
-              terminalId={claudeLoginTerminalId}
-              command={claudeLoginCommand}
-              commandArgs={claudeLoginArgs}
-              onComplete={handleClaudeLoginComplete}
-              onRetry={handleClaudeLoginRetry}
+              pathVersion={pathDetection.data.version}
+              pathPath={pathDetection.data.path}
+              isLoading={claudePathSelected}
+              onSelectPath={handleClaudePathSelect}
+              onSelectJean={() => {
+                setClaudePathSelected(true)
+              }}
             />
-          ) : step === 'codex-auth-login' ? (
-            <AuthLoginState
+          ) : step === 'codex-setup' && codexPathDetection.data?.found && !codexPathSelected ? (
+            <CliPathSelector
               cliName="Codex CLI"
-              terminalId={codexLoginTerminalId}
-              command={codexLoginCommand}
-              commandArgs={codexLoginArgs}
-              onComplete={handleCodexLoginComplete}
-              onRetry={handleCodexLoginRetry}
+              pathVersion={codexPathDetection.data.version}
+              pathPath={codexPathDetection.data.path}
+              isLoading={codexPathSelected}
+              onSelectPath={handleCodexPathSelect}
+              onSelectJean={() => {
+                setCodexPathSelected(true)
+              }}
             />
-          ) : step === 'opencode-auth-login' ? (
-            <AuthLoginState
+          ) : step === 'opencode-setup' && opencodePathDetection.data?.found && !opencodePathSelected ? (
+            <CliPathSelector
               cliName="OpenCode CLI"
-              terminalId={opencodeLoginTerminalId}
-              command={opencodeLoginCommand}
-              commandArgs={opencodeLoginArgs}
-              onComplete={handleOpencodeLoginComplete}
-              onRetry={handleOpencodeLoginRetry}
+              pathVersion={opencodePathDetection.data.version}
+              pathPath={opencodePathDetection.data.path}
+              isLoading={opencodePathSelected}
+              onSelectPath={handleOpencodePathSelect}
+              onSelectJean={() => {
+                setOpencodePathSelected(true)
+              }}
+            />
+          ) : step === 'claude-auth-login' ? (
+            claudeLoginCommand ? (
+              <AuthLoginState
+                key={claudeLoginTerminalId}
+                cliName="Claude CLI"
+                terminalId={claudeLoginTerminalId}
+                command={claudeLoginCommand}
+                commandArgs={claudeLoginArgs}
+                onComplete={handleClaudeLoginComplete}
+                onRetry={handleClaudeLoginRetry}
+              />
+            ) : (
+              <AuthCheckingState cliName="Claude CLI" />
+            )
+          ) : step === 'codex-auth-login' ? (
+            codexLoginCommand ? (
+              <AuthLoginState
+                key={codexLoginTerminalId}
+                cliName="Codex CLI"
+                terminalId={codexLoginTerminalId}
+                command={codexLoginCommand}
+                commandArgs={codexLoginArgs}
+                onComplete={handleCodexLoginComplete}
+                onRetry={handleCodexLoginRetry}
+              />
+            ) : (
+              <AuthCheckingState cliName="Codex CLI" />
+            )
+          ) : step === 'opencode-auth-login' ? (
+            opencodeLoginCommand ? (
+              <AuthLoginState
+                key={opencodeLoginTerminalId}
+                cliName="OpenCode CLI"
+                terminalId={opencodeLoginTerminalId}
+                command={opencodeLoginCommand}
+                commandArgs={opencodeLoginArgs}
+                onComplete={handleOpencodeLoginComplete}
+                onRetry={handleOpencodeLoginRetry}
+              />
+            ) : (
+              <AuthCheckingState cliName="OpenCode CLI" />
+            )
+          ) : step === 'gh-setup' && ghPathDetection.data?.found && !ghPathSelected ? (
+            <CliPathSelector
+              cliName="GitHub CLI"
+              pathVersion={ghPathDetection.data.version}
+              pathPath={ghPathDetection.data.path}
+              isLoading={ghPathSelected}
+              onSelectPath={handleGhPathSelect}
+              onSelectJean={() => {
+                setGhPathSelected(true)
+              }}
             />
           ) : step === 'gh-auth-login' ? (
-            <AuthLoginState
-              cliName="GitHub CLI"
-              terminalId={ghLoginTerminalId}
-              command={ghLoginCommand}
-              commandArgs={ghLoginArgs}
-              onComplete={handleGhLoginComplete}
-              onRetry={handleGhLoginRetry}
-            />
+            ghLoginCommand ? (
+              <AuthLoginState
+                key={ghLoginTerminalId}
+                cliName="GitHub CLI"
+                terminalId={ghLoginTerminalId}
+                command={ghLoginCommand}
+                commandArgs={ghLoginArgs}
+                onComplete={handleGhLoginComplete}
+                onRetry={handleGhLoginRetry}
+              />
+            ) : (
+              <AuthCheckingState cliName="GitHub CLI" />
+            )
           ) : cliData ? (
             cliData.installError ? (
               <ErrorState
@@ -1056,9 +1384,6 @@ function BackendSelectionState({
             {readyBackends.length > 0
               ? 'Select the backends you want to add.'
               : 'You must install at least one AI backend. You can install more later in Settings.'}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Jean installs its own copies of each CLI and won&apos;t use or modify your global installations.
           </p>
         </>
       )}

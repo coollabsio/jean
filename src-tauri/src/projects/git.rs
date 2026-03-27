@@ -1296,8 +1296,29 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str) -> Result<(), Strin
                 .current_dir(repo_path)
                 .output();
         } else {
-            return Err(format!("Failed to remove worktree: {stderr}"));
+            // git worktree remove failed (e.g. file locks on Windows)
+            // Try manual directory removal as fallback
+            if Path::new(worktree_path).exists() {
+                log::warn!("git worktree remove failed ({stderr}), attempting manual directory removal");
+                if let Err(rm_err) = std::fs::remove_dir_all(worktree_path) {
+                    return Err(format!("Failed to remove worktree: {stderr} (manual cleanup also failed: {rm_err})"));
+                }
+                log::info!("Manually removed worktree directory at {worktree_path}");
+                // Prune the now-stale git worktree entry
+                let _ = silent_command("git")
+                    .args(["worktree", "prune"])
+                    .current_dir(repo_path)
+                    .output();
+            } else {
+                return Err(format!("Failed to remove worktree: {stderr}"));
+            }
         }
+    }
+
+    // Safety net: if git reported success but directory still exists, clean it up
+    if Path::new(worktree_path).exists() {
+        log::warn!("Worktree directory still exists after git worktree remove, cleaning up manually");
+        let _ = std::fs::remove_dir_all(worktree_path);
     }
 
     log::trace!("Successfully removed worktree at {worktree_path}");

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '@/lib/transport'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
@@ -74,7 +74,7 @@ export const ProvidersPane: React.FC = () => {
               value={defaultProvider ?? 'default'}
               onValueChange={handleDefaultProviderChange}
             >
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-96">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

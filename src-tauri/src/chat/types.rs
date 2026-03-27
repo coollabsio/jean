@@ -397,6 +397,9 @@ pub struct Session {
     /// Unix timestamp when session was archived (None = not archived)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// Whether this session was archived by the base close operation (vs user action)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_by_base_close: Option<bool>,
     /// Unix timestamp when session was last opened/viewed by the user
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_opened_at: Option<u64>,
@@ -499,6 +502,7 @@ impl Session {
             selected_execution_mode: None,
             session_naming_completed: false,
             archived_at: None,
+            archived_by_base_close: None,
             last_opened_at: None,
             // Session-specific UI state
             answered_questions: vec![],
@@ -679,6 +683,7 @@ impl SessionMetadata {
             selected_execution_mode: self.selected_execution_mode.clone(),
             session_naming_completed: self.session_naming_completed,
             archived_at: self.archived_at,
+            archived_by_base_close: self.archived_by_base_close,
             last_opened_at: self.last_opened_at,
             answered_questions: self.answered_questions.clone(),
             submitted_answers: self.submitted_answers.clone(),
@@ -716,6 +721,7 @@ impl SessionMetadata {
         self.selected_execution_mode = session.selected_execution_mode.clone();
         self.session_naming_completed = session.session_naming_completed;
         self.archived_at = session.archived_at;
+        self.archived_by_base_close = session.archived_by_base_close;
         self.answered_questions = session.answered_questions.clone();
         self.submitted_answers = session.submitted_answers.clone();
         self.fixed_findings = session.fixed_findings.clone();
@@ -993,6 +999,9 @@ pub struct SessionMetadata {
     /// Unix timestamp when session was archived (None = not archived)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// Whether this session was archived by the base close operation (vs user action)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_by_base_close: Option<bool>,
 
     // Session-specific UI state
     /// Tool call IDs that have been answered (for AskUserQuestion)
@@ -1130,6 +1139,7 @@ impl SessionMetadata {
             selected_execution_mode: None,
             session_naming_completed: false,
             archived_at: None,
+            archived_by_base_close: None,
             answered_questions: vec![],
             submitted_answers: HashMap::new(),
             fixed_findings: vec![],

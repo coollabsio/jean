@@ -11,6 +11,10 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/chat/ImageLightbox'
+import { TextFileLightbox } from '@/components/chat/TextFileLightbox'
+import { FileMentionBadge } from '@/components/chat/FileMentionBadge'
+import { SkillBadge } from '@/components/chat/SkillBadge'
+import { normalizePath } from '@/lib/path-utils'
 import type { QueuedMessage } from '@/types/chat'
 import {
   MODEL_OPTIONS,
@@ -27,6 +31,7 @@ interface QueuedMessageItemProps {
   message: QueuedMessage
   index: number
   sessionId: string
+  worktreePath?: string
   onRemove: (sessionId: string, messageId: string) => void
   onForceSend?: (sessionId: string) => void
   isSessionIdle?: boolean
@@ -40,6 +45,7 @@ export const QueuedMessageItem = memo(function QueuedMessageItem({
   message,
   index,
   sessionId,
+  worktreePath,
   onRemove,
   onForceSend,
   isSessionIdle,
@@ -103,28 +109,57 @@ export const QueuedMessageItem = memo(function QueuedMessageItem({
             ))}
           </div>
         )}
-        {/* Message content */}
-        <div className="text-sm">
-          {message.message.length > 200
-            ? `${message.message.slice(0, 200)}...`
-            : message.message}
-        </div>
-        {/* Attachment indicators */}
-        {(message.pendingFiles.length > 0 ||
-          message.pendingSkills.length > 0 ||
-          message.pendingTextFiles.length > 0) && (
-          <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-            {message.pendingFiles.length > 0 && (
-              <span>{message.pendingFiles.length} file(s)</span>
-            )}
-            {message.pendingSkills.length > 0 && (
-              <span>{message.pendingSkills.length} skill(s)</span>
-            )}
-            {message.pendingTextFiles.length > 0 && (
-              <span>{message.pendingTextFiles.length} text file(s)</span>
-            )}
+        {/* Attached text files */}
+        {message.pendingTextFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-1.5">
+            {message.pendingTextFiles.map((tf, idx) => (
+              <TextFileLightbox
+                key={`${message.id}-txt-${idx}`}
+                path={tf.path}
+                size={tf.size}
+              />
+            ))}
           </div>
         )}
+        {/* Attached file/directory mentions */}
+        {message.pendingFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-1.5">
+            {message.pendingFiles.map((f, idx) => (
+              <FileMentionBadge
+                key={`${message.id}-file-${idx}`}
+                path={f.relativePath}
+                worktreePath={worktreePath ?? ''}
+                isDirectory={f.isDirectory}
+              />
+            ))}
+          </div>
+        )}
+        {/* Attached skills */}
+        {message.pendingSkills.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-1.5">
+            {message.pendingSkills.map((skill, idx) => {
+              const parts = normalizePath(skill.path).split('/')
+              const skillsIdx = parts.findIndex(p => p === 'skills')
+              const name =
+                skillsIdx >= 0 && parts[skillsIdx + 1]
+                  ? parts[skillsIdx + 1]
+                  : skill.name
+              return (
+                <SkillBadge
+                  key={`${message.id}-skill-${idx}`}
+                  skill={{
+                    id: skill.id,
+                    name: name ?? skill.name,
+                    path: skill.path,
+                  }}
+                  compact
+                />
+              )
+            })}
+          </div>
+        )}
+        {/* Message content */}
+        <div className="text-sm whitespace-pre-wrap">{message.message}</div>
         {/* Captured settings */}
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {/* Model badge */}
@@ -185,6 +220,7 @@ export const QueuedMessageItem = memo(function QueuedMessageItem({
 interface QueuedMessagesListProps {
   messages: QueuedMessage[]
   sessionId: string
+  worktreePath?: string
   onRemove: (sessionId: string, messageId: string) => void
   onForceSend?: (sessionId: string) => void
   isSessionIdle?: boolean
@@ -197,6 +233,7 @@ interface QueuedMessagesListProps {
 export const QueuedMessagesList = memo(function QueuedMessagesList({
   messages,
   sessionId,
+  worktreePath,
   onRemove,
   onForceSend,
   isSessionIdle,
@@ -211,6 +248,7 @@ export const QueuedMessagesList = memo(function QueuedMessagesList({
           message={msg}
           index={index}
           sessionId={sessionId}
+          worktreePath={worktreePath}
           onRemove={onRemove}
           onForceSend={onForceSend}
           isSessionIdle={isSessionIdle}

@@ -562,13 +562,15 @@ export function useLoadContextHandlers({
         return
       }
 
-      setLoadingSlugs(prev => new Set(prev).add(context.slug))
+      // Use filename sans .md as unique attachment key (slugs can collide across projects)
+      const contextKey = context.filename.replace(/\.md$/, '')
+      setLoadingSlugs(prev => new Set(prev).add(contextKey))
       const toastId = toast.loading(
         `Attaching context "${context.name || context.slug}"...`
       )
 
       try {
-        await attachSavedContext(activeSessionId, context.path, context.slug)
+        await attachSavedContext(activeSessionId, context.path, contextKey)
         await refetchAttachedContexts()
         toast.success(`Context "${context.name || context.slug}" attached`, {
           id: toastId,
@@ -579,7 +581,7 @@ export function useLoadContextHandlers({
       } finally {
         setLoadingSlugs(prev => {
           const next = new Set(prev)
-          next.delete(context.slug)
+          next.delete(contextKey)
           return next
         })
       }
@@ -714,13 +716,10 @@ export function useLoadContextHandlers({
 
         refetchContexts()
 
-        const slug = result.filename
-          .split('-')
-          .slice(2)
-          .join('-')
-          .replace('.md', '')
+        // Use filename sans .md as unique attachment key
+        const contextKey = result.filename.replace(/\.md$/, '')
 
-        await attachSavedContext(activeSessionId, result.path, slug)
+        await attachSavedContext(activeSessionId, result.path, contextKey)
         await refetchAttachedContexts()
 
         const verb = result.updated ? 'updated' : 'created'

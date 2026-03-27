@@ -277,8 +277,8 @@ export const VirtualizedMessageList = memo(
           const lastEl = messageRefs.current.get(messages.length - 1)
           if (lastEl) {
             lastEl.scrollIntoView({ behavior: 'instant', block: 'end' })
+            onScrollToBottomHandled?.()
           }
-          onScrollToBottomHandled?.()
         }
         prevMessageCountRef.current = messages.length
       }, [messages.length, shouldScrollToBottom, onScrollToBottomHandled])

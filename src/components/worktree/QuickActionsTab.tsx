@@ -7,7 +7,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
-import type { JeanConfig } from '@/services/projects'
+import { normalizeRunScripts, type JeanConfig } from '@/services/projects'
 
 export interface QuickActionsTabProps {
   hasBaseSession: boolean
@@ -27,11 +27,11 @@ export function QuickActionsTab({
   jeanConfig,
 }: QuickActionsTabProps) {
   const setupScript = jeanConfig?.scripts.setup
-  const runScript = jeanConfig?.scripts.run
+  const runScripts = normalizeRunScripts(jeanConfig?.scripts.run)
 
   const handleRunClick = () => {
     if (!projectId) return
-    if (!runScript) {
+    if (runScripts.length === 0) {
       useUIStore.getState().setNewWorktreeModalOpen(false)
       useProjectsStore.getState().openProjectSettings(projectId, 'jean-json')
     }
@@ -97,7 +97,7 @@ export function QuickActionsTab({
       </div>
 
       {/* Configure jean.json - only show when not configured */}
-      {!runScript && projectId && (
+      {runScripts.length === 0 && projectId && (
         <div className="flex items-center gap-1 mt-6">
           <Tooltip>
             <TooltipTrigger asChild>

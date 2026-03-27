@@ -8,6 +8,13 @@ use tauri::AppHandle;
 use super::config::{ensure_gh_cli_dir, get_gh_cli_binary_path, resolve_gh_binary};
 use crate::http_server::EmitExt;
 
+/// Emergency fallback version when API fails AND no cache exists.
+/// The download URL pattern is stable for any valid version, so staleness is acceptable.
+const FALLBACK_GH_VERSION: &str = "2.74.0";
+
+/// Cache file name for storing fetched versions
+const GH_VERSIONS_CACHE_FILE: &str = "gh-versions-cache.json";
+
 /// GitHub API URL for releases
 const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/cli/cli/releases";
 const GITHUB_API_ACCEPT: &str = "application/vnd.github+json";
@@ -69,7 +76,7 @@ struct GitHubAsset {
 pub async fn check_gh_cli_installed(app: AppHandle) -> Result<GhCliStatus, String> {
     log::trace!("Checking GitHub CLI installation status");
 
-    let binary_path = get_gh_cli_binary_path(&app)?;
+    let binary_path = resolve_gh_binary(&app);
 
     if !binary_path.exists() {
         log::trace!("GitHub CLI not found at {:?}", binary_path);
@@ -113,17 +120,38 @@ pub async fn check_gh_cli_installed(app: AppHandle) -> Result<GhCliStatus, Strin
     })
 }
 
-/// Get available GitHub CLI versions from GitHub releases API
+/// Get available GitHub CLI versions from GitHub releases API.
+///
+/// Falls back to disk cache or a hardcoded version if the API is unreachable
+/// (e.g., rate-limited on unauthenticated requests during first-time onboarding).
 #[tauri::command]
 pub async fn get_available_gh_versions(app: AppHandle) -> Result<Vec<GhReleaseInfo>, String> {
     log::trace!("Fetching available GitHub CLI versions from GitHub API");
 
+    match fetch_gh_versions_from_api(&app).await {
+        Ok(versions) if !versions.is_empty() => {
+            save_gh_versions_cache(&app, &versions);
+            Ok(versions)
+        }
+        Ok(_empty) => {
+            log::warn!("GitHub API returned empty releases, falling back to cache");
+            Ok(load_gh_versions_cache(&app).unwrap_or_else(fallback_gh_versions))
+        }
+        Err(e) => {
+            log::warn!("GitHub API request failed ({e}), falling back to cache");
+            Ok(load_gh_versions_cache(&app).unwrap_or_else(fallback_gh_versions))
+        }
+    }
+}
+
+/// Fetch versions directly from the GitHub API (no fallback).
+async fn fetch_gh_versions_from_api(app: &AppHandle) -> Result<Vec<GhReleaseInfo>, String> {
     let client = reqwest::Client::builder()
         .user_agent("Jean-App/1.0")
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let token = resolve_github_api_token(&app);
+    let token = resolve_github_api_token(app);
     let mut request = client
         .get(GITHUB_RELEASES_API)
         .header("Accept", GITHUB_API_ACCEPT)
@@ -146,13 +174,11 @@ pub async fn get_available_gh_versions(app: AppHandle) -> Result<Vec<GhReleaseIn
         .await
         .map_err(|e| format!("Failed to parse GitHub API response: {e}"))?;
 
-    // Convert to our format, filtering to releases with assets for our platform
     let versions: Vec<GhReleaseInfo> = releases
         .into_iter()
         .filter(|r| !r.assets.is_empty())
-        .take(5) // Only take 5 most recent
+        .take(5)
         .map(|r| {
-            // Remove 'v' prefix from tag_name for version
             let version = r
                 .tag_name
                 .strip_prefix('v')
@@ -167,7 +193,7 @@ pub async fn get_available_gh_versions(app: AppHandle) -> Result<Vec<GhReleaseIn
         })
         .collect();
 
-    log::trace!("Found {} GitHub CLI versions", versions.len());
+    log::trace!("Found {} GitHub CLI versions from API", versions.len());
     Ok(versions)
 }
 
@@ -213,6 +239,71 @@ pub fn resolve_github_api_token(app: &AppHandle) -> Option<String> {
     }
 
     None
+}
+
+/// Cached versions structure for disk persistence
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedGhVersions {
+    versions: Vec<GhReleaseInfo>,
+    fetched_at: String,
+}
+
+/// Save fetched versions to disk cache
+fn save_gh_versions_cache(app: &AppHandle, versions: &[GhReleaseInfo]) {
+    let cache_path = match super::config::get_gh_cli_dir(app) {
+        Ok(dir) => dir.join(GH_VERSIONS_CACHE_FILE),
+        Err(e) => {
+            log::warn!("Cannot resolve gh CLI dir for cache: {e}");
+            return;
+        }
+    };
+
+    let fetched_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default();
+
+    let cached = CachedGhVersions {
+        versions: versions.to_vec(),
+        fetched_at,
+    };
+
+    match serde_json::to_string(&cached) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&cache_path, json) {
+                log::warn!("Failed to write gh versions cache: {e}");
+            } else {
+                log::trace!("Saved {} gh versions to cache", versions.len());
+            }
+        }
+        Err(e) => log::warn!("Failed to serialize gh versions cache: {e}"),
+    }
+}
+
+/// Load cached versions from disk
+fn load_gh_versions_cache(app: &AppHandle) -> Option<Vec<GhReleaseInfo>> {
+    let cache_path = super::config::get_gh_cli_dir(app).ok()?.join(GH_VERSIONS_CACHE_FILE);
+    let contents = std::fs::read_to_string(&cache_path).ok()?;
+    let cached: CachedGhVersions = serde_json::from_str(&contents).ok()?;
+    if cached.versions.is_empty() {
+        return None;
+    }
+    log::trace!(
+        "Loaded {} cached gh versions (fetched at {})",
+        cached.versions.len(),
+        cached.fetched_at
+    );
+    Some(cached.versions)
+}
+
+/// Build a single-entry fallback version list from the hardcoded constant
+fn fallback_gh_versions() -> Vec<GhReleaseInfo> {
+    vec![GhReleaseInfo {
+        version: FALLBACK_GH_VERSION.to_string(),
+        tag_name: format!("v{FALLBACK_GH_VERSION}"),
+        published_at: String::new(),
+        prerelease: false,
+    }]
 }
 
 /// Get the platform string for the current system (for gh releases)
@@ -277,7 +368,7 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     // Determine version (use provided or fetch latest)
     let version = match version {
         Some(v) => v,
-        None => fetch_latest_gh_version().await?,
+        None => fetch_latest_gh_version(&app).await?,
     };
 
     // Detect platform
@@ -402,8 +493,10 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     Ok(())
 }
 
-/// Fetch the latest GitHub CLI version from GitHub API
-async fn fetch_latest_gh_version() -> Result<String, String> {
+/// Fetch the latest GitHub CLI version from GitHub API.
+///
+/// Falls back to disk cache or hardcoded version if the API is unreachable.
+async fn fetch_latest_gh_version(app: &AppHandle) -> Result<String, String> {
     log::trace!("Fetching latest GitHub CLI version");
 
     let client = reqwest::Client::builder()
@@ -414,28 +507,33 @@ async fn fetch_latest_gh_version() -> Result<String, String> {
     let response = client
         .get(format!("{GITHUB_RELEASES_API}/latest"))
         .send()
-        .await
-        .map_err(|e| format!("Failed to fetch latest release: {e}"))?;
+        .await;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to fetch latest release: HTTP {}",
-            response.status()
-        ));
+    if let Ok(resp) = response {
+        if resp.status().is_success() {
+            if let Ok(release) = resp.json::<GitHubRelease>().await {
+                let version = release
+                    .tag_name
+                    .strip_prefix('v')
+                    .unwrap_or(&release.tag_name)
+                    .to_string();
+                log::trace!("Latest GitHub CLI version: {version}");
+                return Ok(version);
+            }
+        }
     }
 
-    let release: GitHubRelease = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release info: {e}"))?;
+    // API failed — try disk cache, then hardcoded fallback
+    log::warn!("Failed to fetch latest gh version from API, using fallback");
+    if let Some(cached) = load_gh_versions_cache(app) {
+        if let Some(first) = cached.into_iter().find(|v| !v.prerelease) {
+            log::trace!("Using cached version: {}", first.version);
+            return Ok(first.version);
+        }
+    }
 
-    let version = release
-        .tag_name
-        .strip_prefix('v')
-        .unwrap_or(&release.tag_name)
-        .to_string();
-    log::trace!("Latest GitHub CLI version: {version}");
-    Ok(version)
+    log::warn!("No cache available, using hardcoded fallback: {FALLBACK_GH_VERSION}");
+    Ok(FALLBACK_GH_VERSION.to_string())
 }
 
 /// Extract gh binary from a zip archive (macOS, Windows)
@@ -555,7 +653,7 @@ pub struct GhAuthStatus {
 pub async fn check_gh_cli_auth(app: AppHandle) -> Result<GhAuthStatus, String> {
     log::trace!("Checking GitHub CLI authentication status");
 
-    let binary_path = get_gh_cli_binary_path(&app)?;
+    let binary_path = resolve_gh_binary(&app);
 
     if !binary_path.exists() {
         return Ok(GhAuthStatus {
@@ -588,6 +686,96 @@ pub async fn check_gh_cli_auth(app: AppHandle) -> Result<GhAuthStatus, String> {
             error: Some(stderr),
         })
     }
+}
+
+/// Result of detecting GitHub CLI in system PATH
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GhPathDetection {
+    pub found: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+    pub package_manager: Option<String>,
+}
+
+/// Detect GitHub CLI in system PATH (excluding Jean-managed binary)
+#[tauri::command]
+pub async fn detect_gh_in_path(app: AppHandle) -> Result<GhPathDetection, String> {
+    log::trace!("Detecting GitHub CLI in system PATH");
+
+    let jean_managed_path = get_gh_cli_binary_path(&app)
+        .ok()
+        .and_then(|p| std::fs::canonicalize(&p).ok());
+
+    let which_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+
+    let output = match silent_command(which_cmd).arg("gh").output() {
+        Ok(output) if output.status.success() => {
+            // On Windows, `where` can return multiple paths; take only the first line
+            String::from_utf8_lossy(&output.stdout).lines().next().unwrap_or("").trim().to_string()
+        }
+        _ => {
+            log::trace!("GitHub CLI not found in PATH");
+            return Ok(GhPathDetection {
+                found: false,
+                path: None,
+                version: None,
+                package_manager: None,
+            });
+        }
+    };
+
+    if output.is_empty() {
+        return Ok(GhPathDetection {
+            found: false,
+            path: None,
+            version: None,
+            package_manager: None,
+        });
+    }
+
+    let found_path = std::path::PathBuf::from(&output);
+
+    // Exclude Jean-managed binary
+    if let Some(ref jean_path) = jean_managed_path {
+        if let Ok(canonical_found) = std::fs::canonicalize(&found_path) {
+            if canonical_found == *jean_path {
+                log::trace!("Found PATH gh is the Jean-managed binary, excluding");
+                return Ok(GhPathDetection {
+                    found: false,
+                    path: None,
+                    version: None,
+                    package_manager: None,
+                });
+            }
+        }
+    }
+
+    // gh --version returns "gh version 2.40.0 (2024-01-15)"
+    let version = match silent_command(&found_path).arg("--version").output() {
+        Ok(ver_output) if ver_output.status.success() => {
+            let ver_str = String::from_utf8_lossy(&ver_output.stdout).trim().to_string();
+            ver_str
+                .split_whitespace()
+                .nth(2)
+                .map(|s| s.to_string())
+        }
+        _ => None,
+    };
+
+    let package_manager = crate::platform::detect_package_manager(&found_path);
+
+    log::trace!("Found GitHub CLI in PATH: {output} (version: {version:?}, pkg_mgr: {package_manager:?})");
+
+    Ok(GhPathDetection {
+        found: true,
+        path: Some(output),
+        version,
+        package_manager,
+    })
 }
 
 /// Helper function to emit installation progress events

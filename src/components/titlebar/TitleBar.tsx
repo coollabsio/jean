@@ -63,7 +63,7 @@ export function TitleBar({
       {...(native ? { 'data-tauri-drag-region': true } : {})}
       className={cn(
         'relative flex h-8 w-full shrink-0 items-center justify-between',
-        'bg-background/80 backdrop-blur-md border-b border-border/50 md:px-2',
+        'bg-background/80 backdrop-blur-md md:px-2',
         native ? 'z-[60]' : 'z-50',
         className
       )}
@@ -89,9 +89,9 @@ export function TitleBar({
                 className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
               >
                 {leftSidebarVisible ? (
-                  <PanelLeftClose className="h-3 w-3" />
+                  <PanelLeftClose className="size-3.5" />
                 ) : (
-                  <PanelLeft className="h-3 w-3" />
+                  <PanelLeft className="size-3.5" />
                 )}
               </Button>
             </TooltipTrigger>
@@ -110,7 +110,7 @@ export function TitleBar({
                 size="icon"
                 className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
               >
-                <Settings className="h-3 w-3" />
+                <Settings className="size-3.5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -134,7 +134,7 @@ export function TitleBar({
                   size="icon"
                   className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
                 >
-                  <Github className="h-3 w-3" />
+                  <Github className="size-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>GitHub</TooltipContent>
@@ -148,7 +148,7 @@ export function TitleBar({
                 size="icon"
                 className="h-6 w-6 rounded-none text-pink-500 hover:text-pink-400"
               >
-                <Heart className="h-3 w-3" />
+                <Heart className="size-3.5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Sponsor</TooltipContent>
@@ -218,7 +218,7 @@ function UpdateIndicator() {
           }
           className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
         >
-          <ArrowUpCircle className="size-3" />
+          <ArrowUpCircle className="size-3.5" />
           Update available
         </button>
       </TooltipTrigger>

@@ -3,9 +3,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   invoke,
   useWsConnectionStatus,
+  useWsDataReady,
+  setWsDataReady,
   useWsAuthError,
   preloadInitialData,
   refetchInitialData,
+  consumeReconnectData,
   setAppDataDir,
   hasPreloadedData,
   type InitialData,
@@ -340,6 +343,7 @@ function App() {
             projects: Array.isArray(data.projects) ? data.projects.length : 0,
           })
           seedCache(data)
+          setWsDataReady(true)
         }
       })
       .catch(err => {
@@ -384,6 +388,7 @@ function App() {
   // On first connect: invalidate non-preloaded queries.
   // On reconnect: re-fetch bulk data via HTTP to restore everything fast.
   const wsConnected = useWsConnectionStatus()
+  const wsDataReady = useWsDataReady()
   const wsAuthError = useWsAuthError()
   const hadWsConnectionRef = useRef(false)
   useEffect(() => {
@@ -393,36 +398,49 @@ function App() {
     hadWsConnectionRef.current = true
 
     if (reconnected) {
-      // Re-fetch all data via HTTP in one request (much faster than
-      // individual WebSocket query refetches, and ensures Zustand state
-      // like sessionWorktreeMap/reviewingSessions is also restored).
-      logger.info('WebSocket reconnected, re-fetching initial data via HTTP')
-      refetchInitialData()
+      // Try to use the prefetch that was started during the backoff wait.
+      // Falls back to a fresh fetch with the browser's active session IDs
+      // so the server loads the correct sessions even when ui_state.json
+      // on disk is stale (debounced save hasn't flushed yet).
+      const activeSessionIds = useChatStore.getState().activeSessionIds
+      const prefetch = consumeReconnectData()
+      const dataPromise = prefetch ?? refetchInitialData(activeSessionIds)
+      logger.info('WebSocket reconnected, re-fetching initial data via HTTP', {
+        prefetched: !!prefetch,
+      })
+      dataPromise
         .then(data => {
           if (data) {
             seedCache(data)
             logger.info('Reconnect: re-seeded cache from HTTP')
           }
-          // Also invalidate non-preloaded queries (git status, CLI checks, etc.)
-          queryClient.invalidateQueries({
-            predicate: query => {
-              const key = query.queryKey[0]
-              return (
-                key !== 'projects' &&
-                key !== 'preferences' &&
-                key !== 'ui-state' &&
-                key !== 'chat'
-              )
-            },
+          setWsDataReady(true)
+          // Invalidate non-preloaded queries after a frame so the seeded
+          // cache renders first (prevents flash of stale → fresh data).
+          requestAnimationFrame(() => {
+            queryClient.invalidateQueries({
+              predicate: query => {
+                const key = query.queryKey[0]
+                return (
+                  key !== 'projects' &&
+                  key !== 'preferences' &&
+                  key !== 'ui-state' &&
+                  key !== 'chat'
+                )
+              },
+            })
           })
         })
         .catch(err => {
           logger.warn('Reconnect: HTTP re-fetch failed, falling back to query invalidation', { error: err })
+          setWsDataReady(true)
           // Fallback: invalidate everything so TanStack Query refetches via WebSocket
           queryClient.invalidateQueries()
         })
     } else {
-      // First connect: invalidate non-preloaded queries only
+      // First connect: mark data ready (preload already seeded the cache)
+      // and invalidate non-preloaded queries only.
+      setWsDataReady(true)
       logger.info('WebSocket connected, invalidating dynamic queries')
       queryClient.invalidateQueries({
         predicate: query => {
@@ -830,8 +848,8 @@ function App() {
 
   const showReconnectOverlay =
     !isNativeApp() &&
-    !wsConnected &&
     hadWsConnectionRef.current &&
+    !wsDataReady &&
     !wsAuthError
 
   return (

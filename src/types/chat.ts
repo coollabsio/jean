@@ -154,6 +154,8 @@ export interface Session {
   session_naming_completed?: boolean
   /** Unix timestamp when session was archived (undefined = not archived) */
   archived_at?: number
+  /** Whether this session was archived by the base close operation (vs user action) */
+  archived_by_base_close?: boolean
 
   // ========================================================================
   // Session-specific UI state (moved from ui-state.json)

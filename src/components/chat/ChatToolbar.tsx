@@ -175,9 +175,10 @@ export const ChatToolbar = memo(function ChatToolbar({
       if (
         provider &&
         provider !== '__anthropic__' &&
-        (selectedModel === 'opus-4.5' ||
-          selectedModel === 'claude-opus-4-6[1m]' ||
-          selectedModel === 'claude-sonnet-4-6[1m]')
+        (selectedModel === 'claude-opus-4-6[1m]' ||
+          selectedModel === 'claude-sonnet-4-6[1m]' ||
+          selectedModel === 'opus-fast' ||
+          selectedModel === 'claude-opus-4-6[1m]-fast')
       ) {
         onModelChange('opus' as ClaudeModel)
       }
@@ -305,6 +306,18 @@ export const ChatToolbar = memo(function ChatToolbar({
           handleModelChange={handleModelChange}
           handleEffortLevelChange={handleEffortLevelChange}
           handleThinkingLevelChange={handleThinkingLevelChange}
+          loadedIssueContexts={loadedIssueContexts}
+          loadedPRContexts={loadedPRContexts}
+          loadedSecurityContexts={loadedSecurityContexts}
+          loadedAdvisoryContexts={loadedAdvisoryContexts}
+          loadedLinearContexts={loadedLinearContexts}
+          attachedSavedContexts={attachedSavedContexts}
+          handleViewIssue={handleViewIssue}
+          handleViewPR={handleViewPR}
+          handleViewSecurityAlert={handleViewSecurityAlert}
+          handleViewAdvisory={handleViewAdvisory}
+          handleViewLinear={handleViewLinear}
+          handleViewSavedContext={handleViewSavedContext}
           availableMcpServers={availableMcpServers}
           enabledMcpServers={enabledMcpServers}
           activeMcpCount={activeMcpCount}
