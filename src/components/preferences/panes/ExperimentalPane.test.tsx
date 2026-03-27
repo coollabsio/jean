@@ -38,7 +38,9 @@ describe('ExperimentalPane', () => {
     render(<ExperimentalPane />)
 
     const switches = screen.getAllByRole('switch')
-    await user.click(switches[2]!)
+    const rtkSwitch = switches[2]
+    expect(rtkSwitch).toBeDefined()
+    await user.click(rtkSwitch!)
 
     expect(mutate).toHaveBeenCalledWith({ rtk_ai_enabled: true })
   })

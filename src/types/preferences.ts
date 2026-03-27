@@ -747,9 +747,10 @@ export const CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
 }
 
 /** OpenCode preset: same as Codex */
-export const OPENCODE_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
-  ...CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS,
-}
+export const OPENCODE_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts =
+  {
+    ...CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS,
+  }
 
 /**
  * Per-prompt provider overrides. null = use global default_provider.
@@ -854,8 +855,7 @@ function makeBackendsPreset(backend: string): MagicPromptBackends {
   }
 }
 
-export const CLAUDE_DEFAULT_MAGIC_PROMPT_BACKENDS =
-  makeBackendsPreset('claude')
+export const CLAUDE_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('claude')
 export const CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('codex')
 export const OPENCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('opencode')
@@ -955,9 +955,6 @@ export interface AppPreferences {
   build_thinking_level: string | null // Thinking level override for build mode, null = use session thinking level
   yolo_thinking_level: string | null // Thinking level override for yolo mode, null = use session thinking level
   rtk_ai_enabled?: boolean // Global RTK AI integration switch (experimental)
-  use_rtk_for_claude?: boolean // Enable RTK command rewriting for Claude sessions
-  use_rtk_for_codex?: boolean // Enable RTK command rewriting hints for Codex sessions
-  use_rtk_for_opencode?: boolean // Enable RTK command rewriting hints for OpenCode sessions
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
   magic_models_auto_initialized: boolean // Whether magic prompt models were auto-set based on installed backends
 }
@@ -1175,7 +1172,6 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'codex', label: 'Codex' },
   { value: 'opencode', label: 'OpenCode' },
 ]
-
 
 export type TerminalApp =
   | 'terminal'
@@ -1514,9 +1510,6 @@ export const defaultPreferences: AppPreferences = {
   build_thinking_level: null, // Default: use session thinking level
   yolo_thinking_level: null, // Default: use session thinking level
   rtk_ai_enabled: false, // Default: disabled
-  use_rtk_for_claude: true, // Default: enabled
-  use_rtk_for_codex: true, // Default: enabled
-  use_rtk_for_opencode: true, // Default: enabled
   linear_api_key: null, // Default: no global Linear API key
   magic_models_auto_initialized: false, // Default: not yet auto-set
 }

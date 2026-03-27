@@ -108,7 +108,7 @@ fn push_claude_rtk_allowed_tool(args: &mut Vec<String>, use_rtk_for_claude: bool
 
 fn claude_rtk_enabled(preferences: Option<&crate::AppPreferences>) -> bool {
     preferences
-        .map(|prefs| prefs.rtk_ai_enabled && prefs.use_rtk_for_claude)
+        .map(|prefs| prefs.rtk_ai_enabled)
         .unwrap_or(false)
 }
 
@@ -1517,7 +1517,9 @@ mod tests {
     fn test_claude_rtk_system_prompt_enabled() {
         let prompt = claude_rtk_system_prompt(true);
         assert!(prompt.is_some());
-        assert!(prompt.unwrap().contains("RTK is enabled for Claude sessions"));
+        assert!(prompt
+            .unwrap()
+            .contains("RTK is enabled for Claude sessions"));
     }
 
     #[test]
@@ -1544,14 +1546,10 @@ mod tests {
     fn test_claude_rtk_enabled_requires_global_toggle() {
         let mut prefs = crate::AppPreferences::default();
         prefs.rtk_ai_enabled = false;
-        prefs.use_rtk_for_claude = true;
         assert!(!claude_rtk_enabled(Some(&prefs)));
 
         prefs.rtk_ai_enabled = true;
         assert!(claude_rtk_enabled(Some(&prefs)));
-
-        prefs.use_rtk_for_claude = false;
-        assert!(!claude_rtk_enabled(Some(&prefs)));
         assert!(!claude_rtk_enabled(None));
     }
 }

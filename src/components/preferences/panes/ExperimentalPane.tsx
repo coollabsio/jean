@@ -62,7 +62,9 @@ export const ExperimentalPane: React.FC = () => {
             <Switch
               checked={preferences?.parallel_execution_prompt_enabled ?? false}
               onCheckedChange={checked => {
-                patchPreferences.mutate({ parallel_execution_prompt_enabled: checked })
+                patchPreferences.mutate({
+                  parallel_execution_prompt_enabled: checked,
+                })
               }}
             />
           </InlineField>
@@ -84,7 +86,9 @@ export const ExperimentalPane: React.FC = () => {
             description="Claude model for automatic and on-demand session recaps"
           >
             <Select
-              value={preferences?.magic_prompt_models.session_recap_model ?? 'haiku'}
+              value={
+                preferences?.magic_prompt_models.session_recap_model ?? 'haiku'
+              }
               onValueChange={(value: ClaudeModel) => {
                 if (preferences) {
                   patchPreferences.mutate({
@@ -114,7 +118,7 @@ export const ExperimentalPane: React.FC = () => {
       <SettingsSection title="Developer Tools">
         <InlineField
           label="Enable RTK AI"
-          description="Turn on RTK command rewriting support and reveal RTK-specific settings in Jean."
+          description="Turn on RTK command rewriting for Claude sessions."
         >
           <Switch
             checked={preferences?.rtk_ai_enabled ?? false}
@@ -135,9 +139,7 @@ export const ExperimentalPane: React.FC = () => {
             }}
           />
         </InlineField>
-
       </SettingsSection>
-
     </div>
   )
 }

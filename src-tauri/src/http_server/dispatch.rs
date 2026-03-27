@@ -309,8 +309,7 @@ pub async fn dispatch_command(
         }
         "revert_last_local_commit" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let result =
-                crate::projects::revert_last_local_commit(worktree_path).await?;
+            let result = crate::projects::revert_last_local_commit(worktree_path).await?;
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
@@ -1787,10 +1786,6 @@ pub async fn dispatch_command(
         }
         "get_codex_usage" => {
             let result = crate::codex_cli::get_codex_usage().await?;
-            to_value(result)
-        }
-        "get_rtk_gain" => {
-            let result = crate::rtk::get_rtk_gain(app.clone()).await?;
             to_value(result)
         }
         "install_codex_cli" => {

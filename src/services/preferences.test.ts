@@ -151,9 +151,6 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         rtk_ai_enabled: false,
-        use_rtk_for_claude: true,
-        use_rtk_for_codex: true,
-        use_rtk_for_opencode: true,
         linear_api_key: null,
         magic_models_auto_initialized: false,
       }
@@ -182,9 +179,6 @@ describe('preferences service', () => {
       expect(result.current.data?.theme).toBe('system')
       expect(result.current.data?.selected_model).toBe('opus')
       expect(result.current.data?.rtk_ai_enabled).toBe(false)
-      expect(result.current.data?.use_rtk_for_claude).toBe(true)
-      expect(result.current.data?.use_rtk_for_codex).toBe(true)
-      expect(result.current.data?.use_rtk_for_opencode).toBe(true)
     })
 
     it('returns defaults on backend error', async () => {
@@ -199,16 +193,10 @@ describe('preferences service', () => {
 
       expect(result.current.data?.theme).toBe('system')
       expect(result.current.data?.rtk_ai_enabled).toBe(false)
-      expect(result.current.data?.use_rtk_for_claude).toBe(true)
-      expect(result.current.data?.use_rtk_for_codex).toBe(true)
-      expect(result.current.data?.use_rtk_for_opencode).toBe(true)
     })
 
     it('includes RTK defaults in default preferences', () => {
       expect(defaultPreferences.rtk_ai_enabled).toBe(false)
-      expect(defaultPreferences.use_rtk_for_claude).toBe(true)
-      expect(defaultPreferences.use_rtk_for_codex).toBe(true)
-      expect(defaultPreferences.use_rtk_for_opencode).toBe(true)
     })
 
     it('migrates old keybindings to new defaults', async () => {
@@ -286,9 +274,6 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         rtk_ai_enabled: false,
-        use_rtk_for_claude: true,
-        use_rtk_for_codex: true,
-        use_rtk_for_opencode: true,
         linear_api_key: null,
         magic_models_auto_initialized: false,
       }
@@ -364,7 +349,8 @@ describe('preferences service', () => {
         confirm_session_close: true,
         default_execution_mode: 'plan',
         default_backend: 'claude',
-        selected_codex_model: 'gpt-5.3-fast' as AppPreferences['selected_codex_model'],
+        selected_codex_model:
+          'gpt-5.3-fast' as AppPreferences['selected_codex_model'],
         selected_opencode_model: 'opencode/gpt-5.3-codex',
         default_codex_reasoning_effort: 'high',
         codex_multi_agent_enabled: false,

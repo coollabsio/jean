@@ -3,7 +3,6 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
 import { Loader2 } from 'lucide-react'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 
@@ -40,7 +39,9 @@ export const IntegrationsPane: React.FC = () => {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
 
-  const [localLinearApiKey, setLocalLinearApiKey] = useState<string | null>(null)
+  const [localLinearApiKey, setLocalLinearApiKey] = useState<string | null>(
+    null
+  )
   const [showLinearApiKey, setShowLinearApiKey] = useState(false)
 
   const currentGlobalKey = preferences?.linear_api_key ?? ''
@@ -65,44 +66,6 @@ export const IntegrationsPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {preferences?.rtk_ai_enabled && (
-        <SettingsSection title="RTK">
-          <InlineField
-            label="Use RTK with Claude"
-            description="Enable RTK command rewriting for Claude backend sessions."
-          >
-            <Switch
-              checked={preferences?.use_rtk_for_claude ?? true}
-              onCheckedChange={checked =>
-                patchPreferences.mutate({ use_rtk_for_claude: checked })
-              }
-            />
-          </InlineField>
-          <InlineField
-            label="Use RTK with Codex"
-            description="Enable RTK command rewriting guidance for Codex backend sessions."
-          >
-            <Switch
-              checked={preferences?.use_rtk_for_codex ?? true}
-              onCheckedChange={checked =>
-                patchPreferences.mutate({ use_rtk_for_codex: checked })
-              }
-            />
-          </InlineField>
-          <InlineField
-            label="Use RTK with OpenCode"
-            description="Enable RTK command rewriting guidance for OpenCode backend sessions."
-          >
-            <Switch
-              checked={preferences?.use_rtk_for_opencode ?? true}
-              onCheckedChange={checked =>
-                patchPreferences.mutate({ use_rtk_for_opencode: checked })
-              }
-            />
-          </InlineField>
-        </SettingsSection>
-      )}
-
       <SettingsSection title="Linear">
         <InlineField
           label="Personal API Key"
