@@ -138,8 +138,7 @@ export function GeneralPane({
       : null
 
   const displayedName = localName ?? project?.name ?? ''
-  const nameChanged =
-    localName !== null && localName !== (project?.name ?? '')
+  const nameChanged = localName !== null && localName !== (project?.name ?? '')
 
   const handleSaveName = useCallback(() => {
     if (localName === null) return
@@ -246,8 +245,12 @@ export function GeneralPane({
         { projectId, linearTeamId: value === 'all' ? '' : value },
         {
           onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: linearQueryKeys.issues(projectId) })
-            queryClient.invalidateQueries({ queryKey: ['linear', 'issue-search', projectId] })
+            queryClient.invalidateQueries({
+              queryKey: linearQueryKeys.issues(projectId),
+            })
+            queryClient.invalidateQueries({
+              queryKey: ['linear', 'issue-search', projectId],
+            })
           },
         }
       )
@@ -614,10 +617,7 @@ export function GeneralPane({
                 disabled={teamsLoading}
               >
                 <RefreshCw
-                  className={cn(
-                    'h-4 w-4',
-                    teamsLoading && 'animate-spin'
-                  )}
+                  className={cn('h-4 w-4', teamsLoading && 'animate-spin')}
                 />
               </Button>
             </div>

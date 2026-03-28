@@ -46,11 +46,10 @@ export function MainWindowContent({
 
   const showWelcome = !activeWorktreePath && !selectedProjectId && !children
   const shouldCheckBackends = backendCheckReady && showWelcome
-  const { installedBackends, isLoading: backendsLoading } = useInstalledBackends(
-    {
+  const { installedBackends, isLoading: backendsLoading } =
+    useInstalledBackends({
       enabled: shouldCheckBackends,
-    }
-  )
+    })
   const awaitingBackendCheck = showWelcome && !backendCheckReady
   const setupIncomplete =
     shouldCheckBackends && !backendsLoading && installedBackends.length === 0

@@ -23,10 +23,7 @@ export function navigateToRestoredItem(
   _worktreePath: string,
   sessionId?: string
 ): void {
-  const {
-    clearActiveWorktree,
-    setActiveSession,
-  } = useChatStore.getState()
+  const { clearActiveWorktree, setActiveSession } = useChatStore.getState()
   const { selectWorktree } = useProjectsStore.getState()
 
   // Preselect the session if provided

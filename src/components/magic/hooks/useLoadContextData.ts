@@ -62,28 +62,28 @@ export function useLoadContextData({
     data: loadedIssueContexts,
     isLoading: isLoadingIssueContexts,
     refetch: refetchIssueContexts,
-  } = useLoadedIssueContexts(activeSessionId)
+  } = useLoadedIssueContexts(activeSessionId, worktreeId)
 
   // PR contexts for this session
   const {
     data: loadedPRContexts,
     isLoading: isLoadingPRContexts,
     refetch: refetchPRContexts,
-  } = useLoadedPRContexts(activeSessionId)
+  } = useLoadedPRContexts(activeSessionId, worktreeId)
 
   // Security alert contexts for this session
   const {
     data: loadedSecurityContexts,
     isLoading: isLoadingSecurityContexts,
     refetch: refetchSecurityContexts,
-  } = useLoadedSecurityContexts(activeSessionId)
+  } = useLoadedSecurityContexts(activeSessionId, worktreeId)
 
   // Advisory contexts for this session
   const {
     data: loadedAdvisoryContexts,
     isLoading: isLoadingAdvisoryContexts,
     refetch: refetchAdvisoryContexts,
-  } = useLoadedAdvisoryContexts(activeSessionId)
+  } = useLoadedAdvisoryContexts(activeSessionId, worktreeId)
 
   // Attached saved contexts for this session
   const {
@@ -171,8 +171,10 @@ export function useLoadContextData({
   const { data: searchedIssues, isFetching: isSearchingIssues } =
     useSearchGitHubIssues(worktreePath, debouncedSearchQuery)
 
-  const { data: searchedPRs, isFetching: isSearchingPRs } =
-    useSearchGitHubPRs(worktreePath, debouncedSearchQuery)
+  const { data: searchedPRs, isFetching: isSearchingPRs } = useSearchGitHubPRs(
+    worktreePath,
+    debouncedSearchQuery
+  )
 
   const { data: searchedLinearIssues, isFetching: isSearchingLinearIssues } =
     useSearchLinearIssues(projectId, debouncedSearchQuery)
@@ -196,7 +198,9 @@ export function useLoadContextData({
   const filteredIssues = useMemo(() => {
     const loadedNumbers = new Set(loadedIssueContexts?.map(c => c.number) ?? [])
     if (parseItemNumber(searchQuery) !== null) {
-      return exactIssue && !loadedNumbers.has(exactIssue.number) ? [exactIssue] : []
+      return exactIssue && !loadedNumbers.has(exactIssue.number)
+        ? [exactIssue]
+        : []
     }
     const localFiltered = filterIssues(issues ?? [], searchQuery)
     const merged = mergeWithSearchResults(localFiltered, searchedIssues)
@@ -222,7 +226,10 @@ export function useLoadContextData({
     const loadedNumbers = new Set(
       loadedSecurityContexts?.map(c => c.number) ?? []
     )
-    const localFiltered = filterSecurityAlerts(securityAlerts ?? [], searchQuery)
+    const localFiltered = filterSecurityAlerts(
+      securityAlerts ?? [],
+      searchQuery
+    )
     return localFiltered
       .filter(alert => !loadedNumbers.has(alert.number))
       .sort(
@@ -241,7 +248,11 @@ export function useLoadContextData({
     const localFiltered = filterAdvisories(advisories ?? [], searchQuery)
     return localFiltered
       .filter(advisory => !loadedGhsaIds.has(advisory.ghsaId))
-      .filter(advisory => includeClosed || (advisory.state !== 'closed' && advisory.state !== 'published'))
+      .filter(
+        advisory =>
+          includeClosed ||
+          (advisory.state !== 'closed' && advisory.state !== 'published')
+      )
       .sort(
         (a, b) =>
           (ADVISORY_STATE_ORDER.indexOf(a.state) ?? 99) -
@@ -300,7 +311,8 @@ export function useLoadContextData({
       loadedLinearContexts?.map(c => c.identifier) ?? []
     )
     if (parseLinearItemNumber(searchQuery) !== null) {
-      return exactLinearIssue && !loadedIdentifiers.has(exactLinearIssue.identifier)
+      return exactLinearIssue &&
+        !loadedIdentifiers.has(exactLinearIssue.identifier)
         ? [exactLinearIssue]
         : []
     }

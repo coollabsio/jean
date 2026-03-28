@@ -507,7 +507,9 @@ function DiffView({
 
   return (
     <div className={className}>
-      <div className="text-muted-foreground mb-1.5 font-mono">Path: {filePath}</div>
+      <div className="text-muted-foreground mb-1.5 font-mono">
+        Path: {filePath}
+      </div>
       <div className="rounded border border-border/30 overflow-auto max-h-64">
         {parts.map((part, i) => {
           const lines = part.value.replace(/\n$/, '').split('\n')
@@ -582,7 +584,9 @@ function FileChangeDiffView({ input }: { input: unknown }) {
   return (
     <div className="space-y-3">
       {changes.map((change, idx) => {
-        const filename = change.path ? getFilename(change.path) : `file ${idx + 1}`
+        const filename = change.path
+          ? getFilename(change.path)
+          : `file ${idx + 1}`
         const changeType = change.kind?.type ?? 'update'
         const typeColor =
           changeType === 'create'
@@ -596,7 +600,9 @@ function FileChangeDiffView({ input }: { input: unknown }) {
         return (
           <div key={change.path ?? idx}>
             <div className="flex items-center gap-1.5 mb-1">
-              <span className={cn('font-mono truncate', typeColor)}>{filename}</span>
+              <span className={cn('font-mono truncate', typeColor)}>
+                {filename}
+              </span>
               <span
                 className={cn(
                   'text-[0.625rem] uppercase font-medium px-1 rounded',
@@ -614,7 +620,9 @@ function FileChangeDiffView({ input }: { input: unknown }) {
             {change.diff ? (
               <PatchDiffView patch={change.diff} />
             ) : (
-              <div className="text-muted-foreground/50 italic">No diff available</div>
+              <div className="text-muted-foreground/50 italic">
+                No diff available
+              </div>
             )}
           </div>
         )
@@ -858,7 +866,9 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
 
       // If input is an array of changes, summarize
       const isArray = Array.isArray(toolCall.input)
-      const fileCount = isArray ? (toolCall.input as unknown[]).length : undefined
+      const fileCount = isArray
+        ? (toolCall.input as unknown[]).length
+        : undefined
       const detail = isArray
         ? `${fileCount} file${fileCount === 1 ? '' : 's'}`
         : filename
@@ -888,14 +898,14 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         typeof args === 'string'
           ? args
           : args
-          ? JSON.stringify(args)
-          : undefined
+            ? JSON.stringify(args)
+            : undefined
       const expandedArgs =
         typeof args === 'string'
           ? args
           : args
-          ? JSON.stringify(args, null, 2)
-          : undefined
+            ? JSON.stringify(args, null, 2)
+            : undefined
       return {
         icon: <Wand2 className="h-4 w-4 shrink-0 text-purple-500" />,
         label: skillName ? `Skill: ${skillName}` : 'Skill',

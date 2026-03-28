@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { getModifierSymbol } from '@/lib/platform'
-import { Bookmark, CircleDot, FolderOpen, GitPullRequest, Shield, ShieldAlert } from 'lucide-react'
+import {
+  Bookmark,
+  CircleDot,
+  FolderOpen,
+  GitPullRequest,
+  Shield,
+  ShieldAlert,
+} from 'lucide-react'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type { LucideIcon } from 'lucide-react'
 import {
@@ -145,7 +152,10 @@ export function LoadContextModal({
         setActiveTab('issues')
       } else if (data.hasLoadedPRContexts) {
         setActiveTab('prs')
-      } else if (data.hasLoadedSecurityContexts || data.hasLoadedAdvisoryContexts) {
+      } else if (
+        data.hasLoadedSecurityContexts ||
+        data.hasLoadedAdvisoryContexts
+      ) {
         setActiveTab('security')
       } else if (data.hasLoadedLinearContexts) {
         setActiveTab('linear')
@@ -331,7 +341,8 @@ export function LoadContextModal({
                 onViewItem: handlers.handleViewIssue,
                 onPreviewItem: handlers.handlePreviewIssue,
                 onRemoveItem: handlers.handleRemoveIssue,
-                onLoadItem: (num, refresh) => handlers.handleLoadIssue(num, refresh),
+                onLoadItem: (num, refresh) =>
+                  handlers.handleLoadIssue(num, refresh),
               }}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
@@ -364,7 +375,8 @@ export function LoadContextModal({
                 onViewItem: handlers.handleViewPR,
                 onPreviewItem: handlers.handlePreviewPR,
                 onRemoveItem: handlers.handleRemovePR,
-                onLoadItem: (num, refresh) => handlers.handleLoadPR(num, refresh),
+                onLoadItem: (num, refresh) =>
+                  handlers.handleLoadPR(num, refresh),
               }}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
@@ -413,7 +425,9 @@ export function LoadContextModal({
               onViewAlert={handlers.handleViewSecurityAlert}
               onPreviewAlert={handlers.handlePreviewSecurityAlert}
               onRemoveAlert={handlers.handleRemoveSecurityAlert}
-              onLoadAlert={(num, refresh) => handlers.handleLoadSecurityAlert(num, refresh)}
+              onLoadAlert={(num, refresh) =>
+                handlers.handleLoadSecurityAlert(num, refresh)
+              }
               onGhLogin={triggerGhLogin}
               isGhInstalled={isGhInstalled}
               // Advisory props
@@ -429,7 +443,9 @@ export function LoadContextModal({
               onViewAdvisory={handlers.handleViewAdvisory}
               onPreviewAdvisory={handlers.handlePreviewAdvisory}
               onRemoveAdvisory={handlers.handleRemoveAdvisory}
-              onLoadAdvisory={(ghsaId, refresh) => handlers.handleLoadAdvisory(ghsaId, refresh)}
+              onLoadAdvisory={(ghsaId, refresh) =>
+                handlers.handleLoadAdvisory(ghsaId, refresh)
+              }
             />
           )}
 
@@ -501,7 +517,8 @@ export function LoadContextModal({
 
         {/* GitHub issue/PR preview modal */}
         {handlers.viewingContext &&
-          (handlers.viewingContext.type === 'issue' || handlers.viewingContext.type === 'pr') &&
+          (handlers.viewingContext.type === 'issue' ||
+            handlers.viewingContext.type === 'pr') &&
           handlers.viewingContext.number &&
           worktreePath && (
             <IssuePreviewModal
@@ -520,31 +537,31 @@ export function LoadContextModal({
           (handlers.viewingContext.type === 'saved' ||
             handlers.viewingContext.type === 'security' ||
             handlers.viewingContext.type === 'advisory') && (
-          <Dialog
-            open={true}
-            onOpenChange={() => handlers.setViewingContext(null)}
-          >
-            <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-8rem)] sm:!max-w-[calc(100vw-8rem)] sm:!h-[calc(100vh-8rem)] sm:!rounded-lg flex flex-col">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  {handlers.viewingContext.type === 'security' ? (
-                    <Shield className="h-4 w-4 text-orange-500" />
-                  ) : handlers.viewingContext.type === 'advisory' ? (
-                    <ShieldAlert className="h-4 w-4 text-orange-500" />
-                  ) : (
-                    <FolderOpen className="h-4 w-4 text-blue-500" />
-                  )}
-                  {handlers.viewingContext.title}
-                </DialogTitle>
-              </DialogHeader>
-              <ScrollArea className="flex-1 min-h-0">
-                <Markdown className="p-4">
-                  {handlers.viewingContext.content}
-                </Markdown>
-              </ScrollArea>
-            </DialogContent>
-          </Dialog>
-        )}
+            <Dialog
+              open={true}
+              onOpenChange={() => handlers.setViewingContext(null)}
+            >
+              <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-8rem)] sm:!max-w-[calc(100vw-8rem)] sm:!h-[calc(100vh-8rem)] sm:!rounded-lg flex flex-col">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    {handlers.viewingContext.type === 'security' ? (
+                      <Shield className="h-4 w-4 text-orange-500" />
+                    ) : handlers.viewingContext.type === 'advisory' ? (
+                      <ShieldAlert className="h-4 w-4 text-orange-500" />
+                    ) : (
+                      <FolderOpen className="h-4 w-4 text-blue-500" />
+                    )}
+                    {handlers.viewingContext.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <ScrollArea className="flex-1 min-h-0">
+                  <Markdown className="p-4">
+                    {handlers.viewingContext.content}
+                  </Markdown>
+                </ScrollArea>
+              </DialogContent>
+            </Dialog>
+          )}
       </DialogContent>
     </Dialog>
   )

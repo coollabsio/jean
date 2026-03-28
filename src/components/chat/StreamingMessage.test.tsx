@@ -36,10 +36,7 @@ describe('StreamingMessage', () => {
 
   it('hides the placeholder once streaming text is available', () => {
     render(
-      <StreamingMessage
-        {...baseProps}
-        streamingContent="Working on it..."
-      />
+      <StreamingMessage {...baseProps} streamingContent="Working on it..." />
     )
 
     expect(

@@ -985,7 +985,6 @@ fn handle_approval_request(
             }
         }
         "item/commandExecution/requestApproval" => {
-            // Emit permission denied event for the frontend
             let command = params
                 .get("command")
                 .and_then(|v| v.as_str())
@@ -996,6 +995,23 @@ fn handle_approval_request(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+
+            // Auto-approve embedded/resolved CLI binaries (matches Claude's --allowedTools)
+            let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
+            let gh_str = gh_binary.to_string_lossy();
+            if command.contains(&*gh_str)
+                || command.contains("gh-cli/gh")
+                || command.contains("claude-cli/claude")
+            {
+                log::trace!(
+                    "Auto-accepting CLI command (rpc_id={rpc_id}): {command}"
+                );
+                let _ = super::codex_server::send_response(
+                    rpc_id,
+                    serde_json::json!({"decision": "accept"}),
+                );
+                return;
+            }
 
             log::trace!("Command approval requested (rpc_id={rpc_id}): {command}");
 

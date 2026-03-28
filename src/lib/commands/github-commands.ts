@@ -1,4 +1,9 @@
-import { CircleDot, GitPullRequest, Activity, LayoutDashboard } from 'lucide-react'
+import {
+  CircleDot,
+  GitPullRequest,
+  Activity,
+  LayoutDashboard,
+} from 'lucide-react'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -78,7 +83,16 @@ export const githubCommands: AppCommand[] = [
     description: 'View issues, PRs, and security across all projects',
     icon: LayoutDashboard,
     group: 'github',
-    keywords: ['github', 'dashboard', 'overview', 'all', 'projects', 'issues', 'prs', 'security'],
+    keywords: [
+      'github',
+      'dashboard',
+      'overview',
+      'all',
+      'projects',
+      'issues',
+      'prs',
+      'security',
+    ],
 
     execute: () => {
       useUIStore.getState().setGitHubDashboardOpen(true)

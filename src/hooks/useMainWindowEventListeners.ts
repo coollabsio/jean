@@ -79,7 +79,9 @@ export function closeActiveTerminalTabForShortcut(): boolean {
   return true
 }
 
-export function switchActiveTerminalTabByIndexForShortcut(index: number): boolean {
+export function switchActiveTerminalTabByIndexForShortcut(
+  index: number
+): boolean {
   const worktreeId = getTerminalShortcutWorktreeId()
   if (!worktreeId) return false
 
@@ -171,10 +173,11 @@ function executeKeybindingAction(
       if (!targetWorktreePath && targetWorktreeId) {
         const projectId = useProjectsStore.getState().selectedProjectId
         if (projectId) {
-          const worktrees = queryClient.getQueryData<{ id: string; path: string }[]>(
-            projectsQueryKeys.worktrees(projectId)
-          )
-          targetWorktreePath = worktrees?.find(w => w.id === targetWorktreeId)?.path ?? null
+          const worktrees = queryClient.getQueryData<
+            { id: string; path: string }[]
+          >(projectsQueryKeys.worktrees(projectId))
+          targetWorktreePath =
+            worktrees?.find(w => w.id === targetWorktreeId)?.path ?? null
         }
       }
 
@@ -528,7 +531,10 @@ export function useMainWindowEventListeners() {
             closeActiveTerminalTabForShortcut()
             return
           }
-          if (shortcut === kb.toggle_terminal || shortcut === kb.cancel_prompt) {
+          if (
+            shortcut === kb.toggle_terminal ||
+            shortcut === kb.cancel_prompt
+          ) {
             // Let these fall through to the normal keybinding handler below
           } else {
             // Block all other shortcuts
@@ -655,7 +661,11 @@ export function useMainWindowEventListeners() {
 
         listen('menu-magic-menu', () => {
           logger.debug('Magic menu event received from native menu')
-          executeKeybindingAction('open_magic_modal', commandContext, queryClient)
+          executeKeybindingAction(
+            'open_magic_modal',
+            commandContext,
+            queryClient
+          )
         }),
 
         // Branch naming events (automatic branch renaming based on first message)

@@ -35,13 +35,13 @@ export const StreamingStatusBar = memo(function StreamingStatusBar({
 
   return (
     <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono select-none">
-        {showRestored ? (
-          <span className="animate-dots">
-            {getModeLabel(restoredExecutionMode)}
-          </span>
-        ) : (
-          elapsed ?? '0s'
-        )}
+      {showRestored ? (
+        <span className="animate-dots">
+          {getModeLabel(restoredExecutionMode)}
+        </span>
+      ) : (
+        (elapsed ?? '0s')
+      )}
     </span>
   )
 })

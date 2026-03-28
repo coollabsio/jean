@@ -238,7 +238,8 @@ export function SessionChatModal({
     return terminals.some(t => state.runningTerminals.has(t.id))
   })
   const terminalShortcut = formatShortcutDisplay(
-    preferences?.keybindings?.toggle_terminal ?? DEFAULT_KEYBINDINGS.toggle_terminal
+    preferences?.keybindings?.toggle_terminal ??
+      DEFAULT_KEYBINDINGS.toggle_terminal
   )
   const runShortcut = formatShortcutDisplay(
     preferences?.keybindings?.execute_run ?? DEFAULT_KEYBINDINGS.execute_run
@@ -693,10 +694,12 @@ export function SessionChatModal({
         const portalAncestor = target?.closest?.(
           '[data-slot="dialog-portal"], [data-slot="alert-dialog-portal"], [data-slot="sheet-portal"]'
         )
-        const planDialogOpen = useUIStore.getState().planDialogOpen
+        const { planDialogOpen, gitDiffModalOpen } = useUIStore.getState()
 
         // Don't close if PlanDialog is open — let it handle ESC
         if (planDialogOpen) return
+        // Don't close if GitDiffModal is open — let it handle ESC
+        if (gitDiffModalOpen) return
         // Don't close if CloseWorktreeDialog is open — let it handle ESC
         if (closeConfirmOpen) return
         // Don't close if ESC originated inside a child dialog/sheet portal
@@ -797,7 +800,12 @@ export function SessionChatModal({
                         <Terminal className="h-3 w-3" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Terminal{' '}<kbd className="ml-1 text-[0.625rem] opacity-60">{terminalShortcut}</kbd></TooltipContent>
+                    <TooltipContent>
+                      Terminal{' '}
+                      <kbd className="ml-1 text-[0.625rem] opacity-60">
+                        {terminalShortcut}
+                      </kbd>
+                    </TooltipContent>
                   </Tooltip>
                   {runScripts.length === 1 && (
                     <Tooltip>
@@ -808,10 +816,17 @@ export function SessionChatModal({
                           className="h-7 px-2 text-xs"
                           onClick={handleRun}
                         >
-                          <Play className={`h-3 w-3 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
+                          <Play
+                            className={`h-3 w-3 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`}
+                          />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>{hasRunningTerminal ? 'Running' : 'Run'}{' '}<kbd className="ml-1 text-[0.625rem] opacity-60">{runShortcut}</kbd></TooltipContent>
+                      <TooltipContent>
+                        {hasRunningTerminal ? 'Running' : 'Run'}{' '}
+                        <kbd className="ml-1 text-[0.625rem] opacity-60">
+                          {runShortcut}
+                        </kbd>
+                      </TooltipContent>
                     </Tooltip>
                   )}
                   {runScripts.length > 1 && (
@@ -824,10 +839,17 @@ export function SessionChatModal({
                             className="h-7 rounded-r-none px-2 text-xs"
                             onClick={handleRun}
                           >
-                            <Play className={`h-3 w-3 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
+                            <Play
+                              className={`h-3 w-3 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`}
+                            />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{hasRunningTerminal ? 'Running' : 'Run first command'}{' '}<kbd className="ml-1 text-[0.625rem] opacity-60">{runShortcut}</kbd></TooltipContent>
+                        <TooltipContent>
+                          {hasRunningTerminal ? 'Running' : 'Run first command'}{' '}
+                          <kbd className="ml-1 text-[0.625rem] opacity-60">
+                            {runShortcut}
+                          </kbd>
+                        </TooltipContent>
                       </Tooltip>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -930,14 +952,18 @@ export function SessionChatModal({
                     </DropdownMenuItem>
                     {runScripts.length === 1 && (
                       <DropdownMenuItem onSelect={handleRun}>
-                        <Play className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
+                        <Play
+                          className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`}
+                        />
                         Run
                       </DropdownMenuItem>
                     )}
                     {runScripts.length > 1 && (
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger>
-                          <Play className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`} />
+                          <Play
+                            className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`}
+                          />
                           Run
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
@@ -1072,7 +1098,16 @@ export function SessionChatModal({
                               className="w-full min-w-0 bg-transparent text-xs outline-none"
                             />
                           ) : (
-                            <span className="truncate max-w-48">{session.name}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="truncate max-w-48">
+                                  {session.name}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                {session.name}
+                              </TooltipContent>
+                            </Tooltip>
                           )}
                           {renamingSessionId !== session.id && (
                             <DismissButton

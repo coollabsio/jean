@@ -182,7 +182,9 @@ export function FileMentionPopover({
                         />
                       )}
                       <span className="truncate text-sm">
-                        {file.is_dir ? `${file.relative_path}/` : file.relative_path}
+                        {file.is_dir
+                          ? `${file.relative_path}/`
+                          : file.relative_path}
                       </span>
                     </CommandItem>
                   )

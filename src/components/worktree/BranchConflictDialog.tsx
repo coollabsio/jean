@@ -57,6 +57,8 @@ export function BranchConflictDialog() {
         branchName: conflict.branch,
         issueContext: conflict.issue_context,
         prContext: conflict.pr_context,
+        securityContext: conflict.security_context,
+        advisoryContext: conflict.advisory_context,
       },
       {
         onError: (error: Error) => {
@@ -78,6 +80,8 @@ export function BranchConflictDialog() {
         customName: conflict.suggested_name,
         issueContext: conflict.issue_context,
         prContext: conflict.pr_context,
+        securityContext: conflict.security_context,
+        advisoryContext: conflict.advisory_context,
       },
       {
         onError: (error: Error) => {

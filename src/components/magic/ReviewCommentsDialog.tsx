@@ -42,22 +42,30 @@ type ConversationItem =
   | { kind: 'comment'; data: GitHubComment }
   | { kind: 'review'; data: GitHubReview }
 
-function getCreatedAt(obj: { created_at?: string; createdAt?: string } & Record<string, unknown>): string {
+function getCreatedAt(
+  obj: { created_at?: string; createdAt?: string } & Record<string, unknown>
+): string {
   return (
-    (obj as Record<string, unknown>).createdAt as string ||
-    (obj as Record<string, unknown>).created_at as string ||
+    ((obj as Record<string, unknown>).createdAt as string) ||
+    ((obj as Record<string, unknown>).created_at as string) ||
     ''
   )
 }
 
 function reviewStateLabel(state: string): string {
   switch (state.toUpperCase()) {
-    case 'APPROVED': return 'Approved'
-    case 'CHANGES_REQUESTED': return 'Changes Requested'
-    case 'COMMENTED': return 'Commented'
-    case 'DISMISSED': return 'Dismissed'
-    case 'PENDING': return 'Pending'
-    default: return state
+    case 'APPROVED':
+      return 'Approved'
+    case 'CHANGES_REQUESTED':
+      return 'Changes Requested'
+    case 'COMMENTED':
+      return 'Commented'
+    case 'DISMISSED':
+      return 'Dismissed'
+    case 'PENDING':
+      return 'Pending'
+    default:
+      return state
   }
 }
 
@@ -112,8 +120,12 @@ export function ReviewCommentsDialog() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   // Conversation comments state
-  const [conversationItems, setConversationItems] = useState<ConversationItem[]>([])
-  const [conversationSelected, setConversationSelected] = useState<Set<number>>(new Set())
+  const [conversationItems, setConversationItems] = useState<
+    ConversationItem[]
+  >([])
+  const [conversationSelected, setConversationSelected] = useState<Set<number>>(
+    new Set()
+  )
 
   const fetchComments = useCallback(async () => {
     if (!worktreePath || !prNumber) return
@@ -128,14 +140,14 @@ export function ReviewCommentsDialog() {
 
     try {
       const [inlineResult, prDetail] = await Promise.all([
-        invoke<GitHubReviewComment[]>(
-          'get_pr_review_comments',
-          { projectPath: worktreePath, prNumber }
-        ),
-        invoke<GitHubPullRequestDetail>(
-          'get_github_pr',
-          { projectPath: worktreePath, prNumber }
-        ),
+        invoke<GitHubReviewComment[]>('get_pr_review_comments', {
+          projectPath: worktreePath,
+          prNumber,
+        }),
+        invoke<GitHubPullRequestDetail>('get_github_pr', {
+          projectPath: worktreePath,
+          prNumber,
+        }),
       ])
 
       // Inline code comments
@@ -226,17 +238,25 @@ export function ReviewCommentsDialog() {
   // Toggle all for active tab
   const activeItems = tab === 'inline' ? comments : conversationItems
   const activeSelected = tab === 'inline' ? selected : conversationSelected
-  const allSelected = activeItems.length > 0 && activeSelected.size === activeItems.length
+  const allSelected =
+    activeItems.length > 0 && activeSelected.size === activeItems.length
 
   const toggleAll = useCallback(() => {
     if (tab === 'inline') {
       if (selected.size === comments.length) setSelected(new Set())
       else setSelected(new Set(comments.map((_, i) => i)))
     } else {
-      if (conversationSelected.size === conversationItems.length) setConversationSelected(new Set())
+      if (conversationSelected.size === conversationItems.length)
+        setConversationSelected(new Set())
       else setConversationSelected(new Set(conversationItems.map((_, i) => i)))
     }
-  }, [tab, selected.size, comments.length, conversationSelected.size, conversationItems.length])
+  }, [
+    tab,
+    selected.size,
+    comments.length,
+    conversationSelected.size,
+    conversationItems.length,
+  ])
 
   const handleSendToChat = useCallback(() => {
     if (!prNumber) return
@@ -432,7 +452,8 @@ ${c.body}`
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 text-xs">
                               <code className="font-mono text-foreground truncate">
-                                {comment.path}{lineInfo}
+                                {comment.path}
+                                {lineInfo}
                               </code>
                               <span className="text-muted-foreground shrink-0">
                                 @{comment.author.login}
@@ -485,7 +506,9 @@ ${c.body}`
                       <div className="flex items-start gap-2">
                         <Checkbox
                           checked={conversationSelected.has(index)}
-                          onCheckedChange={() => toggleConversationSelect(index)}
+                          onCheckedChange={() =>
+                            toggleConversationSelect(index)
+                          }
                           className="mt-0.5"
                         />
                         <div className="flex-1 min-w-0">
@@ -498,8 +521,13 @@ ${c.body}`
                             )}
                             <span className="text-muted-foreground/60 text-[10px]">
                               {item.kind === 'review'
-                                ? item.data.submittedAt ?? ''
-                                : getCreatedAt(item.data as unknown as Record<string, unknown>)}
+                                ? (item.data.submittedAt ?? '')
+                                : getCreatedAt(
+                                    item.data as unknown as Record<
+                                      string,
+                                      unknown
+                                    >
+                                  )}
                             </span>
                           </div>
                           <p className="mt-1 text-sm text-foreground/90 whitespace-pre-wrap">

@@ -253,7 +253,11 @@ export const ChatInput = memo(function ChatInput({
           setFileMentionOpen(true)
 
           // Anchor at the top-left of the form so popover appears above the input
-          setFileMentionAnchor({ top: 0, left: 0, containerWidth: formRef.current?.offsetWidth ?? 0 })
+          setFileMentionAnchor({
+            top: 0,
+            left: 0,
+            containerWidth: formRef.current?.offsetWidth ?? 0,
+          })
         }
       } else if (atTriggerIndex !== null && fileMentionOpen) {
         // Continuing to type after @, update query
@@ -288,7 +292,11 @@ export const ChatInput = memo(function ChatInput({
               setFileMentionQuery(query)
               setFileMentionOpen(true)
               // Anchor at the top-left of the form so popover appears above the input
-              setFileMentionAnchor({ top: 0, left: 0, containerWidth: formRef.current?.offsetWidth ?? 0 })
+              setFileMentionAnchor({
+                top: 0,
+                left: 0,
+                containerWidth: formRef.current?.offsetWidth ?? 0,
+              })
             }
             break
           }
@@ -331,7 +339,6 @@ export const ChatInput = memo(function ChatInput({
           }
         }
       }
-
     },
     [
       activeSessionId,
@@ -575,10 +582,9 @@ export const ChatInput = memo(function ChatInput({
 
           try {
             const svgText = await file.text()
-            const result = await invoke<SaveTextResponse>(
-              'save_pasted_text',
-              { content: svgText }
-            )
+            const result = await invoke<SaveTextResponse>('save_pasted_text', {
+              content: svgText,
+            })
             const { addPendingTextFile } = useChatStore.getState()
             addPendingTextFile(activeSessionId, {
               id: result.id,
@@ -757,10 +763,9 @@ export const ChatInput = memo(function ChatInput({
 
         if (mentions.length > 0) {
           // Get file list: cache-first, async fallback
-          let fileList: WorktreeFile[] | undefined =
-            queryClient.getQueryData(
-              fileQueryKeys.worktreeFiles(activeWorktreePath)
-            )
+          let fileList: WorktreeFile[] | undefined = queryClient.getQueryData(
+            fileQueryKeys.worktreeFiles(activeWorktreePath)
+          )
           if (!fileList) {
             try {
               fileList = await invoke<WorktreeFile[]>('list_worktree_files', {
@@ -806,7 +811,6 @@ export const ChatInput = memo(function ChatInput({
           }
         }
       }
-
     },
     [activeSessionId, activeWorktreePath, inputRef]
   )

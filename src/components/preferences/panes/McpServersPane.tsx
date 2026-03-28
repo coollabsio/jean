@@ -214,8 +214,7 @@ export const McpServersPane: React.FC = () => {
                     <Checkbox
                       id={`mcp-${backend}-${server.name}`}
                       checked={
-                        !server.disabled &&
-                        enabledServers.includes(server.name)
+                        !server.disabled && enabledServers.includes(server.name)
                       }
                       onCheckedChange={() => handleToggle(server.name)}
                       disabled={server.disabled}

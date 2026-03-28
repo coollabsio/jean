@@ -448,7 +448,6 @@ describe('ChatStore', () => {
       setThinkingLevel('session-1', 'think')
       expect(getThinkingLevel('session-1')).toBe('think')
     })
-
   })
 
   describe('question answering', () => {
@@ -821,11 +820,8 @@ describe('ChatStore', () => {
     })
 
     it('clears pending text files', () => {
-      const {
-        addPendingTextFile,
-        clearPendingTextFiles,
-        getPendingTextFiles,
-      } = useChatStore.getState()
+      const { addPendingTextFile, clearPendingTextFiles, getPendingTextFiles } =
+        useChatStore.getState()
 
       addPendingTextFile('session-1', mockTextFile)
       clearPendingTextFiles('session-1')

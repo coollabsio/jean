@@ -1,5 +1,16 @@
-import { CircleDot, FolderOpen, GitPullRequest, Shield, ShieldAlert } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  CircleDot,
+  FolderOpen,
+  GitPullRequest,
+  Shield,
+  ShieldAlert,
+} from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
 import { LinearIcon } from '@/components/icons/LinearIcon'
@@ -41,7 +52,10 @@ export function ContextViewerDialog({
             )}
             {viewingContext.number ? `#${viewingContext.number}: ` : ''}
             {viewingContext.ghsaId ? `${viewingContext.ghsaId}: ` : ''}
-            {viewingContext.identifier && !viewingContext.title.startsWith(viewingContext.identifier) ? `${viewingContext.identifier}: ` : ''}
+            {viewingContext.identifier &&
+            !viewingContext.title.startsWith(viewingContext.identifier)
+              ? `${viewingContext.identifier}: `
+              : ''}
             {viewingContext.title}
           </DialogTitle>
         </DialogHeader>

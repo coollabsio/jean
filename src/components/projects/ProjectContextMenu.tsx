@@ -55,7 +55,9 @@ export function ProjectContextMenu({
   const { data: worktrees = [] } = useWorktrees(project.id)
   const { data: preferences } = usePreferences()
   const { openProjectSettings, selectProject } = useProjectsStore()
-  const setNewWorktreeModalOpen = useUIStore(state => state.setNewWorktreeModalOpen)
+  const setNewWorktreeModalOpen = useUIStore(
+    state => state.setNewWorktreeModalOpen
+  )
   // Check if base session already exists
   const existingBaseSession = worktrees.find(isBaseSession)
   const isNested = project.parent_id !== undefined

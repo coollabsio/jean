@@ -358,8 +358,7 @@ export function useUIStatePersistence() {
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevPendingDigestSessionIds =
       useChatStore.getState().pendingDigestSessionIds
-    let prevLastOpenedPerProject =
-      useChatStore.getState().lastOpenedPerProject
+    let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
     let prevModalTerminalOpen = useTerminalStore.getState().modalTerminalOpen
     let prevModalTerminalWidth = useTerminalStore.getState().modalTerminalWidth
 

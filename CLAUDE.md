@@ -173,7 +173,9 @@ To diagnose unnecessary re-renders, temporarily install [why-did-you-render](htt
 2. Create `src/wdyr.ts`:
    ```typescript
    if (import.meta.env.DEV) {
-     const whyDidYouRender = (await import('@welldone-software/why-did-you-render')).default
+     const whyDidYouRender = (
+       await import('@welldone-software/why-did-you-render')
+     ).default
      whyDidYouRender(React, { trackAllPureComponents: false })
    }
    ```
@@ -317,6 +319,7 @@ The helper is defined in `src-tauri/src/platform/process.rs` and exported via `p
 #### Canvas Views Architecture
 
 **"Canvas"** refers to **ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`):
+
 - Project-level canvas showing worktrees as compact list rows (with section headers)
 - Sessions are opened via `SessionChatModal` overlay
 - Navigation: clicking "back" from ChatWindow returns to ProjectCanvasView via `clearActiveWorktree()`

@@ -3,7 +3,11 @@ import { Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
 import type { CheckStatus } from '@/types/pr-status'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface CheckStatusButtonProps {
   status: CheckStatus | null

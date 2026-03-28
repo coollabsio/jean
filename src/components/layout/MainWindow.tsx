@@ -1,4 +1,12 @@
-import { useMemo, useCallback, useRef, useEffect, useState, lazy, Suspense } from 'react'
+import {
+  useMemo,
+  useCallback,
+  useRef,
+  useEffect,
+  useState,
+  lazy,
+  Suspense,
+} from 'react'
 import { cn } from '@/lib/utils'
 import { TitleBar } from '@/components/titlebar/TitleBar'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -190,14 +198,18 @@ export function MainWindow() {
   const newWorktreeModalOpen = useUIStore(state => state.newWorktreeModalOpen)
   const releaseNotesModalOpen = useUIStore(state => state.releaseNotesModalOpen)
   const updatePrModalOpen = useUIStore(state => state.updatePrModalOpen)
-  const reviewCommentsModalOpen = useUIStore(state => state.reviewCommentsModalOpen)
+  const reviewCommentsModalOpen = useUIStore(
+    state => state.reviewCommentsModalOpen
+  )
   const workflowRunsModalOpen = useUIStore(state => state.workflowRunsModalOpen)
   const cliUpdateModalOpen = useUIStore(state => state.cliUpdateModalOpen)
   const cliLoginModalOpen = useUIStore(state => state.cliLoginModalOpen)
   const updateModalVersion = useUIStore(state => state.updateModalVersion)
   const githubDashboardOpen = useUIStore(state => state.githubDashboardOpen)
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
-  const addProjectDialogOpen = useProjectsStore(state => state.addProjectDialogOpen)
+  const addProjectDialogOpen = useProjectsStore(
+    state => state.addProjectDialogOpen
+  )
   const projectSettingsDialogOpen = useProjectsStore(
     state => state.projectSettingsDialogOpen
   )
@@ -262,13 +274,18 @@ export function MainWindow() {
   const [closeConfirmBranch, setCloseConfirmBranch] = useState<
     string | undefined
   >()
-  const [closeConfirmMode, setCloseConfirmMode] = useState<'worktree' | 'session'>('worktree')
+  const [closeConfirmMode, setCloseConfirmMode] = useState<
+    'worktree' | 'session'
+  >('worktree')
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
-  const handleConfirmRequired = useCallback((branchName?: string, mode?: 'worktree' | 'session') => {
-    setCloseConfirmBranch(branchName)
-    setCloseConfirmMode(mode ?? 'worktree')
-    setCloseConfirmOpen(true)
-  }, [])
+  const handleConfirmRequired = useCallback(
+    (branchName?: string, mode?: 'worktree' | 'session') => {
+      setCloseConfirmBranch(branchName)
+      setCloseConfirmMode(mode ?? 'worktree')
+      setCloseConfirmOpen(true)
+    },
+    []
+  )
   const { executeClose } = useCloseSessionOrWorktreeKeybinding(
     handleConfirmRequired
   )
@@ -284,7 +301,6 @@ export function MainWindow() {
     return () =>
       window.removeEventListener('command:open-archived-modal', handler)
   }, [])
-
 
   // Auto-cleanup old archived items on startup
   useArchiveCleanup()
@@ -364,12 +380,12 @@ export function MainWindow() {
   const shouldRenderOpenInModal = useRetainedMount(openInModalOpen)
   const shouldRenderRemotePickerModal = useRetainedMount(remotePickerOpen)
   const shouldRenderUpdatePrDialog = useRetainedMount(updatePrModalOpen)
-  const shouldRenderReviewCommentsDialog = useRetainedMount(reviewCommentsModalOpen)
+  const shouldRenderReviewCommentsDialog = useRetainedMount(
+    reviewCommentsModalOpen
+  )
   const shouldRenderWorkflowRunsModal = useRetainedMount(workflowRunsModalOpen)
   const shouldRenderMagicModal = useRetainedMount(magicModalOpen)
-  const shouldRenderReleaseNotesDialog = useRetainedMount(
-    releaseNotesModalOpen
-  )
+  const shouldRenderReleaseNotesDialog = useRetainedMount(releaseNotesModalOpen)
   const shouldRenderNewWorktreeModal = useRetainedMount(newWorktreeModalOpen)
   const shouldRenderAddProjectDialog = useRetainedMount(addProjectDialogOpen)
   const shouldRenderGitInitModal = useRetainedMount(gitInitModalOpen)
@@ -381,8 +397,8 @@ export function MainWindow() {
   // On Windows, use smaller border radius and remove it when maximized
   // On other platforms, use rounded-xl only in native app mode
   const roundedClass = isWindows
-    ? (!isMaximized && 'rounded-sm')
-    : (isNativeApp() && 'rounded-xl')
+    ? !isMaximized && 'rounded-sm'
+    : isNativeApp() && 'rounded-xl'
 
   return (
     <div

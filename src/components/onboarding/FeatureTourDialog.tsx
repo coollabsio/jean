@@ -54,7 +54,10 @@ const steps = [
       { shortcut: 'mod+Enter' as ShortcutString, label: 'Approve plan' },
       { shortcut: 'mod+y' as ShortcutString, label: 'Approve plan (YOLO)' },
       { shortcut: 'mod+s' as ShortcutString, label: 'Toggle session label' },
-      { shortcut: 'mod+w' as ShortcutString, label: 'Close session or worktree' },
+      {
+        shortcut: 'mod+w' as ShortcutString,
+        label: 'Close session or worktree',
+      },
     ] satisfies ShortcutRow[],
   },
   {
@@ -153,7 +156,10 @@ function FeatureTourDialogContent() {
   const isLastStep = stepIndex === steps.length - 1
 
   return (
-    <Dialog open={featureTourOpen} onOpenChange={open => !open && handleClose()}>
+    <Dialog
+      open={featureTourOpen}
+      onOpenChange={open => !open && handleClose()}
+    >
       <DialogContent className="sm:max-w-md" showCloseButton>
         <DialogHeader>
           {/* Step dots */}

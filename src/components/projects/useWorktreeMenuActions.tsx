@@ -93,7 +93,15 @@ export function useWorktreeMenuActions({
     } else {
       archiveWorktree.mutate({ worktreeId: worktree.id, projectId })
     }
-  }, [isBase, closeBaseSession, archiveWorktree, deleteWorktree, worktree.id, projectId, preferences?.removal_behavior])
+  }, [
+    isBase,
+    closeBaseSession,
+    archiveWorktree,
+    deleteWorktree,
+    worktree.id,
+    projectId,
+    preferences?.removal_behavior,
+  ])
 
   const handleDelete = useCallback(() => {
     deleteWorktree.mutate({ worktreeId: worktree.id, projectId })

@@ -36,17 +36,37 @@ export const ghCliQueryKeys = {
 export function useGhPathDetection(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...ghCliQueryKeys.all, 'path-detection'],
-    queryFn: async (): Promise<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }> => {
+    queryFn: async (): Promise<{
+      found: boolean
+      path: string | null
+      version: string | null
+      package_manager: string | null
+    }> => {
       if (!isTauri()) {
-        return { found: false, path: null, version: null, package_manager: null }
+        return {
+          found: false,
+          path: null,
+          version: null,
+          package_manager: null,
+        }
       }
       try {
-        const result = await invoke<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }>('detect_gh_in_path')
+        const result = await invoke<{
+          found: boolean
+          path: string | null
+          version: string | null
+          package_manager: string | null
+        }>('detect_gh_in_path')
         console.debug('[ONBOARDING:SVC] gh path detection:', result)
         return result
       } catch (err) {
         console.debug('[ONBOARDING:SVC] gh path detection failed:', err)
-        return { found: false, path: null, version: null, package_manager: null }
+        return {
+          found: false,
+          path: null,
+          version: null,
+          package_manager: null,
+        }
       }
     },
     enabled: options?.enabled ?? true,

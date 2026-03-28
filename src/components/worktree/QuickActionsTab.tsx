@@ -61,7 +61,7 @@ export function QuickActionsTab({
           </div>
           <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             M
-        </kbd>
+          </kbd>
         </button>
 
         {/* New Worktree button */}

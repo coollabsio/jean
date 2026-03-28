@@ -330,7 +330,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   {
     action: 'open_github_dashboard',
     label: 'GitHub Dashboard',
-    description: 'Open the GitHub Dashboard (issues, PRs, security across all projects)',
+    description:
+      'Open the GitHub Dashboard (issues, PRs, security across all projects)',
     default_shortcut: 'mod+shift+d',
     category: 'navigation',
   },

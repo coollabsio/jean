@@ -234,7 +234,10 @@ export function useGetLinearIssueByNumber(
       if (!isTauri() || !projectId || !itemNumber || !hasLinearAccess)
         return null
       try {
-        logger.debug('Fetching Linear issue by number', { projectId, itemNumber })
+        logger.debug('Fetching Linear issue by number', {
+          projectId,
+          itemNumber,
+        })
         const result = await invoke<LinearIssue | null>(
           'get_linear_issue_by_number',
           { projectId, issueNumber: itemNumber }

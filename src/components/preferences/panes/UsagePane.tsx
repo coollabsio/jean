@@ -288,8 +288,12 @@ export const UsagePane: React.FC = () => {
     codexUsage.error,
     'Failed to load Codex usage.'
   )
+<<<<<<< HEAD
   const isRefreshing =
     codexUsage.isFetching || codexAuth.isFetching || rtkGain.isFetching
+=======
+  const isRefreshing = codexUsage.isFetching || codexAuth.isFetching
+>>>>>>> origin/main
 
   return (
     <div className="space-y-6">

@@ -1,10 +1,10 @@
-import { memo, useState, useCallback, type ReactNode } from 'react'
+import { memo, useState, useCallback, useRef, type ReactNode } from 'react'
 import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, Table } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import {
@@ -63,6 +63,85 @@ function CodeBlock({ children }: { children: ReactNode }) {
         </TooltipTrigger>
         <TooltipContent>Copy code</TooltipContent>
       </Tooltip>
+    </div>
+  )
+}
+
+function extractTableData(table: HTMLTableElement): string[][] {
+  return Array.from(table.querySelectorAll('tr')).map(row =>
+    Array.from(row.querySelectorAll('th, td')).map(cell =>
+      (cell.textContent ?? '').trim()
+    )
+  )
+}
+
+function tableToTsv(data: string[][]): string {
+  return data.map(row => row.join('\t')).join('\n')
+}
+
+function tableToMarkdown(data: string[][]): string {
+  if (data.length === 0) return ''
+  const [header, ...rows] = data
+  if (!header) return ''
+  const headerLine = `| ${header.join(' | ')} |`
+  const separator = `| ${header.map(() => '---').join(' | ')} |`
+  const bodyLines = rows.map(row => `| ${row.join(' | ')} |`)
+  return [headerLine, separator, ...bodyLines].join('\n')
+}
+
+function TableBlock({ children }: { children: ReactNode }) {
+  const tableRef = useRef<HTMLTableElement>(null)
+  const [copiedFormat, setCopiedFormat] = useState<'markdown' | 'tsv' | null>(
+    null
+  )
+
+  const handleCopy = useCallback((format: 'markdown' | 'tsv') => {
+    if (!tableRef.current) return
+    const data = extractTableData(tableRef.current)
+    const text =
+      format === 'markdown' ? tableToMarkdown(data) : tableToTsv(data)
+    copyToClipboard(text)
+    toast.success(
+      format === 'markdown' ? 'Copied as Markdown' : 'Copied for spreadsheet'
+    )
+    setCopiedFormat(format)
+    setTimeout(() => setCopiedFormat(null), 2000)
+  }, [])
+
+  const btnClass =
+    'opacity-50 hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground cursor-pointer'
+
+  return (
+    <div className="relative my-5 overflow-x-auto">
+      <table ref={tableRef} className="min-w-full border-collapse text-sm">
+        {children}
+      </table>
+      <div className="absolute right-2 top-2 flex gap-0.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={() => handleCopy('markdown')} className={btnClass}>
+              {copiedFormat === 'markdown' ? (
+                <Check className="size-4" />
+              ) : (
+                <Table className="size-4" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Copy as Markdown</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={() => handleCopy('tsv')} className={btnClass}>
+              {copiedFormat === 'tsv' ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Copy for spreadsheet</TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   )
 }
@@ -169,11 +248,7 @@ const components: Components = {
   ),
 
   // Tables
-  table: ({ children }) => (
-    <div className="my-5 overflow-x-auto">
-      <table className="min-w-full border-collapse text-sm">{children}</table>
-    </div>
-  ),
+  table: ({ children }) => <TableBlock>{children}</TableBlock>,
   thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
   tbody: ({ children }) => <tbody>{children}</tbody>,
   tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,

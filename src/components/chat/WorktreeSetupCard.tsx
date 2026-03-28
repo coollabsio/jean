@@ -13,6 +13,8 @@ export interface WorktreeSetupCardProps {
 function getStatusText(worktree: Worktree): string {
   if (worktree.pr_number) return `Checking out PR #${worktree.pr_number}...`
   if (worktree.issue_number) return 'Setting up branch...'
+  if (worktree.security_alert_number) return `Fixing alert #${worktree.security_alert_number}...`
+  if (worktree.advisory_ghsa_id) return `Fixing ${worktree.advisory_ghsa_id}...`
   return 'Creating worktree...'
 }
 
@@ -22,10 +24,7 @@ function getStatusText(worktree: Worktree): string {
 export const WorktreeSetupCard = forwardRef<
   HTMLDivElement,
   WorktreeSetupCardProps
->(function WorktreeSetupCard(
-  { worktree, isSelected, onSelect },
-  ref
-) {
+>(function WorktreeSetupCard({ worktree, isSelected, onSelect }, ref) {
   const statusText = getStatusText(worktree)
 
   return (

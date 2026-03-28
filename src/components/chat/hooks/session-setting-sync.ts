@@ -1,4 +1,9 @@
-import type { Backend, ExecutionMode, Session, ThinkingLevel } from '@/types/chat'
+import type {
+  Backend,
+  ExecutionMode,
+  Session,
+  ThinkingLevel,
+} from '@/types/chat'
 
 export type SessionSettingKey =
   | 'backend'

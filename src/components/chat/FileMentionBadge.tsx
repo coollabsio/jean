@@ -83,7 +83,9 @@ export function FileMentionBadge({
             onClick={handleOpen}
             className={cn(
               'flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border/50 bg-muted/50 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-              isDirectory ? 'cursor-default' : 'cursor-pointer hover:border-primary/50'
+              isDirectory
+                ? 'cursor-default'
+                : 'cursor-pointer hover:border-primary/50'
             )}
           >
             {isDirectory ? (
@@ -110,7 +112,9 @@ export function FileMentionBadge({
             {isDirectory ? (
               <FolderIcon className="h-4 w-4 text-blue-400" />
             ) : (
-              <FileIcon className={cn('h-4 w-4', getExtensionColor(extension))} />
+              <FileIcon
+                className={cn('h-4 w-4', getExtensionColor(extension))}
+              />
             )}
             {path}
           </DialogTitle>

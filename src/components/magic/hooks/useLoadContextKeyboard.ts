@@ -1,6 +1,11 @@
 import { useCallback, useEffect } from 'react'
 import type { SavedContext, AllSessionsEntry } from '@/types/chat'
-import type { GitHubIssue, GitHubPullRequest, DependabotAlert, RepositoryAdvisory } from '@/types/github'
+import type {
+  GitHubIssue,
+  GitHubPullRequest,
+  DependabotAlert,
+  RepositoryAdvisory,
+} from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
 import type { SessionWithContext } from '../LoadContextItems'
 
@@ -92,7 +97,9 @@ export function useLoadContextKeyboard({
       if (activeTab === 'issues' && filteredIssues.length > 0) {
         if (key === 'arrowdown') {
           e.preventDefault()
-          setSelectedIndex(Math.min(selectedIndex + 1, filteredIssues.length - 1))
+          setSelectedIndex(
+            Math.min(selectedIndex + 1, filteredIssues.length - 1)
+          )
           return
         }
         if (key === 'arrowup') {
@@ -105,7 +112,11 @@ export function useLoadContextKeyboard({
           onSelectIssue(filteredIssues[selectedIndex])
           return
         }
-        if (key === 'o' && (e.metaKey || e.ctrlKey) && filteredIssues[selectedIndex]) {
+        if (
+          key === 'o' &&
+          (e.metaKey || e.ctrlKey) &&
+          filteredIssues[selectedIndex]
+        ) {
           e.preventDefault()
           e.nativeEvent.stopImmediatePropagation()
           onPreviewIssue(filteredIssues[selectedIndex])
@@ -130,7 +141,11 @@ export function useLoadContextKeyboard({
           onSelectPR(filteredPRs[selectedIndex])
           return
         }
-        if (key === 'o' && (e.metaKey || e.ctrlKey) && filteredPRs[selectedIndex]) {
+        if (
+          key === 'o' &&
+          (e.metaKey || e.ctrlKey) &&
+          filteredPRs[selectedIndex]
+        ) {
           e.preventDefault()
           e.nativeEvent.stopImmediatePropagation()
           onPreviewPR(filteredPRs[selectedIndex])
@@ -140,11 +155,14 @@ export function useLoadContextKeyboard({
 
       // List navigation for security tab (combined alerts + advisories)
       if (activeTab === 'security') {
-        const totalSecurityItems = filteredSecurityAlerts.length + filteredAdvisories.length
+        const totalSecurityItems =
+          filteredSecurityAlerts.length + filteredAdvisories.length
         if (totalSecurityItems > 0) {
           if (key === 'arrowdown') {
             e.preventDefault()
-            setSelectedIndex(Math.min(selectedIndex + 1, totalSecurityItems - 1))
+            setSelectedIndex(
+              Math.min(selectedIndex + 1, totalSecurityItems - 1)
+            )
             return
           }
           if (key === 'arrowup') {
@@ -158,7 +176,10 @@ export function useLoadContextKeyboard({
               const alert = filteredSecurityAlerts[selectedIndex]
               if (alert) onSelectSecurityAlert(alert)
             } else {
-              const advisory = filteredAdvisories[selectedIndex - filteredSecurityAlerts.length]
+              const advisory =
+                filteredAdvisories[
+                  selectedIndex - filteredSecurityAlerts.length
+                ]
               if (advisory) onSelectAdvisory(advisory)
             }
             return
@@ -170,7 +191,10 @@ export function useLoadContextKeyboard({
               const alert = filteredSecurityAlerts[selectedIndex]
               if (alert) onPreviewSecurityAlert(alert)
             } else {
-              const advisory = filteredAdvisories[selectedIndex - filteredSecurityAlerts.length]
+              const advisory =
+                filteredAdvisories[
+                  selectedIndex - filteredSecurityAlerts.length
+                ]
               if (advisory) onPreviewAdvisory(advisory)
             }
             return
@@ -182,7 +206,9 @@ export function useLoadContextKeyboard({
       if (activeTab === 'linear' && filteredLinearIssues.length > 0) {
         if (key === 'arrowdown') {
           e.preventDefault()
-          setSelectedIndex(Math.min(selectedIndex + 1, filteredLinearIssues.length - 1))
+          setSelectedIndex(
+            Math.min(selectedIndex + 1, filteredLinearIssues.length - 1)
+          )
           return
         }
         if (key === 'arrowup') {

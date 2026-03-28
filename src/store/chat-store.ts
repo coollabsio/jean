@@ -237,7 +237,9 @@ interface ChatUIState {
 
   // Pending magic command to execute when ChatWindow mounts (from canvas navigation)
   pendingMagicCommand: { command: string; prompt?: string } | null
-  setPendingMagicCommand: (cmd: { command: string; prompt?: string } | null) => void
+  setPendingMagicCommand: (
+    cmd: { command: string; prompt?: string } | null
+  ) => void
 
   // Actions - Session management
   setActiveSession: (
@@ -629,9 +631,7 @@ export const useChatStore = create<ChatUIState>()(
         if (options?.markOpened !== false) {
           // Fire-and-forget: update last_opened_at on the backend
           invoke('set_session_last_opened', { sessionId })
-            .then(() =>
-              window.dispatchEvent(new CustomEvent('session-opened'))
-            )
+            .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
             .catch(() => undefined)
         }
       },
@@ -825,7 +825,9 @@ export const useChatStore = create<ChatUIState>()(
 
         // Fire-and-forget: update last_opened_at on the backend
         if (id) {
-          invoke('set_worktree_last_opened', { worktreeId: id }).catch(() => undefined)
+          invoke('set_worktree_last_opened', { worktreeId: id }).catch(
+            () => undefined
+          )
         }
       },
 
@@ -877,7 +879,8 @@ export const useChatStore = create<ChatUIState>()(
             // Guard: skip no-op updates to avoid re-renders on every streaming chunk
             if (state.sendingSessionIds[sessionId]) return state
             const now = startTime ?? Date.now()
-            const { [sessionId]: _, ...restDurations } = state.completedDurations
+            const { [sessionId]: _, ...restDurations } =
+              state.completedDurations
             return {
               sendingSessionIds: {
                 ...state.sendingSessionIds,
@@ -894,7 +897,10 @@ export const useChatStore = create<ChatUIState>()(
       removeSendingSession: sessionId =>
         set(
           state => {
-            console.log(`[Store] removeSendingSession id=${sessionId}`, { wasSending: !!state.sendingSessionIds[sessionId], currentSending: Object.keys(state.sendingSessionIds) })
+            console.log(`[Store] removeSendingSession id=${sessionId}`, {
+              wasSending: !!state.sendingSessionIds[sessionId],
+              currentSending: Object.keys(state.sendingSessionIds),
+            })
             const { [sessionId]: _, ...rest } = state.sendingSessionIds
             return { sendingSessionIds: rest }
           },
@@ -1375,15 +1381,24 @@ export const useChatStore = create<ChatUIState>()(
             }
             const sb = state.selectedBackends[fromId]
             if (sb !== undefined) {
-              updates.selectedBackends = { ...state.selectedBackends, [toId]: sb }
+              updates.selectedBackends = {
+                ...state.selectedBackends,
+                [toId]: sb,
+              }
             }
             const sp = state.selectedProviders[fromId]
             if (sp !== undefined) {
-              updates.selectedProviders = { ...state.selectedProviders, [toId]: sp }
+              updates.selectedProviders = {
+                ...state.selectedProviders,
+                [toId]: sp,
+              }
             }
             const ms = state.enabledMcpServers[fromId]
             if (ms !== undefined) {
-              updates.enabledMcpServers = { ...state.enabledMcpServers, [toId]: ms }
+              updates.enabledMcpServers = {
+                ...state.enabledMcpServers,
+                [toId]: ms,
+              }
             }
             if (Object.keys(updates).length === 0) return state
             return updates
@@ -2101,8 +2116,7 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _sp, ...streamingPlanApprovals } =
               state.streamingPlanApprovals
-            const { [sessionId]: _em, ...executingModes } =
-              state.executingModes
+            const { [sessionId]: _em, ...executingModes } = state.executingModes
             const { [sessionId]: _sa, ...sendStartedAtRest } =
               state.sendStartedAt
             return {
@@ -2145,8 +2159,7 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _sp, ...streamingPlanApprovals } =
               state.streamingPlanApprovals
-            const { [sessionId]: _em, ...executingModes } =
-              state.executingModes
+            const { [sessionId]: _em, ...executingModes } = state.executingModes
             const { [sessionId]: _pd, ...pendingPermissionDenials } =
               state.pendingPermissionDenials
             const { [sessionId]: _dc, ...deniedMessageContext } =
@@ -2196,8 +2209,7 @@ export const useChatStore = create<ChatUIState>()(
               state.streamingContents
             const { [sessionId]: _ss, ...sendingSessionIds } =
               state.sendingSessionIds
-            const { [sessionId]: _em, ...executingModes } =
-              state.executingModes
+            const { [sessionId]: _em, ...executingModes } = state.executingModes
             const { [sessionId]: _sa, ...sendStartedAtRest } =
               state.sendStartedAt
             return {

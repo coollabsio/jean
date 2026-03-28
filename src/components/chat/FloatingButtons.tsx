@@ -103,14 +103,20 @@ export const FloatingButtons = memo(function FloatingButtons({
                 <DropdownMenuItem onClick={withScroll(onYoloApprove)}>
                   YOLO
                   <DropdownMenuShortcut>
-                    {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_yolo)}
+                    {formatShortcutDisplay(
+                      DEFAULT_KEYBINDINGS.approve_plan_yolo
+                    )}
                   </DropdownMenuShortcut>
                 </DropdownMenuItem>
                 {onClearContextBuildApprove && (
-                  <DropdownMenuItem onClick={withScroll(onClearContextBuildApprove)}>
+                  <DropdownMenuItem
+                    onClick={withScroll(onClearContextBuildApprove)}
+                  >
                     New Session
                     <DropdownMenuShortcut>
-                      {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_clear_context_build)}
+                      {formatShortcutDisplay(
+                        DEFAULT_KEYBINDINGS.approve_plan_clear_context_build
+                      )}
                     </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 )}
@@ -118,15 +124,21 @@ export const FloatingButtons = memo(function FloatingButtons({
                   <DropdownMenuItem onClick={withScroll(onClearContextApprove)}>
                     New Session (YOLO)
                     <DropdownMenuShortcut>
-                      {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_clear_context)}
+                      {formatShortcutDisplay(
+                        DEFAULT_KEYBINDINGS.approve_plan_clear_context
+                      )}
                     </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 )}
                 {onWorktreeBuildApprove && (
-                  <DropdownMenuItem onClick={withScroll(onWorktreeBuildApprove)}>
+                  <DropdownMenuItem
+                    onClick={withScroll(onWorktreeBuildApprove)}
+                  >
                     New Worktree
                     <DropdownMenuShortcut>
-                      {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_worktree_build)}
+                      {formatShortcutDisplay(
+                        DEFAULT_KEYBINDINGS.approve_plan_worktree_build
+                      )}
                     </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 )}
@@ -134,7 +146,9 @@ export const FloatingButtons = memo(function FloatingButtons({
                   <DropdownMenuItem onClick={withScroll(onWorktreeYoloApprove)}>
                     New Worktree (YOLO)
                     <DropdownMenuShortcut>
-                      {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo)}
+                      {formatShortcutDisplay(
+                        DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo
+                      )}
                     </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 )}

@@ -130,7 +130,10 @@ export const StreamingMessage = memo(function StreamingMessage({
           timeline.forEach((item, idx) => {
             if (item.type === 'task' && item.taskTool.output === undefined)
               incompleteIndices.add(idx)
-            else if (item.type === 'standalone' && item.tool.output === undefined)
+            else if (
+              item.type === 'standalone' &&
+              item.tool.output === undefined
+            )
               incompleteIndices.add(idx)
             else if (
               item.type === 'stackedGroup' &&
@@ -169,15 +172,25 @@ export const StreamingMessage = memo(function StreamingMessage({
                             // Split at last newline: completed lines → markdown, trailing partial → plain div
                             // This prevents reflow when remend reinterprets incomplete markdown
                             const lastNewline = item.text.lastIndexOf('\n')
-                            const rawComplete = lastNewline !== -1 ? item.text.slice(0, lastNewline + 1) : ''
+                            const rawComplete =
+                              lastNewline !== -1
+                                ? item.text.slice(0, lastNewline + 1)
+                                : ''
                             // Trim trailing whitespace so markdown doesn't render a trailing <br> from "  \n"
                             const completePart = rawComplete.trimEnd()
-                            const trailingPart = lastNewline !== -1 ? item.text.slice(lastNewline + 1) : item.text
+                            const trailingPart =
+                              lastNewline !== -1
+                                ? item.text.slice(lastNewline + 1)
+                                : item.text
                             return (
                               <div>
-                                {completePart && <Markdown streaming>{completePart}</Markdown>}
+                                {completePart && (
+                                  <Markdown streaming>{completePart}</Markdown>
+                                )}
                                 {trailingPart && (
-                                  <p className="my-0 leading-relaxed">{trailingPart}</p>
+                                  <p className="my-0 leading-relaxed">
+                                    {trailingPart}
+                                  </p>
                                 )}
                               </div>
                             )
@@ -298,8 +311,12 @@ export const StreamingMessage = memo(function StreamingMessage({
                                   }
                                   shortcut={approveShortcut}
                                   shortcutYolo={approveShortcutYolo}
-                                  shortcutClearContext={approveShortcutClearContext}
-                                  shortcutClearContextBuild={approveShortcutClearContextBuild}
+                                  shortcutClearContext={
+                                    approveShortcutClearContext
+                                  }
+                                  shortcutClearContextBuild={
+                                    approveShortcutClearContextBuild
+                                  }
                                   hideApproveButtons={hideApproveButtons}
                                 />
                               </div>
@@ -350,7 +367,6 @@ export const StreamingMessage = memo(function StreamingMessage({
         toolCalls={toolCalls}
         onFileClick={onEditedFileClick}
       />
-
     </div>
   )
 })

@@ -42,7 +42,8 @@ export function SecurityAlertsBadge({
 
   const alertCount = alerts?.length ?? 0
   const advisoryCount =
-    advisories?.filter(a => a.state === 'draft' || a.state === 'triage').length ?? 0
+    advisories?.filter(a => a.state === 'draft' || a.state === 'triage')
+      .length ?? 0
   const totalCount = alertCount + advisoryCount
 
   const handleClick = useCallback(

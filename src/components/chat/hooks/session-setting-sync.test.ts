@@ -17,14 +17,18 @@ const baseSession: Session = {
 
 describe('applySessionSettingToSession', () => {
   it('updates backend', () => {
-    expect(applySessionSettingToSession(baseSession, 'backend', 'codex')).toMatchObject({
+    expect(
+      applySessionSettingToSession(baseSession, 'backend', 'codex')
+    ).toMatchObject({
       backend: 'codex',
       selected_model: 'opus',
     })
   })
 
   it('updates model', () => {
-    expect(applySessionSettingToSession(baseSession, 'model', 'gpt-5.4')).toMatchObject({
+    expect(
+      applySessionSettingToSession(baseSession, 'model', 'gpt-5.4')
+    ).toMatchObject({
       backend: 'claude',
       selected_model: 'gpt-5.4',
     })

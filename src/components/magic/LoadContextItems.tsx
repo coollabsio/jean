@@ -265,7 +265,9 @@ const SEVERITY_COLORS: Record<string, string> = {
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
-  const colorClasses = SEVERITY_COLORS[severity.toLowerCase()] ?? 'bg-muted text-muted-foreground border-border'
+  const colorClasses =
+    SEVERITY_COLORS[severity.toLowerCase()] ??
+    'bg-muted text-muted-foreground border-border'
   return (
     <span
       className={cn(
@@ -424,7 +426,9 @@ export function SecurityAlertItem({
           <Shield
             className={cn(
               'h-4 w-4 mt-0.5 flex-shrink-0',
-              alert.state === 'open' ? 'text-orange-500' : 'text-muted-foreground'
+              alert.state === 'open'
+                ? 'text-orange-500'
+                : 'text-muted-foreground'
             )}
           />
         )}
@@ -460,9 +464,7 @@ export function SecurityAlertItem({
             <Eye className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>
-          Preview alert ({getModifierSymbol()}O)
-        </TooltipContent>
+        <TooltipContent>Preview alert ({getModifierSymbol()}O)</TooltipContent>
       </Tooltip>
     </div>
   )
@@ -502,9 +504,7 @@ export function LoadedAdvisoryItem({
       <SeverityBadge severity={context.severity} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium truncate">
-            {context.ghsaId}
-          </span>
+          <span className="text-sm font-medium truncate">{context.ghsaId}</span>
           <span className="text-xs text-muted-foreground truncate">
             {context.summary}
           </span>
@@ -615,7 +615,9 @@ export function AdvisoryItem({
           <ShieldAlert
             className={cn(
               'h-4 w-4 mt-0.5 flex-shrink-0',
-              advisory.state === 'published' ? 'text-orange-500' : 'text-muted-foreground'
+              advisory.state === 'published'
+                ? 'text-orange-500'
+                : 'text-muted-foreground'
             )}
           />
         )}
@@ -750,9 +752,7 @@ export function IssueItem({
             <Eye className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>
-          Preview issue ({getModifierSymbol()}O)
-        </TooltipContent>
+        <TooltipContent>Preview issue ({getModifierSymbol()}O)</TooltipContent>
       </Tooltip>
     </div>
   )

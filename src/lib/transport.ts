@@ -559,7 +559,9 @@ class WsTransport {
 
       const timeout = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`Command '${command}' timed out after ${timeoutMs / 1000}s`))
+        reject(
+          new Error(`Command '${command}' timed out after ${timeoutMs / 1000}s`)
+        )
       }, timeoutMs)
 
       this.pending.set(id, {

@@ -43,7 +43,12 @@ export function useTerminal({
 
       // Get or create persistent terminal instance
       // (creates xterm + listeners if new, returns existing otherwise)
-      getOrCreateTerminal(terminalId, { worktreeId, worktreePath, command, commandArgs })
+      getOrCreateTerminal(terminalId, {
+        worktreeId,
+        worktreePath,
+        command,
+        commandArgs,
+      })
 
       // Attach terminal to this container
       // (opens if first time, moves DOM element if re-attaching)

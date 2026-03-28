@@ -20,6 +20,7 @@ import {
   Clock3,
   GitBranch,
   GitPullRequestArrow,
+  ShieldAlert,
   Code,
   ExternalLink,
   Folder,
@@ -72,7 +73,6 @@ import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { PlanDialog } from '@/components/chat/PlanDialog'
 import { RecapDialog } from '@/components/chat/RecapDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
-
 
 import { LabelModal } from '@/components/chat/LabelModal'
 import { getLabelTextColor } from '@/lib/label-colors'
@@ -199,7 +199,8 @@ function getSessionMetrics(cards: SessionCardData[]) {
       c.status === 'planning' || c.status === 'vibing' || c.status === 'yoloing'
   ).length
   const latestUpdatedAt = cards.reduce(
-    (latest, card) => Math.max(latest, card.session.updated_at ?? card.session.created_at),
+    (latest, card) =>
+      Math.max(latest, card.session.updated_at ?? card.session.created_at),
     0
   )
 
@@ -231,7 +232,11 @@ function WorktreeSectionHeader({
   isSelected?: boolean
   shortcutNumber?: number
   onRowClick?: () => void
-  onDiffClick?: (worktreePath: string, baseBranch: string, type: 'uncommitted' | 'branch') => void
+  onDiffClick?: (
+    worktreePath: string,
+    baseBranch: string,
+    type: 'uncommitted' | 'branch'
+  ) => void
 }) {
   const isBase = isBaseSession(worktree)
   const { data: gitStatus } = useGitStatus(worktree.id)
@@ -286,11 +291,18 @@ function WorktreeSectionHeader({
       pickRemoteOrRun(async remote => {
         const toastId = toast.loading('Pushing changes...')
         try {
-          const result = await gitPush(worktree.path, worktree.pr_number, remote)
+          const result = await gitPush(
+            worktree.path,
+            worktree.pr_number,
+            remote
+          )
           triggerImmediateGitPoll()
           fetchWorktreesStatus(projectId)
           if (result.fellBack) {
-            toast.warning('Could not push to PR branch, pushed to new branch instead', { id: toastId })
+            toast.warning(
+              'Could not push to PR branch, pushed to new branch instead',
+              { id: toastId }
+            )
           } else {
             toast.success('Changes pushed', { id: toastId })
           }
@@ -303,7 +315,11 @@ function WorktreeSectionHeader({
   )
 
   const handleDiffClick = useCallback(() => {
-    onDiffClick?.(worktree.path, defaultBranch, isBase ? 'uncommitted' : 'branch')
+    onDiffClick?.(
+      worktree.path,
+      defaultBranch,
+      isBase ? 'uncommitted' : 'branch'
+    )
   }, [onDiffClick, isBase, worktree.path, defaultBranch])
 
   const sessionMetrics = useMemo(
@@ -365,7 +381,7 @@ function WorktreeSectionHeader({
           <div className="flex min-w-0 items-center gap-2">
             {shortcutNumber !== undefined && (
               <kbd className="hidden shrink-0 h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted/50 px-0.5 font-mono text-muted-foreground sm:inline-flex">
-                <span className='text-[9px]'>⌘{shortcutNumber}</span>
+                <span className="text-[9px]">⌘{shortcutNumber}</span>
               </kbd>
             )}
             {hasRunningTerminal && (
@@ -390,8 +406,22 @@ function WorktreeSectionHeader({
                     {worktree.pr_number && (
                       <>
                         <span className="text-border">·</span>
-                        <GitPullRequestArrow className="h-2.5 w-2.5" />
-                        #{worktree.pr_number}
+                        <GitPullRequestArrow className="h-2.5 w-2.5" />#
+                        {worktree.pr_number}
+                      </>
+                    )}
+                    {worktree.security_alert_number && (
+                      <>
+                        <span className="text-border">·</span>
+                        <ShieldAlert className="h-2.5 w-2.5 text-orange-500" />#
+                        {worktree.security_alert_number}
+                      </>
+                    )}
+                    {worktree.advisory_ghsa_id && (
+                      <>
+                        <span className="text-border">·</span>
+                        <ShieldAlert className="h-2.5 w-2.5 text-orange-500" />
+                        <span className="max-w-20 truncate">{worktree.advisory_ghsa_id}</span>
                       </>
                     )}
                   </span>
@@ -418,8 +448,22 @@ function WorktreeSectionHeader({
                   {worktree.pr_number && (
                     <>
                       <span className="text-border">·</span>
-                      <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />
-                      #{worktree.pr_number}
+                      <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />#
+                      {worktree.pr_number}
+                    </>
+                  )}
+                  {worktree.security_alert_number && (
+                    <>
+                      <span className="text-border">·</span>
+                      <ShieldAlert className="h-2.5 w-2.5 shrink-0 text-orange-500" />#
+                      {worktree.security_alert_number}
+                    </>
+                  )}
+                  {worktree.advisory_ghsa_id && (
+                    <>
+                      <span className="text-border">·</span>
+                      <ShieldAlert className="h-2.5 w-2.5 shrink-0 text-orange-500" />
+                      <span className="max-w-20 truncate">{worktree.advisory_ghsa_id}</span>
                     </>
                   )}
                 </span>
@@ -605,22 +649,21 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       const sessions = sessionData?.sessions ?? []
 
       // Filter sessions based on search query (includes labels)
-      const filteredSessions =
-        searchQuery.trim()
-          ? sessions.filter(session => {
-              const q = searchQuery.toLowerCase()
-              return (
-                session.name.toLowerCase().includes(q) ||
-                worktree.name.toLowerCase().includes(q) ||
-                worktree.branch.toLowerCase().includes(q) ||
-                (session.label?.name ?? '').toLowerCase().includes(q) ||
-                (storeState.sessionLabels[session.id]?.name ?? '')
-                  .toLowerCase()
-                  .includes(q) ||
-                (worktree.label?.name ?? '').toLowerCase().includes(q)
-              )
-            })
-          : sessions
+      const filteredSessions = searchQuery.trim()
+        ? sessions.filter(session => {
+            const q = searchQuery.toLowerCase()
+            return (
+              session.name.toLowerCase().includes(q) ||
+              worktree.name.toLowerCase().includes(q) ||
+              worktree.branch.toLowerCase().includes(q) ||
+              (session.label?.name ?? '').toLowerCase().includes(q) ||
+              (storeState.sessionLabels[session.id]?.name ?? '')
+                .toLowerCase()
+                .includes(q) ||
+              (worktree.label?.name ?? '').toLowerCase().includes(q)
+            )
+          })
+        : sessions
 
       // Compute card data for each session
       const cards = filteredSessions.map(session =>
@@ -731,15 +774,17 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     worktreeId: selectedFlatCard?.worktreeId ?? '',
     worktreePath: selectedFlatCard?.worktreePath ?? '',
   })
-  const { handleClearContextApproval, handleClearContextApprovalBuild } = useClearContextApproval({
-    worktreeId: selectedFlatCard?.worktreeId ?? '',
-    worktreePath: selectedFlatCard?.worktreePath ?? '',
-  })
-  const { handleWorktreeApproval, handleWorktreeApprovalYolo } = useWorktreeApproval({
-    worktreeId: selectedFlatCard?.worktreeId ?? '',
-    worktreePath: selectedFlatCard?.worktreePath ?? '',
-    projectId: projectId ?? null,
-  })
+  const { handleClearContextApproval, handleClearContextApprovalBuild } =
+    useClearContextApproval({
+      worktreeId: selectedFlatCard?.worktreeId ?? '',
+      worktreePath: selectedFlatCard?.worktreePath ?? '',
+    })
+  const { handleWorktreeApproval, handleWorktreeApprovalYolo } =
+    useWorktreeApproval({
+      worktreeId: selectedFlatCard?.worktreeId ?? '',
+      worktreePath: selectedFlatCard?.worktreePath ?? '',
+      projectId: projectId ?? null,
+    })
 
   // Archive mutations - need to handle per-worktree
   const archiveWorktree = useArchiveWorktree()
@@ -824,9 +869,15 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         setSelectedWorktreeModal(null)
       }
     }
-    window.addEventListener('close-worktree-modal', handleCloseModal as EventListener)
+    window.addEventListener(
+      'close-worktree-modal',
+      handleCloseModal as EventListener
+    )
     return () =>
-      window.removeEventListener('close-worktree-modal', handleCloseModal as EventListener)
+      window.removeEventListener(
+        'close-worktree-modal',
+        handleCloseModal as EventListener
+      )
   }, [selectedWorktreeModal?.worktreeId])
 
   // Open modal from external triggers (e.g. base session switch)
@@ -839,9 +890,15 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         worktreePath: e.detail.worktreePath,
       })
     }
-    window.addEventListener('open-worktree-modal', handleOpenModal as EventListener)
+    window.addEventListener(
+      'open-worktree-modal',
+      handleOpenModal as EventListener
+    )
     return () =>
-      window.removeEventListener('open-worktree-modal', handleOpenModal as EventListener)
+      window.removeEventListener(
+        'open-worktree-modal',
+        handleOpenModal as EventListener
+      )
   }, [])
 
   // Record last opened worktree+session per project for restoration on project switch
@@ -882,7 +939,9 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       ? { worktreeId: selectedWorktreeModal.worktreeId }
       : highlightedCardRef.current
     if (!highlighted) return
-    const cardIndex = flatCards.findIndex(fc => fc.worktreeId === highlighted.worktreeId)
+    const cardIndex = flatCards.findIndex(
+      fc => fc.worktreeId === highlighted.worktreeId
+    )
     if (cardIndex !== -1 && cardIndex !== selectedIndex) {
       setSelectedIndex(cardIndex)
     }
@@ -986,7 +1045,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     const lastOpened = lastOpenedPerProject[projectId]
     if (lastOpened) {
       const worktreeSessions =
-        sessionsByWorktreeIdRef.current.get(lastOpened.worktreeId)?.sessions ?? []
+        sessionsByWorktreeIdRef.current.get(lastOpened.worktreeId)?.sessions ??
+        []
       const hasSavedSession = worktreeSessions.some(
         session => session.id === lastOpened.sessionId
       )
@@ -1111,7 +1171,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       const { activeSessionIds, setActiveSession, setLastOpenedForProject } =
         useChatStore.getState()
       const existingSessionId = activeSessionIds[worktreeId]
-      const firstSessionId = sessionsByWorktreeIdRef.current.get(worktreeId)?.sessions[0]?.id
+      const firstSessionId =
+        sessionsByWorktreeIdRef.current.get(worktreeId)?.sessions[0]?.id
       const targetSessionId = existingSessionId ?? firstSessionId
 
       if (targetSessionId) {
@@ -1187,7 +1248,12 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         'open-worktree-by-index',
         handleOpenWorktreeByIndex
       )
-  }, [worktreeSections, flatCards, handleWorktreeClick, handleSelectedIndexChange])
+  }, [
+    worktreeSections,
+    flatCards,
+    handleWorktreeClick,
+    handleSelectedIndexChange,
+  ])
 
   // Cancel running session via cancel-prompt event (dispatched by centralized keybinding system)
   useEffect(() => {
@@ -1280,7 +1346,9 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   }, [selectedWorktreeModal, selectedIndex, flatCards, worktreeSections])
 
   // Linked projects modal (opened by MagicModal via UI store)
-  const linkedProjectsModalOpen = useUIStore(state => state.linkedProjectsModalOpen)
+  const linkedProjectsModalOpen = useUIStore(
+    state => state.linkedProjectsModalOpen
+  )
   const handleLinkedProjectsModalChange = useCallback((open: boolean) => {
     useUIStore.getState().setLinkedProjectsModalOpen(open)
   }, [])
@@ -1376,9 +1444,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
       const failures = results.filter(r => r.status === 'rejected')
       if (failures.length > 0) {
-        toast.error(
-          `Failed to update color for ${failures.length} worktree(s)`
-        )
+        toast.error(`Failed to update color for ${failures.length} worktree(s)`)
       }
 
       queryClient.invalidateQueries({
@@ -1655,9 +1721,15 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           <div className="flex flex-col shrink-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-lg font-semibold">{project.name}</h2>
-              <NewIssuesBadge projectPath={project.path} projectId={projectId} />
+              <NewIssuesBadge
+                projectPath={project.path}
+                projectId={projectId}
+              />
               <OpenPRsBadge projectPath={project.path} projectId={projectId} />
-              <SecurityAlertsBadge projectPath={project.path} projectId={projectId} />
+              <SecurityAlertsBadge
+                projectPath={project.path}
+                projectId={projectId}
+              />
               <FailedRunsBadge projectPath={project.path} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1769,20 +1841,22 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
               {/* Mobile: magnifier icon inline with badges */}
-              {isMobile && (worktreeSections.length > 0 || searchQuery) && !isMobileSearchOpen && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="relative h-7 w-7 text-muted-foreground"
-                  onClick={() => setIsMobileSearchOpen(true)}
-                  aria-label="Open search"
-                >
-                  <Search className="h-4 w-4" />
-                  {searchQuery && (
-                    <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-primary" />
-                  )}
-                </Button>
-              )}
+              {isMobile &&
+                (worktreeSections.length > 0 || searchQuery) &&
+                !isMobileSearchOpen && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="relative h-7 w-7 text-muted-foreground"
+                    onClick={() => setIsMobileSearchOpen(true)}
+                    aria-label="Open search"
+                  >
+                    <Search className="h-4 w-4" />
+                    {searchQuery && (
+                      <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-primary" />
+                    )}
+                  </Button>
+                )}
             </div>
             <p className="text-xs text-muted-foreground whitespace-nowrap">
               {projectSummary.totalReady > 0 ? (
@@ -1907,7 +1981,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                       />
                     )
                   }
-                  const thisShortcut = ++shortcutNum <= 9 ? shortcutNum : undefined
+                  const thisShortcut =
+                    ++shortcutNum <= 9 ? shortcutNum : undefined
                   return (
                     <div
                       key={section.worktree.id}
@@ -1931,7 +2006,11 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                           )
                         }}
                         onDiffClick={(worktreePath, baseBranch, type) => {
-                          setCanvasDiffRequest({ type, worktreePath, baseBranch })
+                          setCanvasDiffRequest({
+                            type,
+                            worktreePath,
+                            baseBranch,
+                          })
                         }}
                       />
                     </div>
@@ -1955,8 +2034,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           onApproveYolo={handleDialogApproveYolo}
           onClearContextApprove={handleDialogClearContextApprove}
           onClearContextBuildApprove={handleDialogClearContextApproveBuild}
-          onWorktreeBuildApprove={handleWorktreeApproval ? handleDialogWorktreeApprove : undefined}
-          onWorktreeYoloApprove={handleWorktreeApprovalYolo ? handleDialogWorktreeApproveYolo : undefined}
+          onWorktreeBuildApprove={
+            handleWorktreeApproval ? handleDialogWorktreeApprove : undefined
+          }
+          onWorktreeYoloApprove={
+            handleWorktreeApprovalYolo
+              ? handleDialogWorktreeApproveYolo
+              : undefined
+          }
         />
       ) : planDialogContent ? (
         <PlanDialog
@@ -1969,8 +2054,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           onApproveYolo={handleDialogApproveYolo}
           onClearContextApprove={handleDialogClearContextApprove}
           onClearContextBuildApprove={handleDialogClearContextApproveBuild}
-          onWorktreeBuildApprove={handleWorktreeApproval ? handleDialogWorktreeApprove : undefined}
-          onWorktreeYoloApprove={handleWorktreeApprovalYolo ? handleDialogWorktreeApproveYolo : undefined}
+          onWorktreeBuildApprove={
+            handleWorktreeApproval ? handleDialogWorktreeApprove : undefined
+          }
+          onWorktreeYoloApprove={
+            handleWorktreeApprovalYolo
+              ? handleDialogWorktreeApproveYolo
+              : undefined
+          }
         />
       ) : null}
 

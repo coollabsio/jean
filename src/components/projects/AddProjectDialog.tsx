@@ -147,7 +147,8 @@ export function AddProjectDialog() {
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
-      ) return
+      )
+        return
 
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault()
@@ -162,7 +163,13 @@ export function AddProjectDialog() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [addProjectDialogOpen, isPending, handleAddExisting, handleInitNew, handleCloneRemote])
+  }, [
+    addProjectDialogOpen,
+    isPending,
+    handleAddExisting,
+    handleInitNew,
+    handleCloneRemote,
+  ])
 
   return (
     <Dialog open={addProjectDialogOpen} onOpenChange={setAddProjectDialogOpen}>

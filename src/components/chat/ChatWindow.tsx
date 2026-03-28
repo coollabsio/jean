@@ -39,7 +39,11 @@ import {
 } from '@/services/chat'
 import { useWorktree, useProjects, useRunScripts } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
-import type { Worktree, WorktreeCreatedEvent, WorktreeCreateErrorEvent } from '@/types/projects'
+import type {
+  Worktree,
+  WorktreeCreatedEvent,
+  WorktreeCreateErrorEvent,
+} from '@/types/projects'
 import {
   useLoadedIssueContexts,
   useLoadedPRContexts,
@@ -120,7 +124,12 @@ import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
 import { useClaudeCliStatus } from '@/services/claude-cli'
 import { usePrStatus, usePrStatusEvents } from '@/services/pr-status'
 import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
-import type { QueuedMessage, Session, SessionDigest, WorktreeSessions } from '@/types/chat'
+import type {
+  QueuedMessage,
+  Session,
+  SessionDigest,
+  WorktreeSessions,
+} from '@/types/chat'
 import type { DiffRequest } from '@/types/git-diff'
 import { FileDiffModal } from './FileDiffModal'
 
@@ -229,15 +238,11 @@ export function ChatWindow({
   )
   // Timestamp when current send started (for elapsed timer)
   const sendStartedAt = useChatStore(state =>
-    activeSessionId
-      ? (state.sendStartedAt[activeSessionId] ?? null)
-      : null
+    activeSessionId ? (state.sendStartedAt[activeSessionId] ?? null) : null
   )
   // Duration of last completed run (ms) — stored by completeSession
   const completedDurationMs = useChatStore(state =>
-    activeSessionId
-      ? (state.completedDurations[activeSessionId] ?? null)
-      : null
+    activeSessionId ? (state.completedDurations[activeSessionId] ?? null) : null
   )
   // Session label for top-right badge
   const sessionLabel = useChatStore(state =>
@@ -509,8 +514,10 @@ export function ChatWindow({
   const zustandBackend = useChatStore(state =>
     deferredSessionId ? state.selectedBackends[deferredSessionId] : undefined
   )
-  const projectDefaultBackend = (project?.default_backend ?? null) as CliBackend | null
-  const globalDefaultBackend = (preferences?.default_backend ?? 'claude') as CliBackend
+  const projectDefaultBackend = (project?.default_backend ??
+    null) as CliBackend | null
+  const globalDefaultBackend = (preferences?.default_backend ??
+    'claude') as CliBackend
   const resolvedBackend: CliBackend =
     (session?.backend as CliBackend) ??
     zustandBackend ??
@@ -519,12 +526,17 @@ export function ChatWindow({
   // Model string is definitive backend source (matches Rust safety net in send_chat_message).
   // Prevents race where setSessionModel invalidation refetches before setSessionBackend persists.
   const modelImpliedBackend: CliBackend | null =
-    session?.selected_model?.startsWith('opencode/') ? 'opencode'
-    : (session?.selected_model?.startsWith('codex') || session?.selected_model?.includes('codex')) ? 'codex'
-    : null
+    session?.selected_model?.startsWith('opencode/')
+      ? 'opencode'
+      : session?.selected_model?.startsWith('codex') ||
+          session?.selected_model?.includes('codex')
+        ? 'codex'
+        : null
   // Clamp to installed backends — prevents showing "Claude" when only Codex is installed
-  const selectedBackend: CliBackend = modelImpliedBackend
-    ?? (installedBackends.length > 0 && !installedBackends.includes(resolvedBackend)
+  const selectedBackend: CliBackend =
+    modelImpliedBackend ??
+    (installedBackends.length > 0 &&
+    !installedBackends.includes(resolvedBackend)
       ? (installedBackends[0] as CliBackend)
       : resolvedBackend)
   const isCodexBackend = selectedBackend === 'codex'
@@ -708,7 +720,6 @@ export function ChatWindow({
     isCodexBackend,
   })
 
-
   // PERFORMANCE: Pre-compute last assistant message to avoid rescanning in multiple memos
   // This reference only changes when the actual last assistant message changes
   const lastAssistantMessage = useMemo(() => {
@@ -748,10 +759,18 @@ export function ChatWindow({
   const selectedModelRef = useRef(selectedModel)
   const buildModelRef = useRef<string | null>(preferences?.build_model ?? null)
   const yoloModelRef = useRef<string | null>(preferences?.yolo_model ?? null)
-  const buildBackendRef = useRef<string | null>(preferences?.build_backend ?? null)
-  const buildThinkingLevelRef = useRef<string | null>(preferences?.build_thinking_level ?? null)
-  const yoloBackendRef = useRef<string | null>(preferences?.yolo_backend ?? null)
-  const yoloThinkingLevelRef = useRef<string | null>(preferences?.yolo_thinking_level ?? null)
+  const buildBackendRef = useRef<string | null>(
+    preferences?.build_backend ?? null
+  )
+  const buildThinkingLevelRef = useRef<string | null>(
+    preferences?.build_thinking_level ?? null
+  )
+  const yoloBackendRef = useRef<string | null>(
+    preferences?.yolo_backend ?? null
+  )
+  const yoloThinkingLevelRef = useRef<string | null>(
+    preferences?.yolo_thinking_level ?? null
+  )
   const selectedProviderRef = useRef(selectedProvider)
   const selectedThinkingLevelRef = useRef(selectedThinkingLevel)
   const selectedEffortLevelRef = useRef(selectedEffortLevel)
@@ -966,16 +985,19 @@ export function ChatWindow({
       store.setActiveSession(activeWorktreeId, newSession.id)
 
       // Send plan as first message in YOLO mode
-      const yoloBackend = (yoloBackendRef.current as Session['backend']) ?? undefined
-      const yoloModel = yoloModelRef.current ??
+      const yoloBackend =
+        (yoloBackendRef.current as Session['backend']) ?? undefined
+      const yoloModel =
+        yoloModelRef.current ??
         (yoloBackend === 'codex'
           ? (preferences?.selected_codex_model ?? 'gpt-5.4')
           : yoloBackend === 'opencode'
             ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.3-codex')
             : selectedModelRef.current)
-      const yoloOverride = (yoloModelRef.current || yoloBackend)
-        ? [yoloBackend, yoloModel].filter(Boolean).join(' / ')
-        : ''
+      const yoloOverride =
+        yoloModelRef.current || yoloBackend
+          ? [yoloBackend, yoloModel].filter(Boolean).join(' / ')
+          : ''
       if (yoloOverride) toast.info(`Yolo: ${yoloOverride}`)
       const message = yoloOverride
         ? `[Yolo: ${yoloOverride}]\nExecute this plan. Implement all changes described.\n\n<plan>\n${editedPlanContent}\n</plan>`
@@ -995,20 +1017,35 @@ export function ChatWindow({
       // Optimistically update TanStack Query cache so UI shows correct backend/model immediately.
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),
-        old => old ? { ...old, backend: yoloBackend ?? old.backend, selected_model: yoloModel } : old
+        old =>
+          old
+            ? {
+                ...old,
+                backend: yoloBackend ?? old.backend,
+                selected_model: yoloModel,
+              }
+            : old
       )
 
       // Persist model and backend to Rust session BEFORE sending so send_chat_message
       // reads the updated session state (both use with_sessions_mut, so ordering matters)
       await invoke('set_session_model', {
-        worktreeId: activeWorktreeId, worktreePath: activeWorktreePath,
-        sessionId: newSession.id, model: yoloModel,
-      }).catch(err => console.error('[PlanDialog CC Yolo] Failed to persist model:', err))
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        sessionId: newSession.id,
+        model: yoloModel,
+      }).catch(err =>
+        console.error('[PlanDialog CC Yolo] Failed to persist model:', err)
+      )
       if (yoloBackend) {
         await invoke('set_session_backend', {
-          worktreeId: activeWorktreeId, worktreePath: activeWorktreePath,
-          sessionId: newSession.id, backend: yoloBackend,
-        }).catch(err => console.error('[PlanDialog CC Yolo] Failed to persist backend:', err))
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: newSession.id,
+          backend: yoloBackend,
+        }).catch(err =>
+          console.error('[PlanDialog CC Yolo] Failed to persist backend:', err)
+        )
       }
 
       const effectiveYoloBackend = yoloBackend ?? session?.backend
@@ -1016,17 +1053,19 @@ export function ChatWindow({
       const yoloThinkingLevel: ThinkingLevel =
         effectiveYoloBackend === 'codex'
           ? 'off'
-          : ((yoloModeThinking ?? selectedThinkingLevelRef.current) as ThinkingLevel)
+          : ((yoloModeThinking ??
+              selectedThinkingLevelRef.current) as ThinkingLevel)
       const yoloEffortLevel: EffortLevel | undefined =
         effectiveYoloBackend === 'codex'
-          ? (({
-              low: 'low',
-              medium: 'medium',
-              high: 'high',
-              xhigh: 'max',
-              max: 'max',
-            } as Record<string, EffortLevel>)[yoloModeThinking ?? ''] ??
-            selectedEffortLevelRef.current)
+          ? ((
+              {
+                low: 'low',
+                medium: 'medium',
+                high: 'high',
+                xhigh: 'max',
+                max: 'max',
+              } as Record<string, EffortLevel>
+            )[yoloModeThinking ?? ''] ?? selectedEffortLevelRef.current)
           : undefined
       sendMessage.mutate({
         sessionId: newSession.id,
@@ -1115,16 +1154,19 @@ export function ChatWindow({
       store.setActiveSession(activeWorktreeId, newSession.id)
 
       // Send plan as first message in build mode using build overrides
-      const buildBackend = (buildBackendRef.current as Session['backend']) ?? undefined
-      const buildModel = buildModelRef.current ??
+      const buildBackend =
+        (buildBackendRef.current as Session['backend']) ?? undefined
+      const buildModel =
+        buildModelRef.current ??
         (buildBackend === 'codex'
           ? (preferences?.selected_codex_model ?? 'gpt-5.4')
           : buildBackend === 'opencode'
             ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.3-codex')
             : selectedModelRef.current)
-      const buildOverride = (buildModelRef.current || buildBackend)
-        ? [buildBackend, buildModel].filter(Boolean).join(' / ')
-        : ''
+      const buildOverride =
+        buildModelRef.current || buildBackend
+          ? [buildBackend, buildModel].filter(Boolean).join(' / ')
+          : ''
       if (buildOverride) toast.info(`Build: ${buildOverride}`)
       const message = buildOverride
         ? `[Build: ${buildOverride}]\nExecute this plan. Implement all changes described.\n\n<plan>\n${editedPlanContent}\n</plan>`
@@ -1144,20 +1186,35 @@ export function ChatWindow({
       // Optimistically update TanStack Query cache so UI shows correct backend/model immediately.
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),
-        old => old ? { ...old, backend: buildBackend ?? old.backend, selected_model: buildModel } : old
+        old =>
+          old
+            ? {
+                ...old,
+                backend: buildBackend ?? old.backend,
+                selected_model: buildModel,
+              }
+            : old
       )
 
       // Persist model and backend to Rust session BEFORE sending so send_chat_message
       // reads the updated session state (both use with_sessions_mut, so ordering matters)
       await invoke('set_session_model', {
-        worktreeId: activeWorktreeId, worktreePath: activeWorktreePath,
-        sessionId: newSession.id, model: buildModel,
-      }).catch(err => console.error('[PlanDialog CC Build] Failed to persist model:', err))
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        sessionId: newSession.id,
+        model: buildModel,
+      }).catch(err =>
+        console.error('[PlanDialog CC Build] Failed to persist model:', err)
+      )
       if (buildBackend) {
         await invoke('set_session_backend', {
-          worktreeId: activeWorktreeId, worktreePath: activeWorktreePath,
-          sessionId: newSession.id, backend: buildBackend,
-        }).catch(err => console.error('[PlanDialog CC Build] Failed to persist backend:', err))
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: newSession.id,
+          backend: buildBackend,
+        }).catch(err =>
+          console.error('[PlanDialog CC Build] Failed to persist backend:', err)
+        )
       }
 
       const effectiveBuildBackend = buildBackend ?? session?.backend
@@ -1165,17 +1222,19 @@ export function ChatWindow({
       const buildThinkingLevel: ThinkingLevel =
         effectiveBuildBackend === 'codex'
           ? 'off'
-          : ((buildModeThinking ?? selectedThinkingLevelRef.current) as ThinkingLevel)
+          : ((buildModeThinking ??
+              selectedThinkingLevelRef.current) as ThinkingLevel)
       const buildEffortLevel: EffortLevel | undefined =
         effectiveBuildBackend === 'codex'
-          ? (({
-              low: 'low',
-              medium: 'medium',
-              high: 'high',
-              xhigh: 'max',
-              max: 'max',
-            } as Record<string, EffortLevel>)[buildModeThinking ?? ''] ??
-            selectedEffortLevelRef.current)
+          ? ((
+              {
+                low: 'low',
+                medium: 'medium',
+                high: 'high',
+                xhigh: 'max',
+                max: 'max',
+              } as Record<string, EffortLevel>
+            )[buildModeThinking ?? ''] ?? selectedEffortLevelRef.current)
           : undefined
       sendMessage.mutate({
         sessionId: newSession.id,
@@ -1213,7 +1272,13 @@ export function ChatWindow({
   const handlePlanDialogWorktreeApprove = useCallback(
     async (editedPlanContent: string, mode: 'build' | 'yolo') => {
       const projectId = worktree?.project_id
-      if (!activeSessionId || !activeWorktreeId || !activeWorktreePath || !projectId) return
+      if (
+        !activeSessionId ||
+        !activeWorktreeId ||
+        !activeWorktreePath ||
+        !projectId
+      )
+        return
 
       const toastId = toast.loading('Creating worktree...')
 
@@ -1254,7 +1319,9 @@ export function ChatWindow({
       // Create new worktree
       let pendingWorktree: Worktree
       try {
-        pendingWorktree = await invoke<Worktree>('create_worktree', { projectId })
+        pendingWorktree = await invoke<Worktree>('create_worktree', {
+          projectId,
+        })
       } catch (err) {
         toast.error(`Failed to create worktree: ${err}`, { id: toastId })
         return
@@ -1270,23 +1337,29 @@ export function ChatWindow({
             reject(new Error('Worktree creation timed out'))
           }, 120_000)
 
-          const unlistenCreated = listen<WorktreeCreatedEvent>('worktree:created', event => {
-            if (event.payload.worktree.id === pendingWorktree.id) {
-              clearTimeout(timeout)
-              void unlistenCreated.then(fn => fn())
-              void unlistenError.then(fn => fn())
-              resolve(event.payload.worktree)
+          const unlistenCreated = listen<WorktreeCreatedEvent>(
+            'worktree:created',
+            event => {
+              if (event.payload.worktree.id === pendingWorktree.id) {
+                clearTimeout(timeout)
+                void unlistenCreated.then(fn => fn())
+                void unlistenError.then(fn => fn())
+                resolve(event.payload.worktree)
+              }
             }
-          })
+          )
 
-          const unlistenError = listen<WorktreeCreateErrorEvent>('worktree:error', event => {
-            if (event.payload.id === pendingWorktree.id) {
-              clearTimeout(timeout)
-              void unlistenCreated.then(fn => fn())
-              void unlistenError.then(fn => fn())
-              reject(new Error(event.payload.error))
+          const unlistenError = listen<WorktreeCreateErrorEvent>(
+            'worktree:error',
+            event => {
+              if (event.payload.id === pendingWorktree.id) {
+                clearTimeout(timeout)
+                void unlistenCreated.then(fn => fn())
+                void unlistenError.then(fn => fn())
+                reject(new Error(event.payload.error))
+              }
             }
-          })
+          )
         })
       } catch (err) {
         toast.error(`Worktree creation failed: ${err}`, { id: toastId })
@@ -1330,17 +1403,22 @@ export function ChatWindow({
       const modeLabel = isYolo ? 'Yolo' : 'Build'
       const modeBackendRef = isYolo ? yoloBackendRef : buildBackendRef
       const modeModelRef = isYolo ? yoloModelRef : buildModelRef
-      const modeThinkingRef = isYolo ? yoloThinkingLevelRef : buildThinkingLevelRef
-      const modeBackend = (modeBackendRef.current as Session['backend']) ?? undefined
-      const modeModel = modeModelRef.current ??
+      const modeThinkingRef = isYolo
+        ? yoloThinkingLevelRef
+        : buildThinkingLevelRef
+      const modeBackend =
+        (modeBackendRef.current as Session['backend']) ?? undefined
+      const modeModel =
+        modeModelRef.current ??
         (modeBackend === 'codex'
           ? (preferences?.selected_codex_model ?? 'gpt-5.4')
           : modeBackend === 'opencode'
             ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.3-codex')
             : selectedModelRef.current)
-      const modeOverride = (modeModelRef.current || modeBackend)
-        ? [modeBackend, modeModel].filter(Boolean).join(' / ')
-        : ''
+      const modeOverride =
+        modeModelRef.current || modeBackend
+          ? [modeBackend, modeModel].filter(Boolean).join(' / ')
+          : ''
       if (modeOverride) toast.info(`${modeLabel}: ${modeOverride}`)
       const message = modeOverride
         ? `[${modeLabel}: ${modeOverride}]\nExecute this plan. Implement all changes described.\n\n<plan>\n${editedPlanContent}\n</plan>`
@@ -1359,18 +1437,39 @@ export function ChatWindow({
       }
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),
-        old => old ? { ...old, backend: modeBackend ?? old.backend, selected_model: modeModel } : old
+        old =>
+          old
+            ? {
+                ...old,
+                backend: modeBackend ?? old.backend,
+                selected_model: modeModel,
+              }
+            : old
       )
 
       await invoke('set_session_model', {
-        worktreeId: readyWorktree.id, worktreePath: readyWorktree.path,
-        sessionId: newSession.id, model: modeModel,
-      }).catch(err => console.error(`[PlanDialog WT ${modeLabel}] Failed to persist model:`, err))
+        worktreeId: readyWorktree.id,
+        worktreePath: readyWorktree.path,
+        sessionId: newSession.id,
+        model: modeModel,
+      }).catch(err =>
+        console.error(
+          `[PlanDialog WT ${modeLabel}] Failed to persist model:`,
+          err
+        )
+      )
       if (modeBackend) {
         await invoke('set_session_backend', {
-          worktreeId: readyWorktree.id, worktreePath: readyWorktree.path,
-          sessionId: newSession.id, backend: modeBackend,
-        }).catch(err => console.error(`[PlanDialog WT ${modeLabel}] Failed to persist backend:`, err))
+          worktreeId: readyWorktree.id,
+          worktreePath: readyWorktree.path,
+          sessionId: newSession.id,
+          backend: modeBackend,
+        }).catch(err =>
+          console.error(
+            `[PlanDialog WT ${modeLabel}] Failed to persist backend:`,
+            err
+          )
+        )
       }
 
       const effectiveBackend = modeBackend ?? session?.backend
@@ -1378,17 +1477,19 @@ export function ChatWindow({
       const thinkingLevel: ThinkingLevel =
         effectiveBackend === 'codex'
           ? 'off'
-          : ((modeThinking ?? selectedThinkingLevelRef.current) as ThinkingLevel)
+          : ((modeThinking ??
+              selectedThinkingLevelRef.current) as ThinkingLevel)
       const effortLevel: EffortLevel | undefined =
         effectiveBackend === 'codex'
-          ? (({
-              low: 'low',
-              medium: 'medium',
-              high: 'high',
-              xhigh: 'max',
-              max: 'max',
-            } as Record<string, EffortLevel>)[modeThinking ?? ''] ??
-            selectedEffortLevelRef.current)
+          ? ((
+              {
+                low: 'low',
+                medium: 'medium',
+                high: 'high',
+                xhigh: 'max',
+                max: 'max',
+              } as Record<string, EffortLevel>
+            )[modeThinking ?? ''] ?? selectedEffortLevelRef.current)
           : undefined
       sendMessage.mutate({
         sessionId: newSession.id,
@@ -1428,12 +1529,14 @@ export function ChatWindow({
   )
 
   const handlePlanDialogWorktreeBuildApprove = useCallback(
-    (editedPlanContent: string) => handlePlanDialogWorktreeApprove(editedPlanContent, 'build'),
+    (editedPlanContent: string) =>
+      handlePlanDialogWorktreeApprove(editedPlanContent, 'build'),
     [handlePlanDialogWorktreeApprove]
   )
 
   const handlePlanDialogWorktreeYoloApprove = useCallback(
-    (editedPlanContent: string) => handlePlanDialogWorktreeApprove(editedPlanContent, 'yolo'),
+    (editedPlanContent: string) =>
+      handlePlanDialogWorktreeApprove(editedPlanContent, 'yolo'),
     [handlePlanDialogWorktreeApprove]
   )
 
@@ -1461,7 +1564,9 @@ export function ChatWindow({
       // Switch to new session
       store.setActiveSession(activeWorktreeId, newSession.id)
 
-      const model = preferences?.magic_prompt_models?.code_review_model ?? selectedModelRef.current
+      const model =
+        preferences?.magic_prompt_models?.code_review_model ??
+        selectedModelRef.current
       store.setExecutionMode(newSession.id, executionMode)
       store.setLastSentMessage(newSession.id, message)
       store.setError(newSession.id, null)
@@ -1560,7 +1665,9 @@ export function ChatWindow({
 
   const handlePushWithPicker = useCallback(
     () =>
-      worktree?.pr_number ? handlePush() : pickRemoteOrRun(remote => handlePush(remote)),
+      worktree?.pr_number
+        ? handlePush()
+        : pickRemoteOrRun(remote => handlePush(remote)),
     [worktree?.pr_number, pickRemoteOrRun, handlePush]
   )
 
@@ -1576,8 +1683,6 @@ export function ChatWindow({
     () => pickRemoteOrRun(remote => handlePull(remote)),
     [pickRemoteOrRun, handlePull]
   )
-
-
 
   // Global cancel keyboard shortcut (Cmd+Option+Backspace / Ctrl+Alt+Backspace)
   // ChatInput handles this when focused, but we need a global handler for when
@@ -1654,33 +1759,38 @@ export function ChatWindow({
   })
 
   // Investigate issue/PR and workflow run handlers
-  const { handleInvestigate, handleInvestigateWorkflowRun, handleReviewComments } =
-    useInvestigateHandlers({
-      activeSessionId,
-      activeWorktreeId,
-      activeWorktreePath,
-      inputRef,
-      preferences,
-      selectedModelRef,
-      selectedThinkingLevelRef,
-      selectedEffortLevelRef,
-      executionModeRef,
-      mcpServersDataRef,
-      enabledMcpServersRef,
-      activeWorktreeIdRef,
-      activeWorktreePathRef,
-      sendMessage,
-      setSessionProvider,
-      setSessionBackend,
-      setSessionModel,
-      createSession,
-      resolveCustomProfile,
-      cliVersion: cliStatus?.version ?? null,
-      worktreeProjectId: worktree?.project_id,
-    })
+  const {
+    handleInvestigate,
+    handleInvestigateWorkflowRun,
+    handleReviewComments,
+  } = useInvestigateHandlers({
+    activeSessionId,
+    activeWorktreeId,
+    activeWorktreePath,
+    inputRef,
+    preferences,
+    selectedModelRef,
+    selectedThinkingLevelRef,
+    selectedEffortLevelRef,
+    executionModeRef,
+    mcpServersDataRef,
+    enabledMcpServersRef,
+    activeWorktreeIdRef,
+    activeWorktreePathRef,
+    sendMessage,
+    setSessionProvider,
+    setSessionBackend,
+    setSessionModel,
+    createSession,
+    resolveCustomProfile,
+    cliVersion: cliStatus?.version ?? null,
+    worktreeProjectId: worktree?.project_id,
+  })
 
   // Linked projects modal state
-  const linkedProjectsModalOpen = useUIStore(state => state.linkedProjectsModalOpen)
+  const linkedProjectsModalOpen = useUIStore(
+    state => state.linkedProjectsModalOpen
+  )
   const handleLinkedProjects = useCallback(() => {
     useUIStore.getState().setLinkedProjectsModalOpen(true)
   }, [])
@@ -1884,32 +1994,66 @@ export function ChatWindow({
   const floatingApprove = useCallback(() => {
     if (hasStreamingPlan) handleStreamingPlanApproval()
     else if (pendingPlanMessage) handlePlanApproval(pendingPlanMessage.id)
-  }, [hasStreamingPlan, handleStreamingPlanApproval, pendingPlanMessage, handlePlanApproval])
+  }, [
+    hasStreamingPlan,
+    handleStreamingPlanApproval,
+    pendingPlanMessage,
+    handlePlanApproval,
+  ])
 
   const floatingYoloApprove = useCallback(() => {
     if (hasStreamingPlan) handleStreamingPlanApprovalYolo()
     else if (pendingPlanMessage) handlePlanApprovalYolo(pendingPlanMessage.id)
-  }, [hasStreamingPlan, handleStreamingPlanApprovalYolo, pendingPlanMessage, handlePlanApprovalYolo])
+  }, [
+    hasStreamingPlan,
+    handleStreamingPlanApprovalYolo,
+    pendingPlanMessage,
+    handlePlanApprovalYolo,
+  ])
 
   const floatingClearContextBuildApprove = useCallback(() => {
     if (hasStreamingPlan) handleStreamingClearContextApprovalBuild()
-    else if (pendingPlanMessage) handleClearContextApprovalBuild(pendingPlanMessage.id)
-  }, [hasStreamingPlan, handleStreamingClearContextApprovalBuild, pendingPlanMessage, handleClearContextApprovalBuild])
+    else if (pendingPlanMessage)
+      handleClearContextApprovalBuild(pendingPlanMessage.id)
+  }, [
+    hasStreamingPlan,
+    handleStreamingClearContextApprovalBuild,
+    pendingPlanMessage,
+    handleClearContextApprovalBuild,
+  ])
 
   const floatingClearContextApprove = useCallback(() => {
     if (hasStreamingPlan) handleStreamingClearContextApproval()
-    else if (pendingPlanMessage) handleClearContextApproval(pendingPlanMessage.id)
-  }, [hasStreamingPlan, handleStreamingClearContextApproval, pendingPlanMessage, handleClearContextApproval])
+    else if (pendingPlanMessage)
+      handleClearContextApproval(pendingPlanMessage.id)
+  }, [
+    hasStreamingPlan,
+    handleStreamingClearContextApproval,
+    pendingPlanMessage,
+    handleClearContextApproval,
+  ])
 
   const floatingWorktreeBuildApprove = useCallback(() => {
     if (hasStreamingPlan) handleStreamingWorktreeBuildApproval()
-    else if (pendingPlanMessage) handleWorktreeBuildApproval(pendingPlanMessage.id)
-  }, [hasStreamingPlan, handleStreamingWorktreeBuildApproval, pendingPlanMessage, handleWorktreeBuildApproval])
+    else if (pendingPlanMessage)
+      handleWorktreeBuildApproval(pendingPlanMessage.id)
+  }, [
+    hasStreamingPlan,
+    handleStreamingWorktreeBuildApproval,
+    pendingPlanMessage,
+    handleWorktreeBuildApproval,
+  ])
 
   const floatingWorktreeYoloApprove = useCallback(() => {
     if (hasStreamingPlan) handleStreamingWorktreeYoloApproval()
-    else if (pendingPlanMessage) handleWorktreeYoloApproval(pendingPlanMessage.id)
-  }, [hasStreamingPlan, handleStreamingWorktreeYoloApproval, pendingPlanMessage, handleWorktreeYoloApproval])
+    else if (pendingPlanMessage)
+      handleWorktreeYoloApproval(pendingPlanMessage.id)
+  }, [
+    hasStreamingPlan,
+    handleStreamingWorktreeYoloApproval,
+    pendingPlanMessage,
+    handleWorktreeYoloApproval,
+  ])
 
   // Pending attachment removal, slash command execution, queue management
   const {
@@ -2023,14 +2167,14 @@ export function ChatWindow({
       <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
         {showReviewFullWidth && activeSessionId ? (
           <div className="flex-1 min-h-0">
-            <ReviewResultsPanel sessionId={activeSessionId} onSendFix={handleReviewFix} />
+            <ReviewResultsPanel
+              sessionId={activeSessionId}
+              onSendFix={handleReviewFix}
+            />
           </div>
         ) : (
-        <ResizablePanelGroup direction="horizontal" className="flex-1">
-            <ResizablePanel
-              defaultSize={100}
-              minSize={40}
-            >
+          <ResizablePanelGroup direction="horizontal" className="flex-1">
+            <ResizablePanel defaultSize={100} minSize={40}>
               <ResizablePanelGroup direction="vertical" className="h-full">
                 <ResizablePanel
                   defaultSize={terminalVisible ? 70 : 100}
@@ -2083,18 +2227,17 @@ export function ChatWindow({
                                 </div>
                               )}
                             {/* Setup script running indicator */}
-                            {worktree?.setup_script &&
-                              !setupScriptResult && (
-                                <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
-                                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                                  <span>
-                                    Running setup script:{' '}
-                                    <code className="rounded bg-muted px-1 py-0.5">
-                                      {worktree.setup_script}
-                                    </code>
-                                  </span>
-                                </div>
-                              )}
+                            {worktree?.setup_script && !setupScriptResult && (
+                              <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                <span>
+                                  Running setup script:{' '}
+                                  <code className="rounded bg-muted px-1 py-0.5">
+                                    {worktree.setup_script}
+                                  </code>
+                                </span>
+                              </div>
+                            )}
                             {/* Setup script output from jean.json */}
                             {setupScriptResult && activeWorktreeId && (
                               <SetupScriptOutput
@@ -2112,67 +2255,95 @@ export function ChatWindow({
                               </div>
                             ) : (
                               <>
-                              {messages.length === 0 && !isSending && activeSessionId && (
-                                <RecentContexts
-                                  sessionId={activeSessionId}
-                                  queryClient={queryClient}
-                                  projectId={worktree?.project_id}
+                                {messages.length === 0 &&
+                                  !isSending &&
+                                  activeSessionId && (
+                                    <RecentContexts
+                                      sessionId={activeSessionId}
+                                      queryClient={queryClient}
+                                      projectId={worktree?.project_id}
+                                    />
+                                  )}
+                                <VirtualizedMessageList
+                                  ref={virtualizedListRef}
+                                  messages={messages}
+                                  scrollContainerRef={scrollViewportRef}
+                                  totalMessages={messages.length}
+                                  lastPlanMessageIndex={lastPlanMessageIndex}
+                                  sessionId={deferredSessionId ?? ''}
+                                  worktreePath={activeWorktreePath ?? ''}
+                                  approveShortcut={approveShortcut}
+                                  approveShortcutYolo={approveShortcutYolo}
+                                  approveShortcutClearContext={
+                                    approveShortcutClearContext
+                                  }
+                                  approveShortcutClearContextBuild={
+                                    approveShortcutClearContextBuild
+                                  }
+                                  approveButtonRef={approveButtonRef}
+                                  isSending={isSending}
+                                  onPlanApproval={handlePlanApproval}
+                                  onPlanApprovalYolo={handlePlanApprovalYolo}
+                                  onClearContextApproval={
+                                    handleClearContextApproval
+                                  }
+                                  onClearContextApprovalBuild={
+                                    handleClearContextApprovalBuild
+                                  }
+                                  onWorktreeBuildApproval={
+                                    worktree?.project_id
+                                      ? handleWorktreeBuildApproval
+                                      : undefined
+                                  }
+                                  onWorktreeYoloApproval={
+                                    worktree?.project_id
+                                      ? handleWorktreeYoloApproval
+                                      : undefined
+                                  }
+                                  onQuestionAnswer={handleQuestionAnswer}
+                                  onQuestionSkip={handleSkipQuestion}
+                                  onFileClick={setViewingFilePath}
+                                  onEditedFileClick={setViewingFilePath}
+                                  onFixFinding={handleFixFinding}
+                                  onFixAllFindings={handleFixAllFindings}
+                                  isQuestionAnswered={isQuestionAnswered}
+                                  getSubmittedAnswers={getSubmittedAnswers}
+                                  areQuestionsSkipped={areQuestionsSkipped}
+                                  isFindingFixed={isFindingFixed}
+                                  onCopyToInput={handleCopyToInput}
+                                  hideApproveButtons={isCodexBackend}
+                                  shouldScrollToBottom={isAtBottom}
+                                  onScrollToBottomHandled={
+                                    handleScrollToBottomHandled
+                                  }
+                                  completedDurationMs={completedDurationMs}
                                 />
-                              )}
-                              <VirtualizedMessageList
-                                ref={virtualizedListRef}
-                                messages={messages}
-                                scrollContainerRef={scrollViewportRef}
-                                totalMessages={messages.length}
-                                lastPlanMessageIndex={lastPlanMessageIndex}
-                                sessionId={deferredSessionId ?? ''}
-                                worktreePath={activeWorktreePath ?? ''}
-                                approveShortcut={approveShortcut}
-                                approveShortcutYolo={approveShortcutYolo}
-                                approveShortcutClearContext={approveShortcutClearContext}
-                                approveShortcutClearContextBuild={approveShortcutClearContextBuild}
-                                approveButtonRef={approveButtonRef}
-                                isSending={isSending}
-                                onPlanApproval={handlePlanApproval}
-                                onPlanApprovalYolo={handlePlanApprovalYolo}
-                                onClearContextApproval={handleClearContextApproval}
-                                onClearContextApprovalBuild={handleClearContextApprovalBuild}
-                                onWorktreeBuildApproval={worktree?.project_id ? handleWorktreeBuildApproval : undefined}
-                                onWorktreeYoloApproval={worktree?.project_id ? handleWorktreeYoloApproval : undefined}
-                                onQuestionAnswer={handleQuestionAnswer}
-                                onQuestionSkip={handleSkipQuestion}
-                                onFileClick={setViewingFilePath}
-                                onEditedFileClick={setViewingFilePath}
-                                onFixFinding={handleFixFinding}
-                                onFixAllFindings={handleFixAllFindings}
-                                isQuestionAnswered={isQuestionAnswered}
-                                getSubmittedAnswers={getSubmittedAnswers}
-                                areQuestionsSkipped={areQuestionsSkipped}
-                                isFindingFixed={isFindingFixed}
-                                onCopyToInput={handleCopyToInput}
-                                hideApproveButtons={isCodexBackend}
-                                shouldScrollToBottom={isAtBottom}
-                                onScrollToBottomHandled={
-                                  handleScrollToBottomHandled
-                                }
-                                completedDurationMs={completedDurationMs}
-                              />
                               </>
                             )}
                             {/* Streaming response + elapsed timer in one wrapper to avoid space-y-4 gap */}
                             {isSending && activeSessionId && (
                               <div>
-                                {(currentStreamingContentBlocks.length > 0 || currentToolCalls.length > 0 || streamingContent.trim().length > 0) && (
+                                {(currentStreamingContentBlocks.length > 0 ||
+                                  currentToolCalls.length > 0 ||
+                                  streamingContent.trim().length > 0) && (
                                   <StreamingMessage
                                     sessionId={activeSessionId}
-                                    contentBlocks={currentStreamingContentBlocks}
+                                    contentBlocks={
+                                      currentStreamingContentBlocks
+                                    }
                                     toolCalls={currentToolCalls}
                                     streamingContent={streamingContent}
-                                    selectedThinkingLevel={selectedThinkingLevel}
+                                    selectedThinkingLevel={
+                                      selectedThinkingLevel
+                                    }
                                     approveShortcut={approveShortcut}
                                     approveShortcutYolo={approveShortcutYolo}
-                                    approveShortcutClearContext={approveShortcutClearContext}
-                                    approveShortcutClearContextBuild={approveShortcutClearContextBuild}
+                                    approveShortcutClearContext={
+                                      approveShortcutClearContext
+                                    }
+                                    approveShortcutClearContextBuild={
+                                      approveShortcutClearContextBuild
+                                    }
                                     onQuestionAnswer={handleQuestionAnswer}
                                     onQuestionSkip={handleSkipQuestion}
                                     onFileClick={setViewingFilePath}
@@ -2211,7 +2382,9 @@ export function ChatWindow({
                                 <StreamingStatusBar
                                   isSending={isSending}
                                   sendStartedAt={sendStartedAt}
-                                  streamingExecutionMode={streamingExecutionMode}
+                                  streamingExecutionMode={
+                                    streamingExecutionMode
+                                  }
                                   restoredRunStatus={
                                     !isSending &&
                                     !isWaitingForInput &&
@@ -2228,16 +2401,15 @@ export function ChatWindow({
                             )}
 
                             {/* Permission approval UI - shown when tools require approval (never in yolo mode) */}
-                            {showPermissionApproval &&
-                              activeSessionId && (
-                                <PermissionApproval
-                                  sessionId={activeSessionId}
-                                  denials={pendingDenials}
-                                  onApprove={handlePermissionApproval}
-                                  onApproveYolo={handlePermissionApprovalYolo}
-                                  onDeny={handlePermissionDeny}
-                                />
-                              )}
+                            {showPermissionApproval && activeSessionId && (
+                              <PermissionApproval
+                                sessionId={activeSessionId}
+                                denials={pendingDenials}
+                                onApprove={handlePermissionApproval}
+                                onApproveYolo={handlePermissionApprovalYolo}
+                                onDeny={handlePermissionDeny}
+                              />
+                            )}
 
                             {/* Queued messages - shown inline after streaming/messages */}
                             {activeSessionId && (
@@ -2256,20 +2428,32 @@ export function ChatWindow({
 
                       {/* Floating scroll buttons */}
                       <FloatingButtons
-                        showApproveButton={!isCodexBackend && (!!pendingPlanMessage || hasStreamingPlan)}
+                        showApproveButton={
+                          !isCodexBackend &&
+                          (!!pendingPlanMessage || hasStreamingPlan)
+                        }
                         showFindingsButton={!areFindingsVisible}
                         isAtBottom={isAtBottom}
                         approveShortcut={approveShortcut}
                         onApprove={floatingApprove}
                         onYoloApprove={floatingYoloApprove}
-                        onClearContextBuildApprove={floatingClearContextBuildApprove}
+                        onClearContextBuildApprove={
+                          floatingClearContextBuildApprove
+                        }
                         onClearContextApprove={floatingClearContextApprove}
-                        onWorktreeBuildApprove={worktree?.project_id ? floatingWorktreeBuildApprove : undefined}
-                        onWorktreeYoloApprove={worktree?.project_id ? floatingWorktreeYoloApprove : undefined}
+                        onWorktreeBuildApprove={
+                          worktree?.project_id
+                            ? floatingWorktreeBuildApprove
+                            : undefined
+                        }
+                        onWorktreeYoloApprove={
+                          worktree?.project_id
+                            ? floatingWorktreeYoloApprove
+                            : undefined
+                        }
                         onScrollToFindings={scrollToFindings}
                         onScrollToBottom={scrollToBottom}
                       />
-
                     </div>
 
                     {/* Error banner - shows when request fails */}
@@ -2434,8 +2618,12 @@ export function ChatWindow({
                               projectId={worktree?.project_id}
                               loadedIssueContexts={loadedIssueContexts ?? []}
                               loadedPRContexts={loadedPRContexts ?? []}
-                              loadedSecurityContexts={loadedSecurityContexts ?? []}
-                              loadedAdvisoryContexts={loadedAdvisoryContexts ?? []}
+                              loadedSecurityContexts={
+                                loadedSecurityContexts ?? []
+                              }
+                              loadedAdvisoryContexts={
+                                loadedAdvisoryContexts ?? []
+                              }
                               loadedLinearContexts={loadedLinearContexts ?? []}
                               attachedSavedContexts={
                                 attachedSavedContexts ?? []
@@ -2560,7 +2748,10 @@ export function ChatWindow({
                   onExpand={handleReviewSidebarExpand}
                 >
                   {activeSessionId && (
-                    <ReviewResultsPanel sessionId={activeSessionId} onSendFix={handleReviewFix} />
+                    <ReviewResultsPanel
+                      sessionId={activeSessionId}
+                      onSendFix={handleReviewFix}
+                    />
                   )}
                 </ResizablePanel>
               </>
@@ -2642,9 +2833,19 @@ export function ChatWindow({
               onApprove={handlePlanDialogApprove}
               onApproveYolo={handlePlanDialogApproveYolo}
               onClearContextApprove={handlePlanDialogClearContextApprove}
-              onClearContextBuildApprove={handlePlanDialogClearContextBuildApprove}
-              onWorktreeBuildApprove={worktree?.project_id ? handlePlanDialogWorktreeBuildApprove : undefined}
-              onWorktreeYoloApprove={worktree?.project_id ? handlePlanDialogWorktreeYoloApprove : undefined}
+              onClearContextBuildApprove={
+                handlePlanDialogClearContextBuildApprove
+              }
+              onWorktreeBuildApprove={
+                worktree?.project_id
+                  ? handlePlanDialogWorktreeBuildApprove
+                  : undefined
+              }
+              onWorktreeYoloApprove={
+                worktree?.project_id
+                  ? handlePlanDialogWorktreeYoloApprove
+                  : undefined
+              }
               hideApproveButtons={isCodexBackend}
             />
           ) : latestPlanFilePath ? (
@@ -2666,9 +2867,19 @@ export function ChatWindow({
               onApprove={handlePlanDialogApprove}
               onApproveYolo={handlePlanDialogApproveYolo}
               onClearContextApprove={handlePlanDialogClearContextApprove}
-              onClearContextBuildApprove={handlePlanDialogClearContextBuildApprove}
-              onWorktreeBuildApprove={worktree?.project_id ? handlePlanDialogWorktreeBuildApprove : undefined}
-              onWorktreeYoloApprove={worktree?.project_id ? handlePlanDialogWorktreeYoloApprove : undefined}
+              onClearContextBuildApprove={
+                handlePlanDialogClearContextBuildApprove
+              }
+              onWorktreeBuildApprove={
+                worktree?.project_id
+                  ? handlePlanDialogWorktreeBuildApprove
+                  : undefined
+              }
+              onWorktreeYoloApprove={
+                worktree?.project_id
+                  ? handlePlanDialogWorktreeYoloApprove
+                  : undefined
+              }
               hideApproveButtons={isCodexBackend}
             />
           ) : null)}

@@ -26,7 +26,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { getResumeCommand, statusConfig, type SessionCardProps } from './session-card-utils'
+import {
+  getResumeCommand,
+  statusConfig,
+  type SessionCardProps,
+} from './session-card-utils'
 
 export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
   function SessionListRow(
@@ -239,9 +243,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
         <ContextMenuContent className="w-48">
           {onRenameStart && (
             <ContextMenuItem
-              onSelect={() =>
-                onRenameStart(card.session.id, card.session.name)
-              }
+              onSelect={() => onRenameStart(card.session.id, card.session.name)}
             >
               <Pencil className="mr-2 h-4 w-4" />
               Rename

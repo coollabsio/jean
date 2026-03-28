@@ -166,9 +166,9 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
 
     expect(addTerminalTabForShortcut()).toBe(true)
 
-    expect(useTerminalStore.getState().terminals['modal-worktree']).toHaveLength(
-      2
-    )
+    expect(
+      useTerminalStore.getState().terminals['modal-worktree']
+    ).toHaveLength(2)
   })
 
   it('uses the terminal shortcut path to close the active terminal tab for the modal worktree', () => {
@@ -201,9 +201,9 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     })
     expect(mockDisposeTerminal).toHaveBeenCalledWith('term-1')
     expect(useTerminalStore.getState().terminals['modal-worktree']).toEqual([])
-    expect(useTerminalStore.getState().modalTerminalOpen['modal-worktree']).toBe(
-      false
-    )
+    expect(
+      useTerminalStore.getState().modalTerminalOpen['modal-worktree']
+    ).toBe(false)
   })
 
   it('switches the active terminal tab by index for the modal worktree', () => {
@@ -236,9 +236,9 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     })
 
     expect(switchActiveTerminalTabByIndexForShortcut(1)).toBe(true)
-    expect(useTerminalStore.getState().activeTerminalIds['modal-worktree']).toBe(
-      'term-2'
-    )
+    expect(
+      useTerminalStore.getState().activeTerminalIds['modal-worktree']
+    ).toBe('term-2')
   })
 
   it('consumes invalid terminal tab indexes without falling back to session switching', () => {
@@ -265,8 +265,8 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     })
 
     expect(switchActiveTerminalTabByIndexForShortcut(8)).toBe(true)
-    expect(useTerminalStore.getState().activeTerminalIds['modal-worktree']).toBe(
-      'term-1'
-    )
+    expect(
+      useTerminalStore.getState().activeTerminalIds['modal-worktree']
+    ).toBe('term-1')
   })
 })

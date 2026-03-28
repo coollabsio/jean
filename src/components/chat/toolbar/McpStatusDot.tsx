@@ -1,5 +1,9 @@
 import { CheckCircle, ShieldAlert, XCircle } from 'lucide-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { McpHealthStatus } from '@/types/chat'
 
 // eslint-disable-next-line react-refresh/only-export-components

@@ -37,7 +37,9 @@ export function useContextViewer({
   worktreeId,
   projectId,
 }: UseContextViewerArgs) {
-  const [viewingContext, setViewingContext] = useState<ViewingContext | null>(null)
+  const [viewingContext, setViewingContext] = useState<ViewingContext | null>(
+    null
+  )
 
   const handleViewIssue = useCallback(
     async (ctx: LoadedIssueContext) => {

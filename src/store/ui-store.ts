@@ -293,7 +293,11 @@ export const useUIStore = create<UIState>()(
         set({ onboardingOpen: open }, undefined, 'setOnboardingOpen'),
 
       setOnboardingManuallyTriggered: triggered =>
-        set({ onboardingManuallyTriggered: triggered }, undefined, 'setOnboardingManuallyTriggered'),
+        set(
+          { onboardingManuallyTriggered: triggered },
+          undefined,
+          'setOnboardingManuallyTriggered'
+        ),
 
       setOnboardingStartStep: step =>
         set({ onboardingStartStep: step }, undefined, 'setOnboardingStartStep'),
@@ -368,7 +372,11 @@ export const useUIStore = create<UIState>()(
       setUpdatePrModalOpen: open =>
         set({ updatePrModalOpen: open }, undefined, 'setUpdatePrModalOpen'),
       setReviewCommentsModalOpen: open =>
-        set({ reviewCommentsModalOpen: open }, undefined, 'setReviewCommentsModalOpen'),
+        set(
+          { reviewCommentsModalOpen: open },
+          undefined,
+          'setReviewCommentsModalOpen'
+        ),
 
       setWorkflowRunsModalOpen: (open, projectPath, branch) =>
         set(
@@ -517,7 +525,9 @@ export const useUIStore = create<UIState>()(
         if (get().autoInvestigateSecurityAlertWorktreeIds.has(worktreeId)) {
           set(
             state => {
-              const newSet = new Set(state.autoInvestigateSecurityAlertWorktreeIds)
+              const newSet = new Set(
+                state.autoInvestigateSecurityAlertWorktreeIds
+              )
               newSet.delete(worktreeId)
               return { autoInvestigateSecurityAlertWorktreeIds: newSet }
             },
@@ -573,7 +583,9 @@ export const useUIStore = create<UIState>()(
         if (get().autoInvestigateLinearIssueWorktreeIds.has(worktreeId)) {
           set(
             state => {
-              const newSet = new Set(state.autoInvestigateLinearIssueWorktreeIds)
+              const newSet = new Set(
+                state.autoInvestigateLinearIssueWorktreeIds
+              )
               newSet.delete(worktreeId)
               return { autoInvestigateLinearIssueWorktreeIds: newSet }
             },
@@ -687,6 +699,7 @@ export const useUIStore = create<UIState>()(
 
       setGitHubDashboardOpen: (open: boolean) =>
         set({ githubDashboardOpen: open }, undefined, 'setGitHubDashboardOpen'),
+
     }),
     {
       name: 'ui-store',

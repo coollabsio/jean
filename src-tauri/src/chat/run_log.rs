@@ -732,18 +732,13 @@ pub fn load_session_messages(
                 .as_deref()
                 .map(crate::is_codex_model)
                 .unwrap_or(false);
-            let run_is_opencode = run
-                .model
-                .as_deref()
-                .map(crate::is_opencode_model)
-                .unwrap_or(false);
             let use_codex_parser = if run.model.is_some() {
-                // Model stored per-run: use it directly (prevents misrouting
-                // when metadata.backend was overwritten by a later run).
-                run_is_codex || run_is_opencode
+                // Model stored per-run: only Codex runs use the Codex history parser.
+                // OpenCode persists Claude-style `type: assistant` JSONL lines.
+                run_is_codex
             } else {
                 // Legacy run without model field: fall back to session backend.
-                metadata.backend == Backend::Codex || metadata.backend == Backend::Opencode
+                metadata.backend == Backend::Codex
             };
             let mut assistant_msg = if use_codex_parser {
                 super::codex::parse_codex_run_to_message(&lines, run)?

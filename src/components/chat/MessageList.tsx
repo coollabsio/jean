@@ -109,7 +109,11 @@ export const MessageList = memo(function MessageList({
         // Show completed duration on the last assistant message (from store),
         // or fall back to timestamp-based computation for persisted messages (after reload)
         let durationMs: number | null = null
-        if (message.role === 'assistant' && index === messages.length - 1 && completedDurationMs) {
+        if (
+          message.role === 'assistant' &&
+          index === messages.length - 1 &&
+          completedDurationMs
+        ) {
           durationMs = completedDurationMs
         } else if (message.role === 'assistant' && index > 0) {
           const prevMessage = messages[index - 1]
@@ -132,7 +136,9 @@ export const MessageList = memo(function MessageList({
               approveShortcut={approveShortcut}
               approveShortcutYolo={approveShortcutYolo}
               approveShortcutClearContext={approveShortcutClearContext}
-              approveShortcutClearContextBuild={approveShortcutClearContextBuild}
+              approveShortcutClearContextBuild={
+                approveShortcutClearContextBuild
+              }
               approveButtonRef={
                 index === lastPlanMessageIndex ? approveButtonRef : undefined
               }

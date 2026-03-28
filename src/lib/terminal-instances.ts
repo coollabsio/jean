@@ -58,7 +58,12 @@ export function getOrCreateTerminal(
     return existing
   }
 
-  const { worktreeId, worktreePath, command = null, commandArgs = null } = options
+  const {
+    worktreeId,
+    worktreePath,
+    command = null,
+    commandArgs = null,
+  } = options
   const { setTerminalRunning } = useTerminalStore.getState()
 
   // Create xterm.js Terminal instance
@@ -136,9 +141,7 @@ export function getOrCreateTerminal(
       const exitCode = event.payload.exit_code
       const signal = event.payload.signal
       const exitLabel =
-        signal != null
-          ? `signal ${signal}`
-          : `code ${exitCode ?? 'unknown'}`
+        signal != null ? `signal ${signal}` : `code ${exitCode ?? 'unknown'}`
       terminal.writeln(`\r\n\x1b[90m[Process exited with ${exitLabel}]\x1b[0m`)
       const inst = instances.get(terminalId)
       inst?.onStopped?.(exitCode, signal)
@@ -218,7 +221,14 @@ export async function attachToContainer(
     return
   }
 
-  const { terminal, fitAddon, worktreePath, command, commandArgs, initialized } = instance
+  const {
+    terminal,
+    fitAddon,
+    worktreePath,
+    command,
+    commandArgs,
+    initialized,
+  } = instance
   const terminalElement = terminal.element
 
   if (!terminalElement) {
@@ -238,7 +248,9 @@ export async function attachToContainer(
     const rawRows = terminal.rows
     let cols = rawCols < 2 ? 80 : rawCols
     let rows = rawRows < 2 ? 24 : rawRows
-    console.log(`[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${initialized}, container=${container.clientWidth}x${container.clientHeight}`)
+    console.log(
+      `[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${initialized}, container=${container.clientWidth}x${container.clientHeight}`
+    )
 
     if (!initialized) {
       // First time - check if PTY already exists (reconnecting after app restart)
@@ -287,7 +299,12 @@ export async function attachToContainer(
  */
 export function startHeadless(
   terminalId: string,
-  options: { worktreeId: string; worktreePath: string; command: string; commandArgs?: string[] | null }
+  options: {
+    worktreeId: string
+    worktreePath: string
+    command: string
+    commandArgs?: string[] | null
+  }
 ): void {
   const instance = getOrCreateTerminal(terminalId, options)
   if (instance.initialized) return // Already started
@@ -402,9 +419,7 @@ const pendingOnStopped = new Map<
  */
 export function setOnStopped(
   terminalId: string,
-  cb:
-    | ((exitCode: number | null, signal: string | null) => void)
-    | undefined
+  cb: ((exitCode: number | null, signal: string | null) => void) | undefined
 ): void {
   const instance = instances.get(terminalId)
   if (instance) {

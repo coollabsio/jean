@@ -138,7 +138,14 @@ export const projectCommands: AppCommand[] = [
     description: 'View sessions with new activity since last opened',
     icon: BellDot,
     group: 'sessions',
-    keywords: ['unread', 'new', 'activity', 'sessions', 'inbox', 'notifications'],
+    keywords: [
+      'unread',
+      'new',
+      'activity',
+      'sessions',
+      'inbox',
+      'notifications',
+    ],
 
     execute: context => {
       context.openUnreadSessions()

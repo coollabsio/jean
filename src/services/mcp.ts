@@ -3,7 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { isTauri } from '@/services/projects'
 import { queryClient } from '@/lib/query-client'
-import type { McpServerInfo, McpHealthResult, McpHealthStatus } from '@/types/chat'
+import type {
+  McpServerInfo,
+  McpHealthResult,
+  McpHealthStatus,
+} from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 
 /** Query key prefix for MCP server queries */
@@ -78,23 +82,11 @@ export function useAllBackendsMcpServers(
   worktreePath: string | null | undefined,
   installedBackends: CliBackend[]
 ) {
-  const claude = useMcpServers(
-    worktreePath,
-    'claude'
-  )
-  const codex = useMcpServers(
-    worktreePath,
-    'codex'
-  )
-  const opencode = useMcpServers(
-    worktreePath,
-    'opencode'
-  )
+  const claude = useMcpServers(worktreePath, 'claude')
+  const codex = useMcpServers(worktreePath, 'codex')
+  const opencode = useMcpServers(worktreePath, 'opencode')
 
-  const has = useMemo(
-    () => new Set(installedBackends),
-    [installedBackends]
-  )
+  const has = useMemo(() => new Set(installedBackends), [installedBackends])
 
   const servers = useMemo(() => {
     const result: McpServerInfo[] = []
@@ -142,10 +134,7 @@ export function useAllBackendsMcpHealth(installedBackends: CliBackend[]) {
   const codex = useMcpHealthCheck('codex')
   const opencode = useMcpHealthCheck('opencode')
 
-  const has = useMemo(
-    () => new Set(installedBackends),
-    [installedBackends]
-  )
+  const has = useMemo(() => new Set(installedBackends), [installedBackends])
 
   const statuses = useMemo(() => {
     const merged: Record<string, McpHealthStatus> = {}

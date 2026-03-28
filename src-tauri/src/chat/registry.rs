@@ -23,9 +23,15 @@ static PENDING_CANCELS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(H
 
 /// Cancel flags for OpenCode sessions (HTTP-based, no PID to kill).
 /// When cancel is requested, the flag is set so the blocking HTTP thread can detect it.
-/// Stores (cancel_flag, optional_opencode_session_id) — the session ID is set after
-/// the OpenCode session is created, enabling server-side interrupt on cancel.
-static CANCEL_FLAGS: Lazy<Mutex<HashMap<String, (Arc<AtomicBool>, Option<String>)>>> =
+/// Stores the cancel flag plus request context needed for server-side interrupt.
+#[derive(Clone)]
+struct OpenCodeCancelEntry {
+    flag: Arc<AtomicBool>,
+    opencode_session_id: Option<String>,
+    working_dir: Option<String>,
+}
+
+static CANCEL_FLAGS: Lazy<Mutex<HashMap<String, OpenCodeCancelEntry>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Codex app-server turn registry: maps session_id → (thread_id, turn_id).
@@ -113,17 +119,29 @@ pub fn register_cancel_flag(session_id: String, flag: Arc<AtomicBool>) -> bool {
         }
     }
 
-    lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").insert(session_id, (flag, None));
+    lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").insert(
+        session_id,
+        OpenCodeCancelEntry {
+            flag,
+            opencode_session_id: None,
+            working_dir: None,
+        },
+    );
     true
 }
 
-/// Update the OpenCode session ID for a registered cancel flag.
+/// Update the OpenCode session ID and working directory for a registered cancel flag.
 /// Called after the OpenCode session is created so that `cancel_process` can
 /// send a server-side interrupt request.
-pub fn update_cancel_flag_session_id(session_id: &str, opencode_session_id: String) {
+pub fn update_cancel_flag_context(
+    session_id: &str,
+    opencode_session_id: String,
+    working_dir: String,
+) {
     let mut flags = lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS");
     if let Some(entry) = flags.get_mut(session_id) {
-        entry.1 = Some(opencode_session_id);
+        entry.opencode_session_id = Some(opencode_session_id);
+        entry.working_dir = Some(working_dir);
     }
 }
 
@@ -306,28 +324,38 @@ pub fn cancel_process(
             .get(session_id)
             .cloned()
     };
-    if let Some((flag, opencode_session_id)) = flag_entry {
+    if let Some(entry) = flag_entry {
         // OpenCode session: set the cancel flag so the HTTP thread detects it
         log::warn!("OpenCode session {session_id}: setting cancel flag");
-        flag.store(true, Ordering::SeqCst);
+        entry.flag.store(true, Ordering::SeqCst);
 
         // Fire-and-forget: call the OpenCode interrupt endpoint to abort server-side processing.
         // This makes the in-flight blocking POST return immediately.
-        if let Some(oc_sid) = opencode_session_id {
+        if let Some(oc_sid) = entry.opencode_session_id {
             if let Some(base_url) = crate::opencode_server::get_current_url() {
                 let interrupt_url = format!("{base_url}/session/{oc_sid}/interrupt");
+                let working_dir = entry.working_dir.clone();
                 std::thread::spawn(move || {
                     log::info!("OpenCode: sending interrupt to {interrupt_url}");
                     let client = reqwest::blocking::Client::builder()
                         .timeout(std::time::Duration::from_secs(5))
                         .build();
                     match client {
-                        Ok(c) => match c.post(&interrupt_url).send() {
-                            Ok(resp) => {
-                                log::info!("OpenCode interrupt response: status={}", resp.status())
+                        Ok(c) => {
+                            let mut request = c.post(&interrupt_url);
+                            if let Some(dir) = working_dir {
+                                request = request.query(&[("directory", dir)]);
                             }
-                            Err(e) => log::warn!("OpenCode interrupt request failed: {e}"),
-                        },
+                            match request.send() {
+                                Ok(resp) => {
+                                    log::info!(
+                                        "OpenCode interrupt response: status={}",
+                                        resp.status()
+                                    )
+                                }
+                                Err(e) => log::warn!("OpenCode interrupt request failed: {e}"),
+                            }
+                        }
                         Err(e) => log::warn!("OpenCode interrupt client build failed: {e}"),
                     }
                 });
@@ -439,22 +467,27 @@ pub fn cancel_process_if_running(
             .get(session_id)
             .cloned()
     };
-    if let Some((flag, opencode_session_id)) = flag_entry {
+    if let Some(entry) = flag_entry {
         // OpenCode session actively running — set the cancel flag
         log::trace!("OpenCode session {session_id} is running, setting cancel flag");
-        flag.store(true, Ordering::SeqCst);
+        entry.flag.store(true, Ordering::SeqCst);
 
         // Fire-and-forget interrupt
-        if let Some(oc_sid) = opencode_session_id {
+        if let Some(oc_sid) = entry.opencode_session_id {
             if let Some(base_url) = crate::opencode_server::get_current_url() {
                 let interrupt_url = format!("{base_url}/session/{oc_sid}/interrupt");
+                let working_dir = entry.working_dir.clone();
                 std::thread::spawn(move || {
                     log::info!("OpenCode: sending interrupt to {interrupt_url}");
                     let client = reqwest::blocking::Client::builder()
                         .timeout(std::time::Duration::from_secs(5))
                         .build();
                     if let Ok(c) = client {
-                        let _ = c.post(&interrupt_url).send();
+                        let mut request = c.post(&interrupt_url);
+                        if let Some(dir) = working_dir {
+                            request = request.query(&[("directory", dir)]);
+                        }
+                        let _ = request.send();
                     }
                 });
             }
@@ -464,7 +497,10 @@ pub fn cancel_process_if_running(
             log::warn!("Failed to mark run as cancelled in manifest: {e}");
         }
 
-        emit_cancelled_event(app, session_id, worktree_id, true);
+        // Match the regular OpenCode cancel path: streamed SSE content may already
+        // exist, so let the frontend decide whether to restore or preserve based on
+        // actual partial output rather than forcing undo-send.
+        emit_cancelled_event(app, session_id, worktree_id, false);
 
         return Ok(true);
     }

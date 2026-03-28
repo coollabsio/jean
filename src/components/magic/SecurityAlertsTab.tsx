@@ -10,7 +10,12 @@ import {
 import { cn } from '@/lib/utils'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
-import { LoadedSecurityItem, SecurityAlertItem, LoadedAdvisoryItem, AdvisoryItem } from './LoadContextItems'
+import {
+  LoadedSecurityItem,
+  SecurityAlertItem,
+  LoadedAdvisoryItem,
+  AdvisoryItem,
+} from './LoadContextItems'
 import type {
   DependabotAlert,
   RepositoryAdvisory,
@@ -134,7 +139,8 @@ export function SecurityAlertsTab({
   const isAnyRefetching = isRefetching || (isRefetchingAdvisories ?? false)
   const combinedError = error ?? null
   const hasNoItems = filteredAlerts.length === 0 && advisories.length === 0
-  const hasAnyLoadedContexts = hasLoadedContexts || (hasLoadedAdvisoryContexts ?? false)
+  const hasAnyLoadedContexts =
+    hasLoadedContexts || (hasLoadedAdvisoryContexts ?? false)
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -273,19 +279,17 @@ export function SecurityAlertsTab({
             </div>
           ))}
 
-        {!isAnyLoading &&
-          !combinedError &&
-          hasNoItems && (
-            <div className="flex items-center justify-center py-8">
-              <span className="text-sm text-muted-foreground">
-                {searchQuery
-                  ? 'No alerts or advisories match your search'
-                  : hasAnyLoadedContexts
-                    ? 'All open alerts and advisories already loaded'
-                    : 'No open security alerts or advisories found'}
-              </span>
-            </div>
-          )}
+        {!isAnyLoading && !combinedError && hasNoItems && (
+          <div className="flex items-center justify-center py-8">
+            <span className="text-sm text-muted-foreground">
+              {searchQuery
+                ? 'No alerts or advisories match your search'
+                : hasAnyLoadedContexts
+                  ? 'All open alerts and advisories already loaded'
+                  : 'No open security alerts or advisories found'}
+            </span>
+          </div>
+        )}
 
         {!isAnyLoading && !combinedError && !hasNoItems && (
           <div className="py-1">
@@ -308,7 +312,8 @@ export function SecurityAlertsTab({
                           <span
                             className={cn(
                               'h-1.5 w-1.5 rounded-full flex-shrink-0',
-                              STATE_DOT_COLORS[alert.state] ?? 'bg-muted-foreground'
+                              STATE_DOT_COLORS[alert.state] ??
+                                'bg-muted-foreground'
                             )}
                           />
                           <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -351,11 +356,13 @@ export function SecurityAlertsTab({
                           <span
                             className={cn(
                               'h-1.5 w-1.5 rounded-full flex-shrink-0',
-                              STATE_DOT_COLORS[advisory.state] ?? 'bg-muted-foreground'
+                              STATE_DOT_COLORS[advisory.state] ??
+                                'bg-muted-foreground'
                             )}
                           />
                           <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                            {ADVISORY_STATE_LABELS[advisory.state] ?? advisory.state}
+                            {ADVISORY_STATE_LABELS[advisory.state] ??
+                              advisory.state}
                           </span>
                         </div>
                       )}

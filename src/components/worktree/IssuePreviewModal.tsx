@@ -221,7 +221,10 @@ function IssueContent({ detail }: { detail: GitHubIssueDetail }) {
             </span>
           </div>
           {detail.comments.map((comment, i) => (
-            <CommentItem key={`comment-${comment.author.login}-${comment.created_at}-${i}`} comment={comment} />
+            <CommentItem
+              key={`comment-${comment.author.login}-${comment.created_at}-${i}`}
+              comment={comment}
+            />
           ))}
         </div>
       )}
@@ -308,7 +311,10 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
             </span>
           </div>
           {detail.reviews.map((review, i) => (
-            <ReviewItem key={`review-${review.author.login}-${review.submittedAt ?? i}`} review={review} />
+            <ReviewItem
+              key={`review-${review.author.login}-${review.submittedAt ?? i}`}
+              review={review}
+            />
           ))}
         </div>
       )}
@@ -324,7 +330,10 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
             </span>
           </div>
           {detail.comments.map((comment, i) => (
-            <CommentItem key={`comment-${comment.author.login}-${comment.created_at}-${i}`} comment={comment} />
+            <CommentItem
+              key={`comment-${comment.author.login}-${comment.created_at}-${i}`}
+              comment={comment}
+            />
           ))}
         </div>
       )}
@@ -623,18 +632,17 @@ export function IssuePreviewModal({
             : securityQuery.data?.htmlUrl
 
   return (
-    <Dialog open={open} onOpenChange={open => {
-      console.log('[DIALOG-DEBUG] Preview onOpenChange', { open })
-      onOpenChange(open)
-    }}>
-      <DialogContent
-        className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-4xl sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-6"
-
-      >
+    <Dialog
+      open={open}
+      onOpenChange={open => {
+        console.log('[DIALOG-DEBUG] Preview onOpenChange', { open })
+        onOpenChange(open)
+      }}
+    >
+      <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-4xl sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-6">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="text-lg flex items-center gap-2">
-            {TYPE_LABELS[type]}{' '}
-            {type === 'advisory' ? ghsaId : `#${number}`}
+            {TYPE_LABELS[type]} {type === 'advisory' ? ghsaId : `#${number}`}
             {githubUrl && (
               <button
                 onClick={() => openExternal(githubUrl)}

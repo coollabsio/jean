@@ -245,8 +245,7 @@ export function WorktreeDropdownMenu({
               <GitBranch className="mr-2 h-4 w-4" />
               <span>Git</span>
               <span className="ml-auto text-xs">
-                <span className="text-green-500">+{uncommittedAdded}</span>
-                {' '}
+                <span className="text-green-500">+{uncommittedAdded}</span>{' '}
                 <span className="text-red-500">-{uncommittedRemoved}</span>
               </span>
             </DropdownMenuItem>

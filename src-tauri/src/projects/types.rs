@@ -164,6 +164,18 @@ pub struct Worktree {
     /// Linear issue identifier (e.g. "ENG-123", if created from a Linear issue)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_issue_identifier: Option<String>,
+    /// Dependabot security alert number (if created from a security alert)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_alert_number: Option<u32>,
+    /// Dependabot security alert URL on GitHub
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_alert_url: Option<String>,
+    /// Repository security advisory GHSA ID (if created from an advisory)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advisory_ghsa_id: Option<String>,
+    /// Repository security advisory URL on GitHub
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advisory_url: Option<String>,
     /// Cached PR display status (draft, open, review, merged, closed)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached_pr_status: Option<String>,
@@ -431,6 +443,10 @@ pub struct WorktreeCreatingEvent {
     pub pr_number: Option<u64>,
     /// Issue number (if created from an issue)
     pub issue_number: Option<u64>,
+    /// Security alert number (if created from a security alert)
+    pub security_alert_number: Option<u64>,
+    /// Advisory GHSA ID (if created from an advisory)
+    pub advisory_ghsa_id: Option<String>,
 }
 
 /// Event emitted when worktree creation completes successfully
@@ -548,6 +564,10 @@ pub struct WorktreePathExistsEvent {
     pub archived_worktree_name: Option<String>,
     /// Issue context to use when creating a new worktree with the suggested name
     pub issue_context: Option<super::github_issues::IssueContext>,
+    /// Security alert context to use when creating a new worktree with the suggested name
+    pub security_context: Option<super::github_issues::SecurityAlertContext>,
+    /// Advisory context to use when creating a new worktree with the suggested name
+    pub advisory_context: Option<super::github_issues::AdvisoryContext>,
 }
 
 /// Event emitted when worktree creation fails because the branch already exists
@@ -565,4 +585,8 @@ pub struct WorktreeBranchExistsEvent {
     pub issue_context: Option<super::github_issues::IssueContext>,
     /// PR context to use when creating a new worktree with the suggested name
     pub pr_context: Option<super::github_issues::PullRequestContext>,
+    /// Security alert context to use when creating a new worktree with the suggested name
+    pub security_context: Option<super::github_issues::SecurityAlertContext>,
+    /// Advisory context to use when creating a new worktree with the suggested name
+    pub advisory_context: Option<super::github_issues::AdvisoryContext>,
 }

@@ -63,7 +63,10 @@ export function usePlanApproval({
 
   const handlePlanApproval = useCallback(
     (card: SessionCardData, updatedPlan?: string) => {
-      console.warn('[usePlanApproval] handlePlanApproval (BUILD) CALLED', card.session.id)
+      console.warn(
+        '[usePlanApproval] handlePlanApproval (BUILD) CALLED',
+        card.session.id
+      )
       const sessionId = card.session.id
       const messageId = card.pendingPlanMessageId
       const originalPlan = card.planContent
@@ -127,7 +130,9 @@ export function usePlanApproval({
         ? formatApprovalMessage(baseMsg, updatedPlan, originalPlan)
         : `I've updated the plan. Please review and execute:\n\n<updated-plan>\n${updatedPlan}\n</updated-plan>`
       const buildInfo = [sessionBackend, model].filter(Boolean).join(' / ')
-      const message = buildInfo ? `[Build: ${buildInfo}]\n${rawMessage}` : rawMessage
+      const message = buildInfo
+        ? `[Build: ${buildInfo}]\n${rawMessage}`
+        : rawMessage
 
       // Chain: mark_plan_approved → update_session_state → broadcast → sendMessage
       // On WebSocket, commands dispatch concurrently via tokio::spawn.
@@ -139,33 +144,47 @@ export function usePlanApproval({
       // returns the already-updated backend data (prevents stale overwrites
       // of optimistic TanStack cache on web access).
       const markPromise = messageId
-        ? markPlanApproved(worktreeId, worktreePath, sessionId, messageId)
-            .catch(err => { console.error('[usePlanApproval] markPlanApproved failed:', err) })
+        ? markPlanApproved(
+            worktreeId,
+            worktreePath,
+            sessionId,
+            messageId
+          ).catch(err => {
+            console.error('[usePlanApproval] markPlanApproved failed:', err)
+          })
         : Promise.resolve()
 
       markPromise
-        .then(() => invoke('update_session_state', {
-          worktreeId,
-          worktreePath,
-          sessionId,
-          waitingForInput: false,
-          waitingForInputType: null,
-          selectedExecutionMode: 'build',
-        }))
+        .then(() =>
+          invoke('update_session_state', {
+            worktreeId,
+            worktreePath,
+            sessionId,
+            waitingForInput: false,
+            waitingForInputType: null,
+            selectedExecutionMode: 'build',
+          })
+        )
         .then(() => {
           invoke('broadcast_session_setting', {
             sessionId,
             key: 'executionMode',
             value: 'build',
           }).catch(err => {
-            console.error('[usePlanApproval] Broadcast executionMode=build failed:', err)
+            console.error(
+              '[usePlanApproval] Broadcast executionMode=build failed:',
+              err
+            )
           })
           invoke('broadcast_session_setting', {
             sessionId,
             key: 'waitingForInput',
             value: 'false',
           }).catch(err => {
-            console.error('[usePlanApproval] Broadcast waitingForInput=false failed:', err)
+            console.error(
+              '[usePlanApproval] Broadcast waitingForInput=false failed:',
+              err
+            )
           })
         })
         .catch(err => {
@@ -212,7 +231,10 @@ export function usePlanApproval({
 
   const handlePlanApprovalYolo = useCallback(
     (card: SessionCardData, updatedPlan?: string) => {
-      console.warn('[usePlanApproval] handlePlanApprovalYolo (YOLO) CALLED', card.session.id)
+      console.warn(
+        '[usePlanApproval] handlePlanApprovalYolo (YOLO) CALLED',
+        card.session.id
+      )
       const sessionId = card.session.id
       const messageId = card.pendingPlanMessageId
       const originalPlan = card.planContent
@@ -276,38 +298,54 @@ export function usePlanApproval({
         ? formatApprovalMessage(baseMsgYolo, updatedPlan, originalPlan)
         : `I've updated the plan. Please review and execute:\n\n<updated-plan>\n${updatedPlan}\n</updated-plan>`
       const yoloInfo = [sessionBackend, model].filter(Boolean).join(' / ')
-      const message = yoloInfo ? `[Yolo: ${yoloInfo}]\n${rawMessage}` : rawMessage
+      const message = yoloInfo
+        ? `[Yolo: ${yoloInfo}]\n${rawMessage}`
+        : rawMessage
 
       // Chain: mark_plan_approved → update_session_state → broadcast → sendMessage
       // See handlePlanApproval comment for why sequencing matters.
       const markPromise = messageId
-        ? markPlanApproved(worktreeId, worktreePath, sessionId, messageId)
-            .catch(err => { console.error('[usePlanApproval] markPlanApproved failed:', err) })
+        ? markPlanApproved(
+            worktreeId,
+            worktreePath,
+            sessionId,
+            messageId
+          ).catch(err => {
+            console.error('[usePlanApproval] markPlanApproved failed:', err)
+          })
         : Promise.resolve()
 
       markPromise
-        .then(() => invoke('update_session_state', {
-          worktreeId,
-          worktreePath,
-          sessionId,
-          waitingForInput: false,
-          waitingForInputType: null,
-          selectedExecutionMode: 'yolo',
-        }))
+        .then(() =>
+          invoke('update_session_state', {
+            worktreeId,
+            worktreePath,
+            sessionId,
+            waitingForInput: false,
+            waitingForInputType: null,
+            selectedExecutionMode: 'yolo',
+          })
+        )
         .then(() => {
           invoke('broadcast_session_setting', {
             sessionId,
             key: 'executionMode',
             value: 'yolo',
           }).catch(err => {
-            console.error('[usePlanApproval] Broadcast executionMode=yolo failed:', err)
+            console.error(
+              '[usePlanApproval] Broadcast executionMode=yolo failed:',
+              err
+            )
           })
           invoke('broadcast_session_setting', {
             sessionId,
             key: 'waitingForInput',
             value: 'false',
           }).catch(err => {
-            console.error('[usePlanApproval] Broadcast waitingForInput=false failed:', err)
+            console.error(
+              '[usePlanApproval] Broadcast waitingForInput=false failed:',
+              err
+            )
           })
         })
         .catch(err => {

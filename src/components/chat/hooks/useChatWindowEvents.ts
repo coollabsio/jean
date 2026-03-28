@@ -37,11 +37,23 @@ interface UseChatWindowEventsParams {
   gitStatus: { base_branch?: string } | null | undefined
   setDiffRequest: (
     req:
-      | { type: 'uncommitted' | 'branch'; worktreePath: string; baseBranch: string }
+      | {
+          type: 'uncommitted' | 'branch'
+          worktreePath: string
+          baseBranch: string
+        }
       | null
       | ((
-          prev: { type: 'uncommitted' | 'branch'; worktreePath: string; baseBranch: string } | null
-        ) => { type: 'uncommitted' | 'branch'; worktreePath: string; baseBranch: string } | null)
+          prev: {
+            type: 'uncommitted' | 'branch'
+            worktreePath: string
+            baseBranch: string
+          } | null
+        ) => {
+          type: 'uncommitted' | 'branch'
+          worktreePath: string
+          baseBranch: string
+        } | null)
   ) => void
   // Auto-scroll
   isAtBottom: boolean
@@ -50,7 +62,12 @@ interface UseChatWindowEventsParams {
   isSending: boolean
   currentQueuedMessages: QueuedMessage[]
   // Create session
-  createSession: { mutate: (args: { worktreeId: string; worktreePath: string }, opts?: { onSuccess?: (session: { id: string }) => void }) => void }
+  createSession: {
+    mutate: (
+      args: { worktreeId: string; worktreePath: string },
+      opts?: { onSuccess?: (session: { id: string }) => void }
+    ) => void
+  }
   // Debug/preferences
   preferences: { debug_mode_enabled?: boolean } | undefined
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -181,7 +198,12 @@ export function useChatWindowEvents({
     }
     window.addEventListener('open-plan', handler)
     return () => window.removeEventListener('open-plan', handler)
-  }, [latestPlanContent, latestPlanFilePath, setPlanDialogContent, setIsPlanDialogOpen])
+  }, [
+    latestPlanContent,
+    latestPlanFilePath,
+    setPlanDialogContent,
+    setIsPlanDialogOpen,
+  ])
 
   // R key: Open recap dialog
   useEffect(() => {
@@ -282,7 +304,8 @@ export function useChatWindowEvents({
     const handler = () => {
       const store = useChatStore.getState()
       store.cycleExecutionMode(activeSessionId)
-      const mode = useChatStore.getState().executionModes[activeSessionId] ?? 'plan'
+      const mode =
+        useChatStore.getState().executionModes[activeSessionId] ?? 'plan'
       // Broadcast to other clients (native ↔ web access)
       invoke('broadcast_session_setting', {
         sessionId: activeSessionId,
@@ -316,7 +339,11 @@ export function useChatWindowEvents({
       setDiffRequest(prev => {
         if (requestedType) {
           // Explicit type from button click — open or switch to that type
-          return { type: requestedType, worktreePath: activeWorktreePath, baseBranch }
+          return {
+            type: requestedType,
+            worktreePath: activeWorktreePath,
+            baseBranch,
+          }
         }
         if (prev) {
           // CMD+G toggle between types
@@ -325,7 +352,11 @@ export function useChatWindowEvents({
             type: prev.type === 'uncommitted' ? 'branch' : 'uncommitted',
           }
         }
-        return { type: 'uncommitted', worktreePath: activeWorktreePath, baseBranch }
+        return {
+          type: 'uncommitted',
+          worktreePath: activeWorktreePath,
+          baseBranch,
+        }
       })
     }
     window.addEventListener('open-git-diff', handler)
@@ -413,7 +444,8 @@ export function useChatWindowEvents({
       })
     }
     window.addEventListener('command:toggle-debug-mode', handler)
-    return () => window.removeEventListener('command:toggle-debug-mode', handler)
+    return () =>
+      window.removeEventListener('command:toggle-debug-mode', handler)
   }, [preferences, patchPreferences])
 
   // Set chat input from external (conflict resolution flow)
@@ -465,7 +497,11 @@ export function useChatWindowEvents({
       if (!viewport) return
       const { scrollTop, scrollHeight, clientHeight } = viewport
       // Skip if already at the boundary
-      if (e.detail.direction === 'down' && scrollHeight - scrollTop - clientHeight < 2) return
+      if (
+        e.detail.direction === 'down' &&
+        scrollHeight - scrollTop - clientHeight < 2
+      )
+        return
       if (e.detail.direction === 'up' && scrollTop < 2) return
       beginKeyboardScroll()
       // Cancel any ongoing keyboard scroll animation
@@ -539,7 +575,8 @@ export function useChatWindowEvents({
       }
     }
     window.addEventListener('approve-plan-clear-context', handler)
-    return () => window.removeEventListener('approve-plan-clear-context', handler)
+    return () =>
+      window.removeEventListener('approve-plan-clear-context', handler)
   }, [
     isModal,
     isCodexBackend,
@@ -563,7 +600,8 @@ export function useChatWindowEvents({
       }
     }
     window.addEventListener('approve-plan-clear-context-build', handler)
-    return () => window.removeEventListener('approve-plan-clear-context-build', handler)
+    return () =>
+      window.removeEventListener('approve-plan-clear-context-build', handler)
   }, [
     isModal,
     isCodexBackend,

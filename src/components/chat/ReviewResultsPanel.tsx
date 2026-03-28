@@ -125,7 +125,6 @@ function getApprovalConfig(status: string) {
   }
 }
 
-
 /** Empty state when no review results */
 function EmptyState() {
   return (
@@ -138,7 +137,10 @@ function EmptyState() {
   )
 }
 
-export function ReviewResultsPanel({ sessionId, onSendFix }: ReviewResultsPanelProps) {
+export function ReviewResultsPanel({
+  sessionId,
+  onSendFix,
+}: ReviewResultsPanelProps) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [customSuggestion, setCustomSuggestion] = useState('')
   const [fixingIndices, setFixingIndices] = useState<Set<number>>(new Set())
@@ -165,10 +167,14 @@ export function ReviewResultsPanel({ sessionId, onSendFix }: ReviewResultsPanelP
   )
 
   // Auto-select first finding when results load and nothing is selected
-  const effectiveSelectedIndex = selectedIndex ?? sortedFindings[0]?.originalIndex ?? null
+  const effectiveSelectedIndex =
+    selectedIndex ?? sortedFindings[0]?.originalIndex ?? null
   const effectiveFinding = useMemo(() => {
     if (effectiveSelectedIndex === null) return null
-    return sortedFindings.find(f => f.originalIndex === effectiveSelectedIndex) ?? null
+    return (
+      sortedFindings.find(f => f.originalIndex === effectiveSelectedIndex) ??
+      null
+    )
   }, [effectiveSelectedIndex, sortedFindings])
 
   // Reset custom suggestion when selection changes
@@ -291,11 +297,13 @@ Please apply all these fixes to the codebase.`
     (f, i) => f.severity !== 'praise' && isFindingFixed(f, i)
   ).length
 
-  const canFix = effectiveFinding && effectiveFinding.finding.severity !== 'praise'
+  const canFix =
+    effectiveFinding && effectiveFinding.finding.severity !== 'praise'
   const isCurrentFixed = effectiveFinding
     ? isFindingFixed(effectiveFinding.finding, effectiveFinding.originalIndex)
     : false
-  const isCurrentFixing = effectiveSelectedIndex !== null && fixingIndices.has(effectiveSelectedIndex)
+  const isCurrentFixing =
+    effectiveSelectedIndex !== null && fixingIndices.has(effectiveSelectedIndex)
 
   return (
     <div className="relative flex h-full flex-col bg-background">
@@ -314,28 +322,43 @@ Please apply all these fixes to the codebase.`
           {/* Severity counts */}
           <div className="flex items-center gap-1.5">
             {(counts.critical ?? 0) > 0 && (
-              <Badge variant="outline" className="text-red-500 text-[10px] px-1.5 py-0">
+              <Badge
+                variant="outline"
+                className="text-red-500 text-[10px] px-1.5 py-0"
+              >
                 {counts.critical} critical
               </Badge>
             )}
             {(counts.warning ?? 0) > 0 && (
-              <Badge variant="outline" className="text-yellow-500 text-[10px] px-1.5 py-0">
+              <Badge
+                variant="outline"
+                className="text-yellow-500 text-[10px] px-1.5 py-0"
+              >
                 {counts.warning} warning
               </Badge>
             )}
             {(counts.suggestion ?? 0) > 0 && (
-              <Badge variant="outline" className="text-blue-500 text-[10px] px-1.5 py-0">
+              <Badge
+                variant="outline"
+                className="text-blue-500 text-[10px] px-1.5 py-0"
+              >
                 {counts.suggestion} suggestion
               </Badge>
             )}
             {(counts.praise ?? 0) > 0 && (
-              <Badge variant="outline" className="text-green-500 text-[10px] px-1.5 py-0">
+              <Badge
+                variant="outline"
+                className="text-green-500 text-[10px] px-1.5 py-0"
+              >
                 {counts.praise} praise
               </Badge>
             )}
           </div>
           {fixedCount > 0 && (
-            <Badge variant="outline" className="text-green-500 border-green-500 text-[10px] px-1.5 py-0">
+            <Badge
+              variant="outline"
+              className="text-green-500 border-green-500 text-[10px] px-1.5 py-0"
+            >
               {fixedCount} fixed
             </Badge>
           )}
@@ -349,7 +372,12 @@ Please apply all these fixes to the codebase.`
       {/* Master-detail layout */}
       <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
         {/* Left sidebar: findings list */}
-        <ResizablePanel defaultSize={40} minSize={15} maxSize={60} className="flex flex-col min-h-0">
+        <ResizablePanel
+          defaultSize={40}
+          minSize={15}
+          maxSize={60}
+          className="flex flex-col min-h-0"
+        >
           {/* Fix all actions */}
           {unfixedCount > 0 && (
             <div className="border-b p-2 flex gap-1.5">
@@ -408,7 +436,9 @@ Please apply all these fixes to the codebase.`
                       isFixed && 'opacity-50'
                     )}
                   >
-                    <Icon className={cn('h-3.5 w-3.5 shrink-0', config.color)} />
+                    <Icon
+                      className={cn('h-3.5 w-3.5 shrink-0', config.color)}
+                    />
                     <span className="flex-1 truncate text-xs">
                       {finding.title}
                     </span>
@@ -425,17 +455,27 @@ Please apply all these fixes to the codebase.`
         <ResizableHandle />
 
         {/* Right detail panel */}
-        <ResizablePanel defaultSize={60} className="flex flex-col min-h-0 min-w-0">
+        <ResizablePanel
+          defaultSize={60}
+          className="flex flex-col min-h-0 min-w-0"
+        >
           {effectiveFinding ? (
             <>
               {/* Finding detail header */}
               <div className="border-b px-6 py-4">
                 <div className="flex items-start gap-3">
                   {(() => {
-                    const config = getSeverityConfig(effectiveFinding.finding.severity)
+                    const config = getSeverityConfig(
+                      effectiveFinding.finding.severity
+                    )
                     const Icon = config.icon
                     return (
-                      <div className={cn('mt-0.5 rounded-md p-1.5', config.bgColor)}>
+                      <div
+                        className={cn(
+                          'mt-0.5 rounded-md p-1.5',
+                          config.bgColor
+                        )}
+                      >
                         <Icon className={cn('h-4 w-4', config.color)} />
                       </div>
                     )
@@ -449,11 +489,15 @@ Please apply all these fixes to the codebase.`
                         variant="outline"
                         className={cn(
                           'text-[10px] px-1.5 py-0',
-                          getSeverityConfig(effectiveFinding.finding.severity).color,
+                          getSeverityConfig(effectiveFinding.finding.severity)
+                            .color,
                           'border-current'
                         )}
                       >
-                        {getSeverityConfig(effectiveFinding.finding.severity).label}
+                        {
+                          getSeverityConfig(effectiveFinding.finding.severity)
+                            .label
+                        }
                       </Badge>
                       {isCurrentFixed && (
                         <Badge
@@ -466,7 +510,9 @@ Please apply all these fixes to the codebase.`
                     </div>
                     <p className="mt-1 text-xs font-mono text-muted-foreground select-text cursor-text">
                       {effectiveFinding.finding.file}
-                      {effectiveFinding.finding.line ? `:${effectiveFinding.finding.line}` : ''}
+                      {effectiveFinding.finding.line
+                        ? `:${effectiveFinding.finding.line}`
+                        : ''}
                     </p>
                   </div>
                 </div>

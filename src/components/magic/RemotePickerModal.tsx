@@ -12,11 +12,8 @@ import { getGitRemotes, removeGitRemote } from '@/services/git-status'
 import { cn } from '@/lib/utils'
 
 export function RemotePickerModal() {
-  const {
-    remotePickerOpen,
-    remotePickerRepoPath,
-    closeRemotePicker,
-  } = useUIStore()
+  const { remotePickerOpen, remotePickerRepoPath, closeRemotePicker } =
+    useUIStore()
   const contentRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const queryClient = useQueryClient()

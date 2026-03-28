@@ -42,7 +42,10 @@ export function RecentContexts({
   projectId,
 }: RecentContextsProps) {
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
-  const [preview, setPreview] = useState<{ title: string; content: string } | null>(null)
+  const [preview, setPreview] = useState<{
+    title: string
+    content: string
+  } | null>(null)
 
   const { data: contextsData } = useQuery({
     queryKey: ['session-context'],
@@ -85,7 +88,10 @@ export function RecentContexts({
     })
 
     if (linkedProjectNames.size === 0) {
-      return { linkedContexts: [] as SavedContext[], otherContexts: deduped.slice(0, 5) }
+      return {
+        linkedContexts: [] as SavedContext[],
+        otherContexts: deduped.slice(0, 5),
+      }
     }
 
     const linked: SavedContext[] = []
@@ -117,14 +123,10 @@ export function RecentContexts({
       try {
         if (isCurrentlyAttached) {
           await removeSavedContext(sessionId, contextKey)
-          toast.success(
-            `Context "${context.name || context.slug}" removed`
-          )
+          toast.success(`Context "${context.name || context.slug}" removed`)
         } else {
           await attachSavedContext(sessionId, context.path, contextKey)
-          toast.success(
-            `Context "${context.name || context.slug}" attached`
-          )
+          toast.success(`Context "${context.name || context.slug}" attached`)
         }
         queryClient.invalidateQueries({
           queryKey: ['github', 'attached-contexts', sessionId],
@@ -144,7 +146,9 @@ export function RecentContexts({
 
   const handlePreview = useCallback(async (ctx: SavedContext) => {
     try {
-      const content = await invoke<string>('read_context_file', { path: ctx.path })
+      const content = await invoke<string>('read_context_file', {
+        path: ctx.path,
+      })
       setPreview({ title: ctx.name || ctx.slug, content })
     } catch {
       toast.error('Failed to load context preview')
@@ -157,7 +161,10 @@ export function RecentContexts({
     const isLoading = loadingIds.has(ctx.id)
     const isAttached = attachedKeys.has(ctx.filename.replace(/\.md$/, ''))
     return (
-      <div key={ctx.id} className="flex items-center w-[200px] rounded-md border border-border bg-muted/50 text-xs text-foreground transition-colors">
+      <div
+        key={ctx.id}
+        className="flex items-center w-[200px] rounded-md border border-border bg-muted/50 text-xs text-foreground transition-colors"
+      >
         <button
           onClick={() => handleToggle(ctx)}
           disabled={isLoading}
@@ -170,12 +177,13 @@ export function RecentContexts({
           ) : (
             <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate">
-            {ctx.name || ctx.slug}
-          </span>
+          <span className="truncate">{ctx.name || ctx.slug}</span>
         </button>
         <button
-          onClick={(e) => { e.stopPropagation(); handlePreview(ctx) }}
+          onClick={e => {
+            e.stopPropagation()
+            handlePreview(ctx)
+          }}
           className="px-1.5 py-1.5 border-l border-border hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer rounded-r-md text-muted-foreground"
         >
           <Eye className="h-3 w-3" />
@@ -200,10 +208,11 @@ export function RecentContexts({
       {otherContexts.length > 0 && (
         <div className="flex flex-col items-center gap-1.5">
           <span className="text-xs text-muted-foreground text-center items-center justify-center flex gap-2">
-            Recent contexts
-            {' '}
+            Recent contexts{' '}
             <button
-              onClick={() => useUIStore.getState().setLoadContextModalOpen(true)}
+              onClick={() =>
+                useUIStore.getState().setLoadContextModalOpen(true)
+              }
               className="inline-flex items-center gap-0.5 text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
               title="Browse all contexts"
             >

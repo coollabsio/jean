@@ -5,17 +5,16 @@ import * as SliderPrimitive from '@radix-ui/react-slider'
 
 import { cn } from '@/lib/utils'
 
-interface SliderProps
-  extends Omit<
-    React.ComponentProps<typeof SliderPrimitive.Root>,
-    | 'min'
-    | 'max'
-    | 'step'
-    | 'value'
-    | 'defaultValue'
-    | 'onValueChange'
-    | 'onValueCommit'
-  > {
+interface SliderProps extends Omit<
+  React.ComponentProps<typeof SliderPrimitive.Root>,
+  | 'min'
+  | 'max'
+  | 'step'
+  | 'value'
+  | 'defaultValue'
+  | 'onValueChange'
+  | 'onValueCommit'
+> {
   ticks: { value: number; label: string }[]
   value: number
   onValueChange: (value: number) => void

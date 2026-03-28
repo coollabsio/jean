@@ -214,7 +214,10 @@ export function useScrollManagement({
         requestAnimationFrame(() => {
           if (cancelled) return
           if (isAtBottomRef.current) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
+            viewport.scrollTo({
+              top: viewport.scrollHeight,
+              behavior: 'instant',
+            })
           }
         })
       }

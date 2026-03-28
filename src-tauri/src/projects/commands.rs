@@ -699,6 +699,8 @@ pub async fn create_worktree(
         branch: name.clone(),
         pr_number: pr_context.as_ref().map(|ctx| ctx.number as u64),
         issue_number: issue_context.as_ref().map(|ctx| ctx.number as u64),
+        security_alert_number: security_context.as_ref().map(|ctx| ctx.number as u64),
+        advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
     };
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
         log::error!("Failed to emit worktree:creating event: {e}");
@@ -720,6 +722,10 @@ pub async fn create_worktree(
         pr_url: None,
         issue_number: issue_context.as_ref().map(|ctx| ctx.number),
         linear_issue_identifier: linear_context.as_ref().map(|ctx| ctx.identifier.clone()),
+        security_alert_number: security_context.as_ref().map(|ctx| ctx.number),
+        security_alert_url: security_context.as_ref().and_then(|ctx| ctx.html_url.clone()),
+        advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+        advisory_url: advisory_context.as_ref().and_then(|ctx| ctx.html_url.clone()),
         cached_pr_status: None,
         cached_check_status: None,
         cached_behind_count: None,
@@ -764,14 +770,22 @@ pub async fn create_worktree(
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             log::trace!("Background: Creating git worktree {name_clone} at {worktree_path_clone}");
 
-            // Auto-pull base branch if enabled (non-blocking on failure)
-            if should_auto_pull {
-                log::trace!("Auto-pulling base branch {base_clone} before worktree creation");
-                match git::git_pull(&project_path, &base_clone, None) {
-                    Ok(_) => log::trace!("Successfully pulled base branch {base_clone}"),
-                    Err(e) => log::warn!("Failed to auto-pull base branch {base_clone}: {e}"),
+            // Fetch base branch if enabled, use origin/<base> for up-to-date start point
+            let effective_base = if should_auto_pull {
+                log::trace!("Fetching base branch {base_clone} before worktree creation");
+                match git::git_fetch(&project_path, &base_clone, None) {
+                    Ok(_) => {
+                        log::trace!("Successfully fetched, using origin/{base_clone}");
+                        format!("origin/{base_clone}")
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch base branch {base_clone}: {e}");
+                        base_clone.clone()
+                    }
                 }
-            }
+            } else {
+                base_clone.clone()
+            };
 
             // Check if path already exists
             let worktree_path = std::path::Path::new(&worktree_path_clone);
@@ -807,6 +821,8 @@ pub async fn create_worktree(
                     archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
                     archived_worktree_name: archived_info.map(|(_, name)| name),
                     issue_context: issue_context_clone.clone(),
+                    security_context: security_context_clone.clone(),
+                    advisory_context: advisory_context_clone.clone(),
                 };
                 if let Err(e) = app_clone.emit_all("worktree:path_exists", &path_exists_event) {
                     log::error!("Failed to emit worktree:path_exists event: {e}");
@@ -867,6 +883,8 @@ pub async fn create_worktree(
                             suggested_name,
                             issue_context: issue_context_clone.clone(),
                             pr_context: pr_context_clone.clone(),
+                            security_context: security_context_clone.clone(),
+                            advisory_context: advisory_context_clone.clone(),
                         };
                         if let Err(e) =
                             app_clone.emit_all("worktree:branch_exists", &branch_exists_event)
@@ -893,7 +911,7 @@ pub async fn create_worktree(
                 &project_path,
                 &worktree_path_clone,
                 &branch_for_worktree,
-                &base_clone,
+                &effective_base,
             ) {
                 log::error!("Background: Failed to create worktree: {e}");
                 let error_event = WorktreeCreateErrorEvent {
@@ -1241,6 +1259,10 @@ pub async fn create_worktree(
                     linear_issue_identifier: linear_context_clone
                         .as_ref()
                         .map(|ctx| ctx.identifier.clone()),
+                    security_alert_number: security_context_clone.as_ref().map(|ctx| ctx.number),
+                    security_alert_url: security_context_clone.as_ref().and_then(|ctx| ctx.html_url.clone()),
+                    advisory_ghsa_id: advisory_context_clone.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+                    advisory_url: advisory_context_clone.as_ref().and_then(|ctx| ctx.html_url.clone()),
                     cached_pr_status: None,
                     cached_check_status: None,
                     cached_behind_count: None,
@@ -1257,7 +1279,7 @@ pub async fn create_worktree(
                     order: max_order + 1,
                     archived_at: None,
                     label: None,
-                    last_opened_at: None,
+                                last_opened_at: None,
                 };
 
                 data.add_worktree(worktree.clone());
@@ -1408,6 +1430,8 @@ pub async fn create_worktree_from_existing_branch(
         branch: name.clone(),
         pr_number: pr_context.as_ref().map(|ctx| ctx.number as u64),
         issue_number: issue_context.as_ref().map(|ctx| ctx.number as u64),
+        security_alert_number: security_context.as_ref().map(|ctx| ctx.number as u64),
+        advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
     };
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
         log::error!("Failed to emit worktree:creating event: {e}");
@@ -1429,6 +1453,10 @@ pub async fn create_worktree_from_existing_branch(
         pr_url: None,
         issue_number: issue_context.as_ref().map(|ctx| ctx.number),
         linear_issue_identifier: linear_context.as_ref().map(|ctx| ctx.identifier.clone()),
+        security_alert_number: security_context.as_ref().map(|ctx| ctx.number),
+        security_alert_url: security_context.as_ref().and_then(|ctx| ctx.html_url.clone()),
+        advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+        advisory_url: advisory_context.as_ref().and_then(|ctx| ctx.html_url.clone()),
         cached_pr_status: None,
         cached_check_status: None,
         cached_behind_count: None,
@@ -1506,6 +1534,8 @@ pub async fn create_worktree_from_existing_branch(
                     archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
                     archived_worktree_name: archived_info.map(|(_, name)| name),
                     issue_context: issue_context_clone.clone(),
+                    security_context: security_context_clone.clone(),
+                    advisory_context: advisory_context_clone.clone(),
                 };
                 if let Err(e) = app_clone.emit_all("worktree:path_exists", &path_exists_event) {
                     log::error!("Failed to emit worktree:path_exists event: {e}");
@@ -1801,6 +1831,10 @@ pub async fn create_worktree_from_existing_branch(
                     linear_issue_identifier: linear_context_clone
                         .as_ref()
                         .map(|ctx| ctx.identifier.clone()),
+                    security_alert_number: security_context_clone.as_ref().map(|ctx| ctx.number),
+                    security_alert_url: security_context_clone.as_ref().and_then(|ctx| ctx.html_url.clone()),
+                    advisory_ghsa_id: advisory_context_clone.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+                    advisory_url: advisory_context_clone.as_ref().and_then(|ctx| ctx.html_url.clone()),
                     cached_pr_status: None,
                     cached_check_status: None,
                     cached_behind_count: None,
@@ -1817,7 +1851,7 @@ pub async fn create_worktree_from_existing_branch(
                     order: max_order + 1,
                     archived_at: None,
                     label: None,
-                    last_opened_at: None,
+                                last_opened_at: None,
                 };
 
                 data.add_worktree(worktree.clone());
@@ -2000,6 +2034,8 @@ pub async fn checkout_pr(
         branch: pr_detail.head_ref_name.clone(), // Use PR's actual branch name
         pr_number: Some(pr_number as u64),
         issue_number: None,
+        security_alert_number: None,
+        advisory_ghsa_id: None,
     };
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
         log::error!("Failed to emit worktree:creating event: {e}");
@@ -2022,6 +2058,10 @@ pub async fn checkout_pr(
         pr_url: None,
         issue_number: None,
         linear_issue_identifier: None,
+        security_alert_number: None,
+        security_alert_url: None,
+        advisory_ghsa_id: None,
+        advisory_url: None,
         cached_pr_status: None,
         cached_check_status: None,
         cached_behind_count: None,
@@ -2087,13 +2127,25 @@ pub async fn checkout_pr(
                 );
             }
 
+            // Fetch latest base branch so the worktree starts from up-to-date code
+            let effective_base = match git::git_fetch(&project_path, &base_branch_clone, None) {
+                Ok(_) => {
+                    log::trace!("Successfully fetched base branch, using origin/{base_branch_clone}");
+                    format!("origin/{base_branch_clone}")
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch base branch: {e}, falling back to local {base_branch_clone}");
+                    base_branch_clone.clone()
+                }
+            };
+
             // Step 1: Create worktree with a temporary branch based on base branch
             // This gives us a working directory where we can run gh pr checkout
             if let Err(e) = git::create_worktree(
                 &project_path,
                 &worktree_path_clone,
                 &temp_branch_clone,
-                &base_branch_clone,
+                &effective_base,
             ) {
                 log::error!("Background: Failed to create worktree: {e}");
                 let error_event = WorktreeCreateErrorEvent {
@@ -2324,6 +2376,10 @@ pub async fn checkout_pr(
                     pr_url: None,
                     issue_number: None,
                     linear_issue_identifier: None,
+                    security_alert_number: None,
+                    security_alert_url: None,
+                    advisory_ghsa_id: None,
+                    advisory_url: None,
                     cached_pr_status: None,
                     cached_check_status: None,
                     cached_behind_count: None,
@@ -2340,7 +2396,7 @@ pub async fn checkout_pr(
                     order: max_order + 1,
                     archived_at: None,
                     label: None,
-                    last_opened_at: None,
+                                last_opened_at: None,
                 };
 
                 data.add_worktree(worktree.clone());
@@ -2617,6 +2673,10 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
         pr_url: None,
         issue_number: None,
         linear_issue_identifier: None,
+        security_alert_number: None,
+        security_alert_url: None,
+        advisory_ghsa_id: None,
+        advisory_url: None,
         cached_pr_status: None,
         cached_check_status: None,
         cached_behind_count: None,
@@ -3010,6 +3070,10 @@ pub async fn import_worktree(
         pr_url: None,
         issue_number: None,
         linear_issue_identifier: None,
+        security_alert_number: None,
+        security_alert_url: None,
+        advisory_ghsa_id: None,
+        advisory_url: None,
         cached_pr_status: None,
         cached_check_status: None,
         cached_behind_count: None,

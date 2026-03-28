@@ -318,7 +318,9 @@
 
 /* Bell ring animation for unread notifications */
 @keyframes bell-ring {
-  0%, 70%, 100% {
+  0%,
+  70%,
+  100% {
     transform: rotate(0deg);
   }
   5% {
@@ -343,7 +345,8 @@
 
 /* Pulsing glow for running terminal icon indicator */
 @keyframes icon-glow {
-  0%, 100% {
+  0%,
+  100% {
     filter: drop-shadow(0 0 2px rgba(250, 204, 21, 0.5));
   }
   50% {
@@ -506,8 +509,13 @@ kbd {
 }
 
 /* Hidden scrollbar for horizontally scrollable tab bars */
-.scrollbar-hide::-webkit-scrollbar { display: none; }
-.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
 
 /* Number input spinner — invert arrows in dark mode so they're visible */
 .dark input[type='number']::-webkit-inner-spin-button,

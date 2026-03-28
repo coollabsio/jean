@@ -166,6 +166,7 @@ export interface SecurityAlertContext {
   ghsaId: string
   cveId?: string
   manifestPath: string
+  htmlUrl?: string
 }
 
 /**
@@ -215,6 +216,7 @@ export interface AdvisoryContext {
   description: string
   cveId?: string
   vulnerabilities: AdvisoryVulnerability[]
+  htmlUrl?: string
 }
 
 /**

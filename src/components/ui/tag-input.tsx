@@ -10,8 +10,10 @@ export interface Tag {
   text: string
 }
 
-export interface TagInputProps
-  extends Omit<React.ComponentProps<'div'>, 'onChange'> {
+export interface TagInputProps extends Omit<
+  React.ComponentProps<'div'>,
+  'onChange'
+> {
   tags: Tag[]
   onTagsChange: (tags: Tag[]) => void
   placeholder?: string

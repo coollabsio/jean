@@ -22,10 +22,7 @@ import type {
   LabelData,
   QueuedMessage,
 } from '@/types/chat'
-import {
-  isTauri,
-  projectsQueryKeys,
-} from '@/services/projects'
+import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { preferencesQueryKeys } from '@/services/preferences'
 import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
@@ -331,15 +328,15 @@ export function useSession(
         const cached = queryClient.getQueryData<Session>(
           chatQueryKeys.session(sessionId)
         )
-        if (
-          cached &&
-          cached.messages.length > session.messages.length
-        ) {
-          logger.warn('[useSession] preserving cached messages over fresh fetch', {
-            sessionId,
-            cachedCount: cached.messages.length,
-            diskCount: session.messages.length,
-          })
+        if (cached && cached.messages.length > session.messages.length) {
+          logger.warn(
+            '[useSession] preserving cached messages over fresh fetch',
+            {
+              sessionId,
+              cachedCount: cached.messages.length,
+              diskCount: session.messages.length,
+            }
+          )
           return { ...session, messages: cached.messages }
         }
 
@@ -881,7 +878,10 @@ export function useAllArchivedSessions() {
  * - When closing the last session, navigates to canvas instead of deleting the worktree
  */
 export function useCloseSessionOrWorktreeKeybinding(
-  onConfirmRequired?: (branchName?: string, mode?: 'worktree' | 'session') => void
+  onConfirmRequired?: (
+    branchName?: string,
+    mode?: 'worktree' | 'session'
+  ) => void
 ) {
   const archiveSession = useArchiveSession()
   const closeSession = useCloseSession()
@@ -953,11 +953,7 @@ export function useCloseSessionOrWorktreeKeybinding(
       })
       useChatStore.getState().clearActiveWorktree()
     }
-  }, [
-    archiveSession,
-    closeSession,
-    queryClient,
-  ])
+  }, [archiveSession, closeSession, queryClient])
 
   useEffect(() => {
     const handleCloseSessionOrWorktree = () => {
@@ -1187,7 +1183,9 @@ export function useSendMessage() {
         throw new Error('Not in Tauri context')
       }
 
-      console.log(`[SendMutation] mutationFn CALLED sessionId=${sessionId} worktreeId=${worktreeId}`)
+      console.log(
+        `[SendMutation] mutationFn CALLED sessionId=${sessionId} worktreeId=${worktreeId}`
+      )
       logger.debug('Sending chat message', {
         sessionId,
         worktreeId,
@@ -1195,7 +1193,7 @@ export function useSendMessage() {
         executionMode,
         thinkingLevel,
         effortLevel,
-          parallelExecutionPrompt,
+        parallelExecutionPrompt,
         aiLanguage,
         allowedTools,
         mcpConfig: mcpConfig ? '(set)' : undefined,
@@ -1210,7 +1208,7 @@ export function useSendMessage() {
         executionMode,
         thinkingLevel,
         effortLevel,
-          parallelExecutionPrompt,
+        parallelExecutionPrompt,
         aiLanguage,
         allowedTools,
         mcpConfig,
@@ -1293,7 +1291,14 @@ export function useSendMessage() {
       return { previous, worktreeId }
     },
     onSuccess: (response, { sessionId, worktreeId, executionMode }) => {
-      console.log(`[SendMutation] onSuccess sessionId=${sessionId} cancelled=${response.cancelled}`, { currentSending: Object.keys(useChatStore.getState().sendingSessionIds) })
+      console.log(
+        `[SendMutation] onSuccess sessionId=${sessionId} cancelled=${response.cancelled}`,
+        {
+          currentSending: Object.keys(
+            useChatStore.getState().sendingSessionIds
+          ),
+        }
+      )
       // All cancelled responses are handled by the chat:cancelled event handler,
       // which already correctly restores the user message (undo path) or preserves
       // the partial assistant response (preserve path). Letting onSuccess proceed
@@ -1367,11 +1372,22 @@ export function useSendMessage() {
       const errorStr = String(error)
       // Tauri invoke errors are strings, not Error instances — extract from both
       const errorMessage =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : errorStr
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : errorStr
       const isCancellation =
         errorStr.includes('cancelled') || errorMessage.includes('cancelled')
 
-      console.log(`[SendMutation] onError sessionId=${sessionId} isCancellation=${isCancellation} error=${errorMessage}`, { currentSending: Object.keys(useChatStore.getState().sendingSessionIds) })
+      console.log(
+        `[SendMutation] onError sessionId=${sessionId} isCancellation=${isCancellation} error=${errorMessage}`,
+        {
+          currentSending: Object.keys(
+            useChatStore.getState().sendingSessionIds
+          ),
+        }
+      )
 
       if (isCancellation) {
         logger.debug('Message cancelled', { sessionId })
@@ -1420,12 +1436,16 @@ export function useSendMessage() {
       // Check if CLI produced streaming content before the error.
       // If so, the CLI likely ran — don't destroy the conversation by
       // rolling back to pre-send state. Instead, refetch from disk (#209).
-      const hasStreamedContent = !!useChatStore.getState().streamingContents[sessionId]
+      const hasStreamedContent =
+        !!useChatStore.getState().streamingContents[sessionId]
       if (hasStreamedContent) {
-        logger.warn('Error after CLI produced content, refetching instead of rollback', {
-          sessionId,
-          error: errorMessage,
-        })
+        logger.warn(
+          'Error after CLI produced content, refetching instead of rollback',
+          {
+            sessionId,
+            error: errorMessage,
+          }
+        )
         setError(sessionId, errorMessage || 'Unknown error occurred')
         queryClient.invalidateQueries({
           queryKey: chatQueryKeys.session(sessionId),
@@ -1592,7 +1612,9 @@ export function useSetSessionModel() {
       logger.info('Session model saved')
     },
     onMutate: async ({ sessionId, model }) => {
-      await queryClient.cancelQueries({ queryKey: chatQueryKeys.session(sessionId) })
+      await queryClient.cancelQueries({
+        queryKey: chatQueryKeys.session(sessionId),
+      })
       const prev = queryClient.getQueryData(chatQueryKeys.session(sessionId))
       queryClient.setQueryData(
         chatQueryKeys.session(sessionId),
@@ -1611,7 +1633,10 @@ export function useSetSessionModel() {
     },
     onError: (error, _vars, context) => {
       if (context?.prev) {
-        queryClient.setQueryData(chatQueryKeys.session(context.sessionId), context.prev)
+        queryClient.setQueryData(
+          chatQueryKeys.session(context.sessionId),
+          context.prev
+        )
       }
       const message =
         error instanceof Error
@@ -2055,7 +2080,12 @@ export function persistEnqueue(
   sessionId: string,
   message: QueuedMessage
 ): void {
-  invoke('enqueue_message', { worktreeId, worktreePath, sessionId, message }).catch(err => {
+  invoke('enqueue_message', {
+    worktreeId,
+    worktreePath,
+    sessionId,
+    message,
+  }).catch(err => {
     logger.error('Failed to persist enqueue', { err, sessionId })
   })
 }
@@ -2103,7 +2133,9 @@ export function persistClearQueue(
   worktreePath: string,
   sessionId: string
 ): void {
-  invoke('clear_message_queue', { worktreeId, worktreePath, sessionId }).catch(err => {
-    logger.error('Failed to persist clear queue', { err, sessionId })
-  })
+  invoke('clear_message_queue', { worktreeId, worktreePath, sessionId }).catch(
+    err => {
+      logger.error('Failed to persist clear queue', { err, sessionId })
+    }
+  )
 }

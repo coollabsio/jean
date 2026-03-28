@@ -63,13 +63,25 @@ export function ExitPlanModeButton({
   const hasQuestions = toolCalls.some(isAskUserQuestion)
   if (hasQuestions && !isApproved) return null
 
-  if (isApproved || !isLatestPlanRequest || hasFollowUpMessage || hideApproveButtons) return null
+  if (
+    isApproved ||
+    !isLatestPlanRequest ||
+    hasFollowUpMessage ||
+    hideApproveButtons
+  )
+    return null
 
-  const hasApproveDropdownItems = !!onClearContextBuildApproval || !!onWorktreeBuildApproval
-  const hasAutoDropdownItems = !!onClearContextApproval || !!onWorktreeYoloApproval
+  const hasApproveDropdownItems =
+    !!onClearContextBuildApproval || !!onWorktreeBuildApproval
+  const hasAutoDropdownItems =
+    !!onClearContextApproval || !!onWorktreeYoloApproval
 
-  const approveTooltip = shortcut ? `Approve plan (${shortcut})` : 'Approve plan'
-  const yoloTooltip = shortcutYolo ? `Approve with yolo mode (${shortcutYolo})` : 'Approve with yolo mode'
+  const approveTooltip = shortcut
+    ? `Approve plan (${shortcut})`
+    : 'Approve plan'
+  const yoloTooltip = shortcutYolo
+    ? `Approve with yolo mode (${shortcutYolo})`
+    : 'Approve with yolo mode'
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -84,11 +96,15 @@ export function ExitPlanModeButton({
             <span className="flex flex-col">
               <span>New Session</span>
               {buildLabel && (
-                <span className="text-[10px] text-muted-foreground">{buildLabel}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {buildLabel}
+                </span>
               )}
             </span>
             <DropdownMenuShortcut>
-              {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_clear_context_build)}
+              {formatShortcutDisplay(
+                DEFAULT_KEYBINDINGS.approve_plan_clear_context_build
+              )}
             </DropdownMenuShortcut>
           </DropdownMenuItem>
           {onWorktreeBuildApproval && (
@@ -96,11 +112,15 @@ export function ExitPlanModeButton({
               <span className="flex flex-col">
                 <span>New Worktree</span>
                 {buildLabel && (
-                  <span className="text-[10px] text-muted-foreground">{buildLabel}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {buildLabel}
+                  </span>
                 )}
               </span>
               <DropdownMenuShortcut>
-                {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_worktree_build)}
+                {formatShortcutDisplay(
+                  DEFAULT_KEYBINDINGS.approve_plan_worktree_build
+                )}
               </DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
@@ -108,7 +128,11 @@ export function ExitPlanModeButton({
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button ref={buttonRef} size="sm" onClick={() => onPlanApproval?.()}>
+            <Button
+              ref={buttonRef}
+              size="sm"
+              onClick={() => onPlanApproval?.()}
+            >
               Approve
             </Button>
           </TooltipTrigger>
@@ -128,11 +152,15 @@ export function ExitPlanModeButton({
             <span className="flex flex-col">
               <span>New Session (YOLO)</span>
               {yoloLabel && (
-                <span className="text-[10px] text-muted-foreground">{yoloLabel}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {yoloLabel}
+                </span>
               )}
             </span>
             <DropdownMenuShortcut>
-              {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_clear_context)}
+              {formatShortcutDisplay(
+                DEFAULT_KEYBINDINGS.approve_plan_clear_context
+              )}
             </DropdownMenuShortcut>
           </DropdownMenuItem>
           {onWorktreeYoloApproval && (
@@ -140,11 +168,15 @@ export function ExitPlanModeButton({
               <span className="flex flex-col">
                 <span>New Worktree (YOLO)</span>
                 {yoloLabel && (
-                  <span className="text-[10px] text-muted-foreground">{yoloLabel}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {yoloLabel}
+                  </span>
                 )}
               </span>
               <DropdownMenuShortcut>
-                {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo)}
+                {formatShortcutDisplay(
+                  DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo
+                )}
               </DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
@@ -152,7 +184,11 @@ export function ExitPlanModeButton({
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="sm" onClick={() => onPlanApprovalYolo?.()}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPlanApprovalYolo?.()}
+            >
               YOLO
             </Button>
           </TooltipTrigger>

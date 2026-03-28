@@ -23,12 +23,11 @@ describe('ToolCallInline', () => {
 
     fireEvent.click(screen.getByRole('button'))
 
-    const expandedContent = screen.getByText(
-      (_, element) =>
-        Boolean(
-          element?.classList.contains('whitespace-pre-wrap') &&
-            element.textContent === 'Query: selectExitPlanMode\nMax results: 1'
-        )
+    const expandedContent = screen.getByText((_, element) =>
+      Boolean(
+        element?.classList.contains('whitespace-pre-wrap') &&
+        element.textContent === 'Query: selectExitPlanMode\nMax results: 1'
+      )
     )
 
     expect(expandedContent).toBeInTheDocument()

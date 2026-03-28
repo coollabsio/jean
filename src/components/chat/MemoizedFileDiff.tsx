@@ -1,10 +1,4 @@
-import {
-  useState,
-  useMemo,
-  useCallback,
-  memo,
-  useTransition,
-} from 'react'
+import { useState, useMemo, useCallback, memo, useTransition } from 'react'
 import { FileText, Loader2, MessageSquarePlus, X } from 'lucide-react'
 import { FileDiff } from '@pierre/diffs/react'
 import type {
@@ -91,7 +85,14 @@ export const MemoizedFileDiff = memo(
       * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
     `,
       }),
-      [themeType, syntaxThemeDark, syntaxThemeLight, diffStyle, enableLineSelectionProp, onLineSelected]
+      [
+        themeType,
+        syntaxThemeDark,
+        syntaxThemeLight,
+        diffStyle,
+        enableLineSelectionProp,
+        onLineSelected,
+      ]
     )
 
     const renderAnnotation = useCallback(

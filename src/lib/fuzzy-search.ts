@@ -26,11 +26,9 @@ export function fuzzySearchFiles(
 /**
  * Fuzzy search over slash commands and skills by name and description.
  */
-export function fuzzySearchItems<T extends { name: string; description?: string | null }>(
-  items: T[],
-  query: string,
-  limit = 15
-): T[] {
+export function fuzzySearchItems<
+  T extends { name: string; description?: string | null },
+>(items: T[], query: string, limit = 15): T[] {
   if (!query) return items.slice(0, limit)
 
   const fuse = new Fuse(items, {

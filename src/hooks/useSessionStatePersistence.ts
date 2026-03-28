@@ -204,7 +204,9 @@ export function useSessionStatePersistence() {
         // which persists directly via invoke(). Persisting true here risks
         // cross-client overwrites: native client's pauseSession sets true in its
         // Zustand, then this debounced save writes it to disk after web cleared it.
-        waitingForInput: state.waitingForInput ? undefined : state.waitingForInput,
+        waitingForInput: state.waitingForInput
+          ? undefined
+          : state.waitingForInput,
         planFilePath: state.planFilePath,
         pendingPlanMessageId: state.pendingPlanMessageId,
         enabledMcpServers: state.enabledMcpServers,

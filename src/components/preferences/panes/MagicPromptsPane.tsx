@@ -187,13 +187,11 @@ const PROMPT_SECTIONS: PromptSection[] = [
         providerKey: 'investigate_advisory_provider',
         backendKey: 'investigate_advisory_backend',
         label: 'Investigate Security Advisory',
-        description:
-          'Prompt for investigating repository security advisories.',
+        description: 'Prompt for investigating repository security advisories.',
         variables: [
           {
             name: '{advisoryRefs}',
-            description:
-              'Advisory references (e.g., GHSA-xxxx-yyyy (high))',
+            description: 'Advisory references (e.g., GHSA-xxxx-yyyy (high))',
           },
           {
             name: '{advisoryWord}',
@@ -270,7 +268,8 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
           {
             name: '{reviewComments}',
-            description: 'Formatted selected review comments with file paths, diffs, and bodies',
+            description:
+              'Formatted selected review comments with file paths, diffs, and bodies',
           },
         ],
         defaultValue: DEFAULT_REVIEW_COMMENTS_PROMPT,
@@ -658,7 +657,12 @@ export const MagicPromptsPane: React.FC = () => {
         },
       })
     },
-    [preferences, patchPreferences, currentProviders, selectedConfig.providerKey]
+    [
+      preferences,
+      patchPreferences,
+      currentProviders,
+      selectedConfig.providerKey,
+    ]
   )
 
   const handleBackendChange = useCallback(
@@ -1032,9 +1036,7 @@ export const MagicPromptsPane: React.FC = () => {
                   <code className="bg-muted px-1 py-0.5 rounded font-mono">
                     {v.name}
                   </code>
-                  <span className="text-muted-foreground">
-                    {v.description}
-                  </span>
+                  <span className="text-muted-foreground">{v.description}</span>
                 </span>
               ))}
             </div>

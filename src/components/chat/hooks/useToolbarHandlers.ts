@@ -112,7 +112,8 @@ export function useToolbarHandlers({
           backend === 'codex'
             ? (preferences?.selected_codex_model ?? 'gpt-5.4')
             : backend === 'opencode'
-              ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.3-codex')
+              ? (preferences?.selected_opencode_model ??
+                'opencode/gpt-5.3-codex')
               : ((preferences?.selected_model as string) ?? DEFAULT_MODEL)
         useChatStore.getState().setSelectedBackend(activeSessionId, backend)
         useChatStore.getState().setSelectedModel(activeSessionId, model)
@@ -178,7 +179,12 @@ export function useToolbarHandlers({
     const nextIndex = (currentIndex + 1) % installedBackends.length
     const nextBackend = installedBackends[nextIndex]
     if (nextBackend) handleToolbarBackendChange(nextBackend)
-  }, [session?.messages?.length, selectedBackend, installedBackends, handleToolbarBackendChange])
+  }, [
+    session?.messages?.length,
+    selectedBackend,
+    installedBackends,
+    handleToolbarBackendChange,
+  ])
 
   const handleToolbarProviderChange = useCallback(
     (provider: string | null) => {
@@ -281,7 +287,12 @@ export function useToolbarHandlers({
       }
       window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
-    [activeSessionIdRef, activeWorktreeIdRef, activeWorktreePathRef, setExecutionMode]
+    [
+      activeSessionIdRef,
+      activeWorktreeIdRef,
+      activeWorktreePathRef,
+      setExecutionMode,
+    ]
   )
 
   const handleOpenMagicModal = useCallback(() => {

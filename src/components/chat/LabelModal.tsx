@@ -57,7 +57,9 @@ export function LabelModal({
   const [isCreatingCustom, setIsCreatingCustom] = useState(false)
   const [editingLabelName, setEditingLabelName] = useState<string | null>(null)
   const [focusedIndex, setFocusedIndex] = useState(0)
-  const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({})
+  const [colorOverrides, setColorOverrides] = useState<Record<string, string>>(
+    {}
+  )
 
   const sessionLabels = useChatStore(state => state.sessionLabels)
 
@@ -115,7 +117,9 @@ export function LabelModal({
     (labelData: LabelData | null) => {
       if (onApply) {
         onApply(labelData)
-        toast.success(labelData ? `Labeled: ${labelData.name}` : 'Label removed')
+        toast.success(
+          labelData ? `Labeled: ${labelData.name}` : 'Label removed'
+        )
         onClose()
         return
       }
@@ -145,7 +149,12 @@ export function LabelModal({
     setColorOverrides(prev => ({ ...prev, [editingLabelName]: selectedColor }))
     toast.success(`Color updated for "${editingLabelName}"`)
     setEditingLabelName(null)
-  }, [editingLabelName, selectedColor, updateAllSessionsWithLabel, onColorChange])
+  }, [
+    editingLabelName,
+    selectedColor,
+    updateAllSessionsWithLabel,
+    onColorChange,
+  ])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

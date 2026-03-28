@@ -587,6 +587,27 @@ pub fn get_branches(repo_path: &str) -> Result<Vec<String>, String> {
     Ok(branches)
 }
 
+/// Fetch a branch from remote without merging (safe, no conflict risk)
+pub fn git_fetch(repo_path: &str, branch: &str, remote: Option<&str>) -> Result<(), String> {
+    let remote = remote.unwrap_or("origin");
+    log::trace!("Fetching {remote}/{branch} in {repo_path}");
+
+    let output = silent_command("git")
+        .args(["fetch", remote, branch])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run git fetch: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        log::error!("Failed to fetch {remote}/{branch}: {stderr}");
+        return Err(stderr);
+    }
+
+    log::trace!("Successfully fetched {remote}/{branch}");
+    Ok(())
+}
+
 /// Pull changes from remote origin for the specified base branch
 pub fn git_pull(
     repo_path: &str,

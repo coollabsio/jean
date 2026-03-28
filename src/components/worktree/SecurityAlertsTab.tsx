@@ -231,45 +231,47 @@ export function SecurityAlertsTab({
 
         {/* Repository Advisories section grouped by state */}
         {!isLoadingAdvisories && filteredAdvisories.length > 0 && (
-            <div className="py-1">
-              <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Repository Advisories
-              </div>
-              {filteredAdvisories.map((advisory, index) => {
-                const combinedIndex = alerts.length + index
-                const showStateHeader =
-                  index === 0 ||
-                  advisory.state !== filteredAdvisories[index - 1]?.state
-                return (
-                  <div key={advisory.ghsaId}>
-                    {showStateHeader && (
-                      <div className="flex items-center gap-1.5 px-3 py-1 mt-1 first:mt-0">
-                        <span
-                          className={cn(
-                            'h-1.5 w-1.5 rounded-full flex-shrink-0',
-                            STATE_DOT_COLORS[advisory.state] ?? 'bg-muted-foreground'
-                          )}
-                        />
-                        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                          {ADVISORY_STATE_LABELS[advisory.state] ?? advisory.state}
-                        </span>
-                      </div>
-                    )}
-                    <AdvisoryItem
-                      advisory={advisory}
-                      index={combinedIndex}
-                      isSelected={combinedIndex === selectedIndex}
-                      isCreating={creatingFromGhsaId === advisory.ghsaId}
-                      onMouseEnter={() => setSelectedIndex(combinedIndex)}
-                      onClick={bg => onSelectAdvisory(advisory, bg)}
-                      onInvestigate={bg => onInvestigateAdvisory(advisory, bg)}
-                      onPreview={() => onPreviewAdvisory(advisory)}
-                    />
-                  </div>
-                )
-              })}
+          <div className="py-1">
+            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Repository Advisories
             </div>
-          )}
+            {filteredAdvisories.map((advisory, index) => {
+              const combinedIndex = alerts.length + index
+              const showStateHeader =
+                index === 0 ||
+                advisory.state !== filteredAdvisories[index - 1]?.state
+              return (
+                <div key={advisory.ghsaId}>
+                  {showStateHeader && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 mt-1 first:mt-0">
+                      <span
+                        className={cn(
+                          'h-1.5 w-1.5 rounded-full flex-shrink-0',
+                          STATE_DOT_COLORS[advisory.state] ??
+                            'bg-muted-foreground'
+                        )}
+                      />
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        {ADVISORY_STATE_LABELS[advisory.state] ??
+                          advisory.state}
+                      </span>
+                    </div>
+                  )}
+                  <AdvisoryItem
+                    advisory={advisory}
+                    index={combinedIndex}
+                    isSelected={combinedIndex === selectedIndex}
+                    isCreating={creatingFromGhsaId === advisory.ghsaId}
+                    onMouseEnter={() => setSelectedIndex(combinedIndex)}
+                    onClick={bg => onSelectAdvisory(advisory, bg)}
+                    onInvestigate={bg => onInvestigateAdvisory(advisory, bg)}
+                    onPreview={() => onPreviewAdvisory(advisory)}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
       </ScrollArea>
     </div>
   )

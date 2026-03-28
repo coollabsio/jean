@@ -321,13 +321,7 @@ export function WorktreeItem({
         )
       }, 50)
     },
-    [
-      projectId,
-      worktree.id,
-      worktree.path,
-      selectProject,
-      selectWorktree,
-    ]
+    [projectId, worktree.id, worktree.path, selectProject, selectWorktree]
   )
 
   // Responsive padding based on sidebar width
@@ -380,7 +374,8 @@ export function WorktreeItem({
     // Open session modal with the first active session
     const sessions = sessionsData?.sessions ?? []
     const activeSessions = sessions.filter(s => !s.archived_at)
-    const activeSessionId = useChatStore.getState().activeSessionIds[worktree.id]
+    const activeSessionId =
+      useChatStore.getState().activeSessionIds[worktree.id]
     const targetSessionId = activeSessionId ?? activeSessions[0]?.id
     if (targetSessionId) {
       useChatStore.getState().setActiveSession(worktree.id, targetSessionId)
@@ -496,7 +491,10 @@ export function WorktreeItem({
         triggerImmediateGitPoll()
         fetchWorktreesStatus(projectId)
         if (result.fellBack) {
-          toast.warning('Could not push to PR branch, pushed to new branch instead', { id: toastId })
+          toast.warning(
+            'Could not push to PR branch, pushed to new branch instead',
+            { id: toastId }
+          )
         } else {
           toast.success('Changes pushed', { id: toastId })
         }

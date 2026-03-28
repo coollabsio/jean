@@ -54,7 +54,9 @@ interface UseLoadContextHandlersOptions {
   refetchAttachedContexts: () => void
   refetchLinearContexts: () => void
   refetchContexts: () => void
-  renameMutation: { mutate: (args: { filename: string; newName: string }) => void }
+  renameMutation: {
+    mutate: (args: { filename: string; newName: string }) => void
+  }
   preferences:
     | {
         magic_prompts?: { context_summary?: string | null }
@@ -88,11 +90,21 @@ export function useLoadContextHandlers({
   const [removingNumbers, setRemovingNumbers] = useState<Set<number>>(new Set())
   const [loadingSlugs, setLoadingSlugs] = useState<Set<string>>(new Set())
   const [removingSlugs, setRemovingSlugs] = useState<Set<string>>(new Set())
-  const [loadingAdvisoryGhsaIds, setLoadingAdvisoryGhsaIds] = useState<Set<string>>(new Set())
-  const [removingAdvisoryGhsaIds, setRemovingAdvisoryGhsaIds] = useState<Set<string>>(new Set())
-  const [loadingLinearIds, setLoadingLinearIds] = useState<Set<string>>(new Set())
-  const [removingLinearIds, setRemovingLinearIds] = useState<Set<string>>(new Set())
-  const [generatingSessionId, setGeneratingSessionId] = useState<string | null>(null)
+  const [loadingAdvisoryGhsaIds, setLoadingAdvisoryGhsaIds] = useState<
+    Set<string>
+  >(new Set())
+  const [removingAdvisoryGhsaIds, setRemovingAdvisoryGhsaIds] = useState<
+    Set<string>
+  >(new Set())
+  const [loadingLinearIds, setLoadingLinearIds] = useState<Set<string>>(
+    new Set()
+  )
+  const [removingLinearIds, setRemovingLinearIds] = useState<Set<string>>(
+    new Set()
+  )
+  const [generatingSessionId, setGeneratingSessionId] = useState<string | null>(
+    null
+  )
 
   // Inline edit state
   const [editingFilename, setEditingFilename] = useState<string | null>(null)
@@ -100,7 +112,9 @@ export function useLoadContextHandlers({
   const editInputRef = useRef<HTMLInputElement>(null)
 
   // Context viewer state
-  const [viewingContext, setViewingContext] = useState<ViewingContext | null>(null)
+  const [viewingContext, setViewingContext] = useState<ViewingContext | null>(
+    null
+  )
 
   // Reset all in-flight state (called when modal opens)
   const resetState = useCallback(() => {
@@ -133,7 +147,11 @@ export function useLoadContextHandlers({
       )
 
       try {
-        const result = await loadIssueContext(activeSessionId, issueNumber, worktreePath)
+        const result = await loadIssueContext(
+          activeSessionId,
+          issueNumber,
+          worktreePath
+        )
         await refetchIssueContexts()
         toast.success(
           `Issue #${result.number}: ${result.title}${result.commentCount > 0 ? ` (${result.commentCount} comments)` : ''}`,
@@ -175,11 +193,21 @@ export function useLoadContextHandlers({
   )
 
   const handleViewIssue = useCallback((ctx: LoadedIssueContext) => {
-    setViewingContext({ type: 'issue', number: ctx.number, title: ctx.title, content: '' })
+    setViewingContext({
+      type: 'issue',
+      number: ctx.number,
+      title: ctx.title,
+      content: '',
+    })
   }, [])
 
   const handlePreviewIssue = useCallback((issue: GitHubIssue) => {
-    setViewingContext({ type: 'issue', number: issue.number, title: issue.title, content: '' })
+    setViewingContext({
+      type: 'issue',
+      number: issue.number,
+      title: issue.title,
+      content: '',
+    })
   }, [])
 
   const handleSelectIssue = useCallback(
@@ -206,7 +234,11 @@ export function useLoadContextHandlers({
       )
 
       try {
-        const result = await loadPRContext(activeSessionId, prNumber, worktreePath)
+        const result = await loadPRContext(
+          activeSessionId,
+          prNumber,
+          worktreePath
+        )
         await refetchPRContexts()
         toast.success(
           `PR #${result.number}: ${result.title}${result.commentCount > 0 ? ` (${result.commentCount} comments)` : ''}${result.reviewCount > 0 ? `, ${result.reviewCount} reviews` : ''}`,
@@ -248,11 +280,21 @@ export function useLoadContextHandlers({
   )
 
   const handleViewPR = useCallback((ctx: LoadedPullRequestContext) => {
-    setViewingContext({ type: 'pr', number: ctx.number, title: ctx.title, content: '' })
+    setViewingContext({
+      type: 'pr',
+      number: ctx.number,
+      title: ctx.title,
+      content: '',
+    })
   }, [])
 
   const handlePreviewPR = useCallback((pr: GitHubPullRequest) => {
-    setViewingContext({ type: 'pr', number: pr.number, title: pr.title, content: '' })
+    setViewingContext({
+      type: 'pr',
+      number: pr.number,
+      title: pr.title,
+      content: '',
+    })
   }, [])
 
   const handleSelectPR = useCallback(
@@ -279,7 +321,11 @@ export function useLoadContextHandlers({
       )
 
       try {
-        const result = await loadSecurityContext(activeSessionId, alertNumber, worktreePath)
+        const result = await loadSecurityContext(
+          activeSessionId,
+          alertNumber,
+          worktreePath
+        )
         await refetchSecurityContexts()
         toast.success(
           `Alert #${result.number}: ${result.packageName} (${result.severity})`,
@@ -375,7 +421,11 @@ export function useLoadContextHandlers({
       )
 
       try {
-        const result = await loadAdvisoryContext(activeSessionId, ghsaId, worktreePath)
+        const result = await loadAdvisoryContext(
+          activeSessionId,
+          ghsaId,
+          worktreePath
+        )
         await refetchAdvisoryContexts()
         toast.success(
           `Advisory ${result.ghsaId}: ${result.summary} (${result.severity})`,
@@ -465,9 +515,7 @@ export function useLoadContextHandlers({
 
       setLoadingLinearIds(prev => new Set(prev).add(identifier))
       const toastId = toast.loading(
-        isRefresh
-          ? `Refreshing ${identifier}...`
-          : `Loading ${identifier}...`
+        isRefresh ? `Refreshing ${identifier}...` : `Loading ${identifier}...`
       )
 
       try {
@@ -629,24 +677,21 @@ export function useLoadContextHandlers({
     [activeSessionId]
   )
 
-  const handleViewContext = useCallback(
-    async (ctx: SavedContext) => {
-      try {
-        const content = await invoke<string>('read_context_file', {
-          path: ctx.path,
-        })
-        setViewingContext({
-          type: 'saved',
-          slug: ctx.slug,
-          title: ctx.name || ctx.slug || 'Untitled',
-          content,
-        })
-      } catch (error) {
-        toast.error(`Failed to load context: ${error}`)
-      }
-    },
-    []
-  )
+  const handleViewContext = useCallback(async (ctx: SavedContext) => {
+    try {
+      const content = await invoke<string>('read_context_file', {
+        path: ctx.path,
+      })
+      setViewingContext({
+        type: 'saved',
+        slug: ctx.slug,
+        title: ctx.name || ctx.slug || 'Untitled',
+        content,
+      })
+    } catch (error) {
+      toast.error(`Failed to load context: ${error}`)
+    }
+  }, [])
 
   const handleStartEdit = useCallback(
     (e: React.MouseEvent, context: SavedContext) => {
@@ -710,7 +755,8 @@ export function useLoadContextHandlers({
               'context_summary_provider',
               preferences?.default_provider
             ),
-            reasoningEffort: preferences?.magic_prompt_efforts?.context_summary_effort ?? null,
+            reasoningEffort:
+              preferences?.magic_prompt_efforts?.context_summary_effort ?? null,
           }
         )
 

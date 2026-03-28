@@ -160,7 +160,9 @@ export function ContextsTab({
                     context={context}
                     index={index}
                     isSelected={index === selectedIndex}
-                    isLoading={loadingSlugs.has(context.filename.replace(/\.md$/, ''))}
+                    isLoading={loadingSlugs.has(
+                      context.filename.replace(/\.md$/, '')
+                    )}
                     isEditing={editingFilename === context.filename}
                     editValue={editValue}
                     setEditValue={setEditValue}

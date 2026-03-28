@@ -90,7 +90,11 @@ export type UiAction =
 
 export type UiActionIntent =
   | { kind: 'execute'; action: UiAction; confidence: number }
-  | { kind: 'clarify'; message: string; candidates?: { id: string; label: string }[] }
+  | {
+      kind: 'clarify'
+      message: string
+      candidates?: { id: string; label: string }[]
+    }
   | { kind: 'reject'; message: string }
 ```
 
@@ -141,7 +145,10 @@ Create a frontend service wrapper:
 **New file:** `src/services/ui-actions.ts`
 
 ```typescript
-export async function interpretUiAction(input: string, context: UiActionContext) {
+export async function interpretUiAction(
+  input: string,
+  context: UiActionContext
+) {
   return invoke<UiActionIntent>('interpret_ui_action', { input, context })
 }
 ```

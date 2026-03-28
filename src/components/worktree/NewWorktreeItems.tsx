@@ -129,14 +129,22 @@ export function IssueItem({
                 key={label.name}
                 className={cn(
                   'px-1.5 py-0.5 text-xs rounded-full',
-                  onLabelClick && 'cursor-pointer hover:opacity-75 transition-opacity'
+                  onLabelClick &&
+                    'cursor-pointer hover:opacity-75 transition-opacity'
                 )}
                 style={{
                   backgroundColor: `#${label.color}20`,
                   color: `#${label.color}`,
                   border: `1px solid #${label.color}40`,
                 }}
-                onClick={onLabelClick ? e => { e.stopPropagation(); onLabelClick(label.name) } : undefined}
+                onClick={
+                  onLabelClick
+                    ? e => {
+                        e.stopPropagation()
+                        onLabelClick(label.name)
+                      }
+                    : undefined
+                }
               >
                 {label.name}
               </span>
@@ -264,14 +272,22 @@ export function PRItem({
                 key={label.name}
                 className={cn(
                   'px-1.5 py-0.5 text-xs rounded-full',
-                  onLabelClick && 'cursor-pointer hover:opacity-75 transition-opacity'
+                  onLabelClick &&
+                    'cursor-pointer hover:opacity-75 transition-opacity'
                 )}
                 style={{
                   backgroundColor: `#${label.color}20`,
                   color: `#${label.color}`,
                   border: `1px solid #${label.color}40`,
                 }}
-                onClick={onLabelClick ? e => { e.stopPropagation(); onLabelClick(label.name) } : undefined}
+                onClick={
+                  onLabelClick
+                    ? e => {
+                        e.stopPropagation()
+                        onLabelClick(label.name)
+                      }
+                    : undefined
+                }
               >
                 {label.name}
               </span>

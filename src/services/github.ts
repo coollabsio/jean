@@ -47,14 +47,18 @@ export const githubQueryKeys = {
     [...githubQueryKeys.all, 'issues', projectPath, state] as const,
   issue: (projectPath: string, issueNumber: number) =>
     [...githubQueryKeys.all, 'issue', projectPath, issueNumber] as const,
-  loadedContexts: (sessionId: string) =>
-    [...githubQueryKeys.all, 'loaded-contexts', sessionId] as const,
+  loadedContexts: (sessionId: string, worktreeId?: string | null) =>
+    worktreeId
+      ? ([...githubQueryKeys.all, 'loaded-contexts', sessionId, worktreeId] as const)
+      : ([...githubQueryKeys.all, 'loaded-contexts', sessionId] as const),
   prs: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'prs', projectPath, state] as const,
   pr: (projectPath: string, prNumber: number) =>
     [...githubQueryKeys.all, 'pr', projectPath, prNumber] as const,
-  loadedPrContexts: (sessionId: string) =>
-    [...githubQueryKeys.all, 'loaded-pr-contexts', sessionId] as const,
+  loadedPrContexts: (sessionId: string, worktreeId?: string | null) =>
+    worktreeId
+      ? ([...githubQueryKeys.all, 'loaded-pr-contexts', sessionId, worktreeId] as const)
+      : ([...githubQueryKeys.all, 'loaded-pr-contexts', sessionId] as const),
   attachedContexts: (sessionId: string) =>
     [...githubQueryKeys.all, 'attached-contexts', sessionId] as const,
   issueSearch: (projectPath: string, query: string) =>
@@ -75,15 +79,24 @@ export const githubQueryKeys = {
   securityAlerts: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'security-alerts', projectPath, state] as const,
   securityAlert: (projectPath: string, alertNumber: number) =>
-    [...githubQueryKeys.all, 'security-alert', projectPath, alertNumber] as const,
-  loadedSecurityContexts: (sessionId: string) =>
-    [...githubQueryKeys.all, 'loaded-security-contexts', sessionId] as const,
+    [
+      ...githubQueryKeys.all,
+      'security-alert',
+      projectPath,
+      alertNumber,
+    ] as const,
+  loadedSecurityContexts: (sessionId: string, worktreeId?: string | null) =>
+    worktreeId
+      ? ([...githubQueryKeys.all, 'loaded-security-contexts', sessionId, worktreeId] as const)
+      : ([...githubQueryKeys.all, 'loaded-security-contexts', sessionId] as const),
   advisories: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'advisories', projectPath, state] as const,
   advisory: (projectPath: string, ghsaId: string) =>
     [...githubQueryKeys.all, 'advisory', projectPath, ghsaId] as const,
-  loadedAdvisoryContexts: (sessionId: string) =>
-    [...githubQueryKeys.all, 'loaded-advisory-contexts', sessionId] as const,
+  loadedAdvisoryContexts: (sessionId: string, worktreeId?: string | null) =>
+    worktreeId
+      ? ([...githubQueryKeys.all, 'loaded-advisory-contexts', sessionId, worktreeId] as const)
+      : ([...githubQueryKeys.all, 'loaded-advisory-contexts', sessionId] as const),
 }
 
 /**
@@ -203,7 +216,10 @@ export function countNewIssues(issues: GitHubIssue[]): number {
  *   'label:"bug" crash'  → { labels: ['bug'], textQuery: 'crash' }
  *   'label:"bug" label:"high priority"' → { labels: ['bug', 'high priority'], textQuery: '' }
  */
-export function parseLabelQuery(query: string): { labels: string[]; textQuery: string } {
+export function parseLabelQuery(query: string): {
+  labels: string[]
+  textQuery: string
+} {
   const labels: string[] = []
   const textQuery = query
     .replace(/label:"([^"]+)"/gi, (_, name) => {
@@ -320,7 +336,7 @@ export function useLoadedIssueContexts(
   worktreeId?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.loadedContexts(sessionId ?? ''),
+    queryKey: githubQueryKeys.loadedContexts(sessionId ?? '', worktreeId),
     queryFn: async (): Promise<LoadedIssueContext[]> => {
       if (!isTauri() || !sessionId) {
         return []
@@ -470,7 +486,7 @@ export function useLoadedPRContexts(
   worktreeId?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.loadedPrContexts(sessionId ?? ''),
+    queryKey: githubQueryKeys.loadedPrContexts(sessionId ?? '', worktreeId),
     queryFn: async (): Promise<LoadedPullRequestContext[]> => {
       if (!isTauri() || !sessionId) {
         return []
@@ -867,7 +883,7 @@ export function useLoadedSecurityContexts(
   worktreeId?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.loadedSecurityContexts(sessionId ?? ''),
+    queryKey: githubQueryKeys.loadedSecurityContexts(sessionId ?? '', worktreeId),
     queryFn: async (): Promise<LoadedSecurityAlertContext[]> => {
       if (!isTauri() || !sessionId) {
         return []
@@ -1074,7 +1090,7 @@ export function useLoadedAdvisoryContexts(
   worktreeId?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.loadedAdvisoryContexts(sessionId ?? ''),
+    queryKey: githubQueryKeys.loadedAdvisoryContexts(sessionId ?? '', worktreeId),
     queryFn: async (): Promise<LoadedAdvisoryContext[]> => {
       if (!isTauri() || !sessionId) {
         return []

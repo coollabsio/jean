@@ -59,7 +59,9 @@ export function FilePreview({ files, onRemove, disabled }: FilePreviewProps) {
               </span>
               {!disabled && (
                 <DismissButton
-                  tooltip={file.isDirectory ? 'Remove directory' : 'Remove file'}
+                  tooltip={
+                    file.isDirectory ? 'Remove directory' : 'Remove file'
+                  }
                   onClick={e => handleRemove(e, file)}
                   className="ml-1"
                 />

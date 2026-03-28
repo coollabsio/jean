@@ -194,9 +194,7 @@ export function CloneProjectModal() {
           </Button>
           <Button
             onClick={handleClone}
-            disabled={
-              cloneProject.isPending || !url.trim() || !destination
-            }
+            disabled={cloneProject.isPending || !url.trim() || !destination}
           >
             {cloneProject.isPending && (
               <Loader2 className="h-4 w-4 animate-spin" />

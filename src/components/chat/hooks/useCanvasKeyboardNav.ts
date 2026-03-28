@@ -147,12 +147,7 @@ export function useCanvasKeyboardNav<T>({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    enabled,
-    onSelectedIndexChange,
-    onSelect,
-    onSelectionChange,
-  ])
+  }, [enabled, onSelectedIndexChange, onSelect, onSelectionChange])
 
   // Scroll selected card into view when selection changes
   // Uses manual scroll to ensure group/section headers above the card stay visible

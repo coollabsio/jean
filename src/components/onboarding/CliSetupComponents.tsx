@@ -295,7 +295,12 @@ export function AuthLoginState({
 
       const observer = new ResizeObserver(entries => {
         const entry = entries[0]
-        if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return
+        if (
+          !entry ||
+          entry.contentRect.width === 0 ||
+          entry.contentRect.height === 0
+        )
+          return
 
         if (!initialized.current) {
           initialized.current = true
@@ -313,14 +318,31 @@ export function AuthLoginState({
   )
 
   useEffect(() => {
-    dbg('AuthLoginState MOUNTED:', cliName, 'terminalId:', terminalId, 'command:', command, 'args:', commandArgs)
-    return () => dbg('AuthLoginState UNMOUNTED:', cliName, 'terminalId:', terminalId)
+    dbg(
+      'AuthLoginState MOUNTED:',
+      cliName,
+      'terminalId:',
+      terminalId,
+      'command:',
+      command,
+      'args:',
+      commandArgs
+    )
+    return () =>
+      dbg('AuthLoginState UNMOUNTED:', cliName, 'terminalId:', terminalId)
   }, [cliName, terminalId, command, commandArgs])
 
   // Auto-advance when the auth process exits successfully
   useEffect(() => {
     setOnStopped(terminalId, (exitCode, signal) => {
-      dbg('AuthLoginState terminal stopped:', cliName, 'exitCode:', exitCode, 'signal:', signal)
+      dbg(
+        'AuthLoginState terminal stopped:',
+        cliName,
+        'exitCode:',
+        exitCode,
+        'signal:',
+        signal
+      )
       if (exitCode === 0) {
         dbg('AuthLoginState: exit 0, calling onComplete in 1.5s')
         // Brief delay so user can see the success output
@@ -433,7 +455,16 @@ export function CliPathSelector({
   onSelectJean,
 }: CliPathSelectorProps) {
   useEffect(() => {
-    dbg('CliPathSelector MOUNTED:', cliName, 'pathVersion:', pathVersion, 'pathPath:', pathPath, 'isLoading:', isLoading)
+    dbg(
+      'CliPathSelector MOUNTED:',
+      cliName,
+      'pathVersion:',
+      pathVersion,
+      'pathPath:',
+      pathPath,
+      'isLoading:',
+      isLoading
+    )
     return () => dbg('CliPathSelector UNMOUNTED:', cliName)
   }, [cliName, pathVersion, pathPath, isLoading])
 
@@ -482,5 +513,6 @@ export function CliPathSelector({
 }
 
 /** @deprecated Use CliPathSelector instead */
-export const ClaudePathSelector = (props: Omit<CliPathSelectorProps, 'cliName'>) =>
-  CliPathSelector({ ...props, cliName: 'Claude CLI' })
+export const ClaudePathSelector = (
+  props: Omit<CliPathSelectorProps, 'cliName'>
+) => CliPathSelector({ ...props, cliName: 'Claude CLI' })

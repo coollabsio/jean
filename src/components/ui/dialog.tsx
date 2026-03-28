@@ -78,7 +78,9 @@ const DialogContent = React.forwardRef<
           e.stopPropagation()
           console.log('[ESC-DEBUG] DialogContent onEscapeKeyDown', {
             preventClose,
-            hasPopover: !!document.querySelector('[data-slot="popover-content"]'),
+            hasPopover: !!document.querySelector(
+              '[data-slot="popover-content"]'
+            ),
             hasSelect: !!document.querySelector('[data-slot="select-content"]'),
             hasCustomHandler: !!onEscapeKeyDownProp,
           })

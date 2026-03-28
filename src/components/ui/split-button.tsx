@@ -39,10 +39,7 @@ export function SplitButton({
       size={size}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        'rounded-r-none border-r-0',
-        className,
-      )}
+      className={cn('rounded-r-none border-r-0', className)}
     >
       {label}
     </Button>
@@ -52,9 +49,7 @@ export function SplitButton({
     <div className="inline-flex">
       {tooltip ? (
         <Tooltip>
-          <TooltipTrigger asChild>
-            {mainButton}
-          </TooltipTrigger>
+          <TooltipTrigger asChild>{mainButton}</TooltipTrigger>
           <TooltipContent>{tooltip}</TooltipContent>
         </Tooltip>
       ) : (
@@ -71,15 +66,13 @@ export function SplitButton({
               variant === 'default'
                 ? 'border-l border-l-primary-foreground/20'
                 : 'border-l border-l-border',
-              className,
+              className
             )}
           >
             <ChevronDown className="h-3 w-3" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {children}
-        </DropdownMenuContent>
+        <DropdownMenuContent align="end">{children}</DropdownMenuContent>
       </DropdownMenu>
     </div>
   )

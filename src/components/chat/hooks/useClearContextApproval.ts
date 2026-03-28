@@ -31,12 +31,16 @@ const THINKING_LEVEL_VALUES = new Set<ThinkingLevel>([
   'ultrathink',
 ])
 
-function isThinkingLevel(value: string | null | undefined): value is ThinkingLevel {
+function isThinkingLevel(
+  value: string | null | undefined
+): value is ThinkingLevel {
   if (!value) return false
   return THINKING_LEVEL_VALUES.has(value as ThinkingLevel)
 }
 
-function mapCodexReasoningToEffort(value: string | null | undefined): EffortLevel | undefined {
+function mapCodexReasoningToEffort(
+  value: string | null | undefined
+): EffortLevel | undefined {
   switch (value) {
     case 'low':
       return 'low'
@@ -91,7 +95,11 @@ export function useClearContextApproval({
   const sendMessage = useSendMessage()
 
   const handleClearContextApproval = useCallback(
-    async (card: SessionCardData, updatedPlan?: string, mode: 'yolo' | 'build' = 'yolo') => {
+    async (
+      card: SessionCardData,
+      updatedPlan?: string,
+      mode: 'yolo' | 'build' = 'yolo'
+    ) => {
       const sessionId = card.session.id
       const messageId = card.pendingPlanMessageId
 
@@ -212,7 +220,8 @@ export function useClearContextApproval({
         console.log('[useClearContextApproval] Fetched session messages:', {
           sessionId,
           messageCount: fullSession.messages.length,
-          userMessages: fullSession.messages.filter(m => m.role === 'user').length,
+          userMessages: fullSession.messages.filter(m => m.role === 'user')
+            .length,
           contentLength: allUserContent.length,
           contentPreview: allUserContent.slice(0, 200),
         })
@@ -233,27 +242,50 @@ export function useClearContextApproval({
       // Fallback chain: mode override → original session → global default
       const isYolo = mode === 'yolo'
       const modeLabel = isYolo ? 'Yolo' : 'Build'
-      const originalBackend = card.session.backend as 'claude' | 'codex' | 'opencode' | undefined
-      const modeBackendPref = isYolo ? preferences?.yolo_backend : preferences?.build_backend
-      const modeModelPref = isYolo ? preferences?.yolo_model : preferences?.build_model
-      const modeThinkingPref = isYolo ? preferences?.yolo_thinking_level : preferences?.build_thinking_level
-      const modeBackendOverride = modeBackendPref as 'claude' | 'codex' | 'opencode' | null
-      const backend = (modeBackendOverride ?? originalBackend ?? undefined) as 'claude' | 'codex' | 'opencode' | undefined
-      const model = modeModelPref ??
+      const originalBackend = card.session.backend as
+        | 'claude'
+        | 'codex'
+        | 'opencode'
+        | undefined
+      const modeBackendPref = isYolo
+        ? preferences?.yolo_backend
+        : preferences?.build_backend
+      const modeModelPref = isYolo
+        ? preferences?.yolo_model
+        : preferences?.build_model
+      const modeThinkingPref = isYolo
+        ? preferences?.yolo_thinking_level
+        : preferences?.build_thinking_level
+      const modeBackendOverride = modeBackendPref as
+        | 'claude'
+        | 'codex'
+        | 'opencode'
+        | null
+      const backend = (modeBackendOverride ?? originalBackend ?? undefined) as
+        | 'claude'
+        | 'codex'
+        | 'opencode'
+        | undefined
+      const model =
+        modeModelPref ??
         (modeBackendOverride
           ? getDefaultModelForBackend(backend, preferences)
-          : (card.session.selected_model ?? getDefaultModelForBackend(backend, preferences)))
-      const modeOverride = (modeModelPref || modeBackendOverride)
-        ? [backend, model].filter(Boolean).join(' / ')
-        : ''
+          : (card.session.selected_model ??
+            getDefaultModelForBackend(backend, preferences)))
+      const modeOverride =
+        modeModelPref || modeBackendOverride
+          ? [backend, model].filter(Boolean).join(' / ')
+          : ''
       if (modeOverride) toast.info(`${modeLabel}: ${modeOverride}`)
       let thinkingLevel: ThinkingLevel = 'off'
       let effortLevel: EffortLevel | undefined
       if (backend === 'codex') {
-        const defaultCodexEffort = mapCodexReasoningToEffort(
-          preferences?.default_codex_reasoning_effort
-        ) ?? 'high'
-        effortLevel = mapCodexReasoningToEffort(modeThinkingPref) ?? defaultCodexEffort
+        const defaultCodexEffort =
+          mapCodexReasoningToEffort(
+            preferences?.default_codex_reasoning_effort
+          ) ?? 'high'
+        effortLevel =
+          mapCodexReasoningToEffort(modeThinkingPref) ?? defaultCodexEffort
       } else {
         const fallbackThinking = isThinkingLevel(preferences?.thinking_level)
           ? preferences.thinking_level
@@ -262,27 +294,40 @@ export function useClearContextApproval({
           ? modeThinkingPref
           : fallbackThinking
       }
-      const resolvedPlanFilePath = card.planFilePath || store.getPlanFilePath(sessionId)
-      const planFileLine = resolvedPlanFilePath ? `\nPlan file: ${resolvedPlanFilePath}\n` : ''
-      const configPrefix = modeOverride ? `[${modeLabel}: ${modeOverride}]\n` : ''
+      const resolvedPlanFilePath =
+        card.planFilePath || store.getPlanFilePath(sessionId)
+      const planFileLine = resolvedPlanFilePath
+        ? `\nPlan file: ${resolvedPlanFilePath}\n`
+        : ''
+      const configPrefix = modeOverride
+        ? `[${modeLabel}: ${modeOverride}]\n`
+        : ''
       let message = `${configPrefix}Execute this plan. Implement all changes described.${planFileLine}\n\n<plan>\n${planContent}\n</plan>`
 
       // Re-attach references from the original session so Claude can read them
       if (skillPaths.length > 0) {
         const skillRefs = skillPaths
-          .map(p => `[Skill: ${p} - Read and use this skill to guide your response]`)
+          .map(
+            p =>
+              `[Skill: ${p} - Read and use this skill to guide your response]`
+          )
           .join('\n')
         message = `${message}\n\n${skillRefs}`
       }
       if (imagePaths.length > 0) {
         const imageRefs = imagePaths
-          .map(p => `[Image attached: ${p} - Use the Read tool to view this image]`)
+          .map(
+            p => `[Image attached: ${p} - Use the Read tool to view this image]`
+          )
           .join('\n')
         message = `${message}\n\n${imageRefs}`
       }
       if (textFilePaths.length > 0) {
         const textFileRefs = textFilePaths
-          .map(p => `[Text file attached: ${p} - Use the Read tool to view this file]`)
+          .map(
+            p =>
+              `[Text file attached: ${p} - Use the Read tool to view this file]`
+          )
           .join('\n')
         message = `${message}\n\n${textFileRefs}`
       }
@@ -304,18 +349,34 @@ export function useClearContextApproval({
       // and overrides the Zustand value in the backend resolution chain.
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),
-        old => old ? { ...old, backend: backend ?? old.backend, selected_model: model } : old
+        old =>
+          old
+            ? { ...old, backend: backend ?? old.backend, selected_model: model }
+            : old
       )
 
       // Persist model and backend to Rust session BEFORE sending so send_chat_message
       // reads the updated session state (both use with_sessions_mut, so ordering matters)
       await invoke('set_session_model', {
-        worktreeId, worktreePath, sessionId: newSession.id, model,
-      }).catch(err => console.error('[useClearContextApproval] Failed to persist model:', err))
+        worktreeId,
+        worktreePath,
+        sessionId: newSession.id,
+        model,
+      }).catch(err =>
+        console.error('[useClearContextApproval] Failed to persist model:', err)
+      )
       if (backend) {
         await invoke('set_session_backend', {
-          worktreeId, worktreePath, sessionId: newSession.id, backend,
-        }).catch(err => console.error('[useClearContextApproval] Failed to persist backend:', err))
+          worktreeId,
+          worktreePath,
+          sessionId: newSession.id,
+          backend,
+        }).catch(err =>
+          console.error(
+            '[useClearContextApproval] Failed to persist backend:',
+            err
+          )
+        )
       }
 
       sendMessage.mutate({

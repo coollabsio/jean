@@ -211,7 +211,8 @@ export function DesktopToolbarControls({
 
   const loadedIssueCount = loadedIssueContexts.length
   const loadedPRCount = loadedPRContexts.length
-  const loadedSecurityCount = loadedSecurityContexts.length + loadedAdvisoryContexts.length
+  const loadedSecurityCount =
+    loadedSecurityContexts.length + loadedAdvisoryContexts.length
   const loadedLinearCount = loadedLinearContexts.length
   const loadedContextCount = attachedSavedContexts.length
   const providerDisplayName = getProviderDisplayName(selectedProvider)
@@ -310,7 +311,8 @@ export function DesktopToolbarControls({
                       <DropdownMenuCheckboxItem
                         key={`${backend}-${server.name}`}
                         checked={
-                          !server.disabled && enabledMcpServers.includes(server.name)
+                          !server.disabled &&
+                          enabledMcpServers.includes(server.name)
                         }
                         onCheckedChange={() => onToggleMcpServer(server.name)}
                         disabled={server.disabled}
@@ -372,12 +374,18 @@ export function DesktopToolbarControls({
                 <CircleDot className="h-3.5 w-3.5" />
                 <span>
                   {[
-                    loadedIssueCount > 0 && `${loadedIssueCount} Issue${loadedIssueCount > 1 ? 's' : ''}`,
-                    loadedPRCount > 0 && `${loadedPRCount} PR${loadedPRCount > 1 ? 's' : ''}`,
-                    loadedSecurityCount > 0 && `${loadedSecurityCount} Security`,
+                    loadedIssueCount > 0 &&
+                      `${loadedIssueCount} Issue${loadedIssueCount > 1 ? 's' : ''}`,
+                    loadedPRCount > 0 &&
+                      `${loadedPRCount} PR${loadedPRCount > 1 ? 's' : ''}`,
+                    loadedSecurityCount > 0 &&
+                      `${loadedSecurityCount} Security`,
                     loadedLinearCount > 0 && `${loadedLinearCount} Linear`,
-                    loadedContextCount > 0 && `${loadedContextCount} Context${loadedContextCount > 1 ? 's' : ''}`,
-                  ].filter(Boolean).join(', ')}
+                    loadedContextCount > 0 &&
+                      `${loadedContextCount} Context${loadedContextCount > 1 ? 's' : ''}`,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
                 </span>
                 <ChevronDown className="h-3 w-3 opacity-50" />
               </button>
@@ -480,7 +488,9 @@ export function DesktopToolbarControls({
                 <>
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
-                    loadedSecurityContexts.length > 0) && <DropdownMenuSeparator />}
+                    loadedSecurityContexts.length > 0) && (
+                    <DropdownMenuSeparator />
+                  )}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     Advisories
                   </DropdownMenuLabel>
@@ -514,7 +524,9 @@ export function DesktopToolbarControls({
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
                     loadedSecurityContexts.length > 0 ||
-                    loadedAdvisoryContexts.length > 0) && <DropdownMenuSeparator />}
+                    loadedAdvisoryContexts.length > 0) && (
+                    <DropdownMenuSeparator />
+                  )}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     Linear Issues
                   </DropdownMenuLabel>
@@ -549,7 +561,9 @@ export function DesktopToolbarControls({
                     loadedPRContexts.length > 0 ||
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0 ||
-                    loadedLinearContexts.length > 0) && <DropdownMenuSeparator />}
+                    loadedLinearContexts.length > 0) && (
+                    <DropdownMenuSeparator />
+                  )}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     Contexts
                   </DropdownMenuLabel>
@@ -664,7 +678,11 @@ export function DesktopToolbarControls({
               </TooltipTrigger>
               <TooltipContent>Switch backend (Tab)</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="start" className="min-w-40" onCloseAutoFocus={focusChatInput}>
+            <DropdownMenuContent
+              align="start"
+              className="min-w-40"
+              onCloseAutoFocus={focusChatInput}
+            >
               <DropdownMenuRadioGroup
                 value={selectedBackend}
                 onValueChange={v =>
@@ -722,7 +740,12 @@ export function DesktopToolbarControls({
                 </TooltipTrigger>
                 <TooltipContent>Provider (⌘⇧P)</TooltipContent>
               </Tooltip>
-              <DropdownMenuContent align="start" className="min-w-40" onEscapeKeyDown={e => e.stopPropagation()} onCloseAutoFocus={focusChatInput}>
+              <DropdownMenuContent
+                align="start"
+                className="min-w-40"
+                onEscapeKeyDown={e => e.stopPropagation()}
+                onCloseAutoFocus={focusChatInput}
+              >
                 <DropdownMenuRadioGroup
                   value={selectedProvider ?? '__anthropic__'}
                   onValueChange={handleProviderChange}
@@ -882,7 +905,11 @@ export function DesktopToolbarControls({
               {`Effort: ${EFFORT_LEVEL_OPTIONS.find(o => o.value === selectedEffortLevel)?.label} (⌘⇧E)`}
             </TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="start" onEscapeKeyDown={e => e.stopPropagation()} onCloseAutoFocus={focusChatInput}>
+          <DropdownMenuContent
+            align="start"
+            onEscapeKeyDown={e => e.stopPropagation()}
+            onCloseAutoFocus={focusChatInput}
+          >
             <DropdownMenuRadioGroup
               value={selectedEffortLevel}
               onValueChange={handleEffortLevelChange}
@@ -935,7 +962,11 @@ export function DesktopToolbarControls({
               {`Thinking: ${THINKING_LEVEL_OPTIONS.find(o => o.value === selectedThinkingLevel)?.label} (⌘⇧E)`}
             </TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="start" onEscapeKeyDown={e => e.stopPropagation()} onCloseAutoFocus={focusChatInput}>
+          <DropdownMenuContent
+            align="start"
+            onEscapeKeyDown={e => e.stopPropagation()}
+            onCloseAutoFocus={focusChatInput}
+          >
             <DropdownMenuRadioGroup
               value={selectedThinkingLevel}
               onValueChange={handleThinkingLevelChange}

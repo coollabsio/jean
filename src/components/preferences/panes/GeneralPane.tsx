@@ -1,4 +1,11 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef, type FC } from 'react'
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+  type FC,
+} from 'react'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -125,7 +132,7 @@ function getPathUpdateAction(
   brewPkg: string,
   selfUpdateArgs: string[] | null,
   npmPkg?: string,
-  targetVersion?: string,
+  targetVersion?: string
 ): [string, string[]] | null {
   if (packageManager === 'homebrew') {
     return ['brew', ['upgrade', brewPkg]]
@@ -217,7 +224,9 @@ export const GeneralPane: React.FC = () => {
   const { data: codexStatus, isLoading: isCodexLoading } = useCodexCliStatus()
   const isCodexPathSource = preferences?.codex_cli_source === 'path'
   const { data: codexVersions, isLoading: isCodexVersionsLoading } =
-    useAvailableCodexVersions({ enabled: isCodexPathSource && !!codexStatus?.installed })
+    useAvailableCodexVersions({
+      enabled: isCodexPathSource && !!codexStatus?.installed,
+    })
   const codexLatestStable = codexVersions?.find(v => !v.prerelease)
   const codexHasUpdate =
     !!codexStatus?.version &&
@@ -227,7 +236,9 @@ export const GeneralPane: React.FC = () => {
     useOpenCodeCliStatus()
   const isOpencodePathSource = preferences?.opencode_cli_source === 'path'
   const { data: opencodeVersions, isLoading: isOpencodeVersionsLoading } =
-    useAvailableOpencodeVersions({ enabled: isOpencodePathSource && !!opencodeStatus?.installed })
+    useAvailableOpencodeVersions({
+      enabled: isOpencodePathSource && !!opencodeStatus?.installed,
+    })
   const opencodeLatestStable = opencodeVersions?.find(v => !v.prerelease)
   const opencodeHasUpdate =
     !!opencodeStatus?.version &&
@@ -444,7 +455,9 @@ export const GeneralPane: React.FC = () => {
         { opencode_cli_source: value },
         {
           onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: opencodeCliQueryKeys.all })
+            queryClient.invalidateQueries({
+              queryKey: opencodeCliQueryKeys.all,
+            })
           },
         }
       )
@@ -738,8 +751,6 @@ export const GeneralPane: React.FC = () => {
     openCliLoginModal('opencode', opencodeStatus.path, ['auth', 'login'])
   }, [opencodeStatus?.path, openCliLoginModal])
 
-
-
   const handleCopyPath = useCallback((path: string | null | undefined) => {
     if (!path) return
     copyToClipboard(path)
@@ -761,7 +772,11 @@ export const GeneralPane: React.FC = () => {
               ) : claudeAuth?.authenticated ? (
                 <span className="text-sm text-muted-foreground flex items-center gap-2">
                   Logged in
-                  <Button variant="outline" size="sm" onClick={handleClaudeRelogin}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClaudeRelogin}
+                  >
                     Relogin
                   </Button>
                 </span>
@@ -791,7 +806,9 @@ export const GeneralPane: React.FC = () => {
               ) : cliStatus?.installed ? (
                 isPathSource ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">{cliStatus.version ?? 'Installed'}</span>
+                    <span className="text-sm">
+                      {cliStatus.version ?? 'Installed'}
+                    </span>
                     {isClaudeVersionsLoading ? (
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -800,15 +817,27 @@ export const GeneralPane: React.FC = () => {
                         size="sm"
                         disabled={!claudeHasUpdate}
                         onClick={() => {
-                          const action = getPathUpdateAction(cliStatus.path, pathDetection?.package_manager, 'claude-code', ['update'])
+                          const action = getPathUpdateAction(
+                            cliStatus.path,
+                            pathDetection?.package_manager,
+                            'claude-code',
+                            ['update']
+                          )
                           if (action) {
-                            openCliLoginModal('claude', action[0], action[1], 'update')
+                            openCliLoginModal(
+                              'claude',
+                              action[0],
+                              action[1],
+                              'update'
+                            )
                           } else {
                             openCliUpdateModal('claude')
                           }
                         }}
                       >
-                        {claudeHasUpdate ? `Update to ${claudeLatestStable?.version}` : 'Up to date'}
+                        {claudeHasUpdate
+                          ? `Update to ${claudeLatestStable?.version}`
+                          : 'Up to date'}
                       </Button>
                     )}
                   </div>
@@ -838,16 +867,18 @@ export const GeneralPane: React.FC = () => {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => handleCopyPath(
-                          preferences?.claude_cli_source === 'path'
-                            ? pathDetection?.path
-                            : cliStatus?.path
-                        )}
+                        onClick={() =>
+                          handleCopyPath(
+                            preferences?.claude_cli_source === 'path'
+                              ? pathDetection?.path
+                              : cliStatus?.path
+                          )
+                        }
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.claude_cli_source === 'path'
-                          ? pathDetection?.path ?? 'System PATH'
-                          : cliStatus?.path ?? 'Not installed'}
+                          ? (pathDetection?.path ?? 'System PATH')
+                          : (cliStatus?.path ?? 'Not installed')}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -863,10 +894,7 @@ export const GeneralPane: React.FC = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="jean">Jean (managed)</SelectItem>
-                    <SelectItem
-                      value="path"
-                      disabled={!pathDetection?.found}
-                    >
+                    <SelectItem value="path" disabled={!pathDetection?.found}>
                       System PATH
                       {!pathDetection?.found && ' (not found)'}
                     </SelectItem>
@@ -921,7 +949,9 @@ export const GeneralPane: React.FC = () => {
               ) : ghStatus?.installed ? (
                 isGhPathSource ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">{ghStatus.version ?? 'Installed'}</span>
+                    <span className="text-sm">
+                      {ghStatus.version ?? 'Installed'}
+                    </span>
                     {isGhVersionsLoading ? (
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -930,15 +960,27 @@ export const GeneralPane: React.FC = () => {
                         size="sm"
                         disabled={!ghHasUpdate}
                         onClick={() => {
-                          const action = getPathUpdateAction(ghStatus.path, ghPathDetection?.package_manager, 'gh', null)
+                          const action = getPathUpdateAction(
+                            ghStatus.path,
+                            ghPathDetection?.package_manager,
+                            'gh',
+                            null
+                          )
                           if (action) {
-                            openCliLoginModal('gh', action[0], action[1], 'update')
+                            openCliLoginModal(
+                              'gh',
+                              action[0],
+                              action[1],
+                              'update'
+                            )
                           } else {
                             openCliUpdateModal('gh')
                           }
                         }}
                       >
-                        {ghHasUpdate ? `Update to ${ghLatestStable?.version}` : 'Up to date'}
+                        {ghHasUpdate
+                          ? `Update to ${ghLatestStable?.version}`
+                          : 'Up to date'}
                       </Button>
                     )}
                   </div>
@@ -968,16 +1010,18 @@ export const GeneralPane: React.FC = () => {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => handleCopyPath(
-                          preferences?.gh_cli_source === 'path'
-                            ? ghPathDetection?.path
-                            : ghStatus?.path
-                        )}
+                        onClick={() =>
+                          handleCopyPath(
+                            preferences?.gh_cli_source === 'path'
+                              ? ghPathDetection?.path
+                              : ghStatus?.path
+                          )
+                        }
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.gh_cli_source === 'path'
-                          ? ghPathDetection?.path ?? 'System PATH'
-                          : ghStatus?.path ?? 'Not installed'}
+                          ? (ghPathDetection?.path ?? 'System PATH')
+                          : (ghStatus?.path ?? 'Not installed')}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -993,10 +1037,7 @@ export const GeneralPane: React.FC = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="jean">Jean (managed)</SelectItem>
-                    <SelectItem
-                      value="path"
-                      disabled={!ghPathDetection?.found}
-                    >
+                    <SelectItem value="path" disabled={!ghPathDetection?.found}>
                       System PATH
                       {!ghPathDetection?.found && ' (not found)'}
                     </SelectItem>
@@ -1028,7 +1069,11 @@ export const GeneralPane: React.FC = () => {
               ) : codexAuth?.authenticated ? (
                 <span className="text-sm text-muted-foreground flex items-center gap-2">
                   Logged in
-                  <Button variant="outline" size="sm" onClick={handleCodexRelogin}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCodexRelogin}
+                  >
                     Relogin
                   </Button>
                 </span>
@@ -1058,7 +1103,9 @@ export const GeneralPane: React.FC = () => {
               ) : codexStatus?.installed ? (
                 isCodexPathSource ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">{codexStatus.version ?? 'Installed'}</span>
+                    <span className="text-sm">
+                      {codexStatus.version ?? 'Installed'}
+                    </span>
                     {isCodexVersionsLoading ? (
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -1067,15 +1114,29 @@ export const GeneralPane: React.FC = () => {
                         size="sm"
                         disabled={!codexHasUpdate}
                         onClick={() => {
-                          const action = getPathUpdateAction(codexStatus.path, codexPathDetection?.package_manager, 'codex', null, '@openai/codex', codexLatestStable?.version)
+                          const action = getPathUpdateAction(
+                            codexStatus.path,
+                            codexPathDetection?.package_manager,
+                            'codex',
+                            null,
+                            '@openai/codex',
+                            codexLatestStable?.version
+                          )
                           if (action) {
-                            openCliLoginModal('codex', action[0], action[1], 'update')
+                            openCliLoginModal(
+                              'codex',
+                              action[0],
+                              action[1],
+                              'update'
+                            )
                           } else {
                             openCliUpdateModal('codex')
                           }
                         }}
                       >
-                        {codexHasUpdate ? `Update to ${codexLatestStable?.version}` : 'Up to date'}
+                        {codexHasUpdate
+                          ? `Update to ${codexLatestStable?.version}`
+                          : 'Up to date'}
                       </Button>
                     )}
                   </div>
@@ -1105,16 +1166,18 @@ export const GeneralPane: React.FC = () => {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => handleCopyPath(
-                          preferences?.codex_cli_source === 'path'
-                            ? codexPathDetection?.path
-                            : codexStatus?.path
-                        )}
+                        onClick={() =>
+                          handleCopyPath(
+                            preferences?.codex_cli_source === 'path'
+                              ? codexPathDetection?.path
+                              : codexStatus?.path
+                          )
+                        }
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.codex_cli_source === 'path'
-                          ? codexPathDetection?.path ?? 'System PATH'
-                          : codexStatus?.path ?? 'Not installed'}
+                          ? (codexPathDetection?.path ?? 'System PATH')
+                          : (codexStatus?.path ?? 'Not installed')}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -1165,12 +1228,20 @@ export const GeneralPane: React.FC = () => {
               ) : opencodeAuth?.authenticated ? (
                 <span className="text-sm text-muted-foreground flex items-center gap-2">
                   Logged in
-                  <Button variant="outline" size="sm" onClick={handleOpenCodeRelogin}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenCodeRelogin}
+                  >
                     Relogin
                   </Button>
                 </span>
               ) : (
-                <Button variant="outline" size="sm" onClick={handleOpenCodeLogin}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenCodeLogin}
+                >
                   Login
                 </Button>
               )
@@ -1195,7 +1266,9 @@ export const GeneralPane: React.FC = () => {
               ) : opencodeStatus?.installed ? (
                 isOpencodePathSource ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">{opencodeStatus.version ?? 'Installed'}</span>
+                    <span className="text-sm">
+                      {opencodeStatus.version ?? 'Installed'}
+                    </span>
                     {isOpencodeVersionsLoading ? (
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -1204,15 +1277,27 @@ export const GeneralPane: React.FC = () => {
                         size="sm"
                         disabled={!opencodeHasUpdate}
                         onClick={() => {
-                          const action = getPathUpdateAction(opencodeStatus.path, opencodePathDetection?.package_manager, 'opencode', ['upgrade'])
+                          const action = getPathUpdateAction(
+                            opencodeStatus.path,
+                            opencodePathDetection?.package_manager,
+                            'opencode',
+                            ['upgrade']
+                          )
                           if (action) {
-                            openCliLoginModal('opencode', action[0], action[1], 'update')
+                            openCliLoginModal(
+                              'opencode',
+                              action[0],
+                              action[1],
+                              'update'
+                            )
                           } else {
                             openCliUpdateModal('opencode')
                           }
                         }}
                       >
-                        {opencodeHasUpdate ? `Update to ${opencodeLatestStable?.version}` : 'Up to date'}
+                        {opencodeHasUpdate
+                          ? `Update to ${opencodeLatestStable?.version}`
+                          : 'Up to date'}
                       </Button>
                     )}
                   </div>
@@ -1242,16 +1327,18 @@ export const GeneralPane: React.FC = () => {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => handleCopyPath(
-                          preferences?.opencode_cli_source === 'path'
-                            ? opencodePathDetection?.path
-                            : opencodeStatus?.path
-                        )}
+                        onClick={() =>
+                          handleCopyPath(
+                            preferences?.opencode_cli_source === 'path'
+                              ? opencodePathDetection?.path
+                              : opencodeStatus?.path
+                          )
+                        }
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.opencode_cli_source === 'path'
-                          ? opencodePathDetection?.path ?? 'System PATH'
-                          : opencodeStatus?.path ?? 'Not installed'}
+                          ? (opencodePathDetection?.path ?? 'System PATH')
+                          : (opencodeStatus?.path ?? 'Not installed')}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -1372,17 +1459,18 @@ export const GeneralPane: React.FC = () => {
                       >
                         <span className="truncate text-left">
                           {preferences?.build_model
-                            ? (openCodeModelOptions.find(o => o.value === preferences.build_model)?.label
-                              ?? formatOpenCodeModelLabelForSettings(preferences.build_model))
+                            ? (openCodeModelOptions.find(
+                                o => o.value === preferences.build_model
+                              )?.label ??
+                              formatOpenCodeModelLabelForSettings(
+                                preferences.build_model
+                              ))
                             : 'Default model'}
                         </span>
                         <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent
-                      align="start"
-                      className="w-80 p-0"
-                    >
+                    <PopoverContent align="start" className="w-80 p-0">
                       <Command>
                         <CommandInput placeholder="Search models..." />
                         <CommandList onWheel={e => e.stopPropagation()}>
@@ -1396,7 +1484,15 @@ export const GeneralPane: React.FC = () => {
                               }}
                             >
                               Default model
-                              <Check className={cn('ml-auto h-4 w-4', !preferences?.build_model || preferences.build_model === 'default' ? 'opacity-100' : 'opacity-0')} />
+                              <Check
+                                className={cn(
+                                  'ml-auto h-4 w-4',
+                                  !preferences?.build_model ||
+                                    preferences.build_model === 'default'
+                                    ? 'opacity-100'
+                                    : 'opacity-0'
+                                )}
+                              />
                             </CommandItem>
                             {openCodeModelOptions.map(option => (
                               <CommandItem
@@ -1408,7 +1504,14 @@ export const GeneralPane: React.FC = () => {
                                 }}
                               >
                                 <span className="truncate">{option.label}</span>
-                                <Check className={cn('ml-auto h-4 w-4', preferences?.build_model === option.value ? 'opacity-100' : 'opacity-0')} />
+                                <Check
+                                  className={cn(
+                                    'ml-auto h-4 w-4',
+                                    preferences?.build_model === option.value
+                                      ? 'opacity-100'
+                                      : 'opacity-0'
+                                  )}
+                                />
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -1458,7 +1561,9 @@ export const GeneralPane: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <SelectItem value="default">Default thinking</SelectItem>
+                        <SelectItem value="default">
+                          Default thinking
+                        </SelectItem>
                         {thinkingLevelOptions.map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
@@ -1510,17 +1615,18 @@ export const GeneralPane: React.FC = () => {
                       >
                         <span className="truncate text-left">
                           {preferences?.yolo_model
-                            ? (openCodeModelOptions.find(o => o.value === preferences.yolo_model)?.label
-                              ?? formatOpenCodeModelLabelForSettings(preferences.yolo_model))
+                            ? (openCodeModelOptions.find(
+                                o => o.value === preferences.yolo_model
+                              )?.label ??
+                              formatOpenCodeModelLabelForSettings(
+                                preferences.yolo_model
+                              ))
                             : 'Default model'}
                         </span>
                         <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent
-                      align="start"
-                      className="w-80 p-0"
-                    >
+                    <PopoverContent align="start" className="w-80 p-0">
                       <Command>
                         <CommandInput placeholder="Search models..." />
                         <CommandList onWheel={e => e.stopPropagation()}>
@@ -1534,7 +1640,15 @@ export const GeneralPane: React.FC = () => {
                               }}
                             >
                               Default model
-                              <Check className={cn('ml-auto h-4 w-4', !preferences?.yolo_model || preferences.yolo_model === 'default' ? 'opacity-100' : 'opacity-0')} />
+                              <Check
+                                className={cn(
+                                  'ml-auto h-4 w-4',
+                                  !preferences?.yolo_model ||
+                                    preferences.yolo_model === 'default'
+                                    ? 'opacity-100'
+                                    : 'opacity-0'
+                                )}
+                              />
                             </CommandItem>
                             {openCodeModelOptions.map(option => (
                               <CommandItem
@@ -1546,7 +1660,14 @@ export const GeneralPane: React.FC = () => {
                                 }}
                               >
                                 <span className="truncate">{option.label}</span>
-                                <Check className={cn('ml-auto h-4 w-4', preferences?.yolo_model === option.value ? 'opacity-100' : 'opacity-0')} />
+                                <Check
+                                  className={cn(
+                                    'ml-auto h-4 w-4',
+                                    preferences?.yolo_model === option.value
+                                      ? 'opacity-100'
+                                      : 'opacity-0'
+                                  )}
+                                />
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -1596,7 +1717,9 @@ export const GeneralPane: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <SelectItem value="default">Default thinking</SelectItem>
+                        <SelectItem value="default">
+                          Default thinking
+                        </SelectItem>
                         {thinkingLevelOptions.map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}

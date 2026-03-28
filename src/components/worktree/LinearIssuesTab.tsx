@@ -142,7 +142,9 @@ export function LinearIssuesTab({
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={bg => onSelectIssue(issue, bg)}
                 onInvestigate={bg => onInvestigateIssue(issue, bg)}
-                onPreview={onPreviewIssue ? () => onPreviewIssue(issue) : undefined}
+                onPreview={
+                  onPreviewIssue ? () => onPreviewIssue(issue) : undefined
+                }
               />
             ))}
             {isSearching && (

@@ -12,7 +12,11 @@ import {
   useAvailableCliVersions,
   useClaudePathDetection,
 } from '@/services/claude-cli'
-import { useGhCliStatus, useAvailableGhVersions, useGhPathDetection } from '@/services/gh-cli'
+import {
+  useGhCliStatus,
+  useAvailableGhVersions,
+  useGhPathDetection,
+} from '@/services/gh-cli'
 import {
   useCodexCliStatus,
   useAvailableCodexVersions,
@@ -66,10 +70,16 @@ const CLI_DISPLAY_NAMES: Record<CliUpdateInfo['type'], string> = {
 export function useCliVersionCheck() {
   const shouldCheck = isNativeApp()
   const { data: preferences } = usePreferences()
-  const { data: claudePathInfo } = useClaudePathDetection({ enabled: shouldCheck })
+  const { data: claudePathInfo } = useClaudePathDetection({
+    enabled: shouldCheck,
+  })
   const { data: ghPathInfo } = useGhPathDetection({ enabled: shouldCheck })
-  const { data: codexPathInfo } = useCodexPathDetection({ enabled: shouldCheck })
-  const { data: opencodePathInfo } = useOpencodePathDetection({ enabled: shouldCheck })
+  const { data: codexPathInfo } = useCodexPathDetection({
+    enabled: shouldCheck,
+  })
+  const { data: opencodePathInfo } = useOpencodePathDetection({
+    enabled: shouldCheck,
+  })
 
   // Defer version fetches (GitHub API) by 10s — they're only for update toasts,
   // no reason to compete with startup-critical queries.
@@ -80,12 +90,15 @@ export function useCliVersionCheck() {
     return () => clearTimeout(timer)
   }, [shouldCheck])
 
-  const { data: claudeStatus, isLoading: claudeLoading } =
-    useClaudeCliStatus({ enabled: shouldCheck && versionCheckReady })
-  const { data: ghStatus, isLoading: ghLoading } =
-    useGhCliStatus({ enabled: shouldCheck && versionCheckReady })
-  const { data: codexStatus, isLoading: codexLoading } =
-    useCodexCliStatus({ enabled: shouldCheck && versionCheckReady })
+  const { data: claudeStatus, isLoading: claudeLoading } = useClaudeCliStatus({
+    enabled: shouldCheck && versionCheckReady,
+  })
+  const { data: ghStatus, isLoading: ghLoading } = useGhCliStatus({
+    enabled: shouldCheck && versionCheckReady,
+  })
+  const { data: codexStatus, isLoading: codexLoading } = useCodexCliStatus({
+    enabled: shouldCheck && versionCheckReady,
+  })
   const { data: opencodeStatus, isLoading: opencodeLoading } =
     useOpencodeCliStatus({ enabled: shouldCheck && versionCheckReady })
   const { data: claudeVersions, isLoading: claudeVersionsLoading } =
@@ -256,9 +269,7 @@ export function useCliVersionCheck() {
 }
 
 /** Get the correct self-update args for each CLI type, or null if no built-in update */
-function getPathModeUpdateArgs(
-  type: CliUpdateInfo['type']
-): string[] | null {
+function getPathModeUpdateArgs(type: CliUpdateInfo['type']): string[] | null {
   switch (type) {
     case 'claude':
       return ['update']
@@ -294,20 +305,39 @@ function showUpdateToasts(updates: CliUpdateInfo[]) {
         onClick: () => {
           if (isPathMode && isHomebrew) {
             const brewPkg = CLI_BINARY_NAMES[update.type]
-            logger.debug(`[CliVersionCheck] Homebrew update: brew upgrade ${brewPkg}`)
-            openCliLoginModal(update.type, 'brew', ['upgrade', brewPkg], 'update')
+            logger.debug(
+              `[CliVersionCheck] Homebrew update: brew upgrade ${brewPkg}`
+            )
+            openCliLoginModal(
+              update.type,
+              'brew',
+              ['upgrade', brewPkg],
+              'update'
+            )
           } else if (isPathMode && update.cliPath) {
             const pathUpdateArgs = getPathModeUpdateArgs(update.type)
             if (pathUpdateArgs) {
               logger.debug(
                 `[CliVersionCheck] PATH-mode update: type=${update.type} path=${update.cliPath} args=${pathUpdateArgs}`
               )
-              openCliLoginModal(update.type, update.cliPath, pathUpdateArgs, 'update')
+              openCliLoginModal(
+                update.type,
+                update.cliPath,
+                pathUpdateArgs,
+                'update'
+              )
             } else if (update.packageManager === 'npm') {
               const npmPkg = NPM_PACKAGE_NAMES[update.type]
               if (npmPkg) {
-                logger.debug(`[CliVersionCheck] npm update: npm install -g ${npmPkg}@${update.latestVersion}`)
-                openCliLoginModal(update.type, 'npm', ['install', '-g', `${npmPkg}@${update.latestVersion}`], 'update')
+                logger.debug(
+                  `[CliVersionCheck] npm update: npm install -g ${npmPkg}@${update.latestVersion}`
+                )
+                openCliLoginModal(
+                  update.type,
+                  'npm',
+                  ['install', '-g', `${npmPkg}@${update.latestVersion}`],
+                  'update'
+                )
               } else {
                 openCliUpdateModal(update.type)
               }

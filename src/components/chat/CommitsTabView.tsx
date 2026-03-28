@@ -338,7 +338,11 @@ export function CommitsTabView({
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent className="p-0 w-64" align="start" onWheel={e => e.stopPropagation()}>
+              <PopoverContent
+                className="p-0 w-64"
+                align="start"
+                onWheel={e => e.stopPropagation()}
+              >
                 <Command>
                   <CommandInput placeholder="Search branches..." />
                   <CommandList onWheel={e => e.stopPropagation()}>

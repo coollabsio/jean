@@ -84,9 +84,12 @@ export function useAutoArchiveOnMerge() {
               prNumber: status.pr_number,
             })
 
-            await invoke(shouldDelete ? 'delete_worktree' : 'archive_worktree', {
-              worktreeId: status.worktree_id,
-            })
+            await invoke(
+              shouldDelete ? 'delete_worktree' : 'archive_worktree',
+              {
+                worktreeId: status.worktree_id,
+              }
+            )
 
             // Invalidate worktrees query to refresh the list
             queryClient.invalidateQueries({
@@ -111,7 +114,11 @@ export function useAutoArchiveOnMerge() {
         processedWorktrees.current.delete(status.worktree_id)
       }
     },
-    [preferences?.auto_archive_on_pr_merged, preferences?.removal_behavior, queryClient]
+    [
+      preferences?.auto_archive_on_pr_merged,
+      preferences?.removal_behavior,
+      queryClient,
+    ]
   )
 
   // Listen for PR status updates

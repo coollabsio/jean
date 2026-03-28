@@ -50,9 +50,7 @@ export function JeanJsonPane({
       setLocalRun(scripts.length > 0 ? scripts : [''])
 
       const ports = jeanConfig.ports ?? []
-      setLocalPorts(
-        ports.map(p => ({ port: String(p.port), label: p.label }))
-      )
+      setLocalPorts(ports.map(p => ({ port: String(p.port), label: p.label })))
 
       setSynced(true)
     }

@@ -237,7 +237,10 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
 
           {showStatusBadges && (
             <div className="hidden items-center gap-1 sm:flex">
-              <NewIssuesBadge projectPath={project.path} projectId={project.id} />
+              <NewIssuesBadge
+                projectPath={project.path}
+                projectId={project.id}
+              />
               <OpenPRsBadge projectPath={project.path} projectId={project.id} />
               <SecurityAlertsBadge
                 projectPath={project.path}

@@ -5,8 +5,14 @@ import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { Copy, FileText } from 'lucide-react'
-import type { SessionDebugInfo, RunStatus, UsageData } from '@/types/chat'
+import type {
+  Backend,
+  SessionDebugInfo,
+  RunStatus,
+  UsageData,
+} from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { getSessionProviderDisplayName } from '@/components/chat/toolbar/toolbar-utils'
 import {
   Tooltip,
   TooltipTrigger,
@@ -19,7 +25,7 @@ interface SessionDebugPanelProps {
   sessionId: string
   selectedModel?: string
   selectedProvider?: string | null
-  selectedBackend?: string
+  selectedBackend?: Backend
   onFileClick?: (path: string) => void
 }
 
@@ -90,15 +96,13 @@ export function SessionDebugPanel({
     refetchInterval: 1000, // Poll every second for real-time updates
   })
 
+  const providerDisplay = getSessionProviderDisplayName(
+    selectedBackend,
+    selectedProvider
+  )
+
   const handleCopyAll = useCallback(async () => {
     if (!debugInfo) return
-
-    const providerDisplay =
-      selectedBackend === 'codex'
-        ? 'OpenAI'
-        : !selectedProvider || selectedProvider === '__anthropic__'
-          ? 'Anthropic'
-          : selectedProvider
 
     const lines = [
       `session: ${sessionId}`,
@@ -123,7 +127,7 @@ export function SessionDebugPanel({
       console.error('Failed to copy:', error)
       toast.error(`Failed to copy: ${error}`)
     }
-  }, [debugInfo, sessionId, selectedModel, selectedProvider, selectedBackend])
+  }, [debugInfo, providerDisplay, sessionId, selectedModel])
 
   if (!debugInfo) {
     return null
@@ -153,16 +157,7 @@ export function SessionDebugPanel({
         model:{' '}
         <span className="text-foreground">{selectedModel ?? 'unknown'}</span>
         {' / '}
-        provider:{' '}
-        <span className="text-foreground">
-          {selectedBackend === 'codex'
-            ? 'OpenAI'
-            : selectedBackend === 'opencode'
-              ? 'OpenCode'
-              : !selectedProvider || selectedProvider === '__anthropic__'
-                ? 'Anthropic'
-                : selectedProvider}
-        </span>
+        provider: <span className="text-foreground">{providerDisplay}</span>
       </div>
       <Tooltip>
         <TooltipTrigger asChild>

@@ -43,14 +43,20 @@ export function KeybindingHints({ hints, className }: KeybindingHintsProps) {
           <span className="sr-only">Keyboard shortcuts</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-auto min-w-[200px] p-3">
+      <PopoverContent
+        side="top"
+        align="start"
+        className="w-auto min-w-[200px] p-3"
+      >
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-center">
           {hints.map(hint => (
             <Fragment key={hint.shortcut}>
               <Kbd className="h-5 px-1.5 text-[11px]">
                 {formatShortcutDisplay(hint.shortcut)}
               </Kbd>
-              <span className="text-xs text-muted-foreground">{hint.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {hint.label}
+              </span>
             </Fragment>
           ))}
         </div>

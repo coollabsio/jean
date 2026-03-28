@@ -4,9 +4,7 @@ import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
-import {
-  chatQueryKeys,
-} from '@/services/chat'
+import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
@@ -40,7 +38,6 @@ export interface WorkflowRunDetail {
   projectPath?: string | null
 }
 
-
 interface UseInvestigateHandlersParams {
   activeSessionId: string | null | undefined
   activeWorktreeId: string | null | undefined
@@ -63,8 +60,19 @@ interface UseInvestigateHandlersParams {
   setSessionBackend: { mutate: (args: any) => void }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setSessionModel: { mutate: (args: any) => void }
-  createSession: { mutate: (args: { worktreeId: string; worktreePath: string }, opts?: { onSuccess?: (session: { id: string }) => void; onError?: (error: unknown) => void }) => void }
-  resolveCustomProfile: (model: string, provider: string | null) => { model: string; customProfileName: string | undefined }
+  createSession: {
+    mutate: (
+      args: { worktreeId: string; worktreePath: string },
+      opts?: {
+        onSuccess?: (session: { id: string }) => void
+        onError?: (error: unknown) => void
+      }
+    ) => void
+  }
+  resolveCustomProfile: (
+    model: string,
+    provider: string | null
+  ) => { model: string; customProfileName: string | undefined }
   cliVersion: string | null
   worktreeProjectId: string | null | undefined
 }
@@ -100,21 +108,31 @@ export function useInvestigateHandlers({
   const queryClient = useQueryClient()
 
   const handleInvestigate = useCallback(
-    async (type: 'issue' | 'pr' | 'security-alert' | 'advisory' | 'linear-issue') => {
+    async (
+      type: 'issue' | 'pr' | 'security-alert' | 'advisory' | 'linear-issue'
+    ) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
       const modelKey =
-        type === 'issue' ? 'investigate_issue_model'
-          : type === 'pr' ? 'investigate_pr_model'
-          : type === 'security-alert' ? 'investigate_security_alert_model'
-          : type === 'linear-issue' ? 'investigate_linear_issue_model'
-          : 'investigate_advisory_model' as const
+        type === 'issue'
+          ? 'investigate_issue_model'
+          : type === 'pr'
+            ? 'investigate_pr_model'
+            : type === 'security-alert'
+              ? 'investigate_security_alert_model'
+              : type === 'linear-issue'
+                ? 'investigate_linear_issue_model'
+                : ('investigate_advisory_model' as const)
       const providerKey =
-        type === 'issue' ? 'investigate_issue_provider'
-          : type === 'pr' ? 'investigate_pr_provider'
-          : type === 'security-alert' ? 'investigate_security_alert_provider'
-          : type === 'linear-issue' ? 'investigate_linear_issue_provider'
-          : 'investigate_advisory_provider' as const
+        type === 'issue'
+          ? 'investigate_issue_provider'
+          : type === 'pr'
+            ? 'investigate_pr_provider'
+            : type === 'security-alert'
+              ? 'investigate_security_alert_provider'
+              : type === 'linear-issue'
+                ? 'investigate_linear_issue_provider'
+                : ('investigate_advisory_provider' as const)
       const investigateModel =
         preferences?.magic_prompt_models?.[modelKey] ?? selectedModelRef.current
       const investigateProvider = resolveMagicPromptProvider(
@@ -167,7 +185,11 @@ export function useInvestigateHandlers({
           .replace(/\{prRefs\}/g, refs)
       } else if (type === 'security-alert') {
         const contexts = await queryClient.fetchQuery({
-          queryKey: ['investigate-contexts', 'security-alert', activeWorktreeId],
+          queryKey: [
+            'investigate-contexts',
+            'security-alert',
+            activeWorktreeId,
+          ],
           queryFn: () =>
             invoke<{ number: number; packageName: string; severity: string }[]>(
               'list_loaded_security_contexts',
@@ -175,9 +197,12 @@ export function useInvestigateHandlers({
             ),
           staleTime: 0,
         })
-        const refs = (contexts ?? []).map(c => `#${c.number} ${c.packageName} (${c.severity})`).join(', ')
+        const refs = (contexts ?? [])
+          .map(c => `#${c.number} ${c.packageName} (${c.severity})`)
+          .join(', ')
         const word = (contexts ?? []).length === 1 ? 'alert' : 'alerts'
-        const customPrompt = preferences?.magic_prompts?.investigate_security_alert
+        const customPrompt =
+          preferences?.magic_prompts?.investigate_security_alert
         const template =
           customPrompt && customPrompt.trim()
             ? customPrompt
@@ -189,23 +214,42 @@ export function useInvestigateHandlers({
         const projectId = worktreeProjectId ?? ''
         const [contexts, contentItems] = await Promise.all([
           queryClient.fetchQuery({
-            queryKey: ['investigate-contexts', 'linear-issue', activeWorktreeId],
+            queryKey: [
+              'investigate-contexts',
+              'linear-issue',
+              activeWorktreeId,
+            ],
             queryFn: () =>
-              invoke<{ identifier: string; title: string; commentCount: number; projectName: string }[]>(
-                'list_loaded_linear_issue_contexts',
-                { sessionId: activeWorktreeId, worktreeId: activeWorktreeId, projectId }
-              ),
+              invoke<
+                {
+                  identifier: string
+                  title: string
+                  commentCount: number
+                  projectName: string
+                }[]
+              >('list_loaded_linear_issue_contexts', {
+                sessionId: activeWorktreeId,
+                worktreeId: activeWorktreeId,
+                projectId,
+              }),
             staleTime: 0,
           }),
           invoke<{ identifier: string; title: string; content: string }[]>(
             'get_linear_issue_context_contents',
-            { sessionId: activeWorktreeId, worktreeId: activeWorktreeId, projectId }
+            {
+              sessionId: activeWorktreeId,
+              worktreeId: activeWorktreeId,
+              projectId,
+            }
           ),
         ])
         const refs = (contexts ?? []).map(c => c.identifier).join(', ')
         const word = (contexts ?? []).length === 1 ? 'issue' : 'issues'
-        const linearContext = (contentItems ?? []).map(c => c.content).join('\n\n---\n\n')
-        const customPrompt = preferences?.magic_prompts?.investigate_linear_issue
+        const linearContext = (contentItems ?? [])
+          .map(c => c.content)
+          .join('\n\n---\n\n')
+        const customPrompt =
+          preferences?.magic_prompts?.investigate_linear_issue
         const template =
           customPrompt && customPrompt.trim()
             ? customPrompt
@@ -224,7 +268,9 @@ export function useInvestigateHandlers({
             ),
           staleTime: 0,
         })
-        const refs = (contexts ?? []).map(c => `${c.ghsaId} (${c.severity})`).join(', ')
+        const refs = (contexts ?? [])
+          .map(c => `${c.ghsaId} (${c.severity})`)
+          .join(', ')
         const word = (contexts ?? []).length === 1 ? 'advisory' : 'advisories'
         const customPrompt = preferences?.magic_prompts?.investigate_advisory
         const template =
@@ -282,8 +328,10 @@ export function useInvestigateHandlers({
       })
 
       {
-        const { setSelectedBackend: setZustandBackend, setSelectedModel: setZustandModel } =
-          useChatStore.getState()
+        const {
+          setSelectedBackend: setZustandBackend,
+          setSelectedModel: setZustandModel,
+        } = useChatStore.getState()
         setZustandBackend(activeSessionId, investigateBackend)
         setZustandModel(activeSessionId, investigateModel)
       }
@@ -517,8 +565,10 @@ export function useInvestigateHandlers({
           provider: investigateProvider,
         })
         {
-          const { setSelectedBackend: setZustandBackend, setSelectedModel: setZustandModel } =
-            useChatStore.getState()
+          const {
+            setSelectedBackend: setZustandBackend,
+            setSelectedModel: setZustandModel,
+          } = useChatStore.getState()
           setZustandBackend(targetSessionId, investigateBackend)
           setZustandModel(targetSessionId, investigateModel)
         }
@@ -643,8 +693,7 @@ export function useInvestigateHandlers({
         reviewCommentsProvider && reviewCommentsProvider !== '__anthropic__'
       )
       const useAdaptive =
-        !isCustom &&
-        supportsAdaptiveThinking(reviewCommentsModel, cliVersion)
+        !isCustom && supportsAdaptiveThinking(reviewCommentsModel, cliVersion)
       const reviewCommentsBackend = resolveBackend(reviewCommentsModel)
 
       // Helper to send the message once we have a session ID
@@ -782,5 +831,9 @@ export function useInvestigateHandlers({
     ]
   )
 
-  return { handleInvestigate, handleInvestigateWorkflowRun, handleReviewComments }
+  return {
+    handleInvestigate,
+    handleInvestigateWorkflowRun,
+    handleReviewComments,
+  }
 }

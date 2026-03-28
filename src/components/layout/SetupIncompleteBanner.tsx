@@ -1,6 +1,9 @@
 import { useClaudeCliStatus, useClaudeCliAuth } from '@/services/claude-cli'
 import { useCodexCliStatus, useCodexCliAuth } from '@/services/codex-cli'
-import { useOpencodeCliStatus, useOpencodeCliAuth } from '@/services/opencode-cli'
+import {
+  useOpencodeCliStatus,
+  useOpencodeCliAuth,
+} from '@/services/opencode-cli'
 import { useGhCliStatus, useGhCliAuth } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNativeApp } from '@/lib/environment'
@@ -15,9 +18,13 @@ export function SetupIncompleteBanner() {
   const opencodeStatus = useOpencodeCliStatus()
   const ghStatus = useGhCliStatus()
 
-  const claudeAuth = useClaudeCliAuth({ enabled: !!claudeStatus.data?.installed })
+  const claudeAuth = useClaudeCliAuth({
+    enabled: !!claudeStatus.data?.installed,
+  })
   const codexAuth = useCodexCliAuth({ enabled: !!codexStatus.data?.installed })
-  const opencodeAuth = useOpencodeCliAuth({ enabled: !!opencodeStatus.data?.installed })
+  const opencodeAuth = useOpencodeCliAuth({
+    enabled: !!opencodeStatus.data?.installed,
+  })
   const ghAuth = useGhCliAuth({ enabled: !!ghStatus.data?.installed })
 
   if (!isNativeApp()) return null
@@ -25,8 +32,10 @@ export function SetupIncompleteBanner() {
   if (!onboardingDismissed || onboardingOpen) return null
 
   const isLoading =
-    claudeStatus.isLoading || codexStatus.isLoading ||
-    opencodeStatus.isLoading || ghStatus.isLoading
+    claudeStatus.isLoading ||
+    codexStatus.isLoading ||
+    opencodeStatus.isLoading ||
+    ghStatus.isLoading
 
   if (isLoading) {
     return (

@@ -69,7 +69,10 @@ export function usePlanDialogApproval({
 
   const approve = useCallback(
     (updatedPlan: string | undefined, mode: 'build' | 'yolo') => {
-      console.warn('[usePlanDialogApproval] approve CALLED', { mode, activeSessionId })
+      console.warn('[usePlanDialogApproval] approve CALLED', {
+        mode,
+        activeSessionId,
+      })
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
       // Optimistic updates: apply immediately so the approving client's UI updates
@@ -150,36 +153,54 @@ export function usePlanDialogApproval({
             activeWorktreePath,
             activeSessionId,
             pendingPlanMessage.id
-          ).catch(err => { console.error('[usePlanDialogApproval] markPlanApproved failed:', err) })
+          ).catch(err => {
+            console.error(
+              '[usePlanDialogApproval] markPlanApproved failed:',
+              err
+            )
+          })
         : Promise.resolve()
 
       markPromise
-        .then(() => invoke('update_session_state', {
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          sessionId: activeSessionId,
-          waitingForInput: false,
-          waitingForInputType: null,
-          selectedExecutionMode: mode,
-        }))
+        .then(() =>
+          invoke('update_session_state', {
+            worktreeId: activeWorktreeId,
+            worktreePath: activeWorktreePath,
+            sessionId: activeSessionId,
+            waitingForInput: false,
+            waitingForInputType: null,
+            selectedExecutionMode: mode,
+          })
+        )
         .then(() => {
           invoke('broadcast_session_setting', {
             sessionId: activeSessionId,
             key: 'executionMode',
             value: mode,
           }).catch(err => {
-            console.error('[usePlanDialogApproval] Broadcast executionMode=' + mode + ' failed:', err)
+            console.error(
+              '[usePlanDialogApproval] Broadcast executionMode=' +
+                mode +
+                ' failed:',
+              err
+            )
           })
           invoke('broadcast_session_setting', {
             sessionId: activeSessionId,
             key: 'waitingForInput',
             value: 'false',
           }).catch(err => {
-            console.error('[usePlanDialogApproval] Broadcast waitingForInput=false failed:', err)
+            console.error(
+              '[usePlanDialogApproval] Broadcast waitingForInput=false failed:',
+              err
+            )
           })
         })
         .catch(err => {
-          console.error('[usePlanDialogApproval] Failed to clear waiting state:', err)
+          console.error(
+            '[usePlanDialogApproval] Failed to clear waiting state:',
+            err
+          )
         })
 
       // Build approval message
@@ -193,15 +214,20 @@ export function usePlanDialogApproval({
 
       setExecutionMode(activeSessionId, mode)
 
-      const modelOverride = mode === 'yolo' ? yoloModelRef.current : buildModelRef.current
-      const backendOverride = mode === 'yolo' ? yoloBackendRef.current : buildBackendRef.current
+      const modelOverride =
+        mode === 'yolo' ? yoloModelRef.current : buildModelRef.current
+      const backendOverride =
+        mode === 'yolo' ? yoloBackendRef.current : buildBackendRef.current
       const model = modelOverride ?? selectedModelRef.current
       const modeLabel = mode === 'yolo' ? 'Yolo' : 'Build'
-      const overrideStr = (modelOverride || backendOverride)
-        ? [backendOverride, model].filter(Boolean).join(' / ')
-        : ''
+      const overrideStr =
+        modelOverride || backendOverride
+          ? [backendOverride, model].filter(Boolean).join(' / ')
+          : ''
       if (overrideStr) toast.info(`${modeLabel}: ${overrideStr}`)
-      const displayMessage = overrideStr ? `[${modeLabel}: ${overrideStr}]\n${message}` : message
+      const displayMessage = overrideStr
+        ? `[${modeLabel}: ${overrideStr}]\n${message}`
+        : message
 
       const queuedMessage: QueuedMessage = {
         id: generateId(),
@@ -227,7 +253,12 @@ export function usePlanDialogApproval({
       }
 
       enqueueMessage(activeSessionId, queuedMessage)
-      persistEnqueue(activeWorktreeId, activeWorktreePath, activeSessionId, queuedMessage)
+      persistEnqueue(
+        activeWorktreeId,
+        activeWorktreePath,
+        activeSessionId,
+        queuedMessage
+      )
     },
     [
       activeSessionId,

@@ -150,7 +150,12 @@ export function usePendingAttachments({
           if (checkIsSendingNow(activeSessionId)) {
             enqueueMessage(activeSessionId, queuedMessage)
             if (activeWorktreeId && activeWorktreePath) {
-              persistEnqueue(activeWorktreeId, activeWorktreePath, activeSessionId, queuedMessage)
+              persistEnqueue(
+                activeWorktreeId,
+                activeWorktreePath,
+                activeSessionId,
+                queuedMessage
+              )
             }
           } else {
             sendMessageNow(queuedMessage)

@@ -39,17 +39,37 @@ export const claudeCliQueryKeys = {
 export function useClaudePathDetection(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...claudeCliQueryKeys.all, 'path-detection'],
-    queryFn: async (): Promise<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }> => {
+    queryFn: async (): Promise<{
+      found: boolean
+      path: string | null
+      version: string | null
+      package_manager: string | null
+    }> => {
       if (!isTauri()) {
-        return { found: false, path: null, version: null, package_manager: null }
+        return {
+          found: false,
+          path: null,
+          version: null,
+          package_manager: null,
+        }
       }
       try {
-        const result = await invoke<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }>('detect_claude_in_path')
+        const result = await invoke<{
+          found: boolean
+          path: string | null
+          version: string | null
+          package_manager: string | null
+        }>('detect_claude_in_path')
         console.debug('[ONBOARDING:SVC] claude path detection:', result)
         return result
       } catch (err) {
         console.debug('[ONBOARDING:SVC] claude path detection failed:', err)
-        return { found: false, path: null, version: null, package_manager: null }
+        return {
+          found: false,
+          path: null,
+          version: null,
+          package_manager: null,
+        }
       }
     },
     enabled: options?.enabled ?? true,
@@ -79,7 +99,12 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
     queryFn: async (): Promise<ClaudeCliStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock CLI status')
-        return { installed: false, version: null, path: null, supports_auth_command: false }
+        return {
+          installed: false,
+          version: null,
+          path: null,
+          supports_auth_command: false,
+        }
       }
 
       try {
@@ -91,7 +116,12 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
         return status
       } catch (error) {
         logger.error('Failed to check Claude CLI status', { error })
-        return { installed: false, version: null, path: null, supports_auth_command: false }
+        return {
+          installed: false,
+          version: null,
+          path: null,
+          supports_auth_command: false,
+        }
       }
     },
     enabled: options?.enabled ?? true,

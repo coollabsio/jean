@@ -57,13 +57,7 @@ export function useSessionArchive({
         })
       }
     },
-    [
-      worktreeId,
-      worktreePath,
-      removalBehavior,
-      closeSession,
-      archiveSession,
-    ]
+    [worktreeId, worktreePath, removalBehavior, closeSession, archiveSession]
   )
 
   return { handleArchiveSession, handleDeleteSession }

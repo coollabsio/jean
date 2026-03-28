@@ -23,8 +23,7 @@ export interface LinearIssueItemProps {
 function isNewIssue(createdAt: string): boolean {
   const created = new Date(createdAt)
   const now = new Date()
-  const diffDays =
-    (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+  const diffDays = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
   return diffDays <= 7
 }
 
@@ -123,9 +122,7 @@ export function LinearIssueItem({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent>
-            Investigate ({getModifierSymbol()}+M)
-          </TooltipContent>
+          <TooltipContent>Investigate ({getModifierSymbol()}+M)</TooltipContent>
         </Tooltip>
         {onPreview && (
           <div className="opacity-0 group-hover:opacity-100 transition-opacity">
@@ -141,9 +138,7 @@ export function LinearIssueItem({
                   <Eye className="h-3 w-3" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>
-                Preview ({getModifierSymbol()}+O)
-              </TooltipContent>
+              <TooltipContent>Preview ({getModifierSymbol()}+O)</TooltipContent>
             </Tooltip>
           </div>
         )}

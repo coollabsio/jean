@@ -157,9 +157,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         }
       }
     }
-    return results.sort(
-      (a, b) => b.session.updated_at - a.session.updated_at
-    )
+    return results.sort((a, b) => b.session.updated_at - a.session.updated_at)
   }, [allSessions])
 
   const markSessionsReadOptimistically = useCallback(
@@ -211,50 +209,46 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     [queryClient, unreadItems.length, markSessionsReadOptimistically]
   )
 
-  const handleSelect = useCallback((item: UnreadItem) => {
-    const { selectedProjectId, selectProject } =
-      useProjectsStore.getState()
-    const {
-      setActiveSession,
-      clearActiveWorktree,
-      setLastOpenedForProject,
-    } = useChatStore.getState()
+  const handleSelect = useCallback(
+    (item: UnreadItem) => {
+      const { selectedProjectId, selectProject } = useProjectsStore.getState()
+      const { setActiveSession, clearActiveWorktree, setLastOpenedForProject } =
+        useChatStore.getState()
 
-    const crossProject = selectedProjectId !== item.projectId
-    if (crossProject) {
-      selectProject(item.projectId)
-    }
+      const crossProject = selectedProjectId !== item.projectId
+      if (crossProject) {
+        selectProject(item.projectId)
+      }
 
-    // Navigate to ProjectCanvasView
-    clearActiveWorktree()
-    setActiveSession(item.worktreeId, item.session.id)
-    setLastOpenedForProject(item.projectId, item.worktreeId, item.session.id)
-    markSessionsReadOptimistically([item.session.id])
-    setOpen(false)
+      // Navigate to ProjectCanvasView
+      clearActiveWorktree()
+      setActiveSession(item.worktreeId, item.session.id)
+      setLastOpenedForProject(item.projectId, item.worktreeId, item.session.id)
+      markSessionsReadOptimistically([item.session.id])
+      setOpen(false)
 
-    if (crossProject) {
-      // Component remounts with new projectId key — use store-based auto-open
-      useUIStore
-        .getState()
-        .markWorktreeForAutoOpenSession(
-          item.worktreeId,
-          item.session.id
-        )
-    } else {
-      // Same project, component stays mounted — use event
-      setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent('open-session-modal', {
-            detail: {
-              sessionId: item.session.id,
-              worktreeId: item.worktreeId,
-              worktreePath: item.worktreePath,
-            },
-          })
-        )
-      }, 50)
-    }
-  }, [markSessionsReadOptimistically])
+      if (crossProject) {
+        // Component remounts with new projectId key — use store-based auto-open
+        useUIStore
+          .getState()
+          .markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
+      } else {
+        // Same project, component stays mounted — use event
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent('open-session-modal', {
+              detail: {
+                sessionId: item.session.id,
+                worktreeId: item.worktreeId,
+                worktreePath: item.worktreePath,
+              },
+            })
+          )
+        }, 50)
+      }
+    },
+    [markSessionsReadOptimistically]
+  )
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -314,8 +308,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
             className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-yellow-400 cursor-pointer"
           >
             <BellDot className="h-3.5 w-3.5 shrink-0 animate-[bell-ring_2s_ease-in-out_infinite]" />
-            {unreadCount} finished{' '}
-            {unreadCount === 1 ? 'session' : 'sessions'}
+            {unreadCount} finished {unreadCount === 1 ? 'session' : 'sessions'}
             {!isMobile && (
               <Kbd className="ml-1 h-4 px-1 text-[10px] opacity-60">
                 {formatShortcutDisplay('mod+shift+f')}

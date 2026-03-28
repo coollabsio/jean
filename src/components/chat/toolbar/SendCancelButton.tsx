@@ -2,7 +2,11 @@ import { Rocket } from 'lucide-react'
 import { getModifierSymbol, isMacOS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 interface SendCancelButtonProps {
@@ -95,7 +99,9 @@ export function SendCancelButton({
               : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
           )}
         >
-          <span className="w-9 text-center">{MODE_LABELS[executionMode] ?? executionMode}</span>
+          <span className="w-9 text-center">
+            {MODE_LABELS[executionMode] ?? executionMode}
+          </span>
           <Rocket className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>

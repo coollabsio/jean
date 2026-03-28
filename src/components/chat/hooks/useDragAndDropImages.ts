@@ -80,8 +80,7 @@ export function useDragAndDropImages(
 
           if (imagePaths.length === 0 && svgPaths.length === 0) {
             toast.error('No image detected', {
-              description:
-                'Only PNG, JPEG, GIF, WebP, SVG files are accepted',
+              description: 'Only PNG, JPEG, GIF, WebP, SVG files are accepted',
             })
             return
           }

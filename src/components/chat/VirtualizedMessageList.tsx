@@ -170,7 +170,7 @@ export const VirtualizedMessageList = memo(
       const visibleMessages = messages.slice(startIndex)
       const hasMoreMessages = startIndex > 0
 
-      // Reset visible count when session changes (messages go to 0)
+      // Reset visible count when session changes
       const prevSessionRef = useRef(sessionId)
       useEffect(() => {
         if (sessionId !== prevSessionRef.current) {
@@ -264,7 +264,10 @@ export const VirtualizedMessageList = memo(
             rect.top < containerRect.bottom && rect.bottom > containerRect.top
           )
         },
-        getVisibleRange: () => ({ start: startIndex, end: messages.length - 1 }),
+        getVisibleRange: () => ({
+          start: startIndex,
+          end: messages.length - 1,
+        }),
       }))
 
       // Handle scroll-to-bottom when new messages arrive
@@ -306,13 +309,18 @@ export const VirtualizedMessageList = memo(
             // Show completed duration on the last assistant message (from store),
             // or fall back to timestamp-based computation for persisted messages (after reload)
             let durationMs: number | null = null
-            if (message.role === 'assistant' && globalIndex === messages.length - 1 && completedDurationMs) {
+            if (
+              message.role === 'assistant' &&
+              globalIndex === messages.length - 1 &&
+              completedDurationMs
+            ) {
               durationMs = completedDurationMs
             } else if (message.role === 'assistant' && globalIndex > 0) {
               const prevMessage = messages[globalIndex - 1]
               if (prevMessage?.role === 'user') {
                 const deltaSecs = message.timestamp - prevMessage.timestamp
-                if (deltaSecs > 0 && deltaSecs < 3600) durationMs = deltaSecs * 1000
+                if (deltaSecs > 0 && deltaSecs < 3600)
+                  durationMs = deltaSecs * 1000
               }
             }
 
@@ -323,7 +331,9 @@ export const VirtualizedMessageList = memo(
                   if (el) messageRefs.current.set(globalIndex, el)
                   else messageRefs.current.delete(globalIndex)
                 }}
-                className={globalIndex === messages.length - 1 && isSending ? '' : 'pb-4'}
+                className={
+                  globalIndex === messages.length - 1 && isSending ? '' : 'pb-4'
+                }
               >
                 <MessageItem
                   message={message}
@@ -336,7 +346,9 @@ export const VirtualizedMessageList = memo(
                   approveShortcut={approveShortcut}
                   approveShortcutYolo={approveShortcutYolo}
                   approveShortcutClearContext={approveShortcutClearContext}
-                  approveShortcutClearContextBuild={approveShortcutClearContextBuild}
+                  approveShortcutClearContextBuild={
+                    approveShortcutClearContextBuild
+                  }
                   approveButtonRef={
                     globalIndex === lastPlanMessageIndex
                       ? approveButtonRef

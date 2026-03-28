@@ -24,7 +24,8 @@ export function useSessionPrefetch(projects: Project[] | undefined) {
     const actualProjects = projects.filter(p => !p.is_folder)
     if (actualProjects.length === 0) return
 
-    const { expandedProjectIds, selectedProjectId } = useProjectsStore.getState()
+    const { expandedProjectIds, selectedProjectId } =
+      useProjectsStore.getState()
     const prioritizedProjectIds = new Set<string>(expandedProjectIds)
     if (selectedProjectId) {
       prioritizedProjectIds.add(selectedProjectId)

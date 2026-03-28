@@ -31,7 +31,10 @@ export function useMcpServerResolution({
   preferences,
   selectedBackend,
 }: UseMcpServerResolutionParams) {
-  const { data: mcpServersData } = useMcpServers(activeWorktreePath, selectedBackend)
+  const { data: mcpServersData } = useMcpServers(
+    activeWorktreePath,
+    selectedBackend
+  )
   const availableMcpServers = useMemo(
     () => mcpServersData ?? [],
     [mcpServersData]
@@ -39,7 +42,8 @@ export function useMcpServerResolution({
 
   // Re-read MCP config when switching worktrees or backends
   useEffect(() => {
-    if (activeWorktreePath) invalidateMcpServers(activeWorktreePath, selectedBackend)
+    if (activeWorktreePath)
+      invalidateMcpServers(activeWorktreePath, selectedBackend)
   }, [activeWorktreePath, selectedBackend])
 
   const sessionEnabledMcpServers = useChatStore(state =>

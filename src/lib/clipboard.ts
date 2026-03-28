@@ -32,10 +32,7 @@ export async function copyHtmlToClipboard(
   html: string,
   plainText: string
 ): Promise<void> {
-  if (
-    typeof ClipboardItem !== 'undefined' &&
-    navigator.clipboard?.write
-  ) {
+  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
     await navigator.clipboard.write([
       new ClipboardItem({
         'text/plain': new Blob([plainText], { type: 'text/plain' }),

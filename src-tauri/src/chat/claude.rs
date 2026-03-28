@@ -419,12 +419,17 @@ fn build_claude_args(
         }
     }
 
-    // Allow embedded CLI binaries without approval via --allowedTools
-    // Claude wraps paths with spaces in quotes, so the actual command is:
-    // "/Users/.../Application Support/.../gh-cli/gh" --version
-    // Use *gh-cli/gh* to match regardless of quoting
+    // Allow embedded/resolved CLI binaries without approval via --allowedTools
+    // Claude wraps paths with spaces in quotes, so use glob patterns to match
+    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
+    let gh_path_str = gh_binary.to_string_lossy();
     args.push("--allowedTools".to_string());
-    args.push("Bash(*gh-cli/gh*)".to_string());
+    args.push(format!("Bash(*{gh_path_str}*)"));
+    // Also allow the Jean-managed path pattern when user configured system PATH gh
+    if !gh_path_str.contains("gh-cli/gh") {
+        args.push("--allowedTools".to_string());
+        args.push("Bash(*gh-cli/gh*)".to_string());
+    }
     args.push("--allowedTools".to_string());
     args.push("Bash(*claude-cli/claude*)".to_string());
     push_claude_rtk_allowed_tool(&mut args, use_rtk_for_claude);

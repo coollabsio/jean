@@ -5,10 +5,7 @@ import { readPlanFile } from '@/services/chat'
 import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
 import { getFilename } from '@/lib/path-utils'
-import {
-  Collapsible,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
+import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 interface PlanDisplayBaseProps {
   className?: string
@@ -46,7 +43,8 @@ export function PlanDisplay({
   // Render-time sync: when defaultCollapsed transitions to true, close immediately
   // in the same render frame (no useEffect delay). React re-renders before commit.
   // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
-  const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed)
+  const [prevDefaultCollapsed, setPrevDefaultCollapsed] =
+    useState(defaultCollapsed)
   if (defaultCollapsed && !prevDefaultCollapsed) {
     setPrevDefaultCollapsed(true)
     setIsOpen(false)

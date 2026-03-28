@@ -573,7 +573,8 @@ export function useCommandContext(
           'code_review_provider',
           preferences?.default_provider
         ),
-        reasoningEffort: preferences?.magic_prompt_efforts?.code_review_effort ?? null,
+        reasoningEffort:
+          preferences?.magic_prompt_efforts?.code_review_effort ?? null,
       })
 
       // Store review results in Zustand (also activates review tab)
@@ -726,7 +727,8 @@ export function useCommandContext(
           'session_naming_provider',
           preferences?.default_provider
         ),
-        reasoningEffort: preferences?.magic_prompt_efforts?.session_naming_effort ?? null,
+        reasoningEffort:
+          preferences?.magic_prompt_efforts?.session_naming_effort ?? null,
       })
       toast.success('Session title will update shortly', { id: toastId })
     } catch (error) {

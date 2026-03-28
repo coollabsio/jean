@@ -56,8 +56,13 @@ export function useContextOperations({
     if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
     // Get project display name (e.g., "royal-camel") instead of worktree name (e.g., "main")
-    const projects = queryClient.getQueryData<Project[]>(projectsQueryKeys.list())
-    const projectName = projects?.find(p => p.id === worktree?.project_id)?.name ?? worktree?.name ?? 'unknown-project'
+    const projects = queryClient.getQueryData<Project[]>(
+      projectsQueryKeys.list()
+    )
+    const projectName =
+      projects?.find(p => p.id === worktree?.project_id)?.name ??
+      worktree?.name ??
+      'unknown-project'
 
     // Check if this session already has a saved context
     const cachedContexts = queryClient.getQueryData<SavedContextsResponse>([
@@ -88,7 +93,8 @@ export function useContextOperations({
             'context_summary_provider',
             preferences?.default_provider
           ),
-          reasoningEffort: preferences?.magic_prompt_efforts?.context_summary_effort ?? null,
+          reasoningEffort:
+            preferences?.magic_prompt_efforts?.context_summary_effort ?? null,
         }
       )
 

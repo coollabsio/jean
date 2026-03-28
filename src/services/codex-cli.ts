@@ -39,17 +39,37 @@ export const codexCliQueryKeys = {
 export function useCodexPathDetection(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...codexCliQueryKeys.all, 'path-detection'],
-    queryFn: async (): Promise<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }> => {
+    queryFn: async (): Promise<{
+      found: boolean
+      path: string | null
+      version: string | null
+      package_manager: string | null
+    }> => {
       if (!isTauri()) {
-        return { found: false, path: null, version: null, package_manager: null }
+        return {
+          found: false,
+          path: null,
+          version: null,
+          package_manager: null,
+        }
       }
       try {
-        const result = await invoke<{ found: boolean; path: string | null; version: string | null; package_manager: string | null }>('detect_codex_in_path')
+        const result = await invoke<{
+          found: boolean
+          path: string | null
+          version: string | null
+          package_manager: string | null
+        }>('detect_codex_in_path')
         console.debug('[ONBOARDING:SVC] codex path detection:', result)
         return result
       } catch (err) {
         console.debug('[ONBOARDING:SVC] codex path detection failed:', err)
-        return { found: false, path: null, version: null, package_manager: null }
+        return {
+          found: false,
+          path: null,
+          version: null,
+          package_manager: null,
+        }
       }
     },
     enabled: options?.enabled ?? true,
