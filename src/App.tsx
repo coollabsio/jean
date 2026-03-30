@@ -692,6 +692,19 @@ function App() {
         logger.warn('Failed to cleanup old recovery files', { error })
       })
 
+      invoke<number>('recover_spotlights')
+        .then(recovered => {
+          if (recovered > 0) {
+            logger.info('Recovered repository roots from Spotlight state', {
+              recovered,
+            })
+            toast.info(`Restored ${recovered} Spotlight session(s) on launch`)
+          }
+        })
+        .catch(error => {
+          logger.warn('Failed to recover Spotlights on startup', { error })
+        })
+
       // Check for and resume any detached sessions that are still running.
       invoke<ResumableSession[]>('check_resumable_sessions')
         .then(async resumable => {

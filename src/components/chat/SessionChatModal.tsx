@@ -19,6 +19,7 @@ import {
   MoreHorizontal,
   Pencil,
   Sparkles,
+  SunMedium,
   Tag,
   Terminal,
   Play,
@@ -101,6 +102,13 @@ import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu
 import { LabelModal } from './LabelModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
 import { useIsMobile } from '@/hooks/use-mobile'
+import {
+  getEffectiveWorktreePath,
+  useActivateSpotlight,
+  useDeactivateSpotlight,
+  useSpotlight,
+  useSyncSpotlight,
+} from '@/services/spotlight'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -232,7 +240,7 @@ export function SessionChatModal({
     [sessionsData?.sessions]
   )
   const { data: preferences } = usePreferences()
-  const { data: runScripts = [] } = useRunScripts(worktreePath)
+  const { spotlight } = useSpotlight(worktreeId)
   const hasRunningTerminal = useTerminalStore(state => {
     const terminals = state.terminals[worktreeId] ?? []
     return terminals.some(t => state.runningTerminals.has(t.id))
@@ -330,6 +338,17 @@ export function SessionChatModal({
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
     : null
+  const terminalWorktreePath =
+    getEffectiveWorktreePath(project?.path ?? worktreePath, spotlight) ??
+    worktreePath
+  const { data: runScripts = [] } = useRunScripts(terminalWorktreePath)
+  const activateSpotlight = useActivateSpotlight()
+  const syncSpotlight = useSyncSpotlight()
+  const deactivateSpotlight = useDeactivateSpotlight()
+  const isSpotlightLoading =
+    activateSpotlight.isPending ||
+    syncSpotlight.isPending ||
+    deactivateSpotlight.isPending
   const isBase = worktree ? isBaseSession(worktree) : false
   const { data: gitStatus } = useGitStatus(worktreeId)
   const behindCount =
@@ -782,9 +801,70 @@ export function SessionChatModal({
               {isNativeApp() && (
                 <div className="hidden sm:flex items-center gap-1">
                   <OpenInButton
-                    worktreePath={worktreePath}
+                    worktreePath={terminalWorktreePath}
                     branch={worktree?.branch}
                   />
+                  {preferences?.spotlight_testing_enabled && !isBase && (
+                    <DropdownMenu>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className={cn(
+                                'h-7 px-2 text-xs',
+                                spotlight?.active &&
+                                  'text-amber-500 hover:text-amber-400'
+                              )}
+                              disabled={isSpotlightLoading}
+                            >
+                              <SunMedium
+                                className={cn(
+                                  'h-3 w-3',
+                                  spotlight?.active && 'animate-icon-glow'
+                                )}
+                              />
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {spotlight?.active
+                            ? 'Spotlight active'
+                            : 'Enable Spotlight'}
+                        </TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="end">
+                        {!spotlight?.active ? (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              activateSpotlight.mutate(worktreeId)
+                            }
+                          >
+                            <SunMedium className="h-4 w-4" />
+                            Enable Spotlight
+                          </DropdownMenuItem>
+                        ) : (
+                          <>
+                            <DropdownMenuItem
+                              onSelect={() => syncSpotlight.mutate(worktreeId)}
+                            >
+                              <SunMedium className="h-4 w-4" />
+                              Sync Spotlight
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                deactivateSpotlight.mutate(worktreeId)
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Disable Spotlight
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -893,7 +973,7 @@ export function SessionChatModal({
                     <DropdownMenuItem
                       onSelect={() =>
                         openInEditor.mutate({
-                          worktreePath,
+                          worktreePath: terminalWorktreePath,
                           editor: preferences?.editor,
                         })
                       }
@@ -908,7 +988,7 @@ export function SessionChatModal({
                     <DropdownMenuItem
                       onSelect={() =>
                         openInTerminal.mutate({
-                          worktreePath,
+                          worktreePath: terminalWorktreePath,
                           terminal: preferences?.terminal,
                         })
                       }
@@ -921,7 +1001,7 @@ export function SessionChatModal({
                       )}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onSelect={() => openInFinder.mutate(worktreePath)}
+                      onSelect={() => openInFinder.mutate(terminalWorktreePath)}
                     >
                       <FolderOpen className="h-4 w-4" />
                       Finder
@@ -938,6 +1018,38 @@ export function SessionChatModal({
                         <Github className="h-4 w-4" />
                         GitHub
                       </DropdownMenuItem>
+                    )}
+                    {preferences?.spotlight_testing_enabled && !isBase && (
+                      <>
+                        <DropdownMenuSeparator />
+                        {!spotlight?.active ? (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              activateSpotlight.mutate(worktreeId)
+                            }
+                          >
+                            <SunMedium className="h-4 w-4" />
+                            Enable Spotlight
+                          </DropdownMenuItem>
+                        ) : (
+                          <>
+                            <DropdownMenuItem
+                              onSelect={() => syncSpotlight.mutate(worktreeId)}
+                            >
+                              <SunMedium className="h-4 w-4" />
+                              Sync Spotlight
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                deactivateSpotlight.mutate(worktreeId)
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Disable Spotlight
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </>
                     )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -1286,7 +1398,7 @@ export function SessionChatModal({
         {isNativeApp() && (
           <ModalTerminalDrawer
             worktreeId={worktreeId}
-            worktreePath={worktreePath}
+            worktreePath={terminalWorktreePath}
           />
         )}
       </div>

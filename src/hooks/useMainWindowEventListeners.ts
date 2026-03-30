@@ -15,6 +15,8 @@ import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
 import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
+import { spotlightQueryKeys } from '@/services/spotlight'
+import type { SpotlightStatus } from '@/types/spotlight'
 import {
   eventToShortcutString,
   DEFAULT_KEYBINDINGS,
@@ -188,18 +190,40 @@ function executeKeybindingAction(
 
       // Fetch run scripts - use fetchQuery to handle uncached dashboard worktrees
       ;(async () => {
+        let spotlights = queryClient.getQueryData<SpotlightStatus[]>(
+          spotlightQueryKeys.list()
+        )
+
+        if (spotlights === undefined) {
+          try {
+            spotlights = await queryClient.fetchQuery<SpotlightStatus[]>({
+              queryKey: spotlightQueryKeys.list(),
+              queryFn: () => invoke<SpotlightStatus[]>('list_spotlights'),
+            })
+          } catch {
+            spotlights = []
+          }
+        }
+
+        const spotlight = spotlights?.find(
+          item => item.worktree_id === targetWorktreeId
+        )
+        const executionPath = spotlight?.active
+          ? spotlight.root_path
+          : targetWorktreePath
+
         let runScripts = queryClient.getQueryData<string[]>([
           'run-scripts',
-          targetWorktreePath,
+          executionPath,
         ])
 
         if (runScripts === undefined) {
           try {
             runScripts = await queryClient.fetchQuery<string[]>({
-              queryKey: ['run-scripts', targetWorktreePath],
+              queryKey: ['run-scripts', executionPath],
               queryFn: () =>
                 invoke<string[]>('get_run_scripts', {
-                  worktreePath: targetWorktreePath,
+                  worktreePath: executionPath,
                 }),
             })
           } catch {
@@ -238,7 +262,7 @@ function executeKeybindingAction(
           // Canvas view: start PTY headlessly (no terminal UI mounted yet)
           startHeadless(terminalId, {
             worktreeId: targetWorktreeId,
-            worktreePath: targetWorktreePath!,
+            worktreePath: executionPath!,
             command: firstScript,
           })
         }

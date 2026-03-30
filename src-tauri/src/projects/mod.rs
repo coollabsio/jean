@@ -8,6 +8,7 @@ pub mod linear_issues;
 mod names;
 pub mod pr_status;
 pub mod saved_contexts;
+pub mod spotlight;
 pub mod storage;
 pub mod types;
 
@@ -17,3 +18,4 @@ pub use github_actions::*;
 pub use github_issues::*;
 pub use linear_issues::*;
 pub use saved_contexts::*;
+pub use spotlight::*;

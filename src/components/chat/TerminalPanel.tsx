@@ -6,6 +6,7 @@ import { TerminalView } from './TerminalView'
 interface TerminalPanelProps {
   isCollapsed?: boolean
   onExpand?: () => void
+  activeWorktreePathOverride?: string | null
 }
 
 /**
@@ -52,7 +53,11 @@ const WorktreeTerminals = memo(function WorktreeTerminals({
  * - Running processes
  * - Scroll position
  */
-export function TerminalPanel({ isCollapsed, onExpand }: TerminalPanelProps) {
+export function TerminalPanel({
+  isCollapsed,
+  onExpand,
+  activeWorktreePathOverride,
+}: TerminalPanelProps) {
   // Subscribe to terminals object (stable reference when unchanged)
   const terminals = useTerminalStore(state => state.terminals)
   const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
@@ -73,6 +78,9 @@ export function TerminalPanel({ isCollapsed, onExpand }: TerminalPanelProps) {
     <div className="relative h-full w-full overflow-hidden">
       {worktreeIdsToRender.map(worktreeId => {
         const path =
+          (worktreeId === activeWorktreeId
+            ? activeWorktreePathOverride
+            : null) ??
           worktreePaths[worktreeId] ??
           (worktreeId === activeWorktreeId ? activeWorktreePath : undefined)
         if (!path) return null

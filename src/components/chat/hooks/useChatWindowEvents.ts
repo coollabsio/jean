@@ -20,6 +20,7 @@ interface UseChatWindowEventsParams {
   activeSessionId: string | null | undefined
   activeWorktreeId: string | null | undefined
   activeWorktreePath: string | null | undefined
+  terminalWorktreePath: string | null | undefined
   isModal: boolean
   // Plan dialog
   latestPlanContent: string | null
@@ -108,6 +109,7 @@ export function useChatWindowEvents({
   activeSessionId,
   activeWorktreeId,
   activeWorktreePath,
+  terminalWorktreePath,
   isModal,
   latestPlanContent,
   latestPlanFilePath,
@@ -422,7 +424,13 @@ export function useChatWindowEvents({
     const handleLoad = () => handleLoadContext()
     const handleRun = () => {
       const first = runScripts[0]
-      if (!isNativeApp() || !activeWorktreeId || !first) return
+      if (
+        !isNativeApp() ||
+        !activeWorktreeId ||
+        !first ||
+        !terminalWorktreePath
+      )
+        return
       useTerminalStore.getState().startRun(activeWorktreeId, first)
     }
     window.addEventListener('command:save-context', handleSave)
@@ -433,7 +441,14 @@ export function useChatWindowEvents({
       window.removeEventListener('command:load-context', handleLoad)
       window.removeEventListener('command:run-script', handleRun)
     }
-  }, [handleSaveContext, handleLoadContext, activeWorktreeId, runScripts])
+  }, [
+    handleSaveContext,
+    handleLoadContext,
+    activeWorktreeId,
+    activeWorktreePath,
+    runScripts,
+    terminalWorktreePath,
+  ])
 
   // Toggle debug mode
   useEffect(() => {
