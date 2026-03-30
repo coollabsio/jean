@@ -9,6 +9,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { preferencesQueryKeys } from '@/services/preferences'
 import type { QueuedMessage } from '@/types/chat'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
@@ -20,6 +21,7 @@ import type { SpotlightStatus } from '@/types/spotlight'
 import {
   eventToShortcutString,
   DEFAULT_KEYBINDINGS,
+  getRuntimeKeybindings,
   type KeybindingAction,
   type KeybindingsMap,
 } from '@/types/keybindings'
@@ -148,6 +150,84 @@ function executeKeybindingAction(
       logger.debug('Keybinding: open_git_diff')
       window.dispatchEvent(new CustomEvent('open-git-diff'))
       break
+    case 'execute_spotlight': {
+      logger.debug('Keybinding: execute_spotlight')
+      if (!isNativeApp()) break
+
+      const preferences = queryClient.getQueryData<{
+        spotlight_testing_enabled?: boolean
+      }>(preferencesQueryKeys.preferences())
+
+      const runAction = () =>
+        executeKeybindingAction('execute_run', commandContext, queryClient)
+
+      const uiStore = useUIStore.getState()
+      if (uiStore.gitDiffModalOpen) break
+
+      const chatStore = useChatStore.getState()
+      const sessionModalOpen = uiStore.sessionChatModalOpen
+      const targetWorktreeId =
+        sessionModalOpen && uiStore.sessionChatModalWorktreeId
+          ? uiStore.sessionChatModalWorktreeId
+          : (chatStore.activeWorktreeId ??
+            useProjectsStore.getState().selectedWorktreeId)
+
+      if (!targetWorktreeId) {
+        notify('Open a worktree to use Spotlight', undefined, { type: 'error' })
+        break
+      }
+
+      if (!preferences?.spotlight_testing_enabled) {
+        runAction()
+        break
+      }
+
+      ;(async () => {
+        let spotlights = queryClient.getQueryData<SpotlightStatus[]>(
+          spotlightQueryKeys.list()
+        )
+
+        if (spotlights === undefined) {
+          try {
+            spotlights = await queryClient.fetchQuery<SpotlightStatus[]>({
+              queryKey: spotlightQueryKeys.list(),
+              queryFn: () => invoke<SpotlightStatus[]>('list_spotlights'),
+            })
+          } catch {
+            spotlights = []
+          }
+        }
+
+        const spotlight = spotlights?.find(
+          item => item.worktree_id === targetWorktreeId
+        )
+
+        try {
+          if (spotlight?.active) {
+            await invoke<SpotlightStatus>('sync_spotlight', {
+              worktreeId: targetWorktreeId,
+            })
+            toast.success('Spotlight synced')
+          } else {
+            await invoke<SpotlightStatus>('activate_spotlight', {
+              worktreeId: targetWorktreeId,
+            })
+            toast.success('Spotlight enabled')
+          }
+
+          queryClient.invalidateQueries({ queryKey: spotlightQueryKeys.all })
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : typeof error === 'string'
+                ? error
+                : 'Failed to start Spotlight'
+          toast.error(message)
+        }
+      })()
+      break
+    }
     case 'execute_run': {
       logger.debug('Keybinding: execute_run')
       if (!isNativeApp()) break
@@ -471,11 +551,11 @@ export function useMainWindowEventListeners() {
 
   // Update ref when preferences change
   useEffect(() => {
-    keybindingsRef.current = {
-      ...DEFAULT_KEYBINDINGS,
-      ...(preferences?.keybindings ?? {}),
-    }
-  }, [preferences?.keybindings])
+    keybindingsRef.current = getRuntimeKeybindings(
+      preferences?.keybindings,
+      preferences?.spotlight_testing_enabled ?? false
+    )
+  }, [preferences?.keybindings, preferences?.spotlight_testing_enabled])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

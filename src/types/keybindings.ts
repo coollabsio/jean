@@ -5,6 +5,7 @@ export type KeybindingAction =
   | 'open_preferences'
   | 'open_commit_modal'
   | 'open_git_diff'
+  | 'execute_spotlight'
   | 'execute_run'
   | 'open_in_modal'
   | 'open_magic_modal'
@@ -60,7 +61,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_preferences: 'mod+comma',
   open_commit_modal: 'mod+shift+c',
   open_git_diff: 'mod+g',
-  execute_run: 'mod+r',
+  execute_spotlight: 'mod+r',
+  execute_run: 'mod+shift+r',
   open_in_modal: 'mod+o',
   open_magic_modal: 'mod+m',
   new_session: 'mod+t',
@@ -91,6 +93,30 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_github_dashboard: 'mod+shift+d',
   open_quick_menu: 'mod+period',
   open_usage_dropdown: 'mod+u',
+}
+
+export function getRuntimeKeybindings(
+  keybindings: Partial<KeybindingsMap> | undefined,
+  spotlightEnabled: boolean
+): KeybindingsMap {
+  const merged = {
+    ...DEFAULT_KEYBINDINGS,
+    ...(keybindings ?? {}),
+  } as KeybindingsMap
+
+  if (
+    !spotlightEnabled &&
+    merged.execute_spotlight === DEFAULT_KEYBINDINGS.execute_spotlight &&
+    merged.execute_run === DEFAULT_KEYBINDINGS.execute_run
+  ) {
+    return {
+      ...merged,
+      execute_spotlight: '',
+      execute_run: 'mod+r',
+    }
+  }
+
+  return merged
 }
 
 // UI definitions for the settings pane
@@ -131,10 +157,17 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     category: 'git',
   },
   {
+    action: 'execute_spotlight',
+    label: 'Execute spotlight',
+    description: 'Start or sync Spotlight for the current worktree',
+    default_shortcut: 'mod+r',
+    category: 'navigation',
+  },
+  {
     action: 'execute_run',
     label: 'Execute run',
     description: 'Start or stop the run script in current workspace',
-    default_shortcut: 'mod+r',
+    default_shortcut: 'mod+shift+r',
     category: 'navigation',
   },
   {

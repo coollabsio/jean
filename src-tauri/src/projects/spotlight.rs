@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -54,6 +55,8 @@ struct SpotlightManifest {
     pub moved_untracked_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracked_stash_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_commit: Option<String>,
     pub started_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_synced_at: Option<u64>,
@@ -175,7 +178,7 @@ fn get_sync_lock(worktree_id: &str) -> Arc<Mutex<()>> {
         .clone()
 }
 
-fn relative_git_paths(repo_path: &str, args: &[&str]) -> Result<Vec<String>, String> {
+fn git_output(repo_path: &str, args: &[&str]) -> Result<Output, String> {
     let output = silent_command("git")
         .args(args)
         .current_dir(repo_path)
@@ -191,6 +194,38 @@ fn relative_git_paths(repo_path: &str, args: &[&str]) -> Result<Vec<String>, Str
         });
     }
 
+    Ok(output)
+}
+
+fn git_output_with_env(
+    repo_path: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<Output, String> {
+    let mut command = silent_command("git");
+    command.args(args).current_dir(repo_path);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+
+    let output = command
+        .output()
+        .map_err(|e| format!("Failed to run git command: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Git command failed".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(output)
+}
+
+fn relative_git_paths(repo_path: &str, args: &[&str]) -> Result<Vec<String>, String> {
+    let output = git_output(repo_path, args)?;
     let stdout = output.stdout;
     let paths = stdout
         .split(|byte| *byte == 0)
@@ -217,38 +252,24 @@ fn list_untracked_paths(repo_path: &str) -> Result<Vec<String>, String> {
 }
 
 fn current_branch(repo_path: &str) -> Result<String, String> {
-    let output = silent_command("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to read git branch: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+    let output = git_output(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn head_sha(repo_path: &str) -> Result<String, String> {
-    let output = silent_command("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to read git HEAD: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+    let output = git_output(repo_path, &["rev-parse", "HEAD"])?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn git_dir(repo_path: &str) -> Result<PathBuf, String> {
-    let output = silent_command("git")
-        .args(["rev-parse", "--absolute-git-dir"])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to resolve git dir: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+    let output = git_output(repo_path, &["rev-parse", "--absolute-git-dir"])?;
+    Ok(PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
+}
+
+fn git_path(repo_path: &str, path_name: &str) -> Result<PathBuf, String> {
+    let output = git_output(repo_path, &["rev-parse", "--git-path", path_name])?;
     Ok(PathBuf::from(
         String::from_utf8_lossy(&output.stdout).trim(),
     ))
@@ -271,27 +292,19 @@ fn git_operation_in_progress(repo_path: &str) -> Result<bool, String> {
 
 fn tracked_changes_fingerprint(repo_path: &str) -> Result<String, String> {
     let head = head_sha(repo_path)?;
-    let output = silent_command("git")
-        .args(["status", "--porcelain", "--untracked-files=no"])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to read git status: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+    let output = git_output(
+        repo_path,
+        &["status", "--porcelain", "--untracked-files=no"],
+    )?;
     let status = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(format!("{head}\n{status}"))
 }
 
 fn has_tracked_changes(repo_path: &str) -> Result<bool, String> {
-    let output = silent_command("git")
-        .args(["status", "--porcelain", "--untracked-files=no"])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to read git status: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+    let output = git_output(
+        repo_path,
+        &["status", "--porcelain", "--untracked-files=no"],
+    )?;
     Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
@@ -316,14 +329,7 @@ fn stash_tracked_changes(repo_path: &str, message: &str) -> Result<Option<String
 }
 
 fn find_stash_ref(repo_path: &str, message: &str) -> Result<Option<String>, String> {
-    let output = silent_command("git")
-        .args(["stash", "list", "--format=%gd%x00%s"])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to read stash list: {e}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+    let output = git_output(repo_path, &["stash", "list", "--format=%gd%x00%s"])?;
 
     for line in output.stdout.split(|byte| *byte == b'\n') {
         if line.is_empty() {
@@ -519,48 +525,119 @@ fn restore_untracked(
     Ok(())
 }
 
-fn sync_manifest(manifest: &mut SpotlightManifest) -> Result<(), String> {
-    let worktree_root = Path::new(&manifest.worktree_path);
+fn temp_index_path(app: &AppHandle, recovery_id: &str, suffix: &str) -> Result<PathBuf, String> {
+    Ok(get_recovery_dir(app)?.join(format!(
+        "spotlight-{recovery_id}-{suffix}-{}.index",
+        std::process::id()
+    )))
+}
+
+fn list_tree_paths(repo_path: &str, treeish: &str) -> Result<Vec<String>, String> {
+    relative_git_paths(repo_path, &["ls-tree", "-r", "--name-only", "-z", treeish])
+}
+
+fn create_snapshot_commit(
+    app: &AppHandle,
+    manifest: &SpotlightManifest,
+) -> Result<(String, Vec<String>), String> {
+    let source_index = git_path(&manifest.worktree_path, "index")?;
+    let temp_index = temp_index_path(app, &manifest.recovery_id, "worktree")?;
+    let temp_index_string = temp_index.to_string_lossy().into_owned();
+
+    if temp_index.exists() {
+        fs::remove_file(&temp_index)
+            .map_err(|e| format!("Failed to reset spotlight temp index: {e}"))?;
+    }
+    fs::copy(&source_index, &temp_index)
+        .map_err(|e| format!("Failed to prepare spotlight temp index: {e}"))?;
+
+    let temp_index_result = (|| -> Result<(String, Vec<String>), String> {
+        git_output_with_env(
+            &manifest.worktree_path,
+            &["add", "-u", "--", "."],
+            &[("GIT_INDEX_FILE", temp_index_string.as_str())],
+        )?;
+
+        let tree_output = git_output_with_env(
+            &manifest.worktree_path,
+            &["write-tree"],
+            &[("GIT_INDEX_FILE", temp_index_string.as_str())],
+        )?;
+        let tree_sha = String::from_utf8_lossy(&tree_output.stdout)
+            .trim()
+            .to_string();
+        let parent = head_sha(&manifest.worktree_path)?;
+        let message = format!("jean spotlight snapshot {}", manifest.worktree_id);
+        let commit_output = git_output_with_env(
+            &manifest.worktree_path,
+            &[
+                "commit-tree",
+                tree_sha.as_str(),
+                "-p",
+                parent.as_str(),
+                "-m",
+                message.as_str(),
+            ],
+            &[("GIT_INDEX_FILE", temp_index_string.as_str())],
+        )?;
+        let snapshot_commit = String::from_utf8_lossy(&commit_output.stdout)
+            .trim()
+            .to_string();
+        let tracked_paths = list_tree_paths(&manifest.worktree_path, &snapshot_commit)?;
+        Ok((snapshot_commit, tracked_paths))
+    })();
+
+    if temp_index.exists() {
+        fs::remove_file(&temp_index)
+            .map_err(|e| format!("Failed to clean spotlight temp index: {e}"))?;
+    }
+
+    temp_index_result
+}
+
+fn apply_snapshot_commit(
+    manifest: &mut SpotlightManifest,
+    snapshot_commit: &str,
+    snapshot_paths: &[String],
+) -> Result<(), String> {
     let root = Path::new(&manifest.root_path);
     let root_tracked: HashSet<String> = manifest.root_tracked_paths.iter().cloned().collect();
-    let worktree_tracked_vec = list_tracked_paths(&manifest.worktree_path)?;
-    let worktree_tracked: HashSet<String> = worktree_tracked_vec.iter().cloned().collect();
+    let snapshot_tracked: HashSet<String> = snapshot_paths.iter().cloned().collect();
     let previous_spotlight_only: HashSet<String> =
         manifest.spotlight_only_paths.iter().cloned().collect();
 
-    for relative in root_tracked.difference(&worktree_tracked) {
+    for relative in root_tracked.difference(&snapshot_tracked) {
         let target = root.join(relative);
         remove_path(&target)?;
         remove_empty_parent_dirs(root, &target);
     }
 
-    for relative in previous_spotlight_only.difference(&worktree_tracked) {
+    for relative in previous_spotlight_only.difference(&snapshot_tracked) {
         let target = root.join(relative);
         remove_path(&target)?;
         remove_empty_parent_dirs(root, &target);
     }
 
-    for relative in &worktree_tracked_vec {
-        let src = worktree_root.join(relative);
-        let dst = root.join(relative);
-        if src.exists() || src.is_symlink() {
-            let _ = remove_path(&dst);
-            copy_path(&src, &dst)?;
-        } else {
-            remove_path(&dst)?;
-            remove_empty_parent_dirs(root, &dst);
-        }
-    }
+    git_output(
+        &manifest.root_path,
+        &["checkout", snapshot_commit, "--", "."],
+    )?;
 
-    let mut spotlight_only = worktree_tracked
+    let mut spotlight_only = snapshot_tracked
         .difference(&root_tracked)
         .cloned()
         .collect::<Vec<_>>();
     spotlight_only.sort();
     manifest.spotlight_only_paths = spotlight_only;
+    manifest.snapshot_commit = Some(snapshot_commit.to_string());
     manifest.last_synced_at = Some(now());
     manifest.last_error = None;
     Ok(())
+}
+
+fn sync_manifest(app: &AppHandle, manifest: &mut SpotlightManifest) -> Result<(), String> {
+    let (snapshot_commit, snapshot_paths) = create_snapshot_commit(app, manifest)?;
+    apply_snapshot_commit(manifest, &snapshot_commit, &snapshot_paths)
 }
 
 fn perform_sync(app: &AppHandle, worktree_id: &str) -> Result<SpotlightStatus, String> {
@@ -569,7 +646,7 @@ fn perform_sync(app: &AppHandle, worktree_id: &str) -> Result<SpotlightStatus, S
 
     let mut manifest = load_manifest(app, worktree_id)?
         .ok_or_else(|| format!("Spotlight is not active for worktree: {worktree_id}"))?;
-    sync_manifest(&mut manifest)?;
+    sync_manifest(app, &mut manifest)?;
     save_manifest(app, &manifest)?;
     Ok(status_from_manifest(&manifest))
 }
@@ -769,13 +846,14 @@ pub async fn activate_spotlight(
         spotlight_only_paths: Vec::new(),
         moved_untracked_paths,
         tracked_stash_message,
+        snapshot_commit: None,
         started_at: now(),
         last_synced_at: None,
         restore_pending: true,
         last_error: None,
     };
 
-    sync_manifest(&mut manifest)?;
+    sync_manifest(&app, &mut manifest)?;
     save_manifest(&app, &manifest)?;
     start_watcher(app.clone(), manifest.clone());
     Ok(status_from_manifest(&manifest))
