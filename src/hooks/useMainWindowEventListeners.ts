@@ -205,7 +205,8 @@ function executeKeybindingAction(
             ]) ?? null
 
           if (!targetWorktree) {
-            const selectedProjectId = useProjectsStore.getState().selectedProjectId
+            const selectedProjectId =
+              useProjectsStore.getState().selectedProjectId
             if (selectedProjectId) {
               const worktrees = queryClient.getQueryData<Worktree[]>(
                 projectsQueryKeys.worktrees(selectedProjectId)
@@ -368,10 +369,11 @@ function executeKeybindingAction(
             .getState()
             .setModalTerminalOpen(targetWorktreeId, true)
         } else {
+          if (!executionPath) return
           // Canvas view: start PTY headlessly (no terminal UI mounted yet)
           startHeadless(terminalId, {
             worktreeId: targetWorktreeId,
-            worktreePath: executionPath!,
+            worktreePath: executionPath,
             command: firstScript,
           })
         }
@@ -637,7 +639,7 @@ export function useMainWindowEventListeners() {
         if (terminalShortcutWorktreeId) {
           const kb = keybindingsRef.current
           const digitMatch = e.code.match(/^Digit(\d)$/)
-          const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+          const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
 
           if (
             (e.metaKey || e.ctrlKey) &&
@@ -680,7 +682,7 @@ export function useMainWindowEventListeners() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
         const digitMatch = e.code.match(/^Digit(\d)$/)
-        const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+        const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
         if (digit >= 1 && digit <= 9) {
           e.preventDefault()
           e.stopPropagation()

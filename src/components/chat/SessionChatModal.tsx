@@ -261,7 +261,8 @@ export function SessionChatModal({
     runtimeKeybindings.toggle_terminal ?? DEFAULT_KEYBINDINGS.toggle_terminal
   )
   const spotlightShortcut = formatShortcutDisplay(
-    runtimeKeybindings.execute_spotlight ?? DEFAULT_KEYBINDINGS.execute_spotlight
+    runtimeKeybindings.execute_spotlight ??
+      DEFAULT_KEYBINDINGS.execute_spotlight
   )
   const runShortcut = formatShortcutDisplay(
     runtimeKeybindings.execute_run ?? DEFAULT_KEYBINDINGS.execute_run
