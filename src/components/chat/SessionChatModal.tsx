@@ -18,6 +18,7 @@ import {
   Github,
   MoreHorizontal,
   Pencil,
+  Square,
   Sparkles,
   Tag,
   Terminal,
@@ -365,7 +366,7 @@ export function SessionChatModal({
     deactivateSpotlight.isPending
   const spotlightEnabled = preferences?.spotlight_testing_enabled && !isBase
   const spotlightActionLabel = spotlight?.active
-    ? 'Sync Spotlight'
+    ? 'Disable Spotlight'
     : 'Spotlight'
   const { data: gitStatus } = useGitStatus(worktreeId)
   const behindCount =
@@ -723,11 +724,11 @@ export function SessionChatModal({
 
   const handleSpotlightAction = useCallback(() => {
     if (spotlight?.active) {
-      syncSpotlight.mutate(worktreeId)
+      deactivateSpotlight.mutate(worktreeId)
       return
     }
     activateSpotlight.mutate(worktreeId)
-  }, [activateSpotlight, spotlight?.active, syncSpotlight, worktreeId])
+  }, [activateSpotlight, deactivateSpotlight, spotlight?.active, worktreeId])
 
   // Close on Escape key
   useEffect(() => {
@@ -883,13 +884,11 @@ export function SessionChatModal({
                             onClick={handleSpotlightAction}
                             disabled={isSpotlightLoading}
                           >
-                            <Play
-                              className={cn(
-                                'h-3 w-3',
-                                spotlight?.active &&
-                                  'text-amber-500 animate-icon-glow'
-                              )}
-                            />
+                            {spotlight?.active ? (
+                              <Square className="h-3 w-3 fill-current text-amber-500 animate-icon-glow" />
+                            ) : (
+                              <Play className="h-3 w-3" />
+                            )}
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -912,7 +911,11 @@ export function SessionChatModal({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onSelect={handleSpotlightAction}>
-                            <Play className="h-4 w-4" />
+                            {spotlight?.active ? (
+                              <Square className="h-4 w-4 fill-current" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
                             {spotlightActionLabel}
                             <span className="ml-auto text-[0.625rem] opacity-60">
                               {spotlightShortcut}
@@ -943,16 +946,6 @@ export function SessionChatModal({
                                 </DropdownMenuItem>
                               ))}
                             </>
-                          )}
-                          {spotlight?.active && (
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                deactivateSpotlight.mutate(worktreeId)
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Disable Spotlight
-                            </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1070,33 +1063,17 @@ export function SessionChatModal({
                     {spotlightEnabled && (
                       <>
                         <DropdownMenuSeparator />
-                        {!spotlight?.active ? (
-                          <DropdownMenuItem onSelect={handleSpotlightAction}>
+                        <DropdownMenuItem onSelect={handleSpotlightAction}>
+                          {spotlight?.active ? (
+                            <Square className="h-4 w-4 fill-current" />
+                          ) : (
                             <Play className="h-4 w-4" />
-                            Spotlight
-                            <span className="ml-auto text-[0.625rem] opacity-60">
-                              {spotlightShortcut}
-                            </span>
-                          </DropdownMenuItem>
-                        ) : (
-                          <>
-                            <DropdownMenuItem onSelect={handleSpotlightAction}>
-                              <Play className="h-4 w-4" />
-                              Sync Spotlight
-                              <span className="ml-auto text-[0.625rem] opacity-60">
-                                {spotlightShortcut}
-                              </span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                deactivateSpotlight.mutate(worktreeId)
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Disable Spotlight
-                            </DropdownMenuItem>
-                          </>
-                        )}
+                          )}
+                          {spotlightActionLabel}
+                          <span className="ml-auto text-[0.625rem] opacity-60">
+                            {spotlightShortcut}
+                          </span>
+                        </DropdownMenuItem>
                       </>
                     )}
                     <DropdownMenuSeparator />

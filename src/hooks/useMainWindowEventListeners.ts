@@ -11,12 +11,19 @@ import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
 import { preferencesQueryKeys } from '@/services/preferences'
 import type { QueuedMessage } from '@/types/chat'
+import type { Worktree } from '@/types/projects'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
 import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
-import { spotlightQueryKeys } from '@/services/spotlight'
+import {
+  activateSpotlightWithEffects,
+  deactivateSpotlightWithEffects,
+  loadSpotlights,
+  shouldUseSpotlightShortcut,
+  spotlightQueryKeys,
+} from '@/services/spotlight'
 import type { SpotlightStatus } from '@/types/spotlight'
 import {
   eventToShortcutString,
@@ -183,39 +190,61 @@ function executeKeybindingAction(
       }
 
       ;(async () => {
-        let spotlights = queryClient.getQueryData<SpotlightStatus[]>(
-          spotlightQueryKeys.list()
-        )
-
-        if (spotlights === undefined) {
-          try {
-            spotlights = await queryClient.fetchQuery<SpotlightStatus[]>({
-              queryKey: spotlightQueryKeys.list(),
-              queryFn: () => invoke<SpotlightStatus[]>('list_spotlights'),
-            })
-          } catch {
-            spotlights = []
-          }
-        }
-
+        const spotlights = await loadSpotlights(queryClient)
         const spotlight = spotlights?.find(
           item => item.worktree_id === targetWorktreeId
         )
+        let targetWorktree: Worktree | null = null
+
+        if (!spotlight?.active) {
+          targetWorktree =
+            queryClient.getQueryData<Worktree>([
+              ...projectsQueryKeys.all,
+              'worktree',
+              targetWorktreeId,
+            ]) ?? null
+
+          if (!targetWorktree) {
+            const selectedProjectId = useProjectsStore.getState().selectedProjectId
+            if (selectedProjectId) {
+              const worktrees = queryClient.getQueryData<Worktree[]>(
+                projectsQueryKeys.worktrees(selectedProjectId)
+              )
+              targetWorktree =
+                worktrees?.find(w => w.id === targetWorktreeId) ?? null
+            }
+          }
+
+          if (!targetWorktree) {
+            try {
+              targetWorktree = await invoke<Worktree>('get_worktree', {
+                worktreeId: targetWorktreeId,
+              })
+            } catch {
+              targetWorktree = null
+            }
+          }
+        }
+
+        if (
+          !shouldUseSpotlightShortcut({
+            spotlightTestingEnabled: true,
+            spotlightActive: !!spotlight?.active,
+            targetWorktree,
+          })
+        ) {
+          runAction()
+          return
+        }
 
         try {
           if (spotlight?.active) {
-            await invoke<SpotlightStatus>('sync_spotlight', {
-              worktreeId: targetWorktreeId,
-            })
-            toast.success('Spotlight synced')
+            await deactivateSpotlightWithEffects(queryClient, targetWorktreeId)
+            toast.success('Spotlight disabled')
           } else {
-            await invoke<SpotlightStatus>('activate_spotlight', {
-              worktreeId: targetWorktreeId,
-            })
+            await activateSpotlightWithEffects(queryClient, targetWorktreeId)
             toast.success('Spotlight enabled')
           }
-
-          queryClient.invalidateQueries({ queryKey: spotlightQueryKeys.all })
         } catch (error) {
           const message =
             error instanceof Error

@@ -1,11 +1,17 @@
 import { useMemo } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { hasBackend } from '@/lib/environment'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
 import type { SpotlightStatus } from '@/types/spotlight'
+import { isBaseSession, type Worktree } from '@/types/projects'
 
 const isTauri = hasBackend
 
@@ -30,6 +36,75 @@ export function getEffectiveWorktreePath(
 ): string | null {
   if (spotlight?.active) return spotlight.root_path
   return fallbackPath ?? null
+}
+
+export function shouldUseSpotlightShortcut({
+  spotlightTestingEnabled,
+  spotlightActive,
+  targetWorktree,
+}: {
+  spotlightTestingEnabled: boolean
+  spotlightActive: boolean
+  targetWorktree?: Worktree | null
+}): boolean {
+  if (!spotlightTestingEnabled) return false
+  if (spotlightActive) return true
+  if (!targetWorktree) return true
+  return !isBaseSession(targetWorktree)
+}
+
+async function invalidateSpotlightQueries(queryClient: QueryClient) {
+  await queryClient.invalidateQueries({ queryKey: spotlightQueryKeys.all })
+}
+
+export async function loadSpotlights(
+  queryClient: QueryClient
+): Promise<SpotlightStatus[]> {
+  const cached = queryClient.getQueryData<SpotlightStatus[]>(
+    spotlightQueryKeys.list()
+  )
+  if (cached !== undefined) return cached
+
+  try {
+    return await queryClient.fetchQuery<SpotlightStatus[]>({
+      queryKey: spotlightQueryKeys.list(),
+      queryFn: () => invoke<SpotlightStatus[]>('list_spotlights'),
+    })
+  } catch {
+    return []
+  }
+}
+
+export async function activateSpotlightWithEffects(
+  queryClient: QueryClient,
+  worktreeId: string
+): Promise<SpotlightStatus> {
+  const status = await invoke<SpotlightStatus>('activate_spotlight', {
+    worktreeId,
+  })
+  disposeAllWorktreeTerminals(status.worktree_id)
+  await invalidateSpotlightQueries(queryClient)
+  return status
+}
+
+export async function syncSpotlightWithEffects(
+  queryClient: QueryClient,
+  worktreeId: string
+): Promise<SpotlightStatus> {
+  const status = await invoke<SpotlightStatus>('sync_spotlight', {
+    worktreeId,
+  })
+  await invalidateSpotlightQueries(queryClient)
+  return status
+}
+
+export async function deactivateSpotlightWithEffects(
+  queryClient: QueryClient,
+  worktreeId: string
+): Promise<void> {
+  await invoke('deactivate_spotlight', { worktreeId })
+  disposeAllWorktreeTerminals(worktreeId)
+  await invalidateSpotlightQueries(queryClient)
 }
 
 export function useSpotlights() {
@@ -71,15 +146,9 @@ export function useActivateSpotlight() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (worktreeId: string) => {
-      const status = await invoke<SpotlightStatus>('activate_spotlight', {
-        worktreeId,
-      })
-      return status
-    },
-    onSuccess: status => {
-      disposeAllWorktreeTerminals(status.worktree_id)
-      queryClient.invalidateQueries({ queryKey: spotlightQueryKeys.all })
+    mutationFn: (worktreeId: string) =>
+      activateSpotlightWithEffects(queryClient, worktreeId),
+    onSuccess: () => {
       toast.success('Spotlight enabled')
     },
     onError: error => handleSpotlightError(error, 'Failed to enable Spotlight'),
@@ -90,14 +159,9 @@ export function useSyncSpotlight() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (worktreeId: string) => {
-      const status = await invoke<SpotlightStatus>('sync_spotlight', {
-        worktreeId,
-      })
-      return status
-    },
+    mutationFn: (worktreeId: string) =>
+      syncSpotlightWithEffects(queryClient, worktreeId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: spotlightQueryKeys.all })
       toast.success('Spotlight synced')
     },
     onError: error => handleSpotlightError(error, 'Failed to sync Spotlight'),
@@ -108,12 +172,9 @@ export function useDeactivateSpotlight() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (worktreeId: string) => {
-      await invoke('deactivate_spotlight', { worktreeId })
-    },
-    onSuccess: (_, worktreeId) => {
-      disposeAllWorktreeTerminals(worktreeId)
-      queryClient.invalidateQueries({ queryKey: spotlightQueryKeys.all })
+    mutationFn: (worktreeId: string) =>
+      deactivateSpotlightWithEffects(queryClient, worktreeId),
+    onSuccess: () => {
       toast.success('Spotlight disabled')
     },
     onError: error =>
