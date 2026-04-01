@@ -59,6 +59,8 @@ export const defaultResponses: Record<string, unknown> = {
     created_at: Date.now() / 1000,
     messages: [],
   },
+  get_revert_targets: [],
+  revert_to_message: null,
 
   // Preferences
   load_preferences: mockPreferences,

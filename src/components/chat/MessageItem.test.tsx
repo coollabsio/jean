@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import { MessageItem } from './MessageItem'
-import type { ChatMessage, ReviewFinding, QuestionAnswer, Question } from '@/types/chat'
+import type {
+  ChatMessage,
+  ReviewFinding,
+  QuestionAnswer,
+  Question,
+} from '@/types/chat'
 
 describe('MessageItem', () => {
   const noopQuestionAnswer = (
@@ -299,5 +304,38 @@ describe('MessageItem', () => {
     )
 
     expect(screen.getByText('Raptors')).toBeVisible()
+  })
+
+  it('shows a revert action for revertable user messages', () => {
+    const onRevert = vi.fn()
+
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          id: 'user-1',
+          role: 'user',
+          content: 'hello',
+          tool_calls: [],
+          content_blocks: [],
+        }}
+        canRevert
+        onRevert={onRevert}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /revert to this message/i })
+    )
+    expect(onRevert).toHaveBeenCalledWith('user-1')
+  })
+
+  it('does not show a revert action for assistant messages', () => {
+    render(<MessageItem {...baseProps} canRevert />)
+
+    expect(
+      screen.queryByRole('button', { name: /revert to this message/i })
+    ).not.toBeInTheDocument()
   })
 })

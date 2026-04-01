@@ -90,6 +90,55 @@ pub struct UsageData {
 }
 
 // ============================================================================
+// Revert / Restore Point Types
+// ============================================================================
+
+/// Provider-specific anchor used to continue a conversation from a restored turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub enum ProviderRevertAnchor {
+    Claude {
+        session_id: String,
+        assistant_uuid: String,
+    },
+    Codex {
+        thread_id: String,
+        turn_id: String,
+    },
+    Opencode {
+        session_id: String,
+        message_id: String,
+    },
+}
+
+/// Pending Claude rewind that will be materialized on the next real user send.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ClaudePendingRewind {
+    pub session_id: String,
+    pub assistant_uuid: String,
+}
+
+/// Reason why a turn can or cannot be reverted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RevertStatus {
+    Ready,
+    IncompleteRun,
+    MissingCheckpoint,
+    MissingProviderAnchor,
+    UnsupportedProvider,
+}
+
+/// Lightweight revertability payload returned to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertTarget {
+    pub user_message_id: String,
+    pub available: bool,
+    pub reason: RevertStatus,
+}
+
+// ============================================================================
 // Message Types
 // ============================================================================
 
@@ -517,6 +566,9 @@ pub struct Session {
     /// OpenCode session ID for resuming conversations
     #[serde(default)]
     pub opencode_session_id: Option<String>,
+    /// Pending Claude rewind to materialize on the next real user send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_claude_rewind: Option<ClaudePendingRewind>,
     /// Selected model for this session
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -651,6 +703,7 @@ impl Session {
             claude_session_id: None,
             codex_thread_id: None,
             opencode_session_id: None,
+            pending_claude_rewind: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_provider: None,
@@ -842,6 +895,7 @@ impl SessionMetadata {
             claude_session_id: self.claude_session_id.clone(),
             codex_thread_id: self.codex_thread_id.clone(),
             opencode_session_id: self.opencode_session_id.clone(),
+            pending_claude_rewind: self.pending_claude_rewind.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_provider: self.selected_provider.clone(),
@@ -891,6 +945,7 @@ impl SessionMetadata {
         self.claude_session_id = session.claude_session_id.clone();
         self.codex_thread_id = session.codex_thread_id.clone();
         self.opencode_session_id = session.opencode_session_id.clone();
+        self.pending_claude_rewind = session.pending_claude_rewind.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_provider = session.selected_provider.clone();
@@ -1092,6 +1147,9 @@ pub enum RunStatus {
 /// Metadata for a single Claude CLI execution (stored in manifest)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunEntry {
+    /// Backend that produced this run.
+    #[serde(default)]
+    pub backend: Backend,
     /// Unique run identifier (UUID)
     pub run_id: String,
     /// ID of the user message that triggered this run
@@ -1129,6 +1187,24 @@ pub struct RunEntry {
     /// Claude CLI session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_session_id: Option<String>,
+    /// Codex thread ID for resuming conversations
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_thread_id: Option<String>,
+    /// OpenCode session ID for resuming conversations
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_session_id: Option<String>,
+    /// Provider-specific anchor required to continue from this exact turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_revert_anchor: Option<ProviderRevertAnchor>,
+    /// Checkpoint captured immediately before the run started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_before: Option<String>,
+    /// Checkpoint captured after the run finished successfully.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_after: Option<String>,
+    /// Whether this run can currently be reverted from the product surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revert_status: Option<RevertStatus>,
     /// PID of the detached Claude CLI process (for checking if still running)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -1165,6 +1241,10 @@ pub struct SessionMetadata {
     /// OpenCode session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencode_session_id: Option<String>,
+    /// Pending Claude rewind that should fork from an earlier assistant UUID
+    /// on the next real user send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_claude_rewind: Option<ClaudePendingRewind>,
     /// Selected model for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
@@ -1332,6 +1412,7 @@ impl SessionMetadata {
             claude_session_id: None,
             codex_thread_id: None,
             opencode_session_id: None,
+            pending_claude_rewind: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_provider: None,
@@ -1706,6 +1787,7 @@ mod tests {
         );
 
         metadata.runs.push(RunEntry {
+            backend: Backend::Claude,
             run_id: "run-1".to_string(),
             user_message_id: "msg-1".to_string(),
             user_message: "Hello".to_string(),
@@ -1720,6 +1802,12 @@ mod tests {
             cancelled: false,
             recovered: false,
             claude_session_id: None,
+            codex_thread_id: None,
+            opencode_session_id: None,
+            provider_revert_anchor: None,
+            checkpoint_before: None,
+            checkpoint_after: None,
+            revert_status: None,
             pid: Some(12345),
             usage: None,
         });
@@ -1742,6 +1830,7 @@ mod tests {
 
         // Add run without claude_session_id
         metadata.runs.push(RunEntry {
+            backend: Backend::Claude,
             run_id: "run-1".to_string(),
             user_message_id: "msg-1".to_string(),
             user_message: "First".to_string(),
@@ -1756,6 +1845,12 @@ mod tests {
             cancelled: false,
             recovered: false,
             claude_session_id: None,
+            codex_thread_id: None,
+            opencode_session_id: None,
+            provider_revert_anchor: None,
+            checkpoint_before: None,
+            checkpoint_after: None,
+            revert_status: None,
             pid: None,
             usage: None,
         });
@@ -1764,6 +1859,7 @@ mod tests {
 
         // Add run with claude_session_id
         metadata.runs.push(RunEntry {
+            backend: Backend::Claude,
             run_id: "run-2".to_string(),
             user_message_id: "msg-2".to_string(),
             user_message: "Second".to_string(),
@@ -1778,6 +1874,12 @@ mod tests {
             cancelled: false,
             recovered: false,
             claude_session_id: Some("claude-sess-abc".to_string()),
+            codex_thread_id: None,
+            opencode_session_id: None,
+            provider_revert_anchor: None,
+            checkpoint_before: None,
+            checkpoint_after: None,
+            revert_status: None,
             pid: None,
             usage: None,
         });

@@ -15,6 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogContent,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -34,6 +35,8 @@ import {
   useSetSessionBackend,
   useSetSessionProvider,
   useCreateSession,
+  useRevertTargets,
+  useRevertToMessage,
   markPlanApproved as markPlanApprovedService,
   chatQueryKeys,
 } from '@/services/chat'
@@ -404,6 +407,51 @@ export function ChatWindow({
     deferredSessionId ?? null,
     activeWorktreeId,
     activeWorktreePath
+  )
+  const { data: revertTargets = [] } = useRevertTargets(
+    deferredSessionId ?? null
+  )
+  const revertMessage = useRevertToMessage()
+  const [revertingMessageId, setRevertingMessageId] = useState<string | null>(
+    null
+  )
+  const [pendingRevertMessageId, setPendingRevertMessageId] = useState<
+    string | null
+  >(null)
+  const revertableMessageIds = useMemo(
+    () =>
+      new Set(
+        revertTargets
+          .filter(target => target.available)
+          .map(target => target.userMessageId)
+      ),
+    [revertTargets]
+  )
+  const handleRevertMessage = useCallback((userMessageId: string) => {
+    setPendingRevertMessageId(userMessageId)
+  }, [])
+  const confirmRevertMessage = useCallback(
+    async (userMessageId: string) => {
+      if (!activeWorktreeId || !activeWorktreePath || !deferredSessionId) {
+        return
+      }
+
+      setPendingRevertMessageId(null)
+      setRevertingMessageId(userMessageId)
+      try {
+        await revertMessage.mutateAsync({
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: deferredSessionId,
+          userMessageId,
+        })
+      } finally {
+        setRevertingMessageId(current =>
+          current === userMessageId ? null : current
+        )
+      }
+    },
+    [activeWorktreeId, activeWorktreePath, deferredSessionId, revertMessage]
   )
 
   const { data: preferences } = usePreferences()
@@ -2334,6 +2382,11 @@ export function ChatWindow({
                                   areQuestionsSkipped={areQuestionsSkipped}
                                   isFindingFixed={isFindingFixed}
                                   onCopyToInput={handleCopyToInput}
+                                  canRevertMessage={messageId =>
+                                    revertableMessageIds.has(messageId)
+                                  }
+                                  onRevertMessage={handleRevertMessage}
+                                  revertingMessageId={revertingMessageId}
                                   shouldScrollToBottom={isAtBottom}
                                   onScrollToBottomHandled={
                                     handleScrollToBottomHandled
@@ -2348,16 +2401,16 @@ export function ChatWindow({
                                 {(currentStreamingContentBlocks.length > 0 ||
                                   currentToolCalls.length > 0 ||
                                   streamingContent.trim().length > 0) && (
-                                <StreamingMessage
-                                  sessionId={activeSessionId}
-                                  contentBlocks={
-                                    currentStreamingContentBlocks
-                                  }
-                                  toolCalls={currentToolCalls}
-                                  streamingContent={streamingContent}
-                                  onQuestionAnswer={handleQuestionAnswer}
-                                  onQuestionSkip={handleSkipQuestion}
-                                  onFileClick={setViewingFilePath}
+                                  <StreamingMessage
+                                    sessionId={activeSessionId}
+                                    contentBlocks={
+                                      currentStreamingContentBlocks
+                                    }
+                                    toolCalls={currentToolCalls}
+                                    streamingContent={streamingContent}
+                                    onQuestionAnswer={handleQuestionAnswer}
+                                    onQuestionSkip={handleSkipQuestion}
+                                    onFileClick={setViewingFilePath}
                                     onEditedFileClick={setViewingFilePath}
                                     isQuestionAnswered={isQuestionAnswered}
                                     getSubmittedAnswers={getSubmittedAnswers}
@@ -2979,6 +3032,42 @@ export function ChatWindow({
             window.dispatchEvent(new CustomEvent('open-recap'))
           }
         />
+
+        <AlertDialog
+          open={pendingRevertMessageId !== null}
+          onOpenChange={open => {
+            if (!open) setPendingRevertMessageId(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Revert this thread to checkpoint?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This will discard newer messages and turn diffs in this thread.
+                This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={revertMessage.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20"
+                onClick={event => {
+                  event.preventDefault()
+                  if (pendingRevertMessageId) {
+                    void confirmRevertMessage(pendingRevertMessageId)
+                  }
+                }}
+                disabled={revertMessage.isPending}
+              >
+                {revertMessage.isPending ? 'Reverting...' : 'Revert thread'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Merge options dialog */}
         <AlertDialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>

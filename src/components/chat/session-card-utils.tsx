@@ -148,8 +148,7 @@ export function computeSessionCardData(
   const sessionSending = sendingSessionIds[session.id] ?? false
   const toolCalls = activeToolCalls[session.id] ?? []
   const streamingContent = streamingContents[session.id] ?? ''
-  const currentStreamingContentBlocks =
-    streamingContentBlocks[session.id] ?? []
+  const currentStreamingContentBlocks = streamingContentBlocks[session.id] ?? []
   const answeredSet = answeredQuestions[session.id]
 
   // Check streaming tool calls for waiting state
@@ -227,7 +226,6 @@ export function computeSessionCardData(
         break // Only check the last assistant message
       }
     }
-
   }
 
   // Also check for plan file/content in streaming tool calls

@@ -2000,6 +2000,26 @@ pub async fn dispatch_command(
             let result = crate::chat::get_mcp_servers(backend, worktree_path).await?;
             to_value(result)
         }
+        "get_revert_targets" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let result = crate::chat::get_revert_targets(app.clone(), session_id).await?;
+            to_value(result)
+        }
+        "revert_to_message" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let user_message_id: String = field(&args, "userMessageId", "user_message_id")?;
+            crate::chat::revert_to_message(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                user_message_id,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
         "read_clipboard_image" => {
             let result = crate::chat::read_clipboard_image(app.clone()).await?;
             to_value(result)

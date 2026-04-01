@@ -895,9 +895,7 @@ export function resolveMagicPromptBackend(
   const merged = { ...DEFAULT_MAGIC_PROMPT_BACKENDS, ...backends }
   const value = merged[key]
   return (
-    value !== undefined && value !== null
-      ? value
-      : (defaultBackend ?? null)
+    value !== undefined && value !== null ? value : (defaultBackend ?? null)
   ) as CliBackend | null
 }
 

@@ -453,7 +453,9 @@ function WorktreeSectionHeader({
                       <>
                         <span className="text-border">·</span>
                         <ShieldAlert className="h-2.5 w-2.5 text-orange-500" />
-                        <span className="max-w-20 truncate">{worktree.advisory_ghsa_id}</span>
+                        <span className="max-w-20 truncate">
+                          {worktree.advisory_ghsa_id}
+                        </span>
                       </>
                     )}
                   </span>
@@ -487,15 +489,17 @@ function WorktreeSectionHeader({
                   {worktree.security_alert_number && (
                     <>
                       <span className="text-border">·</span>
-                      <ShieldAlert className="h-2.5 w-2.5 shrink-0 text-orange-500" />#
-                      {worktree.security_alert_number}
+                      <ShieldAlert className="h-2.5 w-2.5 shrink-0 text-orange-500" />
+                      #{worktree.security_alert_number}
                     </>
                   )}
                   {worktree.advisory_ghsa_id && (
                     <>
                       <span className="text-border">·</span>
                       <ShieldAlert className="h-2.5 w-2.5 shrink-0 text-orange-500" />
-                      <span className="max-w-20 truncate">{worktree.advisory_ghsa_id}</span>
+                      <span className="max-w-20 truncate">
+                        {worktree.advisory_ghsa_id}
+                      </span>
                     </>
                   )}
                 </span>

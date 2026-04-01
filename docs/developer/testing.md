@@ -125,7 +125,12 @@ if (cmd === 'create_session') {
 }
 ```
 
-Current dynamic handlers: `get_sessions`, `create_session`, `rename_session`, `set_active_session`, `set_session_model`, `get_session`, `send_chat_message`.
+Current dynamic handlers: `get_sessions`, `create_session`, `rename_session`, `set_active_session`, `set_session_model`, `get_session`, `get_revert_targets`, `revert_to_message`, `send_chat_message`.
+
+Recent chat additions that also need default mock coverage:
+
+- `get_revert_targets`
+- `revert_to_message`
 
 #### Override Precedence
 

@@ -99,7 +99,9 @@ async function hydrateCompletedSessionFromBackend(
 ): Promise<void> {
   const worktreePath = useChatStore.getState().worktreePaths[worktreeId]
   if (!worktreePath) {
-    queryClient.invalidateQueries({ queryKey: chatQueryKeys.session(sessionId) })
+    queryClient.invalidateQueries({
+      queryKey: chatQueryKeys.session(sessionId),
+    })
     return
   }
 
@@ -116,7 +118,9 @@ async function hydrateCompletedSessionFromBackend(
       error
     )
   } finally {
-    queryClient.invalidateQueries({ queryKey: chatQueryKeys.session(sessionId) })
+    queryClient.invalidateQueries({
+      queryKey: chatQueryKeys.session(sessionId),
+    })
   }
 }
 

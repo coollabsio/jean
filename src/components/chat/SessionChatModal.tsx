@@ -573,8 +573,9 @@ export function SessionChatModal({
     })
   }, [sessions, storeState])
 
-  // Keep ref in sync for selectVisualNeighbor (declared above sortedSessions)
-  sortedSessionsRef.current = sortedSessions
+  useEffect(() => {
+    sortedSessionsRef.current = sortedSessions
+  }, [sortedSessions])
 
   // Off-screen waiting tab indicators
   const { hasLeft: hasWaitingLeft, hasRight: hasWaitingRight } =

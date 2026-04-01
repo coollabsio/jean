@@ -70,6 +70,7 @@ pub struct ErrorEvent {
 pub struct OpenCodeResponse {
     pub content: String,
     pub session_id: String,
+    pub revert_message_id: Option<String>,
     pub tool_calls: Vec<ToolCall>,
     pub content_blocks: Vec<ContentBlock>,
     pub cancelled: bool,
@@ -1693,6 +1694,7 @@ pub fn execute_opencode_http(
         return Ok(OpenCodeResponse {
             content: String::new(),
             session_id: existing_opencode_session_id.unwrap_or("").to_string(),
+            revert_message_id: None,
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
@@ -1795,6 +1797,7 @@ pub fn execute_opencode_http(
         return Ok(OpenCodeResponse {
             content: String::new(),
             session_id: opencode_session_id,
+            revert_message_id: None,
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
@@ -1840,6 +1843,7 @@ pub fn execute_opencode_http(
         return Ok(OpenCodeResponse {
             content: String::new(),
             session_id: opencode_session_id,
+            revert_message_id: None,
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
@@ -1882,6 +1886,7 @@ pub fn execute_opencode_http(
                 return Ok(OpenCodeResponse {
                     content: String::new(),
                     session_id: opencode_session_id,
+                    revert_message_id: None,
                     tool_calls: vec![],
                     content_blocks: vec![],
                     cancelled: true,
@@ -1946,6 +1951,7 @@ pub fn execute_opencode_http(
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut usage: Option<UsageData> = None;
+    let revert_message_id = extract_revert_message_id(&response_json);
 
     let parts = response_json
         .get("parts")
@@ -2130,6 +2136,7 @@ pub fn execute_opencode_http(
         return Ok(OpenCodeResponse {
             content,
             session_id: opencode_session_id,
+            revert_message_id,
             tool_calls: final_tool_calls,
             content_blocks: final_content_blocks,
             cancelled: true,
@@ -2149,6 +2156,7 @@ pub fn execute_opencode_http(
     Ok(OpenCodeResponse {
         content,
         session_id: opencode_session_id,
+        revert_message_id,
         tool_calls: final_tool_calls,
         content_blocks: final_content_blocks,
         cancelled: false,
@@ -2174,6 +2182,14 @@ fn merge_consecutive_thinking(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
         result.push(block);
     }
     result
+}
+
+fn extract_revert_message_id(response_json: &serde_json::Value) -> Option<String> {
+    response_json
+        .get("info")
+        .and_then(|info| info.get("parentID"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
 }
 
 /// Execute a one-shot OpenCode call and return the text response.
@@ -2499,4 +2515,78 @@ pub fn answer_opencode_question(
     log::info!("OpenCode question replied: request_id={request_id}, tool_call_id={tool_call_id}");
 
     Ok(())
+}
+
+pub fn revert_opencode_session(
+    app: &tauri::AppHandle,
+    working_dir: &str,
+    opencode_session_id: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    let base_url = crate::opencode_server::acquire(app)?;
+
+    struct ServerReleaseGuard;
+    impl Drop for ServerReleaseGuard {
+        fn drop(&mut self) {
+            crate::opencode_server::release();
+        }
+    }
+    let _server_guard = ServerReleaseGuard;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to build OpenCode HTTP client: {e}"))?;
+
+    let query = [("directory", working_dir.to_string())];
+    let revert_url = format!("{base_url}/session/{opencode_session_id}/revert");
+    let revert_body = serde_json::json!({ "messageID": message_id });
+
+    let response = client
+        .post(&revert_url)
+        .query(&query)
+        .json(&revert_body)
+        .send()
+        .map_err(|e| format!("Failed to revert OpenCode session: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!(
+            "OpenCode revert failed: status={status}, body={body}"
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_revert_message_id;
+
+    #[test]
+    fn extract_revert_message_id_reads_parent_id() {
+        let response = serde_json::json!({
+            "info": {
+                "id": "assistant-1",
+                "parentID": "user-1"
+            }
+        });
+
+        assert_eq!(
+            extract_revert_message_id(&response).as_deref(),
+            Some("user-1")
+        );
+    }
+
+    #[test]
+    fn extract_revert_message_id_returns_none_without_parent_id() {
+        let response = serde_json::json!({
+            "info": {
+                "id": "assistant-1"
+            }
+        });
+
+        assert_eq!(extract_revert_message_id(&response), None);
+    }
 }

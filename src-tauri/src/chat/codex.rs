@@ -29,6 +29,8 @@ pub struct CodexResponse {
     pub content: String,
     /// The thread ID (for resuming conversations)
     pub thread_id: String,
+    /// The completed turn ID used for rollback targeting
+    pub turn_id: Option<String>,
     /// Tool calls made during this response
     pub tool_calls: Vec<ToolCall>,
     /// Ordered content blocks preserving tool position in response
@@ -206,7 +208,10 @@ fn extract_plain_text_plan_sections(text: &str) -> Option<(Option<String>, Strin
         return None;
     }
 
-    let plan_heading_match = normalized.match_indices("\nPlan:\n").last().map(|(idx, _)| idx);
+    let plan_heading_match = normalized
+        .match_indices("\nPlan:\n")
+        .last()
+        .map(|(idx, _)| idx);
     let plan_start = if normalized.starts_with("Plan:\n") {
         Some(0)
     } else {
@@ -222,10 +227,7 @@ fn extract_plain_text_plan_sections(text: &str) -> Option<(Option<String>, Strin
         let trimmed = line.trim_start();
         trimmed.starts_with("- ")
             || trimmed.starts_with("* ")
-            || trimmed
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_digit())
+            || trimmed.chars().next().is_some_and(|c| c.is_ascii_digit())
     });
 
     if !has_plan_body || !looks_structured {
@@ -785,6 +787,7 @@ fn process_turn_events(
 
     let mut full_content = String::new();
     let mut response_thread_id = thread_id.to_string();
+    let mut response_turn_id: Option<String> = None;
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut pending_tool_ids: HashMap<String, String> = HashMap::new();
@@ -879,6 +882,7 @@ fn process_turn_events(
                         .and_then(|t| t.get("id"))
                         .and_then(|v| v.as_str())
                     {
+                        response_turn_id = Some(turn_id.to_string());
                         super::registry::register_codex_turn(
                             session_id.to_string(),
                             thread_id.to_string(),
@@ -1008,6 +1012,7 @@ fn process_turn_events(
     CodexResponse {
         content: full_content,
         thread_id: response_thread_id,
+        turn_id: response_turn_id,
         tool_calls,
         content_blocks,
         cancelled,
@@ -1984,7 +1989,12 @@ fn process_codex_event(
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     let input = merge_codex_plan_input(existing, plan_text, None, None, None);
-                    upsert_codex_plan_tool_call(tool_calls, content_blocks, &tool_id, input.clone());
+                    upsert_codex_plan_tool_call(
+                        tool_calls,
+                        content_blocks,
+                        &tool_id,
+                        input.clone(),
+                    );
                     emit_codex_plan_tool_call(app, session_id, worktree_id, &tool_id, &input);
                 }
                 // Informational tool-like events — surface as tool calls in the UI
@@ -2089,7 +2099,12 @@ fn process_codex_event(
                                 .map(|s| s.to_string())
                         });
                     let input = merge_codex_plan_input(existing, plan_text, None, None, None);
-                    upsert_codex_plan_tool_call(tool_calls, content_blocks, &tool_id, input.clone());
+                    upsert_codex_plan_tool_call(
+                        tool_calls,
+                        content_blocks,
+                        &tool_id,
+                        input.clone(),
+                    );
                     emit_codex_plan_tool_call(app, session_id, worktree_id, &tool_id, &input);
                 }
                 "command_execution" => {
@@ -2948,7 +2963,41 @@ pub fn execute_one_shot_codex(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::types::{RunEntry, RunStatus};
+    use crate::chat::types::{Backend, RunEntry, RunStatus};
+
+    fn sample_run(
+        run_id: &str,
+        assistant_message_id: &str,
+        execution_mode: Option<&str>,
+        status: RunStatus,
+        cancelled: bool,
+    ) -> RunEntry {
+        RunEntry {
+            backend: Backend::Codex,
+            run_id: run_id.to_string(),
+            user_message_id: format!("user-{run_id}"),
+            user_message: "prompt".to_string(),
+            model: None,
+            execution_mode: execution_mode.map(ToString::to_string),
+            thinking_level: None,
+            effort_level: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status,
+            assistant_message_id: Some(assistant_message_id.to_string()),
+            cancelled,
+            recovered: false,
+            claude_session_id: None,
+            codex_thread_id: None,
+            opencode_session_id: None,
+            provider_revert_anchor: None,
+            checkpoint_before: None,
+            checkpoint_after: None,
+            revert_status: None,
+            pid: None,
+            usage: None,
+        }
+    }
 
     #[test]
     fn gpt_5_4_fast_enables_fast_service_tier() {
@@ -3055,24 +3104,13 @@ mod tests {
             r#"{"type":"item.completed","item":{"type":"agent_message","text":"Same text"}}"#
                 .to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-1".to_string(),
-            user_message_id: "user-1".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("plan".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Cancelled,
-            assistant_message_id: Some("assistant-1".to_string()),
-            cancelled: true,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-1",
+            "assistant-1",
+            Some("plan"),
+            RunStatus::Cancelled,
+            true,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 
@@ -3093,24 +3131,13 @@ mod tests {
             r#"{"type":"item.completed","item":{"type":"agent_message","text":"Text between commands"}}"#
                 .to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-2".to_string(),
-            user_message_id: "user-2".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("plan".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Completed,
-            assistant_message_id: Some("assistant-2".to_string()),
-            cancelled: false,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-2",
+            "assistant-2",
+            Some("plan"),
+            RunStatus::Completed,
+            false,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 
@@ -3143,24 +3170,13 @@ mod tests {
             r#"{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","command":"rtk git status"}}"#.to_string(),
             r#"{"type":"turn.plan_updated","turn_id":"turn-1","explanation":"Refined","plan":[{"step":"Inspect repo","status":"completed"},{"step":"Patch order","status":"in_progress"}]}"#.to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-order".to_string(),
-            user_message_id: "user-order".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("plan".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Completed,
-            assistant_message_id: Some("assistant-order".to_string()),
-            cancelled: false,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-order",
+            "assistant-order",
+            Some("plan"),
+            RunStatus::Completed,
+            false,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 
@@ -3208,24 +3224,13 @@ mod tests {
             r#"{"type":"item.completed","item":{"type":"agent_message","text":"Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests"}}"#
                 .to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-plain-plan".to_string(),
-            user_message_id: "user-plain-plan".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("plan".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Completed,
-            assistant_message_id: Some("assistant-plain-plan".to_string()),
-            cancelled: false,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-plain-plan",
+            "assistant-plain-plan",
+            Some("plan"),
+            RunStatus::Completed,
+            false,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 
@@ -3258,24 +3263,13 @@ mod tests {
             r#"{"type":"item.completed","item":{"id":"plan-1","type":"plan","text":"Final plan"}}"#.to_string(),
             r#"{"type":"item.completed","item":{"type":"agent_message","text":"Implemented fix."}}"#.to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-3".to_string(),
-            user_message_id: "user-3".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("yolo".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Completed,
-            assistant_message_id: Some("assistant-3".to_string()),
-            cancelled: false,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-3",
+            "assistant-3",
+            Some("yolo"),
+            RunStatus::Completed,
+            false,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 
@@ -3313,24 +3307,13 @@ mod tests {
             r#"{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","content":[{"type":"text","text":"Final answer"}]}}"#
                 .to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-4".to_string(),
-            user_message_id: "user-4".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("plan".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Completed,
-            assistant_message_id: Some("assistant-4".to_string()),
-            cancelled: false,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-4",
+            "assistant-4",
+            Some("plan"),
+            RunStatus::Completed,
+            false,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 
@@ -3349,24 +3332,13 @@ mod tests {
             r#"{"type":"turn.completed","output":[{"type":"output_text","text":"Recovered from turn output"}]}"#
                 .to_string(),
         ];
-        let run = RunEntry {
-            run_id: "run-5".to_string(),
-            user_message_id: "user-5".to_string(),
-            user_message: "prompt".to_string(),
-            model: None,
-            execution_mode: Some("plan".to_string()),
-            thinking_level: None,
-            effort_level: None,
-            started_at: 1,
-            ended_at: Some(2),
-            status: RunStatus::Completed,
-            assistant_message_id: Some("assistant-5".to_string()),
-            cancelled: false,
-            recovered: false,
-            claude_session_id: None,
-            pid: None,
-            usage: None,
-        };
+        let run = sample_run(
+            "run-5",
+            "assistant-5",
+            Some("plan"),
+            RunStatus::Completed,
+            false,
+        );
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
 

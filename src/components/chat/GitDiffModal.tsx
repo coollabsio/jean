@@ -588,7 +588,7 @@ export function GitDiffModal({
               hunks: [],
               splitLineCount: 0,
               unifiedLineCount: 0,
-            } as FileDiffMetadata,
+            },
             fileName: backendFile.path,
             key: `backend-${backendFile.path}`,
             additions: backendFile.additions,

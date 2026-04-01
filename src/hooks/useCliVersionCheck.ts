@@ -68,7 +68,9 @@ const CLI_DISPLAY_NAMES: Record<CliUpdateInfo['type'], string> = {
  * Codex with default 'jean' preference → Jean binary missing → use path detection instead).
  */
 function resolveCliInfo(
-  status: { installed: boolean; version?: string | null; path?: string | null } | undefined,
+  status:
+    | { installed: boolean; version?: string | null; path?: string | null }
+    | undefined,
   pathInfo:
     | {
         found: boolean
@@ -173,10 +175,22 @@ export function useCliVersionCheck() {
     const updates: CliUpdateInfo[] = []
 
     // Resolve effective CLI info (falls back to path detection when Jean binary is missing)
-    const claude = resolveCliInfo(claudeStatus, claudePathInfo, preferences?.claude_cli_source)
+    const claude = resolveCliInfo(
+      claudeStatus,
+      claudePathInfo,
+      preferences?.claude_cli_source
+    )
     const gh = resolveCliInfo(ghStatus, ghPathInfo, preferences?.gh_cli_source)
-    const codex = resolveCliInfo(codexStatus, codexPathInfo, preferences?.codex_cli_source)
-    const opencode = resolveCliInfo(opencodeStatus, opencodePathInfo, preferences?.opencode_cli_source)
+    const codex = resolveCliInfo(
+      codexStatus,
+      codexPathInfo,
+      preferences?.codex_cli_source
+    )
+    const opencode = resolveCliInfo(
+      opencodeStatus,
+      opencodePathInfo,
+      preferences?.opencode_cli_source
+    )
 
     const checks: {
       type: CliUpdateInfo['type']

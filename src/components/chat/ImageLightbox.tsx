@@ -6,7 +6,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 
 interface ImageLightboxProps {
   /** File path to the image */
@@ -56,10 +55,10 @@ export function ImageLightbox({
           className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm"
           showCloseButton={true}
         >
-          <VisuallyHidden>
-            <DialogTitle>Image Preview</DialogTitle>
-            <DialogDescription>Preview of image: {alt}</DialogDescription>
-          </VisuallyHidden>
+          <DialogTitle className="sr-only">Image Preview</DialogTitle>
+          <DialogDescription className="sr-only">
+            Preview of image: {alt}
+          </DialogDescription>
           <img
             src={assetSrc}
             alt={alt}

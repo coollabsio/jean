@@ -1,10 +1,7 @@
 import { useMemo } from 'react'
 import { isPlanToolCall } from '@/types/chat'
 import type { ToolCall, ChatMessage, ContentBlock } from '@/types/chat'
-import {
-  findPlanFilePath,
-  resolvePlanContent,
-} from '../tool-call-utils'
+import { findPlanFilePath, resolvePlanContent } from '../tool-call-utils'
 
 interface UsePlanStateParams {
   sessionMessages: ChatMessage[] | undefined

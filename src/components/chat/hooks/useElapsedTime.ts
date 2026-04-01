@@ -8,14 +8,20 @@ import { formatDuration } from '../time-utils'
  * value itself, so no setState-during-render flicker.
  */
 export function useElapsedTime(startTime: number | null): string | null {
-  const [, setTick] = useState(0)
+  const [elapsed, setElapsed] = useState<string | null>(null)
 
   useEffect(() => {
-    if (startTime == null) return
-    const id = setInterval(() => setTick(t => t + 1), 1000)
+    if (startTime == null) {
+      setElapsed(null)
+      return
+    }
+
+    const updateElapsed = () =>
+      setElapsed(formatDuration(Date.now() - startTime))
+    updateElapsed()
+    const id = setInterval(updateElapsed, 1000)
     return () => clearInterval(id)
   }, [startTime])
 
-  if (startTime == null) return null
-  return formatDuration(Date.now() - startTime)
+  return elapsed
 }

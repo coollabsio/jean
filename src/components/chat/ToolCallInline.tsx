@@ -894,7 +894,9 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const filePath = (changes.file ?? changes.path ?? changes.file_path) as
         | string
         | undefined
-      const fallbackChanges = !filePath ? parseCodexFileChanges(toolCall.output) : []
+      const fallbackChanges = !filePath
+        ? parseCodexFileChanges(toolCall.output)
+        : []
       const fallbackFilePath =
         fallbackChanges.length === 1
           ? (fallbackChanges[0]?.path as string | undefined)
@@ -909,9 +911,11 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         : isFallbackArray
           ? fallbackChanges.length
           : undefined
-      const detail = isArray || isFallbackArray
-        ? `${fileCount} file${fileCount === 1 ? '' : 's'}`
-        : filename ?? (fallbackFilePath ? getFilename(fallbackFilePath) : undefined)
+      const detail =
+        isArray || isFallbackArray
+          ? `${fileCount} file${fileCount === 1 ? '' : 's'}`
+          : (filename ??
+            (fallbackFilePath ? getFilename(fallbackFilePath) : undefined))
 
       return {
         icon: <FileText className="h-4 w-4 shrink-0" />,
@@ -978,10 +982,11 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       return {
         icon: <FileCode className="h-4 w-4 shrink-0" />,
         label: 'Apply Patch',
-        detail: fileCount > 0 ? `${fileCount} file${fileCount === 1 ? '' : 's'}` : undefined,
-        expandedContent: patchText
-          ? patchText
-          : 'No patch text',
+        detail:
+          fileCount > 0
+            ? `${fileCount} file${fileCount === 1 ? '' : 's'}`
+            : undefined,
+        expandedContent: patchText ? patchText : 'No patch text',
       }
     }
 
@@ -991,7 +996,10 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       return {
         icon: <Edit className="h-4 w-4 shrink-0" />,
         label: 'Multi Edit',
-        detail: fileCount > 0 ? `${fileCount} edit${fileCount === 1 ? '' : 's'}` : undefined,
+        detail:
+          fileCount > 0
+            ? `${fileCount} edit${fileCount === 1 ? '' : 's'}`
+            : undefined,
         expandedContent: JSON.stringify(input, null, 2),
       }
     }
@@ -1023,7 +1031,9 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       return {
         icon: <Code className="h-4 w-4 shrink-0" />,
         label: 'LSP',
-        detail: action ? `${action}${filename ? ` ${filename}` : ''}` : filename,
+        detail: action
+          ? `${action}${filename ? ` ${filename}` : ''}`
+          : filename,
         expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
       }
     }

@@ -23,10 +23,10 @@ function createFileDiff(
         unifiedLineCount: 4,
         additionCount: 7,
         additionStart: 10,
-        additionLines: 11,
+        additionLines: 1,
         deletionCount: 7,
         deletionStart: 10,
-        deletionLines: 11,
+        deletionLines: 1,
         hunkContent: [
           {
             type: 'context',
@@ -57,10 +57,10 @@ function createFileDiff(
         unifiedLineCount: 4,
         additionCount: 7,
         additionStart: 20,
-        additionLines: 21,
+        additionLines: 1,
         deletionCount: 7,
         deletionStart: 20,
-        deletionLines: 21,
+        deletionLines: 1,
         hunkContent: [
           {
             type: 'context',

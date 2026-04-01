@@ -252,9 +252,10 @@ function executeKeybindingAction(
             .setModalTerminalOpen(targetWorktreeId, true)
         } else {
           // Canvas view: start PTY headlessly (no terminal UI mounted yet)
+          if (!targetWorktreePath) return
           startHeadless(terminalId, {
             worktreeId: targetWorktreeId,
-            worktreePath: targetWorktreePath!,
+            worktreePath: targetWorktreePath,
             command: firstScript,
           })
         }
@@ -520,7 +521,9 @@ export function useMainWindowEventListeners() {
         if (terminalShortcutWorktreeId) {
           const kb = keybindingsRef.current
           const digitMatch = e.code.match(/^Digit(\d)$/)
-          const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+          const digit = digitMatch?.[1]
+            ? parseInt(digitMatch[1], 10)
+            : Number.NaN
 
           if (
             (e.metaKey || e.ctrlKey) &&
@@ -563,7 +566,7 @@ export function useMainWindowEventListeners() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
         const digitMatch = e.code.match(/^Digit(\d)$/)
-        const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+        const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : Number.NaN
         if (digit >= 1 && digit <= 9) {
           e.preventDefault()
           e.stopPropagation()

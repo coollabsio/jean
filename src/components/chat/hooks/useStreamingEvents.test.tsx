@@ -5,17 +5,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import useStreamingEvents from './useStreamingEvents'
 import { useChatStore } from '@/store/chat-store'
 
-const {
-  mockInvoke,
-  mockListen,
-  mockSaveWorktreePr,
-  registeredListeners,
-} = vi.hoisted(() => ({
-  mockInvoke: vi.fn().mockResolvedValue(undefined),
-  mockListen: vi.fn(),
-  mockSaveWorktreePr: vi.fn(),
-  registeredListeners: new Map<string, (event: { payload: unknown }) => void>(),
-}))
+const { mockInvoke, mockListen, mockSaveWorktreePr, registeredListeners } =
+  vi.hoisted(() => ({
+    mockInvoke: vi.fn().mockResolvedValue(undefined),
+    mockListen: vi.fn(),
+    mockSaveWorktreePr: vi.fn(),
+    registeredListeners: new Map<
+      string,
+      (event: { payload: unknown }) => void
+    >(),
+  }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
@@ -43,11 +42,7 @@ function createQueryClient() {
 
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: PropsWithChildren) {
-    return createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      children
-    )
+    return createElement(QueryClientProvider, { client: queryClient }, children)
   }
 }
 
@@ -86,9 +81,9 @@ describe('useStreamingEvents Codex MCP elicitation', () => {
     renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
 
     await waitFor(() =>
-      expect(registeredListeners.has('chat:codex_mcp_elicitation_request')).toBe(
-        true
-      )
+      expect(
+        registeredListeners.has('chat:codex_mcp_elicitation_request')
+      ).toBe(true)
     )
 
     registeredListeners.get('chat:codex_mcp_elicitation_request')?.({
@@ -129,9 +124,9 @@ describe('useStreamingEvents Codex MCP elicitation', () => {
     renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
 
     await waitFor(() =>
-      expect(registeredListeners.has('chat:codex_mcp_elicitation_request')).toBe(
-        true
-      )
+      expect(
+        registeredListeners.has('chat:codex_mcp_elicitation_request')
+      ).toBe(true)
     )
 
     registeredListeners.get('chat:codex_mcp_elicitation_request')?.({
