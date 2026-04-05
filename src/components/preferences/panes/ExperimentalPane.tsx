@@ -117,6 +117,18 @@ export const ExperimentalPane: React.FC = () => {
 
       <SettingsSection title="Developer Tools">
         <InlineField
+          label="Spotlight testing"
+          description="Mirror tracked worktree changes into the repository root for hot-reload testing"
+        >
+          <Switch
+            checked={preferences?.spotlight_testing_enabled ?? false}
+            onCheckedChange={checked => {
+              patchPreferences.mutate({ spotlight_testing_enabled: checked })
+            }}
+          />
+        </InlineField>
+
+        <InlineField
           label="Debug mode"
           description="Show session debug panel with file paths, run logs, and token usage"
         >

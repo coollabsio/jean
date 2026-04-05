@@ -18,6 +18,7 @@ import {
   Github,
   MoreHorizontal,
   Pencil,
+  Square,
   Sparkles,
   Tag,
   Terminal,
@@ -85,7 +86,11 @@ import {
   useOpenBranchOnGitHub,
 } from '@/services/projects'
 import { getOpenInDefaultLabel } from '@/types/preferences'
-import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
+import {
+  DEFAULT_KEYBINDINGS,
+  formatShortcutDisplay,
+  getRuntimeKeybindings,
+} from '@/types/keybindings'
 import {
   getResumeCommand,
   statusConfig,
@@ -102,6 +107,13 @@ import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu
 import { LabelModal } from './LabelModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
 import { useIsMobile } from '@/hooks/use-mobile'
+import {
+  getEffectiveWorktreePath,
+  useActivateSpotlight,
+  useDeactivateSpotlight,
+  useSpotlight,
+  useSyncSpotlight,
+} from '@/services/spotlight'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -233,17 +245,28 @@ export function SessionChatModal({
     [sessionsData?.sessions]
   )
   const { data: preferences } = usePreferences()
-  const { data: runScripts = [] } = useRunScripts(worktreePath)
+  const runtimeKeybindings = useMemo(
+    () =>
+      getRuntimeKeybindings(
+        preferences?.keybindings,
+        preferences?.spotlight_testing_enabled ?? false
+      ),
+    [preferences?.keybindings, preferences?.spotlight_testing_enabled]
+  )
+  const { spotlight } = useSpotlight(worktreeId)
   const hasRunningTerminal = useTerminalStore(state => {
     const terminals = state.terminals[worktreeId] ?? []
     return terminals.some(t => state.runningTerminals.has(t.id))
   })
   const terminalShortcut = formatShortcutDisplay(
-    preferences?.keybindings?.toggle_terminal ??
-      DEFAULT_KEYBINDINGS.toggle_terminal
+    runtimeKeybindings.toggle_terminal ?? DEFAULT_KEYBINDINGS.toggle_terminal
+  )
+  const spotlightShortcut = formatShortcutDisplay(
+    runtimeKeybindings.execute_spotlight ??
+      DEFAULT_KEYBINDINGS.execute_spotlight
   )
   const runShortcut = formatShortcutDisplay(
-    preferences?.keybindings?.execute_run ?? DEFAULT_KEYBINDINGS.execute_run
+    runtimeKeybindings.execute_run ?? DEFAULT_KEYBINDINGS.execute_run
   )
   const createSession = useCreateSession()
 
@@ -331,7 +354,22 @@ export function SessionChatModal({
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
     : null
+  const terminalWorktreePath =
+    getEffectiveWorktreePath(project?.path ?? worktreePath, spotlight) ??
+    worktreePath
+  const { data: runScripts = [] } = useRunScripts(terminalWorktreePath)
+  const activateSpotlight = useActivateSpotlight()
+  const syncSpotlight = useSyncSpotlight()
+  const deactivateSpotlight = useDeactivateSpotlight()
   const isBase = worktree ? isBaseSession(worktree) : false
+  const isSpotlightLoading =
+    activateSpotlight.isPending ||
+    syncSpotlight.isPending ||
+    deactivateSpotlight.isPending
+  const spotlightEnabled = preferences?.spotlight_testing_enabled && !isBase
+  const spotlightActionLabel = spotlight?.active
+    ? 'Disable Spotlight'
+    : 'Spotlight'
   const { data: gitStatus } = useGitStatus(worktreeId)
   const behindCount =
     gitStatus?.behind_count ?? worktree?.cached_behind_count ?? 0
@@ -714,6 +752,14 @@ export function SessionChatModal({
     [worktreeId]
   )
 
+  const handleSpotlightAction = useCallback(() => {
+    if (spotlight?.active) {
+      deactivateSpotlight.mutate(worktreeId)
+      return
+    }
+    activateSpotlight.mutate(worktreeId)
+  }, [activateSpotlight, deactivateSpotlight, spotlight?.active, worktreeId])
+
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return
@@ -811,7 +857,7 @@ export function SessionChatModal({
               {isNativeApp() && (
                 <div className="hidden sm:flex items-center gap-1">
                   <OpenInButton
-                    worktreePath={worktreePath}
+                    worktreePath={terminalWorktreePath}
                     branch={worktree?.branch}
                   />
                   {currentSessionId && (
@@ -844,7 +890,7 @@ export function SessionChatModal({
                       </kbd>
                     </TooltipContent>
                   </Tooltip>
-                  {runScripts.length === 1 && (
+                  {!spotlightEnabled && runScripts.length === 1 && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -866,7 +912,83 @@ export function SessionChatModal({
                       </TooltipContent>
                     </Tooltip>
                   )}
-                  {runScripts.length > 1 && (
+                  {spotlightEnabled ? (
+                    <div className="inline-flex items-center rounded-md border border-border/50 bg-muted/50">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            className="h-7 rounded-r-none border-0 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={handleSpotlightAction}
+                            disabled={isSpotlightLoading}
+                          >
+                            {spotlight?.active ? (
+                              <Square className="h-3 w-3 fill-current text-amber-500 animate-icon-glow" />
+                            ) : (
+                              <Play className="h-3 w-3" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {spotlightActionLabel}{' '}
+                          <kbd className="ml-1 text-[0.625rem] opacity-60">
+                            {spotlightShortcut}
+                          </kbd>
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="h-4 w-px bg-border/50" />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-6 rounded-l-none border-0 px-0 text-muted-foreground hover:text-foreground"
+                          >
+                            <ChevronDown className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={handleSpotlightAction}>
+                            {spotlight?.active ? (
+                              <Square className="h-4 w-4 fill-current" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                            {spotlightActionLabel}
+                            <span className="ml-auto text-[0.625rem] opacity-60">
+                              {spotlightShortcut}
+                            </span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={handleRun}
+                            disabled={runScripts.length === 0}
+                          >
+                            <Play
+                              className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`}
+                            />
+                            Run
+                            <span className="ml-auto text-[0.625rem] opacity-60">
+                              {runShortcut}
+                            </span>
+                          </DropdownMenuItem>
+                          {runScripts.length > 1 && (
+                            <>
+                              <DropdownMenuSeparator />
+                              {runScripts.map((cmd, i) => (
+                                <DropdownMenuItem
+                                  key={i}
+                                  onSelect={() => handleRunCommand(cmd)}
+                                  className="font-mono text-xs"
+                                >
+                                  {cmd}
+                                </DropdownMenuItem>
+                              ))}
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  ) : runScripts.length > 1 ? (
                     <div className="flex items-center">
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -911,7 +1033,7 @@ export function SessionChatModal({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               )}
               {/* Mobile: overflow menu */}
@@ -930,7 +1052,7 @@ export function SessionChatModal({
                     <DropdownMenuItem
                       onSelect={() =>
                         openInEditor.mutate({
-                          worktreePath,
+                          worktreePath: terminalWorktreePath,
                           editor: preferences?.editor,
                         })
                       }
@@ -945,7 +1067,7 @@ export function SessionChatModal({
                     <DropdownMenuItem
                       onSelect={() =>
                         openInTerminal.mutate({
-                          worktreePath,
+                          worktreePath: terminalWorktreePath,
                           terminal: preferences?.terminal,
                         })
                       }
@@ -958,7 +1080,7 @@ export function SessionChatModal({
                       )}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onSelect={() => openInFinder.mutate(worktreePath)}
+                      onSelect={() => openInFinder.mutate(terminalWorktreePath)}
                     >
                       <FolderOpen className="h-4 w-4" />
                       Finder
@@ -975,6 +1097,22 @@ export function SessionChatModal({
                         <Github className="h-4 w-4" />
                         GitHub
                       </DropdownMenuItem>
+                    )}
+                    {spotlightEnabled && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={handleSpotlightAction}>
+                          {spotlight?.active ? (
+                            <Square className="h-4 w-4 fill-current" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                          {spotlightActionLabel}
+                          <span className="ml-auto text-[0.625rem] opacity-60">
+                            {spotlightShortcut}
+                          </span>
+                        </DropdownMenuItem>
+                      </>
                     )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -993,6 +1131,9 @@ export function SessionChatModal({
                           className={`h-4 w-4 ${hasRunningTerminal ? 'text-yellow-400 animate-icon-glow' : ''}`}
                         />
                         Run
+                        <span className="ml-auto text-[0.625rem] opacity-60">
+                          {runShortcut}
+                        </span>
                       </DropdownMenuItem>
                     )}
                     {runScripts.length > 1 && (
@@ -1324,7 +1465,7 @@ export function SessionChatModal({
         {isNativeApp() && (
           <ModalTerminalDrawer
             worktreeId={worktreeId}
-            worktreePath={worktreePath}
+            worktreePath={terminalWorktreePath}
           />
         )}
       </div>

@@ -2489,6 +2489,10 @@ pub async fn checkout_pr(
 pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), String> {
     log::trace!("Deleting worktree: {worktree_id}");
 
+    if super::spotlight::is_worktree_spotlight_active(&app, &worktree_id) {
+        return Err("Disable Spotlight before deleting this worktree".to_string());
+    }
+
     // Cancel any running Claude processes for this worktree FIRST
     crate::chat::registry::cancel_processes_for_worktree(&app, &worktree_id);
 
@@ -2944,6 +2948,10 @@ async fn close_base_session_internal(
 #[tauri::command]
 pub async fn archive_worktree(app: AppHandle, worktree_id: String) -> Result<(), String> {
     log::trace!("Archiving worktree: {worktree_id}");
+
+    if super::spotlight::is_worktree_spotlight_active(&app, &worktree_id) {
+        return Err("Disable Spotlight before archiving this worktree".to_string());
+    }
 
     // Cancel any running Claude processes for this worktree
     crate::chat::registry::cancel_processes_for_worktree(&app, &worktree_id);

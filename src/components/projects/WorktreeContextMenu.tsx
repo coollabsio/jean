@@ -64,10 +64,7 @@ export function WorktreeContextMenu({
     handleDelete,
     handleOpenJeanConfig,
     handleGenerateRecap,
-  } = useWorktreeMenuActions({ worktree, projectId })
-
-  // Suppress unused variable warning
-  void projectPath
+  } = useWorktreeMenuActions({ worktree, projectId, projectPath })
 
   return (
     <ContextMenu>

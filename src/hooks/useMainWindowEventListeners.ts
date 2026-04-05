@@ -9,15 +9,26 @@ import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { preferencesQueryKeys } from '@/services/preferences'
 import type { QueuedMessage } from '@/types/chat'
+import type { Worktree } from '@/types/projects'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
 import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
 import {
+  activateSpotlightWithEffects,
+  deactivateSpotlightWithEffects,
+  loadSpotlights,
+  shouldUseSpotlightShortcut,
+  spotlightQueryKeys,
+} from '@/services/spotlight'
+import type { SpotlightStatus } from '@/types/spotlight'
+import {
   eventToShortcutString,
   DEFAULT_KEYBINDINGS,
+  getRuntimeKeybindings,
   type KeybindingAction,
   type KeybindingsMap,
 } from '@/types/keybindings'
@@ -162,6 +173,107 @@ function executeKeybindingAction(
       logger.debug('Keybinding: open_git_diff')
       window.dispatchEvent(new CustomEvent('open-git-diff'))
       break
+    case 'execute_spotlight': {
+      logger.debug('Keybinding: execute_spotlight')
+      if (!isNativeApp()) break
+
+      const preferences = queryClient.getQueryData<{
+        spotlight_testing_enabled?: boolean
+      }>(preferencesQueryKeys.preferences())
+
+      const runAction = () =>
+        executeKeybindingAction('execute_run', commandContext, queryClient)
+
+      const uiStore = useUIStore.getState()
+      if (uiStore.gitDiffModalOpen) break
+
+      const chatStore = useChatStore.getState()
+      const sessionModalOpen = uiStore.sessionChatModalOpen
+      const targetWorktreeId =
+        sessionModalOpen && uiStore.sessionChatModalWorktreeId
+          ? uiStore.sessionChatModalWorktreeId
+          : (chatStore.activeWorktreeId ??
+            useProjectsStore.getState().selectedWorktreeId)
+
+      if (!targetWorktreeId) {
+        notify('Open a worktree to use Spotlight', undefined, { type: 'error' })
+        break
+      }
+
+      if (!preferences?.spotlight_testing_enabled) {
+        runAction()
+        break
+      }
+
+      ;(async () => {
+        const spotlights = await loadSpotlights(queryClient)
+        const spotlight = spotlights?.find(
+          item => item.worktree_id === targetWorktreeId
+        )
+        let targetWorktree: Worktree | null = null
+
+        if (!spotlight?.active) {
+          targetWorktree =
+            queryClient.getQueryData<Worktree>([
+              ...projectsQueryKeys.all,
+              'worktree',
+              targetWorktreeId,
+            ]) ?? null
+
+          if (!targetWorktree) {
+            const selectedProjectId =
+              useProjectsStore.getState().selectedProjectId
+            if (selectedProjectId) {
+              const worktrees = queryClient.getQueryData<Worktree[]>(
+                projectsQueryKeys.worktrees(selectedProjectId)
+              )
+              targetWorktree =
+                worktrees?.find(w => w.id === targetWorktreeId) ?? null
+            }
+          }
+
+          if (!targetWorktree) {
+            try {
+              targetWorktree = await invoke<Worktree>('get_worktree', {
+                worktreeId: targetWorktreeId,
+              })
+            } catch {
+              targetWorktree = null
+            }
+          }
+        }
+
+        if (
+          !shouldUseSpotlightShortcut({
+            spotlightTestingEnabled: true,
+            spotlightActive: !!spotlight?.active,
+            targetWorktree,
+          })
+        ) {
+          runAction()
+          return
+        }
+
+        try {
+          if (spotlight?.active) {
+            await deactivateSpotlightWithEffects(queryClient, targetWorktreeId)
+            toast.success('Spotlight disabled')
+          } else {
+            await activateSpotlightWithEffects(queryClient, targetWorktreeId)
+            toast.success('Spotlight enabled')
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : typeof error === 'string'
+                ? error
+                : 'Failed to start Spotlight'
+          toast.error(message)
+        }
+      })()
+      break
+    }
     case 'execute_run': {
       logger.debug('Keybinding: execute_run')
       if (!isNativeApp()) break
@@ -204,18 +316,40 @@ function executeKeybindingAction(
 
       // Fetch run scripts - use fetchQuery to handle uncached dashboard worktrees
       ;(async () => {
+        let spotlights = queryClient.getQueryData<SpotlightStatus[]>(
+          spotlightQueryKeys.list()
+        )
+
+        if (spotlights === undefined) {
+          try {
+            spotlights = await queryClient.fetchQuery<SpotlightStatus[]>({
+              queryKey: spotlightQueryKeys.list(),
+              queryFn: () => invoke<SpotlightStatus[]>('list_spotlights'),
+            })
+          } catch {
+            spotlights = []
+          }
+        }
+
+        const spotlight = spotlights?.find(
+          item => item.worktree_id === targetWorktreeId
+        )
+        const executionPath = spotlight?.active
+          ? spotlight.root_path
+          : targetWorktreePath
+
         let runScripts = queryClient.getQueryData<string[]>([
           'run-scripts',
-          targetWorktreePath,
+          executionPath,
         ])
 
         if (runScripts === undefined) {
           try {
             runScripts = await queryClient.fetchQuery<string[]>({
-              queryKey: ['run-scripts', targetWorktreePath],
+              queryKey: ['run-scripts', executionPath],
               queryFn: () =>
                 invoke<string[]>('get_run_scripts', {
-                  worktreePath: targetWorktreePath,
+                  worktreePath: executionPath,
                 }),
             })
           } catch {
@@ -251,10 +385,11 @@ function executeKeybindingAction(
             .getState()
             .setModalTerminalOpen(targetWorktreeId, true)
         } else {
+          if (!executionPath) return
           // Canvas view: start PTY headlessly (no terminal UI mounted yet)
           startHeadless(terminalId, {
             worktreeId: targetWorktreeId,
-            worktreePath: targetWorktreePath!,
+            worktreePath: executionPath,
             command: firstScript,
           })
         }
@@ -463,11 +598,11 @@ export function useMainWindowEventListeners() {
 
   // Update ref when preferences change
   useEffect(() => {
-    keybindingsRef.current = {
-      ...DEFAULT_KEYBINDINGS,
-      ...(preferences?.keybindings ?? {}),
-    }
-  }, [preferences?.keybindings])
+    keybindingsRef.current = getRuntimeKeybindings(
+      preferences?.keybindings,
+      preferences?.spotlight_testing_enabled ?? false
+    )
+  }, [preferences?.keybindings, preferences?.spotlight_testing_enabled])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -520,7 +655,7 @@ export function useMainWindowEventListeners() {
         if (terminalShortcutWorktreeId) {
           const kb = keybindingsRef.current
           const digitMatch = e.code.match(/^Digit(\d)$/)
-          const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+          const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
 
           if (
             (e.metaKey || e.ctrlKey) &&
@@ -563,7 +698,7 @@ export function useMainWindowEventListeners() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
         const digitMatch = e.code.match(/^Digit(\d)$/)
-        const digit = digitMatch ? parseInt(digitMatch[1]!, 10) : NaN
+        const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
         if (digit >= 1 && digit <= 9) {
           e.preventDefault()
           e.stopPropagation()

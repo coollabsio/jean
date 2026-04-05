@@ -18,15 +18,24 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import type { SessionDigest } from '@/types/chat'
+import {
+  getEffectiveWorktreePath,
+  useActivateSpotlight,
+  useDeactivateSpotlight,
+  useSpotlight,
+  useSyncSpotlight,
+} from '@/services/spotlight'
 
 interface UseWorktreeMenuActionsProps {
   worktree: Worktree
   projectId: string
+  projectPath: string
 }
 
 export function useWorktreeMenuActions({
   worktree,
   projectId,
+  projectPath,
 }: UseWorktreeMenuActionsProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const archiveWorktree = useArchiveWorktree()
@@ -35,10 +44,17 @@ export function useWorktreeMenuActions({
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInEditor = useOpenWorktreeInEditor()
-  const { data: runScripts = [] } = useRunScripts(worktree.path)
   const { data: preferences } = usePreferences()
   const { data: sessionsData } = useSessions(worktree.id, worktree.path)
   const isBase = isBaseSession(worktree)
+  const { spotlight } = useSpotlight(worktree.id)
+  const activateSpotlight = useActivateSpotlight()
+  const syncSpotlight = useSyncSpotlight()
+  const deactivateSpotlight = useDeactivateSpotlight()
+  const effectivePath = getEffectiveWorktreePath(worktree.path, spotlight)
+  const runPath =
+    getEffectiveWorktreePath(projectPath, spotlight) ?? projectPath
+  const { data: runScripts = [] } = useRunScripts(runPath)
 
   // Check if any session has at least one message (for recap generation)
   const hasMessages = sessionsData?.sessions?.some(
@@ -68,22 +84,22 @@ export function useWorktreeMenuActions({
   }, [worktree.id])
 
   const handleOpenInFinder = useCallback(() => {
-    openInFinder.mutate(worktree.path)
-  }, [openInFinder, worktree.path])
+    openInFinder.mutate(effectivePath ?? worktree.path)
+  }, [effectivePath, openInFinder, worktree.path])
 
   const handleOpenInTerminal = useCallback(() => {
     openInTerminal.mutate({
-      worktreePath: worktree.path,
+      worktreePath: effectivePath ?? worktree.path,
       terminal: preferences?.terminal,
     })
-  }, [openInTerminal, worktree.path, preferences?.terminal])
+  }, [effectivePath, openInTerminal, worktree.path, preferences?.terminal])
 
   const handleOpenInEditor = useCallback(() => {
     openInEditor.mutate({
-      worktreePath: worktree.path,
+      worktreePath: effectivePath ?? worktree.path,
       editor: preferences?.editor,
     })
-  }, [openInEditor, worktree.path, preferences?.editor])
+  }, [effectivePath, openInEditor, worktree.path, preferences?.editor])
 
   const handleArchiveOrClose = useCallback(() => {
     if (isBase) {
@@ -111,6 +127,18 @@ export function useWorktreeMenuActions({
   const handleOpenJeanConfig = useCallback(() => {
     useProjectsStore.getState().openProjectSettings(projectId, 'jean-json')
   }, [projectId])
+
+  const handleActivateSpotlight = useCallback(() => {
+    activateSpotlight.mutate(worktree.id)
+  }, [activateSpotlight, worktree.id])
+
+  const handleSyncSpotlight = useCallback(() => {
+    syncSpotlight.mutate(worktree.id)
+  }, [syncSpotlight, worktree.id])
+
+  const handleDeactivateSpotlight = useCallback(() => {
+    deactivateSpotlight.mutate(worktree.id)
+  }, [deactivateSpotlight, worktree.id])
 
   const handleGenerateRecap = useCallback(async () => {
     const sessions = sessionsData?.sessions ?? []
@@ -160,6 +188,12 @@ export function useWorktreeMenuActions({
     hasMessages,
     runScripts,
     preferences,
+    spotlight,
+    runPath,
+    isSpotlightLoading:
+      activateSpotlight.isPending ||
+      syncSpotlight.isPending ||
+      deactivateSpotlight.isPending,
 
     // Handlers
     handleRun,
@@ -171,6 +205,9 @@ export function useWorktreeMenuActions({
     handleArchiveOrClose,
     handleDelete,
     handleOpenJeanConfig,
+    handleActivateSpotlight,
+    handleSyncSpotlight,
+    handleDeactivateSpotlight,
     handleGenerateRecap,
   }
 }

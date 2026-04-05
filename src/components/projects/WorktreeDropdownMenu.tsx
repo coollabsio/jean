@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldAlert,
   Sparkles,
+  SunMedium,
   Terminal,
   Trash2,
   X,
@@ -100,7 +101,12 @@ export function WorktreeDropdownMenu({
     handleDelete,
     handleOpenJeanConfig,
     handleGenerateRecap,
-  } = useWorktreeMenuActions({ worktree, projectId })
+    handleActivateSpotlight,
+    handleSyncSpotlight,
+    handleDeactivateSpotlight,
+    spotlight,
+    isSpotlightLoading,
+  } = useWorktreeMenuActions({ worktree, projectId, projectPath })
   const authData = queryClient.getQueryData<GhAuthStatus>(ghCliQueryKeys.auth())
   const isGitHubAuthenticated = authData?.authenticated ?? false
   const { data: issueResult } = useGitHubIssues(projectPath, 'open', {
@@ -221,6 +227,37 @@ export function WorktreeDropdownMenu({
             <FileJson className="mr-2 h-4 w-4" />
             Edit jean.json
           </DropdownMenuItem>
+
+          {preferences?.spotlight_testing_enabled && !isBase && (
+            <>
+              {!spotlight?.active ? (
+                <DropdownMenuItem
+                  disabled={isSpotlightLoading}
+                  onClick={handleActivateSpotlight}
+                >
+                  <SunMedium className="mr-2 h-4 w-4" />
+                  Enable Spotlight
+                </DropdownMenuItem>
+              ) : (
+                <>
+                  <DropdownMenuItem
+                    disabled={isSpotlightLoading}
+                    onClick={handleSyncSpotlight}
+                  >
+                    <SunMedium className="mr-2 h-4 w-4" />
+                    Sync Spotlight
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={isSpotlightLoading}
+                    onClick={handleDeactivateSpotlight}
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Disable Spotlight
+                  </DropdownMenuItem>
+                </>
+              )}
+            </>
+          )}
 
           <DropdownMenuItem
             onClick={() =>

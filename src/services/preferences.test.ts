@@ -122,6 +122,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],
@@ -244,6 +245,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],
@@ -338,6 +340,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],
@@ -434,6 +437,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],
@@ -531,6 +535,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],
@@ -628,6 +633,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],
@@ -723,6 +729,7 @@ describe('preferences service', () => {
         removal_behavior: 'archive',
         auto_archive_on_pr_merged: true,
         debug_mode_enabled: false,
+        spotlight_testing_enabled: false,
 
         default_effort_level: 'high',
         default_enabled_mcp_servers: [],

@@ -10,6 +10,7 @@ import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from '@/types/keybindings'
 // When a default changes, add the old value here so stored prefs get updated
 const MIGRATED_KEYBINDINGS: Partial<Record<keyof KeybindingsMap, string>> = {
   toggle_left_sidebar: 'mod+1', // Changed to 'mod+b'
+  execute_run: 'mod+r', // Changed to 'mod+shift+r'
   open_provider_dropdown: 'alt+p', // Changed to 'mod+shift+p' (macOS dead key fix)
   open_model_dropdown: 'alt+m', // Changed to 'mod+shift+m' (macOS dead key fix)
   open_thinking_dropdown: 'alt+e', // Changed to 'mod+shift+e' (macOS dead key fix)

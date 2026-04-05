@@ -81,6 +81,7 @@ Each major system has focused documentation:
 - **[Logging](./logging.md)** - Rust and TypeScript logging
 - **[Performance](./performance-patterns.md)** - Render optimization patterns
 - **[Testing](./testing.md)** - Quality gates and test patterns
+- **[Spotlight Testing](./spotlight-testing.md)** - Worktree-to-root sync and recovery model
 - **[Releases](./releases.md)** - Automated release process
 - **[Auto-Updates](./auto-updates.md)** - Update system integration
 - **[Bundle Optimization](./bundle-optimization.md)** - Build size optimization

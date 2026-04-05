@@ -132,6 +132,7 @@ import { buildMcpConfigJson } from '@/services/mcp'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
+import { getEffectiveWorktreePath, useSpotlight } from '@/services/spotlight'
 import { isNativeApp } from '@/lib/environment'
 import { supportsAdaptiveThinking } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
@@ -505,8 +506,14 @@ export function ChatWindow({
     (worktree?.cached_check_status as CheckStatus | undefined)
   const mergeableStatus = prStatus?.mergeable ?? undefined
 
-  // Run scripts for this worktree (used by CMD+R keybinding)
-  const { data: runScripts = [] } = useRunScripts(activeWorktreePath ?? null)
+  const { spotlight } = useSpotlight(activeWorktreeId)
+  const terminalWorktreePath = getEffectiveWorktreePath(
+    project?.path ?? activeWorktreePath ?? null,
+    spotlight
+  )
+
+  // Run scripts for this worktree/root (used by CMD+R keybinding)
+  const { data: runScripts = [] } = useRunScripts(terminalWorktreePath)
 
   // Per-session provider selection: persisted session → zustand → project default → global default
   const projectDefaultProvider = project?.default_provider ?? null
@@ -2013,6 +2020,7 @@ export function ChatWindow({
     activeSessionId,
     activeWorktreeId,
     activeWorktreePath,
+    terminalWorktreePath,
     isModal,
     latestPlanContent,
     latestPlanFilePath,
@@ -2809,6 +2817,7 @@ export function ChatWindow({
                         <TerminalPanel
                           isCollapsed={!terminalVisible}
                           onExpand={handleTerminalExpand}
+                          activeWorktreePathOverride={terminalWorktreePath}
                         />
                       </ResizablePanel>
                     </>

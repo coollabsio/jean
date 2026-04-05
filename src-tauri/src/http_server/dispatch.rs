@@ -1200,6 +1200,33 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
+        "list_spotlights" => {
+            let result = crate::projects::list_spotlights(app.clone()).await?;
+            to_value(result)
+        }
+        "activate_spotlight" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::activate_spotlight(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["spotlights"]);
+            to_value(result)
+        }
+        "sync_spotlight" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::sync_spotlight(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["spotlights"]);
+            to_value(result)
+        }
+        "deactivate_spotlight" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            crate::projects::deactivate_spotlight(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["spotlights"]);
+            Ok(Value::Null)
+        }
+        "recover_spotlights" => {
+            let result = crate::projects::recover_spotlights(app.clone()).await?;
+            emit_cache_invalidation(app, &["spotlights"]);
+            to_value(result)
+        }
         "close_base_session" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::close_base_session(app.clone(), worktree_id).await?;
