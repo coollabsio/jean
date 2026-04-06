@@ -1,0 +1,188 @@
+# WebSocket Command Catalog
+
+This catalog is generated from `src-tauri/src/http_server/dispatch.rs` and reflects the browser WebSocket-dispatch surface.
+
+Notation:
+- `?field` means optional field.
+- `camel/snake` means command accepts either casing.
+- Empty args means no request fields are required.
+
+Total commands: 175
+
+## Commands (alphabetical)
+
+- `add_project` — `path,?parentId/parent_id`
+- `archive_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `archive_worktree` — `worktreeId/worktree_id`
+- `attach_saved_context` — `sessionId/session_id,sourcePath/source_path,contextSlug/context_slug`
+- `broadcast_session_setting` — `sessionId/session_id,key/key,value/value`
+- `cancel_chat_message` — `sessionId/session_id,worktreeId/worktree_id`
+- `cancel_review_with_ai` — `reviewRunId/review_run_id`
+- `check_claude_cli_auth`
+- `check_claude_cli_installed`
+- `check_gh_cli_auth`
+- `check_gh_cli_installed`
+- `check_opencode_cli_auth`
+- `check_opencode_cli_installed`
+- `check_resumable_sessions`
+- `checkout_pr` — `projectId/project_id,prNumber/pr_number`
+- `cleanup_old_archives` — `retentionDays/retention_days`
+- `cleanup_old_recovery_files`
+- `clear_session_history` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `clear_worktree_pr` — `worktreeId/worktree_id`
+- `close_base_session_archive` — `worktreeId/worktree_id`
+- `close_base_session_clean` — `worktreeId/worktree_id`
+- `close_base_session` — `worktreeId/worktree_id`
+- `close_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `commit_changes` — `worktreeId/worktree_id,message,?stageAll/stage_all`
+- `create_base_session` — `projectId/project_id`
+- `create_commit_with_ai` — `worktreePath/worktree_path,?magicPrompt/magic_prompt,?push,?remote,?model,?customProfileName/custom_profile_name`
+- `create_folder` — `name,?parentId/parent_id`
+- `create_pr_with_ai_content` — `worktreePath/worktree_path,?sessionId/session_id,?magicPrompt/magic_prompt,?model,?customProfileName/custom_profile_name`
+- `create_session` — `worktreeId/worktree_id,worktreePath/worktree_path,?name`
+- `create_worktree_from_existing_branch` — `projectId/project_id,branchName/branch_name,?issueContext/issue_context,?prContext/pr_context`
+- `create_worktree` — `projectId/project_id,?baseBranch/base_branch,?issueContext/issue_context,?prContext/pr_context,?customName/custom_name`
+- `delete_all_archives`
+- `delete_archived_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `delete_context_file` — `path`
+- `delete_folder` — `folderId/folder_id`
+- `delete_pasted_image` — `path`
+- `delete_pasted_text` — `path`
+- `delete_worktree` — `worktreeId/worktree_id`
+- `fetch_and_merge_base` — `worktreeId/worktree_id`
+- `fetch_worktrees_status` — `projectId/project_id`
+- `generate_context_from_session` — `worktreePath/worktree_path,worktreeId/worktree_id,sessionId/session_id,projectName/project_name,?magicPrompt/magic_prompt,?model,?customProfileName/custom_profile_name`
+- `generate_session_digest` — `sessionId/session_id`
+- `get_active_terminals`
+- `get_app_data_dir`
+- `get_available_cli_versions`
+- `get_available_gh_versions`
+- `get_available_opencode_versions`
+- `get_git_diff` — `worktreePath/worktree_path,diffType/diff_type,?baseBranch/base_branch`
+- `get_git_poll_interval`
+- `get_git_remotes` — `repoPath/repo_path`
+- `get_github_branch_url` — `repoPath/repo_path,branch`
+- `get_github_issue` — `projectPath/project_path,issueNumber/issue_number`
+- `get_github_pr` — `projectPath/project_path,prNumber/pr_number`
+- `get_github_remotes` — `repoPath/repo_path`
+- `get_github_repo_url` — `repoPath/repo_path`
+- `get_http_server_status`
+- `get_issue_context_content` — `sessionId/session_id,issueNumber/issue_number,projectPath/project_path`
+- `get_merge_conflicts` — `worktreeId/worktree_id`
+- `get_opencode_server_status`
+- `get_pr_context_content` — `sessionId/session_id,prNumber/pr_number,projectPath/project_path`
+- `get_pr_prompt` — `worktreePath/worktree_path`
+- `get_project_branches` — `projectId/project_id`
+- `get_remote_poll_interval`
+- `get_review_prompt` — `worktreePath/worktree_path`
+- `get_run_script`
+- `get_saved_context_content` — `sessionId/session_id,contextSlug/context_slug`
+- `get_session_debug_info` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `get_sessions` — `worktreeId/worktree_id,worktreePath/worktree_path,?includeArchived/include_archived,?includeMessageCounts/include_message_counts`
+- `get_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `get_worktree` — `worktreeId/worktree_id`
+- `git_pull` — `worktreePath/worktree_path,baseBranch/base_branch,?remote/remote`
+- `git_push` — `worktreePath/worktree_path,?prNumber/pr_number,?remote/remote`
+- `greet` — `name`
+- `has_active_terminal`
+- `has_running_sessions`
+- `has_uncommitted_changes` — `worktreeId/worktree_id`
+- `import_worktree` — `projectId/project_id,path`
+- `init_git_in_folder` — `path`
+- `init_project` — `path,?parentId/parent_id`
+- `install_claude_cli` — `?version`
+- `install_gh_cli` — `?version`
+- `install_opencode_cli` — `?version`
+- `kill_all_terminals`
+- `list_all_archived_sessions`
+- `list_all_sessions`
+- `list_archived_sessions` — `worktreeId/worktree_id,worktreePath/worktree_path`
+- `list_archived_worktrees`
+- `list_attached_saved_contexts` — `sessionId/session_id`
+- `list_claude_commands`
+- `list_claude_skills`
+- `list_github_issues` — `projectPath/project_path,?state`
+- `list_github_prs` — `projectPath/project_path,?state`
+- `list_loaded_issue_contexts` — `sessionId/session_id,?worktreeId/worktree_id`
+- `list_loaded_pr_contexts` — `sessionId/session_id,?worktreeId/worktree_id`
+- `list_opencode_models`
+- `list_projects`
+- `list_saved_contexts`
+- `list_worktree_files` — `worktreePath/worktree_path,?maxFiles/max_files`
+- `list_worktrees` — `projectId/project_id`
+- `load_emergency_data` — `filename`
+- `load_issue_context` — `sessionId/session_id,issueNumber/issue_number,projectPath/project_path`
+- `load_pr_context` — `sessionId/session_id,prNumber/pr_number,projectPath/project_path`
+- `load_preferences`
+- `load_ui_state`
+- `mark_plan_approved` — `sessionId/session_id,worktreeId/worktree_id,worktreePath/worktree_path,messageId/message_id`
+- `merge_worktree_to_base` — `worktreeId/worktree_id,mergeType/merge_type`
+- `move_item` — `itemId/item_id,?newParentId/new_parent_id,?targetIndex/target_index`
+- `open_file_in_default_app`
+- `open_project_on_github` — `projectId/project_id`
+- `open_project_worktrees_folder`
+- `open_pull_request` — `worktreeId/worktree_id,?title,?body,?draft`
+- `open_worktree_in_editor`
+- `open_worktree_in_finder`
+- `open_worktree_in_terminal`
+- `permanently_delete_worktree` — `worktreeId/worktree_id`
+- `read_context_file` — `path`
+- `read_file_content` — `filePath/file_path`
+- `read_pasted_text` — `path`
+- `read_plan_file` — `path`
+- `rebase_worktree` — `worktreeId/worktree_id,?commitMessage/commit_message`
+- `regenerate_http_token`
+- `remove_issue_context` — `sessionId/session_id,issueNumber/issue_number,projectPath/project_path`
+- `remove_pr_context` — `sessionId/session_id,prNumber/pr_number,projectPath/project_path`
+- `remove_project_avatar` — `projectId/project_id`
+- `remove_project` — `projectId/project_id`
+- `remove_saved_context` — `sessionId/session_id,contextSlug/context_slug`
+- `rename_folder` — `folderId/folder_id,name`
+- `rename_saved_context` — `filename,newName/new_name`
+- `rename_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id,newName/new_name`
+- `rename_worktree` — `worktreeId/worktree_id,newName/new_name`
+- `reorder_items` — `itemIds/item_ids,?parentId/parent_id`
+- `reorder_projects` — `projectIds/project_ids`
+- `reorder_sessions` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionIds/session_ids`
+- `reorder_worktrees` — `projectId/project_id,worktreeIds/worktree_ids`
+- `restore_session_with_base` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id,projectId/project_id`
+- `resume_session` — `sessionId/session_id,worktreeId/worktree_id`
+- `run_review_with_ai` — `worktreePath/worktree_path,?magicPrompt/magic_prompt,?model,?customProfileName/custom_profile_name,?reviewRunId/review_run_id`
+- `save_cancelled_message` — `sessionId/session_id,worktreeId/worktree_id,worktreePath/worktree_path,content,?toolCalls,?contentBlocks`
+- `save_context_file` — `worktreePath/worktree_path,slug,content`
+- `save_dropped_image`
+- `save_emergency_data` — `filename,data`
+- `save_pasted_image` — `data,mimeType/mime_type`
+- `save_pasted_text` — `content`
+- `save_preferences` — `preferences`
+- `save_ui_state` — `uiState/ui_state`
+- `save_worktree_pr` — `worktreeId/worktree_id,prNumber/pr_number,prUrl/pr_url`
+- `search_github_issues` — `projectPath/project_path,query`
+- `search_github_prs` — `projectPath/project_path,query`
+- `send_chat_message` — `sessionId/session_id,worktreeId/worktree_id,worktreePath/worktree_path,message,?model,?executionMode/execution_mode,?thinkingLevel/thinking_level,?aiLanguage/ai_language,?allowedTools/allowed_tools,?effortLevel/effort_level,?mcpConfig/mcp_config,?chromeEnabled/chrome_enabled,?customProfileName/custom_profile_name,?backend/backend`
+- `send_native_notification` — `title,?body`
+- `set_active_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `set_active_worktree_for_polling` — `?worktreeId/worktree_id,?worktreePath/worktree_path,?baseBranch/base_branch,?prNumber/pr_number,?prUrl/pr_url`
+- `set_app_focus_state` — `focused`
+- `set_git_poll_interval` — `seconds`
+- `set_project_avatar` — `projectId/project_id`
+- `set_remote_poll_interval` — `seconds`
+- `set_session_model` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id,model`
+- `set_session_thinking_level` — `sessionId/session_id,worktreeId/worktree_id,worktreePath/worktree_path,thinkingLevel/thinking_level`
+- `start_http_server`
+- `start_opencode_server`
+- `start_terminal`
+- `stop_http_server`
+- `stop_opencode_server`
+- `stop_terminal`
+- `terminal_resize`
+- `terminal_write`
+- `trigger_immediate_git_poll`
+- `trigger_immediate_remote_poll`
+- `unarchive_session` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id`
+- `unarchive_worktree` — `worktreeId/worktree_id`
+- `update_project_settings` — `projectId/project_id,?defaultBranch/default_branch`
+- `update_session_digest` — `sessionId/session_id,digest`
+- `update_session_state` — `worktreeId/worktree_id,worktreePath/worktree_path,sessionId/session_id,?answeredQuestions/answered_questions,?submittedAnswers/submitted_answers,?fixedFindings/fixed_findings,?deniedMessageContext/denied_message_context,?isReviewing/is_reviewing,?waitingForInput/waiting_for_input,?waitingForInputType/waiting_for_input_type,?planFilePath/plan_file_path,?pendingPlanMessageId/pending_plan_message_id,?clearLabel/clear_label,?reviewResults/review_results,?enabledMcpServers/enabled_mcp_servers`
+- `update_worktree_cached_status` — `worktreeId/worktree_id,?branch/branch,?prStatus/pr_status,?checkStatus/check_status,?behindCount/behind_count,?aheadCount/ahead_count,?uncommittedAdded/uncommitted_added,?uncommittedRemoved/uncommitted_removed,?branchDiffAdded/branch_diff_added,?branchDiffRemoved/branch_diff_removed,?baseBranchAheadCount/base_branch_ahead_count,?baseBranchBehindCount/base_branch_behind_count,?worktreeAheadCount/worktree_ahead_count,?unpushedCount/unpushed_count`
+- `write_file_content` — `path,content`
