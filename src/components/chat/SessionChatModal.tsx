@@ -431,6 +431,8 @@ export function SessionChatModal({
         e.preventDefault()
         handleRenameSubmit(sessionId)
       } else if (e.key === 'Escape') {
+        // stopPropagation prevents the modal's global Escape handler from also closing the modal
+        e.stopPropagation()
         setRenamingSessionId(null)
       }
     },
@@ -537,6 +539,18 @@ export function SessionChatModal({
     window.addEventListener('toggle-session-label', handler)
     return () => window.removeEventListener('toggle-session-label', handler)
   }, [isOpen])
+
+  // Listen for command:rename-session event (CMD+E)
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = () => {
+      if (currentSessionId && currentSession) {
+        handleStartRenameImmediate(currentSessionId, currentSession.name)
+      }
+    }
+    window.addEventListener('command:rename-session', handler)
+    return () => window.removeEventListener('command:rename-session', handler)
+  }, [isOpen, currentSessionId, currentSession, handleStartRenameImmediate])
 
   const handleClose = useCallback(() => {
     onClose()

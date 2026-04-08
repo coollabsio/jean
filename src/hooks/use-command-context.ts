@@ -193,12 +193,19 @@ export function useCommandContext(
   // Sessions - Rename session
   const renameSession = useCallback(() => {
     const { activeWorktreeId, getActiveSession } = useChatStore.getState()
-    if (!activeWorktreeId) {
+    const { sessionChatModalOpen, sessionChatModalWorktreeId } =
+      useUIStore.getState()
+
+    // Prefer modal's worktree when the modal is open (activeWorktreeId is null in modal context)
+    const worktreeId = sessionChatModalOpen
+      ? (sessionChatModalWorktreeId ?? activeWorktreeId)
+      : activeWorktreeId
+    if (!worktreeId) {
       notify('No worktree selected', undefined, { type: 'error' })
       return
     }
 
-    const sessionId = getActiveSession(activeWorktreeId)
+    const sessionId = getActiveSession(worktreeId)
     if (!sessionId) {
       notify('No session selected', undefined, { type: 'error' })
       return

@@ -44,6 +44,7 @@ export type KeybindingAction =
   | 'switch_mode_build'
   | 'switch_mode_yolo'
   | 'go_to_session'
+  | 'rename_session'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -107,6 +108,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   switch_mode_build: 'mod+ctrl+quote',
   switch_mode_yolo: 'mod+ctrl+backslash',
   go_to_session: 'mod+p',
+  rename_session: 'mod+e',
 }
 
 // UI definitions for the settings pane
@@ -420,6 +422,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     description: 'Fuzzy-search and jump to any session across all projects',
     default_shortcut: 'mod+p',
     category: 'navigation',
+  },
+  {
+    action: 'rename_session',
+    label: 'Rename session',
+    description: 'Rename the current chat session',
+    default_shortcut: 'mod+e',
+    category: 'chat',
   },
 ]
 
