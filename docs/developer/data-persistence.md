@@ -560,6 +560,55 @@ function migrateKeybindings(
 }
 ```
 
+## Chat Sessions, Runs, and Restore Points
+
+Chat persistence uses two layers:
+
+1. **Session metadata** in `sessions/data/{session_id}/metadata.json`
+2. **Per-run JSONL history** written by `src-tauri/src/chat/run_log.rs`
+
+The metadata file stores session-level state plus a `runs` ledger. Each `RunEntry` records:
+
+- user/assistant message IDs
+- backend resume handles (`claude_session_id`, `codex_thread_id`, `opencode_session_id`)
+- provider revert anchors
+- checkpoints captured before/after the run
+- run status and usage metadata
+
+### Restore Point Model
+
+Revert is built on **pre/post run checkpoints**, not by reconstructing edits from tool calls.
+
+For every completed run Jean captures:
+
+- `checkpoint_before` — filesystem state immediately before the user prompt executes
+- `checkpoint_after` — filesystem state after the run completes
+
+Checkpoints are stored in Jean app data via `src-tauri/src/chat/checkpoints.rs` using a git-backed snapshot store. This keeps restore independent from the user's working branch history.
+
+### Revert Semantics
+
+The product surface exposes revert on the **user message**. Reverting a user message means:
+
+- restore `checkpoint_before`
+- truncate local run/message history starting at that run
+- restore provider conversation state to the matching earlier point
+
+Provider handling differs by backend:
+
+- **Claude**: persist a rewind anchor from the previous assistant UUID and materialize it on the next real send
+- **Codex**: send `thread/rollback` for the number of turns being discarded
+- **OpenCode**: send native `session/:id/revert` using the provider user-message anchor (`info.parentID`)
+
+### Compatibility With Older Sessions
+
+Older chats continue to load because revert fields are optional and defaulted during deserialization. However, runs created before restore-point support usually do **not** have:
+
+- checkpoints
+- provider revert anchors
+
+Those older turns remain readable and sendable, but typically won't show a revert affordance.
+
 ## Best Practices
 
 1. **Use atomic writes**: Always write to temp file then rename

@@ -132,7 +132,8 @@ export const CODEX_DEV_PROMPTS: CodexDevPromptDefinition[] = [
   {
     id: 'ask-secret-and-other',
     label: 'Ask secret + other',
-    description: 'Prompt Codex to ask for a masked value and a free-form answer',
+    description:
+      'Prompt Codex to ask for a masked value and a free-form answer',
     prompt:
       'Use your user input tool to ask me two questions: first a secret token field, then a multiple-choice question that also allows an Other free-text answer. Wait for my answers before continuing.',
   },

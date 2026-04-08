@@ -99,6 +99,8 @@ pub struct ClaudeResponse {
     pub content: String,
     /// The session ID (for resuming conversations)
     pub session_id: String,
+    /// The top-level Claude transcript UUID for the assistant turn
+    pub assistant_uuid: Option<String>,
     /// Tool calls made during this response
     pub tool_calls: Vec<ToolCall>,
     /// Ordered content blocks preserving tool position in response
@@ -244,6 +246,8 @@ fn build_claude_args(
     session_id: &str,
     worktree_id: &str,
     existing_claude_session_id: Option<&str>,
+    resume_session_at: Option<&str>,
+    fork_session: bool,
     model: Option<&str>,
     execution_mode: Option<&str>,
     thinking_level: Option<&ThinkingLevel>,
@@ -747,6 +751,13 @@ fn build_claude_args(
     if let Some(claude_sid) = existing_claude_session_id {
         args.push("--resume".to_string());
         args.push(claude_sid.to_string());
+        if let Some(anchor) = resume_session_at.filter(|a| !a.is_empty()) {
+            args.push("--resume-session-at".to_string());
+            args.push(anchor.to_string());
+            if fork_session {
+                args.push("--fork-session".to_string());
+            }
+        }
     }
 
     // Disable background tasks - forces all Task subagents to run in foreground.
@@ -789,6 +800,8 @@ pub fn execute_claude_detached(
     output_file: &std::path::Path,
     working_dir: &std::path::Path,
     existing_claude_session_id: Option<&str>,
+    resume_session_at: Option<&str>,
+    fork_session: bool,
     model: Option<&str>,
     execution_mode: Option<&str>,
     thinking_level: Option<&ThinkingLevel>,
@@ -833,6 +846,8 @@ pub fn execute_claude_detached(
         session_id,
         worktree_id,
         existing_claude_session_id,
+        resume_session_at,
+        fork_session,
         model,
         execution_mode,
         thinking_level,
@@ -901,6 +916,7 @@ pub fn execute_claude_detached(
             ClaudeResponse {
                 content: String::new(),
                 session_id: String::new(),
+                assistant_uuid: None,
                 tool_calls: vec![],
                 content_blocks: vec![],
                 cancelled: true,
@@ -960,6 +976,7 @@ pub fn tail_claude_output(
 
     let mut full_content = String::new();
     let mut claude_session_id = String::new();
+    let mut assistant_uuid: Option<String> = None;
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut completed = false;
@@ -1035,6 +1052,13 @@ pub fn tail_claude_output(
 
             match msg_type {
                 "assistant" => {
+                    if assistant_uuid.is_none() {
+                        assistant_uuid = msg
+                            .get("uuid")
+                            .and_then(|v| v.as_str())
+                            .filter(|v| !v.is_empty())
+                            .map(|v| v.to_string());
+                    }
                     if let Some(message) = msg.get("message") {
                         if let Some(blocks) = message.get("content").and_then(|c| c.as_array()) {
                             for block in blocks {
@@ -1150,6 +1174,7 @@ pub fn tail_claude_output(
                                             return Ok(ClaudeResponse {
                                                 content: full_content,
                                                 session_id: claude_session_id,
+                                                assistant_uuid: assistant_uuid.clone(),
                                                 tool_calls,
                                                 content_blocks,
                                                 cancelled: false,
@@ -1504,6 +1529,7 @@ pub fn tail_claude_output(
     Ok(ClaudeResponse {
         content: full_content,
         session_id: claude_session_id,
+        assistant_uuid,
         tool_calls,
         content_blocks,
         cancelled,

@@ -41,9 +41,9 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
     })
   })
 
-  function renderUseChatWindowEvents(overrides: Partial<Parameters<
-    typeof useChatWindowEvents
-  >[0]> = {}) {
+  function renderUseChatWindowEvents(
+    overrides: Partial<Parameters<typeof useChatWindowEvents>[0]> = {}
+  ) {
     const inputRef = { current: null }
     const scrollViewportRef = { current: null }
 

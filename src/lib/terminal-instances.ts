@@ -246,8 +246,8 @@ export async function attachToContainer(
     // animation) cause portable_pty to crash with an internal assertion failure.
     const rawCols = terminal.cols
     const rawRows = terminal.rows
-    let cols = rawCols < 2 ? 80 : rawCols
-    let rows = rawRows < 2 ? 24 : rawRows
+    const cols = rawCols < 2 ? 80 : rawCols
+    const rows = rawRows < 2 ? 24 : rawRows
     console.log(
       `[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${initialized}, container=${container.clientWidth}x${container.clientHeight}`
     )

@@ -467,12 +467,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('approve-plan', handler)
     return () => window.removeEventListener('approve-plan', handler)
-  }, [
-    isModal,
-    hasPendingPlanApproval,
-    pendingPlanMessage,
-    handlePlanApproval,
-  ])
+  }, [isModal, hasPendingPlanApproval, pendingPlanMessage, handlePlanApproval])
 
   // CMD+Up/Down: Scroll chat by one page with eased animation
   const scrollAnimationRef = useRef<number | null>(null)

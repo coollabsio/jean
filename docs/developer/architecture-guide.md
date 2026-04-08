@@ -204,7 +204,9 @@ src-tauri/src/
 ├── main.rs                # Entry point
 ├── chat/                  # Session lifecycle management
 │   ├── commands.rs        # Tauri commands (send message, create session, image processing)
+│   ├── checkpoints.rs     # Git-backed restore points captured before/after chat runs
 │   ├── claude.rs          # Claude CLI process spawning and management
+│   ├── codex.rs           # Codex app-server turn execution and history parsing
 │   ├── detached.rs        # Detached process recovery (survives app quit via nohup)
 │   ├── registry.rs        # Active session registry
 │   ├── storage.rs         # Session data on disk
@@ -362,6 +364,29 @@ This includes:
 2. **Follow established patterns** - Don't invent new approaches
 3. **Update docs** - Document new patterns as they emerge
 4. **Test comprehensively** - Use the established testing patterns
+
+### Chat Restore Points and Revert
+
+Jean's chat revert flow is intentionally a **hybrid** system:
+
+- **Jean owns file restore** using git-backed checkpoints captured in `chat/checkpoints.rs`
+- **Providers own conversation history** where supported
+  - Claude: resume/fork from a saved assistant UUID anchor
+  - Codex: app-server `thread/rollback`
+  - OpenCode: native `session/:id/revert`
+- **UI contract**: revert is exposed on the **user message**, not the assistant reply
+
+This means "revert" is defined as:
+
+1. restore the workspace to the checkpoint captured **before** that user prompt ran
+2. remove that prompt, its assistant reply, and all later turns from Jean's local history
+3. roll back provider conversation state to the corresponding earlier point
+
+Important implications:
+
+- Revert availability is **per run**, not global to the session
+- Old chats created before restore-point metadata existed still load normally, but old turns usually won't show a revert action
+- New Tauri commands in this flow (`get_revert_targets`, `revert_to_message`) must be registered in both `lib.rs` and `http_server/dispatch.rs`
 
 ## Extension Points
 

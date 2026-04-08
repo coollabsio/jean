@@ -13,6 +13,7 @@ import type {
   ArchivedSessionEntry,
   ChatMessage,
   ChatHistory,
+  RevertTarget,
   Session,
   WorktreeSessions,
   Question,
@@ -46,6 +47,8 @@ export const chatQueryKeys = {
     [...chatQueryKeys.all, 'sessions', worktreeId] as const,
   session: (sessionId: string) =>
     [...chatQueryKeys.all, 'session', sessionId] as const,
+  revertTargets: (sessionId: string) =>
+    [...chatQueryKeys.all, 'revert-targets', sessionId] as const,
 }
 
 // ============================================================================
@@ -389,6 +392,29 @@ export function useSession(
   })
 }
 
+export function useRevertTargets(sessionId: string | null) {
+  return useQuery({
+    queryKey: chatQueryKeys.revertTargets(sessionId ?? ''),
+    queryFn: async (): Promise<RevertTarget[]> => {
+      if (!isTauri() || !sessionId) {
+        return []
+      }
+
+      try {
+        return await invoke<RevertTarget[]>('get_revert_targets', {
+          sessionId,
+        })
+      } catch (error) {
+        logger.error('Failed to load revert targets', { error, sessionId })
+        return []
+      }
+    },
+    enabled: !!sessionId,
+    staleTime: 0,
+    gcTime: 1000 * 60 * 5,
+  })
+}
+
 // ============================================================================
 // Session Mutations
 // ============================================================================
@@ -684,7 +710,8 @@ export function useCloseSession() {
       // Switch to the new active session — but only if the caller hasn't already
       // picked a neighbor (e.g. SessionChatModal sets it based on visual tab order)
       if (newActiveId) {
-        const currentActive = useChatStore.getState().activeSessionIds[worktreeId]
+        const currentActive =
+          useChatStore.getState().activeSessionIds[worktreeId]
         if (!currentActive || currentActive === sessionId) {
           useChatStore.getState().setActiveSession(worktreeId, newActiveId)
         }
@@ -748,7 +775,8 @@ export function useArchiveSession() {
       // Switch to the new active session — but only if the caller hasn't already
       // picked a neighbor (e.g. SessionChatModal sets it based on visual tab order)
       if (newActiveId) {
-        const currentActive = useChatStore.getState().activeSessionIds[worktreeId]
+        const currentActive =
+          useChatStore.getState().activeSessionIds[worktreeId]
         if (!currentActive || currentActive === sessionId) {
           useChatStore.getState().setActiveSession(worktreeId, newActiveId)
         }
@@ -1614,6 +1642,58 @@ export function useClearSessionHistory() {
             : 'Unknown error occurred'
       logger.error('Failed to clear session history', { error })
       toast.error('Failed to clear chat history', { description: message })
+    },
+  })
+}
+
+export function useRevertToMessage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      worktreeId,
+      worktreePath,
+      sessionId,
+      userMessageId,
+    }: {
+      worktreeId: string
+      worktreePath: string
+      sessionId: string
+      userMessageId: string
+    }): Promise<void> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      await invoke('revert_to_message', {
+        worktreeId,
+        worktreePath,
+        sessionId,
+        userMessageId,
+      })
+    },
+    onSuccess: (_, { worktreeId, sessionId }) => {
+      queryClient.setQueryData(chatQueryKeys.session(sessionId), null)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.session(sessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(worktreeId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.revertTargets(sessionId),
+      })
+      toast.success('Thread reverted')
+    },
+    onError: error => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
+      logger.error('Failed to revert turn', { error })
+      toast.error('Failed to revert turn', { description: message })
     },
   })
 }

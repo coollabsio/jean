@@ -11,6 +11,7 @@ This repository is a template with sensible defaults for building Tauri React ap
 ## Core Rules
 
 ### Codex App Server schema
+
 If you need to check some codex app-server related things, use "codex app-server generate-json-schema --out ./codex-schema" to generate schema and check local dir ./codex-schema for schemas.
 
 ### New Sessions

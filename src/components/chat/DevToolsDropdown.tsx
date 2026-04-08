@@ -45,8 +45,7 @@ export function DevToolsDropdown({
   worktreePath,
   session,
 }: DevToolsDropdownProps) {
-  if (!import.meta.env.DEV) return null
-
+  const isDev = import.meta.env.DEV
   const queryClient = useQueryClient()
   const { data: preferences } = usePreferences()
   const sendMessage = useSendMessage()
@@ -160,6 +159,7 @@ export function DevToolsDropdown({
   )
 
   const defaultFlow = CODEX_DEV_FLOWS[0]
+  if (!isDev) return null
   if (!defaultFlow) return null
 
   return (

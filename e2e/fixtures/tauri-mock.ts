@@ -54,6 +54,15 @@ export const test = base.extend<TauriMockFixtures>({
           return sessionStore[worktreeId]
         }
 
+        function findSession(sessionId?: unknown) {
+          if (typeof sessionId !== 'string' || !sessionId) return null
+          for (const store of Object.values(sessionStore)) {
+            const session = store.sessions.find(s => s.id === sessionId)
+            if (session) return session
+          }
+          return null
+        }
+
         // Commands that need dynamic responses based on args
         const dynamicHandlers: Record<
           string,
@@ -110,9 +119,15 @@ export const test = base.extend<TauriMockFixtures>({
             return null
           },
           get_session: args => {
-            const wid = (args?.worktreeId as string) ?? 'unknown'
-            const store = getWorktreeStore(wid)
-            const session = store.sessions.find(s => s.id === args?.sessionId)
+            const session =
+              findSession(args?.sessionId) ??
+              (() => {
+                const wid = (args?.worktreeId as string) ?? 'unknown'
+                const store = getWorktreeStore(wid)
+                return (
+                  store.sessions.find(s => s.id === args?.sessionId) ?? null
+                )
+              })()
             return session
               ? structuredClone(session)
               : {
@@ -122,6 +137,13 @@ export const test = base.extend<TauriMockFixtures>({
                   created_at: Date.now() / 1000,
                   messages: [],
                 }
+          },
+          get_revert_targets: args => {
+            const session = findSession(args?.sessionId)
+            return structuredClone(
+              (session as { revert_targets?: unknown[] } | null)
+                ?.revert_targets ?? []
+            )
           },
           send_chat_message: args => {
             // Return a mock assistant ChatMessage
@@ -139,6 +161,39 @@ export const test = base.extend<TauriMockFixtures>({
               tool_calls: [],
               cancelled: false,
             }
+          },
+          revert_to_message: args => {
+            const session = findSession(args?.sessionId) as {
+              messages?: Array<{ id?: string }>
+              revert_targets?: Array<{ userMessageId?: string }>
+              updated_at?: number
+            } | null
+            if (!session) return null
+
+            const userMessageId = args?.userMessageId as string | undefined
+            if (userMessageId && Array.isArray(session.messages)) {
+              const targetIndex = session.messages.findIndex(
+                message => message.id === userMessageId
+              )
+              if (targetIndex >= 0) {
+                session.messages = session.messages.slice(0, targetIndex)
+              }
+            }
+
+            if (userMessageId && Array.isArray(session.revert_targets)) {
+              const targetIndex = session.revert_targets.findIndex(
+                target => target.userMessageId === userMessageId
+              )
+              if (targetIndex >= 0) {
+                session.revert_targets = session.revert_targets.slice(
+                  0,
+                  targetIndex
+                )
+              }
+            }
+
+            session.updated_at = Date.now() / 1000
+            return null
           },
         }
 
@@ -165,6 +220,7 @@ export const test = base.extend<TauriMockFixtures>({
         ;(window as any).__JEAN_E2E_MOCK__ = {
           invokeHandlers: handlers,
           eventEmitter: new EventTarget(),
+          sessionStore,
         }
       },
       { responseMap: responses, overrideKeys }

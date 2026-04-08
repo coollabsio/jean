@@ -15,7 +15,11 @@ import {
   updateWorktreeCachedStatus,
   projectsQueryKeys,
 } from '@/services/projects'
-import type { DetectPrResponse, GitPushResponse, Worktree } from '@/types/projects'
+import type {
+  DetectPrResponse,
+  GitPushResponse,
+  Worktree,
+} from '@/types/projects'
 import type { GitDiff, CommitHistoryResult } from '@/types/git-diff'
 
 // ============================================================================

@@ -30,8 +30,7 @@ vi.mock('@/services/preferences', () => ({
 }))
 
 vi.mock('@/services/chat', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/services/chat')>('@/services/chat')
+  const actual = await vi.importActual('@/services/chat')
 
   return {
     ...actual,

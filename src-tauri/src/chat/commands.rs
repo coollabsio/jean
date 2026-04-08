@@ -15,9 +15,9 @@ use super::storage::{
     with_existing_metadata_mut, with_sessions_mut,
 };
 use super::types::{
-    AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
-    LabelData, MessageRole, RunStatus, Session, SessionDigest, ThinkingLevel, WorktreeIndex,
-    WorktreeSessions,
+    AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext,
+    ClaudePendingRewind, EffortLevel, LabelData, MessageRole, ProviderRevertAnchor, RevertStatus,
+    RunEntry, RunStatus, Session, SessionDigest, ThinkingLevel, WorktreeIndex, WorktreeSessions,
 };
 use crate::claude_cli::resolve_cli_binary;
 use crate::http_server::EmitExt;
@@ -94,6 +94,57 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn compute_revert_status(run: &RunEntry) -> RevertStatus {
+    if run.status != RunStatus::Completed || run.assistant_message_id.is_none() {
+        RevertStatus::IncompleteRun
+    } else if run.checkpoint_before.is_none() {
+        RevertStatus::MissingCheckpoint
+    } else if run.provider_revert_anchor.is_none() {
+        RevertStatus::MissingProviderAnchor
+    } else {
+        RevertStatus::Ready
+    }
+}
+
+fn latest_provider_state_before(
+    runs: &[RunEntry],
+    target_idx: usize,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let preserved = &runs[..target_idx];
+    let claude_session_id = preserved
+        .iter()
+        .rev()
+        .find_map(|run| run.claude_session_id.clone());
+    let codex_thread_id = preserved
+        .iter()
+        .rev()
+        .find_map(|run| run.codex_thread_id.clone());
+    let opencode_session_id = preserved
+        .iter()
+        .rev()
+        .find_map(|run| run.opencode_session_id.clone());
+    (claude_session_id, codex_thread_id, opencode_session_id)
+}
+
+fn latest_claude_anchor_before(
+    runs: &[RunEntry],
+    target_idx: usize,
+) -> Option<ClaudePendingRewind> {
+    runs[..target_idx]
+        .iter()
+        .rev()
+        .find_map(|run| match run.provider_revert_anchor.as_ref() {
+            Some(ProviderRevertAnchor::Claude {
+                session_id,
+                assistant_uuid,
+            }) => Some(ClaudePendingRewind {
+                session_id: session_id.clone(),
+                assistant_uuid: assistant_uuid.clone(),
+            }),
+            _ => None,
+        })
 }
 
 /// Find the nearest non-archived session after removing an item at `removed_index`.
@@ -1587,6 +1638,9 @@ pub async fn send_chat_message(
     let opencode_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.opencode_session_id.clone());
+    let pending_claude_rewind = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.pending_claude_rewind.clone());
 
     // Start NDJSON run log for crash recovery
     let mut run_log_writer = run_log::start_run(
@@ -1614,6 +1668,16 @@ pub async fn send_chat_message(
     let input_file = run_log_writer.input_file_path()?;
     let output_file = run_log_writer.output_file_path()?;
     let run_id = run_log_writer.run_id().to_string();
+
+    if let Ok(checkpoint_before) =
+        super::checkpoints::capture(&app, &session_id, std::path::Path::new(&worktree_path))
+    {
+        let _ = with_existing_metadata_mut(&app, &session_id, |metadata| {
+            if let Some(run) = metadata.find_run_mut(&run_id) {
+                run.checkpoint_before = Some(checkpoint_before.clone());
+            }
+        });
+    }
 
     // Write input file with the user message
     run_log::write_input_file(&app, &session_id, &run_id, &message)?;
@@ -1661,12 +1725,12 @@ pub async fn send_chat_message(
     } else {
         Some(final_allowed_tools)
     };
-
     // Unified response type for both backends
     struct UnifiedResponse {
         content: String,
         /// Claude session ID or Codex thread ID (for resumption)
         resume_id: String,
+        provider_revert_anchor: Option<ProviderRevertAnchor>,
         tool_calls: Vec<super::types::ToolCall>,
         content_blocks: Vec<super::types::ContentBlock>,
         cancelled: bool,
@@ -1686,6 +1750,7 @@ pub async fn send_chat_message(
     let thread_output_file = output_file.clone();
     let thread_working_dir = context.worktree_path.clone();
     let thread_claude_session_id = claude_session_id.clone();
+    let thread_pending_claude_rewind = pending_claude_rewind.clone();
     let thread_codex_thread_id = codex_thread_id.clone();
     let thread_opencode_session_id = opencode_session_id.clone();
     let thread_model = model.clone();
@@ -1753,7 +1818,10 @@ pub async fn send_chat_message(
         let result: Result<(u32, UnifiedResponse), String> = match thread_backend {
             Backend::Claude => {
                 // === Claude execution path (unchanged) ===
-                let mut claude_session_id_for_call = thread_claude_session_id;
+                let mut claude_session_id_for_call = thread_pending_claude_rewind
+                    .as_ref()
+                    .map(|rewind| rewind.session_id.clone())
+                    .or(thread_claude_session_id);
                 let result = loop {
                     log::trace!("About to call execute_claude_detached...");
 
@@ -1765,6 +1833,10 @@ pub async fn send_chat_message(
                         &thread_output_file,
                         std::path::Path::new(&thread_working_dir),
                         claude_session_id_for_call.as_deref(),
+                        thread_pending_claude_rewind
+                            .as_ref()
+                            .map(|rewind| rewind.assistant_uuid.as_str()),
+                        thread_pending_claude_rewind.is_some(),
                         thread_model.as_deref(),
                         thread_execution_mode.as_deref(),
                         thread_thinking_level.as_ref(),
@@ -1779,6 +1851,7 @@ pub async fn send_chat_message(
                     ) {
                         Ok((pid, response)) => {
                             log::trace!("execute_claude_detached succeeded (PID: {pid})");
+                            let response_session_id = response.session_id.clone();
 
                             if response.content.is_empty()
                                 && response.usage.is_none()
@@ -1807,7 +1880,19 @@ pub async fn send_chat_message(
                                 pid,
                                 UnifiedResponse {
                                     content: response.content,
-                                    resume_id: response.session_id,
+                                    resume_id: response_session_id.clone(),
+                                    provider_revert_anchor: response.assistant_uuid.map(|uuid| {
+                                        ProviderRevertAnchor::Claude {
+                                            session_id: if thread_pending_claude_rewind.is_some() {
+                                                response_session_id.clone()
+                                            } else {
+                                                claude_session_id_for_call
+                                                    .clone()
+                                                    .unwrap_or_else(|| response_session_id.clone())
+                                            },
+                                            assistant_uuid: uuid,
+                                        }
+                                    }),
                                     tool_calls: response.tool_calls,
                                     content_blocks: response.content_blocks,
                                     cancelled: response.cancelled,
@@ -2174,15 +2259,24 @@ pub async fn send_chat_message(
                 ) {
                     Ok(response) => Ok((
                         0, // No PID for app-server sessions
-                        UnifiedResponse {
-                            content: response.content,
-                            resume_id: response.thread_id,
-                            tool_calls: response.tool_calls,
-                            content_blocks: response.content_blocks,
-                            cancelled: response.cancelled,
-                            error_emitted: response.error_emitted,
-                            usage: response.usage,
-                            backend: Backend::Codex,
+                        {
+                            let response_thread_id = response.thread_id.clone();
+                            UnifiedResponse {
+                                content: response.content,
+                                resume_id: response_thread_id.clone(),
+                                provider_revert_anchor: response.turn_id.map(|turn_id| {
+                                    ProviderRevertAnchor::Codex {
+                                        thread_id: response_thread_id.clone(),
+                                        turn_id,
+                                    }
+                                }),
+                                tool_calls: response.tool_calls,
+                                content_blocks: response.content_blocks,
+                                cancelled: response.cancelled,
+                                error_emitted: response.error_emitted,
+                                usage: response.usage,
+                                backend: Backend::Codex,
+                            }
                         },
                     )),
                     Err(e) => {
@@ -2418,7 +2512,13 @@ pub async fn send_chat_message(
                         0,
                         UnifiedResponse {
                             content: response.content,
-                            resume_id: response.session_id,
+                            resume_id: response.session_id.clone(),
+                            provider_revert_anchor: response.revert_message_id.map(|message_id| {
+                                ProviderRevertAnchor::Opencode {
+                                    session_id: response.session_id.clone(),
+                                    message_id,
+                                }
+                            }),
                             tool_calls: response.tool_calls,
                             content_blocks: response.content_blocks,
                             cancelled: response.cancelled,
@@ -2702,6 +2802,7 @@ pub async fn send_chat_message(
     // Pre-compute completion state flags before moving unified_response fields
     let has_content = !unified_response.content.is_empty();
     let was_cancelled = unified_response.cancelled;
+    let provider_revert_anchor = unified_response.provider_revert_anchor.clone();
     let has_blocking_tool = unified_response.tool_calls.iter().any(|tc| {
         tc.name == "AskUserQuestion"
             || tc.name == "ExitPlanMode"
@@ -2781,6 +2882,9 @@ pub async fn send_chat_message(
                 match response_backend {
                     Backend::Claude => {
                         session.claude_session_id = Some(resume_id_for_log.clone());
+                        if pending_claude_rewind.is_some() {
+                            session.pending_claude_rewind = None;
+                        }
                     }
                     Backend::Codex => {
                         session.codex_thread_id = Some(resume_id_for_log.clone());
@@ -2827,6 +2931,34 @@ pub async fn send_chat_message(
         );
     }
 
+    if !was_cancelled {
+        let checkpoint_after =
+            super::checkpoints::capture(&app, &session_id, std::path::Path::new(&worktree_path))
+                .ok();
+        let _ = with_existing_metadata_mut(&app, &session_id, |metadata| {
+            if let Some(run) = metadata.find_run_mut(&run_id) {
+                run.backend = response_backend.clone();
+                match response_backend {
+                    Backend::Claude => {
+                        run.claude_session_id =
+                            (!resume_id_for_log.is_empty()).then(|| resume_id_for_log.clone());
+                    }
+                    Backend::Codex => {
+                        run.codex_thread_id =
+                            (!resume_id_for_log.is_empty()).then(|| resume_id_for_log.clone());
+                    }
+                    Backend::Opencode => {
+                        run.opencode_session_id =
+                            (!resume_id_for_log.is_empty()).then(|| resume_id_for_log.clone());
+                    }
+                }
+                run.provider_revert_anchor = provider_revert_anchor.clone();
+                run.checkpoint_after = checkpoint_after;
+                run.revert_status = Some(compute_revert_status(run));
+            }
+        });
+    }
+
     // Emit cache invalidation so all clients (native + web) refetch authoritative state
     emit_sessions_cache_invalidation(&app);
 
@@ -2836,6 +2968,188 @@ pub async fn send_chat_message(
         log::info!("[SendChat] EXIT session={session_id} reason=success");
     }
     Ok(assistant_msg)
+}
+
+#[tauri::command]
+pub async fn get_revert_targets(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Vec<super::types::RevertTarget>, String> {
+    let metadata = load_metadata(&app, &session_id)?
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+
+    Ok(metadata
+        .runs
+        .iter()
+        .filter_map(|run| {
+            let user_message_id = run.user_message_id.clone();
+            let reason = compute_revert_status(run);
+            Some(super::types::RevertTarget {
+                user_message_id,
+                available: reason == RevertStatus::Ready,
+                reason,
+            })
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn revert_to_message(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    user_message_id: String,
+) -> Result<(), String> {
+    let metadata = load_metadata(&app, &session_id)?
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+
+    if metadata
+        .runs
+        .iter()
+        .any(|run| run.status == RunStatus::Running)
+    {
+        return Err("Cannot revert while the session is running".to_string());
+    }
+
+    let target_idx = metadata
+        .runs
+        .iter()
+        .position(|run| run.user_message_id == user_message_id)
+        .ok_or_else(|| format!("User message {user_message_id} not found"))?;
+
+    let target_run = metadata.runs[target_idx].clone();
+
+    match compute_revert_status(&target_run) {
+        RevertStatus::Ready => {}
+        reason => return Err(format!("Message is not revertable: {reason:?}")),
+    }
+
+    let checkpoint_before = target_run
+        .checkpoint_before
+        .clone()
+        .ok_or_else(|| "Missing pre-run checkpoint".to_string())?;
+
+    if target_run.backend == Backend::Codex {
+        let target_thread_id = target_run
+            .codex_thread_id
+            .clone()
+            .ok_or_else(|| "Missing Codex thread ID on target run".to_string())?;
+
+        let turns_to_drop = metadata
+            .runs
+            .iter()
+            .skip(target_idx)
+            .filter(|run| {
+                run.backend == Backend::Codex
+                    && run.codex_thread_id.as_deref() == Some(target_thread_id.as_str())
+            })
+            .count() as u32;
+
+        let rollback_app = app.clone();
+        let rollback_thread_id = target_thread_id.clone();
+        tokio::task::spawn_blocking(move || {
+            super::codex_server::ensure_running(&rollback_app)?;
+            let rollback = super::codex_server::send_request(
+                "thread/rollback",
+                serde_json::json!({
+                    "threadId": rollback_thread_id,
+                    "numTurns": turns_to_drop,
+                }),
+            );
+            super::codex_server::decrement_usage_count();
+            rollback.map(|_| ())
+        })
+        .await
+        .map_err(|e| format!("Codex rollback task failed: {e}"))??;
+    }
+
+    if target_run.backend == Backend::Opencode {
+        let (opencode_session_id, message_id) = match target_run.provider_revert_anchor.as_ref() {
+            Some(ProviderRevertAnchor::Opencode {
+                session_id,
+                message_id,
+            }) => (session_id.clone(), message_id.clone()),
+            _ => {
+                return Err("Missing OpenCode revert anchor on target run".to_string());
+            }
+        };
+        let rollback_app = app.clone();
+        let rollback_worktree_path = worktree_path.clone();
+        tokio::task::spawn_blocking(move || {
+            super::opencode::revert_opencode_session(
+                &rollback_app,
+                &rollback_worktree_path,
+                &opencode_session_id,
+                &message_id,
+            )
+        })
+        .await
+        .map_err(|e| format!("OpenCode revert task failed: {e}"))??;
+    }
+
+    let (
+        mut restored_claude_session_id,
+        mut restored_codex_thread_id,
+        restored_opencode_session_id,
+    ) = latest_provider_state_before(&metadata.runs, target_idx);
+
+    if target_run.backend == Backend::Codex {
+        restored_codex_thread_id = target_run.codex_thread_id.clone();
+    }
+
+    let pending_claude_rewind = if target_run.backend == Backend::Claude {
+        latest_claude_anchor_before(&metadata.runs, target_idx)
+    } else {
+        None
+    };
+
+    if target_run.backend == Backend::Claude {
+        restored_claude_session_id = pending_claude_rewind
+            .as_ref()
+            .map(|rewind| rewind.session_id.clone());
+    }
+
+    super::checkpoints::restore(
+        &app,
+        &session_id,
+        std::path::Path::new(&worktree_path),
+        &checkpoint_before,
+    )?;
+
+    with_existing_metadata_mut(&app, &session_id, |metadata| {
+        metadata.runs.truncate(target_idx);
+        metadata.claude_session_id = restored_claude_session_id.clone();
+        metadata.codex_thread_id = restored_codex_thread_id.clone();
+        metadata.opencode_session_id = restored_opencode_session_id.clone();
+        metadata.pending_claude_rewind = pending_claude_rewind.clone();
+        metadata.waiting_for_input = false;
+        metadata.waiting_for_input_type = None;
+        metadata.is_reviewing = false;
+        metadata.pending_permission_denials.clear();
+        metadata.pending_codex_permission_requests.clear();
+        metadata.pending_codex_command_approval_requests.clear();
+        metadata.pending_codex_user_input_requests.clear();
+        metadata.pending_codex_mcp_elicitation_requests.clear();
+        metadata.pending_codex_dynamic_tool_call_requests.clear();
+        metadata.pending_plan_message_id = None;
+    })?;
+
+    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if let Some(session) = sessions.find_session_mut(&session_id) {
+            session.claude_session_id = restored_claude_session_id.clone();
+            session.codex_thread_id = restored_codex_thread_id.clone();
+            session.opencode_session_id = restored_opencode_session_id.clone();
+            session.pending_claude_rewind = pending_claude_rewind.clone();
+            session.waiting_for_input = false;
+            session.waiting_for_input_type = None;
+            session.is_reviewing = false;
+        }
+        Ok(())
+    })?;
+
+    emit_sessions_cache_invalidation(&app);
+    Ok(())
 }
 
 /// Clear chat history for a session
@@ -2868,6 +3182,7 @@ pub async fn clear_session_history(
             session.claude_session_id = None;
             session.codex_thread_id = None;
             session.opencode_session_id = None;
+            session.pending_claude_rewind = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_provider = selected_provider;
@@ -5755,6 +6070,38 @@ pub async fn answer_opencode_question(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::{Backend, RunEntry, RunStatus};
+
+    fn sample_run(backend: Backend) -> RunEntry {
+        RunEntry {
+            backend,
+            run_id: "run-1".to_string(),
+            user_message_id: "user-1".to_string(),
+            user_message: "prompt".to_string(),
+            model: None,
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: RunStatus::Completed,
+            assistant_message_id: Some("assistant-1".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            codex_thread_id: None,
+            opencode_session_id: None,
+            provider_revert_anchor: Some(ProviderRevertAnchor::Codex {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+            }),
+            checkpoint_before: Some("before".to_string()),
+            checkpoint_after: Some("after".to_string()),
+            revert_status: None,
+            pid: None,
+            usage: None,
+        }
+    }
 
     #[test]
     fn test_extract_text_from_stream_json_text_only() {
@@ -5878,6 +6225,83 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let output = "Checking MCP server health...\n\n";
         let statuses = parse_mcp_list_output(output);
         assert!(statuses.is_empty());
+    }
+
+    #[test]
+    fn compute_revert_status_requires_completed_run() {
+        let mut run = sample_run(Backend::Codex);
+        run.status = RunStatus::Running;
+        assert_eq!(compute_revert_status(&run), RevertStatus::IncompleteRun);
+    }
+
+    #[test]
+    fn compute_revert_status_requires_checkpoint() {
+        let mut run = sample_run(Backend::Codex);
+        run.checkpoint_before = None;
+        assert_eq!(compute_revert_status(&run), RevertStatus::MissingCheckpoint);
+    }
+
+    #[test]
+    fn compute_revert_status_requires_provider_anchor() {
+        let mut run = sample_run(Backend::Codex);
+        run.provider_revert_anchor = None;
+        assert_eq!(
+            compute_revert_status(&run),
+            RevertStatus::MissingProviderAnchor
+        );
+    }
+
+    #[test]
+    fn compute_revert_status_marks_opencode_ready_when_requirements_exist() {
+        let mut run = sample_run(Backend::Opencode);
+        run.provider_revert_anchor = Some(ProviderRevertAnchor::Opencode {
+            session_id: "session-1".to_string(),
+            message_id: "message-1".to_string(),
+        });
+        assert_eq!(compute_revert_status(&run), RevertStatus::Ready);
+    }
+
+    #[test]
+    fn compute_revert_status_marks_ready_when_requirements_exist() {
+        let run = sample_run(Backend::Codex);
+        assert_eq!(compute_revert_status(&run), RevertStatus::Ready);
+    }
+
+    #[test]
+    fn latest_provider_state_before_returns_previous_ids() {
+        let mut first = sample_run(Backend::Claude);
+        first.claude_session_id = Some("claude-1".to_string());
+        let mut second = sample_run(Backend::Codex);
+        second.codex_thread_id = Some("codex-1".to_string());
+        let runs = vec![first, second];
+
+        assert_eq!(
+            latest_provider_state_before(&runs, 2),
+            (
+                Some("claude-1".to_string()),
+                Some("codex-1".to_string()),
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn latest_claude_anchor_before_returns_previous_anchor() {
+        let mut first = sample_run(Backend::Claude);
+        first.provider_revert_anchor = Some(ProviderRevertAnchor::Claude {
+            session_id: "claude-session-1".to_string(),
+            assistant_uuid: "assistant-uuid-1".to_string(),
+        });
+        let second = sample_run(Backend::Codex);
+        let runs = vec![first, second];
+
+        assert_eq!(
+            latest_claude_anchor_before(&runs, 2),
+            Some(ClaudePendingRewind {
+                session_id: "claude-session-1".to_string(),
+                assistant_uuid: "assistant-uuid-1".to_string(),
+            })
+        );
     }
 
     #[test]

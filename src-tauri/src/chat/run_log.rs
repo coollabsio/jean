@@ -313,6 +313,7 @@ pub fn start_run(
 
     // Add run entry to metadata
     let run_entry = RunEntry {
+        backend: backend.clone().unwrap_or_default(),
         run_id: run_id.clone(),
         user_message_id: user_message_id.to_string(),
         user_message: user_message.to_string(),
@@ -327,6 +328,12 @@ pub fn start_run(
         cancelled: false,
         recovered: false,
         claude_session_id: None,
+        codex_thread_id: None,
+        opencode_session_id: None,
+        provider_revert_anchor: None,
+        checkpoint_before: None,
+        checkpoint_after: None,
+        revert_status: None,
         pid: None,   // Set later via set_pid() after spawning detached process
         usage: None, // Set on completion via complete()
     };
@@ -861,6 +868,7 @@ mod tests {
 
     fn sample_run() -> RunEntry {
         RunEntry {
+            backend: Backend::Claude,
             run_id: "run-123".to_string(),
             user_message_id: "user-123".to_string(),
             user_message: "continue".to_string(),
@@ -875,6 +883,12 @@ mod tests {
             cancelled: false,
             recovered: false,
             claude_session_id: None,
+            codex_thread_id: None,
+            opencode_session_id: None,
+            provider_revert_anchor: None,
+            checkpoint_before: None,
+            checkpoint_after: None,
+            revert_status: None,
             pid: None,
             usage: None,
         }

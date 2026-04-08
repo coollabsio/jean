@@ -340,9 +340,8 @@ export function MagicModal() {
   const [selectedOption, setSelectedOption] =
     useState<MagicOption>('save-context')
   const [investigateDialogOpen, setInvestigateDialogOpen] = useState(false)
-  const [investigateType, setInvestigateType] = useState<InvestigateType | null>(
-    null
-  )
+  const [investigateType, setInvestigateType] =
+    useState<InvestigateType | null>(null)
   const [investigateSelectionMode, setInvestigateSelectionMode] =
     useState<InvestigateSelectionMode>('settings-default')
   const [customInvestigateBackend, setCustomInvestigateBackend] =
@@ -483,39 +482,42 @@ export function MagicModal() {
     return { backend, model, provider }
   }, [preferences, project?.default_backend])
 
-  const getClaudeModelOptionsForProvider = useCallback((provider: string | null) => {
-    const profile = [
-      ...PREDEFINED_CLI_PROFILES,
-      ...(preferences?.custom_cli_profiles ?? []),
-    ].find(item => item.name === provider)
-    let opusModel: string | undefined
-    let sonnetModel: string | undefined
-    let haikuModel: string | undefined
-    if (profile?.settings_json) {
-      try {
-        const settings = JSON.parse(profile.settings_json)
-        const env = settings?.env
-        if (env) {
-          opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
-          sonnetModel =
-            env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
-          haikuModel =
-            env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
+  const getClaudeModelOptionsForProvider = useCallback(
+    (provider: string | null) => {
+      const profile = [
+        ...PREDEFINED_CLI_PROFILES,
+        ...(preferences?.custom_cli_profiles ?? []),
+      ].find(item => item.name === provider)
+      let opusModel: string | undefined
+      let sonnetModel: string | undefined
+      let haikuModel: string | undefined
+      if (profile?.settings_json) {
+        try {
+          const settings = JSON.parse(profile.settings_json)
+          const env = settings?.env
+          if (env) {
+            opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
+            sonnetModel =
+              env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
+            haikuModel =
+              env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
+          }
+        } catch {
+          // ignore invalid custom profile json
         }
-      } catch {
-        // ignore invalid custom profile json
       }
-    }
 
-    const suffix = (model?: string) => (model ? ` (${model})` : '')
-    return provider
-      ? [
-          { value: 'opus', label: `Opus${suffix(opusModel)}` },
-          { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
-          { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
-        ]
-      : MODEL_OPTIONS
-  }, [preferences?.custom_cli_profiles])
+      const suffix = (model?: string) => (model ? ` (${model})` : '')
+      return provider
+        ? [
+            { value: 'opus', label: `Opus${suffix(opusModel)}` },
+            { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
+            { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
+          ]
+        : MODEL_OPTIONS
+    },
+    [preferences?.custom_cli_profiles]
+  )
 
   const investigateClaudeProvider =
     investigateDefaults?.provider &&
@@ -559,7 +561,9 @@ export function MagicModal() {
     return (
       customInvestigateModelOptions.find(
         option => option.value === customInvestigateModel
-      )?.value ?? customInvestigateModelOptions[0]?.value ?? ''
+      )?.value ??
+      customInvestigateModelOptions[0]?.value ??
+      ''
     )
   }, [customInvestigateModel, customInvestigateModelOptions])
 
@@ -626,8 +630,9 @@ export function MagicModal() {
 
   const effectiveCustomResolveModel = useMemo(() => {
     return (
-      customResolveModelOptions.find(option => option.value === customResolveModel)
-        ?.value ??
+      customResolveModelOptions.find(
+        option => option.value === customResolveModel
+      )?.value ??
       customResolveModelOptions[0]?.value ??
       ''
     )
@@ -695,7 +700,7 @@ export function MagicModal() {
     if (!investigateDefaults) return
     const nextBackend = installedBackends.includes(investigateDefaults.backend)
       ? investigateDefaults.backend
-      : installedBackends[0] ?? 'claude'
+      : (installedBackends[0] ?? 'claude')
     const nextOptions = getInvestigateModelOptions(nextBackend)
     const nextModel =
       nextOptions.find(option => option.value === investigateDefaults.model)
@@ -729,10 +734,11 @@ export function MagicModal() {
   useEffect(() => {
     const nextBackend = installedBackends.includes(resolveDefaults.backend)
       ? resolveDefaults.backend
-      : installedBackends[0] ?? 'claude'
+      : (installedBackends[0] ?? 'claude')
     const nextOptions = getResolveModelOptions(nextBackend)
     const nextModel =
-      nextOptions.find(option => option.value === resolveDefaults.model)?.value ??
+      nextOptions.find(option => option.value === resolveDefaults.model)
+        ?.value ??
       nextOptions[0]?.value ??
       resolveDefaults.model
     setCustomResolveBackend(nextBackend)
@@ -1056,7 +1062,9 @@ export function MagicModal() {
               resolveMagicPromptBackend(
                 preferences?.magic_prompt_backends,
                 RESOLVE_CONFLICTS_BACKEND_KEY,
-                project?.default_backend ?? preferences?.default_backend ?? 'claude'
+                project?.default_backend ??
+                  preferences?.default_backend ??
+                  'claude'
               ) ??
               'claude'
             const resolvedModel =
@@ -1679,7 +1687,10 @@ ${resolveInstructions}`
         </DialogContent>
       </Dialog>
 
-      <Dialog open={investigateDialogOpen} onOpenChange={setInvestigateDialogOpen}>
+      <Dialog
+        open={investigateDialogOpen}
+        onOpenChange={setInvestigateDialogOpen}
+      >
         <DialogContent
           ref={investigateContentRef}
           tabIndex={-1}
@@ -1744,7 +1755,10 @@ ${resolveInstructions}`
                     id="investigate-custom"
                     className="mt-0.5"
                   />
-                  <Label htmlFor="investigate-custom" className="flex-1 cursor-pointer">
+                  <Label
+                    htmlFor="investigate-custom"
+                    className="flex-1 cursor-pointer"
+                  >
                     <div className="text-sm font-medium">
                       Choose backend + model
                     </div>
@@ -1881,7 +1895,10 @@ ${resolveInstructions}`
                     id="resolve-custom"
                     className="mt-0.5"
                   />
-                  <Label htmlFor="resolve-custom" className="flex-1 cursor-pointer">
+                  <Label
+                    htmlFor="resolve-custom"
+                    className="flex-1 cursor-pointer"
+                  >
                     <div className="text-sm font-medium">
                       Choose backend + model
                     </div>
@@ -1948,7 +1965,10 @@ ${resolveInstructions}`
             </RadioGroup>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setResolveDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setResolveDialogOpen(false)}
+              >
                 Cancel
               </Button>
               <Button onClick={dispatchResolveConflictsCommand}>

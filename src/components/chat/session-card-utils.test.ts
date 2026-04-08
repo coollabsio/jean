@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { computeSessionCardData, type ChatStoreState } from './session-card-utils'
+import {
+  computeSessionCardData,
+  type ChatStoreState,
+} from './session-card-utils'
 import type { Session } from '@/types/chat'
 
 describe('computeSessionCardData', () => {

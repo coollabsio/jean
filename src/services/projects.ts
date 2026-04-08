@@ -918,8 +918,17 @@ export function useWorktreeEvents() {
     // Listen for creation starting - add pending worktree immediately
     unlistenPromises.push(
       listen<WorktreeCreatingEvent>('worktree:creating', event => {
-        const { id, project_id, name, path, branch, pr_number, issue_number, security_alert_number, advisory_ghsa_id } =
-          event.payload
+        const {
+          id,
+          project_id,
+          name,
+          path,
+          branch,
+          pr_number,
+          issue_number,
+          security_alert_number,
+          advisory_ghsa_id,
+        } = event.payload
         logger.info('Worktree creating (background started)', { id, name })
 
         // Add pending worktree to cache so it appears instantly on all clients

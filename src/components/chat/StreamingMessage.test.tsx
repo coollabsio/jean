@@ -109,9 +109,7 @@ describe('StreamingMessage', () => {
     )
 
     expect(
-      screen.getByText(
-        'Repo inspected. No implementation target was provided.'
-      )
+      screen.getByText('Repo inspected. No implementation target was provided.')
     ).toBeVisible()
   })
 

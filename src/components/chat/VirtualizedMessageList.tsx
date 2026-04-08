@@ -104,6 +104,12 @@ interface VirtualizedMessageListProps {
   isFindingFixed: (sessionId: string, key: string) => boolean
   /** Callback to copy a user message back to the input field */
   onCopyToInput?: (message: ChatMessage) => void
+  /** Whether a given user message can be reverted safely */
+  canRevertMessage?: (messageId: string) => boolean
+  /** Callback to revert a user message */
+  onRevertMessage?: (messageId: string) => void
+  /** Current user message being reverted */
+  revertingMessageId?: string | null
   /** Hide approve buttons (e.g. for Codex which has no native approval flow) */
   hideApproveButtons?: boolean
   /** Whether we should scroll to bottom (new message arrived while at bottom) */
@@ -152,6 +158,9 @@ export const VirtualizedMessageList = memo(
         areQuestionsSkipped,
         isFindingFixed,
         onCopyToInput,
+        canRevertMessage,
+        onRevertMessage,
+        revertingMessageId,
         hideApproveButtons,
         shouldScrollToBottom,
         onScrollToBottomHandled,
@@ -372,6 +381,9 @@ export const VirtualizedMessageList = memo(
                   areQuestionsSkipped={areQuestionsSkipped}
                   isFindingFixed={isFindingFixed}
                   onCopyToInput={onCopyToInput}
+                  canRevert={canRevertMessage?.(message.id) ?? false}
+                  onRevert={onRevertMessage}
+                  isReverting={revertingMessageId === message.id}
                   hideApproveButtons={hideApproveButtons}
                   durationMs={durationMs}
                 />

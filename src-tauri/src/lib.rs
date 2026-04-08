@@ -2850,6 +2850,8 @@ pub fn run() {
             chat::get_mcp_servers,
             chat::check_mcp_health,
             chat::clear_session_history,
+            chat::get_revert_targets,
+            chat::revert_to_message,
             chat::set_session_model,
             chat::set_session_backend,
             chat::set_session_thinking_level,

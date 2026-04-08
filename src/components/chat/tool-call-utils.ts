@@ -1,14 +1,5 @@
-import type {
-  ToolCall,
-  ContentBlock,
-  Todo,
-  PlanToolInput,
-} from '@/types/chat'
-import {
-  isTodoWrite,
-  isCollabToolCall,
-  isPlanToolCall,
-} from '@/types/chat'
+import type { ToolCall, ContentBlock, Todo, PlanToolInput } from '@/types/chat'
+import { isTodoWrite, isCollabToolCall, isPlanToolCall } from '@/types/chat'
 
 /** Check if a tool is a task/agent container (Claude CLI uses both names) */
 function isAgentTool(name: string): boolean {
@@ -488,7 +479,7 @@ function extractPlanSectionFromCandidates(candidates: string[]): string | null {
     const extracted = extractPlanSectionFromText(candidate)
     if (extracted) return extracted
   }
- 
+
   return null
 }
 
@@ -570,7 +561,9 @@ export function getPlanTextBlockIndicesToHide(
   if (!contentBlocks?.length || !resolvedPlanContent) return hidden
 
   const textBlocks = contentBlocks.flatMap((block, index) =>
-    block.type === 'text' && block.text.trim() ? [{ index, text: block.text }] : []
+    block.type === 'text' && block.text.trim()
+      ? [{ index, text: block.text }]
+      : []
   )
   if (textBlocks.length === 0) return hidden
 

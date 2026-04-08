@@ -113,6 +113,29 @@ export interface ChatMessage {
   usage?: UsageData
 }
 
+export type RevertStatus =
+  | 'ready'
+  | 'incomplete_run'
+  | 'missing_checkpoint'
+  | 'missing_provider_anchor'
+  | 'unsupported_provider'
+
+export type ProviderRevertAnchor =
+  | { backend: 'claude'; session_id: string; assistant_uuid: string }
+  | { backend: 'codex'; thread_id: string; turn_id: string }
+  | { backend: 'opencode'; session_id: string; message_id: string }
+
+export interface ClaudePendingRewind {
+  session_id: string
+  assistant_uuid: string
+}
+
+export interface RevertTarget {
+  userMessageId: string
+  available: boolean
+  reason: RevertStatus
+}
+
 // ============================================================================
 // Session Types (for multiple tabs per worktree)
 // ============================================================================
@@ -157,6 +180,8 @@ export interface Session {
   codex_thread_id?: string
   /** OpenCode session ID for resuming conversations */
   opencode_session_id?: string
+  /** Pending Claude rewind to materialize on the next real send */
+  pending_claude_rewind?: ClaudePendingRewind
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

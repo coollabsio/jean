@@ -123,21 +123,21 @@ export function useGitOperations({
       worktreePath: string,
       override?: InvestigateOverride
     ) => {
-      const defaultBackend =
-        (project?.default_backend ?? preferences?.default_backend ?? 'claude') as CliBackend
+      const defaultBackend = (project?.default_backend ??
+        preferences?.default_backend ??
+        'claude') as CliBackend
       const resolvedProvider = resolveMagicPromptProvider(
         preferences?.magic_prompt_providers,
         'resolve_conflicts_provider',
         preferences?.default_provider
       )
-      const backend =
-        (override?.backend ??
-          resolveMagicPromptBackend(
-            preferences?.magic_prompt_backends,
-            'resolve_conflicts_backend',
-            defaultBackend
-          ) ??
-          defaultBackend) as CliBackend
+      const backend = (override?.backend ??
+        resolveMagicPromptBackend(
+          preferences?.magic_prompt_backends,
+          'resolve_conflicts_backend',
+          defaultBackend
+        ) ??
+        defaultBackend) as CliBackend
       const model =
         override?.model ??
         preferences?.magic_prompt_models?.resolve_conflicts_model ??
@@ -731,195 +731,211 @@ export function useGitOperations({
   }, [activeWorktreeId, worktree])
 
   // Handle Resolve Conflicts - detects existing merge conflicts and opens resolution session
-  const handleResolveConflicts = useCallback(async (override?: InvestigateOverride) => {
-    if (!activeWorktreeId || !worktree) return
+  const handleResolveConflicts = useCallback(
+    async (override?: InvestigateOverride) => {
+      if (!activeWorktreeId || !worktree) return
 
-    const toastId = toast.loading('Checking for merge conflicts...')
+      const toastId = toast.loading('Checking for merge conflicts...')
 
-    try {
-      const result = await invoke<MergeConflictsResponse>(
-        'get_merge_conflicts',
-        { worktreeId: activeWorktreeId }
-      )
+      try {
+        const result = await invoke<MergeConflictsResponse>(
+          'get_merge_conflicts',
+          { worktreeId: activeWorktreeId }
+        )
 
-      if (!result.has_conflicts) {
-        toast.info('No merge conflicts detected', { id: toastId })
-        return
-      }
+        if (!result.has_conflicts) {
+          toast.info('No merge conflicts detected', { id: toastId })
+          return
+        }
 
-      toast.warning(`Found conflicts in ${result.conflicts.length} file(s)`, {
-        id: toastId,
-        description: 'Opening conflict resolution session...',
-      })
+        toast.warning(`Found conflicts in ${result.conflicts.length} file(s)`, {
+          id: toastId,
+          description: 'Opening conflict resolution session...',
+        })
 
-      const {
-        setActiveSession,
-        setInputDraft,
-        copySessionSettings,
-        activeSessionIds,
-      } = useChatStore.getState()
-      const currentSessionId = activeSessionIds[activeWorktreeId]
+        const {
+          setActiveSession,
+          setInputDraft,
+          copySessionSettings,
+          activeSessionIds,
+        } = useChatStore.getState()
+        const currentSessionId = activeSessionIds[activeWorktreeId]
 
-      // Create a NEW session tab for conflict resolution
-      const newSession = await invoke<Session>('create_session', {
-        worktreeId: activeWorktreeId,
-        worktreePath: worktree.path,
-        name: 'Resolve conflicts',
-      })
+        // Create a NEW session tab for conflict resolution
+        const newSession = await invoke<Session>('create_session', {
+          worktreeId: activeWorktreeId,
+          worktreePath: worktree.path,
+          name: 'Resolve conflicts',
+        })
 
-      // Inherit model/mode/thinking settings from current session
-      if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
-      applyResolveConflictSessionSelection(
-        newSession.id,
-        activeWorktreeId,
-        worktree.path,
-        override
-      )
+        // Inherit model/mode/thinking settings from current session
+        if (currentSessionId)
+          copySessionSettings(currentSessionId, newSession.id)
+        applyResolveConflictSessionSelection(
+          newSession.id,
+          activeWorktreeId,
+          worktree.path,
+          override
+        )
 
-      // Set the new session as active
-      setActiveSession(activeWorktreeId, newSession.id)
+        // Set the new session as active
+        setActiveSession(activeWorktreeId, newSession.id)
 
-      // Build conflict resolution prompt with diff details
-      const conflictFiles = result.conflicts.join('\n- ')
-      const diffSection = result.conflict_diff
-        ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
-        : ''
+        // Build conflict resolution prompt with diff details
+        const conflictFiles = result.conflicts.join('\n- ')
+        const diffSection = result.conflict_diff
+          ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
+          : ''
 
-      const resolveInstructions =
-        preferences?.magic_prompts?.resolve_conflicts ??
-        DEFAULT_RESOLVE_CONFLICTS_PROMPT
+        const resolveInstructions =
+          preferences?.magic_prompts?.resolve_conflicts ??
+          DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-      const conflictPrompt = `I have merge conflicts that need to be resolved.
+        const conflictPrompt = `I have merge conflicts that need to be resolved.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}
 
 ${resolveInstructions}`
 
-      // Set the input draft for the new session
-      setInputDraft(newSession.id, conflictPrompt)
+        // Set the input draft for the new session
+        setInputDraft(newSession.id, conflictPrompt)
 
-      // Invalidate queries to refresh session list in tab bar
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(activeWorktreeId),
-      })
+        // Invalidate queries to refresh session list in tab bar
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(activeWorktreeId),
+        })
 
-      // Focus input after a short delay to allow UI to update
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 100)
-    } catch (error) {
-      toast.error(`Failed to check conflicts: ${error}`, { id: toastId })
-    }
-  }, [
-    activeWorktreeId,
-    worktree,
-    preferences,
-    queryClient,
-    inputRef,
-    applyResolveConflictSessionSelection,
-  ])
+        // Focus input after a short delay to allow UI to update
+        setTimeout(() => {
+          inputRef.current?.focus()
+        }, 100)
+      } catch (error) {
+        toast.error(`Failed to check conflicts: ${error}`, { id: toastId })
+      }
+    },
+    [
+      activeWorktreeId,
+      worktree,
+      preferences,
+      queryClient,
+      inputRef,
+      applyResolveConflictSessionSelection,
+    ]
+  )
 
   // Handle PR Conflicts - fetches base branch, merges locally to create conflict state
-  const handleResolvePrConflicts = useCallback(async (override?: InvestigateOverride) => {
-    if (!activeWorktreeId || !worktree) return
+  const handleResolvePrConflicts = useCallback(
+    async (override?: InvestigateOverride) => {
+      if (!activeWorktreeId || !worktree) return
 
-    const toastId = toast.loading(
-      'Fetching base branch and checking for conflicts...'
-    )
-
-    try {
-      const result = await invoke<MergeConflictsResponse>(
-        'fetch_and_merge_base',
-        { worktreeId: activeWorktreeId }
+      const toastId = toast.loading(
+        'Fetching base branch and checking for conflicts...'
       )
 
-      if (!result.has_conflicts) {
-        toast.success('No conflicts — base branch merged cleanly', {
-          id: toastId,
-        })
-        triggerImmediateGitPoll()
-
-        // Optimistically clear "Conflicts" button by updating cached PR status
-        const cached = queryClient.getQueryData<PrStatusEvent>(
-          prStatusQueryKeys.worktree(activeWorktreeId)
+      try {
+        const result = await invoke<MergeConflictsResponse>(
+          'fetch_and_merge_base',
+          { worktreeId: activeWorktreeId }
         )
-        if (cached) {
-          queryClient.setQueryData(
-            prStatusQueryKeys.worktree(activeWorktreeId),
-            { ...cached, mergeable: 'mergeable' }
+
+        if (!result.has_conflicts) {
+          toast.success('No conflicts — base branch merged cleanly', {
+            id: toastId,
+          })
+          triggerImmediateGitPoll()
+
+          // Optimistically clear "Conflicts" button by updating cached PR status
+          const cached = queryClient.getQueryData<PrStatusEvent>(
+            prStatusQueryKeys.worktree(activeWorktreeId)
           )
+          if (cached) {
+            queryClient.setQueryData(
+              prStatusQueryKeys.worktree(activeWorktreeId),
+              { ...cached, mergeable: 'mergeable' }
+            )
+          }
+          triggerImmediateRemotePoll()
+          return
         }
-        triggerImmediateRemotePoll()
-        return
-      }
 
-      toast.warning(`Found conflicts in ${result.conflicts.length} file(s)`, {
-        id: toastId,
-        description: 'Opening conflict resolution session...',
-      })
+        toast.warning(`Found conflicts in ${result.conflicts.length} file(s)`, {
+          id: toastId,
+          description: 'Opening conflict resolution session...',
+        })
 
-      const {
-        setActiveSession,
-        setInputDraft,
-        copySessionSettings,
-        activeSessionIds,
-      } = useChatStore.getState()
-      const currentSessionId = activeSessionIds[activeWorktreeId]
+        const {
+          setActiveSession,
+          setInputDraft,
+          copySessionSettings,
+          activeSessionIds,
+        } = useChatStore.getState()
+        const currentSessionId = activeSessionIds[activeWorktreeId]
 
-      // Create a NEW session tab for conflict resolution
-      const newSession = await invoke<Session>('create_session', {
-        worktreeId: activeWorktreeId,
-        worktreePath: worktree.path,
-        name: 'PR: resolve conflicts',
-      })
+        // Create a NEW session tab for conflict resolution
+        const newSession = await invoke<Session>('create_session', {
+          worktreeId: activeWorktreeId,
+          worktreePath: worktree.path,
+          name: 'PR: resolve conflicts',
+        })
 
-      // Inherit model/mode/thinking settings from current session
-      if (currentSessionId) copySessionSettings(currentSessionId, newSession.id)
-      applyResolveConflictSessionSelection(
-        newSession.id,
-        activeWorktreeId,
-        worktree.path,
-        override
-      )
+        // Inherit model/mode/thinking settings from current session
+        if (currentSessionId)
+          copySessionSettings(currentSessionId, newSession.id)
+        applyResolveConflictSessionSelection(
+          newSession.id,
+          activeWorktreeId,
+          worktree.path,
+          override
+        )
 
-      // Set the new session as active
-      setActiveSession(activeWorktreeId, newSession.id)
+        // Set the new session as active
+        setActiveSession(activeWorktreeId, newSession.id)
 
-      // Build conflict resolution prompt with diff details
-      const conflictFiles = result.conflicts.join('\n- ')
-      const diffSection = result.conflict_diff
-        ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
-        : ''
+        // Build conflict resolution prompt with diff details
+        const conflictFiles = result.conflicts.join('\n- ')
+        const diffSection = result.conflict_diff
+          ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
+          : ''
 
-      const baseBranch = project?.default_branch || 'main'
-      const resolveInstructions =
-        preferences?.magic_prompts?.resolve_conflicts ??
-        DEFAULT_RESOLVE_CONFLICTS_PROMPT
+        const baseBranch = project?.default_branch || 'main'
+        const resolveInstructions =
+          preferences?.magic_prompts?.resolve_conflicts ??
+          DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-      const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+        const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}
 
 ${resolveInstructions}`
 
-      // Set the input draft for the new session
-      setInputDraft(newSession.id, conflictPrompt)
+        // Set the input draft for the new session
+        setInputDraft(newSession.id, conflictPrompt)
 
-      // Invalidate queries to refresh session list in tab bar
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(activeWorktreeId),
-      })
+        // Invalidate queries to refresh session list in tab bar
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(activeWorktreeId),
+        })
 
-      // Focus input after a short delay to allow UI to update
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 100)
-    } catch (error) {
-      toast.error(`Failed to merge base branch: ${error}`, { id: toastId })
-    }
-  }, [activeWorktreeId, worktree, project, preferences, queryClient, inputRef, applyResolveConflictSessionSelection])
+        // Focus input after a short delay to allow UI to update
+        setTimeout(() => {
+          inputRef.current?.focus()
+        }, 100)
+      } catch (error) {
+        toast.error(`Failed to merge base branch: ${error}`, { id: toastId })
+      }
+    },
+    [
+      activeWorktreeId,
+      worktree,
+      project,
+      preferences,
+      queryClient,
+      inputRef,
+      applyResolveConflictSessionSelection,
+    ]
+  )
 
   // Execute merge with merge type option
   const executeMerge = useCallback(

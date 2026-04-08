@@ -83,7 +83,9 @@ export function CodexMcpElicitationRequest({
             className="min-h-32 font-mono text-xs"
           />
           {parsedContent.error && (
-            <div className="text-xs text-destructive">{parsedContent.error}</div>
+            <div className="text-xs text-destructive">
+              {parsedContent.error}
+            </div>
           )}
         </div>
       )}

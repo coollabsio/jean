@@ -1,3 +1,4 @@
+pub(crate) mod checkpoints;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod codex_server;
