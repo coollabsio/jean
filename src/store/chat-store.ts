@@ -254,6 +254,14 @@ interface ChatUIState {
   // User-assigned labels per session (e.g. "Needs testing")
   sessionLabels: Record<string, LabelData>
 
+  // Browser-style navigation history (back/forward across sessions and projects)
+  navigationHistory: Array<{
+    projectId: string
+    worktreeId: string
+    sessionId: string
+  }>
+  navigationIndex: number
+
   // Pending magic command to execute when ChatWindow mounts (from canvas navigation)
   pendingMagicCommand: { command: string; prompt?: string } | null
   setPendingMagicCommand: (
@@ -301,8 +309,19 @@ interface ChatUIState {
   setLastOpenedForProject: (
     projectId: string,
     worktreeId: string,
-    sessionId: string
+    sessionId: string,
+    options?: { skipHistory?: boolean }
   ) => void
+  navigateBack: () => {
+    projectId: string
+    worktreeId: string
+    sessionId: string
+  } | null
+  navigateForward: () => {
+    projectId: string
+    worktreeId: string
+    sessionId: string
+  } | null
   registerWorktreePath: (worktreeId: string, path: string) => void
   getWorktreePath: (worktreeId: string) => string | undefined
 
@@ -672,6 +691,8 @@ export const useChatStore = create<ChatUIState>()(
       sessionDigests: {},
       worktreeLoadingOperations: {},
       sessionLabels: {},
+      navigationHistory: [],
+      navigationIndex: -1,
       pendingMagicCommand: null,
 
       // Session management
@@ -932,7 +953,7 @@ export const useChatStore = create<ChatUIState>()(
       setLastActiveWorktreeId: id =>
         set({ lastActiveWorktreeId: id }, undefined, 'setLastActiveWorktreeId'),
 
-      setLastOpenedForProject: (projectId, worktreeId, sessionId) =>
+      setLastOpenedForProject: (projectId, worktreeId, sessionId, options) =>
         set(
           state => {
             const existing = state.lastOpenedPerProject[projectId]
@@ -941,16 +962,72 @@ export const useChatStore = create<ChatUIState>()(
               existing?.sessionId === sessionId
             )
               return state
+
+            // Push to navigation history unless replaying back/forward
+            const historyUpdate: Partial<ChatUIState> = {}
+            if (!options?.skipHistory) {
+              const entry = { projectId, worktreeId, sessionId }
+              const current =
+                state.navigationIndex >= 0
+                  ? state.navigationHistory[state.navigationIndex]
+                  : null
+              // Deduplicate consecutive identical locations
+              if (
+                !current ||
+                current.projectId !== projectId ||
+                current.worktreeId !== worktreeId ||
+                current.sessionId !== sessionId
+              ) {
+                // Truncate forward history (browser-style)
+                const truncated = state.navigationHistory.slice(
+                  0,
+                  state.navigationIndex + 1
+                )
+                truncated.push(entry)
+                // Cap at 50 entries
+                if (truncated.length > 50) truncated.shift()
+                historyUpdate.navigationHistory = truncated
+                historyUpdate.navigationIndex = truncated.length - 1
+              }
+            }
+
             return {
               lastOpenedPerProject: {
                 ...state.lastOpenedPerProject,
                 [projectId]: { worktreeId, sessionId },
               },
+              ...historyUpdate,
             }
           },
           undefined,
           'setLastOpenedForProject'
         ),
+
+      navigateBack: () => {
+        const { navigationHistory, navigationIndex } = get()
+        if (navigationIndex <= 0) return null
+        const newIndex = navigationIndex - 1
+        const target = navigationHistory[newIndex]
+        set(
+          { navigationIndex: newIndex },
+          undefined,
+          'navigateBack'
+        )
+        return target
+      },
+
+      navigateForward: () => {
+        const { navigationHistory, navigationIndex } = get()
+        if (navigationIndex >= navigationHistory.length - 1) return null
+        const newIndex = navigationIndex + 1
+        const target = navigationHistory[newIndex]
+        set(
+          { navigationIndex: newIndex },
+          undefined,
+          'navigateForward'
+        )
+        return target
+      },
 
       registerWorktreePath: (worktreeId, path) =>
         set(

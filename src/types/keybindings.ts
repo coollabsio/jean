@@ -45,6 +45,8 @@ export type KeybindingAction =
   | 'switch_mode_yolo'
   | 'go_to_session'
   | 'rename_session'
+  | 'navigate_back'
+  | 'navigate_forward'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -109,6 +111,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   switch_mode_yolo: 'mod+ctrl+backslash',
   go_to_session: 'mod+p',
   rename_session: 'mod+e',
+  navigate_back: 'mod+bracketleft',
+  navigate_forward: 'mod+bracketright',
 }
 
 // UI definitions for the settings pane
@@ -430,6 +434,20 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     default_shortcut: 'mod+e',
     category: 'chat',
   },
+  {
+    action: 'navigate_back',
+    label: 'Go back',
+    description: 'Navigate to the previously viewed session',
+    default_shortcut: 'mod+bracketleft',
+    category: 'navigation',
+  },
+  {
+    action: 'navigate_forward',
+    label: 'Go forward',
+    description: 'Navigate forward in session history',
+    default_shortcut: 'mod+bracketright',
+    category: 'navigation',
+  },
 ]
 
 // Helper to convert shortcut string to display format
@@ -472,6 +490,10 @@ export function formatShortcutDisplay(
           return '→'
         case 'slash':
           return '/'
+        case 'bracketleft':
+          return '['
+        case 'bracketright':
+          return ']'
         case 'backspace':
           return isMac ? '⌫' : 'Backspace'
         case 'enter':

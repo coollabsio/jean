@@ -472,6 +472,61 @@ function executeKeybindingAction(
       logger.debug('Keybinding: rename_session')
       commandContext.renameSession()
       break
+    case 'navigate_back':
+    case 'navigate_forward': {
+      const navigate =
+        action === 'navigate_back'
+          ? useChatStore.getState().navigateBack
+          : useChatStore.getState().navigateForward
+      const target = navigate()
+      if (!target) break
+
+      const currentProjectId = useProjectsStore.getState().selectedProjectId
+      const crossProject = currentProjectId !== target.projectId
+
+      // Clear active worktree so we land on ProjectCanvasView
+      useChatStore.getState().clearActiveWorktree()
+
+      // Update lastOpenedForProject with skipHistory to avoid pushing a duplicate entry
+      useChatStore
+        .getState()
+        .setLastOpenedForProject(
+          target.projectId,
+          target.worktreeId,
+          target.sessionId,
+          { skipHistory: true }
+        )
+
+      if (crossProject) {
+        // Cross-project: store intent in Zustand (survives component remount), then switch
+        useUIStore
+          .getState()
+          .markWorktreeForAutoOpenSession(
+            target.worktreeId,
+            target.sessionId
+          )
+        useProjectsStore.getState().selectProject(target.projectId)
+      } else {
+        // Same project: set active session, fire event for already-mounted ProjectCanvasView
+        useChatStore
+          .getState()
+          .setActiveSession(target.worktreeId, target.sessionId)
+        const worktreePath =
+          useChatStore.getState().getWorktreePath(target.worktreeId)
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent('open-session-modal', {
+              detail: {
+                sessionId: target.sessionId,
+                worktreeId: target.worktreeId,
+                worktreePath: worktreePath ?? '',
+              },
+            })
+          )
+        }, 50)
+      }
+      break
+    }
     case 'toggle_session_label': {
       logger.debug('Keybinding: toggle_session_label')
       // Works when a session is active (modal open or in session view) or on project canvas
