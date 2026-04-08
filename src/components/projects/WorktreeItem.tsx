@@ -4,9 +4,10 @@ import type {
   IndicatorStatus,
   IndicatorVariant,
 } from '@/components/ui/status-indicator'
-import { ArrowDown, ArrowUp, ChevronDown, GitBranch } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, GitBranch, GitPullRequestArrow } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { openExternal } from '@/lib/platform'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -584,14 +585,33 @@ export function WorktreeItem({
                   )}
                 />
               </button>
-              {/* Show branch name only when different from displayed name */}
+              {/* Show branch name when different from displayed name, and/or PR badge */}
               {(() => {
                 const displayBranch =
                   gitStatus?.current_branch ?? worktree.branch
-                return displayBranch !== worktree.name ? (
+                return displayBranch !== worktree.name || worktree.pr_number ? (
                   <span className="ml-0.5 inline-flex max-w-[80px] items-center gap-0.5 truncate text-xs text-muted-foreground">
-                    <GitBranch className="h-2.5 w-2.5" />
-                    {displayBranch}
+                    {displayBranch !== worktree.name && (
+                      <>
+                        <GitBranch className="h-2.5 w-2.5" />
+                        {displayBranch}
+                      </>
+                    )}
+                    {worktree.pr_number && (
+                      <>
+                        {displayBranch !== worktree.name && <span className="text-border">·</span>}
+                        <span
+                          className="inline-flex items-center gap-0.5 cursor-pointer hover:text-foreground transition-colors"
+                          onClick={e => {
+                            e.stopPropagation()
+                            if (worktree.pr_url) openExternal(worktree.pr_url)
+                          }}
+                        >
+                          <GitPullRequestArrow className="h-2.5 w-2.5" />
+                          #{worktree.pr_number}
+                        </span>
+                      </>
+                    )}
                   </span>
                 ) : null
               })()}
