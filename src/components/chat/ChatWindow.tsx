@@ -108,7 +108,7 @@ import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { QueuedMessagesList } from './QueuedMessageItem'
 import { FloatingButtons } from './FloatingButtons'
 import { PlanDialog } from './PlanDialog'
-import { RecapDialog } from './RecapDialog'
+import { RecapBanner } from './RecapBanner'
 import { StreamingMessage } from './StreamingMessage'
 import { StreamingStatusBar } from './StreamingStatusBar'
 import { ChatErrorFallback } from './ChatErrorFallback'
@@ -2224,6 +2224,16 @@ export function ChatWindow({
                       {activeSessionId && (
                         <SessionDigestReminder sessionId={activeSessionId} />
                       )}
+                      {/* Recap banner — non-blocking sticky bar instead of modal overlay */}
+                      <RecapBanner
+                        digest={recapDialogDigest}
+                        isOpen={isRecapDialogOpen}
+                        onClose={() => {
+                          setIsRecapDialogOpen(false)
+                          setRecapDialogDigest(null)
+                        }}
+                        isGenerating={isGeneratingRecap}
+                      />
                       <ScrollArea
                         className="h-full w-full"
                         viewportRef={scrollViewportRef}
@@ -2968,19 +2978,7 @@ export function ChatWindow({
             />
           ) : null)}
 
-        {/* Recap dialog */}
-        <RecapDialog
-          digest={recapDialogDigest}
-          isOpen={isRecapDialogOpen}
-          onClose={() => {
-            setIsRecapDialogOpen(false)
-            setRecapDialogDigest(null)
-          }}
-          isGenerating={isGeneratingRecap}
-          onRegenerate={() =>
-            window.dispatchEvent(new CustomEvent('open-recap'))
-          }
-        />
+        {/* RecapDialog replaced by RecapBanner above the ScrollArea */}
 
         {/* Merge options dialog */}
         <AlertDialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
