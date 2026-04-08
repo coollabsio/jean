@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { ChatSearchBar } from './ChatSearchBar'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -2216,6 +2217,7 @@ export function ChatWindow({
                           {sessionLabel.name}
                         </span>
                       )}
+                      <ChatSearchBar scrollContainerRef={scrollViewportRef} />
                       {/* Bottom fade gradient so messages don't hard-cut at the input area */}
                       <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 h-8 bg-gradient-to-b from-transparent to-background" />
                       {/* Session digest reminder (shows when opening a session that had activity while out of focus) */}

@@ -523,6 +523,14 @@ kbd {
   filter: invert(1);
 }
 
+/* Chat search highlights (CSS Custom Highlight API) */
+::highlight(chat-search) {
+  background-color: rgba(250, 204, 21, 0.35);
+}
+::highlight(chat-search-active) {
+  background-color: rgba(251, 146, 60, 0.7);
+}
+
 /* Custom scrollbar styling to match Radix ScrollArea */
 .custom-scrollbar::-webkit-scrollbar {
   width: 10px;

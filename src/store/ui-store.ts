@@ -159,6 +159,8 @@ interface UIState {
   setUIStateInitialized: (initialized: boolean) => void
   setPendingUpdateVersion: (version: string | null) => void
   setUpdateModalVersion: (version: string | null) => void
+  chatSearchOpen: boolean
+  setChatSearchOpen: (open: boolean) => void
   githubDashboardOpen: boolean
   setGitHubDashboardOpen: (open: boolean) => void
 }
@@ -223,6 +225,7 @@ export const useUIStore = create<UIState>()(
       uiStateInitialized: false,
       pendingUpdateVersion: null,
       updateModalVersion: null,
+      chatSearchOpen: false,
       githubDashboardOpen: false,
       toggleLeftSidebar: () =>
         set(
@@ -696,6 +699,9 @@ export const useUIStore = create<UIState>()(
           undefined,
           'setUpdateModalVersion'
         ),
+
+      setChatSearchOpen: (open: boolean) =>
+        set({ chatSearchOpen: open }, undefined, 'setChatSearchOpen'),
 
       setGitHubDashboardOpen: (open: boolean) =>
         set({ githubDashboardOpen: open }, undefined, 'setGitHubDashboardOpen'),

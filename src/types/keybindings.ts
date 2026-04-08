@@ -36,6 +36,7 @@ export type KeybindingAction =
   | 'open_github_dashboard'
   | 'open_quick_menu'
   | 'open_usage_dropdown'
+  | 'search_chat'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -91,6 +92,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_github_dashboard: 'mod+shift+d',
   open_quick_menu: 'mod+period',
   open_usage_dropdown: 'mod+u',
+  search_chat: 'mod+f',
 }
 
 // UI definitions for the settings pane
@@ -348,6 +350,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     description: 'Open the floating usage dropdown',
     default_shortcut: 'mod+u',
     category: 'navigation',
+  },
+  {
+    action: 'search_chat',
+    label: 'Search chat',
+    description: 'Open in-chat text search (find in messages)',
+    default_shortcut: 'mod+f',
+    category: 'chat',
   },
 ]
 
