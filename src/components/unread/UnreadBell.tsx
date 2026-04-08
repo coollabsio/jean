@@ -3,10 +3,6 @@ import {
   BellDot,
   Loader2,
   CheckCircle2,
-  AlertTriangle,
-  CirclePause,
-  HelpCircle,
-  FileText,
 } from 'lucide-react'
 import {
   Popover,
@@ -18,83 +14,18 @@ import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAllSessions } from '@/services/chat'
-import { useProjectsStore } from '@/store/projects-store'
-import { useChatStore } from '@/store/chat-store'
-import { useUIStore } from '@/store/ui-store'
 import { useUnreadCount } from './useUnreadCount'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import type { Session } from '@/types/chat'
 import { useIsMobile } from '@/hooks/use-mobile'
-
-function isUnread(session: Session): boolean {
-  if (session.archived_at) return false
-  const actionableStatuses = ['completed', 'cancelled', 'crashed']
-  const hasFinishedRun =
-    session.last_run_status &&
-    actionableStatuses.includes(session.last_run_status)
-  const isWaiting = session.waiting_for_input
-  const isReviewing = session.is_reviewing
-  if (!hasFinishedRun && !isWaiting && !isReviewing) return false
-  if (!session.last_opened_at) return true
-  return session.last_opened_at < session.updated_at
-}
-
-function formatRelativeTime(timestamp: number): string {
-  const ms = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp
-  const diffMs = Date.now() - ms
-  if (diffMs < 0) return 'just now'
-  const minuteMs = 60_000
-  const hourMs = 60 * minuteMs
-  const dayMs = 24 * hourMs
-  if (diffMs < hourMs)
-    return `${Math.max(1, Math.floor(diffMs / minuteMs))}m ago`
-  if (diffMs < dayMs) return `${Math.floor(diffMs / hourMs)}h ago`
-  return `${Math.floor(diffMs / dayMs)}d ago`
-}
-
-interface UnreadItem {
-  session: Session
-  projectId: string
-  projectName: string
-  worktreeId: string
-  worktreeName: string
-  worktreePath: string
-}
-
-function getSessionStatus(session: Session) {
-  if (session.waiting_for_input) {
-    const isplan = session.waiting_for_input_type === 'plan'
-    return {
-      icon: isplan ? FileText : HelpCircle,
-      label: isplan ? 'Needs approval' : 'Needs input',
-      className: 'text-yellow-500',
-    }
-  }
-  const config: Record<
-    string,
-    { icon: typeof CheckCircle2; label: string; className: string }
-  > = {
-    completed: {
-      icon: CheckCircle2,
-      label: 'Completed',
-      className: 'text-green-500',
-    },
-    cancelled: {
-      icon: CirclePause,
-      label: 'Cancelled',
-      className: 'text-muted-foreground',
-    },
-    crashed: {
-      icon: AlertTriangle,
-      label: 'Crashed',
-      className: 'text-destructive',
-    },
-  }
-  if (session.last_run_status && config[session.last_run_status]) {
-    return config[session.last_run_status]
-  }
-  return null
-}
+import {
+  type SessionListItem,
+  isUnread,
+  isActionable,
+  formatRelativeTime,
+  getSessionStatus,
+  navigateToSession,
+} from '@/lib/session-utils'
 
 interface UnreadBellProps {
   title: string
@@ -117,13 +48,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       window.removeEventListener('command:open-unread-sessions', handler)
   }, [])
 
-  // Synchronous reset: guarantees open=false is committed before unreadCount
-  // can bounce back (e.g. optimistic update overwritten by in-flight refetch).
-  // A useEffect would fire after render, missing fast 1→0→1 transitions.
-  if (unreadCount === 0 && open) {
-    setOpen(false)
-  }
-
   // Invalidate cache each time popover opens
   useEffect(() => {
     if (open) {
@@ -140,25 +64,42 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     return () => window.removeEventListener('session-opened', handler)
   }, [queryClient])
 
-  const unreadItems = useMemo((): UnreadItem[] => {
-    if (!allSessions) return []
-    const results: UnreadItem[] = []
+  // Split actionable sessions into unread (top, full opacity) and read (bottom, dimmed)
+  const { unreadItems, readItems } = useMemo(() => {
+    if (!allSessions) return { unreadItems: [] as SessionListItem[], readItems: [] as SessionListItem[] }
+    const unread: SessionListItem[] = []
+    const read: SessionListItem[] = []
     for (const entry of allSessions.entries) {
       for (const session of entry.sessions) {
+        if (!isActionable(session)) continue
+        const item: SessionListItem = {
+          session,
+          projectId: entry.project_id,
+          projectName: entry.project_name,
+          worktreeId: entry.worktree_id,
+          worktreeName: entry.worktree_name,
+          worktreePath: entry.worktree_path,
+        }
         if (isUnread(session)) {
-          results.push({
-            session,
-            projectId: entry.project_id,
-            projectName: entry.project_name,
-            worktreeId: entry.worktree_id,
-            worktreeName: entry.worktree_name,
-            worktreePath: entry.worktree_path,
-          })
+          unread.push(item)
+        } else {
+          read.push(item)
         }
       }
     }
-    return results.sort((a, b) => b.session.updated_at - a.session.updated_at)
+    const byUpdated = (a: SessionListItem, b: SessionListItem) =>
+      b.session.updated_at - a.session.updated_at
+    return {
+      unreadItems: unread.sort(byUpdated),
+      readItems: read.sort(byUpdated),
+    }
   }, [allSessions])
+
+  // Combined list for keyboard navigation (unread first, then read)
+  const allItems = useMemo(
+    () => [...unreadItems, ...readItems],
+    [unreadItems, readItems]
+  )
 
   const markSessionsReadOptimistically = useCallback(
     (sessionIds: string[]) => {
@@ -192,7 +133,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   }, [unreadItems, queryClient, markSessionsReadOptimistically])
 
   const handleMarkOneRead = useCallback(
-    async (item: UnreadItem) => {
+    async (item: SessionListItem) => {
       markSessionsReadOptimistically([item.session.id])
       await invoke('set_session_last_opened', {
         sessionId: item.session.id,
@@ -209,50 +150,15 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     [queryClient, unreadItems.length, markSessionsReadOptimistically]
   )
 
-  const handleSelect = useCallback(
-    (item: UnreadItem) => {
-      const { selectedProjectId, selectProject } = useProjectsStore.getState()
-      const { setActiveSession, clearActiveWorktree, setLastOpenedForProject } =
-        useChatStore.getState()
-
-      const crossProject = selectedProjectId !== item.projectId
-      if (crossProject) {
-        selectProject(item.projectId)
-      }
-
-      // Navigate to ProjectCanvasView
-      clearActiveWorktree()
-      setActiveSession(item.worktreeId, item.session.id)
-      setLastOpenedForProject(item.projectId, item.worktreeId, item.session.id)
-      markSessionsReadOptimistically([item.session.id])
-      setOpen(false)
-
-      if (crossProject) {
-        // Component remounts with new projectId key — use store-based auto-open
-        useUIStore
-          .getState()
-          .markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
-      } else {
-        // Same project, component stays mounted — use event
-        setTimeout(() => {
-          window.dispatchEvent(
-            new CustomEvent('open-session-modal', {
-              detail: {
-                sessionId: item.session.id,
-                worktreeId: item.worktreeId,
-                worktreePath: item.worktreePath,
-              },
-            })
-          )
-        }, 50)
-      }
-    },
-    [markSessionsReadOptimistically]
-  )
+  const handleSelect = useCallback((item: SessionListItem) => {
+    markSessionsReadOptimistically([item.session.id])
+    setOpen(false)
+    navigateToSession(item)
+  }, [markSessionsReadOptimistically])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const total = unreadItems.length
+      const total = allItems.length
       if (!total) return
 
       switch (e.key) {
@@ -266,19 +172,20 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           break
         case 'Enter':
           e.preventDefault()
-          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
-            handleSelect(unreadItems[focusedIndex])
+          if (focusedIndex >= 0 && allItems[focusedIndex]) {
+            handleSelect(allItems[focusedIndex])
           }
           break
         case 'Backspace':
           e.preventDefault()
-          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
+          // Only mark-read works on unread items (first N in the list)
+          if (focusedIndex >= 0 && focusedIndex < unreadItems.length && unreadItems[focusedIndex]) {
             handleMarkOneRead(unreadItems[focusedIndex])
           }
           break
       }
     },
-    [unreadItems, focusedIndex, handleSelect, handleMarkOneRead]
+    [allItems, unreadItems, focusedIndex, handleSelect, handleMarkOneRead]
   )
 
   // Scroll focused item into view
@@ -289,33 +196,37 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       ?.scrollIntoView({ block: 'nearest' })
   }, [focusedIndex])
 
-  // No unread → show normal title (or nothing if hideTitle)
-  if (unreadCount === 0) {
-    if (hideTitle) return null
-    return (
-      <span className="block truncate text-sm font-medium text-foreground/80">
-        {title}
-      </span>
-    )
-  }
-
+  // Popover is always openable (notification center style).
+  // When unread > 0, show animated bell trigger; otherwise show title as clickable button.
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <div className="card-border-spin">
+        {unreadCount > 0 ? (
+          <div className="card-border-spin">
+            <button
+              type="button"
+              className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-yellow-400 cursor-pointer"
+            >
+              <BellDot className="h-3.5 w-3.5 shrink-0 animate-[bell-ring_2s_ease-in-out_infinite]" />
+              {unreadCount} finished{' '}
+              {unreadCount === 1 ? 'session' : 'sessions'}
+              {!isMobile && (
+                <Kbd className="ml-1 h-4 px-1 text-[10px] opacity-60">
+                  {formatShortcutDisplay('mod+shift+f')}
+                </Kbd>
+              )}
+            </button>
+          </div>
+        ) : hideTitle ? (
+          <span className="sr-only" />
+        ) : (
           <button
             type="button"
-            className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-yellow-400 cursor-pointer"
+            className="block truncate text-sm font-medium text-foreground/80 cursor-pointer"
           >
-            <BellDot className="h-3.5 w-3.5 shrink-0 animate-[bell-ring_2s_ease-in-out_infinite]" />
-            {unreadCount} finished {unreadCount === 1 ? 'session' : 'sessions'}
-            {!isMobile && (
-              <Kbd className="ml-1 h-4 px-1 text-[10px] opacity-60">
-                {formatShortcutDisplay('mod+shift+f')}
-              </Kbd>
-            )}
+            {title}
           </button>
-        </div>
+        )}
       </PopoverTrigger>
       <PopoverContent
         ref={contentRef}
@@ -347,15 +258,16 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           <div className="flex items-center justify-center py-6">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
-        ) : unreadItems.length === 0 ? (
+        ) : allItems.length === 0 ? (
           <div className="text-center py-6 text-muted-foreground text-xs">
-            No unread sessions
+            No sessions with activity
           </div>
         ) : (
           <div className="max-h-[min(400px,60vh)] overflow-y-auto p-1">
-            {unreadItems.map((item, idx) => {
+            {allItems.map((item, idx) => {
               const status = getSessionStatus(item.session)
               const StatusIcon = status?.icon ?? CheckCircle2
+              const isRead = idx >= unreadItems.length
 
               return (
                 <button
@@ -366,7 +278,8 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
                   onMouseEnter={() => setFocusedIndex(idx)}
                   className={cn(
                     'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-start gap-2',
-                    focusedIndex === idx && 'bg-accent'
+                    focusedIndex === idx && 'bg-accent',
+                    isRead && 'opacity-50'
                   )}
                 >
                   <StatusIcon

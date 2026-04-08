@@ -3,118 +3,25 @@ import {
   BellDot,
   Loader2,
   CheckCircle2,
-  AlertTriangle,
-  CirclePause,
-  HelpCircle,
-  FileText,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAllSessions } from '@/services/chat'
-import { useProjectsStore } from '@/store/projects-store'
-import { useChatStore } from '@/store/chat-store'
-import { useUIStore } from '@/store/ui-store'
 import type { Session } from '@/types/chat'
+import {
+  type SessionListItem,
+  isUnread,
+  isActionable,
+  formatRelativeTime,
+  getSessionStatus,
+  navigateToSession,
+} from '@/lib/session-utils'
 
 interface UnreadSessionsDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-/**
- * A session is "unread" if it has activity the user hasn't seen:
- * - Not archived
- * - Has a meaningful status (finished, waiting for input, or reviewing)
- * - Never opened, or opened before last update
- */
-function isUnread(session: Session): boolean {
-  if (session.archived_at) return false
-
-  const actionableStatuses = ['completed', 'cancelled', 'crashed']
-  const hasFinishedRun =
-    session.last_run_status &&
-    actionableStatuses.includes(session.last_run_status)
-  const isWaiting = session.waiting_for_input
-  const isReviewing = session.is_reviewing
-
-  // Must have some actionable state
-  if (!hasFinishedRun && !isWaiting && !isReviewing) return false
-
-  // Never opened → definitely unread
-  if (!session.last_opened_at) return true
-
-  // Opened before last update → unread
-  return session.last_opened_at < session.updated_at
-}
-
-/** Format a unix timestamp (seconds) to relative time like "2h ago" */
-function formatRelativeTime(timestamp: number): string {
-  const ms = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp
-  const diffMs = Date.now() - ms
-  if (diffMs < 0) return 'just now'
-  const minuteMs = 60_000
-  const hourMs = 60 * minuteMs
-  const dayMs = 24 * hourMs
-  if (diffMs < hourMs) {
-    const minutes = Math.max(1, Math.floor(diffMs / minuteMs))
-    return `${minutes}m ago`
-  }
-  if (diffMs < dayMs) {
-    const hours = Math.floor(diffMs / hourMs)
-    return `${hours}h ago`
-  }
-  const days = Math.floor(diffMs / dayMs)
-  return `${days}d ago`
-}
-
-interface UnreadItem {
-  session: Session
-  projectId: string
-  projectName: string
-  worktreeId: string
-  worktreeName: string
-  worktreePath: string
-}
-
-/** Get display info for a session's current state */
-function getSessionStatus(session: Session) {
-  if (session.waiting_for_input) {
-    const isplan = session.waiting_for_input_type === 'plan'
-    return {
-      icon: isplan ? FileText : HelpCircle,
-      label: isplan ? 'Needs approval' : 'Needs input',
-      className: 'text-yellow-500',
-    }
-  }
-
-  const config: Record<
-    string,
-    { icon: typeof CheckCircle2; label: string; className: string }
-  > = {
-    completed: {
-      icon: CheckCircle2,
-      label: 'Completed',
-      className: 'text-green-500',
-    },
-    cancelled: {
-      icon: CirclePause,
-      label: 'Cancelled',
-      className: 'text-muted-foreground',
-    },
-    crashed: {
-      icon: AlertTriangle,
-      label: 'Crashed',
-      className: 'text-destructive',
-    },
-  }
-
-  if (session.last_run_status && config[session.last_run_status]) {
-    return config[session.last_run_status]
-  }
-
-  return null
 }
 
 export function UnreadSessionsDrawer({
@@ -135,28 +42,41 @@ export function UnreadSessionsDrawer({
     }
   }, [open, queryClient])
 
-  const unreadItems = useMemo((): UnreadItem[] => {
-    if (!allSessions) return []
-
-    const results: UnreadItem[] = []
-
+  // Split actionable sessions into unread (top, full opacity) and read (bottom, dimmed)
+  const { unreadItems, readItems } = useMemo(() => {
+    if (!allSessions) return { unreadItems: [] as SessionListItem[], readItems: [] as SessionListItem[] }
+    const unread: SessionListItem[] = []
+    const read: SessionListItem[] = []
     for (const entry of allSessions.entries) {
       for (const session of entry.sessions) {
+        if (!isActionable(session)) continue
+        const item: SessionListItem = {
+          session,
+          projectId: entry.project_id,
+          projectName: entry.project_name,
+          worktreeId: entry.worktree_id,
+          worktreeName: entry.worktree_name,
+          worktreePath: entry.worktree_path,
+        }
         if (isUnread(session)) {
-          results.push({
-            session,
-            projectId: entry.project_id,
-            projectName: entry.project_name,
-            worktreeId: entry.worktree_id,
-            worktreeName: entry.worktree_name,
-            worktreePath: entry.worktree_path,
-          })
+          unread.push(item)
+        } else {
+          read.push(item)
         }
       }
     }
-
-    return results.sort((a, b) => b.session.updated_at - a.session.updated_at)
+    const byUpdated = (a: SessionListItem, b: SessionListItem) =>
+      b.session.updated_at - a.session.updated_at
+    return {
+      unreadItems: unread.sort(byUpdated),
+      readItems: read.sort(byUpdated),
+    }
   }, [allSessions])
+
+  const allItems = useMemo(
+    () => [...unreadItems, ...readItems],
+    [unreadItems, readItems]
+  )
 
   const markSessionsReadOptimistically = useCallback(
     (sessionIds: string[]) => {
@@ -190,7 +110,7 @@ export function UnreadSessionsDrawer({
   }, [unreadItems, queryClient, markSessionsReadOptimistically])
 
   const handleMarkOneRead = useCallback(
-    async (item: UnreadItem) => {
+    async (item: SessionListItem) => {
       markSessionsReadOptimistically([item.session.id])
       await invoke('set_session_last_opened', {
         sessionId: item.session.id,
@@ -207,40 +127,10 @@ export function UnreadSessionsDrawer({
   )
 
   const handleSelect = useCallback(
-    (item: UnreadItem) => {
-      const { selectedProjectId, selectProject } = useProjectsStore.getState()
-      const { setActiveSession, clearActiveWorktree } = useChatStore.getState()
-
-      const crossProject = selectedProjectId !== item.projectId
-      if (crossProject) {
-        selectProject(item.projectId)
-      }
-
-      // Navigate to ProjectCanvasView
-      clearActiveWorktree()
-      setActiveSession(item.worktreeId, item.session.id)
+    (item: SessionListItem) => {
       markSessionsReadOptimistically([item.session.id])
       onOpenChange(false)
-
-      if (crossProject) {
-        // Component remounts with new projectId key — use store-based auto-open
-        useUIStore
-          .getState()
-          .markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
-      } else {
-        // Same project, component stays mounted — use event
-        setTimeout(() => {
-          window.dispatchEvent(
-            new CustomEvent('open-session-modal', {
-              detail: {
-                sessionId: item.session.id,
-                worktreeId: item.worktreeId,
-                worktreePath: item.worktreePath,
-              },
-            })
-          )
-        }, 50)
-      }
+      navigateToSession(item)
     },
     [onOpenChange, markSessionsReadOptimistically]
   )
@@ -252,7 +142,7 @@ export function UnreadSessionsDrawer({
         return
       }
 
-      const total = unreadItems.length
+      const total = allItems.length
       if (!total) return
 
       switch (e.key) {
@@ -266,19 +156,19 @@ export function UnreadSessionsDrawer({
           break
         case 'Enter':
           e.preventDefault()
-          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
-            handleSelect(unreadItems[focusedIndex])
+          if (focusedIndex >= 0 && allItems[focusedIndex]) {
+            handleSelect(allItems[focusedIndex])
           }
           break
         case 'Backspace':
           e.preventDefault()
-          if (focusedIndex >= 0 && unreadItems[focusedIndex]) {
+          if (focusedIndex >= 0 && focusedIndex < unreadItems.length && unreadItems[focusedIndex]) {
             handleMarkOneRead(unreadItems[focusedIndex])
           }
           break
       }
     },
-    [unreadItems, focusedIndex, handleSelect, handleMarkOneRead, onOpenChange]
+    [allItems, unreadItems, focusedIndex, handleSelect, handleMarkOneRead, onOpenChange]
   )
 
   // Scroll focused item into view
@@ -336,15 +226,16 @@ export function UnreadSessionsDrawer({
           <div className="flex items-center justify-center py-6">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
-        ) : unreadItems.length === 0 ? (
+        ) : allItems.length === 0 ? (
           <div className="text-center py-6 text-muted-foreground text-xs">
-            No unread sessions
+            No sessions with activity
           </div>
         ) : (
           <div className="max-h-[min(400px,60vh)] overflow-y-auto p-1">
-            {unreadItems.map((item, idx) => {
+            {allItems.map((item, idx) => {
               const status = getSessionStatus(item.session)
               const StatusIcon = status?.icon ?? CheckCircle2
+              const isRead = idx >= unreadItems.length
 
               return (
                 <button
@@ -355,7 +246,8 @@ export function UnreadSessionsDrawer({
                   onMouseEnter={() => setFocusedIndex(idx)}
                   className={cn(
                     'w-full text-left px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors cursor-pointer flex items-center gap-2',
-                    focusedIndex === idx && 'bg-accent'
+                    focusedIndex === idx && 'bg-accent',
+                    isRead && 'opacity-50'
                   )}
                 >
                   <StatusIcon

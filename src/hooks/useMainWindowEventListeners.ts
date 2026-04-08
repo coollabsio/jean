@@ -460,6 +460,9 @@ function executeKeybindingAction(
     case 'open_github_dashboard':
       useUIStore.getState().setGitHubDashboardOpen(true)
       break
+    case 'open_session_history':
+      useUIStore.getState().setSessionHistoryOpen(true)
+      break
     case 'open_quick_menu':
       window.dispatchEvent(new CustomEvent('toggle-quick-menu'))
       break

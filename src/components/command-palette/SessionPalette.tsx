@@ -1,7 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useUIStore } from '@/store/ui-store'
-import { useProjectsStore } from '@/store/projects-store'
-import { useChatStore } from '@/store/chat-store'
 import { useAllSessions } from '@/services/chat'
 import {
   CommandDialog,
@@ -11,36 +9,11 @@ import {
   CommandGroup,
   CommandItem,
 } from '@/components/ui/command'
-import type { Session } from '@/types/chat'
-
-/** Format a unix timestamp (seconds) to relative time like "2h ago" */
-function formatRelativeTime(timestamp: number): string {
-  const ms = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp
-  const diffMs = Date.now() - ms
-  if (diffMs < 0) return 'just now'
-  const minuteMs = 60_000
-  const hourMs = 60 * minuteMs
-  const dayMs = 24 * hourMs
-  if (diffMs < hourMs) {
-    const minutes = Math.max(1, Math.floor(diffMs / minuteMs))
-    return `${minutes}m ago`
-  }
-  if (diffMs < dayMs) {
-    const hours = Math.floor(diffMs / hourMs)
-    return `${hours}h ago`
-  }
-  const days = Math.floor(diffMs / dayMs)
-  return `${days}d ago`
-}
-
-interface FlatSession {
-  session: Session
-  projectId: string
-  projectName: string
-  worktreeId: string
-  worktreeName: string
-  worktreePath: string
-}
+import {
+  type SessionListItem,
+  formatRelativeTime,
+  navigateToSession,
+} from '@/lib/session-utils'
 
 export function SessionPalette() {
   const sessionPaletteOpen = useUIStore(state => state.sessionPaletteOpen)
@@ -53,10 +26,10 @@ export function SessionPalette() {
   const { data: allSessions } = useAllSessions(sessionPaletteOpen)
 
   // Flatten, filter archived, sort by updated_at desc
-  const flatSessions = useMemo((): FlatSession[] => {
+  const flatSessions = useMemo((): SessionListItem[] => {
     if (!allSessions?.entries) return []
 
-    const result: FlatSession[] = []
+    const result: SessionListItem[] = []
     for (const entry of allSessions.entries) {
       for (const session of entry.sessions) {
         if (session.archived_at) continue
@@ -77,7 +50,7 @@ export function SessionPalette() {
 
   // Group by project for display
   const groupedSessions = useMemo(() => {
-    const groups = new Map<string, FlatSession[]>()
+    const groups = new Map<string, SessionListItem[]>()
     for (const item of flatSessions) {
       const existing = groups.get(item.projectName)
       if (existing) {
@@ -90,43 +63,10 @@ export function SessionPalette() {
   }, [flatSessions])
 
   const handleSelect = useCallback(
-    (item: FlatSession) => {
+    (item: SessionListItem) => {
       setSessionPaletteOpen(false)
       setSearch('')
-
-      const currentProjectId =
-        useProjectsStore.getState().selectedProjectId
-
-      // Clear active worktree so we land on ProjectCanvasView
-      useChatStore.getState().clearActiveWorktree()
-
-      const crossProject = currentProjectId !== item.projectId
-
-      if (crossProject) {
-        // Race-condition safe: store intent in Zustand, then switch project.
-        // ProjectCanvasView consumes the intent on mount.
-        useUIStore
-          .getState()
-          .markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
-        useProjectsStore.getState().selectProject(item.projectId)
-      } else {
-        // Same project — set the active session, then fire event for the
-        // already-mounted ProjectCanvasView.
-        useChatStore
-          .getState()
-          .setActiveSession(item.worktreeId, item.session.id)
-        setTimeout(() => {
-          window.dispatchEvent(
-            new CustomEvent('open-session-modal', {
-              detail: {
-                sessionId: item.session.id,
-                worktreeId: item.worktreeId,
-                worktreePath: item.worktreePath,
-              },
-            })
-          )
-        }, 50)
-      }
+      navigateToSession(item)
     },
     [setSessionPaletteOpen]
   )
