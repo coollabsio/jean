@@ -8,6 +8,7 @@ import {
 interface GitStatusBadgesProps {
   behindCount: number
   unpushedCount: number
+  unpushedCommits?: { hash: string; message: string }[]
   diffAdded: number
   diffRemoved: number
   branchDiffAdded?: number
@@ -25,6 +26,7 @@ export function GitStatusBadges({
   diffRemoved,
   branchDiffAdded = 0,
   branchDiffRemoved = 0,
+  unpushedCommits,
   onPull,
   onPush,
   onDiffClick,
@@ -95,7 +97,24 @@ export function GitStatusBadges({
               {unpushedCount}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{`Push ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} to remote`}</TooltipContent>
+          <TooltipContent className="max-w-80">
+            <p>{`Push ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} to remote`}</p>
+            {unpushedCommits && unpushedCommits.length > 0 && (
+              <ul className="mt-1 space-y-0.5 border-t border-border/50 pt-1">
+                {unpushedCommits.map(c => (
+                  <li key={c.hash} className="flex gap-1.5 text-[11px] leading-tight">
+                    <code className="shrink-0 text-muted-foreground">{c.hash}</code>
+                    <span className="truncate">{c.message}</span>
+                  </li>
+                ))}
+                {unpushedCount > unpushedCommits.length && (
+                  <li className="text-[11px] text-muted-foreground">
+                    ...and {unpushedCount - unpushedCommits.length} more
+                  </li>
+                )}
+              </ul>
+            )}
+          </TooltipContent>
         </Tooltip>
       )}
     </span>

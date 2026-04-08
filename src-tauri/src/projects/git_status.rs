@@ -15,6 +15,13 @@ pub struct ActiveWorktreeInfo {
     pub pr_url: Option<String>,
 }
 
+/// Short commit summary (hash + subject line)
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitSummary {
+    pub hash: String,
+    pub message: String,
+}
+
 /// Git branch status relative to a base branch
 #[derive(Debug, Clone, Serialize)]
 pub struct GitBranchStatus {
@@ -41,6 +48,8 @@ pub struct GitBranchStatus {
     pub worktree_ahead_count: u32,
     /// Commits in HEAD not yet pushed to origin/{current_branch}
     pub unpushed_count: u32,
+    /// Short summaries of unpushed commits (hash + subject)
+    pub unpushed_commits: Vec<CommitSummary>,
 }
 
 /// Fetch the latest changes from origin for a specific branch
@@ -402,6 +411,37 @@ fn ref_exists(repo_path: &str, git_ref: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// List commit summaries (short hash + subject) between two refs
+/// Returns up to `limit` commits, newest first
+fn list_commits_between(repo_path: &str, from_ref: &str, to_ref: &str, limit: u32) -> Vec<CommitSummary> {
+    let output = silent_command("git")
+        .args([
+            "log",
+            "--format=%h %s",
+            &format!("-{limit}"),
+            &format!("{from_ref}..{to_ref}"),
+        ])
+        .current_dir(repo_path)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| {
+                    let (hash, message) = line.split_once(' ').unwrap_or((line, ""));
+                    CommitSummary {
+                        hash: hash.to_string(),
+                        message: message.to_string(),
+                    }
+                })
+                .collect()
+        }
+        _ => vec![],
+    }
 }
 
 /// Count commits between two refs
@@ -770,7 +810,8 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     // Commits not yet pushed to the upstream tracking ref
     // Uses @{upstream} to support non-origin remotes (e.g., fork/branch)
     // Falls back to origin/{current_branch} if no upstream is configured
-    let unpushed_count = if current_branch != *base_branch {
+    // Track which ref we're comparing against so we can list individual commits
+    let (unpushed_count, unpushed_from_ref) = if current_branch != *base_branch {
         let upstream_ref = get_upstream_ref(repo_path);
 
         if let Some(ref upstream) = upstream_ref {
@@ -782,21 +823,32 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
                     let _ = fetch_origin_branch(repo_path, &current_branch);
                 }
             }
-            count_commits_between(repo_path, upstream, "HEAD")
+            (count_commits_between(repo_path, upstream, "HEAD"), Some(upstream.clone()))
         } else {
             // No upstream configured — try origin/{current_branch}
             let _ = fetch_origin_branch(repo_path, &current_branch);
             let origin_current_ref = format!("origin/{current_branch}");
             if ref_exists(repo_path, &origin_current_ref) {
-                count_commits_between(repo_path, &origin_current_ref, "HEAD")
+                (count_commits_between(repo_path, &origin_current_ref, "HEAD"), Some(origin_current_ref))
             } else {
                 // Never pushed — all worktree-unique commits are unpushed
-                worktree_ahead_count
+                (worktree_ahead_count, Some(base_branch.clone()))
             }
         }
     } else {
         // On the base branch itself, unpushed = base_branch_ahead_count
-        base_branch_ahead_count
+        (base_branch_ahead_count, Some(origin_ref.clone()))
+    };
+
+    // Get unpushed commit summaries (piggybacks on existing polling, no extra round-trip)
+    let unpushed_commits = if unpushed_count > 0 {
+        if let Some(ref from) = unpushed_from_ref {
+            list_commits_between(repo_path, from, "HEAD", 20)
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
     };
 
     // Get current timestamp
@@ -821,6 +873,7 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
         base_branch_behind_count,
         worktree_ahead_count,
         unpushed_count,
+        unpushed_commits,
     })
 }
 
@@ -846,6 +899,7 @@ mod tests {
             base_branch_behind_count: 0,
             worktree_ahead_count: 3,
             unpushed_count: 1,
+            unpushed_commits: vec![CommitSummary { hash: "abc1234".to_string(), message: "fix: something".to_string() }],
         };
 
         let json = serde_json::to_string(&status).unwrap();

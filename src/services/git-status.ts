@@ -49,6 +49,8 @@ export interface GitStatusEvent {
   worktree_ahead_count: number
   /** Commits in HEAD not yet pushed to origin/current_branch */
   unpushed_count: number
+  /** Short summaries of unpushed commits (hash + subject) */
+  unpushed_commits: { hash: string; message: string }[]
 }
 
 /**

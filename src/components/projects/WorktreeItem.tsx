@@ -630,7 +630,24 @@ export function WorktreeItem({
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}</TooltipContent>
+              <TooltipContent className="max-w-80">
+                <p>{`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}</p>
+                {gitStatus?.unpushed_commits && gitStatus.unpushed_commits.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 border-t border-border/50 pt-1">
+                    {gitStatus.unpushed_commits.map((c: { hash: string; message: string }) => (
+                      <li key={c.hash} className="flex gap-1.5 text-[11px] leading-tight">
+                        <code className="shrink-0 text-muted-foreground">{c.hash}</code>
+                        <span className="truncate">{c.message}</span>
+                      </li>
+                    ))}
+                    {pushCount > gitStatus.unpushed_commits.length && (
+                      <li className="text-[11px] text-muted-foreground">
+                        ...and {pushCount - gitStatus.unpushed_commits.length} more
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </TooltipContent>
             </Tooltip>
           )}
 
