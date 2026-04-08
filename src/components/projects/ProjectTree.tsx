@@ -19,13 +19,24 @@ import {
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable'
-import { Folder } from 'lucide-react'
+import { Folder, ChevronsUpDown, ChevronsDownUp } from 'lucide-react'
 import { isFolder, type Project } from '@/types/projects'
 import { ProjectTreeItem } from './ProjectTreeItem'
 import { FolderTreeItem } from './FolderTreeItem'
-import { useReorderItems, useMoveItem } from '@/services/projects'
+import {
+  useReorderItems,
+  useMoveItem,
+  projectsQueryKeys,
+} from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useQueryClient } from '@tanstack/react-query'
 import { Separator } from '@/components/ui/separator'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
 
 const MAX_NESTING_DEPTH = 3
@@ -230,7 +241,8 @@ function RootDropZone({ isOver }: { isOver: boolean }) {
 export function ProjectTree({ projects }: ProjectTreeProps) {
   const reorderItems = useReorderItems()
   const moveItem = useMoveItem()
-  const { expandFolder, expandedFolderIds } = useProjectsStore()
+  const queryClient = useQueryClient()
+  const { expandFolder, expandedFolderIds, expandedWorktreeIds, expandAllWorktrees, collapseAllWorktrees } = useProjectsStore()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overFolderId, setOverFolderId] = useState<string | null>(null)
   const [isOverRoot, setIsOverRoot] = useState(false)
@@ -250,6 +262,47 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
     .filter(p => !isFolder(p))
     .sort((a, b) => a.order - b.order)
   const hasBothTypes = rootFolders.length > 0 && rootProjects.length > 0
+  const anyWorktreesExpanded = expandedWorktreeIds.size > 0
+
+  const handleToggleAllWorktrees = useCallback((e: React.MouseEvent) => {
+    const withProjects = e.altKey
+    if (anyWorktreesExpanded) {
+      collapseAllWorktrees()
+      if (withProjects) {
+        useProjectsStore.setState({
+          expandedProjectIds: new Set<string>(),
+          expandedFolderIds: new Set<string>(),
+        })
+      }
+    } else {
+      const allWorktreeIds: string[] = []
+      const allProjectIds: string[] = []
+      const allFolderIds: string[] = []
+      for (const project of projects) {
+        if (isFolder(project)) {
+          allFolderIds.push(project.id)
+          continue
+        }
+        allProjectIds.push(project.id)
+        const worktrees =
+          queryClient.getQueryData<{ id: string }[]>(
+            projectsQueryKeys.worktrees(project.id)
+          ) ?? []
+        for (const w of worktrees) {
+          allWorktreeIds.push(w.id)
+        }
+      }
+      if (allWorktreeIds.length > 0) {
+        expandAllWorktrees(allWorktreeIds)
+      }
+      if (withProjects) {
+        useProjectsStore.setState({
+          expandedProjectIds: new Set(allProjectIds),
+          expandedFolderIds: new Set(allFolderIds),
+        })
+      }
+    }
+  }, [anyWorktreesExpanded, collapseAllWorktrees, expandAllWorktrees, projects, queryClient])
 
   // All items flattened for the SortableContext
   const allItemIds = flattenItems(projects)
@@ -520,10 +573,29 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
             </div>
           )}
           {rootProjects.length > 0 && (
-            <div className="px-3 pb-1 pt-2">
+            <div className="px-3 pb-1 pt-2 flex items-center justify-between">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 Projects
               </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex size-4 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+                    onClick={handleToggleAllWorktrees}
+                  >
+                    {anyWorktreesExpanded ? (
+                      <ChevronsDownUp className="size-3" />
+                    ) : (
+                      <ChevronsUpDown className="size-3" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">
+                  <p>{anyWorktreesExpanded ? 'Collapse' : 'Expand'} all worktrees ({formatShortcutDisplay(DEFAULT_KEYBINDINGS.toggle_all_worktrees_expanded)})</p>
+                  <p className="text-muted-foreground">Hold {formatShortcutDisplay('alt')} to include projects</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
           )}
           {rootProjects.map(item => (

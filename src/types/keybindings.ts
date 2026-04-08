@@ -47,6 +47,7 @@ export type KeybindingAction =
   | 'rename_session'
   | 'navigate_back'
   | 'navigate_forward'
+  | 'toggle_all_worktrees_expanded'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -113,6 +114,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   rename_session: 'mod+e',
   navigate_back: 'mod+bracketleft',
   navigate_forward: 'mod+bracketright',
+  toggle_all_worktrees_expanded: 'mod+shift+w',
 }
 
 // UI definitions for the settings pane
@@ -446,6 +448,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     label: 'Go forward',
     description: 'Navigate forward in session history',
     default_shortcut: 'mod+bracketright',
+    category: 'navigation',
+  },
+  {
+    action: 'toggle_all_worktrees_expanded',
+    label: 'Toggle all worktrees',
+    description: 'Expand or collapse all worktree session lists at once',
+    default_shortcut: 'mod+shift+w',
     category: 'navigation',
   },
 ]

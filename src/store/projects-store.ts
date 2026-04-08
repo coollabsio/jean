@@ -61,6 +61,8 @@ interface ProjectsUIState {
 
   // Worktree expansion actions
   toggleWorktreeExpanded: (id: string) => void
+  expandAllWorktrees: (ids: string[]) => void
+  collapseAllWorktrees: () => void
 
   // Dashboard collapse actions
   toggleDashboardWorktreeCollapsed: (
@@ -207,6 +209,23 @@ export const useProjectsStore = create<ProjectsUIState>()(
           },
           undefined,
           'toggleWorktreeExpanded'
+        ),
+
+      expandAllWorktrees: ids =>
+        set(
+          { expandedWorktreeIds: new Set(ids) },
+          undefined,
+          'expandAllWorktrees'
+        ),
+
+      collapseAllWorktrees: () =>
+        set(
+          state => {
+            if (state.expandedWorktreeIds.size === 0) return state
+            return { expandedWorktreeIds: new Set<string>() }
+          },
+          undefined,
+          'collapseAllWorktrees'
         ),
 
       // Dashboard collapse actions
