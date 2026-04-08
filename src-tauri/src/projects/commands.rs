@@ -2536,6 +2536,24 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
         log::error!("Failed to emit worktree:deleting event: {e}");
     }
 
+    // Safety: never delete a base session or the main repo itself
+    if worktree.session_type == SessionType::Base {
+        return Err(
+            "Base sessions cannot be deleted. Use close_base_session instead.".to_string(),
+        );
+    }
+
+    // Safety: ensure worktree path differs from project root to prevent nuking the main repo
+    let worktree_canonical = std::fs::canonicalize(&worktree.path).ok();
+    let project_canonical = std::fs::canonicalize(&project.path).ok();
+    if let (Some(wt), Some(proj)) = (&worktree_canonical, &project_canonical) {
+        if wt == proj {
+            return Err(
+                "Cannot delete worktree: path matches the main repository. This is a safety check to prevent data loss.".to_string(),
+            );
+        }
+    }
+
     // Collect session IDs now (before background thread) so we can clean up data dirs later
     let session_ids: Vec<String> =
         crate::chat::storage::load_sessions(&app, &worktree.path, &worktree_id)

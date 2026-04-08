@@ -1277,6 +1277,17 @@ pub fn gh_pr_checkout(
 pub fn remove_worktree(repo_path: &str, worktree_path: &str) -> Result<(), String> {
     log::trace!("Removing worktree at {worktree_path}");
 
+    // Safety: never delete the main repository itself
+    let wt_canonical = std::fs::canonicalize(worktree_path).ok();
+    let repo_canonical = std::fs::canonicalize(repo_path).ok();
+    if let (Some(wt), Some(repo)) = (&wt_canonical, &repo_canonical) {
+        if wt == repo {
+            return Err(
+                "Refusing to remove worktree: path matches the main repository root. This is a safety check to prevent data loss.".to_string(),
+            );
+        }
+    }
+
     // Prune stale worktree entries (folders deleted outside the app)
     let _ = silent_command("git")
         .args(["worktree", "prune"])
@@ -1316,6 +1327,11 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str) -> Result<(), Strin
                 .args(["worktree", "prune"])
                 .current_dir(repo_path)
                 .output();
+        } else if stderr.contains("is a main working tree") {
+            // The path is the main repo root — never attempt manual removal
+            return Err(format!(
+                "Cannot remove worktree: {worktree_path} is the main working tree"
+            ));
         } else {
             // git worktree remove failed (e.g. file locks on Windows)
             // Try manual directory removal as fallback
