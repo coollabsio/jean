@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
-import type { LabelData } from '@/types/chat'
+import type { LabelData, TextHighlight } from '@/types/chat'
 import { isSessionStateHydrating } from '@/lib/session-state-hydration'
 import { isBackendPersisting } from '@/lib/backend-persist-guard'
 
@@ -20,6 +20,7 @@ export function useImmediateSessionStateSave() {
   const prevReviewingRef = useRef<Record<string, boolean>>({})
   const prevWaitingRef = useRef<Record<string, boolean>>({})
   const prevLabelsRef = useRef<Record<string, LabelData>>({})
+  const prevHighlightsRef = useRef<Record<string, TextHighlight[]>>({})
 
   useEffect(() => {
     const initialState = useChatStore.getState()
@@ -31,6 +32,7 @@ export function useImmediateSessionStateSave() {
     prevReviewingRef.current = initialState.reviewingSessions
     prevWaitingRef.current = initialState.waitingForInputSessionIds
     prevLabelsRef.current = initialState.sessionLabels
+    prevHighlightsRef.current = initialState.sessionHighlights
 
     const unsubscribe = useChatStore.subscribe(state => {
       if (isSessionStateHydrating()) {
@@ -42,6 +44,7 @@ export function useImmediateSessionStateSave() {
         prevReviewingRef.current = state.reviewingSessions
         prevWaitingRef.current = state.waitingForInputSessionIds
         prevLabelsRef.current = state.sessionLabels
+        prevHighlightsRef.current = state.sessionHighlights
         return
       }
 
@@ -51,6 +54,7 @@ export function useImmediateSessionStateSave() {
         reviewingSessions,
         waitingForInputSessionIds,
         sessionLabels,
+        sessionHighlights,
         sessionWorktreeMap,
         worktreePaths,
       } = state
@@ -62,13 +66,16 @@ export function useImmediateSessionStateSave() {
       const waitingChanged =
         waitingForInputSessionIds !== prevWaitingRef.current
       const labelsChanged = sessionLabels !== prevLabelsRef.current
+      const highlightsChanged =
+        sessionHighlights !== prevHighlightsRef.current
 
       if (
         !answeredChanged &&
         !submittedChanged &&
         !reviewingChanged &&
         !waitingChanged &&
-        !labelsChanged
+        !labelsChanged &&
+        !highlightsChanged
       ) {
         return
       }
@@ -173,6 +180,25 @@ export function useImmediateSessionStateSave() {
         }
         prevLabelsRef.current = sessionLabels
       }
+
+      if (highlightsChanged) {
+        const sessionIds = new Set([
+          ...Object.keys(prevHighlightsRef.current),
+          ...Object.keys(sessionHighlights),
+        ])
+
+        for (const sessionId of sessionIds) {
+          if (
+            prevHighlightsRef.current[sessionId] !==
+            sessionHighlights[sessionId]
+          ) {
+            saveSessionStatus(sessionId, sessionWorktreeMap, worktreePaths, {
+              highlights: sessionHighlights[sessionId] ?? [],
+            })
+          }
+        }
+        prevHighlightsRef.current = sessionHighlights
+      }
     })
 
     return unsubscribe
@@ -189,6 +215,7 @@ async function saveSessionStatus(
     isReviewing?: boolean
     waitingForInput?: boolean
     label?: LabelData | null
+    highlights?: TextHighlight[]
   }
 ) {
   const worktreeId = sessionWorktreeMap[sessionId]
@@ -216,6 +243,7 @@ async function saveSessionStatus(
       waitingForInput: updates.waitingForInput,
       label: labelValue,
       clearLabel,
+      highlights: updates.highlights,
     })
   } catch (error) {
     logger.error('Failed to save session status', { sessionId, error })

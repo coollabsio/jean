@@ -531,6 +531,11 @@ kbd {
   background-color: rgba(251, 146, 60, 0.7);
 }
 
+/* User-created text highlights (persistent annotations) */
+::highlight(user-highlight) {
+  background-color: rgba(250, 204, 21, 0.25);
+}
+
 /* Custom scrollbar styling to match Radix ScrollArea */
 .custom-scrollbar::-webkit-scrollbar {
   width: 10px;

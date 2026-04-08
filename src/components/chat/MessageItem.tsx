@@ -703,7 +703,7 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {message.role === 'user' ? (
-        <div className="relative group flex items-start gap-1 max-w-[85%] sm:max-w-[70%]">
+        <div className="relative group flex items-start gap-1 max-w-[85%] sm:max-w-[70%]" data-message-id={message.id}>
           {/* Copy to clipboard button - appears on hover */}
           {onCopyToInput && (
             <Tooltip>
@@ -724,7 +724,7 @@ export const MessageItem = memo(function MessageItem({
           </div>
         </div>
       ) : (
-        <div className="text-foreground/90 w-full min-w-0 break-words">
+        <div className="text-foreground/90 w-full min-w-0 break-words" data-message-id={message.id}>
           {messageBoxContent}
         </div>
       )}

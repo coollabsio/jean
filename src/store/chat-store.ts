@@ -23,6 +23,7 @@ import {
   type ExecutionMode,
   type SessionDigest,
   type LabelData,
+  type TextHighlight,
   EXECUTION_MODE_CYCLE,
   isPlanToolCall,
 } from '@/types/chat'
@@ -254,6 +255,9 @@ interface ChatUIState {
   // User-assigned labels per session (e.g. "Needs testing")
   sessionLabels: Record<string, LabelData>
 
+  // User-created text highlights per session
+  sessionHighlights: Record<string, TextHighlight[]>
+
   // Browser-style navigation history (back/forward across sessions and projects)
   navigationHistory: Array<{
     projectId: string
@@ -293,6 +297,11 @@ interface ChatUIState {
 
   // Actions - Session label management (persisted)
   setSessionLabel: (sessionId: string, label: LabelData | null) => void
+
+  // Actions - Text highlight management (persisted)
+  setSessionHighlights: (sessionId: string, highlights: TextHighlight[]) => void
+  addHighlight: (sessionId: string, highlight: TextHighlight) => void
+  removeHighlight: (sessionId: string, highlightId: string) => void
 
   // Actions - Plan file path management (persisted)
   setPlanFilePath: (sessionId: string, path: string | null) => void
@@ -691,6 +700,7 @@ export const useChatStore = create<ChatUIState>()(
       sessionDigests: {},
       worktreeLoadingOperations: {},
       sessionLabels: {},
+      sessionHighlights: {},
       navigationHistory: [],
       navigationIndex: -1,
       pendingMagicCommand: null,
@@ -870,6 +880,55 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'setSessionLabel'
+        ),
+
+      // Text highlight management (persisted)
+      setSessionHighlights: (sessionId, highlights) =>
+        set(
+          state => {
+            if (state.sessionHighlights[sessionId] === highlights) return state
+            return {
+              sessionHighlights: {
+                ...state.sessionHighlights,
+                [sessionId]: highlights,
+              },
+            }
+          },
+          undefined,
+          'setSessionHighlights'
+        ),
+
+      addHighlight: (sessionId, highlight) =>
+        set(
+          state => {
+            const existing = state.sessionHighlights[sessionId] ?? []
+            return {
+              sessionHighlights: {
+                ...state.sessionHighlights,
+                [sessionId]: [...existing, highlight],
+              },
+            }
+          },
+          undefined,
+          'addHighlight'
+        ),
+
+      removeHighlight: (sessionId, highlightId) =>
+        set(
+          state => {
+            const existing = state.sessionHighlights[sessionId]
+            if (!existing) return state
+            const filtered = existing.filter(h => h.id !== highlightId)
+            if (filtered.length === existing.length) return state
+            return {
+              sessionHighlights: {
+                ...state.sessionHighlights,
+                [sessionId]: filtered,
+              },
+            }
+          },
+          undefined,
+          'removeHighlight'
         ),
 
       // Plan file path management
@@ -2713,6 +2772,8 @@ export const useChatStore = create<ChatUIState>()(
             const { [sessionId]: _effort, ...restEffort } = state.effortLevels
             const { [sessionId]: _mcp, ...restMcp } = state.enabledMcpServers
             const { [sessionId]: _label, ...restLabels } = state.sessionLabels
+            const { [sessionId]: _highlights, ...restHighlights } =
+              state.sessionHighlights
 
             return {
               approvedTools: restApproved,
@@ -2731,6 +2792,7 @@ export const useChatStore = create<ChatUIState>()(
               effortLevels: restEffort,
               enabledMcpServers: restMcp,
               sessionLabels: restLabels,
+              sessionHighlights: restHighlights,
             }
           },
           undefined,
