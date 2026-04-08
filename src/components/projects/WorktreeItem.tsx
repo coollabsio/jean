@@ -612,7 +612,7 @@ export function WorktreeItem({
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}</TooltipContent>
+              <TooltipContent>{`Merge ${behindCount} new commit${behindCount > 1 ? 's' : ''} from origin/${defaultBranch}`}</TooltipContent>
             </Tooltip>
           )}
 

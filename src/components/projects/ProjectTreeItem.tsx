@@ -215,7 +215,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
+              <TooltipContent>{`Merge ${baseBranchBehindCount} new commit${baseBranchBehindCount > 1 ? 's' : ''} from origin/${project.default_branch}`}</TooltipContent>
             </Tooltip>
           )}
           {baseBranchAheadCount > 0 && (
