@@ -28,7 +28,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({
         <span>Thinking...</span>
         <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-open:rotate-90" />
       </summary>
-      <div className="border-t border-border/50 px-3 py-2">
+      <div className="border-t border-border/50 px-3 py-2 select-text cursor-text">
         <div className="pl-4 border-l-2 border-purple-500/30 text-sm text-muted-foreground">
           <Markdown streaming={isStreaming}>{thinking}</Markdown>
         </div>

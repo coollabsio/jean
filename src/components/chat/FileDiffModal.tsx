@@ -189,7 +189,7 @@ export function FileDiffModal({
               matchingFile && getStatusColor(matchingFile.fileDiff.type)
             )}
           />
-          <span className="truncate">{displayFilename}</span>
+          <span className="truncate select-text cursor-text">{displayFilename}</span>
           {matchingFile && (
             <span className="text-muted-foreground font-normal text-xs ml-2">
               {stats.additions > 0 && (
@@ -283,7 +283,7 @@ export function FileDiffModal({
                     getStatusColor(matchingFile.fileDiff.type)
                   )}
                 />
-                <span className="truncate text-sm">
+                <span className="truncate text-sm select-text cursor-text">
                   {matchingFile.fileName}
                 </span>
                 {matchingFile.fileDiff.prevName &&

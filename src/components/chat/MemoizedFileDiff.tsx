@@ -130,7 +130,7 @@ export const MemoizedFileDiff = memo(
               getStatusColor(fileDiff.type)
             )}
           />
-          <span className="truncate">{fileName}</span>
+          <span className="truncate select-text cursor-text">{fileName}</span>
           {fileDiff.prevName && fileDiff.prevName !== fileName && (
             <span className="text-muted-foreground truncate">
               ← {fileDiff.prevName}

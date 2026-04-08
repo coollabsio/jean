@@ -97,7 +97,7 @@ export function SessionDebugPanel({
   }
 
   return (
-    <div className="p-4 space-y-2 text-sm">
+    <div className="p-4 space-y-2 text-sm select-text cursor-text">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <span className="font-semibold">Debug Info</span>

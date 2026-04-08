@@ -146,7 +146,7 @@ export function ReviewFindingBlock({
 
         {/* Content */}
         <CollapsibleContent>
-          <div className="px-3 pb-3 pt-1 space-y-3">
+          <div className="px-3 pb-3 pt-1 space-y-3 select-text cursor-text">
             {/* Description */}
             {finding.description && (
               <p className="text-sm text-muted-foreground">

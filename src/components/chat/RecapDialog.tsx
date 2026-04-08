@@ -33,7 +33,7 @@ export function RecapDialog({
           </DialogTitle>
         </DialogHeader>
         {digest ? (
-          <div className="space-y-4 pt-2">
+          <div className="space-y-4 pt-2 select-text cursor-text">
             <div>
               <p className="text-sm text-foreground">{digest.chat_summary}</p>
             </div>

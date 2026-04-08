@@ -57,7 +57,7 @@ export function ChatErrorFallback({
         </summary>
         <div className="relative mt-1">
           <CopyErrorButton error={error} />
-          <pre className="max-h-40 overflow-auto rounded border bg-muted p-2 pr-8 text-xs font-mono text-muted-foreground whitespace-pre-wrap break-words">
+          <pre className="max-h-40 overflow-auto rounded border bg-muted p-2 pr-8 text-xs font-mono text-muted-foreground whitespace-pre-wrap break-words select-text cursor-text">
             {error.message}
             {error.stack && `\n\n${error.stack}`}
           </pre>

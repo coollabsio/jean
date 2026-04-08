@@ -65,7 +65,7 @@ export function SetupScriptOutput({
           )}
         </div>
         <CollapsibleContent>
-          <div className="border-t border-muted px-4 py-3">
+          <div className="border-t border-muted px-4 py-3 select-text cursor-text">
             <div className="mb-2 text-xs text-muted-foreground">
               <span className="opacity-60">workdir:</span> {result.worktreePath}
             </div>
