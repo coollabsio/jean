@@ -1,12 +1,15 @@
 import { useEffect, useRef, useCallback, memo } from 'react'
-import { Plus, X, Minus, Terminal, ChevronUp } from 'lucide-react'
+import { Plus, X, Minus, Terminal, ChevronUp, WrapText } from 'lucide-react'
 import { invoke } from '@/lib/transport'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStore, type TerminalInstance } from '@/store/terminal-store'
 import {
   disposeTerminal,
   disposeAllWorktreeTerminals,
+  setWordWrap,
+  isWordWrapEnabled,
 } from '@/lib/terminal-instances'
+import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { Kbd } from '@/components/ui/kbd'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
@@ -93,6 +96,43 @@ const TerminalTabContent = memo(function TerminalTabContent({
     <div className={cn('h-full w-full p-2', !isActive && 'hidden')}>
       <div ref={containerRef} className="h-full w-full overflow-hidden" />
     </div>
+  )
+})
+
+/** Toggle button for terminal word wrap */
+const WordWrapToggle = memo(function WordWrapToggle() {
+  const { data: preferences } = usePreferences()
+  const patchPreferences = usePatchPreferences()
+  const wordWrap = preferences?.terminal_word_wrap ?? true
+
+  // Sync persisted preference → module-level state on load
+  useEffect(() => {
+    if (isWordWrapEnabled() !== wordWrap) {
+      setWordWrap(wordWrap)
+    }
+  }, [wordWrap])
+
+  const handleToggle = useCallback(() => {
+    const next = !wordWrap
+    setWordWrap(next)
+    patchPreferences.mutate({ terminal_word_wrap: next })
+  }, [wordWrap, patchPreferences])
+
+  return (
+    <button
+      type="button"
+      onClick={handleToggle}
+      className={cn(
+        'flex h-full shrink-0 items-center px-2 transition-colors hover:bg-neutral-800/50',
+        wordWrap
+          ? 'text-neutral-200'
+          : 'text-neutral-500'
+      )}
+      aria-label={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
+      title={wordWrap ? 'Word wrap: on' : 'Word wrap: off'}
+    >
+      <WrapText className="h-3.5 w-3.5" />
+    </button>
   )
 })
 
@@ -288,6 +328,9 @@ export function TerminalView({
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Word wrap toggle */}
+        <WordWrapToggle />
 
         {!hideControls && (
           <>

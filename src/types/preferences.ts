@@ -982,6 +982,7 @@ export interface AppPreferences {
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   sidebar_group_by_status: boolean // Group sidebar sessions by status headers (default: true)
+  terminal_word_wrap: boolean // Terminal word wrap (default: true, false = horizontal scroll)
 }
 
 export interface CustomCliProfile {
@@ -1548,4 +1549,5 @@ export const defaultPreferences: AppPreferences = {
   opencode_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   sidebar_group_by_status: true, // Default: group by status
+  terminal_word_wrap: true, // Default: word wrap enabled
 }

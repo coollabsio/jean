@@ -228,9 +228,15 @@ pub struct AppPreferences {
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_sidebar_group_by_status")]
     pub sidebar_group_by_status: bool, // Group sidebar sessions by status headers (default: true)
+    #[serde(default = "default_terminal_word_wrap")]
+    pub terminal_word_wrap: bool, // Terminal word wrap (default: true, false = horizontal scroll with wide cols)
 }
 
 fn default_sidebar_group_by_status() -> bool {
+    true
+}
+
+fn default_terminal_word_wrap() -> bool {
     true
 }
 
@@ -1198,6 +1204,7 @@ impl Default for AppPreferences {
             opencode_cli_source: default_cli_source(),
             gh_cli_source: default_cli_source(),
             sidebar_group_by_status: default_sidebar_group_by_status(),
+            terminal_word_wrap: default_terminal_word_wrap(),
         }
     }
 }

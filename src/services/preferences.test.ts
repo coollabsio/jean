@@ -159,6 +159,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -283,6 +284,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -380,6 +382,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
 
@@ -477,6 +480,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -576,6 +580,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -675,6 +680,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -772,6 +778,7 @@ describe('preferences service', () => {
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
+        terminal_word_wrap: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
