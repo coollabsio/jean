@@ -677,6 +677,7 @@ export function WorktreeItem({
                     <StatusIndicator
                       status={config.indicatorStatus}
                       variant={config.indicatorVariant}
+                      title={config.label}
                       className="h-1.5 w-1.5 shrink-0"
                     />
                     <span className="truncate text-xs">

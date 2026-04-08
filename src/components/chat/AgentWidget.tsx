@@ -109,7 +109,11 @@ interface AgentItemProps {
 function AgentItem({ agent }: AgentItemProps) {
   return (
     <li className="flex items-start gap-2 py-0.5 text-xs">
-      <span className="mt-0.5 shrink-0">
+      <span className="mt-0.5 shrink-0" title={
+        agent.status === 'completed' ? 'Completed'
+          : agent.status === 'errored' ? 'Errored'
+          : 'Running'
+      }>
         {agent.status === 'completed' ? (
           <CheckCircle2 className="h-4 w-4 text-green-500" />
         ) : agent.status === 'errored' ? (

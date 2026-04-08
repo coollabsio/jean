@@ -392,6 +392,7 @@ export const WebAccessPane: React.FC = () => {
               />
               <div className="flex items-center gap-1.5">
                 <div
+                  title={serverStatus?.running ? 'Running' : 'Stopped'}
                   className={`h-2 w-2 rounded-full ${
                     serverStatus?.running
                       ? 'bg-green-500'

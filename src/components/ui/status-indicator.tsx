@@ -13,16 +13,31 @@ interface StatusIndicatorProps {
   status: IndicatorStatus
   variant?: IndicatorVariant
   shape?: IndicatorShape
+  title?: string
   className?: string
+}
+
+function getDefaultTitle(status: IndicatorStatus, variant: IndicatorVariant): string {
+  if (status === 'running') {
+    if (variant === 'destructive') return 'Running (yolo mode)'
+    if (variant === 'loading') return 'Loading'
+    return 'Running'
+  }
+  if (status === 'waiting') return 'Waiting for input'
+  if (status === 'review') return 'Ready for review'
+  if (status === 'completed') return 'Completed'
+  return 'Idle'
 }
 
 export function StatusIndicator({
   status,
   variant = 'default',
   shape = 'circle',
+  title,
   className,
 }: StatusIndicatorProps) {
   const shapeClass = shape === 'square' ? 'rounded-sm' : 'rounded-full'
+  const resolvedTitle = title ?? getDefaultTitle(status, variant)
 
   // Running state: CSS border spinner
   if (status === 'running') {
@@ -35,6 +50,7 @@ export function StatusIndicator({
 
     return (
       <span
+        title={resolvedTitle}
         className={cn(
           'shrink-0 block animate-spin border-2 border-transparent',
           shapeClass,
@@ -55,6 +71,7 @@ export function StatusIndicator({
 
   return (
     <span
+      title={resolvedTitle}
       className={cn(
         'shrink-0 block bg-current',
         shape === 'circle' ? 'rounded-full' : 'rounded-sm',

@@ -27,6 +27,7 @@ export function SetupScriptOutput({
 
   const StatusIcon = result.success ? CheckCircle2 : XCircle
   const statusColor = result.success ? 'text-green-500' : 'text-destructive'
+  const statusTitle = result.success ? 'Success' : 'Failed'
   const statusText = result.success
     ? `Setup script completed for ${result.worktreeName}`
     : `Setup script failed for ${result.worktreeName}`
@@ -49,7 +50,7 @@ export function SetupScriptOutput({
                 isExpanded && 'rotate-90'
               )}
             />
-            <StatusIcon className={cn('h-4 w-4 shrink-0', statusColor)} />
+            <span title={statusTitle}><StatusIcon className={cn('h-4 w-4 shrink-0', statusColor)} /></span>
             <span className="truncate text-muted-foreground">{statusText}</span>
           </CollapsibleTrigger>
           {/* Only show dismiss button on failure - success messages should persist */}

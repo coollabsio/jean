@@ -112,7 +112,12 @@ interface TodoItemProps {
 function TodoItem({ todo }: TodoItemProps) {
   return (
     <li className="flex items-start gap-2 py-0.5 text-xs">
-      <span className="mt-0.5 shrink-0">
+      <span className="mt-0.5 shrink-0" title={
+        todo.status === 'completed' ? 'Completed'
+          : todo.status === 'cancelled' ? 'Cancelled'
+          : todo.status === 'in_progress' ? 'In progress'
+          : 'Pending'
+      }>
         {todo.status === 'completed' ? (
           <CheckCircle2 className="h-4 w-4 text-green-500" />
         ) : todo.status === 'cancelled' ? (

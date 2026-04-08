@@ -1151,6 +1151,7 @@ export function SessionChatModal({
                           <StatusIndicator
                             status={config.indicatorStatus}
                             variant={config.indicatorVariant}
+                            title={config.label}
                             className="h-1.5 w-1.5"
                           />
                           {idx < 9 && (
