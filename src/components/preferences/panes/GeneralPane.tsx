@@ -2209,6 +2209,22 @@ export const GeneralPane: React.FC = () => {
           </InlineField>
 
           <InlineField
+            label="Group sessions by status"
+            description="Show status headers (Idle, Review, Waiting, In Progress) in sidebar and canvas"
+          >
+            <Switch
+              checked={preferences?.sidebar_group_by_status ?? true}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  patchPreferences.mutate({
+                    sidebar_group_by_status: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
+
+          <InlineField
             label="Restore last session on project switch"
             description="Automatically reopen the last worktree and session when switching projects"
           >

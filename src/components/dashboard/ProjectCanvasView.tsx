@@ -772,8 +772,11 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         return 0
       })
 
-      // Re-order by status group so flat array matches visual group order
-      const grouped = flattenGroups(groupCardsByStatus(cards))
+      // Re-order by status group, or keep flat chronological order
+      const groupByStatus = preferences?.sidebar_group_by_status ?? true
+      const grouped = groupByStatus
+        ? flattenGroups(groupCardsByStatus(cards))
+        : [...cards].sort((a, b) => a.session.created_at - b.session.created_at)
       const latestActivityAt = getWorktreeLastActivity(
         filteredSessions,
         worktree.created_at
@@ -819,6 +822,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     storeState,
     searchQuery,
     worktreeSortMode,
+    preferences?.sidebar_group_by_status,
   ])
 
   useEffect(() => {

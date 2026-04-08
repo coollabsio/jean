@@ -576,8 +576,13 @@ export function SessionChatModal({
     )
   }, [worktreeId, worktreePath, createSession])
 
-  // Sorted sessions for tab order (waiting → review → idle)
+  // Sorted sessions for tab order — status-priority or flat chronological
+  const groupByStatus = preferences?.sidebar_group_by_status ?? true
   const sortedSessions = useMemo(() => {
+    if (!groupByStatus) {
+      // Flat chronological: oldest first
+      return [...sessions].sort((a, b) => a.created_at - b.created_at)
+    }
     const priority: Record<string, number> = {
       waiting: 0,
       permission: 0,
@@ -590,7 +595,7 @@ export function SessionChatModal({
       // Stable secondary sort: oldest first (consistent across refetches)
       return a.created_at - b.created_at
     })
-  }, [sessions, storeState])
+  }, [sessions, storeState, groupByStatus])
 
   // Keep ref in sync for selectVisualNeighbor (declared above sortedSessions)
   sortedSessionsRef.current = sortedSessions

@@ -35,6 +35,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
+import { usePreferences } from '@/services/preferences'
 
 interface WorktreeItemProps {
   worktree: Worktree
@@ -299,10 +300,19 @@ export function WorktreeItem({
     return sessions.map(s => computeSessionCardData(s, storeState))
   }, [sessionsData?.sessions, storeState])
 
+  const { data: preferences } = usePreferences()
+  const groupByStatus = preferences?.sidebar_group_by_status ?? true
+
   const sessionGroups = useMemo(() => {
     if (!isExpanded) return []
     return groupCardsByStatus(allCards)
   }, [isExpanded, allCards])
+
+  // Flat chronological list (sorted by created_at, oldest first)
+  const flatCards = useMemo(() => {
+    if (!isExpanded || groupByStatus) return []
+    return [...allCards].sort((a, b) => a.session.created_at - b.session.created_at)
+  }, [isExpanded, groupByStatus, allCards])
 
   const handleChevronClick = useCallback(
     (e: React.MouseEvent) => {
@@ -640,23 +650,56 @@ export function WorktreeItem({
         </div>
       </WorktreeContextMenu>
 
-      {/* Expandable session list grouped by status */}
-      {isExpanded && sessionGroups.length > 0 && (
+      {/* Expandable session list — grouped by status or flat chronological */}
+      {isExpanded && (groupByStatus ? sessionGroups.length > 0 : flatCards.length > 0) && (
         <div
           className={cn(
             'border-l border-border/40 py-0.5',
             'ml-4'
           )}
         >
-          {sessionGroups.map(group => (
-            <div key={group.key}>
-              <div className="pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {group.title}{' '}
-                <span className="text-muted-foreground/60">
-                  {group.cards.length}
-                </span>
-              </div>
-              {group.cards.map(card => {
+          {groupByStatus
+            ? sessionGroups.map(group => (
+                <div key={group.key}>
+                  <div className="pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {group.title}{' '}
+                    <span className="text-muted-foreground/60">
+                      {group.cards.length}
+                    </span>
+                  </div>
+                  {group.cards.map(card => {
+                    const config = statusConfig[card.status]
+                    return (
+                      <div
+                        key={card.session.id}
+                        className={cn(
+                          'flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate',
+                          activeSessionId === card.session.id && isSelected
+                            ? 'text-foreground bg-primary/10 font-medium'
+                            : activeSessionId === card.session.id
+                              ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                        )}
+                        onClick={e => {
+                          e.stopPropagation()
+                          handleSessionSelect(card.session.id)
+                        }}
+                      >
+                        <StatusIndicator
+                          status={config.indicatorStatus}
+                          variant={config.indicatorVariant}
+                          title={config.label}
+                          className="h-1.5 w-1.5 shrink-0"
+                        />
+                        <span className="truncate text-xs">
+                          {card.session.name || 'Untitled'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))
+            : flatCards.map(card => {
                 const config = statusConfig[card.status]
                 return (
                   <div
@@ -686,8 +729,6 @@ export function WorktreeItem({
                   </div>
                 )
               })}
-            </div>
-          ))}
         </div>
       )}
     </div>
