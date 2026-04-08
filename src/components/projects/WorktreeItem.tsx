@@ -694,6 +694,13 @@ export function WorktreeItem({
                         <span className="truncate text-xs">
                           {card.session.name || 'Untitled'}
                         </span>
+                        {card.label && (
+                          <div
+                            className="ml-auto h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: card.label.color }}
+                            title={card.label.name}
+                          />
+                        )}
                       </div>
                     )
                   })}
@@ -726,6 +733,13 @@ export function WorktreeItem({
                     <span className="truncate text-xs">
                       {card.session.name || 'Untitled'}
                     </span>
+                    {card.label && (
+                      <div
+                        className="ml-auto h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: card.label.color }}
+                        title={card.label.name}
+                      />
+                    )}
                   </div>
                 )
               })}
