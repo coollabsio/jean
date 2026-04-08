@@ -284,6 +284,11 @@ export function WorktreeItem({
     isReviewing,
   ])
 
+  // Active session for this worktree (reactive subscription)
+  const activeSessionId = useChatStore(
+    state => state.activeSessionIds[worktree.id]
+  )
+
   // Worktree expansion state for sidebar session list
   const isExpanded = expandedWorktreeIds.has(worktree.id)
   const storeState = useCanvasStoreState()
@@ -656,7 +661,14 @@ export function WorktreeItem({
                 return (
                   <div
                     key={card.session.id}
-                    className="flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 truncate"
+                    className={cn(
+                      'flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate',
+                      activeSessionId === card.session.id && isSelected
+                        ? 'text-foreground bg-primary/10 font-medium'
+                        : activeSessionId === card.session.id
+                          ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                    )}
                     onClick={e => {
                       e.stopPropagation()
                       handleSessionSelect(card.session.id)
