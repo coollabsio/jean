@@ -43,6 +43,7 @@ export type KeybindingAction =
   | 'switch_mode_plan'
   | 'switch_mode_build'
   | 'switch_mode_yolo'
+  | 'go_to_session'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -105,6 +106,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   switch_mode_plan: 'mod+ctrl+semicolon',
   switch_mode_build: 'mod+ctrl+quote',
   switch_mode_yolo: 'mod+ctrl+backslash',
+  go_to_session: 'mod+p',
 }
 
 // UI definitions for the settings pane
@@ -411,6 +413,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     description: 'Switch execution mode to Yolo',
     default_shortcut: 'mod+ctrl+backslash',
     category: 'chat',
+  },
+  {
+    action: 'go_to_session',
+    label: 'Go to session',
+    description: 'Fuzzy-search and jump to any session across all projects',
+    default_shortcut: 'mod+p',
+    category: 'navigation',
   },
 ]
 

@@ -464,6 +464,10 @@ function executeKeybindingAction(
     case 'open_usage_dropdown':
       window.dispatchEvent(new CustomEvent('toggle-usage-menu'))
       break
+    case 'go_to_session':
+      logger.debug('Keybinding: go_to_session')
+      useUIStore.getState().setSessionPaletteOpen(true)
+      break
     case 'toggle_session_label': {
       logger.debug('Keybinding: toggle_session_label')
       // Works when a session is active (modal open or in session view) or on project canvas
@@ -534,6 +538,7 @@ export function useMainWindowEventListeners() {
         uiState.openInModalOpen ||
         uiState.newWorktreeModalOpen ||
         uiState.commandPaletteOpen ||
+        uiState.sessionPaletteOpen ||
         uiState.preferencesOpen ||
         uiState.releaseNotesModalOpen ||
         uiState.updatePrModalOpen
