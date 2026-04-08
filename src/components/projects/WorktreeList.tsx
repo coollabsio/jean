@@ -166,7 +166,7 @@ export function WorktreeList({
     .map(w => w.id)
 
   return (
-    <div className="ml-4 border-l border-border/40 py-0.5">
+    <div className="ml-2 border-l border-border/40 py-0.5">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

@@ -207,7 +207,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
               <TooltipTrigger asChild>
                 <button
                   onClick={handleBasePull}
-                  className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                  className="shrink-0 text-[11px] font-medium text-primary transition-opacity hover:opacity-70"
                 >
                   <span className="flex items-center gap-0.5">
                     <ArrowDown className="h-3 w-3" />
@@ -223,7 +223,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
               <TooltipTrigger asChild>
                 <button
                   onClick={handleBasePush}
-                  className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
+                  className="shrink-0 text-[11px] font-medium text-orange-500 transition-opacity hover:opacity-70"
                 >
                   <span className="flex items-center gap-0.5">
                     <ArrowUp className="h-3 w-3" />
@@ -236,7 +236,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
 
           {showStatusBadges && (
-            <div className="hidden items-center gap-1 sm:flex">
+            <div className="hidden items-center gap-2 sm:flex">
               <NewIssuesBadge
                 projectPath={project.path}
                 projectId={project.id}

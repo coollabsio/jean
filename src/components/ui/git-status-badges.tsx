@@ -74,7 +74,7 @@ export function GitStatusBadges({
             <button
               type="button"
               onClick={onPull}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-[11px] font-medium text-primary transition-opacity hover:opacity-70"
             >
               <ArrowDown className="h-3 w-3" />
               {behindCount}
@@ -89,7 +89,7 @@ export function GitStatusBadges({
             <button
               type="button"
               onClick={onPush}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-[11px] font-medium text-orange-500 transition-opacity hover:opacity-70"
             >
               <ArrowUp className="h-3 w-3" />
               {unpushedCount}

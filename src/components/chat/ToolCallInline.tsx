@@ -383,7 +383,7 @@ function SubThinkingItem({ thinking }: SubThinkingItemProps) {
           isOpen && 'bg-muted/30'
         )}
       >
-        <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 cursor-pointer select-none">
+        <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 cursor-pointer select-none">
           <Brain className="h-3 w-3 shrink-0 text-purple-500" />
           <span className="font-medium">Thinking</span>
           <ChevronRight
@@ -434,7 +434,7 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
           isOpen && 'bg-muted/30'
         )}
       >
-        <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 cursor-pointer select-none">
+        <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 cursor-pointer select-none">
           <span className="[&>svg]:h-3 [&>svg]:w-3">{icon}</span>
           <span className="font-medium">{label}</span>
           {detail && filePath && onFileClick ? (
@@ -721,15 +721,10 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     case 'Bash': {
       const command = input.command as string | undefined
       const description = input.description as string | undefined
-      // Truncate long commands for display
-      const truncatedCommand =
-        command && command.length > 50
-          ? command.substring(0, 50) + '...'
-          : command
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: 'Bash',
-        detail: truncatedCommand,
+        detail: command, // CSS truncate handles overflow — no JS truncation needed
         expandedContent: description
           ? `${description}\n\n$ ${command}`
           : `$ ${command ?? '(no command)'}`,
@@ -806,12 +801,10 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     // Codex multi-agent tools
     case 'SpawnAgent': {
       const prompt = input.prompt as string | undefined
-      const truncatedPrompt =
-        prompt && prompt.length > 60 ? prompt.substring(0, 60) + '...' : prompt
       return {
         icon: <Users className="h-4 w-4 shrink-0" />,
         label: 'Spawn Agent',
-        detail: truncatedPrompt ?? 'sub-agent',
+        detail: prompt ?? 'sub-agent', // CSS truncate handles overflow — no JS truncation needed
         expandedContent: prompt ?? JSON.stringify(input, null, 2),
       }
     }

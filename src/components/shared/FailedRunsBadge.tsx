@@ -56,7 +56,7 @@ export function FailedRunsBadge({
           <button
             onClick={handleClick}
             className={cn(
-              'shrink-0 rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-500/20',
+              'shrink-0 text-[11px] font-medium text-red-600 transition-opacity hover:opacity-70',
               className
             )}
           >
@@ -78,7 +78,7 @@ export function FailedRunsBadge({
         <button
           onClick={handleClick}
           className={cn(
-            'shrink-0 rounded bg-muted-foreground/10 px-2.5 py-[4.5px] text-[11px] text-muted-foreground/50 transition-colors hover:bg-muted-foreground/20 hover:text-muted-foreground',
+            'shrink-0 text-[11px] text-muted-foreground/50 transition-opacity hover:opacity-70 hover:text-muted-foreground',
             className
           )}
         >

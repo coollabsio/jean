@@ -57,7 +57,7 @@ export function OpenPRsBadge({
         <button
           onClick={handleClick}
           className={cn(
-            'shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition-colors hover:bg-blue-500/20',
+            'shrink-0 text-[11px] font-medium text-blue-600 transition-opacity hover:opacity-70',
             className
           )}
         >

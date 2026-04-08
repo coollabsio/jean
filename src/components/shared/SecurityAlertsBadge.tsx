@@ -66,7 +66,7 @@ export function SecurityAlertsBadge({
         <button
           onClick={handleClick}
           className={cn(
-            'shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-600 transition-colors hover:bg-orange-500/20',
+            'shrink-0 text-[11px] font-medium text-orange-600 transition-opacity hover:opacity-70',
             className
           )}
         >
