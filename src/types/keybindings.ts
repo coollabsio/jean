@@ -37,6 +37,12 @@ export type KeybindingAction =
   | 'open_quick_menu'
   | 'open_usage_dropdown'
   | 'search_chat'
+  | 'switch_model_haiku'
+  | 'switch_model_sonnet'
+  | 'switch_model_opus'
+  | 'switch_mode_plan'
+  | 'switch_mode_build'
+  | 'switch_mode_yolo'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -93,6 +99,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_quick_menu: 'mod+period',
   open_usage_dropdown: 'mod+u',
   search_chat: 'mod+f',
+  switch_model_haiku: 'mod+semicolon',
+  switch_model_sonnet: 'mod+quote',
+  switch_model_opus: 'mod+backslash',
+  switch_mode_plan: 'mod+ctrl+semicolon',
+  switch_mode_build: 'mod+ctrl+quote',
+  switch_mode_yolo: 'mod+ctrl+backslash',
 }
 
 // UI definitions for the settings pane
@@ -358,6 +370,48 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     default_shortcut: 'mod+f',
     category: 'chat',
   },
+  {
+    action: 'switch_model_haiku',
+    label: 'Switch to Haiku',
+    description: 'Switch model to Haiku',
+    default_shortcut: 'mod+semicolon',
+    category: 'chat',
+  },
+  {
+    action: 'switch_model_sonnet',
+    label: 'Switch to Sonnet',
+    description: 'Switch model to Sonnet',
+    default_shortcut: 'mod+quote',
+    category: 'chat',
+  },
+  {
+    action: 'switch_model_opus',
+    label: 'Switch to Opus',
+    description: 'Switch model to Opus',
+    default_shortcut: 'mod+backslash',
+    category: 'chat',
+  },
+  {
+    action: 'switch_mode_plan',
+    label: 'Switch to Plan',
+    description: 'Switch execution mode to Plan',
+    default_shortcut: 'mod+ctrl+semicolon',
+    category: 'chat',
+  },
+  {
+    action: 'switch_mode_build',
+    label: 'Switch to Build',
+    description: 'Switch execution mode to Build',
+    default_shortcut: 'mod+ctrl+quote',
+    category: 'chat',
+  },
+  {
+    action: 'switch_mode_yolo',
+    label: 'Switch to Yolo',
+    description: 'Switch execution mode to Yolo',
+    default_shortcut: 'mod+ctrl+backslash',
+    category: 'chat',
+  },
 ]
 
 // Helper to convert shortcut string to display format
@@ -380,6 +434,8 @@ export function formatShortcutDisplay(
       switch (part) {
         case 'mod':
           return useMacCtrl ? '⌃' : isMac ? '⌘' : 'Ctrl'
+        case 'ctrl':
+          return isMac ? '⌃' : 'Ctrl'
         case 'shift':
           return isMac ? '⇧' : 'Shift'
         case 'alt':
@@ -408,6 +464,12 @@ export function formatShortcutDisplay(
           return 'Esc'
         case 'backquote':
           return '`'
+        case 'semicolon':
+          return ';'
+        case 'quote':
+          return "'"
+        case 'backslash':
+          return '\\'
         default:
           return part.toUpperCase()
       }
@@ -422,8 +484,18 @@ export function eventToShortcutString(e: KeyboardEvent): ShortcutString | null {
     return null
   }
 
+  const isMac =
+    typeof navigator !== 'undefined' && navigator.platform.includes('Mac')
+
   const parts: string[] = []
-  if (e.metaKey || e.ctrlKey) parts.push('mod')
+  // On macOS, Cmd and Ctrl are separate physical keys. Detect when both are held
+  // so we can distinguish mod+key from mod+ctrl+key (e.g. Cmd+; vs Ctrl+Cmd+;).
+  if (isMac && e.metaKey && e.ctrlKey) {
+    parts.push('mod')
+    parts.push('ctrl')
+  } else if (e.metaKey || e.ctrlKey) {
+    parts.push('mod')
+  }
   if (e.shiftKey) parts.push('shift')
   if (e.altKey) parts.push('alt')
 

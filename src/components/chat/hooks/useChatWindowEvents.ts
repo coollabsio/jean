@@ -319,6 +319,54 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('cycle-execution-mode', handler)
   }, [activeSessionId, activeWorktreeId, activeWorktreePath])
 
+  // Direct model switch (Cmd+; / Cmd+' / Cmd+\)
+  useEffect(() => {
+    if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+    const handler = (e: Event) => {
+      const model = (e as CustomEvent).detail?.model as string | undefined
+      if (!model) return
+      useChatStore.getState().setSelectedModel(activeSessionId, model)
+      invoke('broadcast_session_setting', {
+        sessionId: activeSessionId,
+        key: 'model',
+        value: model,
+      }).catch(() => undefined)
+      invoke('set_session_model', {
+        sessionId: activeSessionId,
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        model,
+      }).catch(() => undefined)
+    }
+    window.addEventListener('set-model', handler)
+    return () => window.removeEventListener('set-model', handler)
+  }, [activeSessionId, activeWorktreeId, activeWorktreePath])
+
+  // Direct execution mode switch (Ctrl+Cmd+; / Ctrl+Cmd+' / Ctrl+Cmd+\)
+  useEffect(() => {
+    if (!activeSessionId) return
+    const handler = (e: Event) => {
+      const mode = (e as CustomEvent).detail?.mode as string | undefined
+      if (!mode) return
+      useChatStore.getState().setExecutionMode(activeSessionId, mode as 'plan' | 'build' | 'yolo')
+      invoke('broadcast_session_setting', {
+        sessionId: activeSessionId,
+        key: 'executionMode',
+        value: mode,
+      }).catch(() => undefined)
+      if (activeWorktreeId && activeWorktreePath) {
+        invoke('update_session_state', {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: activeSessionId,
+          selectedExecutionMode: mode,
+        }).catch(() => undefined)
+      }
+    }
+    window.addEventListener('set-execution-mode', handler)
+    return () => window.removeEventListener('set-execution-mode', handler)
+  }, [activeSessionId, activeWorktreeId, activeWorktreePath])
+
   // CMD+G: Open git diff (also handles button clicks that dispatch with detail.type)
   useEffect(() => {
     const handler = (e: Event) => {

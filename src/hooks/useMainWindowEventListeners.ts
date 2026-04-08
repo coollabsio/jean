@@ -321,6 +321,24 @@ function executeKeybindingAction(
       window.dispatchEvent(new CustomEvent('cycle-execution-mode'))
       break
     }
+    case 'switch_model_haiku':
+      window.dispatchEvent(new CustomEvent('set-model', { detail: { model: 'haiku' } }))
+      break
+    case 'switch_model_sonnet':
+      window.dispatchEvent(new CustomEvent('set-model', { detail: { model: 'sonnet' } }))
+      break
+    case 'switch_model_opus':
+      window.dispatchEvent(new CustomEvent('set-model', { detail: { model: 'opus' } }))
+      break
+    case 'switch_mode_plan':
+      window.dispatchEvent(new CustomEvent('set-execution-mode', { detail: { mode: 'plan' } }))
+      break
+    case 'switch_mode_build':
+      window.dispatchEvent(new CustomEvent('set-execution-mode', { detail: { mode: 'build' } }))
+      break
+    case 'switch_mode_yolo':
+      window.dispatchEvent(new CustomEvent('set-execution-mode', { detail: { mode: 'yolo' } }))
+      break
     case 'approve_plan': {
       logger.debug('Keybinding: approve_plan')
       const planDialogOpen = useUIStore.getState().planDialogOpen
