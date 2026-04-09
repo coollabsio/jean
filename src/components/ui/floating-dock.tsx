@@ -3,7 +3,6 @@ import {
   useState,
   useEffect,
   useCallback,
-  useSyncExternalStore,
 } from 'react'
 import {
   LayoutDashboard,
@@ -91,7 +90,7 @@ function KeybindingHintsButton({
   side = 'top',
 }: {
   hints: KeybindingHint[]
-  side?: 'top' | 'right'
+  side?: 'top' | 'right' | 'bottom'
 }) {
   return (
     <Popover>
@@ -162,21 +161,8 @@ function CodexIcon({ className }: { className: string }) {
   )
 }
 
-const WIDE_BREAKPOINT = 1280
-const lgQuery = `(min-width: ${WIDE_BREAKPOINT}px)`
-function subscribeLg(cb: () => void) {
-  const mql = window.matchMedia(lgQuery)
-  mql.addEventListener('change', cb)
-  return () => mql.removeEventListener('change', cb)
-}
-function snapshotLg() {
-  return window.matchMedia(lgQuery).matches
-}
-const serverLg = () => true
-
 export function FloatingDock() {
   const isMobile = useIsMobile()
-  const isLg = useSyncExternalStore(subscribeLg, snapshotLg, serverLg)
   const { data: preferences } = usePreferences()
   const queryClient = useQueryClient()
 
@@ -383,11 +369,14 @@ export function FloatingDock() {
   const isWebAccess = !isNativeApp()
   const showConnectionIndicator = isWebAccess
   const showKeybindingHints = isNativeApp() && !isMobile
-  const popoverSide = isMobile || isLg ? 'top' : ('right' as const)
-  const popoverAlign = isMobile ? 'end' : ('start' as const)
+
+  // Titlebar-integrated: render inline buttons, no floating container
+  const btnClass = 'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground'
+  const tooltipSide = 'bottom' as const
+  const menuAlign = 'start' as const
 
   return (
-    <div className="absolute bottom-4 right-4 z-10 flex flex-row items-center gap-0.5 rounded-full border border-border/30 bg-background/60 backdrop-blur-md px-1 py-0.5 sm:left-4 sm:right-auto sm:flex-col sm:rounded-2xl sm:px-0.5 sm:py-1 xl:flex-row xl:rounded-full xl:px-1 xl:py-0.5">
+    <>
       <DropdownMenu open={menuOpen} onOpenChange={handleQuickMenuOpenChange}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -395,14 +384,14 @@ export function FloatingDock() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                className={btnClass}
               >
-                <Menu className="size-4" />
+                <Menu className="size-3.5" />
                 <span className="sr-only">Quick menu</span>
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent side={popoverSide}>
+          <TooltipContent side={tooltipSide}>
             Menu{' '}
             <kbd className="ml-1 text-[0.625rem] opacity-60">
               {menuShortcut}
@@ -410,8 +399,8 @@ export function FloatingDock() {
           </TooltipContent>
         </Tooltip>
         <DropdownMenuContent
-          side={popoverSide}
-          align={popoverAlign}
+          side={tooltipSide}
+          align={menuAlign}
           className="min-w-[200px]"
           onEscapeKeyDown={e => e.stopPropagation()}
         >
@@ -493,14 +482,14 @@ export function FloatingDock() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+            className={btnClass}
             onClick={() => useUIStore.getState().setCommandPaletteOpen(true)}
           >
-            <Command className="size-4" />
+            <Command className="size-3.5" />
             <span className="sr-only">Command Palette</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent side={popoverSide}>
+        <TooltipContent side={tooltipSide}>
           Command Palette{' '}
           <kbd className="ml-1 text-[0.625rem] opacity-60">⌘K</kbd>
         </TooltipContent>
@@ -513,25 +502,17 @@ export function FloatingDock() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  size={isLg ? 'sm' : 'icon'}
-                  className={
-                    isLg
-                      ? 'h-7 w-[88px] justify-center rounded-full px-2 text-muted-foreground hover:text-foreground'
-                      : 'h-7 w-7 rounded-full text-muted-foreground hover:text-foreground'
-                  }
+                  size="sm"
+                  className="h-6 justify-center rounded-none px-1.5 text-foreground/70 hover:text-foreground"
                 >
-                  <activeUsageEntry.Icon
-                    className={isLg ? 'mr-1 size-3.5 shrink-0' : 'size-4'}
-                  />
-                  {isLg && (
-                    <span className="text-[11px] leading-none tabular-nums">
-                      {usageBadge.text}
-                    </span>
-                  )}
+                  <activeUsageEntry.Icon className="mr-0.5 size-3 shrink-0" />
+                  <span className="text-[10px] leading-none tabular-nums">
+                    {usageBadge.text}
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent side={popoverSide}>
+            <TooltipContent side={tooltipSide}>
               {activeUsageEntry.label} Session|Weekly{' '}
               <kbd className="ml-1 text-[0.625rem] opacity-60">
                 {usageShortcut}
@@ -539,8 +520,8 @@ export function FloatingDock() {
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent
-            side={popoverSide}
-            align={popoverAlign}
+            side={tooltipSide}
+            align={menuAlign}
             className="min-w-[180px]"
             onEscapeKeyDown={e => e.stopPropagation()}
           >
@@ -583,8 +564,8 @@ export function FloatingDock() {
 
       {showConnectionIndicator && <ConnectionIndicator />}
       {showKeybindingHints && (
-        <KeybindingHintsButton hints={CANVAS_HINTS} side={popoverSide} />
+        <KeybindingHintsButton hints={CANVAS_HINTS} side={tooltipSide} />
       )}
-    </div>
+    </>
   )
 }

@@ -148,7 +148,6 @@ const SessionHistoryModal = lazy(() =>
     default: mod.SessionHistoryModal,
   }))
 )
-import { FloatingDock } from '@/components/ui/floating-dock'
 import { Toaster } from '@/components/ui/sonner'
 import { useWindowMaximized } from '@/hooks/use-window-maximized'
 import { useUIStore } from '@/store/ui-store'
@@ -482,7 +481,6 @@ export function MainWindow() {
         {/* Main Content - flex-1 to fill remaining space */}
         <div className="relative min-w-0 flex-1 overflow-hidden">
           <MainWindowContent />
-          <FloatingDock />
         </div>
       </div>
 

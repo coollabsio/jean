@@ -22,6 +22,7 @@ import { usePreferences } from '@/services/preferences'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import { isNativeApp } from '@/lib/environment'
 import { UnreadBell } from '@/components/unread/UnreadBell'
+import { FloatingDock } from '@/components/ui/floating-dock'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 
@@ -152,6 +153,9 @@ export function TitleBar({
             </TooltipTrigger>
             <TooltipContent>Sponsor</TooltipContent>
           </Tooltip>
+          {/* Separator between upstream links and dock actions */}
+          <div className="mx-1 h-3.5 w-px bg-border/50" />
+          <FloatingDock />
         </div>
       </div>
 
