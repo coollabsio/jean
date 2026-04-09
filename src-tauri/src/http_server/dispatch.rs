@@ -1460,6 +1460,10 @@ pub async fn dispatch_command(
             let result = crate::terminal::get_ports(worktree_path).await;
             to_value(result)
         }
+        "get_terminal_listening_ports" => {
+            // NATIVE ONLY: lsof not available in browser mode
+            Ok(Value::Array(vec![]))
+        }
 
         // =====================================================================
         // Session Management (additional)

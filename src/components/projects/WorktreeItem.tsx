@@ -12,7 +12,9 @@ import { isBaseSession, type Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { WorktreeContextMenu } from './WorktreeContextMenu'
 import { useRenameWorktree } from '@/services/projects'
 import { useSessions } from '@/services/chat'
@@ -80,6 +82,7 @@ export function WorktreeItem({
   )
   const isSelected = selectedWorktreeId === worktree.id
   const isBase = isBaseSession(worktree)
+
 
   // Get git status for this worktree from event-driven cache
   // Note: useGitStatus reads from TanStack Query cache, no network requests
@@ -546,7 +549,7 @@ export function WorktreeItem({
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
         >
-          {/* Status indicator */}
+          {/* Chat status indicator (spinner/dot) */}
           <StatusIndicator
             status={indicatorStatus}
             variant={indicatorVariant}
@@ -573,6 +576,17 @@ export function WorktreeItem({
               )}
             >
               <span className="truncate">{worktree.name}</span>
+              {/* Terminal running/failed indicator — click opens terminal */}
+              <TerminalStatusIndicator
+                worktreeId={worktree.id}
+                onClick={() => {
+                  selectProject(projectId)
+                  selectWorktree(worktree.id)
+                  useChatStore.getState().clearActiveWorktree()
+                  useUIStore.getState().setSessionChatModalOpen(true, worktree.id)
+                  useTerminalStore.getState().setModalTerminalOpen(worktree.id, true)
+                }}
+              />
               {/* Chevron for expand/collapse sessions */}
               <button
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"

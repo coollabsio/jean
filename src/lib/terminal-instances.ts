@@ -146,12 +146,17 @@ export function getOrCreateTerminal(
       const inst = instances.get(terminalId)
       inst?.onStopped?.(exitCode, signal)
 
-      // Auto-close terminal tab on:
-      // 1. Successful exit (code 0) — any terminal
-      // 2. SIGINT (Ctrl+C) — only for "run" terminals (have a command)
-      const isInterrupt = signal != null && signal.includes('Interrupt')
+      // Auto-close terminal tab on clean exit:
+      // - code 0 — any terminal
+      // - SIGINT (Ctrl+C) or SIGTERM (graceful stop) — user or system stop
+      // SIGKILL, SIGSEGV, SIGABRT, etc. are NOT clean → mark as failed.
       const isRunTerminal = inst?.command != null
-      if (inst && (exitCode === 0 || (isInterrupt && isRunTerminal))) {
+      const isIntentionalSignal =
+        signal != null &&
+        (signal.includes('Interrupt') || signal.includes('Terminated'))
+      const isCleanExit = exitCode === 0 || isIntentionalSignal
+
+      if (isCleanExit && inst) {
         const wId = inst.worktreeId
         setTimeout(() => {
           if (!instances.has(terminalId)) return // Already disposed
@@ -168,6 +173,9 @@ export function getOrCreateTerminal(
             useTerminalStore.getState().setModalTerminalOpen(wId, false)
           }
         }, 0)
+      } else if (isRunTerminal) {
+        // Non-zero exit on a run terminal → mark as failed (red indicator in sidebar)
+        useTerminalStore.getState().setTerminalFailed(terminalId, true)
       }
     }
   }).then(unlisten => listeners.push(unlisten))

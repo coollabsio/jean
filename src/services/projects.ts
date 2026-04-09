@@ -2196,6 +2196,34 @@ export function usePorts(worktreePath: string | null) {
 }
 
 /**
+ * A TCP port actively listened on by a terminal's child process.
+ * Detected at runtime via lsof (macOS/Linux only).
+ */
+export interface TerminalPortInfo {
+  terminalId: string
+  port: number
+  processName: string
+  localAddress: string
+}
+
+/**
+ * Hook to discover TCP LISTEN ports owned by terminal processes.
+ * Polls every 5s when enabled. Returns empty array on non-native platforms.
+ */
+export function useTerminalListeningPorts(enabled: boolean) {
+  return useQuery<TerminalPortInfo[]>({
+    queryKey: ['terminal-listening-ports'],
+    queryFn: async () => {
+      if (!isTauri()) return []
+      return invoke<TerminalPortInfo[]>('get_terminal_listening_ports')
+    },
+    enabled,
+    refetchInterval: 5_000,
+    staleTime: 3_000,
+  })
+}
+
+/**
  * Hook to commit changes in a worktree
  */
 export function useCommitChanges() {

@@ -17,6 +17,8 @@ interface TerminalState {
   activeTerminalIds: Record<string, string>
   // Set of running terminal IDs (have active PTY process)
   runningTerminals: Set<string>
+  // Set of terminal IDs that exited with non-zero exit code (crash/failure)
+  failedTerminals: Set<string>
   // Whether terminal panel is expanded (false = collapsed/minimized) - global since only one worktree visible
   terminalVisible: boolean
   // Whether terminal panel is open per worktree (worktreeId -> open)
@@ -53,6 +55,10 @@ interface TerminalState {
   setTerminalRunning: (terminalId: string, running: boolean) => void
   isTerminalRunning: (terminalId: string) => boolean
 
+  // Failed state (terminal exited with non-zero code)
+  setTerminalFailed: (terminalId: string, failed: boolean) => void
+  isTerminalFailed: (terminalId: string) => boolean
+
   // Start a run command (creates new terminal with command)
   startRun: (worktreeId: string, command: string) => string
 
@@ -77,6 +83,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   terminals: {},
   activeTerminalIds: {},
   runningTerminals: new Set(),
+  failedTerminals: new Set(),
   terminalVisible: false,
   terminalPanelOpen: {},
   terminalHeight: 30,
@@ -162,6 +169,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const newRunning = new Set(state.runningTerminals)
       newRunning.delete(terminalId)
 
+      // Update failed terminals
+      const newFailed = new Set(state.failedTerminals)
+      newFailed.delete(terminalId)
+
       // Update active terminal if needed
       const currentActiveId = state.activeTerminalIds[worktreeId] ?? ''
       const newActiveId =
@@ -179,6 +190,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           [worktreeId]: newActiveId,
         },
         runningTerminals: newRunning,
+        failedTerminals: newFailed,
       }
     }),
 
@@ -200,6 +212,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   setTerminalRunning: (terminalId, running) =>
     set(state => {
+      if (running === state.runningTerminals.has(terminalId)) return state
       const newSet = new Set(state.runningTerminals)
       if (running) {
         newSet.add(terminalId)
@@ -210,6 +223,20 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }),
 
   isTerminalRunning: terminalId => get().runningTerminals.has(terminalId),
+
+  setTerminalFailed: (terminalId, failed) =>
+    set(state => {
+      if (failed === state.failedTerminals.has(terminalId)) return state
+      const newSet = new Set(state.failedTerminals)
+      if (failed) {
+        newSet.add(terminalId)
+      } else {
+        newSet.delete(terminalId)
+      }
+      return { failedTerminals: newSet }
+    }),
+
+  isTerminalFailed: terminalId => get().failedTerminals.has(terminalId),
 
   startRun: (worktreeId, command) => {
     const state = get()
@@ -245,10 +272,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const terminals = state.terminals[worktreeId] ?? []
     const terminalIds = terminals.map(t => t.id)
 
-    // Remove all running terminal IDs for this worktree
+    // Remove all running/failed terminal IDs for this worktree
     const newRunning = new Set(state.runningTerminals)
+    const newFailed = new Set(state.failedTerminals)
     for (const id of terminalIds) {
       newRunning.delete(id)
+      newFailed.delete(id)
     }
 
     set({
@@ -261,6 +290,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         [worktreeId]: '',
       },
       runningTerminals: newRunning,
+      failedTerminals: newFailed,
       terminalPanelOpen: {
         ...state.terminalPanelOpen,
         [worktreeId]: false,

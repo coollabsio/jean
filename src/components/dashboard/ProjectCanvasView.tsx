@@ -67,6 +67,7 @@ import { useGitStatus } from '@/services/git-status'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
@@ -100,6 +101,7 @@ import {
   useCloseBaseSessionClean,
   useCloseBaseSessionArchive,
 } from '@/services/projects'
+import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { usePreferences } from '@/services/preferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
@@ -116,12 +118,6 @@ const LinkedProjectsModal = lazy(() =>
 )
 import type { DiffRequest } from '@/types/git-diff'
 import { toast } from 'sonner'
-import { useTerminalStore } from '@/store/terminal-store'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import {
   gitPush,
   fetchWorktreesStatus,
@@ -273,13 +269,6 @@ function WorktreeSectionHeader({
   const isBase = isBaseSession(worktree)
   const { data: gitStatus } = useGitStatus(worktree.id)
 
-  const hasRunningTerminal = useTerminalStore(state => {
-    const terminals = state.terminals[worktree.id] ?? []
-    // Show spinner when a run-script terminal exists: covers both "pending" (created
-    // by startRun on canvas, PTY starts when session opens) and "running" (PTY active).
-    // Terminal entry is removed on successful exit, so spinner clears automatically.
-    return terminals.some(t => !!t.command)
-  })
 
   const behindCount =
     gitStatus?.behind_count ?? worktree.cached_behind_count ?? 0
@@ -416,21 +405,19 @@ function WorktreeSectionHeader({
                 <span className="text-[9px]">⌘{shortcutNumber}</span>
               </kbd>
             )}
-            {hasRunningTerminal && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="shrink-0 block h-3 w-3 square-spinner" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  Dev server running in terminal. Press ⌘R to open
-                </TooltipContent>
-              </Tooltip>
-            )}
             <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate">
                   {isBase ? 'Base Session' : worktree.name}
                 </span>
+                <TerminalStatusIndicator
+                  worktreeId={worktree.id}
+                  iconSize="h-3 w-3"
+                  onClick={() => {
+                    useUIStore.getState().setSessionChatModalOpen(true, worktree.id)
+                    useTerminalStore.getState().setModalTerminalOpen(worktree.id, true)
+                  }}
+                />
                 {displayBranch && (
                   <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground sm:inline-flex">
                     <GitBranch className="h-2.5 w-2.5" />

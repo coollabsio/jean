@@ -1,0 +1,139 @@
+# Customization re-implementation tracking
+# Status: done | in-progress | todo
+
+customizations:
+  - spec: xx-active-session-highlight.md
+    status: done
+    commit: 92f414ae75f562bfa291d53e64decf889e948b04
+    pr: 286
+    jean_deep_link: null
+
+  - spec: xx-chat-text-search.md
+    status: done
+    commit: 92c5bc475f8a385f6d8e7ec9a8001368c31e44e2
+    pr: 287
+    jean_deep_link: "jean:///show?session=58eae522-8a2c-4fd3-ae45-3ba044c74f3b"
+
+  - spec: xx-ui-tweaks.md
+    status: done
+    commit: 69f2f6d
+
+  - spec: xx-direct-model-and-mode-shortcuts.md
+    status: done
+    commit: f8115b1
+    pr: null
+    jean_deep_link: null
+  
+  - spec: xx-go-to-session.md
+    status: done
+    commit: f5f0886
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-rename-session-shortcut.md
+    status: done
+    commit: 1166584
+    pr: null
+    jean_deep_link: null
+    
+  - spec: xx-indicator-hover-titles.md
+    status: done
+    commit: 1009bfd
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-navigation-history.md
+    status: done
+    commit: 8c9ea16
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-selectable-text.md
+    status: done
+    commit: b50ada9
+
+  - spec: xx-sidebar-disable-status-grouping.md
+    status: done
+    commit: cd3e63d
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-toggle-all-worktrees-expanded.md
+    status: done
+    commit: fb79175
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-sidebar-session-labels.md
+    status: done
+    commit: fc4277a
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-session-history-and-notification-center.md
+    status: done
+    commit: b4c61ed
+    pr: null
+    jean_deep_link: null
+    
+
+  - spec: xx-git-diff-tree-view.md
+    status: done
+    commit: da5d26e
+  
+  - spec: xx-push-tooltip-commit-list.md
+    status: done
+    commit: b4aa00a
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-recap-banner.md
+    status: done
+    commit: aac36a1
+
+
+  - spec: xx-sidebar-pr-badge.md
+    status: done
+    commit: 60ec8ed
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-terminal-word-wrap-toggle.md
+    status: done
+    commit: 9e1868c
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-text-highlights.md
+    status: done
+    commit: 338c38f
+    pr: null
+    jean_deep_link: null
+
+  - spec: xx-terminal-status-indicator.md
+    status: in-progress
+    commit: null
+    pr: 285 # not mine
+    jean_deep_link: null
+    note: "Based on upstream PR #285 with tweaks: icon moved right of title, clickable to open terminal"
+
+  # TODO
+
+  - spec: xx-deep-links.md
+    status: todo
+  
+
+  
+  
+  
+  
+  # SKIP
+  - spec: xx-fork-session.md
+    status: todo
+
+
+  - spec: xx-project-index-switching.md
+    status: not-needed-anymore
+
+  - spec: xx-fix-json-schema-max-turns.md
+    status: maybe-not-needed-anymore
