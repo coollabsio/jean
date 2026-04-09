@@ -123,6 +123,9 @@ pub struct Project {
     /// IDs of linked projects for cross-project context sharing
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_project_ids: Vec<String>,
+    /// Nightshift configuration for this project
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nightshift_config: Option<crate::nightshift::types::NightshiftConfig>,
 }
 
 /// A git worktree created for a project

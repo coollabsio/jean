@@ -117,6 +117,13 @@ customizations:
     jean_deep_link: null
     note: "Based on upstream PR #285 with tweaks: icon moved right of title, clickable to open terminal"
 
+  - spec: xx-nightshift.md
+    status: in-progress
+    commit: null
+    pr: 122 # not mine
+    jean_deep_link: null
+    note: "Based on upstream PR #122. Tweaks: merged storage.rs conflict with text-highlights, added missing Worktree fields to engine.rs"
+
   # TODO
 
   - spec: xx-deep-links.md

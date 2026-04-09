@@ -2422,6 +2422,237 @@ fn process_codex_event(
 }
 
 // =============================================================================
+// File-based tailing for detached Codex CLI
+// =============================================================================
+
+/// Tail a Codex JSONL output file and emit events as new lines appear.
+///
+/// Maps Codex events to the same Tauri events used by Claude, so the
+/// frontend streaming infrastructure works unchanged.
+pub fn tail_codex_output(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    output_file: &std::path::Path,
+    pid: u32,
+    is_plan_mode: bool,
+) -> Result<CodexResponse, String> {
+    use super::detached::is_process_alive;
+    use super::tail::{NdjsonTailer, POLL_INTERVAL, POLL_INTERVAL_FAST};
+    use std::time::{Duration, Instant};
+
+    log::trace!("Starting to tail Codex NDJSON output for session: {session_id}");
+
+    let mut tailer = NdjsonTailer::new_from_start(output_file)?;
+
+    let mut full_content = String::new();
+    let mut thread_id = String::new();
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut content_blocks: Vec<ContentBlock> = Vec::new();
+    let mut completed = false;
+    let mut cancelled = false;
+    let mut error_emitted = false;
+    let mut usage: Option<UsageData> = None;
+    let mut error_lines: Vec<String> = Vec::new();
+
+    // Track tool IDs for matching started/completed pairs
+    let mut pending_tool_ids: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    let startup_timeout = Duration::from_secs(120);
+    let dead_process_timeout = Duration::from_secs(2);
+    let started_at = Instant::now();
+    let mut last_output_time = Instant::now();
+    let mut received_codex_output = false;
+
+    loop {
+        let lines = tailer.poll()?;
+        let had_data = !lines.is_empty();
+
+        if had_data {
+            last_output_time = Instant::now();
+        }
+
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // Skip our metadata header
+            if line.contains("\"_run_meta\"") {
+                continue;
+            }
+
+            if !received_codex_output {
+                log::trace!("Received first Codex output for session: {session_id}");
+                received_codex_output = true;
+            }
+
+            let msg: serde_json::Value = match serde_json::from_str(&line) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::trace!("Failed to parse Codex line as JSON: {e}");
+                    let trimmed = line.trim().to_string();
+                    if !trimmed.is_empty() {
+                        error_lines.push(trimmed);
+                    }
+                    continue;
+                }
+            };
+
+            let event_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            process_codex_event(
+                app,
+                session_id,
+                worktree_id,
+                &msg,
+                event_type,
+                &mut full_content,
+                &mut thread_id,
+                &mut tool_calls,
+                &mut content_blocks,
+                &mut pending_tool_ids,
+                &mut completed,
+                &mut usage,
+                &mut error_emitted,
+            );
+        }
+
+        if completed {
+            break;
+        }
+
+        // Check if externally cancelled
+        if !super::registry::is_process_running(session_id) {
+            log::trace!("Session {session_id} cancelled externally, stopping Codex tail");
+            cancelled = true;
+            break;
+        }
+
+        // Timeout logic
+        let process_alive = is_process_alive(pid);
+
+        if received_codex_output {
+            if !process_alive && last_output_time.elapsed() > dead_process_timeout {
+                log::trace!("Codex process {pid} is no longer running and no new output");
+                // If we got content, treat as completed (Codex yolo mode may
+                // not emit turn.completed before exiting)
+                if full_content.is_empty() && content_blocks.is_empty() && tool_calls.is_empty() {
+                    cancelled = true;
+                }
+                break;
+            }
+        } else {
+            let elapsed = started_at.elapsed();
+
+            if !process_alive && elapsed > Duration::from_secs(5) {
+                log::warn!(
+                    "Codex process {pid} died during startup after {:.1}s with no output",
+                    elapsed.as_secs_f64()
+                );
+                cancelled = true;
+                break;
+            }
+
+            if elapsed > startup_timeout {
+                log::warn!("Startup timeout exceeded waiting for Codex output");
+                cancelled = true;
+                break;
+            }
+        }
+
+        // Adaptive sleep: poll faster when actively receiving data (5ms)
+        // to reduce per-event latency, back off to 50ms when idle.
+        std::thread::sleep(if had_data {
+            POLL_INTERVAL_FAST
+        } else {
+            POLL_INTERVAL
+        });
+    }
+
+    // Surface errors
+    if cancelled || (full_content.is_empty() && !received_codex_output) {
+        if let Ok(remaining) = tailer.poll() {
+            for line in remaining {
+                let trimmed = line.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.contains("\"_run_meta\"")
+                    && serde_json::from_str::<serde_json::Value>(trimmed).is_err()
+                {
+                    error_lines.push(trimmed.to_string());
+                }
+            }
+        }
+        let drained = tailer.drain_buffer();
+        if !drained.trim().is_empty() {
+            error_lines.push(drained.trim().to_string());
+        }
+    }
+
+    let has_content = !full_content.is_empty() || !content_blocks.is_empty() || !tool_calls.is_empty();
+
+    if !error_emitted && !error_lines.is_empty() && !has_content {
+        let error_text = error_lines.join("\n");
+        log::warn!("Codex CLI error output for session {session_id}: {error_text}");
+
+        let user_error = format_codex_user_error(&error_text);
+        let _ = app.emit_all(
+            "chat:error",
+            &ErrorEvent {
+                session_id: session_id.to_string(),
+                worktree_id: worktree_id.to_string(),
+                error: user_error,
+            },
+        );
+        error_emitted = true;
+    }
+
+    // Fallback: process died silently with no content and no error emitted
+    if !error_emitted && !completed && !has_content && cancelled {
+        log::warn!("Codex process died silently for session {session_id} with no output");
+        let _ = app.emit_all(
+            "chat:error",
+            &ErrorEvent {
+                session_id: session_id.to_string(),
+                worktree_id: worktree_id.to_string(),
+                error: "Codex CLI exited unexpectedly without producing output. Check your API key and usage limits.".to_string(),
+            },
+        );
+        error_emitted = true;
+    }
+
+    // Don't emit chat:done if an error was emitted — the frontend chat:done
+    // handler clears errors, which would hide the error message from the user
+    if !cancelled && !error_emitted {
+        let _ = app.emit_all(
+            "chat:done",
+            &DoneEvent {
+                session_id: session_id.to_string(),
+                worktree_id: worktree_id.to_string(),
+                waiting_for_plan: is_plan_mode && !full_content.is_empty(),
+            },
+        );
+    }
+
+    log::trace!(
+        "Codex tailing complete: {} chars, {} tool calls, cancelled: {cancelled}",
+        full_content.len(),
+        tool_calls.len()
+    );
+
+    Ok(CodexResponse {
+        content: full_content,
+        thread_id,
+        tool_calls,
+        content_blocks,
+        cancelled,
+        error_emitted,
+        usage,
+    })
+}
+
+// =============================================================================
 // JSONL history parser (for loading saved sessions)
 // =============================================================================
 
