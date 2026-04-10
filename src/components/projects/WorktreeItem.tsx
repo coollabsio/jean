@@ -37,7 +37,6 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
-import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import { usePreferences } from '@/services/preferences'
 
 interface WorktreeItemProps {
@@ -349,10 +348,6 @@ export function WorktreeItem({
     },
     [projectId, worktree.id, worktree.path, selectProject, selectWorktree]
   )
-
-  // Responsive padding based on sidebar width
-  const sidebarWidth = useSidebarWidth()
-  const isNarrowSidebar = sidebarWidth < 200
 
   // Inline editing state
   const [isEditing, setIsEditing] = useState(false)

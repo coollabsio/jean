@@ -1737,6 +1737,34 @@ pub fn run_setup_script(
     run_jean_script("setup", worktree_path, root_path, branch, script)
 }
 
+/// Read jean.json from the project root and run the setup script if configured.
+///
+/// Returns (setup_output, setup_script, setup_success) — all None if no jean.json
+/// or no setup script is defined. Logs failures but never errors out; the worktree
+/// is still usable even if the setup script fails.
+pub fn run_setup_if_configured(
+    worktree_path: &str,
+    project_root: &str,
+    branch: &str,
+) -> (Option<String>, Option<String>, Option<bool>) {
+    let config = match read_jean_config(project_root) {
+        Some(c) => c,
+        None => return (None, None, None),
+    };
+    let script = match config.scripts.setup {
+        Some(s) if !s.is_empty() => s,
+        _ => return (None, None, None),
+    };
+    log::trace!("Found jean.json setup script, executing in {worktree_path}");
+    match run_setup_script(worktree_path, project_root, branch, &script) {
+        Ok(output) => (Some(output), Some(script), Some(true)),
+        Err(e) => {
+            log::warn!("Setup script failed (continuing): {e}");
+            (Some(e), Some(script), Some(false))
+        }
+    }
+}
+
 /// Run a teardown script in a worktree directory before deletion
 ///
 /// Executes the script using sh -c and captures output.

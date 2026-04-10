@@ -21,6 +21,7 @@ import {
   useNightshiftConfig,
   useSaveNightshiftConfig,
   useStartNightshiftRun,
+  useStartNightshiftCheck,
 } from '@/services/nightshift'
 import { useNightshiftStore } from '@/store/nightshift-store'
 import { defaultNightshiftConfig } from '@/types/nightshift'
@@ -105,6 +106,7 @@ export function NightshiftPane({
   const { data: config } = useNightshiftConfig(projectId)
   const saveConfig = useSaveNightshiftConfig()
   const startRun = useStartNightshiftRun()
+  const startCheck = useStartNightshiftCheck()
   const activeRuns = useNightshiftStore(s => s.activeRuns)
   const isRunning = !!activeRuns[projectId]
 
@@ -178,14 +180,23 @@ export function NightshiftPane({
   )
 
   const handleRunNow = useCallback(async () => {
-    const toastId = toast.loading('Starting Nightshift run...')
     try {
       await startRun.mutateAsync(projectId)
-      toast.success('Nightshift run started', { id: toastId })
     } catch (error) {
-      toast.error(`Failed to start: ${error}`, { id: toastId })
+      toast.error(`Failed to start: ${error}`)
     }
   }, [projectId, startRun])
+
+  const handleRunCheck = useCallback(
+    async (checkId: string, checkName: string) => {
+      try {
+        await startCheck.mutateAsync({ projectId, checkId })
+      } catch (error) {
+        toast.error(`Failed to start "${checkName}": ${error}`)
+      }
+    },
+    [projectId, startCheck]
+  )
 
   const handleViewHistory = useCallback(() => {
     useNightshiftStore.getState().openRunsModal(projectId)
@@ -248,7 +259,7 @@ export function NightshiftPane({
             ) : (
               <Play className="h-4 w-4" />
             )}
-            {isRunning ? 'Running...' : 'Run Now'}
+            {isRunning ? 'Running...' : 'Run most overdue check now'}
           </Button>
           <Button variant="outline" size="sm" onClick={handleViewHistory}>
             <History className="h-4 w-4" />
@@ -335,14 +346,24 @@ export function NightshiftPane({
             return (
               <div key={check.id} className="border border-border rounded-md">
                 <div className="flex items-start gap-3 p-3">
-                  <Checkbox
-                    id={`check-${check.id}`}
-                    checked={isCheckEnabled(check.id, check.defaultEnabled)}
-                    onCheckedChange={() =>
-                      handleToggleCheck(check.id, check.defaultEnabled)
-                    }
-                    className="mt-0.5"
-                  />
+                  <div className="flex flex-col items-center gap-1 mt-0.5">
+                    <Checkbox
+                      id={`check-${check.id}`}
+                      checked={isCheckEnabled(check.id, check.defaultEnabled)}
+                      onCheckedChange={() =>
+                        handleToggleCheck(check.id, check.defaultEnabled)
+                      }
+                    />
+                    <button
+                      type="button"
+                      title={`Run "${check.name}" now`}
+                      className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
+                      disabled={isRunning}
+                      onClick={() => handleRunCheck(check.id, check.name)}
+                    >
+                      <Play className="h-3 w-3" />
+                    </button>
+                  </div>
                   <button
                     type="button"
                     className="flex-1 text-left cursor-pointer"

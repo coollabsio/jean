@@ -53,6 +53,17 @@ pub async fn nightshift_start_run(app: AppHandle, project_id: String) -> Result<
     engine::start_run(&app, &project_id, RunTrigger::Manual)
 }
 
+/// Manually trigger a single specific check for a project.
+/// Returns immediately with run_id; progress is emitted via events.
+#[tauri::command]
+pub async fn nightshift_start_check(
+    app: AppHandle,
+    project_id: String,
+    check_id: String,
+) -> Result<String, String> {
+    engine::start_single_check_run(&app, &project_id, &check_id)
+}
+
 /// Cancel an in-progress Nightshift run
 #[tauri::command]
 pub async fn nightshift_cancel_run(run_id: String) -> Result<bool, String> {
@@ -100,5 +111,5 @@ pub async fn nightshift_report_check_done(
 /// Get the built-in default prompt for a check (for UI reset-to-default)
 #[tauri::command]
 pub async fn nightshift_get_default_prompt(check_id: String) -> Result<Option<String>, String> {
-    Ok(get_default_prompt(&check_id).map(|s| s.to_string()))
+    Ok(get_default_prompt(&check_id).map(|s: &str| s.to_string()))
 }

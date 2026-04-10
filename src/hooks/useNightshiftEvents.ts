@@ -34,17 +34,17 @@ export function useNightshiftEvents() {
       listen<RunStartedPayload>('nightshift:run-started', (event) => {
         const { runId, projectId } = event.payload
         useNightshiftStore.getState().setActiveRun(projectId, runId)
-        toast.loading('Nightshift run started...', { id: `nightshift-${runId}` })
       })
     )
 
+    // Toasts here are brief notifications, NOT persistent progress trackers.
+    // Checks can run for 30+ minutes — a persistent toast would obstruct the UI
+    // (especially the prompt input area). Progress is visible in View History.
     listeners.push(
       listen<CheckStartedPayload>('nightshift:check-started', (event) => {
         const { runId, checkId, checkName } = event.payload
         useNightshiftStore.getState().setRunningCheck(runId, checkId)
-        toast.loading(`Running: ${checkName}...`, {
-          id: `nightshift-${runId}`,
-        })
+        toast(`Running: ${checkName}`, { duration: 4000 })
       })
     )
 
@@ -125,7 +125,6 @@ export function useNightshiftEvents() {
           toast.success(
             `Nightshift completed ${totalChecks} check${totalChecks === 1 ? '' : 's'}`,
             {
-              id: `nightshift-${runId}`,
               action: {
                 label: 'View',
                 onClick: () => {
@@ -136,7 +135,6 @@ export function useNightshiftEvents() {
           )
         } else if (status === 'partially_completed') {
           toast.warning('Nightshift: some checks failed', {
-            id: `nightshift-${runId}`,
             action: {
               label: 'View',
               onClick: () => {
@@ -145,9 +143,7 @@ export function useNightshiftEvents() {
             },
           })
         } else if (status === 'failed') {
-          toast.error('Nightshift run failed', {
-            id: `nightshift-${runId}`,
-          })
+          toast.error('Nightshift run failed')
         }
       })
     )
@@ -158,9 +154,7 @@ export function useNightshiftEvents() {
         useNightshiftStore.getState().clearActiveRun(projectId)
         useNightshiftStore.getState().clearRunningCheck(runId)
 
-        toast.error(`Nightshift failed: ${error}`, {
-          id: `nightshift-${runId}`,
-        })
+        toast.error(`Nightshift failed: ${error}`)
       })
     )
 

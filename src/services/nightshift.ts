@@ -69,6 +69,20 @@ export function useStartNightshiftRun() {
   })
 }
 
+/** Manually trigger a single specific check */
+export function useStartNightshiftCheck() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, checkId }: { projectId: string; checkId: string }) =>
+      invoke<string>('nightshift_start_check', { projectId, checkId }),
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({
+        queryKey: nightshiftQueryKeys.runs(projectId),
+      })
+    },
+  })
+}
+
 /** Cancel an in-progress run */
 export function useCancelNightshiftRun() {
   return useMutation({

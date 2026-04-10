@@ -264,45 +264,23 @@ fn get_or_create_nightshift_worktree(
         )?;
     }
 
+    // Run jean.json setup script if configured (e.g. `bun install`)
+    let (setup_output, setup_script, setup_success) =
+        crate::projects::git::run_setup_if_configured(&worktree_path_str, &project.path, branch_name);
+
     // Register worktree in ProjectsData
     let worktree_id = uuid::Uuid::new_v4().to_string();
-    let worktree = Worktree {
-        id: worktree_id.clone(),
-        project_id: project_id.to_string(),
-        name: worktree_name.to_string(),
-        path: worktree_path_str.clone(),
-        branch: branch_name.to_string(),
-        created_at: now(),
-        setup_output: None,
-        setup_script: None,
-        session_type: crate::projects::types::SessionType::Worktree,
-        pr_number: None,
-        pr_url: None,
-        issue_number: None,
-        cached_pr_status: None,
-        cached_check_status: None,
-        cached_behind_count: None,
-        cached_ahead_count: None,
-        cached_status_at: None,
-        cached_uncommitted_added: None,
-        cached_uncommitted_removed: None,
-        cached_branch_diff_added: None,
-        cached_branch_diff_removed: None,
-        cached_base_branch_ahead_count: None,
-        cached_base_branch_behind_count: None,
-        cached_worktree_ahead_count: None,
-        cached_unpushed_count: None,
-        order: 999,
-        archived_at: None,
-        label: None,
-        last_opened_at: None,
-        setup_success: None,
-        linear_issue_identifier: None,
-        security_alert_number: None,
-        security_alert_url: None,
-        advisory_ghsa_id: None,
-        advisory_url: None,
-    };
+    let mut worktree = Worktree::new(
+        worktree_id.clone(),
+        project_id.to_string(),
+        worktree_name.to_string(),
+        worktree_path_str.clone(),
+        branch_name.to_string(),
+        999,
+    );
+    worktree.setup_output = setup_output;
+    worktree.setup_script = setup_script;
+    worktree.setup_success = setup_success;
 
     let mut data = load_projects_data(app)?;
     data.worktrees.push(worktree.clone());
@@ -439,6 +417,8 @@ pub struct RunParams<'a> {
     pub config: &'a NightshiftConfig,
     pub trigger: RunTrigger,
     pub run_id: &'a str,
+    /// When set, skip get_enabled_checks() and run only this check
+    pub check_id_override: Option<String>,
 }
 
 /// Execute a full nightshift run for a project (called from background thread)
@@ -468,6 +448,7 @@ pub fn execute_run(params: &RunParams<'_>) {
         config,
         trigger,
         run_id,
+        ..
     } = params;
     let trigger = trigger.clone();
     log::trace!("Starting nightshift run {run_id} for project {project_id}");
@@ -525,7 +506,11 @@ pub fn execute_run(params: &RunParams<'_>) {
     );
 
     // 2. Determine which checks to run
-    let check_ids = get_enabled_checks(app, project_id, config, &run.trigger);
+    let check_ids = if let Some(ref id) = params.check_id_override {
+        vec![id.clone()]
+    } else {
+        get_enabled_checks(app, project_id, config, &run.trigger)
+    };
     if check_ids.is_empty() {
         log::trace!("No checks to run for project {project_id}");
         run.status = RunStatus::Completed;
@@ -775,6 +760,55 @@ pub fn start_run(app: &AppHandle, project_id: &str, trigger: RunTrigger) -> Resu
             config: &config,
             trigger,
             run_id: &run_id_clone,
+            check_id_override: None,
+        });
+    });
+
+    Ok(run_id)
+}
+
+/// Start a nightshift run for a single specific check. Returns the run ID.
+pub fn start_single_check_run(
+    app: &AppHandle,
+    project_id: &str,
+    check_id: &str,
+) -> Result<String, String> {
+    // Validate the check_id exists
+    find_check(check_id)
+        .ok_or_else(|| format!("Unknown check: {check_id}"))?;
+
+    let data = load_projects_data(app)?;
+    let project = data
+        .find_project(project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    if project.is_folder {
+        return Err("Cannot run Nightshift on a folder".to_string());
+    }
+    if project.path.is_empty() {
+        return Err("Project has no path".to_string());
+    }
+    if is_project_running(project_id) {
+        return Err("Nightshift is already running for this project".to_string());
+    }
+
+    let config = project.nightshift_config.clone().unwrap_or_default();
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let app_clone = app.clone();
+    let project_id = project_id.to_string();
+    let run_id_clone = run_id.clone();
+    let check_id = check_id.to_string();
+
+    mark_project_running(&project_id);
+
+    std::thread::spawn(move || {
+        execute_run(&RunParams {
+            app: &app_clone,
+            project_id: &project_id,
+            config: &config,
+            trigger: RunTrigger::Manual,
+            run_id: &run_id_clone,
+            check_id_override: Some(check_id),
         });
     });
 

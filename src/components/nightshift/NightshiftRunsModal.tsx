@@ -15,6 +15,11 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -23,57 +28,82 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { useNightshiftStore } from '@/store/nightshift-store'
+import { useChatStore } from '@/store/chat-store'
 import { useNightshiftRuns } from '@/services/nightshift'
 import type {
   NightshiftRun,
   NightshiftRunStatus,
 } from '@/types/nightshift'
 
-function StatusBadge({ status }: { status: NightshiftRunStatus }) {
-  switch (status) {
-    case 'completed':
-      return (
-        <Badge variant="default" className="bg-green-600 text-white">
-          <CheckCircle2 className="h-3 w-3 mr-1" />
-          Completed
-        </Badge>
-      )
-    case 'running':
-      return (
-        <Badge variant="default" className="bg-blue-600 text-white">
-          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-          Running
-        </Badge>
-      )
-    case 'failed':
-      return (
-        <Badge variant="destructive">
-          <XCircle className="h-3 w-3 mr-1" />
-          Failed
-        </Badge>
-      )
-    case 'partially_completed':
-      return (
-        <Badge variant="default" className="bg-amber-600 text-white">
-          <AlertTriangle className="h-3 w-3 mr-1" />
-          Partial
-        </Badge>
-      )
-    case 'cancelled':
-      return (
-        <Badge variant="secondary">
-          <XCircle className="h-3 w-3 mr-1" />
-          Cancelled
-        </Badge>
-      )
-    default:
-      return (
-        <Badge variant="secondary">
-          <Clock className="h-3 w-3 mr-1" />
-          Pending
-        </Badge>
-      )
+const STATUS_CONFIG: Record<
+  string,
+  {
+    label: string
+    tooltip: string
+    icon: typeof CheckCircle2
+    variant: 'default' | 'destructive' | 'secondary'
+    className?: string
+    spin?: boolean
   }
+> = {
+  completed: {
+    label: 'Completed',
+    tooltip: 'All checks finished successfully',
+    icon: CheckCircle2,
+    variant: 'default',
+    className: 'bg-green-600 text-white',
+  },
+  running: {
+    label: 'Running',
+    tooltip: 'Checks are currently being executed',
+    icon: Loader2,
+    variant: 'default',
+    className: 'bg-blue-600 text-white',
+    spin: true,
+  },
+  failed: {
+    label: 'Failed',
+    tooltip: 'All checks failed or the run errored out',
+    icon: XCircle,
+    variant: 'destructive',
+  },
+  partially_completed: {
+    label: 'Partial',
+    tooltip: 'Some checks succeeded but others failed or timed out',
+    icon: AlertTriangle,
+    variant: 'default',
+    className: 'bg-amber-600 text-white',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    tooltip: 'Run was manually cancelled before all checks finished',
+    icon: XCircle,
+    variant: 'secondary',
+  },
+}
+
+const PENDING_CONFIG = {
+  label: 'Pending',
+  tooltip: 'Run is queued and waiting to start',
+  icon: Clock,
+  variant: 'secondary' as const,
+  className: undefined as string | undefined,
+}
+
+function StatusBadge({ status }: { status: NightshiftRunStatus }) {
+  const config = STATUS_CONFIG[status] ?? PENDING_CONFIG
+  const Icon = config.icon
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant={config.variant} className={config.className}>
+          <Icon className={`h-3 w-3 mr-1${'spin' in config && config.spin ? ' animate-spin' : ''}`} />
+          {config.label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{config.tooltip}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 function formatDuration(secs: number): string {
@@ -83,7 +113,7 @@ function formatDuration(secs: number): string {
   return remainSecs > 0 ? `${mins}m ${remainSecs}s` : `${mins}m`
 }
 
-function RunDetail({ run }: { run: NightshiftRun }) {
+function RunDetail({ run, onOpenSession }: { run: NightshiftRun; onOpenSession: (worktreeId: string, worktreePath: string, sessionId: string) => void }) {
   const completedChecks = run.checkResults.filter(
     (cr) => cr.status === 'completed'
   ).length
@@ -136,11 +166,18 @@ function RunDetail({ run }: { run: NightshiftRun }) {
                   {formatDuration(cr.durationSecs)}
                 </span>
               )}
-              {cr.sessionId && (
-                <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+              {cr.sessionId && run.worktreeId && run.worktreePath && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation() // Don't toggle collapsible
+                    onOpenSession(run.worktreeId!, run.worktreePath!, cr.sessionId!)
+                  }}
+                  className="text-xs text-blue-500 hover:text-blue-600 hover:underline flex items-center gap-0.5 cursor-pointer"
+                >
                   <ExternalLink className="h-3 w-3" />
                   Session
-                </span>
+                </button>
               )}
               {cr.error && (
                 <span className="text-xs text-destructive truncate max-w-[200px]">
@@ -180,6 +217,24 @@ export function NightshiftRunsModal() {
     [closeRunsModal]
   )
 
+  const handleOpenSession = useCallback(
+    (worktreeId: string, worktreePath: string, sessionId: string) => {
+      closeRunsModal()
+      // Navigate to the session: clear active worktree (go to canvas), set session, dispatch event
+      const { clearActiveWorktree, setActiveSession } = useChatStore.getState()
+      clearActiveWorktree()
+      setActiveSession(worktreeId, sessionId)
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('open-session-modal', {
+            detail: { sessionId, worktreeId, worktreePath },
+          })
+        )
+      }, 50)
+    },
+    [closeRunsModal]
+  )
+
   if (!runsModalOpen) return null
 
   return (
@@ -211,7 +266,7 @@ export function NightshiftRunsModal() {
             </div>
           )}
           {runs.map((run) => (
-            <RunDetail key={run.id} run={run} />
+            <RunDetail key={run.id} run={run} onOpenSession={handleOpenSession} />
           ))}
         </div>
       </DialogContent>
