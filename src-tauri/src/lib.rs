@@ -187,6 +187,8 @@ pub struct AppPreferences {
     pub canvas_layout: String, // Canvas display mode: grid or list
     #[serde(default = "default_confirm_session_close")]
     pub confirm_session_close: bool, // Show confirmation dialog before closing sessions/worktrees
+    #[serde(default = "default_esc_closes_session")]
+    pub esc_closes_session: bool, // Whether pressing Escape closes the current session modal
     #[serde(default = "default_execution_mode")]
     pub default_execution_mode: String, // Default execution mode: "plan", "build", or "yolo"
     #[serde(default = "default_backend")]
@@ -393,6 +395,10 @@ fn default_canvas_layout() -> String {
 
 fn default_confirm_session_close() -> bool {
     true // Enabled by default
+}
+
+fn default_esc_closes_session() -> bool {
+    true // Enabled by default — Escape closes the session modal
 }
 
 fn default_execution_mode() -> String {
@@ -1184,6 +1190,7 @@ impl Default for AppPreferences {
             default_provider: None,
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
+            esc_closes_session: default_esc_closes_session(),
             default_execution_mode: default_execution_mode(),
             default_backend: default_backend(),
             selected_codex_model: default_codex_model(),

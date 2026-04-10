@@ -2261,6 +2261,22 @@ export const GeneralPane: React.FC = () => {
           </InlineField>
 
           <InlineField
+            label="Escape closes session"
+            description="Allow pressing Escape to close the current session modal"
+          >
+            <Switch
+              checked={preferences?.esc_closes_session ?? true}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  patchPreferences.mutate({
+                    esc_closes_session: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
+
+          <InlineField
             label="Close original session on clear context"
             description="Automatically close the original session when using Clear Context and yolo"
           >

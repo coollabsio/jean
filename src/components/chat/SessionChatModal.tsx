@@ -738,9 +738,10 @@ export function SessionChatModal({
     [worktreeId]
   )
 
-  // Close on Escape key
+  // Close on Escape key (can be disabled via preferences, respects confirm_session_close)
   useEffect(() => {
     if (!isOpen) return
+    if (preferences?.esc_closes_session === false) return
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         const target = e.target as HTMLElement
@@ -758,12 +759,21 @@ export function SessionChatModal({
         // Don't close if ESC originated inside a child dialog/sheet portal
         if (portalAncestor) return
 
-        handleClose()
+        // Respect confirm_session_close: show confirmation for non-empty sessions
+        // (same guard as CMD+W, prevents accidental close via Escape)
+        const currentSession = sessions.find(s => s.id === currentSessionId)
+        const sessionIsEmpty = !currentSession?.message_count
+        if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
+          pendingCloseAction.current = handleClose
+          setCloseConfirmOpen(true)
+        } else {
+          handleClose()
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, handleClose, closeConfirmOpen])
+  }, [isOpen, handleClose, closeConfirmOpen, preferences?.esc_closes_session, preferences?.confirm_session_close, sessions, currentSessionId])
 
   if (!isOpen || !worktreeId) return null
 
