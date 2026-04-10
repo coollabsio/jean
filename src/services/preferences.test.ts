@@ -160,6 +160,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
@@ -286,6 +287,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
@@ -385,6 +387,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
@@ -484,6 +487,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
 
@@ -585,6 +589,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
 
@@ -686,6 +691,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
 
@@ -785,6 +791,7 @@ describe('preferences service', () => {
         gh_cli_source: 'jean',
         sidebar_group_by_status: true,
         terminal_word_wrap: true,
+        expand_tool_calls: false,
         esc_closes_session: true,
       }
 

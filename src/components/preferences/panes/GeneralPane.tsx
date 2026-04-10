@@ -2239,6 +2239,22 @@ export const GeneralPane: React.FC = () => {
               }}
             />
           </InlineField>
+
+          <InlineField
+            label="Expand tool calls by default"
+            description="Show tool call details expanded instead of collapsed in chat messages"
+          >
+            <Switch
+              checked={preferences?.expand_tool_calls ?? false}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  patchPreferences.mutate({
+                    expand_tool_calls: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
         </div>
       </SettingsSection>
 

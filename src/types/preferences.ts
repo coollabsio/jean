@@ -984,6 +984,7 @@ export interface AppPreferences {
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   sidebar_group_by_status: boolean // Group sidebar sessions by status headers (default: true)
   terminal_word_wrap: boolean // Terminal word wrap (default: true, false = horizontal scroll)
+  expand_tool_calls: boolean // Expand tool call groups by default in chat (default: false)
 }
 
 export interface CustomCliProfile {
@@ -1552,4 +1553,5 @@ export const defaultPreferences: AppPreferences = {
   gh_cli_source: 'jean', // Default: Jean-managed
   sidebar_group_by_status: true, // Default: group by status
   terminal_word_wrap: true, // Default: word wrap enabled
+  expand_tool_calls: false, // Default: collapsed (click to expand)
 }

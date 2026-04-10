@@ -51,6 +51,7 @@ import {
   stripAllMarkers,
 } from './message-content-utils'
 import { hasQuestionAnswerOutput } from '@/types/chat'
+import { usePreferences } from '@/services/preferences'
 
 interface MessageItemProps {
   /** The message to render */
@@ -166,6 +167,9 @@ export const MessageItem = memo(function MessageItem({
   hideApproveButtons,
   durationMs,
 }: MessageItemProps) {
+  const { data: preferences } = usePreferences()
+  const expandToolCalls = preferences?.expand_tool_calls ?? false
+
   // Only show Approve button for the last message with ExitPlanMode
   const isLatestPlanRequest = messageIndex === lastPlanMessageIndex
 
@@ -433,6 +437,7 @@ export const MessageItem = memo(function MessageItem({
                             allToolCalls={message.tool_calls ?? []}
                             onFileClick={onFileClick}
                             isStreaming={false}
+                            defaultExpanded={expandToolCalls}
                           />
                         )
                       case 'standalone':
@@ -441,6 +446,7 @@ export const MessageItem = memo(function MessageItem({
                             toolCall={item.tool}
                             onFileClick={onFileClick}
                             isStreaming={false}
+                            defaultExpanded={expandToolCalls}
                           />
                         )
                       case 'stackedGroup':
@@ -449,6 +455,7 @@ export const MessageItem = memo(function MessageItem({
                             items={item.items}
                             onFileClick={onFileClick}
                             isStreaming={false}
+                            defaultExpanded={expandToolCalls}
                           />
                         )
                       case 'askUserQuestion': {
@@ -506,6 +513,7 @@ export const MessageItem = memo(function MessageItem({
                             toolCall={item.tool}
                             onFileClick={onFileClick}
                             isStreaming={false}
+                            defaultExpanded={expandToolCalls}
                           />
                         )
                       case 'exitPlanMode': {
@@ -594,6 +602,7 @@ export const MessageItem = memo(function MessageItem({
               <ToolCallsDisplay
                 toolCalls={message.tool_calls}
                 sessionId={message.session_id}
+                defaultExpanded={expandToolCalls}
                 hasFollowUpMessage={hasFollowUpMessage}
                 onQuestionAnswer={onQuestionAnswer}
                 onQuestionSkip={onQuestionSkip}

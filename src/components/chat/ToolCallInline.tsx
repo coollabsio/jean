@@ -51,6 +51,8 @@ interface ToolCallInlineProps {
   isStreaming?: boolean
   /** Whether this item is still in progress (shows spinner) */
   isIncomplete?: boolean
+  /** Whether to start expanded (from user preference) */
+  defaultExpanded?: boolean
 }
 
 /**
@@ -63,8 +65,9 @@ export function ToolCallInline({
   onFileClick,
   isStreaming,
   isIncomplete,
+  defaultExpanded = false,
 }: ToolCallInlineProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(defaultExpanded)
   const { icon, label, detail, filePath, expandedContent } =
     getToolDisplay(toolCall)
 
@@ -155,6 +158,8 @@ interface TaskCallInlineProps {
   isStreaming?: boolean
   /** Whether this item is still in progress (shows spinner) */
   isIncomplete?: boolean
+  /** Whether to start expanded (from user preference) */
+  defaultExpanded?: boolean
 }
 
 /**
@@ -169,8 +174,9 @@ export function TaskCallInline({
   onFileClick,
   isStreaming,
   isIncomplete,
+  defaultExpanded = false,
 }: TaskCallInlineProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(defaultExpanded)
   const input = taskToolCall.input as Record<string, unknown>
   const subagentType = input.subagent_type as string | undefined
   const description = input.description as string | undefined
@@ -273,6 +279,8 @@ interface StackedGroupProps {
   isStreaming?: boolean
   /** Whether this item is still in progress (shows spinner) */
   isIncomplete?: boolean
+  /** Whether to start expanded (from user preference) */
+  defaultExpanded?: boolean
 }
 
 /**
@@ -285,8 +293,9 @@ export function StackedGroup({
   onFileClick,
   isStreaming,
   isIncomplete,
+  defaultExpanded = false,
 }: StackedGroupProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(defaultExpanded)
 
   // Count thinking blocks and tools for summary
   let thinkingCount = 0
