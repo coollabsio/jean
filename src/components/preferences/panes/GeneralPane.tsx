@@ -2131,6 +2131,26 @@ export const GeneralPane: React.FC = () => {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="Chat">
+        <div className="space-y-4">
+          <InlineField
+            label="Spellcheck"
+            description="Enable spellcheck in the chat input"
+          >
+            <Switch
+              checked={preferences?.spellcheck_enabled ?? true}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  patchPreferences.mutate({
+                    spellcheck_enabled: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Auto-generate">
         <div className="space-y-4">
           <InlineField

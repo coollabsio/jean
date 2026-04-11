@@ -954,6 +954,7 @@ export interface AppPreferences {
   known_mcp_servers: string[] // All MCP server names ever seen (prevents re-enabling user-disabled servers)
   has_seen_feature_tour: boolean // Whether user has seen the feature tour onboarding
   has_seen_jean_config_wizard: boolean // Whether user has seen the jean.json setup wizard
+  spellcheck_enabled: boolean // Enable spellcheck in the chat input
   chrome_enabled: boolean // Enable browser automation via Chrome extension
   zoom_level: number // Zoom level percentage (50-200, default 100)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
@@ -1522,6 +1523,7 @@ export const defaultPreferences: AppPreferences = {
   known_mcp_servers: [], // Default: no known servers
   has_seen_feature_tour: false, // Default: not seen
   has_seen_jean_config_wizard: false, // Default: not seen
+  spellcheck_enabled: true, // Default: enabled
   chrome_enabled: true, // Default: enabled
   zoom_level: ZOOM_LEVEL_DEFAULT,
   custom_cli_profiles: [],

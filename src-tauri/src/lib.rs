@@ -174,6 +174,8 @@ pub struct AppPreferences {
     pub has_seen_feature_tour: bool, // Whether user has seen the feature tour onboarding
     #[serde(default)]
     pub has_seen_jean_config_wizard: bool, // Whether user has seen the jean.json setup wizard
+    #[serde(default = "default_spellcheck_enabled")]
+    pub spellcheck_enabled: bool, // Enable spellcheck in the chat input
     #[serde(default = "default_chrome_enabled")]
     pub chrome_enabled: bool, // Enable browser automation via Chrome extension
     #[serde(default = "default_zoom_level")]
@@ -368,6 +370,10 @@ fn default_session_recap_enabled() -> bool {
 
 fn default_parallel_execution_prompt_enabled() -> bool {
     false // Disabled by default (experimental)
+}
+
+fn default_spellcheck_enabled() -> bool {
+    true // Enabled by default
 }
 
 fn default_chrome_enabled() -> bool {
@@ -1381,6 +1387,7 @@ impl Default for AppPreferences {
             known_mcp_servers: Vec::new(),
             has_seen_feature_tour: false,
             has_seen_jean_config_wizard: false,
+            spellcheck_enabled: default_spellcheck_enabled(),
             chrome_enabled: default_chrome_enabled(),
             zoom_level: default_zoom_level(),
             custom_cli_profiles: Vec::new(),
