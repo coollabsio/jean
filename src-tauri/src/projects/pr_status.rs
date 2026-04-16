@@ -1,7 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::platform::silent_command;
+use crate::platform::wsl_aware_command;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// PR state from GitHub API
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -94,7 +95,7 @@ pub fn get_pr_status(
     log::trace!("Fetching PR status for #{pr_number} in {repo_path}");
 
     // Run gh pr view
-    let output = silent_command(gh_binary)
+    let output = wsl_aware_command(gh_binary, Some(Path::new(repo_path)))
         .args([
             "pr",
             "view",
@@ -102,7 +103,6 @@ pub fn get_pr_status(
             "--json",
             "state,isDraft,reviewDecision,statusCheckRollup,mergeable",
         ])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
 

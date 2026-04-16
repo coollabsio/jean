@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
-use crate::platform::silent_command;
+use crate::platform::wsl_aware_command;
 
 // =============================================================================
 // GitHub Types
@@ -98,7 +98,7 @@ pub async fn list_github_issues(
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
     // Run gh issue list
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(project_path.as_ref())))
         .args([
             "issue",
             "list",
@@ -109,7 +109,6 @@ pub async fn list_github_issues(
             "--state",
             &state_arg,
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh issue list: {e}"))?;
 
@@ -159,9 +158,8 @@ fn get_issue_total_count(gh: &PathBuf, project_path: &str, state: &str) -> Optio
         repo_id.owner, repo_id.repo, state_qualifier
     );
 
-    let output = silent_command(gh)
+    let output = wsl_aware_command(gh, Some(Path::new(project_path)))
         .args(["api", &query])
-        .current_dir(project_path)
         .output()
         .ok()?;
 
@@ -187,7 +185,7 @@ pub async fn search_github_issues(
     log::trace!("Searching GitHub issues for {project_path} with query: {query}");
 
     let gh = resolve_gh_binary(&app);
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "issue",
             "list",
@@ -200,7 +198,6 @@ pub async fn search_github_issues(
             "--state",
             "all",
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh issue list --search: {e}"))?;
 
@@ -239,7 +236,7 @@ pub async fn get_github_issue_by_number(
     log::trace!("Getting GitHub issue #{issue_number} by number for {project_path}");
 
     let gh = resolve_gh_binary(&app);
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "issue",
             "view",
@@ -247,7 +244,6 @@ pub async fn get_github_issue_by_number(
             "--json",
             "number,title,body,state,labels,createdAt,author",
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
 
@@ -283,7 +279,7 @@ pub async fn get_github_issue(
 
     let gh = resolve_gh_binary(&app);
     // Run gh issue view
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "issue",
             "view",
@@ -291,7 +287,6 @@ pub async fn get_github_issue(
             "--json",
             "number,title,body,state,labels,createdAt,author,url,comments",
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
 
@@ -1407,7 +1402,7 @@ pub async fn list_github_prs(
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
     // Run gh pr list
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "pr",
             "list",
@@ -1418,7 +1413,6 @@ pub async fn list_github_prs(
             "--state",
             &state_arg,
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr list: {e}"))?;
 
@@ -1457,7 +1451,7 @@ pub async fn search_github_prs(
     log::trace!("Searching GitHub PRs for {project_path} with query: {query}");
 
     let gh = resolve_gh_binary(&app);
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "pr",
             "list",
@@ -1470,7 +1464,6 @@ pub async fn search_github_prs(
             "--state",
             "all",
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr list --search: {e}"))?;
 
@@ -1509,7 +1502,7 @@ pub async fn get_github_pr_by_number(
     log::trace!("Getting GitHub PR #{pr_number} by number for {project_path}");
 
     let gh = resolve_gh_binary(&app);
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "pr",
             "view",
@@ -1517,7 +1510,6 @@ pub async fn get_github_pr_by_number(
             "--json",
             "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
 
@@ -1553,7 +1545,7 @@ pub async fn get_github_pr(
 
     let gh = resolve_gh_binary(&app);
     // Run gh pr view
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args([
             "pr",
             "view",
@@ -1561,7 +1553,6 @@ pub async fn get_github_pr(
             "--json",
             "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,url,labels,comments,reviews",
         ])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
 
@@ -1603,9 +1594,8 @@ pub async fn get_pr_review_comments(
         repo_id.owner, repo_id.repo
     );
 
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args(["api", &endpoint])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh api: {e}"))?;
 
@@ -1725,9 +1715,8 @@ pub fn get_pr_diff(
 ) -> Result<String, String> {
     log::debug!("Fetching diff for PR #{pr_number} in {project_path}");
 
-    let output = silent_command(gh_binary)
+    let output = wsl_aware_command(gh_binary, Some(Path::new(project_path)))
         .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
 
@@ -2374,9 +2363,8 @@ pub async fn list_dependabot_alerts(
         repo_id.owner, repo_id.repo, state_arg
     );
 
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args(["api", &endpoint])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh api: {e}"))?;
 
@@ -2423,9 +2411,8 @@ pub async fn get_dependabot_alert(
         repo_id.owner, repo_id.repo
     );
 
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args(["api", &endpoint])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh api: {e}"))?;
 
@@ -2470,9 +2457,8 @@ pub async fn load_security_alert_context(
             "/repos/{}/{}/dependabot/alerts/{alert_number}",
             repo_id.owner, repo_id.repo
         );
-        let output = silent_command(&gh)
+        let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
             .args(["api", &endpoint])
-            .current_dir(&project_path)
             .output()
             .map_err(|e| format!("Failed to run gh api: {e}"))?;
 
@@ -2697,9 +2683,8 @@ pub async fn list_repository_advisories(
         endpoint.push_str(&format!("&state={s}"));
     }
 
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args(["api", &endpoint])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh api: {e}"))?;
 
@@ -2746,9 +2731,8 @@ pub async fn get_repository_advisory(
         repo_id.owner, repo_id.repo
     );
 
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args(["api", &endpoint])
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh api: {e}"))?;
 
@@ -2793,9 +2777,8 @@ pub async fn load_advisory_context(
             "/repos/{}/{}/security-advisories/{ghsa_id}",
             repo_id.owner, repo_id.repo
         );
-        let output = silent_command(&gh)
+        let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
             .args(["api", &endpoint])
-            .current_dir(&project_path)
             .output()
             .map_err(|e| format!("Failed to run gh api: {e}"))?;
 

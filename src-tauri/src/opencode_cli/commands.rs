@@ -3,9 +3,14 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use super::config::{ensure_cli_dir, get_cli_binary_path, resolve_cli_binary};
+use super::config::{
+    ensure_cli_dir, get_cli_binary_path, get_wsl_cli_binary_path, resolve_cli_binary,
+};
 use crate::http_server::EmitExt;
-use crate::platform::silent_command;
+use crate::platform::{
+    check_wsl_tool, get_wsl_config, silent_command, wsl_aware_command, wsl_chmod_exec,
+    wsl_detect_arch, wsl_file_executable, wsl_write_bytes,
+};
 
 /// GitHub owner/repo for OpenCode releases.
 const GITHUB_REPO: &str = "anomalyco/opencode";
@@ -71,6 +76,7 @@ enum ArchiveFormat {
 /// List available OpenCode models by refreshing from the OpenCode CLI cache source.
 #[tauri::command]
 pub async fn list_opencode_models(app: AppHandle) -> Result<Vec<String>, String> {
+    let wsl = get_wsl_config();
     let binary_path = resolve_cli_binary(&app);
     if !binary_path.exists() {
         return Err(format!(
@@ -79,10 +85,27 @@ pub async fn list_opencode_models(app: AppHandle) -> Result<Vec<String>, String>
         ));
     }
 
-    let output = silent_command(&binary_path)
-        .args(["models", "--refresh", "--verbose"])
-        .output()
-        .map_err(|e| format!("Failed to execute OpenCode CLI models command: {e}"))?;
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Err("OpenCode CLI not installed inside WSL".to_string());
+        }
+    }
+
+    let output = if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        wsl_aware_command(&tool, None)
+    } else {
+        silent_command(&binary_path)
+    }
+    .args(["models", "--refresh", "--verbose"])
+    .output()
+    .map_err(|e| format!("Failed to execute OpenCode CLI models command: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -125,7 +148,42 @@ fn emit_progress(app: &AppHandle, stage: &str, message: &str, percent: u8) {
 pub async fn check_opencode_cli_installed(app: AppHandle) -> Result<OpenCodeCliStatus, String> {
     log::trace!("Checking OpenCode CLI installation status");
 
+    let wsl = get_wsl_config();
     let binary_path = resolve_cli_binary(&app);
+
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Ok(OpenCodeCliStatus {
+                installed: false,
+                version: None,
+                path: None,
+            });
+        }
+        let version = crate::platform::wsl_tool_version(&wsl.distro, &tool).and_then(|v| {
+            let cleaned = v
+                .split_whitespace()
+                .last()
+                .unwrap_or(&v)
+                .trim_start_matches('v')
+                .to_string();
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
+        });
+        return Ok(OpenCodeCliStatus {
+            installed: true,
+            version,
+            path: Some(tool),
+        });
+    }
 
     if !binary_path.exists() {
         return Ok(OpenCodeCliStatus {
@@ -178,34 +236,9 @@ pub async fn detect_opencode_in_path(app: AppHandle) -> Result<OpenCodePathDetec
         .ok()
         .and_then(|p| std::fs::canonicalize(&p).ok());
 
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
+    let detection = crate::platform::detect_cli_in_path("opencode", jean_managed_path.as_deref());
 
-    let output = match silent_command(which_cmd).arg("opencode").output() {
-        Ok(output) if output.status.success() => {
-            // On Windows, `where` can return multiple paths; take only the first line
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string()
-        }
-        _ => {
-            log::trace!("OpenCode CLI not found in PATH");
-            return Ok(OpenCodePathDetection {
-                found: false,
-                path: None,
-                version: None,
-                package_manager: None,
-            });
-        }
-    };
-
-    if output.is_empty() {
+    if !detection.found {
         return Ok(OpenCodePathDetection {
             found: false,
             path: None,
@@ -214,54 +247,25 @@ pub async fn detect_opencode_in_path(app: AppHandle) -> Result<OpenCodePathDetec
         });
     }
 
-    let found_path = std::path::PathBuf::from(&output);
-
-    // Exclude Jean-managed binary
-    if let Some(ref jean_path) = jean_managed_path {
-        if let Ok(canonical_found) = std::fs::canonicalize(&found_path) {
-            if canonical_found == *jean_path {
-                log::trace!("Found PATH opencode is the Jean-managed binary, excluding");
-                return Ok(OpenCodePathDetection {
-                    found: false,
-                    path: None,
-                    version: None,
-                    package_manager: None,
-                });
-            }
+    let version = detection.version.and_then(|v| {
+        let cleaned = v
+            .split_whitespace()
+            .last()
+            .unwrap_or(&v)
+            .trim_start_matches('v')
+            .to_string();
+        if cleaned.is_empty() {
+            None
+        } else {
+            Some(cleaned)
         }
-    }
-
-    let version = match silent_command(&found_path).arg("--version").output() {
-        Ok(ver_output) if ver_output.status.success() => {
-            let ver_str = String::from_utf8_lossy(&ver_output.stdout)
-                .trim()
-                .to_string();
-            let cleaned = ver_str
-                .split_whitespace()
-                .last()
-                .unwrap_or(&ver_str)
-                .trim_start_matches('v')
-                .to_string();
-            if cleaned.is_empty() {
-                None
-            } else {
-                Some(cleaned)
-            }
-        }
-        _ => None,
-    };
-
-    let package_manager = crate::platform::detect_package_manager(&found_path);
-
-    log::trace!(
-        "Found OpenCode CLI in PATH: {output} (version: {version:?}, pkg_mgr: {package_manager:?})"
-    );
+    });
 
     Ok(OpenCodePathDetection {
         found: true,
-        path: Some(output),
+        path: detection.path,
         version,
-        package_manager,
+        package_manager: detection.package_manager,
     })
 }
 
@@ -314,19 +318,38 @@ fn is_model_identifier(value: &str) -> bool {
 pub async fn check_opencode_cli_auth(app: AppHandle) -> Result<OpenCodeAuthStatus, String> {
     log::trace!("Checking OpenCode CLI authentication status");
 
+    let wsl = get_wsl_config();
     let binary_path = resolve_cli_binary(&app);
 
-    if !binary_path.exists() {
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Ok(OpenCodeAuthStatus {
+                authenticated: false,
+                error: Some("OpenCode CLI not installed inside WSL".to_string()),
+            });
+        }
+    } else if !binary_path.exists() {
         return Ok(OpenCodeAuthStatus {
             authenticated: false,
             error: Some("OpenCode CLI not installed".to_string()),
         });
     }
 
-    let output = silent_command(&binary_path)
-        .args(["auth", "list"])
-        .output()
-        .map_err(|e| format!("Failed to execute OpenCode CLI: {e}"))?;
+    let output = if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        wsl_aware_command(&tool, None)
+    } else {
+        silent_command(&binary_path)
+    }
+    .args(["auth", "list"])
+    .output()
+    .map_err(|e| format!("Failed to execute OpenCode CLI: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -399,6 +422,21 @@ fn get_platform_asset() -> Result<PlatformAsset, String> {
 
     #[allow(unreachable_code)]
     Err("Unsupported platform".to_string())
+}
+
+/// Platform asset for WSL installs.
+fn wsl_opencode_platform_asset(distro: &str) -> Result<PlatformAsset, String> {
+    match wsl_detect_arch(distro) {
+        Some("linux-x64") => Ok(PlatformAsset {
+            asset_name: "opencode-linux-x64.tar.gz".to_string(),
+            format: ArchiveFormat::TarGz,
+        }),
+        Some("linux-arm64") => Ok(PlatformAsset {
+            asset_name: "opencode-linux-arm64.tar.gz".to_string(),
+            format: ArchiveFormat::TarGz,
+        }),
+        _ => Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string()),
+    }
 }
 
 /// Cached versions structure for disk persistence
@@ -541,8 +579,13 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
 
     emit_progress(&app, "starting", "Preparing OpenCode installation", 5);
 
+    let wsl = get_wsl_config();
     let cli_dir = ensure_cli_dir(&app)?;
-    let platform_asset = get_platform_asset()?;
+    let platform_asset = if wsl.enabled {
+        wsl_opencode_platform_asset(&wsl.distro)?
+    } else {
+        get_platform_asset()?
+    };
 
     // Determine version
     let version = match version.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
@@ -583,7 +626,9 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
 
     emit_progress(&app, "extracting", "Extracting OpenCode binary", 60);
 
-    let binary_name = if cfg!(windows) {
+    let binary_name = if wsl.enabled {
+        "opencode"
+    } else if cfg!(windows) {
         "opencode.exe"
     } else {
         "opencode"
@@ -594,29 +639,36 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
         ArchiveFormat::TarGz => extract_binary_from_tar_gz(&archive_bytes, binary_name)?,
     };
 
-    let binary_path = cli_dir.join(binary_name);
-    crate::platform::write_binary_file(&binary_path, &binary_data)
-        .map_err(|e| format!("Failed to write binary: {e}"))?;
+    if wsl.enabled {
+        let unix_path = get_wsl_cli_binary_path(&wsl.distro)?;
+        wsl_write_bytes(&wsl.distro, &unix_path, &binary_data)
+            .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
+        wsl_chmod_exec(&wsl.distro, &unix_path)?;
+    } else {
+        let binary_path = cli_dir.join(binary_name);
+        crate::platform::write_binary_file(&binary_path, &binary_data)
+            .map_err(|e| format!("Failed to write binary: {e}"))?;
 
-    // Set executable permissions
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&binary_path)
-            .map_err(|e| format!("Failed to get binary metadata: {e}"))?
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&binary_path, perms)
-            .map_err(|e| format!("Failed to set binary permissions: {e}"))?;
-    }
+        // Set executable permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&binary_path)
+                .map_err(|e| format!("Failed to get binary metadata: {e}"))?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&binary_path, perms)
+                .map_err(|e| format!("Failed to set binary permissions: {e}"))?;
+        }
 
-    // Remove macOS quarantine attribute
-    #[cfg(target_os = "macos")]
-    {
-        let _ = silent_command("xattr")
-            .args(["-d", "com.apple.quarantine"])
-            .arg(&binary_path)
-            .output();
+        // Remove macOS quarantine attribute
+        #[cfg(target_os = "macos")]
+        {
+            let _ = silent_command("xattr")
+                .args(["-d", "com.apple.quarantine"])
+                .arg(&binary_path)
+                .output();
+        }
     }
 
     emit_progress(&app, "verifying", "Verifying OpenCode CLI", 85);

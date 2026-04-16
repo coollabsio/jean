@@ -1,5 +1,6 @@
-use crate::platform::silent_command;
+use crate::platform::wsl_aware_command;
 use serde::Serialize;
+use std::path::Path;
 
 use super::git_status::{parse_unified_diff, GitDiff};
 
@@ -52,9 +53,8 @@ pub fn get_commit_history(
     let branch_ref = branch.unwrap_or("HEAD");
 
     // Get total count
-    let count_output = silent_command("git")
+    let count_output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["rev-list", "--count", branch_ref, "--"])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to count commits: {e}"))?;
 
@@ -76,7 +76,7 @@ pub fn get_commit_history(
     // --numstat lines follow each commit (tab-separated: add\tdel\tfile).
     let format_str = String::from("--format=COMMIT%x00%H%x00%h%x00%s%x00%an%x00%aI");
 
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args([
             "log",
             &limit_str,
@@ -88,7 +88,6 @@ pub fn get_commit_history(
             branch_ref,
             "--",
         ])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git log: {e}"))?;
 
@@ -157,9 +156,8 @@ pub fn get_commit_diff(repo_path: &str, commit_sha: &str) -> Result<GitDiff, Str
     let parent_ref = format!("{commit_sha}^");
     let range = format!("{parent_ref}..{commit_sha}");
 
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["diff", "--unified=3", &range])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git diff: {e}"))?;
 
@@ -167,9 +165,8 @@ pub fn get_commit_diff(repo_path: &str, commit_sha: &str) -> Result<GitDiff, Str
         String::from_utf8_lossy(&output.stdout).to_string()
     } else {
         // Might be root commit — try diff-tree
-        let fallback = silent_command("git")
+        let fallback = wsl_aware_command("git", Some(Path::new(repo_path)))
             .args(["diff-tree", "-p", "--unified=3", "--root", commit_sha])
-            .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff-tree: {e}"))?;
 

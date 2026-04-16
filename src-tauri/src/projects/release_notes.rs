@@ -6,7 +6,7 @@ use std::path::Path;
 use tauri::AppHandle;
 
 use crate::gh_cli::config::resolve_gh_binary;
-use crate::platform::silent_command;
+use crate::platform::{silent_command, wsl_aware_command};
 
 pub type PrIssueRefsMap = BTreeMap<u32, BTreeMap<String, BTreeSet<u32>>>;
 
@@ -149,13 +149,12 @@ pub fn build_release_notes_prompt_context(
 }
 
 fn load_git_commits(project_path: &str, tag: &str) -> Result<Vec<GitCommitRecord>, String> {
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(project_path)))
         .args([
             "log",
             &format!("{tag}..HEAD"),
             "--format=%H%x1f%s%x1f%b%x1e",
         ])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to get commit metadata: {e}"))?;
 
@@ -169,9 +168,8 @@ fn load_git_commits(project_path: &str, tag: &str) -> Result<Vec<GitCommitRecord
 }
 
 fn load_tag_date(project_path: &str, tag: &str) -> Result<String, String> {
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(project_path)))
         .args(["show", "-s", "--format=%cI", tag])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to get tag date: {e}"))?;
 
@@ -195,7 +193,7 @@ fn load_pull_requests(
     tag_date: &str,
 ) -> Result<Vec<GitHubPullRequestCandidate>, String> {
     let search = format!("merged:>={tag_date}");
-    let output = silent_command(gh)
+    let output = wsl_aware_command(gh, Some(Path::new(project_path)))
         .args([
             "pr",
             "list",
@@ -208,7 +206,6 @@ fn load_pull_requests(
             "--json",
             "number,title,body,closingIssuesReferences,mergeCommit",
         ])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr list: {e}"))?;
 
@@ -230,9 +227,8 @@ fn load_pull_request_commits(
     project_path: &str,
     pr_number: u32,
 ) -> Result<Vec<GitHubPullRequestCommit>, String> {
-    let output = silent_command(gh)
+    let output = wsl_aware_command(gh, Some(Path::new(project_path)))
         .args(["pr", "view", &pr_number.to_string(), "--json", "commits"])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr view for #{pr_number}: {e}"))?;
 
@@ -276,7 +272,7 @@ fn load_pull_request_detail(
         commits: Vec<GitHubPullRequestCommit>,
     }
 
-    let output = silent_command(gh)
+    let output = wsl_aware_command(gh, Some(Path::new(project_path)))
         .args([
             "pr",
             "view",
@@ -284,7 +280,6 @@ fn load_pull_request_detail(
             "--json",
             "number,title,body,closingIssuesReferences,commits",
         ])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to run gh pr view for #{pr_number}: {e}"))?;
 
@@ -580,9 +575,8 @@ fn load_git_commits_for_range(
     project_path: &str,
     revision_range: &str,
 ) -> Result<Vec<GitCommitRecord>, String> {
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(project_path)))
         .args(["log", revision_range, "--format=%H%x1f%s%x1f%b%x1e"])
-        .current_dir(project_path)
         .output()
         .map_err(|e| format!("Failed to get commit metadata: {e}"))?;
 

@@ -7,10 +7,15 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use super::config::{ensure_cli_dir, get_cli_binary_path, resolve_cli_binary};
+use super::config::{
+    ensure_cli_dir, get_cli_binary_path, get_wsl_cli_binary_path, resolve_cli_binary,
+};
 use crate::gh_cli::resolve_github_api_token;
 use crate::http_server::EmitExt;
-use crate::platform::silent_command;
+use crate::platform::{
+    check_wsl_tool, get_wsl_config, silent_command, wsl_aware_command, wsl_chmod_exec,
+    wsl_detect_arch, wsl_file_executable, wsl_write_bytes,
+};
 
 /// GitHub API URL for Codex CLI releases
 const CODEX_RELEASES_API: &str = "https://api.github.com/repos/openai/codex/releases";
@@ -269,50 +274,10 @@ pub async fn detect_codex_in_path(app: AppHandle) -> Result<CodexPathDetection, 
         .and_then(|p| std::fs::canonicalize(&p).ok());
     log::debug!("detect_codex_in_path: jean_managed_path={jean_managed_path:?}");
 
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
+    let detection = crate::platform::detect_cli_in_path("codex", jean_managed_path.as_deref());
 
-    let output = match silent_command(which_cmd).arg("codex").output() {
-        Ok(output) if output.status.success() => {
-            // On Windows, `where` can return multiple paths; take only the first line
-            let raw = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            log::debug!("detect_codex_in_path: `{which_cmd} codex` found: {raw:?}");
-            raw
-        }
-        Ok(output) => {
-            log::debug!(
-                "detect_codex_in_path: `{which_cmd} codex` exited with status={}, stderr={:?}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-            return Ok(CodexPathDetection {
-                found: false,
-                path: None,
-                version: None,
-                package_manager: None,
-            });
-        }
-        Err(e) => {
-            log::debug!("detect_codex_in_path: `{which_cmd} codex` failed to execute: {e}");
-            return Ok(CodexPathDetection {
-                found: false,
-                path: None,
-                version: None,
-                package_manager: None,
-            });
-        }
-    };
-
-    if output.is_empty() {
-        log::debug!("detect_codex_in_path: which returned empty output");
+    if !detection.found {
+        log::debug!("detect_codex_in_path: not found");
         return Ok(CodexPathDetection {
             found: false,
             path: None,
@@ -321,64 +286,31 @@ pub async fn detect_codex_in_path(app: AppHandle) -> Result<CodexPathDetection, 
         });
     }
 
-    let found_path = std::path::PathBuf::from(&output);
-
-    // Exclude Jean-managed binary
-    if let Some(ref jean_path) = jean_managed_path {
-        if let Ok(canonical_found) = std::fs::canonicalize(&found_path) {
-            if canonical_found == *jean_path {
-                log::debug!("detect_codex_in_path: found path is jean-managed binary, excluding");
-                return Ok(CodexPathDetection {
-                    found: false,
-                    path: None,
-                    version: None,
-                    package_manager: None,
-                });
-            }
-        }
-    }
-
-    let version = match silent_command(&found_path).arg("--version").output() {
-        Ok(ver_output) if ver_output.status.success() => {
-            let ver_str = String::from_utf8_lossy(&ver_output.stdout)
-                .trim()
-                .to_string();
-            log::debug!("detect_codex_in_path: raw --version output={ver_str:?}");
-            let cleaned = ver_str
-                .split_whitespace()
-                .last()
-                .unwrap_or(&ver_str)
-                .trim_start_matches('v')
-                .to_string();
-            if cleaned.is_empty() {
-                None
-            } else {
-                Some(cleaned)
-            }
-        }
-        Ok(ver_output) => {
-            log::debug!(
-                "detect_codex_in_path: --version failed, status={}, stderr={:?}",
-                ver_output.status,
-                String::from_utf8_lossy(&ver_output.stderr).trim()
-            );
+    let version = detection.version.and_then(|ver_str| {
+        let cleaned = ver_str
+            .split_whitespace()
+            .last()
+            .unwrap_or(&ver_str)
+            .trim_start_matches('v')
+            .to_string();
+        if cleaned.is_empty() {
             None
+        } else {
+            Some(cleaned)
         }
-        Err(e) => {
-            log::debug!("detect_codex_in_path: --version command error: {e}");
-            None
-        }
-    };
+    });
 
-    let package_manager = crate::platform::detect_package_manager(&found_path);
-
-    log::debug!("detect_codex_in_path: result path={output} version={version:?} pkg_mgr={package_manager:?}");
+    log::debug!(
+        "detect_codex_in_path: result path={:?} version={version:?} pkg_mgr={:?}",
+        detection.path,
+        detection.package_manager
+    );
 
     Ok(CodexPathDetection {
         found: true,
-        path: Some(output),
+        path: detection.path,
         version,
-        package_manager,
+        package_manager: detection.package_manager,
     })
 }
 
@@ -709,11 +641,46 @@ async fn refresh_codex_access_token(
 pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus, String> {
     log::debug!("check_codex_cli_installed: starting");
 
+    let wsl = get_wsl_config();
     let binary_path = resolve_cli_binary(&app);
     log::debug!(
         "check_codex_cli_installed: resolved binary_path={:?}",
         binary_path
     );
+
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Ok(CodexCliStatus {
+                installed: false,
+                version: None,
+                path: None,
+            });
+        }
+        let version = crate::platform::wsl_tool_version(&wsl.distro, &tool).and_then(|v| {
+            let cleaned = v
+                .split_whitespace()
+                .last()
+                .unwrap_or(&v)
+                .trim_start_matches('v')
+                .to_string();
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
+        });
+        return Ok(CodexCliStatus {
+            installed: true,
+            version,
+            path: Some(tool),
+        });
+    }
 
     if !binary_path.exists() {
         log::debug!(
@@ -781,17 +748,33 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
 pub async fn check_codex_cli_auth(app: AppHandle) -> Result<CodexAuthStatus, String> {
     log::trace!("Checking Codex CLI authentication status");
 
+    let wsl = get_wsl_config();
     let binary_path = resolve_cli_binary(&app);
 
-    if !binary_path.exists() {
+    if !wsl.enabled && !binary_path.exists() {
         return Ok(CodexAuthStatus {
             authenticated: false,
             error: Some("Codex CLI not installed".to_string()),
         });
     }
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Ok(CodexAuthStatus {
+                authenticated: false,
+                error: Some("Codex CLI not installed inside WSL".to_string()),
+            });
+        }
+    }
 
     // Run `codex login status` to check authentication
-    let output = silent_command(&binary_path)
+    let binary_str = binary_path.to_string_lossy().to_string();
+    let output = wsl_aware_command(&binary_str, None)
         .args(["login", "status"])
         .output()
         .map_err(|e| format!("Failed to execute Codex CLI: {e}"))?;
@@ -1259,9 +1242,6 @@ async fn find_asset_url(
 pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
     log::trace!("Installing Codex CLI, version: {:?}", version);
 
-    let _cli_dir = ensure_cli_dir(&app)?;
-    let binary_path = get_cli_binary_path(&app)?;
-
     // Emit progress: starting
     emit_progress(&app, "starting", "Preparing installation...", 0);
 
@@ -1271,7 +1251,18 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
         None => fetch_latest_codex_version(&app).await?,
     };
 
-    let target = get_codex_target()?;
+    let wsl = get_wsl_config();
+    let target = if wsl.enabled {
+        match wsl_detect_arch(&wsl.distro) {
+            Some("linux-x64") => "x86_64-unknown-linux-gnu",
+            Some("linux-arm64") => "aarch64-unknown-linux-gnu",
+            _ => {
+                return Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string())
+            }
+        }
+    } else {
+        get_codex_target()?
+    };
     log::trace!("Installing version {version} for target {target}");
 
     // Build asset name to search for in release assets
@@ -1315,6 +1306,21 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
 
     // Emit progress: extracting
     emit_progress(&app, "extracting", "Extracting archive...", 45);
+
+    if wsl.enabled {
+        let unix_path = get_wsl_cli_binary_path(&wsl.distro)?;
+        emit_progress(&app, "installing", "Installing Codex CLI into WSL...", 65);
+        log::trace!("Writing codex binary into WSL at {unix_path}");
+        wsl_write_bytes(&wsl.distro, &unix_path, &binary_data)
+            .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
+        wsl_chmod_exec(&wsl.distro, &unix_path)?;
+        emit_progress(&app, "complete", "Installation complete!", 100);
+        log::trace!("Codex CLI installed successfully at WSL:{unix_path}");
+        return Ok(());
+    }
+
+    let _cli_dir = ensure_cli_dir(&app)?;
+    let binary_path = get_cli_binary_path(&app)?;
 
     // On Windows, a running codex.exe holds a file lock that prevents overwriting.
     // Rename the old binary out of the way before extracting the new one.

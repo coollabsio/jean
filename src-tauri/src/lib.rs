@@ -16,8 +16,8 @@ mod cursor_cli;
 mod gh_cli;
 pub mod http_server;
 mod opencode_cli;
-mod opinionated;
 mod opencode_server;
+mod opinionated;
 mod platform;
 mod projects;
 mod terminal;
@@ -71,6 +71,26 @@ fn greet(name: &str) -> String {
 
     log::trace!("Greeting user: {name}");
     format!("Hello, {name}! You've been greeted from Rust!")
+}
+
+#[tauri::command]
+fn list_wsl_distros() -> Vec<String> {
+    platform::list_wsl_distros()
+}
+
+#[tauri::command]
+fn check_wsl_tool(distro: String, tool: String) -> bool {
+    platform::check_wsl_tool(&distro, &tool)
+}
+
+#[tauri::command]
+fn get_wsl_home_dir(distro: String) -> Result<String, String> {
+    platform::get_wsl_home_dir(&distro)
+}
+
+#[tauri::command]
+fn is_wsl_available() -> bool {
+    platform::is_wsl_available()
 }
 
 // Preferences data structure
@@ -230,6 +250,12 @@ pub struct AppPreferences {
     pub opencode_cli_source: String, // OpenCode CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default)]
+    pub wsl_mode_chosen: bool, // Whether WSL mode selection has been made
+    #[serde(default)]
+    pub wsl_enabled: bool, // Route supported commands through WSL
+    #[serde(default)]
+    pub wsl_distro: String, // WSL distro name, e.g. "Ubuntu"
 }
 
 fn default_true() -> Option<bool> {
@@ -1590,12 +1616,15 @@ pub fn get_preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> {
     let prefs_path = get_preferences_path(app)?;
     if !prefs_path.exists() {
-        return Ok(AppPreferences::default());
+        let defaults = AppPreferences::default();
+        platform::init_wsl_config(defaults.wsl_enabled, defaults.wsl_distro.clone());
+        return Ok(defaults);
     }
     let contents = std::fs::read_to_string(&prefs_path)
         .map_err(|e| format!("Failed to read preferences file: {e}"))?;
     let preferences: AppPreferences =
         serde_json::from_str(&contents).map_err(|e| format!("Failed to parse preferences: {e}"))?;
+    platform::init_wsl_config(preferences.wsl_enabled, preferences.wsl_distro.clone());
     Ok(preferences)
 }
 
@@ -1606,7 +1635,9 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
 
     if !prefs_path.exists() {
         log::trace!("Preferences file not found, using defaults");
-        return Ok(AppPreferences::default());
+        let defaults = AppPreferences::default();
+        platform::init_wsl_config(defaults.wsl_enabled, defaults.wsl_distro.clone());
+        return Ok(defaults);
     }
 
     let contents = std::fs::read_to_string(&prefs_path).map_err(|e| {
@@ -1674,6 +1705,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     }
 
     log::trace!("Successfully loaded preferences");
+    platform::init_wsl_config(preferences.wsl_enabled, preferences.wsl_distro.clone());
     Ok(preferences)
 }
 
@@ -1728,6 +1760,11 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
     })?;
 
     log::trace!("Successfully saved preferences to {prefs_path:?}");
+
+    platform::update_wsl_config(
+        prefs_for_disk.wsl_enabled,
+        prefs_for_disk.wsl_distro.clone(),
+    );
 
     // Sync native menu accelerator for magic menu (macOS only)
     #[cfg(target_os = "macos")]
@@ -2733,6 +2770,20 @@ pub fn run() {
 
             log::info!("Startup: projects loaded + asset scopes registered at {:?}", setup_start.elapsed());
 
+            match load_preferences_sync(&app.handle().clone()) {
+                Ok(prefs) => {
+                    if prefs.wsl_enabled {
+                        log::info!("WSL mode enabled with distro: {}", prefs.wsl_distro);
+                    } else {
+                        log::info!("WSL mode disabled");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to load preferences for WSL config init: {e}");
+                    platform::init_wsl_config(false, String::new());
+                }
+            }
+
             // NOTE: Run recovery (crash recovery) is handled by check_resumable_sessions
             // which the frontend calls once it's ready. Previously this was done here in
             // setup(), but that caused a double-invocation bug: the second call from the
@@ -3208,6 +3259,11 @@ pub fn run() {
             background_tasks::commands::set_remote_poll_interval,
             background_tasks::commands::get_remote_poll_interval,
             background_tasks::commands::trigger_immediate_remote_poll,
+            // WSL commands
+            list_wsl_distros,
+            check_wsl_tool,
+            get_wsl_home_dir,
+            is_wsl_available,
             // HTTP server commands
             start_http_server,
             stop_http_server,

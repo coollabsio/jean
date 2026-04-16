@@ -1,4 +1,5 @@
-use crate::platform::silent_command;
+use crate::platform::wsl_aware_command;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -47,9 +48,8 @@ pub struct GitBranchStatus {
 fn fetch_origin_branch(repo_path: &str, branch: &str) -> Result<(), String> {
     log::trace!("Fetching origin/{branch} in {repo_path}");
 
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["fetch", "origin", branch])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git fetch: {e}"))?;
 
@@ -78,9 +78,8 @@ fn fetch_origin_branch_from_remote(
 ) -> Result<(), String> {
     log::trace!("Fetching {remote}/{branch} in {repo_path}");
 
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["fetch", remote, branch])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git fetch: {e}"))?;
 
@@ -102,9 +101,8 @@ fn fetch_origin_branch_from_remote(
 /// Get the upstream tracking ref for the current branch (e.g., "origin/main", "fork/feature")
 /// Returns None if no upstream is configured.
 fn get_upstream_ref(repo_path: &str) -> Option<String> {
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .current_dir(repo_path)
         .output()
         .ok()?;
 
@@ -124,9 +122,8 @@ fn get_upstream_ref(repo_path: &str) -> Option<String> {
 /// Uses symbolic-ref first (works on repos with no commits), falls back to rev-parse
 fn get_current_branch(repo_path: &str) -> Result<String, String> {
     // Try symbolic-ref first — works even on empty repos (no commits yet)
-    let sym_output = silent_command("git")
+    let sym_output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["symbolic-ref", "--short", "HEAD"])
-        .current_dir(repo_path)
         .output();
 
     if let Ok(ref o) = sym_output {
@@ -139,9 +136,8 @@ fn get_current_branch(repo_path: &str) -> Result<String, String> {
     }
 
     // Fall back to rev-parse (works when HEAD is detached)
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git command: {e}"))?;
 
@@ -162,9 +158,8 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
 
     // 1. Get diff stats for unstaged changes (working directory vs index)
     // git diff --numstat outputs: "added<tab>removed<tab>filename" per line
-    let unstaged_output = silent_command("git")
+    let unstaged_output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["diff", "--numstat"])
-        .current_dir(repo_path)
         .output();
 
     if let Ok(o) = unstaged_output {
@@ -183,9 +178,8 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
 
     // 2. Get diff stats for staged changes (index vs HEAD)
     // git diff --cached --numstat shows changes that have been `git add`ed
-    let staged_output = silent_command("git")
+    let staged_output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["diff", "--cached", "--numstat"])
-        .current_dir(repo_path)
         .output();
 
     if let Ok(o) = staged_output {
@@ -204,9 +198,8 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
 
     // 3. Get stats for untracked (new) files
     // List all untracked files
-    let untracked_output = silent_command("git")
+    let untracked_output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["ls-files", "--others", "--exclude-standard"])
-        .current_dir(repo_path)
         .output();
 
     if let Ok(o) = untracked_output {
@@ -239,9 +232,8 @@ fn get_untracked_files_raw_patch(repo_path: &str) -> String {
     let mut raw_patch = String::new();
 
     // List all untracked files
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["ls-files", "--others", "--exclude-standard"])
-        .current_dir(repo_path)
         .output();
 
     let Ok(o) = output else {
@@ -289,9 +281,8 @@ fn get_untracked_files_diff(repo_path: &str) -> Vec<DiffFile> {
     let mut untracked_files: Vec<DiffFile> = Vec::new();
 
     // List all untracked files
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["ls-files", "--others", "--exclude-standard"])
-        .current_dir(repo_path)
         .output();
 
     let Ok(o) = output else {
@@ -370,9 +361,8 @@ fn get_untracked_files_diff(repo_path: &str) -> Vec<DiffFile> {
 fn get_branch_diff_stats(repo_path: &str, base_branch: &str) -> (u32, u32) {
     // git diff --numstat origin/main...HEAD shows changes in current branch vs base
     let origin_ref = format!("origin/{base_branch}");
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["diff", "--numstat", &format!("{origin_ref}...HEAD")])
-        .current_dir(repo_path)
         .output();
 
     match output {
@@ -396,9 +386,8 @@ fn get_branch_diff_stats(repo_path: &str, base_branch: &str) -> (u32, u32) {
 
 /// Check if a git ref exists
 fn ref_exists(repo_path: &str, git_ref: &str) -> bool {
-    silent_command("git")
+    wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["rev-parse", "--verify", "--quiet", git_ref])
-        .current_dir(repo_path)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -407,9 +396,8 @@ fn ref_exists(repo_path: &str, git_ref: &str) -> bool {
 /// Count commits between two refs
 /// Returns 0 if either ref doesn't exist
 fn count_commits_between(repo_path: &str, from_ref: &str, to_ref: &str) -> u32 {
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["rev-list", "--count", &format!("{from_ref}..{to_ref}")])
-        .current_dir(repo_path)
         .output();
 
     match output {
@@ -681,9 +669,8 @@ pub fn get_git_diff(
         _ => return Err(format!("Invalid diff_type: {diff_type}")),
     };
 
-    let output = silent_command("git")
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(&args)
-        .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to run git diff: {e}"))?;
 

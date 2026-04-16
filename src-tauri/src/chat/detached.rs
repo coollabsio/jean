@@ -11,6 +11,7 @@ use std::process::Stdio;
 use std::io::{BufRead, BufReader};
 
 // Re-export is_process_alive from platform module
+use crate::platform::get_wsl_config;
 pub use crate::platform::is_process_alive;
 #[cfg(unix)]
 use crate::platform::shell_escape;
@@ -185,6 +186,97 @@ pub fn spawn_detached_claude(
 
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let wsl_config = get_wsl_config();
+
+    if wsl_config.enabled {
+        use std::io::{BufRead, BufReader};
+
+        let unix_cwd = crate::platform::win_to_wsl_path(&working_dir.to_string_lossy());
+        let cli_path_str = cli_path.to_string_lossy();
+        let cli_name_owned = if cli_path_str.starts_with('/') {
+            cli_path_str.to_string()
+        } else {
+            cli_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("claude")
+                .to_string()
+        };
+        let cli_name = cli_name_owned.as_str();
+
+        let unix_input = crate::platform::win_to_wsl_path(&input_file.to_string_lossy());
+        let unix_output = crate::platform::win_to_wsl_path(&output_file.to_string_lossy());
+
+        let env_exports = env_vars
+            .iter()
+            .map(|(k, v)| format!("{k}='{}'", v.replace('\'', "'\\''")))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let args_str = args
+            .iter()
+            .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let cli_quoted = format!("'{}'", cli_name.replace('\'', "'\\''"));
+        let shell_cmd = if env_exports.is_empty() {
+            format!(
+                "cat '{unix_input}' | nohup {cli_quoted} {args_str} >> '{unix_output}' 2>&1 & echo $!"
+            )
+        } else {
+            format!(
+                "cat '{unix_input}' | {env_exports} nohup {cli_quoted} {args_str} >> '{unix_output}' 2>&1 & echo $!"
+            )
+        };
+
+        log::trace!("Spawning detached Claude CLI via WSL");
+        log::trace!("WSL shell command: {shell_cmd}");
+
+        let mut child = silent_command("wsl.exe")
+            .args([
+                "-d",
+                &wsl_config.distro,
+                "--cd",
+                &unix_cwd,
+                "--",
+                "sh",
+                "-c",
+                &shell_cmd,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn WSL shell: {e}"))?;
+
+        let stdout = child.stdout.take().ok_or("Failed to capture WSL stdout")?;
+        let reader = BufReader::new(stdout);
+
+        let mut pid_str = String::new();
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                pid_str = l.trim().to_string();
+                break;
+            }
+        }
+
+        let status = child
+            .wait()
+            .map_err(|e| format!("Failed to wait for WSL shell: {e}"))?;
+        if !status.success() {
+            return Err(format!("WSL shell command failed with status: {status}"));
+        }
+
+        let pid: u32 = pid_str
+            .parse()
+            .map_err(|e| format!("Failed to parse WSL PID '{pid_str}': {e}"))?;
+
+        log::trace!("Detached Claude CLI spawned inside WSL with PID: {pid}");
+        return Ok(pid);
+    }
 
     // Open output file in append mode (metadata header already written)
     let out_file = OpenOptions::new()

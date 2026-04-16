@@ -1,6 +1,6 @@
 //! Configuration and path management for the embedded Claude CLI
 
-use crate::platform::silent_command;
+use crate::platform::{get_wsl_config, get_wsl_home_dir, silent_command};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -12,6 +12,10 @@ pub const CLI_DIR_NAME: &str = "claude-cli";
 pub const CLI_BINARY_NAME: &str = "claude.exe";
 #[cfg(not(windows))]
 pub const CLI_BINARY_NAME: &str = "claude";
+
+/// Name of the Claude CLI binary when Jean manages it inside a WSL distro
+/// (always Linux, regardless of the host OS).
+pub const CLI_BINARY_NAME_UNIX: &str = "claude";
 
 /// Get the directory where Claude CLI is installed
 ///
@@ -31,12 +35,22 @@ pub fn get_cli_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(get_cli_dir(app)?.join(CLI_BINARY_NAME))
 }
 
+/// Get the directory where Jean installs the Claude CLI inside a WSL distro.
+pub fn get_wsl_cli_dir(distro: &str) -> Result<String, String> {
+    let home = get_wsl_home_dir(distro)?;
+    Ok(format!("{home}/.local/share/jean/{CLI_DIR_NAME}"))
+}
+
+/// Get the full Unix path to the Jean-managed Claude CLI binary inside a WSL distro.
+pub fn get_wsl_cli_binary_path(distro: &str) -> Result<String, String> {
+    Ok(format!(
+        "{}/{CLI_BINARY_NAME_UNIX}",
+        get_wsl_cli_dir(distro)?
+    ))
+}
+
 /// Resolve Claude binary path based on the user's preference.
-///
-/// If `claude_cli_source` preference is `"path"`, look up `claude` in system PATH.
-/// Otherwise (default `"jean"`), use the Jean-managed binary.
 pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
-    // Read preference from disk to avoid needing managed state
     let use_path = match crate::get_preferences_path(app) {
         Ok(prefs_path) => {
             if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
@@ -53,32 +67,43 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
     };
 
     if use_path {
-        // Try to find claude in system PATH
-        let which_cmd = if cfg!(target_os = "windows") {
-            "where"
+        let wsl = get_wsl_config();
+        if wsl.enabled {
+            if let Some(unix_path) = crate::platform::wsl_which(&wsl.distro, "claude") {
+                return PathBuf::from(unix_path);
+            }
         } else {
-            "which"
-        };
+            let which_cmd = if cfg!(target_os = "windows") {
+                "where"
+            } else {
+                "which"
+            };
 
-        if let Ok(output) = silent_command(which_cmd).arg("claude").output() {
-            if output.status.success() {
-                // On Windows, `where` can return multiple paths; take only the first line
-                let path_str = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if !path_str.is_empty() {
-                    let path = PathBuf::from(&path_str);
-                    if path.exists() {
-                        return path;
+            if let Ok(output) = silent_command(which_cmd).arg("claude").output() {
+                if output.status.success() {
+                    let path_str = String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if !path_str.is_empty() {
+                        let path = PathBuf::from(&path_str);
+                        if path.exists() {
+                            return path;
+                        }
                     }
                 }
             }
         }
-        // Fallback: if PATH lookup fails, still return Jean-managed path
         log::warn!("claude_cli_source is 'path' but could not find claude in PATH, falling back to Jean-managed binary");
+    }
+
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return get_wsl_cli_binary_path(&wsl.distro)
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(CLI_BINARY_NAME_UNIX));
     }
 
     get_cli_binary_path(app).unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME))

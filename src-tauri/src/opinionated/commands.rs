@@ -9,9 +9,7 @@ pub struct PluginStatus {
 }
 
 #[tauri::command]
-pub async fn check_opinionated_plugin_status(
-    plugin_name: String,
-) -> Result<PluginStatus, String> {
+pub async fn check_opinionated_plugin_status(plugin_name: String) -> Result<PluginStatus, String> {
     match plugin_name.as_str() {
         "rtk" => check_rtk_status().await,
         "caveman" => check_caveman_status().await,
@@ -32,11 +30,9 @@ pub async fn install_opinionated_plugin(
 }
 
 async fn check_rtk_status() -> Result<PluginStatus, String> {
-    let result = tokio::task::spawn_blocking(|| {
-        silent_command("rtk").arg("--version").output()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let result = tokio::task::spawn_blocking(|| silent_command("rtk").arg("--version").output())
+        .await
+        .map_err(|e| e.to_string())?;
 
     match result {
         Ok(output) if output.status.success() => {
@@ -131,11 +127,10 @@ async fn install_rtk() -> Result<String, String> {
 
     if install_ok {
         // Run post-install setup
-        let init_result = tokio::task::spawn_blocking(|| {
-            silent_command("rtk").args(["init", "-g"]).output()
-        })
-        .await
-        .map_err(|e| e.to_string())?;
+        let init_result =
+            tokio::task::spawn_blocking(|| silent_command("rtk").args(["init", "-g"]).output())
+                .await
+                .map_err(|e| e.to_string())?;
 
         match init_result {
             Ok(output) if output.status.success() => {
@@ -143,9 +138,7 @@ async fn install_rtk() -> Result<String, String> {
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                Ok(format!(
-                    "RTK installed but init had warnings: {stderr}"
-                ))
+                Ok(format!("RTK installed but init had warnings: {stderr}"))
             }
             Err(e) => Ok(format!("RTK installed but init failed: {e}")),
         }
@@ -189,9 +182,7 @@ async fn install_caveman(app: &AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())?;
 
     match install_result {
-        Ok(output) if output.status.success() => {
-            Ok("Caveman installed successfully".to_string())
-        }
+        Ok(output) if output.status.success() => Ok("Caveman installed successfully".to_string()),
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(format!("Failed to install Caveman skill: {stderr}"))

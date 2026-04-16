@@ -2425,8 +2425,7 @@ pub async fn dispatch_command(
         // =====================================================================
         "check_opinionated_plugin_status" => {
             let plugin_name: String = from_field(&args, "pluginName")?;
-            let result =
-                crate::opinionated::check_opinionated_plugin_status(plugin_name).await?;
+            let result = crate::opinionated::check_opinionated_plugin_status(plugin_name).await?;
             to_value(result)
         }
         "install_opinionated_plugin" => {

@@ -13,7 +13,12 @@ pub fn get_default_shell() -> String {
 
 #[cfg(windows)]
 pub fn get_default_shell() -> String {
-    "powershell.exe".to_string()
+    let wsl = super::get_wsl_config();
+    if wsl.enabled {
+        "wsl.exe".to_string()
+    } else {
+        "powershell.exe".to_string()
+    }
 }
 
 /// Check if an executable exists in PATH

@@ -1,11 +1,16 @@
 //! Tauri commands for GitHub CLI management
 
-use crate::platform::silent_command;
+use crate::platform::{
+    check_wsl_tool, get_wsl_config, silent_command, wsl_aware_command, wsl_chmod_exec,
+    wsl_detect_arch, wsl_file_executable, wsl_tool_version, wsl_write_bytes,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-use super::config::{ensure_gh_cli_dir, get_gh_cli_binary_path, resolve_gh_binary};
+use super::config::{
+    ensure_gh_cli_dir, get_gh_cli_binary_path, get_wsl_gh_binary_path, resolve_gh_binary,
+};
 use crate::http_server::EmitExt;
 
 /// Emergency fallback version when API fails AND no cache exists.
@@ -76,7 +81,31 @@ struct GitHubAsset {
 pub async fn check_gh_cli_installed(app: AppHandle) -> Result<GhCliStatus, String> {
     log::trace!("Checking GitHub CLI installation status");
 
+    let wsl = get_wsl_config();
     let binary_path = resolve_gh_binary(&app);
+
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Ok(GhCliStatus {
+                installed: false,
+                version: None,
+                path: None,
+            });
+        }
+        let version = wsl_tool_version(&wsl.distro, &tool)
+            .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()));
+        return Ok(GhCliStatus {
+            installed: true,
+            version,
+            path: Some(tool),
+        });
+    }
 
     if !binary_path.exists() {
         log::trace!("GitHub CLI not found at {:?}", binary_path);
@@ -225,7 +254,10 @@ pub fn resolve_github_api_token(app: &AppHandle) -> Option<String> {
     candidates.push(PathBuf::from("gh"));
 
     for program in candidates {
-        let output = match silent_command(&program).args(["auth", "token"]).output() {
+        let output = match wsl_aware_command(&program.to_string_lossy(), None)
+            .args(["auth", "token"])
+            .output()
+        {
             Ok(output) => output,
             Err(_) => continue,
         };
@@ -345,6 +377,15 @@ fn get_gh_platform() -> Result<(&'static str, &'static str), String> {
     Err("Unsupported platform".to_string())
 }
 
+/// Platform string + archive extension for gh's Linux releases when installing inside WSL.
+fn wsl_gh_platform(distro: &str) -> Result<(&'static str, &'static str), String> {
+    match wsl_detect_arch(distro) {
+        Some("linux-x64") => Ok(("linux_amd64", "tar.gz")),
+        Some("linux-arm64") => Ok(("linux_arm64", "tar.gz")),
+        _ => Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string()),
+    }
+}
+
 /// Install GitHub CLI by downloading from GitHub releases
 #[tauri::command]
 pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
@@ -361,6 +402,7 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
         ));
     }
 
+    let wsl = get_wsl_config();
     let cli_dir = ensure_gh_cli_dir(&app)?;
     let binary_path = get_gh_cli_binary_path(&app)?;
 
@@ -374,7 +416,11 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     };
 
     // Detect platform
-    let (platform, archive_ext) = get_gh_platform()?;
+    let (platform, archive_ext) = if wsl.enabled {
+        wsl_gh_platform(&wsl.distro)?
+    } else {
+        get_gh_platform()?
+    };
     log::trace!("Installing version {version} for platform {platform}");
 
     // Build download URL
@@ -432,11 +478,18 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     emit_progress(&app, "installing", "Installing GitHub CLI...", 60);
 
     // Move binary to final location
-    // Use write_binary_file to handle Windows file-locking (OS error 32)
     let binary_content = std::fs::read(&extracted_binary_path)
         .map_err(|e| format!("Failed to read extracted binary: {e}"))?;
-    crate::platform::write_binary_file(&binary_path, &binary_content)
-        .map_err(|e| format!("Failed to copy binary: {e}"))?;
+    if wsl.enabled {
+        let unix_path = get_wsl_gh_binary_path(&wsl.distro)?;
+        wsl_write_bytes(&wsl.distro, &unix_path, &binary_content)
+            .map_err(|e| format!("Failed to copy binary into WSL: {e}"))?;
+        wsl_chmod_exec(&wsl.distro, &unix_path)?;
+    } else {
+        // Use write_binary_file to handle Windows file-locking (OS error 32)
+        crate::platform::write_binary_file(&binary_path, &binary_content)
+            .map_err(|e| format!("Failed to copy binary: {e}"))?;
+    }
 
     // Clean up temp directory
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -457,6 +510,42 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     }
 
     // Verify the binary works
+    if wsl.enabled {
+        let unix_path = get_wsl_gh_binary_path(&wsl.distro)?;
+        log::trace!("Verifying WSL binary at {unix_path}");
+        let version_output = wsl_aware_command(&unix_path, None)
+            .arg("--version")
+            .output()
+            .map_err(|e| format!("Failed to verify GitHub CLI in WSL: {e}"))?;
+
+        if !version_output.status.success() {
+            let stderr = String::from_utf8_lossy(&version_output.stderr);
+            let stdout = String::from_utf8_lossy(&version_output.stdout);
+            log::error!(
+                "GitHub CLI verification failed in WSL - exit code: {:?}, stdout: {}, stderr: {}",
+                version_output.status.code(),
+                stdout,
+                stderr
+            );
+            return Err(format!(
+                "GitHub CLI binary verification failed: {}",
+                if !stderr.is_empty() {
+                    stderr.to_string()
+                } else {
+                    "Unknown error".to_string()
+                }
+            ));
+        }
+
+        let installed_version = String::from_utf8_lossy(&version_output.stdout)
+            .trim()
+            .to_string();
+        log::trace!("Verified GitHub CLI version in WSL: {installed_version}");
+        emit_progress(&app, "complete", "Installation complete!", 100);
+        log::trace!("GitHub CLI installed successfully at WSL:{unix_path}");
+        return Ok(());
+    }
+
     // Use the binary directly - shell wrapper causes PowerShell parsing issues on Windows
     log::trace!("Verifying binary at {:?}", binary_path);
     let version_output = silent_command(&binary_path)
@@ -655,19 +744,35 @@ pub struct GhAuthStatus {
 pub async fn check_gh_cli_auth(app: AppHandle) -> Result<GhAuthStatus, String> {
     log::trace!("Checking GitHub CLI authentication status");
 
+    let wsl = get_wsl_config();
     let binary_path = resolve_gh_binary(&app);
 
-    if !binary_path.exists() {
+    if !wsl.enabled && !binary_path.exists() {
         return Ok(GhAuthStatus {
             authenticated: false,
             error: Some("GitHub CLI not installed".to_string()),
         });
     }
+    if wsl.enabled {
+        let tool = binary_path.to_string_lossy().to_string();
+        let installed = if tool.starts_with('/') {
+            wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            check_wsl_tool(&wsl.distro, &tool)
+        };
+        if !installed {
+            return Ok(GhAuthStatus {
+                authenticated: false,
+                error: Some("GitHub CLI not installed inside WSL".to_string()),
+            });
+        }
+    }
 
     // Run gh auth status to check authentication
     log::trace!("Running auth check: {:?} auth status", binary_path);
 
-    let output = silent_command(&binary_path)
+    let binary_str = binary_path.to_string_lossy().to_string();
+    let output = wsl_aware_command(&binary_str, None)
         .args(["auth", "status"])
         .output()
         .map_err(|e| format!("Failed to execute GitHub CLI: {e}"))?;
@@ -707,35 +812,9 @@ pub async fn detect_gh_in_path(app: AppHandle) -> Result<GhPathDetection, String
     let jean_managed_path = get_gh_cli_binary_path(&app)
         .ok()
         .and_then(|p| std::fs::canonicalize(&p).ok());
-
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
-
-    let output = match silent_command(which_cmd).arg("gh").output() {
-        Ok(output) if output.status.success() => {
-            // On Windows, `where` can return multiple paths; take only the first line
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string()
-        }
-        _ => {
-            log::trace!("GitHub CLI not found in PATH");
-            return Ok(GhPathDetection {
-                found: false,
-                path: None,
-                version: None,
-                package_manager: None,
-            });
-        }
-    };
-
-    if output.is_empty() {
+    let detection = crate::platform::detect_cli_in_path("gh", jean_managed_path.as_deref());
+    if !detection.found {
+        log::trace!("GitHub CLI not found in PATH");
         return Ok(GhPathDetection {
             found: false,
             path: None,
@@ -744,45 +823,15 @@ pub async fn detect_gh_in_path(app: AppHandle) -> Result<GhPathDetection, String
         });
     }
 
-    let found_path = std::path::PathBuf::from(&output);
-
-    // Exclude Jean-managed binary
-    if let Some(ref jean_path) = jean_managed_path {
-        if let Ok(canonical_found) = std::fs::canonicalize(&found_path) {
-            if canonical_found == *jean_path {
-                log::trace!("Found PATH gh is the Jean-managed binary, excluding");
-                return Ok(GhPathDetection {
-                    found: false,
-                    path: None,
-                    version: None,
-                    package_manager: None,
-                });
-            }
-        }
-    }
-
-    // gh --version returns "gh version 2.40.0 (2024-01-15)"
-    let version = match silent_command(&found_path).arg("--version").output() {
-        Ok(ver_output) if ver_output.status.success() => {
-            let ver_str = String::from_utf8_lossy(&ver_output.stdout)
-                .trim()
-                .to_string();
-            ver_str.split_whitespace().nth(2).map(|s| s.to_string())
-        }
-        _ => None,
-    };
-
-    let package_manager = crate::platform::detect_package_manager(&found_path);
-
-    log::trace!(
-        "Found GitHub CLI in PATH: {output} (version: {version:?}, pkg_mgr: {package_manager:?})"
-    );
+    let version = detection
+        .version
+        .and_then(|ver_str| ver_str.split_whitespace().nth(2).map(|s| s.to_string()));
 
     Ok(GhPathDetection {
         found: true,
-        path: Some(output),
+        path: detection.path,
         version,
-        package_manager,
+        package_manager: detection.package_manager,
     })
 }
 

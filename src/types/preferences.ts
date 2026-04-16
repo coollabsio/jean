@@ -981,6 +981,9 @@ export interface AppPreferences {
   codex_cli_source: 'jean' | 'path' // Codex CLI source: 'jean' (managed) or 'path' (system PATH)
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
+  wsl_mode_chosen: boolean // Whether WSL mode selection has been made
+  wsl_enabled: boolean // Route supported commands through WSL
+  wsl_distro: string // WSL distro name
 }
 
 export interface CustomCliProfile {
@@ -1562,4 +1565,7 @@ export const defaultPreferences: AppPreferences = {
   codex_cli_source: 'jean', // Default: Jean-managed
   opencode_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
+  wsl_mode_chosen: false, // Default: not yet chosen
+  wsl_enabled: false, // Default: native Windows
+  wsl_distro: '', // Default: empty
 }

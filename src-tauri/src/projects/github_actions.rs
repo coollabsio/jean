@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::AppHandle;
 
 use crate::gh_cli::config::resolve_gh_binary;
-use crate::platform::silent_command;
+use crate::platform::wsl_aware_command;
 
 // =============================================================================
 // GitHub Actions Types
@@ -62,9 +63,8 @@ pub async fn list_workflow_runs(
         args.push(b.clone());
     }
 
-    let output = silent_command(&gh)
+    let output = wsl_aware_command(&gh, Some(Path::new(&project_path)))
         .args(&args)
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh run list: {e}"))?;
 

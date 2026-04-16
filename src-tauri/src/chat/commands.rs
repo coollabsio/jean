@@ -1616,7 +1616,9 @@ pub async fn send_chat_message(
     let run_thinking_level = if effective_backend == Backend::Cursor {
         None
     } else {
-        thinking_level.as_ref().map(|t| format!("{t:?}").to_lowercase())
+        thinking_level
+            .as_ref()
+            .map(|t| format!("{t:?}").to_lowercase())
     };
     let run_effort_level = if effective_backend == Backend::Cursor {
         None
@@ -2611,7 +2613,9 @@ pub async fn send_chat_message(
                     let skip_first = matches!(first,
                         Some(super::types::ContentBlock::Text { text }) if text.trim() == trimmed_prompt
                     );
-                    if skip_first { iter.next(); }
+                    if skip_first {
+                        iter.next();
+                    }
                     iter.collect()
                 };
                 let blocks: Vec<serde_json::Value> = blocks_to_write
