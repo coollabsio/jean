@@ -562,6 +562,35 @@ mod tests {
             Some("medium")
         );
     }
+
+    #[test]
+    fn normalize_wsl_preferences_switches_to_available_distro() {
+        let mut prefs = AppPreferences::default();
+        prefs.wsl_enabled = true;
+        prefs.wsl_distro = "Missing".to_string();
+
+        let changed = super::normalize_wsl_preferences_with_distros(
+            &mut prefs,
+            &["Debian".to_string(), "Ubuntu".to_string()],
+        );
+
+        assert!(changed);
+        assert!(prefs.wsl_enabled);
+        assert_eq!(prefs.wsl_distro, "Debian");
+    }
+
+    #[test]
+    fn normalize_wsl_preferences_disables_when_no_distros_exist() {
+        let mut prefs = AppPreferences::default();
+        prefs.wsl_enabled = true;
+        prefs.wsl_distro = "Ubuntu".to_string();
+
+        let changed = super::normalize_wsl_preferences_with_distros(&mut prefs, &[]);
+
+        assert!(changed);
+        assert!(!prefs.wsl_enabled);
+        assert!(prefs.wsl_distro.is_empty());
+    }
 }
 
 fn default_removal_behavior() -> String {
@@ -1612,6 +1641,52 @@ pub fn get_preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join("preferences.json"))
 }
 
+fn normalize_wsl_preferences_with_distros(
+    preferences: &mut AppPreferences,
+    available_distros: &[String],
+) -> bool {
+    if !preferences.wsl_enabled {
+        return false;
+    }
+
+    let selected_is_available = !preferences.wsl_distro.is_empty()
+        && available_distros
+            .iter()
+            .any(|distro| distro == &preferences.wsl_distro);
+    if selected_is_available {
+        return false;
+    }
+
+    if let Some(first_distro) = available_distros.first() {
+        log::warn!(
+            "Selected WSL distro '{}' is unavailable; switching to '{}'",
+            preferences.wsl_distro,
+            first_distro
+        );
+        preferences.wsl_distro = first_distro.clone();
+        return true;
+    }
+
+    log::warn!("WSL was enabled but no distros are available; disabling WSL");
+    preferences.wsl_enabled = false;
+    preferences.wsl_distro.clear();
+    true
+}
+
+fn normalize_wsl_preferences(app: &AppHandle, preferences: &mut AppPreferences) -> bool {
+    let available_distros = platform::list_wsl_distros();
+    let changed = normalize_wsl_preferences_with_distros(preferences, &available_distros);
+    if changed {
+        log::info!(
+            "Normalized WSL preferences: enabled={}, distro={}",
+            preferences.wsl_enabled,
+            preferences.wsl_distro
+        );
+        let _ = app; // Keep signature symmetric with sync/async callers.
+    }
+    changed
+}
+
 /// Synchronous helper to load AppPreferences (for use in non-async Rust code).
 pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> {
     let prefs_path = get_preferences_path(app)?;
@@ -1624,6 +1699,8 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
         .map_err(|e| format!("Failed to read preferences file: {e}"))?;
     let preferences: AppPreferences =
         serde_json::from_str(&contents).map_err(|e| format!("Failed to parse preferences: {e}"))?;
+    let mut preferences = preferences;
+    let _ = normalize_wsl_preferences(app, &mut preferences);
     platform::init_wsl_config(preferences.wsl_enabled, preferences.wsl_distro.clone());
     Ok(preferences)
 }
@@ -1692,6 +1769,10 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         }
     }
 
+    if normalize_wsl_preferences(&app, &mut preferences) {
+        needs_resave = true;
+    }
+
     // Re-save preferences with settings_json cleared (file is now source of truth)
     if needs_resave {
         let mut prefs_for_disk = preferences.clone();
@@ -1717,8 +1798,11 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
     log::trace!("Saving preferences to disk");
     let prefs_path = get_preferences_path(&app)?;
 
+    let mut prefs_for_disk = preferences;
+    let _ = normalize_wsl_preferences(&app, &mut prefs_for_disk);
+
     // Write any non-empty settings_json to standalone files before clearing
-    for profile in &preferences.custom_cli_profiles {
+    for profile in &prefs_for_disk.custom_cli_profiles {
         if !profile.settings_json.is_empty() {
             if let Ok(path) = get_cli_profile_path(&profile.name) {
                 if let Some(parent) = path.parent() {
@@ -1732,7 +1816,6 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
     }
 
     // Strip settings_json from CLI profiles before writing to preferences.json (file is source of truth)
-    let mut prefs_for_disk = preferences;
     for profile in &mut prefs_for_disk.custom_cli_profiles {
         profile.settings_json = String::new();
         profile.file_path = String::new();

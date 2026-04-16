@@ -1,8 +1,9 @@
 //! Tauri commands for GitHub CLI management
 
 use crate::platform::{
-    check_wsl_tool, get_wsl_config, silent_command, wsl_aware_command, wsl_chmod_exec,
-    wsl_detect_arch, wsl_file_executable, wsl_tool_version, wsl_write_bytes,
+    check_wsl_tool, get_wsl_config, path_available_for_execution, silent_command,
+    wsl_aware_command, wsl_chmod_exec, wsl_detect_arch, wsl_file_executable, wsl_tool_version,
+    wsl_write_bytes,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -242,18 +243,16 @@ pub fn resolve_github_api_token(app: &AppHandle) -> Option<String> {
         }
     }
 
-    let mut candidates: Vec<PathBuf> = Vec::new();
     let managed_gh = resolve_gh_binary(app);
-    if managed_gh.exists() {
-        candidates.push(managed_gh);
-    } else if let Ok(path) = get_gh_cli_binary_path(app) {
-        if path.exists() {
-            candidates.push(path);
-        }
+    let mut candidates: Vec<PathBuf> = vec![managed_gh.clone()];
+    if managed_gh != PathBuf::from("gh") {
+        candidates.push(PathBuf::from("gh"));
     }
-    candidates.push(PathBuf::from("gh"));
 
     for program in candidates {
+        if !path_available_for_execution(&program) {
+            continue;
+        }
         let output = match wsl_aware_command(&program.to_string_lossy(), None)
             .args(["auth", "token"])
             .output()

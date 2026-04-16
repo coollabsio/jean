@@ -21,7 +21,7 @@ use super::types::{
 };
 use crate::claude_cli::resolve_cli_binary;
 use crate::http_server::EmitExt;
-use crate::platform::silent_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command};
 use crate::projects::github_issues::{
     add_issue_reference, add_pr_reference, get_session_issue_refs, get_session_pr_refs,
 };
@@ -2021,33 +2021,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    // Embedded binary path hints
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        system_prompt_parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    append_embedded_cli_hints(&mut system_prompt_parts, &thread_app);
 
                     // Collect context file paths (issues, PRs, saved contexts)
                     let mut all_context_paths: Vec<std::path::PathBuf> = Vec::new();
@@ -2295,33 +2269,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    // Embedded binary path hints
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        system_prompt_parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
-                    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
-                        if claude_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `claude` — always use the full path above.",
-                                claude_binary.display()
-                            ));
-                        }
-                    }
-                    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(&thread_app) {
-                        if codex_binary.exists() {
-                            system_prompt_parts.push(format!(
-                                "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
-                                 Do NOT use bare `codex` — always use the full path above.",
-                                codex_binary.display()
-                            ));
-                        }
-                    }
+                    append_embedded_cli_hints(&mut system_prompt_parts, &thread_app);
 
                     // Collect and inline context files (issues, PRs, saved contexts)
                     let mut context_content = String::new();
@@ -4444,6 +4392,48 @@ fn generate_fallback_slug(project_name: &str, session_name: &str) -> String {
     }
 }
 
+fn append_embedded_cli_hints(system_prompt_parts: &mut Vec<String>, app: &AppHandle) {
+    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
+    if gh_binary != std::path::PathBuf::from("gh") && path_available_for_execution(&gh_binary) {
+        system_prompt_parts.push(format!(
+            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
+             Do NOT use bare `gh` — always use the full path above.",
+            gh_binary.display()
+        ));
+    }
+
+    let wsl = crate::platform::get_wsl_config();
+    let claude_binary = if wsl.enabled {
+        crate::claude_cli::get_wsl_cli_binary_path(&wsl.distro)
+            .ok()
+            .map(std::path::PathBuf::from)
+    } else {
+        crate::claude_cli::get_cli_binary_path(app).ok()
+    };
+    if let Some(claude_binary) = claude_binary.filter(|path| path_available_for_execution(path)) {
+        system_prompt_parts.push(format!(
+            "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
+             Do NOT use bare `claude` — always use the full path above.",
+            claude_binary.display()
+        ));
+    }
+
+    let codex_binary = if wsl.enabled {
+        crate::codex_cli::get_wsl_cli_binary_path(&wsl.distro)
+            .ok()
+            .map(std::path::PathBuf::from)
+    } else {
+        crate::codex_cli::get_cli_binary_path(app).ok()
+    };
+    if let Some(codex_binary) = codex_binary.filter(|path| path_available_for_execution(path)) {
+        system_prompt_parts.push(format!(
+            "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
+             Do NOT use bare `codex` — always use the full path above.",
+            codex_binary.display()
+        ));
+    }
+}
+
 /// Execute one-shot Claude CLI call for summarization with JSON schema (non-streaming)
 fn execute_summarization_claude(
     app: &AppHandle,
@@ -4502,13 +4492,13 @@ fn execute_summarization_claude(
     }
 
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Claude CLI not installed".to_string());
     }
 
     log::trace!("Executing one-shot Claude summarization with JSON schema");
 
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, working_dir);
     crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
     cmd.args([
         "--print",
@@ -5300,13 +5290,13 @@ fn execute_digest_claude(
     }
 
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Claude CLI not installed".to_string());
     }
 
     log::trace!("Executing one-shot Claude digest with JSON schema");
 
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, working_dir);
     crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
     cmd.args([
         "--print",
@@ -5633,13 +5623,13 @@ pub async fn check_mcp_health(
 
 fn check_mcp_health_claude(app: &AppHandle) -> Result<McpHealthResult, String> {
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Claude CLI not installed".to_string());
     }
 
     log::debug!("Running: claude mcp list");
 
-    let output = silent_command(&cli_path)
+    let output = wsl_aware_command(&cli_path, None)
         .args(["mcp", "list"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -5659,13 +5649,13 @@ fn check_mcp_health_claude(app: &AppHandle) -> Result<McpHealthResult, String> {
 
 fn check_mcp_health_codex(app: &AppHandle) -> Result<McpHealthResult, String> {
     let cli_path = crate::codex_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Codex CLI not installed".to_string());
     }
 
     log::debug!("Running: codex mcp list --json");
 
-    let output = silent_command(&cli_path)
+    let output = wsl_aware_command(&cli_path, None)
         .args(["mcp", "list", "--json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -5685,13 +5675,13 @@ fn check_mcp_health_codex(app: &AppHandle) -> Result<McpHealthResult, String> {
 
 fn check_mcp_health_opencode(app: &AppHandle) -> Result<McpHealthResult, String> {
     let cli_path = crate::opencode_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("OpenCode CLI not installed".to_string());
     }
 
     log::debug!("Running: opencode mcp list");
 
-    let output = silent_command(&cli_path)
+    let output = wsl_aware_command(&cli_path, None)
         .args(["mcp", "list"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

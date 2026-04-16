@@ -15,6 +15,7 @@ use super::types::{
     CodexUserInputRequest, CodexUserInputRequestEvent, ContentBlock, ToolCall, UsageData,
 };
 use crate::http_server::EmitExt;
+use crate::platform::{path_available_for_execution, wsl_aware_command};
 
 use std::collections::HashMap;
 
@@ -3199,7 +3200,7 @@ pub fn execute_one_shot_codex(
 ) -> Result<String, String> {
     let cli_path = crate::codex_cli::resolve_cli_binary(app);
 
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Codex CLI not installed".to_string());
     }
 
@@ -3218,7 +3219,7 @@ pub fn execute_one_shot_codex(
     std::fs::write(&schema_file, output_schema)
         .map_err(|e| format!("Failed to write schema file: {e}"))?;
 
-    let mut cmd = crate::platform::silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, working_dir);
     cmd.args(["exec", "--json", "--model", actual_model, "--full-auto"]);
     if is_fast {
         cmd.args(["-c", "service_tier=\"fast\""]);
@@ -3227,7 +3228,7 @@ pub fn execute_one_shot_codex(
     cmd.arg(&schema_file);
     if let Some(dir) = working_dir {
         cmd.arg("--cd");
-        cmd.arg(dir);
+        cmd.arg(crate::platform::wsl_cli_path_arg(dir));
     } else {
         // One-shot calls that don't know a repository path should still run.
         cmd.arg("--skip-git-repo-check");
@@ -3236,11 +3237,6 @@ pub fn execute_one_shot_codex(
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-
-    if let Some(dir) = working_dir {
-        cmd.current_dir(dir);
-    }
-
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn Codex CLI: {e}"))?;

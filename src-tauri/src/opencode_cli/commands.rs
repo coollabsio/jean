@@ -8,8 +8,8 @@ use super::config::{
 };
 use crate::http_server::EmitExt;
 use crate::platform::{
-    check_wsl_tool, get_wsl_config, silent_command, wsl_aware_command, wsl_chmod_exec,
-    wsl_detect_arch, wsl_file_executable, wsl_write_bytes,
+    check_wsl_tool, get_wsl_config, path_available_for_execution, silent_command,
+    wsl_aware_command, wsl_chmod_exec, wsl_detect_arch, wsl_file_executable, wsl_write_bytes,
 };
 
 /// GitHub owner/repo for OpenCode releases.
@@ -76,36 +76,18 @@ enum ArchiveFormat {
 /// List available OpenCode models by refreshing from the OpenCode CLI cache source.
 #[tauri::command]
 pub async fn list_opencode_models(app: AppHandle) -> Result<Vec<String>, String> {
-    let wsl = get_wsl_config();
     let binary_path = resolve_cli_binary(&app);
-    if !binary_path.exists() {
+    if !path_available_for_execution(&binary_path) {
         return Err(format!(
             "OpenCode CLI not found at {}. Install it in Settings > General.",
             binary_path.display()
         ));
     }
 
-    if wsl.enabled {
-        let tool = binary_path.to_string_lossy().to_string();
-        let installed = if tool.starts_with('/') {
-            wsl_file_executable(&wsl.distro, &tool)
-        } else {
-            check_wsl_tool(&wsl.distro, &tool)
-        };
-        if !installed {
-            return Err("OpenCode CLI not installed inside WSL".to_string());
-        }
-    }
-
-    let output = if wsl.enabled {
-        let tool = binary_path.to_string_lossy().to_string();
-        wsl_aware_command(&tool, None)
-    } else {
-        silent_command(&binary_path)
-    }
-    .args(["models", "--refresh", "--verbose"])
-    .output()
-    .map_err(|e| format!("Failed to execute OpenCode CLI models command: {e}"))?;
+    let output = wsl_aware_command(&binary_path, None)
+        .args(["models", "--refresh", "--verbose"])
+        .output()
+        .map_err(|e| format!("Failed to execute OpenCode CLI models command: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

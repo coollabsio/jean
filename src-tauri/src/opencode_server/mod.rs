@@ -9,7 +9,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 use crate::opencode_cli::resolve_cli_binary;
-use crate::platform::silent_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command};
 
 const DEFAULT_PORT: u16 = 4096;
 const DEFAULT_HOSTNAME: &str = "127.0.0.1";
@@ -192,14 +192,14 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
     }
 
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err(format!(
             "OpenCode CLI not found at {}. Install it in Settings > General.",
             cli_path.display()
         ));
     }
 
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, None);
     cmd.arg("serve")
         .arg("--hostname")
         .arg(&hostname)

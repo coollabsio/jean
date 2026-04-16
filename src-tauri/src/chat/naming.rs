@@ -4,7 +4,7 @@
 //! based on the first message in a session.
 
 use crate::claude_cli::resolve_cli_binary;
-use crate::platform::silent_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command, wsl_cli_path_arg};
 use crate::projects::git;
 use crate::projects::storage::{load_projects_data, save_projects_data};
 
@@ -363,7 +363,7 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
     }
 
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Claude CLI not installed".to_string());
     }
 
@@ -373,7 +373,7 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
         "Generating names with Claude CLI using model {model_alias}, has_images: {has_images}, has_text_files: {has_text_files}, has_file_mentions: {has_file_mentions}"
     );
 
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, Some(&request.worktree_path));
     crate::chat::claude::apply_custom_profile_settings(
         &mut cmd,
         request.custom_profile_name.as_deref(),
@@ -399,10 +399,11 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
         // In prod mode: only specific directories (security)
         if let Ok(app_data_dir) = app.path().app_data_dir() {
             if cfg!(debug_assertions) {
-                cmd.arg("--add-dir").arg(&app_data_dir);
+                cmd.arg("--add-dir").arg(wsl_cli_path_arg(&app_data_dir));
                 log::trace!("Added full app data directory to naming scope: {app_data_dir:?}");
                 if has_file_mentions {
-                    cmd.arg("--add-dir").arg(&request.worktree_path);
+                    cmd.arg("--add-dir")
+                        .arg(wsl_cli_path_arg(&request.worktree_path));
                     log::trace!(
                         "Added worktree directory for file mentions: {:?}",
                         request.worktree_path
@@ -411,17 +412,18 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
             } else {
                 if has_images {
                     let pasted_images = app_data_dir.join("pasted-images");
-                    cmd.arg("--add-dir").arg(&pasted_images);
+                    cmd.arg("--add-dir").arg(wsl_cli_path_arg(pasted_images));
                     log::trace!("Added pasted-images directory to naming scope: {pasted_images:?}");
                 }
                 if has_text_files {
                     let pasted_texts = app_data_dir.join("pasted-texts");
-                    cmd.arg("--add-dir").arg(&pasted_texts);
+                    cmd.arg("--add-dir").arg(wsl_cli_path_arg(pasted_texts));
                     log::trace!("Added pasted-texts directory to naming scope: {pasted_texts:?}");
                 }
                 if has_file_mentions {
                     // File mentions reference files in the worktree
-                    cmd.arg("--add-dir").arg(&request.worktree_path);
+                    cmd.arg("--add-dir")
+                        .arg(wsl_cli_path_arg(&request.worktree_path));
                     log::trace!(
                         "Added worktree directory for file mentions: {:?}",
                         request.worktree_path
@@ -429,7 +431,7 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
                 }
                 // Always allow session-context for context loading
                 let saved_contexts = app_data_dir.join("session-context");
-                cmd.arg("--add-dir").arg(&saved_contexts);
+                cmd.arg("--add-dir").arg(wsl_cli_path_arg(saved_contexts));
                 log::trace!("Added session-context directory to naming scope: {saved_contexts:?}");
             }
         }

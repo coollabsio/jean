@@ -50,9 +50,35 @@ pub fn spawn_terminal(
         })
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    // Get user's shell
-    let shell = get_user_shell();
-    log::trace!("Using shell: {shell}");
+    let wsl_config = crate::platform::get_wsl_config();
+    let wsl_mode = cfg!(windows) && wsl_config.enabled;
+
+    // Use the requested working directory if it exists on the host; otherwise
+    // fall back to the system temp directory. When WSL mode is enabled, the
+    // host current_dir must still be a Windows path even if the terminal itself
+    // should start in a WSL path.
+    let host_cwd = if std::path::Path::new(&worktree_path).is_dir() {
+        worktree_path.clone()
+    } else {
+        let fallback = std::env::temp_dir().to_string_lossy().to_string();
+        log::warn!(
+            "Worktree path '{}' does not exist on the host, falling back to '{}'",
+            worktree_path,
+            fallback
+        );
+        fallback
+    };
+    let wsl_cwd = if wsl_mode {
+        crate::platform::wsl_cli_path_arg(&worktree_path)
+    } else {
+        host_cwd.clone()
+    };
+
+    let jean_worktree_path = if wsl_mode {
+        wsl_cwd.clone()
+    } else {
+        host_cwd.clone()
+    };
 
     // Build command - either run a specific command or start interactive shell
     let mut cmd = if let Some(ref run_command) = command {
@@ -60,20 +86,50 @@ pub fn spawn_terminal(
             return Err("Command is empty".to_string());
         }
         if let Some(ref args) = command_args {
-            // Validate absolute paths exist upfront for a clear error message.
-            if run_command.starts_with('/') && !std::path::Path::new(run_command).exists() {
+            // Validate absolute paths upfront for a clear error message.
+            let run_command_path = std::path::Path::new(run_command);
+            if run_command_path.is_absolute()
+                && !crate::platform::path_available_for_execution(run_command_path)
+            {
                 return Err(format!("Binary not found: {run_command}"));
             }
 
-            // Direct binary invocation — CommandBuilder uses execvp which handles
-            // spaces in paths natively. No shell wrapper needed.
-            let mut c = CommandBuilder::new(run_command);
-            for arg in args {
-                c.arg(arg);
+            if wsl_mode {
+                let mut c = CommandBuilder::new("wsl.exe");
+                c.arg("-d");
+                c.arg(&wsl_config.distro);
+                c.arg("--cd");
+                c.arg(&wsl_cwd);
+                c.arg("--");
+                c.arg(crate::platform::wsl_cli_path_arg(run_command));
+                for arg in args {
+                    c.arg(arg);
+                }
+                c
+            } else {
+                // Direct binary invocation — CommandBuilder uses execvp which handles
+                // spaces in paths natively. No shell wrapper needed.
+                let mut c = CommandBuilder::new(run_command);
+                for arg in args {
+                    c.arg(arg);
+                }
+                c
             }
+        } else if wsl_mode {
+            // Run shell commands inside the selected WSL distro.
+            let mut c = CommandBuilder::new("wsl.exe");
+            c.arg("-d");
+            c.arg(&wsl_config.distro);
+            c.arg("--cd");
+            c.arg(&wsl_cwd);
+            c.arg("--");
+            c.arg("bash");
+            c.arg("-lc");
+            c.arg(run_command);
             c
         } else {
             // Run the command wrapped in a shell
+            let shell = get_user_shell();
             let mut c = CommandBuilder::new(&shell);
             #[cfg(windows)]
             {
@@ -87,37 +143,31 @@ pub fn spawn_terminal(
             }
             c
         }
+    } else if wsl_mode {
+        let mut c = CommandBuilder::new("wsl.exe");
+        c.arg("-d");
+        c.arg(&wsl_config.distro);
+        c.arg("--cd");
+        c.arg(&wsl_cwd);
+        c
     } else {
+        let shell = get_user_shell();
         CommandBuilder::new(&shell)
     };
-    // Use the requested working directory if it exists, otherwise fall back to
-    // the system temp directory. This is critical on Windows where `/tmp` doesn't
-    // exist — CLI login terminals pass `/tmp` as a placeholder path.
-    let cwd = if std::path::Path::new(&worktree_path).is_dir() {
-        worktree_path.clone()
-    } else {
-        let fallback = std::env::temp_dir().to_string_lossy().to_string();
-        log::warn!(
-            "Worktree path '{}' does not exist, falling back to '{}'",
-            worktree_path,
-            fallback
-        );
-        fallback
-    };
     log::debug!(
-        "Terminal {terminal_id}: cwd={cwd}, command={:?}, args={:?}",
+        "Terminal {terminal_id}: host_cwd={host_cwd}, wsl_cwd={wsl_cwd}, command={:?}, args={:?}",
         command,
         command_args
     );
-    cmd.cwd(&cwd);
+    cmd.cwd(&host_cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    cmd.env("JEAN_WORKTREE_PATH", &worktree_path);
+    cmd.env("JEAN_WORKTREE_PATH", &jean_worktree_path);
 
     // Spawn the shell
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
         log::error!(
-            "Failed to spawn terminal {terminal_id}: {e} (cwd={cwd}, command={:?}, args={:?})",
+            "Failed to spawn terminal {terminal_id}: {e} (host_cwd={host_cwd}, wsl_cwd={wsl_cwd}, command={:?}, args={:?})",
             command,
             command_args
         );
@@ -262,9 +312,12 @@ pub fn resize_terminal(terminal_id: &str, cols: u16, rows: u16) -> Result<(), St
 pub fn kill_terminal(app: &AppHandle, terminal_id: &str) -> Result<bool, String> {
     if let Some(mut session) = unregister_terminal(terminal_id) {
         // Kill the child process - try graceful termination first
-        if let Some(pid) = session.child.process_id() {
-            if let Err(e) = crate::platform::terminate_process(pid) {
-                log::trace!("Graceful termination of pid={pid} failed: {e}");
+        let wsl_mode = cfg!(windows) && crate::platform::get_wsl_config().enabled;
+        if !wsl_mode {
+            if let Some(pid) = session.child.process_id() {
+                if let Err(e) = crate::platform::terminate_process(pid) {
+                    log::trace!("Graceful termination of pid={pid} failed: {e}");
+                }
             }
         }
 
@@ -301,10 +354,13 @@ pub fn kill_all_terminals() -> usize {
     for (terminal_id, mut session) in sessions.drain() {
         eprintln!("[TERMINAL CLEANUP] Killing terminal: {terminal_id}");
 
-        if let Some(pid) = session.child.process_id() {
-            eprintln!("[TERMINAL CLEANUP] Sending terminate signal to PID {pid}");
-            if let Err(e) = crate::platform::terminate_process(pid) {
-                eprintln!("[TERMINAL CLEANUP] Graceful termination failed: {e}");
+        let wsl_mode = cfg!(windows) && crate::platform::get_wsl_config().enabled;
+        if !wsl_mode {
+            if let Some(pid) = session.child.process_id() {
+                eprintln!("[TERMINAL CLEANUP] Sending terminate signal to PID {pid}");
+                if let Err(e) = crate::platform::terminate_process(pid) {
+                    eprintln!("[TERMINAL CLEANUP] Graceful termination failed: {e}");
+                }
             }
         }
 

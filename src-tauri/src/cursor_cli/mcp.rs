@@ -5,7 +5,7 @@
 //! - User scope:    ~/.cursor/mcp.json              → `mcpServers`
 
 use crate::chat::{McpHealthStatus, McpServerInfo};
-use crate::platform::silent_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -81,17 +81,14 @@ pub fn check_mcp_health(
     worktree_path: Option<&Path>,
 ) -> Result<HashMap<String, McpHealthStatus>, String> {
     let cli_path = super::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Cursor CLI not installed".to_string());
     }
 
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, worktree_path);
     cmd.args(["mcp", "list"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(path) = worktree_path {
-        cmd.current_dir(path);
-    }
 
     let output = cmd
         .output()
@@ -193,13 +190,12 @@ fn run_mcp_approval_command(
     identifier: &str,
 ) -> Result<(), String> {
     let cli_path = super::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Cursor CLI not installed".to_string());
     }
 
-    let output = silent_command(&cli_path)
+    let output = wsl_aware_command(&cli_path, Some(worktree_path))
         .args(["mcp", verb, identifier])
-        .current_dir(worktree_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()

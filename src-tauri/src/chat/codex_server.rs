@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 use crate::codex_cli::resolve_cli_binary;
-use crate::platform::silent_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command};
 
 // =============================================================================
 // Types
@@ -188,7 +188,7 @@ fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
 
     // Spawn new server
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err(format!(
             "Codex CLI not found at {}. Please install it in Settings > General.",
             cli_path.display()
@@ -200,7 +200,7 @@ fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
         cli_path.display()
     );
 
-    let mut child = silent_command(&cli_path)
+    let mut child = wsl_aware_command(&cli_path, None)
         .arg("app-server")
         .arg("--listen")
         .arg("stdio://")

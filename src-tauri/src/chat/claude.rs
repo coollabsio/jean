@@ -213,7 +213,8 @@ pub fn apply_custom_profile_settings(cmd: &mut std::process::Command, profile_na
         if !name.is_empty() {
             if let Ok(path) = crate::get_cli_profile_path(name) {
                 if path.exists() {
-                    cmd.arg("--settings").arg(&path);
+                    let path_arg = crate::platform::wsl_cli_path_arg(&path);
+                    cmd.arg("--settings").arg(path_arg);
                 } else {
                     log::warn!(
                         "CLI profile file not found for '{name}': {}",
@@ -270,7 +271,7 @@ fn build_claude_args(
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         if cfg!(debug_assertions) {
             args.push("--add-dir".to_string());
-            args.push(app_data_dir.to_string_lossy().to_string());
+            args.push(crate::platform::wsl_cli_path_arg(&app_data_dir));
         } else {
             for subdir in [
                 "pasted-images",
@@ -280,12 +281,12 @@ fn build_claude_args(
                 "combined-contexts",
             ] {
                 args.push("--add-dir".to_string());
-                args.push(app_data_dir.join(subdir).to_string_lossy().to_string());
+                args.push(crate::platform::wsl_cli_path_arg(app_data_dir.join(subdir)));
             }
             // Add session-specific runs directory
             let session_runs_dir = app_data_dir.join("runs").join(session_id);
             args.push("--add-dir".to_string());
-            args.push(session_runs_dir.to_string_lossy().to_string());
+            args.push(crate::platform::wsl_cli_path_arg(session_runs_dir));
         }
     }
 
@@ -296,7 +297,7 @@ fn build_claude_args(
             let dir_path = claude_dir.join(subdir);
             if dir_path.exists() {
                 args.push("--add-dir".to_string());
-                args.push(dir_path.to_string_lossy().to_string());
+                args.push(crate::platform::wsl_cli_path_arg(dir_path));
             }
         }
     }
@@ -326,7 +327,7 @@ fn build_claude_args(
             if let Ok(path) = crate::get_cli_profile_path(name) {
                 if path.exists() {
                     args.push("--settings".to_string());
-                    args.push(path.to_string_lossy().to_string());
+                    args.push(crate::platform::wsl_cli_path_arg(&path));
                 } else {
                     log::warn!(
                         "CLI profile file not found for '{name}': {}",
@@ -498,8 +499,18 @@ fn build_claude_args(
     }
 
     // Embedded Claude CLI path - tell Claude to use the app's bundled binary
-    if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(app) {
-        if claude_binary.exists() {
+    {
+        let wsl = crate::platform::get_wsl_config();
+        let claude_binary = if wsl.enabled {
+            crate::claude_cli::get_wsl_cli_binary_path(&wsl.distro)
+                .ok()
+                .map(std::path::PathBuf::from)
+        } else {
+            crate::claude_cli::get_cli_binary_path(app).ok()
+        };
+        if let Some(claude_binary) =
+            claude_binary.filter(|path| crate::platform::path_available_for_execution(path))
+        {
             system_prompt_parts.push(format!(
                 "When running Claude CLI commands, use the full path to the embedded binary: {}\n\
                  Do NOT use bare `claude` — always use the full path above.",
@@ -509,8 +520,18 @@ fn build_claude_args(
     }
 
     // Embedded Codex CLI path - tell Claude to use the app's bundled binary
-    if let Ok(codex_binary) = crate::codex_cli::get_cli_binary_path(app) {
-        if codex_binary.exists() {
+    {
+        let wsl = crate::platform::get_wsl_config();
+        let codex_binary = if wsl.enabled {
+            crate::codex_cli::get_wsl_cli_binary_path(&wsl.distro)
+                .ok()
+                .map(std::path::PathBuf::from)
+        } else {
+            crate::codex_cli::get_cli_binary_path(app).ok()
+        };
+        if let Some(codex_binary) =
+            codex_binary.filter(|path| crate::platform::path_available_for_execution(path))
+        {
             system_prompt_parts.push(format!(
                 "When running Codex CLI commands, use the full path to the embedded binary: {}\n\
                  Do NOT use bare `codex` — always use the full path above.",
@@ -738,7 +759,7 @@ fn build_claude_args(
                     combined_file
                 );
                 args.push("--append-system-prompt-file".to_string());
-                args.push(combined_file.to_string_lossy().to_string());
+                args.push(crate::platform::wsl_cli_path_arg(combined_file));
             }
         }
     }
@@ -812,7 +833,7 @@ pub fn execute_claude_detached(
     // Get CLI path
     let cli_path = resolve_cli_binary(app);
 
-    if !cli_path.exists() {
+    if !crate::platform::path_available_for_execution(&cli_path) {
         let error_msg = format!(
             "Claude CLI not found at {}. Please complete setup in Settings > Advanced.",
             cli_path.display()
@@ -1131,9 +1152,7 @@ pub fn tail_claude_output(
                                             }
                                             #[cfg(windows)]
                                             {
-                                                let _ = crate::platform::silent_command("taskkill")
-                                                    .args(["/F", "/PID", &pid.to_string()])
-                                                    .output();
+                                                let _ = crate::platform::kill_process_tree(pid);
                                             }
 
                                             // Emit done event so frontend knows streaming is complete

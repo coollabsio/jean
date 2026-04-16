@@ -1,4 +1,7 @@
-use crate::platform::silent_command;
+use crate::platform::{
+    check_wsl_tool, get_wsl_config, path_available_for_execution, silent_command,
+    wsl_aware_command, wsl_tool_version,
+};
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -30,6 +33,27 @@ pub async fn install_opinionated_plugin(
 }
 
 async fn check_rtk_status() -> Result<PluginStatus, String> {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        let installed = check_wsl_tool(&wsl.distro, "rtk");
+        if !installed {
+            return Ok(PluginStatus {
+                installed: false,
+                version: None,
+            });
+        }
+
+        let version = wsl_tool_version(&wsl.distro, "rtk")
+            .and_then(|v| extract_version(&v))
+            .map(Some)
+            .unwrap_or(None);
+
+        return Ok(PluginStatus {
+            installed: true,
+            version,
+        });
+    }
+
     let result = tokio::task::spawn_blocking(|| silent_command("rtk").arg("--version").output())
         .await
         .map_err(|e| e.to_string())?;
@@ -51,6 +75,33 @@ async fn check_rtk_status() -> Result<PluginStatus, String> {
 }
 
 async fn check_caveman_status() -> Result<PluginStatus, String> {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        let found = tokio::task::spawn_blocking(|| {
+            let script = r#"
+if find "$HOME/.claude/plugins/cache" -maxdepth 2 -iname '*caveman*' -print -quit 2>/dev/null | grep -q .; then
+    exit 0
+fi
+if find "$HOME/.claude/skills" -maxdepth 2 -iname '*caveman*' -print -quit 2>/dev/null | grep -q .; then
+    exit 0
+fi
+exit 1
+"#;
+            wsl_aware_command("sh", None)
+                .args(["-lc", script])
+                .output()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+
+        return Ok(PluginStatus {
+            installed: found,
+            version: None,
+        });
+    }
+
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
 
     let found = tokio::task::spawn_blocking(move || {
@@ -90,47 +141,39 @@ async fn check_caveman_status() -> Result<PluginStatus, String> {
 }
 
 async fn install_rtk() -> Result<String, String> {
-    // Try brew first on macOS
-    let brew_result = tokio::task::spawn_blocking(|| {
-        silent_command("brew")
-            .args(["install", "rtk-ai/tap/rtk"])
-            .output()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let install_ok = match brew_result {
-        Ok(output) if output.status.success() => true,
-        _ => {
-            // Fallback to curl installer
-            let curl_result = tokio::task::spawn_blocking(|| {
-                silent_command("sh")
-                    .args([
-                        "-c",
-                        "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh",
-                    ])
-                    .output()
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-
-            match curl_result {
-                Ok(output) if output.status.success() => true,
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("RTK installation failed: {stderr}"));
-                }
-                Err(e) => return Err(format!("Failed to run installer: {e}")),
-            }
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        if !check_wsl_tool(&wsl.distro, "curl") {
+            return Err(
+                "curl must be installed in the selected WSL distro to install RTK".to_string(),
+            );
         }
-    };
 
-    if install_ok {
-        // Run post-install setup
-        let init_result =
-            tokio::task::spawn_blocking(|| silent_command("rtk").args(["init", "-g"]).output())
-                .await
-                .map_err(|e| e.to_string())?;
+        let install_result = tokio::task::spawn_blocking(|| {
+            wsl_aware_command("sh", None)
+                .args([
+                    "-lc",
+                    "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh",
+                ])
+                .output()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        match install_result {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("RTK installation failed: {stderr}"));
+            }
+            Err(e) => return Err(format!("Failed to run installer: {e}")),
+        }
+
+        let init_result = tokio::task::spawn_blocking(|| {
+            wsl_aware_command("rtk", None).args(["init", "-g"]).output()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
         match init_result {
             Ok(output) if output.status.success() => {
@@ -143,20 +186,74 @@ async fn install_rtk() -> Result<String, String> {
             Err(e) => Ok(format!("RTK installed but init failed: {e}")),
         }
     } else {
-        Err("RTK installation failed".to_string())
+        // Try brew first on macOS
+        let brew_result = tokio::task::spawn_blocking(|| {
+            silent_command("brew")
+                .args(["install", "rtk-ai/tap/rtk"])
+                .output()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let install_ok = match brew_result {
+            Ok(output) if output.status.success() => true,
+            _ => {
+                // Fallback to curl installer
+                let curl_result = tokio::task::spawn_blocking(|| {
+                    silent_command("sh")
+                        .args([
+                            "-c",
+                            "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh",
+                        ])
+                        .output()
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+
+                match curl_result {
+                    Ok(output) if output.status.success() => true,
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        return Err(format!("RTK installation failed: {stderr}"));
+                    }
+                    Err(e) => return Err(format!("Failed to run installer: {e}")),
+                }
+            }
+        };
+
+        if install_ok {
+            // Run post-install setup
+            let init_result =
+                tokio::task::spawn_blocking(|| silent_command("rtk").args(["init", "-g"]).output())
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+            match init_result {
+                Ok(output) if output.status.success() => {
+                    Ok("RTK installed and initialized successfully".to_string())
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Ok(format!("RTK installed but init had warnings: {stderr}"))
+                }
+                Err(e) => Ok(format!("RTK installed but init failed: {e}")),
+            }
+        } else {
+            Err("RTK installation failed".to_string())
+        }
     }
 }
 
 async fn install_caveman(app: &AppHandle) -> Result<String, String> {
     let binary_path = crate::claude_cli::resolve_cli_binary(app);
 
-    if !binary_path.exists() {
+    if !path_available_for_execution(&binary_path) {
         return Err("Claude CLI must be installed first to install Caveman".to_string());
     }
 
     let bin = binary_path.clone();
     let add_result = tokio::task::spawn_blocking(move || {
-        silent_command(&bin)
+        wsl_aware_command(&bin, None)
             .args(["plugin", "marketplace", "add", "JuliusBrussee/caveman"])
             .output()
     })
@@ -174,7 +271,7 @@ async fn install_caveman(app: &AppHandle) -> Result<String, String> {
 
     let bin = binary_path;
     let install_result = tokio::task::spawn_blocking(move || {
-        silent_command(&bin)
+        wsl_aware_command(&bin, None)
             .args(["plugin", "install", "caveman@caveman"])
             .output()
     })

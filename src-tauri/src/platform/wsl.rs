@@ -69,6 +69,19 @@ pub fn win_to_wsl_path(path: &str) -> String {
     normalized
 }
 
+/// Convert a path to the string form that should be passed to a WSL command.
+///
+/// When WSL mode is disabled, this returns the original path string.
+/// When WSL mode is enabled, Windows-style paths are translated to WSL paths.
+pub fn wsl_cli_path_arg(path: impl AsRef<std::path::Path>) -> String {
+    let path_str = path.as_ref().to_string_lossy().to_string();
+    if get_wsl_config().enabled {
+        win_to_wsl_path(&path_str)
+    } else {
+        path_str
+    }
+}
+
 /// Convert a WSL path to a Windows path.
 pub fn wsl_to_win_path(unix_path: &str, distro: &str) -> String {
     if unix_path.starts_with("/mnt/") && unix_path.len() >= 6 {
@@ -115,6 +128,33 @@ pub fn wsl_aware_command<P: AsRef<std::ffi::OsStr>>(
     args.extend(["--".to_string(), program.to_string()]);
     cmd.args(&args);
     cmd
+}
+
+/// Check whether a resolved command path is usable in the current execution mode.
+///
+/// On Windows with WSL mode enabled, this validates the path inside the selected
+/// WSL distro instead of checking the host filesystem.
+pub fn path_available_for_execution(path: &std::path::Path) -> bool {
+    let config = get_wsl_config();
+    if !config.enabled {
+        return path.exists();
+    }
+
+    #[cfg(windows)]
+    {
+        let path_str = path.to_string_lossy().to_string();
+        if path_str.contains('/') || path_str.contains('\\') || path_str.contains(':') {
+            let unix_path = win_to_wsl_path(&path_str);
+            return wsl_file_executable(&config.distro, &unix_path);
+        }
+
+        return check_wsl_tool(&config.distro, &path_str);
+    }
+
+    #[cfg(not(windows))]
+    {
+        path.exists()
+    }
 }
 
 #[cfg(windows)]
@@ -398,6 +438,16 @@ mod tests {
             win_to_wsl_path(r"\\wsl.localhost\Ubuntu\home\user\project"),
             "/home/user/project"
         );
+    }
+
+    #[test]
+    fn wsl_cli_path_arg_translates_windows_style_paths() {
+        init_wsl_config(true, "Ubuntu".to_string());
+        assert_eq!(
+            wsl_cli_path_arg(r"C:\Users\foo\project"),
+            "/mnt/c/Users/foo/project"
+        );
+        update_wsl_config(false, String::new());
     }
 
     #[test]

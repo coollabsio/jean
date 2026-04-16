@@ -245,15 +245,19 @@ function OnboardingDialogContent() {
     const distros = Array.from(new Set(wslDistros ?? [])).sort((a, b) =>
       a.localeCompare(b)
     )
-    if (preferences?.wsl_distro && !distros.includes(preferences.wsl_distro)) {
-      distros.unshift(preferences.wsl_distro)
-    }
     return distros
-  }, [preferences?.wsl_distro, wslDistros])
+  }, [wslDistros])
+  const selectedAvailableWslDistro = useMemo(() => {
+    const current = preferences?.wsl_distro ?? ''
+    if (current && availableWslDistros.includes(current)) {
+      return current
+    }
+    return availableWslDistros[0] ?? ''
+  }, [preferences?.wsl_distro, availableWslDistros])
   const wslChoiceAvailable =
     isWindows &&
     wslAvailable === true &&
-    (wslDistros?.length ?? 0) > 0 &&
+    availableWslDistros.length > 0 &&
     !preferences?.wsl_mode_chosen
 
   useEffect(() => {
@@ -959,14 +963,12 @@ function OnboardingDialogContent() {
     if (step !== 'wsl-select') return
 
     setWslModeSelection(preferences?.wsl_enabled ? 'wsl' : 'native')
-    setSelectedWslDistro(
-      preferences?.wsl_distro ?? availableWslDistros[0] ?? ''
-    )
+    setSelectedWslDistro(selectedAvailableWslDistro)
   }, [
     step,
     preferences?.wsl_enabled,
     preferences?.wsl_distro,
-    availableWslDistros,
+    selectedAvailableWslDistro,
   ])
 
   const handleWslSelectionContinue = useCallback(() => {
@@ -980,11 +982,7 @@ function OnboardingDialogContent() {
       return
     }
 
-    const chosenDistro =
-      selectedWslDistro ||
-      availableWslDistros[0] ||
-      preferences.wsl_distro ||
-      ''
+    const chosenDistro = selectedWslDistro || selectedAvailableWslDistro || ''
 
     if (wslModeSelection === 'wsl' && !chosenDistro) {
       toast.error('Select a WSL distro before continuing.')
@@ -995,8 +993,7 @@ function OnboardingDialogContent() {
       {
         wsl_mode_chosen: true,
         wsl_enabled: wslModeSelection === 'wsl',
-        wsl_distro:
-          wslModeSelection === 'wsl' ? chosenDistro : preferences.wsl_distro,
+        wsl_distro: chosenDistro,
       },
       {
         onSuccess: async () => {

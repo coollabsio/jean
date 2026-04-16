@@ -2,7 +2,7 @@
 
 use super::types::{ContentBlock, ToolCall, UsageData};
 use crate::http_server::EmitExt;
-use crate::platform::silent_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command, wsl_cli_path_arg};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
@@ -126,13 +126,13 @@ fn build_cursor_message(message: &str, execution_mode: &str) -> String {
 
 fn create_cursor_chat(app: &AppHandle, working_dir: &Path) -> Result<String, String> {
     let cli_path = crate::cursor_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Cursor CLI not installed".to_string());
     }
 
-    let output = silent_command(&cli_path)
+    let output = wsl_aware_command(&cli_path, Some(working_dir))
         .args(["--workspace"])
-        .arg(working_dir)
+        .arg(wsl_cli_path_arg(working_dir))
         .arg("create-chat")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1069,7 +1069,7 @@ pub fn execute_cursor(
     pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<CursorResponse, String> {
     let cli_path = crate::cursor_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Cursor CLI not installed".to_string());
     }
 
@@ -1082,12 +1082,12 @@ pub fn execute_cursor(
     let enabled_mcp_names = parse_enabled_mcp_names(mcp_config);
     crate::cursor_cli::mcp::sync_cursor_mcp_approvals(app, working_dir, &enabled_mcp_names)?;
 
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, Some(working_dir));
     cmd.arg("--print")
         .args(["--output-format", "stream-json"])
         .arg("--trust")
         .args(["--workspace"])
-        .arg(working_dir)
+        .arg(wsl_cli_path_arg(working_dir))
         .args(["--resume", &chat_id]);
 
     if let Some(model) = raw_cursor_model(model) {
@@ -1109,7 +1109,6 @@ pub fn execute_cursor(
 
     let prepared_message = build_cursor_message(message, effective_mode);
     cmd.arg(&prepared_message)
-        .current_dir(working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -1206,23 +1205,22 @@ pub fn execute_one_shot_cursor(
     working_dir: Option<&Path>,
 ) -> Result<String, String> {
     let cli_path = crate::cursor_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Cursor CLI not installed".to_string());
     }
 
     let dir = working_dir.unwrap_or_else(|| Path::new("."));
-    let mut cmd = silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, Some(dir));
     cmd.arg("--print")
         .args(["--output-format", "stream-json"])
         .arg("--trust")
         .args(["--workspace"])
-        .arg(dir)
+        .arg(wsl_cli_path_arg(dir))
         .args(["--mode", "ask", "--sandbox", "enabled"]);
 
     let model = raw_cursor_model(Some(model)).unwrap_or("auto");
     cmd.args(["--model", model])
         .arg(prompt)
-        .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 

@@ -49,7 +49,7 @@ use crate::claude_cli::resolve_cli_binary;
 use crate::codex_cli::resolve_cli_binary as resolve_codex_cli_binary;
 use crate::gh_cli::config::resolve_gh_binary;
 use crate::http_server::EmitExt;
-use crate::platform::wsl_aware_command;
+use crate::platform::{path_available_for_execution, wsl_aware_command, wsl_cli_path_arg};
 
 static RELEASE_NOTES_PAREN_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\(([^)]*)\)").expect("valid release notes parenthetical regex"));
@@ -5243,6 +5243,82 @@ fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -
     ]
 }
 
+fn execute_claude_structured_output(
+    app: &AppHandle,
+    prompt: &str,
+    model: &str,
+    custom_profile_name: Option<&str>,
+    working_dir: Option<&Path>,
+    tools: &str,
+    schema: &str,
+    review_run_id: Option<&str>,
+) -> Result<String, String> {
+    let cli_path = resolve_cli_binary(app);
+    if !path_available_for_execution(&cli_path) {
+        return Err("Claude CLI not installed".to_string());
+    }
+
+    let mut cmd = wsl_aware_command(&cli_path, working_dir);
+    crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
+    cmd.args(build_claude_structured_output_args(model, tools, schema));
+
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
+
+    if let Some(run_id) = review_run_id {
+        register_review_process(run_id, child.id());
+    }
+
+    {
+        let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
+        let input_message = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": prompt
+            }
+        });
+        writeln!(stdin, "{input_message}").map_err(|e| format!("Failed to write to stdin: {e}"))?;
+    }
+
+    let output_result = child.wait_with_output();
+    let cancelled = review_run_id
+        .map(|run_id| take_review_process_pid(run_id).is_none())
+        .unwrap_or(false);
+    let output = match output_result {
+        Ok(output) => output,
+        Err(e) => {
+            if cancelled {
+                return Err("Review cancelled".to_string());
+            }
+            return Err(format!("Failed to wait for Claude CLI: {e}"));
+        }
+    };
+
+    if !output.status.success() {
+        if cancelled {
+            return Err("Review cancelled".to_string());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "Claude CLI failed: stderr={}, stdout={}",
+            stderr.trim(),
+            stdout.trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    log::trace!("Claude CLI structured output stdout: {stdout}");
+
+    extract_structured_output(&stdout)
+}
+
 /// Truncate a diff at file boundaries instead of mid-file.
 /// Splits on `\ndiff --git` markers and keeps complete file diffs until the budget is exceeded.
 fn truncate_diff_at_file_boundaries(diff: &str, max_chars: usize) -> String {
@@ -5985,65 +6061,16 @@ fn generate_pr_content_from_inputs(
 
     log::trace!("Generating PR content with Claude CLI (JSON schema)");
 
-    let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
-        return Err("Claude CLI not installed".to_string());
-    }
-
-    let mut cmd = silent_command(&cli_path);
-    crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    let json_content = execute_claude_structured_output(
+        app,
+        &prompt,
         model_str,
+        custom_profile_name,
+        Some(Path::new(repo_path)),
         "",
         PR_CONTENT_SCHEMA,
-    ));
-
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
-
-    {
-        let input_message = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": prompt
-            }
-        });
-
-        let write_result = if let Some(stdin) = child.stdin.as_mut() {
-            writeln!(stdin, "{input_message}")
-        } else {
-            Err(std::io::Error::other("Failed to open stdin"))
-        };
-
-        if let Err(e) = write_result {
-            return Err(format!("Failed to write to stdin: {e}"));
-        }
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("Failed to wait for Claude CLI: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    log::trace!("Claude CLI PR generation stdout: {stdout}");
-
-    let json_content = extract_structured_output(&stdout)?;
+        None,
+    )?;
     log::trace!("Extracted PR content JSON: {json_content}");
 
     let mut response: PrContentResponse = serde_json::from_str(&json_content).map_err(|e| {
@@ -6574,58 +6601,16 @@ fn generate_commit_message(
 
     log::trace!("Generating commit message with Claude CLI (JSON schema)");
 
-    let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
-        return Err("Claude CLI not installed".to_string());
-    }
-
-    let mut cmd = silent_command(&cli_path);
-    crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    let json_content = execute_claude_structured_output(
+        app,
+        prompt,
         model_str,
+        custom_profile_name,
+        working_dir,
         "",
         COMMIT_MESSAGE_SCHEMA,
-    ));
-
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
-
-    // Write prompt to stdin
-    {
-        let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
-        let input_message = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": prompt
-            }
-        });
-        writeln!(stdin, "{input_message}").map_err(|e| format!("Failed to write to stdin: {e}"))?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("Failed to wait for Claude CLI: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    log::trace!("Claude CLI commit generation stdout: {stdout}");
-
-    let json_content = extract_structured_output(&stdout)?;
+        None,
+    )?;
     log::trace!("Extracted commit message JSON: {json_content}");
 
     serde_json::from_str::<CommitMessageResponse>(&json_content)
@@ -6886,7 +6871,7 @@ fn execute_codex_review(
     review_run_id: Option<&str>,
 ) -> Result<String, String> {
     let cli_path = resolve_codex_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Codex CLI not installed".to_string());
     }
 
@@ -6897,7 +6882,7 @@ fn execute_codex_review(
     std::fs::write(&schema_file, REVIEW_SCHEMA)
         .map_err(|e| format!("Failed to write schema file: {e}"))?;
 
-    let mut cmd = crate::platform::silent_command(&cli_path);
+    let mut cmd = wsl_aware_command(&cli_path, working_dir);
     cmd.args([
         "exec",
         "--json",
@@ -6909,8 +6894,7 @@ fn execute_codex_review(
     cmd.arg(&schema_file);
     if let Some(dir) = working_dir {
         cmd.arg("--cd");
-        cmd.arg(dir);
-        cmd.current_dir(dir);
+        cmd.arg(wsl_cli_path_arg(dir));
     } else {
         cmd.arg("--skip-git-repo-check");
     }
@@ -7027,75 +7011,21 @@ fn generate_review(
     }
 
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    log::trace!("Running code review with Claude CLI (JSON schema)");
+    if !path_available_for_execution(&cli_path) {
         return Err("Claude CLI not installed".to_string());
     }
 
-    log::trace!("Running code review with Claude CLI (JSON schema)");
-
-    let mut cmd = silent_command(&cli_path);
-    crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    let json_content = execute_claude_structured_output(
+        app,
+        prompt,
         model_str,
+        custom_profile_name,
+        working_dir,
         "none",
         REVIEW_SCHEMA,
-    ));
-
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
-    if let Some(run_id) = review_run_id {
-        register_review_process(run_id, child.id());
-    }
-
-    // Write prompt to stdin
-    {
-        let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
-        let input_message = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": prompt
-            }
-        });
-        writeln!(stdin, "{input_message}").map_err(|e| format!("Failed to write to stdin: {e}"))?;
-    }
-
-    let output_result = child.wait_with_output();
-    let cancelled = review_run_id
-        .map(|run_id| take_review_process_pid(run_id).is_none())
-        .unwrap_or(false);
-    let output = match output_result {
-        Ok(output) => output,
-        Err(e) => {
-            if cancelled {
-                return Err("Review cancelled".to_string());
-            }
-            return Err(format!("Failed to wait for Claude CLI: {e}"));
-        }
-    };
-
-    if !output.status.success() {
-        if cancelled {
-            return Err("Review cancelled".to_string());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    log::trace!("Claude CLI review stdout: {stdout}");
-
-    let json_content = extract_structured_output(&stdout)?;
+        review_run_id,
+    )?;
     log::trace!("Extracted review JSON: {json_content}");
 
     serde_json::from_str::<ReviewResponse>(&json_content)
@@ -7561,59 +7491,21 @@ fn generate_release_notes_content(
     }
 
     let cli_path = resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !path_available_for_execution(&cli_path) {
         return Err("Claude CLI not installed".to_string());
     }
 
     log::trace!("Generating release notes with Claude CLI (JSON schema)");
-
-    let mut cmd = silent_command(&cli_path);
-    crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
-    cmd.args(build_claude_structured_output_args(
+    let json_content = execute_claude_structured_output(
+        app,
+        &prompt,
         model_str,
+        custom_profile_name,
+        Some(Path::new(project_path)),
         "",
         RELEASE_NOTES_SCHEMA,
-    ));
-
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
-
-    // Write prompt to stdin
-    {
-        let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
-        let input_message = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": prompt
-            }
-        });
-        writeln!(stdin, "{input_message}").map_err(|e| format!("Failed to write to stdin: {e}"))?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("Failed to wait for Claude CLI: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    log::trace!("Claude CLI release notes stdout: {stdout}");
-
-    let json_content = extract_structured_output(&stdout)?;
+        None,
+    )?;
     log::trace!("Extracted release notes JSON: {json_content}");
 
     serde_json::from_str::<ReleaseNotesResponse>(&json_content)

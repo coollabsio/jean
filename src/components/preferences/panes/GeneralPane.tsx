@@ -536,11 +536,16 @@ export const GeneralPane: React.FC = () => {
     const distros = Array.from(new Set(wslDistros ?? [])).sort((a, b) =>
       a.localeCompare(b)
     )
-    if (preferences?.wsl_distro && !distros.includes(preferences.wsl_distro)) {
-      distros.unshift(preferences.wsl_distro)
-    }
     return distros
-  }, [preferences?.wsl_distro, wslDistros])
+  }, [wslDistros])
+
+  const selectedWslDistro = useMemo(() => {
+    const current = preferences?.wsl_distro ?? ''
+    if (current && wslDistroOptions.includes(current)) {
+      return current
+    }
+    return wslDistroOptions[0] ?? ''
+  }, [preferences?.wsl_distro, wslDistroOptions])
 
   const displayCliPath = useCallback(
     (path: string | null | undefined) =>
@@ -568,11 +573,8 @@ export const GeneralPane: React.FC = () => {
 
     const nextDistro =
       enabled && wslDistroOptions.length > 0
-        ? preferences.wsl_distro &&
-          wslDistroOptions.includes(preferences.wsl_distro)
-          ? preferences.wsl_distro
-          : wslDistroOptions[0]
-        : preferences.wsl_distro
+        ? selectedWslDistro || wslDistroOptions[0] || ''
+        : selectedWslDistro
 
     patchPreferences.mutate(
       {
@@ -1021,7 +1023,7 @@ export const GeneralPane: React.FC = () => {
               }
             >
               <Select
-                value={preferences?.wsl_distro ?? ''}
+                value={selectedWslDistro}
                 onValueChange={handleWslDistroChange}
                 disabled={!wslAvailable || wslDistroOptions.length === 0}
               >
