@@ -98,7 +98,7 @@ pub async fn list_github_issues(
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
     // Run gh issue list
-    let output = wsl_aware_command(&gh, Some(Path::new(project_path.as_ref())))
+    let output = wsl_aware_command(&gh, Some(Path::new(project_path.as_str())))
         .args([
             "issue",
             "list",

@@ -481,11 +481,7 @@ pub async fn install_claude_cli(app: AppHandle, version: Option<String>) -> Resu
         .await
         .map_err(|e| format!("Failed to read binary content: {e}"))?;
 
-    log::trace!(
-        "Downloaded {} bytes, saving to {:?}",
-        binary_content.len(),
-        binary_path
-    );
+    log::trace!("Downloaded {} bytes", binary_content.len());
 
     // Verify checksum before writing to disk
     emit_progress(&app, "verifying_checksum", "Verifying checksum...", 55);

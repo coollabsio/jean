@@ -49,7 +49,7 @@ use crate::claude_cli::resolve_cli_binary;
 use crate::codex_cli::resolve_cli_binary as resolve_codex_cli_binary;
 use crate::gh_cli::config::resolve_gh_binary;
 use crate::http_server::EmitExt;
-use crate::platform::{path_available_for_execution, wsl_aware_command, wsl_cli_path_arg};
+use crate::platform::{path_available_for_execution, silent_command, wsl_aware_command, wsl_cli_path_arg};
 
 static RELEASE_NOTES_PAREN_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\(([^)]*)\)").expect("valid release notes parenthetical regex"));

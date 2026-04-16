@@ -254,8 +254,9 @@ pub fn clone_repo(url: &str, destination: &str) -> Result<(), String> {
 
     log::info!("Cloning {url} into {destination}");
 
-    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["clone", url, destination])
+    let destination_arg = crate::platform::wsl_cli_path_arg(destination);
+    let output = wsl_aware_command("git", dest_path.parent())
+        .args(["clone", url, &destination_arg])
         .output()
         .map_err(|e| format!("Failed to run git clone: {e}"))?;
 
