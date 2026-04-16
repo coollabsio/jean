@@ -164,6 +164,17 @@ pub fn spawn_terminal(
     cmd.env("COLORTERM", "truecolor");
     cmd.env("JEAN_WORKTREE_PATH", &jean_worktree_path);
 
+    // Set WSL-specific environment variables
+    if wsl_mode {
+        // When in WSL mode, set HOME to the WSL user's home directory
+        if let Ok(wsl_home) = crate::platform::get_wsl_home_dir(&wsl_config.distro) {
+            cmd.env("HOME", &wsl_home);
+            log::trace!("Terminal {terminal_id}: Set HOME={} for WSL mode", wsl_home);
+        }
+        // Don't set PWD; wsl.exe --cd will handle it correctly inside WSL
+        // The host Windows PATH should be replaced with WSL's PATH via login shell
+    }
+
     // Spawn the shell
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
         log::error!(

@@ -47,7 +47,12 @@ pub fn get_wsl_config() -> WslConfig {
 
 /// Convert a Windows path to a WSL path.
 pub fn win_to_wsl_path(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
+    let mut normalized = path.replace('\\', "/");
+
+    // Handle extended-length path prefix (\\?\C:\path)
+    if let Some(rest) = normalized.strip_prefix("///?/") {
+        normalized = rest.to_string();
+    }
 
     for prefix in &["//wsl.localhost/", "//wsl$/"] {
         if let Some(rest) = normalized.strip_prefix(prefix) {
@@ -64,6 +69,14 @@ pub fn win_to_wsl_path(path: &str) -> String {
     {
         let drive = (normalized.as_bytes()[0] as char).to_ascii_lowercase();
         return format!("/mnt/{drive}/{}", &normalized[3..]);
+    }
+
+    // Warn about network UNC paths that we can't translate
+    if normalized.starts_with("//") && !normalized.starts_with("//wsl") {
+        log::warn!(
+            "Network UNC path {} passed to WSL mode - may not work correctly",
+            normalized
+        );
     }
 
     normalized
@@ -200,11 +213,68 @@ pub fn list_wsl_distros() -> Vec<String> {
 }
 
 fn decode_utf16le(bytes: &[u8]) -> String {
-    let u16s: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-        .collect();
+    let mut u16s = Vec::new();
+    for chunk in bytes.chunks(2) {
+        if chunk.len() == 2 {
+            u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+        } else if chunk.len() == 1 {
+            // Handle odd byte count - use replacement character
+            u16s.push(0xFFFD);
+        }
+    }
     String::from_utf16_lossy(&u16s)
+}
+
+/// Validate that a distro name is safe to use in WSL commands.
+/// Distro names should only contain alphanumeric characters, hyphens, underscores, dots.
+pub fn validate_distro_name(distro: &str) -> bool {
+    !distro.is_empty()
+        && distro.len() < 256
+        && distro
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
+/// Translate environment variable values that may contain Windows paths to WSL paths.
+/// Only translates known path-like environment variables.
+pub fn translate_env_var_for_wsl(key: &str, value: &str) -> String {
+    // Known environment variables that commonly contain paths
+    let path_var_names = [
+        "PATH",
+        "PYTHONPATH",
+        "CMAKE_PREFIX_PATH",
+        "LD_LIBRARY_PATH",
+        "PKG_CONFIG_PATH",
+        "CPATH",
+        "LIBRARY_PATH",
+        "CLASSPATH",
+        "JAVA_HOME",
+        "GOROOT",
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "VCPKG_ROOT",
+    ];
+
+    if !path_var_names.contains(&key) {
+        return value.to_string();
+    }
+
+    // For PATH and similar, split by ; (Windows) or : (Unix) and translate each part
+    if key == "PATH" {
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        let translated: Vec<String> = value.split(separator).map(|p| win_to_wsl_path(p)).collect();
+        return translated.join(":");
+    }
+
+    // For single-path variables, just translate the value if it looks like a path
+    if value.contains(':')
+        || value.contains('\\')
+        || (value.len() > 2 && value.chars().nth(1) == Some(':'))
+    {
+        win_to_wsl_path(value)
+    } else {
+        value.to_string()
+    }
 }
 
 /// Check whether a tool exists in a WSL distro.

@@ -208,9 +208,13 @@ pub fn spawn_detached_claude(
         let unix_input = crate::platform::win_to_wsl_path(&input_file.to_string_lossy());
         let unix_output = crate::platform::win_to_wsl_path(&output_file.to_string_lossy());
 
+        // Translate environment variables that may contain Windows paths
         let env_exports = env_vars
             .iter()
-            .map(|(k, v)| format!("{k}='{}'", v.replace('\'', "'\\''")))
+            .map(|(k, v)| {
+                let translated_value = crate::platform::translate_env_var_for_wsl(k, v);
+                format!("{k}='{}'", translated_value.replace('\'', "'\\''"))
+            })
             .collect::<Vec<_>>()
             .join(" ");
 

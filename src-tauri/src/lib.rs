@@ -75,7 +75,18 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn list_wsl_distros() -> Vec<String> {
+    // Filter out any distro names that don't pass validation to prevent issues
     platform::list_wsl_distros()
+        .into_iter()
+        .filter(|distro| {
+            if platform::validate_distro_name(distro) {
+                true
+            } else {
+                log::warn!("Skipping WSL distro with invalid name: '{distro}'");
+                false
+            }
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -1647,6 +1658,17 @@ fn normalize_wsl_preferences_with_distros(
 ) -> bool {
     if !preferences.wsl_enabled {
         return false;
+    }
+
+    // Validate that the distro name is safe
+    if !platform::validate_distro_name(&preferences.wsl_distro) {
+        log::warn!(
+            "Selected WSL distro '{}' has invalid characters; disabling WSL",
+            preferences.wsl_distro
+        );
+        preferences.wsl_enabled = false;
+        preferences.wsl_distro.clear();
+        return true;
     }
 
     let selected_is_available = !preferences.wsl_distro.is_empty()
