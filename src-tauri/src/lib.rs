@@ -1498,6 +1498,9 @@ impl Default for AppPreferences {
             codex_cli_source: default_cli_source(),
             opencode_cli_source: default_cli_source(),
             gh_cli_source: default_cli_source(),
+            wsl_mode_chosen: false,
+            wsl_enabled: false,
+            wsl_distro: String::new(),
         }
     }
 }

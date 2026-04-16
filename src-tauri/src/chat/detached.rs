@@ -194,16 +194,11 @@ pub fn spawn_detached_claude(
 
         let unix_cwd = crate::platform::win_to_wsl_path(&working_dir.to_string_lossy());
         let cli_path_str = cli_path.to_string_lossy();
-        let cli_name_owned = if cli_path_str.starts_with('/') {
+        let unix_cli_path = if cli_path_str.starts_with('/') {
             cli_path_str.to_string()
         } else {
-            cli_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("claude")
-                .to_string()
+            crate::platform::win_to_wsl_path(&cli_path_str)
         };
-        let cli_name = cli_name_owned.as_str();
 
         let unix_input = crate::platform::win_to_wsl_path(&input_file.to_string_lossy());
         let unix_output = crate::platform::win_to_wsl_path(&output_file.to_string_lossy());
@@ -224,7 +219,7 @@ pub fn spawn_detached_claude(
             .collect::<Vec<_>>()
             .join(" ");
 
-        let cli_quoted = format!("'{}'", cli_name.replace('\'', "'\\''"));
+        let cli_quoted = format!("'{}'", unix_cli_path.replace('\'', "'\\''"));
         let shell_cmd = if env_exports.is_empty() {
             format!(
                 "cat '{unix_input}' | nohup {cli_quoted} {args_str} >> '{unix_output}' 2>&1 & echo $!"

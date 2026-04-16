@@ -412,12 +412,12 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
             } else {
                 if has_images {
                     let pasted_images = app_data_dir.join("pasted-images");
-                    cmd.arg("--add-dir").arg(wsl_cli_path_arg(pasted_images));
+                    cmd.arg("--add-dir").arg(wsl_cli_path_arg(&pasted_images));
                     log::trace!("Added pasted-images directory to naming scope: {pasted_images:?}");
                 }
                 if has_text_files {
                     let pasted_texts = app_data_dir.join("pasted-texts");
-                    cmd.arg("--add-dir").arg(wsl_cli_path_arg(pasted_texts));
+                    cmd.arg("--add-dir").arg(wsl_cli_path_arg(&pasted_texts));
                     log::trace!("Added pasted-texts directory to naming scope: {pasted_texts:?}");
                 }
                 if has_file_mentions {
@@ -431,7 +431,7 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
                 }
                 // Always allow session-context for context loading
                 let saved_contexts = app_data_dir.join("session-context");
-                cmd.arg("--add-dir").arg(wsl_cli_path_arg(saved_contexts));
+                cmd.arg("--add-dir").arg(wsl_cli_path_arg(&saved_contexts));
                 log::trace!("Added session-context directory to naming scope: {saved_contexts:?}");
             }
         }

@@ -253,7 +253,7 @@ pub fn resolve_github_api_token(app: &AppHandle) -> Option<String> {
         if !path_available_for_execution(&program) {
             continue;
         }
-        let output = match wsl_aware_command(&program.to_string_lossy(), None)
+        let output = match wsl_aware_command(&*program.to_string_lossy(), None)
             .args(["auth", "token"])
             .output()
         {

@@ -225,21 +225,52 @@ fn decode_utf16le(bytes: &[u8]) -> String {
     String::from_utf16_lossy(&u16s)
 }
 
+fn is_windows_path(value: &str) -> bool {
+    let normalized = value.replace('\\', "/").trim().to_string();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if normalized.starts_with("//?/") {
+        return true;
+    }
+
+    if normalized.starts_with("//wsl.localhost/") || normalized.starts_with("//wsl$/") {
+        return false;
+    }
+
+    if normalized.len() >= 3
+        && normalized.as_bytes()[0].is_ascii_alphabetic()
+        && &normalized[1..3] == ":/"
+    {
+        return true;
+    }
+
+    normalized.starts_with("//")
+}
+
 /// Validate that a distro name is safe to use in WSL commands.
-/// Distro names should only contain alphanumeric characters, hyphens, underscores, dots.
 pub fn validate_distro_name(distro: &str) -> bool {
-    !distro.is_empty()
-        && distro.len() < 256
-        && distro
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+    let distro = distro.trim();
+    if distro.is_empty() || distro.len() >= 256 {
+        return false;
+    }
+
+    if distro.chars().any(|c| c == '\0' || c.is_control()) {
+        return false;
+    }
+
+    if distro.contains('/') || distro.contains('\\') {
+        return false;
+    }
+
+    true
 }
 
 /// Translate environment variable values that may contain Windows paths to WSL paths.
 /// Only translates known path-like environment variables.
 pub fn translate_env_var_for_wsl(key: &str, value: &str) -> String {
-    // Known environment variables that commonly contain paths
-    let path_var_names = [
+    let multi_path_vars = [
         "PATH",
         "PYTHONPATH",
         "CMAKE_PREFIX_PATH",
@@ -248,29 +279,39 @@ pub fn translate_env_var_for_wsl(key: &str, value: &str) -> String {
         "CPATH",
         "LIBRARY_PATH",
         "CLASSPATH",
+    ];
+    let single_path_vars = [
         "JAVA_HOME",
         "GOROOT",
         "CARGO_HOME",
         "RUSTUP_HOME",
         "VCPKG_ROOT",
     ];
+    let key_upper = key.to_ascii_uppercase();
 
-    if !path_var_names.contains(&key) {
+    if !multi_path_vars.iter().any(|v| *v == key_upper)
+        && !single_path_vars.iter().any(|v| *v == key_upper)
+    {
         return value.to_string();
     }
 
-    // For PATH and similar, split by ; (Windows) or : (Unix) and translate each part
-    if key == "PATH" {
-        let separator = if cfg!(windows) { ";" } else { ":" };
-        let translated: Vec<String> = value.split(separator).map(|p| win_to_wsl_path(p)).collect();
+    if multi_path_vars.iter().any(|v| *v == key_upper) {
+        let separator = if value.contains(';') { ';' } else { ':' };
+        let translated: Vec<String> = value
+            .split(separator)
+            .map(|part| {
+                let part = part.trim();
+                if is_windows_path(part) {
+                    win_to_wsl_path(part)
+                } else {
+                    part.to_string()
+                }
+            })
+            .collect();
         return translated.join(":");
     }
 
-    // For single-path variables, just translate the value if it looks like a path
-    if value.contains(':')
-        || value.contains('\\')
-        || (value.len() > 2 && value.chars().nth(1) == Some(':'))
-    {
+    if is_windows_path(value) {
         win_to_wsl_path(value)
     } else {
         value.to_string()
@@ -544,5 +585,47 @@ mod tests {
             .collect::<Vec<_>>();
         let result = decode_utf16le(&input);
         assert!(result.contains("Ubuntu"));
+    }
+
+    #[test]
+    fn translate_env_var_for_wsl_preserves_non_path_values() {
+        assert_eq!(
+            translate_env_var_for_wsl("GIT_SSH_COMMAND", "ssh -i C:\\keys\\id_rsa"),
+            "ssh -i C:\\keys\\id_rsa"
+        );
+    }
+
+    #[test]
+    fn translate_env_var_for_wsl_translates_java_home() {
+        assert_eq!(
+            translate_env_var_for_wsl("JAVA_HOME", "C:\\Program Files\\Java\\jdk"),
+            "/mnt/c/Program Files/Java/jdk"
+        );
+    }
+
+    #[test]
+    fn translate_env_var_for_wsl_translates_path_list() {
+        assert_eq!(
+            translate_env_var_for_wsl("PATH", "C:\\Tools\\bin;C:\\Windows\\System32"),
+            "/mnt/c/Tools/bin:/mnt/c/Windows/System32"
+        );
+    }
+
+    #[test]
+    fn translate_env_var_for_wsl_translates_multi_path_variable() {
+        assert_eq!(
+            translate_env_var_for_wsl("CMAKE_PREFIX_PATH", "C:\\Program Files\\lib;C:\\other\\lib"),
+            "/mnt/c/Program Files/lib:/mnt/c/other/lib"
+        );
+    }
+
+    #[test]
+    fn validate_distro_name_allows_spaces() {
+        assert!(validate_distro_name("Ubuntu 24.04"));
+    }
+
+    #[test]
+    fn validate_distro_name_rejects_control_chars() {
+        assert!(!validate_distro_name("Ubuntu\n"));
     }
 }

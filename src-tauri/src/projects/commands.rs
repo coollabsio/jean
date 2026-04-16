@@ -116,7 +116,7 @@ fn take_review_process_pid(review_run_id: &str) -> Option<u32> {
 /// Check if git global user identity is configured
 #[tauri::command]
 pub async fn check_git_identity() -> Result<GitIdentity, String> {
-    let name = wsl_aware_command("git", Some(Path::new(std::env::temp_dir())))
+    let name = wsl_aware_command("git", Some(Path::new(&std::env::temp_dir())))
         .args(["config", "--global", "user.name"])
         .output()
         .ok()
@@ -124,7 +124,7 @@ pub async fn check_git_identity() -> Result<GitIdentity, String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty());
 
-    let email = wsl_aware_command("git", Some(Path::new(std::env::temp_dir())))
+    let email = wsl_aware_command("git", Some(Path::new(&std::env::temp_dir())))
         .args(["config", "--global", "user.email"])
         .output()
         .ok()
@@ -138,7 +138,7 @@ pub async fn check_git_identity() -> Result<GitIdentity, String> {
 /// Set git global user identity
 #[tauri::command]
 pub async fn set_git_identity(name: String, email: String) -> Result<(), String> {
-    let name_output = wsl_aware_command("git", Some(Path::new(std::env::temp_dir())))
+    let name_output = wsl_aware_command("git", Some(Path::new(&std::env::temp_dir())))
         .args(["config", "--global", "user.name", &name])
         .output()
         .map_err(|e| format!("Failed to set git user.name: {e}"))?;
@@ -148,7 +148,7 @@ pub async fn set_git_identity(name: String, email: String) -> Result<(), String>
         return Err(format!("Failed to set git user.name: {stderr}"));
     }
 
-    let email_output = wsl_aware_command("git", Some(Path::new(std::env::temp_dir())))
+    let email_output = wsl_aware_command("git", Some(Path::new(&std::env::temp_dir())))
         .args(["config", "--global", "user.email", &email])
         .output()
         .map_err(|e| format!("Failed to set git user.email: {e}"))?;
