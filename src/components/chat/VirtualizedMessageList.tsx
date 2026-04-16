@@ -112,6 +112,14 @@ interface VirtualizedMessageListProps {
   onScrollToBottomHandled?: () => void
   /** Duration of last completed run (ms) — shown on last assistant message */
   completedDurationMs?: number | null
+  /** True when older runs exist on disk that haven't been loaded yet */
+  hasOlderOnDisk?: boolean
+  /** True while a load-older request is in flight */
+  isLoadingOlder?: boolean
+  /** Callback to fetch the next older window of runs from backend */
+  onLoadOlderRuns?: () => void
+  /** Run index of the oldest currently-loaded run (for label display) */
+  loadedRunStartIndex?: number
 }
 
 /**
@@ -156,11 +164,18 @@ export const VirtualizedMessageList = memo(
         shouldScrollToBottom,
         onScrollToBottomHandled,
         completedDurationMs,
+        hasOlderOnDisk = false,
+        isLoadingOlder = false,
+        onLoadOlderRuns,
+        loadedRunStartIndex = 0,
       },
       ref
     ) {
       const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
       const isLoadingMoreRef = useRef(false)
+      // Captured scroll height taken just before requesting an older-runs load.
+      // Used to restore scroll position after the prepended messages render.
+      const pendingPrependScrollHeightRef = useRef<number | null>(null)
 
       // Track how many messages to render (from the end)
       const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT)
@@ -169,6 +184,7 @@ export const VirtualizedMessageList = memo(
       const startIndex = Math.max(0, messages.length - visibleCount)
       const visibleMessages = messages.slice(startIndex)
       const hasMoreMessages = startIndex > 0
+      const showLoadMoreButton = hasMoreMessages || hasOlderOnDisk
 
       // Reset visible count when session changes
       const prevSessionRef = useRef(sessionId)
@@ -194,28 +210,68 @@ export const VirtualizedMessageList = memo(
       }, [messages])
 
       // Load more messages when scrolling near the top.
-      // Uses flushSync so state update + DOM commit + scroll correction happen in one task.
+      // First expands the in-memory window; once exhausted, requests an older
+      // window from the backend (which prepends to `messages` async).
       const loadMore = useCallback(() => {
         const container = scrollContainerRef.current
-        if (!container || !hasMoreMessages || isLoadingMoreRef.current) return
+        if (!container || isLoadingMoreRef.current) return
 
-        isLoadingMoreRef.current = true
-        const scrollHeightBefore = container.scrollHeight
+        if (hasMoreMessages) {
+          isLoadingMoreRef.current = true
+          const scrollHeightBefore = container.scrollHeight
 
-        flushSync(() => {
-          setVisibleCount(prev =>
-            Math.min(prev + LOAD_MORE_COUNT, messages.length)
-          )
-        })
+          flushSync(() => {
+            setVisibleCount(prev =>
+              Math.min(prev + LOAD_MORE_COUNT, messages.length)
+            )
+          })
 
-        container.scrollTop += container.scrollHeight - scrollHeightBefore
-        isLoadingMoreRef.current = false
-      }, [scrollContainerRef, hasMoreMessages, messages.length])
+          container.scrollTop += container.scrollHeight - scrollHeightBefore
+          isLoadingMoreRef.current = false
+          return
+        }
+
+        // No more in-memory messages — fetch older from disk if available.
+        if (
+          hasOlderOnDisk &&
+          !isLoadingOlder &&
+          onLoadOlderRuns &&
+          pendingPrependScrollHeightRef.current === null
+        ) {
+          pendingPrependScrollHeightRef.current = container.scrollHeight
+          onLoadOlderRuns()
+        }
+      }, [
+        scrollContainerRef,
+        hasMoreMessages,
+        messages.length,
+        hasOlderOnDisk,
+        isLoadingOlder,
+        onLoadOlderRuns,
+      ])
+
+      // After backend prepend completes, restore scroll position and expand
+      // visibleCount so the freshly-prepended messages are actually rendered.
+      useEffect(() => {
+        const container = scrollContainerRef.current
+        const before = pendingPrependScrollHeightRef.current
+        if (!container || before === null) return
+        if (isLoadingOlder) return
+
+        const delta = container.scrollHeight - before
+        if (delta > 0) {
+          // Expand the visible window so the user sees the older messages we
+          // just prepended, then anchor scroll to compensate for new content.
+          setVisibleCount(prev => prev + LOAD_MORE_COUNT)
+          container.scrollTop += delta
+        }
+        pendingPrependScrollHeightRef.current = null
+      }, [scrollContainerRef, isLoadingOlder, messages.length])
 
       // Detect scroll to top
       useEffect(() => {
         const container = scrollContainerRef.current
-        if (!container || !hasMoreMessages) return
+        if (!container || (!hasMoreMessages && !hasOlderOnDisk)) return
 
         const handleScroll = () => {
           if (container.scrollTop < SCROLL_THRESHOLD) {
@@ -225,7 +281,7 @@ export const VirtualizedMessageList = memo(
 
         container.addEventListener('scroll', handleScroll, { passive: true })
         return () => container.removeEventListener('scroll', handleScroll)
-      }, [scrollContainerRef, hasMoreMessages, loadMore])
+      }, [scrollContainerRef, hasMoreMessages, hasOlderOnDisk, loadMore])
 
       // Expose methods to parent via ref
       useImperativeHandle(ref, () => ({
@@ -290,13 +346,18 @@ export const VirtualizedMessageList = memo(
 
       return (
         <div className="flex flex-col w-full">
-          {hasMoreMessages && (
+          {showLoadMoreButton && (
             <button
               type="button"
               onClick={loadMore}
-              className="w-full text-center text-muted-foreground text-xs py-2 opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
+              disabled={isLoadingOlder}
+              className="w-full text-center text-muted-foreground text-xs py-2 opacity-60 hover:opacity-100 transition-opacity cursor-pointer disabled:cursor-wait"
             >
-              ↑ Load more ({startIndex} older messages)
+              {isLoadingOlder
+                ? 'Loading older messages…'
+                : hasMoreMessages
+                  ? `↑ Load more (${startIndex} older messages)`
+                  : `↑ Load older messages (${loadedRunStartIndex} older runs on disk)`}
             </button>
           )}
 

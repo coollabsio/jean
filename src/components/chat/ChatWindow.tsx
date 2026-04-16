@@ -35,6 +35,7 @@ import {
   useSetSessionBackend,
   useSetSessionProvider,
   useCreateSession,
+  useLoadOlderMessages,
   markPlanApproved as markPlanApprovedService,
   chatQueryKeys,
 } from '@/services/chat'
@@ -409,6 +410,25 @@ export function ChatWindow({
     activeWorktreePath
   )
 
+  const loadOlderMessages = useLoadOlderMessages()
+  const loadedRunStartIndex = session?.loaded_run_start_index ?? 0
+  const totalRuns = session?.total_runs ?? 0
+  const hasOlderOnDisk = loadedRunStartIndex > 0 && totalRuns > 0
+  const handleLoadOlderRuns = useCallback(() => {
+    if (!deferredSessionId || !hasOlderOnDisk || loadOlderMessages.isPending) {
+      return
+    }
+    loadOlderMessages.mutate({
+      sessionId: deferredSessionId,
+      beforeRunIndex: loadedRunStartIndex,
+    })
+  }, [
+    deferredSessionId,
+    hasOlderOnDisk,
+    loadedRunStartIndex,
+    loadOlderMessages,
+  ])
+
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const sessionModalOpen = useUIStore(state => state.sessionChatModalOpen)
@@ -593,7 +613,7 @@ export function ChatWindow({
           low: 'low',
           medium: 'medium',
           high: 'high',
-          xhigh: 'max',
+          xhigh: 'xhigh',
         } as Record<string, EffortLevel>
       )[preferences?.default_codex_reasoning_effort ?? 'high'] ?? 'high')
     : ((preferences?.default_effort_level as EffortLevel) ?? 'high')
@@ -1132,7 +1152,7 @@ export function ChatWindow({
                 low: 'low',
                 medium: 'medium',
                 high: 'high',
-                xhigh: 'max',
+                xhigh: 'xhigh',
                 max: 'max',
               } as Record<string, EffortLevel>
             )[yoloModeThinking ?? ''] ?? selectedEffortLevelRef.current)
@@ -1303,7 +1323,7 @@ export function ChatWindow({
                 low: 'low',
                 medium: 'medium',
                 high: 'high',
-                xhigh: 'max',
+                xhigh: 'xhigh',
                 max: 'max',
               } as Record<string, EffortLevel>
             )[buildModeThinking ?? ''] ?? selectedEffortLevelRef.current)
@@ -1560,7 +1580,7 @@ export function ChatWindow({
                 low: 'low',
                 medium: 'medium',
                 high: 'high',
-                xhigh: 'max',
+                xhigh: 'xhigh',
                 max: 'max',
               } as Record<string, EffortLevel>
             )[modeThinking ?? ''] ?? selectedEffortLevelRef.current)
@@ -2392,6 +2412,10 @@ export function ChatWindow({
                                     handleScrollToBottomHandled
                                   }
                                   completedDurationMs={completedDurationMs}
+                                  hasOlderOnDisk={hasOlderOnDisk}
+                                  isLoadingOlder={loadOlderMessages.isPending}
+                                  onLoadOlderRuns={handleLoadOlderRuns}
+                                  loadedRunStartIndex={loadedRunStartIndex}
                                 />
                               </>
                             )}

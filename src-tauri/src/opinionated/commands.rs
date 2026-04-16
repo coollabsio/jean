@@ -174,6 +174,12 @@ async fn install_rtk() -> Result<String, String> {
         })
         .await
         .map_err(|e| e.to_string())?;
+    if install_ok {
+        // Run post-install setup
+        let init_result =
+            tokio::task::spawn_blocking(|| silent_command("rtk").args(["init", "-g"]).output())
+                .await
+                .map_err(|e| e.to_string())?;
 
         match init_result {
             Ok(output) if output.status.success() => {

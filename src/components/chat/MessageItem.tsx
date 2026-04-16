@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react'
-import { Copy, Sparkles } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
 import { Markdown } from '@/components/ui/markdown'
@@ -757,7 +757,6 @@ export const MessageItem = memo(function MessageItem({
             {messageBoxContent}
             {message.model && (
               <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground/50">
-                <Sparkles className="h-2 w-2" />
                 {MODEL_OPTIONS.find(o => o.value === message.model)?.label ??
                   (message.model?.includes('/') ? formatOpencodeModelLabel(message.model) : message.model)}
                 {message.execution_mode &&

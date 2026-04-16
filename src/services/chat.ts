@@ -13,6 +13,7 @@ import type {
   ArchivedSessionEntry,
   ChatMessage,
   ChatHistory,
+  LoadedMessages,
   Session,
   WorktreeSessions,
   Question,
@@ -23,12 +24,18 @@ import type {
   LabelData,
   QueuedMessage,
 } from '@/types/chat'
+
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { preferencesQueryKeys } from '@/services/preferences'
 import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import type { ReviewResponse, Worktree } from '@/types/projects'
+
+/** Default number of recent runs loaded on initial session fetch. */
+export const INITIAL_RUN_LIMIT = 10
+/** Number of older runs to load per scroll-up batch. */
+export const OLDER_RUN_BATCH = 10
 
 /** Check if an error is from a WebSocket disconnect (suppress toasts during reconnect). */
 function isWsDisconnectError(error: unknown): boolean {
@@ -350,10 +357,13 @@ export function useSession(
           worktreeId,
           worktreePath,
           sessionId,
+          limit: INITIAL_RUN_LIMIT,
         })
         logger.info('[useSession] loaded', {
           sessionId,
           messageCount: session.messages.length,
+          totalRuns: session.total_runs,
+          loadedFromRun: session.loaded_run_start_index,
           backend: session.backend,
         })
 
@@ -387,6 +397,79 @@ export function useSession(
     // Respects staleTime; cross-client sync handled by cache:invalidate broadcast
     // from Rust after send_chat_message completes (JSONL fully written).
     refetchOnMount: true,
+  })
+}
+
+/**
+ * Hook to load an older window of messages for an already-cached session.
+ * Prepends the fetched messages into the existing `useSession` cache and
+ * advances `loaded_run_start_index` so subsequent calls walk backward.
+ */
+export function useLoadOlderMessages() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    retry: false,
+    mutationFn: async ({
+      sessionId,
+      beforeRunIndex,
+      limit = OLDER_RUN_BATCH,
+    }: {
+      sessionId: string
+      beforeRunIndex: number
+      limit?: number
+    }): Promise<LoadedMessages> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+      logger.debug('[useLoadOlderMessages] fetching', {
+        sessionId,
+        beforeRunIndex,
+        limit,
+      })
+      const result = await invoke<LoadedMessages>(
+        'load_older_session_messages',
+        {
+          sessionId,
+          beforeRunIndex,
+          limit,
+        }
+      )
+      logger.info('[useLoadOlderMessages] loaded', {
+        sessionId,
+        added: result.messages.length,
+        newStart: result.loaded_run_start_index,
+      })
+      return result
+    },
+    onSuccess: (loaded, { sessionId }) => {
+      queryClient.setQueryData<Session>(
+        chatQueryKeys.session(sessionId),
+        old => {
+          if (!old) return old
+          // Guard: if backend returned empty (race) keep cache untouched.
+          if (loaded.messages.length === 0) {
+            return {
+              ...old,
+              total_runs: loaded.total_runs,
+              loaded_run_start_index: loaded.loaded_run_start_index,
+            }
+          }
+          return {
+            ...old,
+            messages: [...loaded.messages, ...old.messages],
+            total_runs: loaded.total_runs,
+            loaded_run_start_index: loaded.loaded_run_start_index,
+          }
+        }
+      )
+    },
+    onError: error => {
+      if (isWsDisconnectError(error)) return
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error('Failed to load older messages', { error })
+      toast.error('Failed to load older messages', { description: message })
+    },
   })
 }
 
@@ -1356,7 +1439,12 @@ export function useSendMessage() {
         tool_calls: [],
         model,
         execution_mode: executionMode,
-        thinking_level: backend === 'cursor' ? undefined : (effortLevel ? undefined : thinkingLevel),
+        thinking_level:
+          backend === 'cursor'
+            ? undefined
+            : effortLevel
+              ? undefined
+              : thinkingLevel,
         effort_level: backend === 'cursor' ? undefined : effortLevel,
       }
 

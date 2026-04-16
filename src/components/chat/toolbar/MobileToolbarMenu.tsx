@@ -550,20 +550,18 @@ export function MobileToolbarMenu({
             G
           </span>
         </DropdownMenuItem>
-        {hasOpenPr && (
-          <DropdownMenuItem
-            onClick={() => {
-              setMenuOpen(false)
-              useUIStore.getState().setUpdatePrModalOpen(true)
-            }}
-          >
-            <RefreshCw className="h-4 w-4" />
-            PR Description
-            <span className="ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-              E
-            </span>
-          </DropdownMenuItem>
-        )}
+        <DropdownMenuItem
+          onClick={() => {
+            setMenuOpen(false)
+            useUIStore.getState().setUpdatePrModalOpen(true)
+          }}
+        >
+          <RefreshCw className="h-4 w-4" />
+          PR Description
+          <span className="ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            E
+          </span>
+        </DropdownMenuItem>
 
         <DropdownMenuSeparator />
 
