@@ -8,7 +8,15 @@
 /* eslint-disable no-console */
 const dbg = (...args: unknown[]) => console.debug('[ONBOARDING]', ...args)
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import {
+  Fragment,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -18,6 +26,13 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useUIStore } from '@/store/ui-store'
 import {
   useClaudeCliSetup,
@@ -48,7 +63,14 @@ import {
   CliPathSelector,
 } from './CliSetupComponents'
 import { toast } from 'sonner'
+import { isNativeApp } from '@/lib/environment'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import {
+  useWslAvailability,
+  useWslDistros,
+  invalidateWslSensitiveQueries,
+} from '@/services/wsl'
+import { getDisplayPath, isWindows } from '@/lib/platform'
 
 type AIBackend = 'claude' | 'codex' | 'opencode'
 type CliType = AIBackend | 'gh'
@@ -56,6 +78,7 @@ type CliType = AIBackend | 'gh'
 const AI_BACKENDS: AIBackend[] = ['claude', 'codex', 'opencode']
 
 type OnboardingStep =
+  | 'wsl-select'
   | 'backend-select'
   | 'claude-setup'
   | 'claude-installing'
@@ -138,6 +161,7 @@ function OnboardingDialogContent() {
 
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
+  const queryClient = useQueryClient()
 
   const claudeSetup = useClaudeCliSetup()
   const pathDetection = useClaudePathDetection()
@@ -156,6 +180,14 @@ function OnboardingDialogContent() {
     enabled: !!opencodeSetup.status?.installed,
   })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
+  const { data: wslAvailable, isLoading: isWslAvailableLoading } =
+    useWslAvailability({
+      enabled: onboardingOpen && isNativeApp() && isWindows,
+    })
+  const { data: wslDistros, isLoading: isWslDistrosLoading } = useWslDistros({
+    enabled:
+      onboardingOpen && isNativeApp() && isWindows && wslAvailable === true,
+  })
 
   const [step, _setStepRaw] = useState<OnboardingStep>('backend-select')
   const stepRef = useRef<OnboardingStep>('backend-select')
@@ -184,6 +216,11 @@ function OnboardingDialogContent() {
   const [codexLoginAttempt, setCodexLoginAttempt] = useState(0)
   const [opencodeLoginAttempt, setOpencodeLoginAttempt] = useState(0)
   const [ghLoginAttempt, setGhLoginAttempt] = useState(0)
+  const [wslModeSelection, setWslModeSelection] = useState<'native' | 'wsl'>(
+    'native'
+  )
+  const [selectedWslDistro, setSelectedWslDistro] = useState('')
+  const [wslFlowVersion, setWslFlowVersion] = useState(0)
 
   const initializedFlowRef = useRef(false)
 
@@ -204,6 +241,20 @@ function OnboardingDialogContent() {
     v => !v.prerelease
   )
   const stableGhVersions = ghSetup.versions.filter(v => !v.prerelease)
+  const availableWslDistros = useMemo(() => {
+    const distros = Array.from(new Set(wslDistros ?? [])).sort((a, b) =>
+      a.localeCompare(b)
+    )
+    if (preferences?.wsl_distro && !distros.includes(preferences.wsl_distro)) {
+      distros.unshift(preferences.wsl_distro)
+    }
+    return distros
+  }, [preferences?.wsl_distro, wslDistros])
+  const wslChoiceAvailable =
+    isWindows &&
+    wslAvailable === true &&
+    (wslDistros?.length ?? 0) > 0 &&
+    !preferences?.wsl_mode_chosen
 
   useEffect(() => {
     if (!claudeVersion && stableClaudeVersions.length > 0) {
@@ -342,6 +393,59 @@ function OnboardingDialogContent() {
     [selectedBackends, getNextStepForBackend, getNextStepAfterBackends]
   )
 
+  const advanceMainFlow = useCallback(() => {
+    const readyBackends = AI_BACKENDS.filter(isBackendReady)
+    const ghReady = !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
+    dbg(
+      'advanceMainFlow:',
+      'readyBackends:',
+      readyBackends,
+      'ghReady:',
+      ghReady,
+      'manuallyTriggered:',
+      onboardingManuallyTriggered
+    )
+
+    // When manually triggered, start at backend-select so users can
+    // install additional CLIs (e.g. Codex) even if minimum requirements are met.
+    // But if ALL backends are already installed, skip to GH or complete.
+    if (onboardingManuallyTriggered) {
+      const uninstalledBackends = AI_BACKENDS.filter(b => !isBackendReady(b))
+      dbg('advanceMainFlow: manual trigger, uninstalled:', uninstalledBackends)
+      if (uninstalledBackends.length > 0) {
+        queueMicrotask(() => setStep('backend-select'))
+        return
+      }
+      // All backends installed — skip to GH check or complete
+      queueMicrotask(() => setStep(getNextStepAfterBackends()))
+      return
+    }
+
+    if (ghReady && readyBackends.length > 0) {
+      dbg('advanceMainFlow: all ready → complete')
+      queueMicrotask(() => setStep('complete'))
+      return
+    }
+
+    if (readyBackends.length > 0) {
+      dbg('advanceMainFlow: some backends ready → skip to after backends')
+      queueMicrotask(() => {
+        setSelectedBackends(readyBackends)
+        setStep(getNextStepAfterBackends())
+      })
+      return
+    }
+
+    dbg('advanceMainFlow: nothing ready → backend-select')
+    queueMicrotask(() => setStep('backend-select'))
+  }, [
+    ghSetup.status?.installed,
+    ghAuth.data?.authenticated,
+    onboardingManuallyTriggered,
+    isBackendReady,
+    getNextStepAfterBackends,
+  ])
+
   const loadingInitialState =
     claudeSetup.isStatusLoading ||
     codexSetup.isStatusLoading ||
@@ -387,6 +491,17 @@ function OnboardingDialogContent() {
       return
     }
 
+    if (isWindows) {
+      if (isWslAvailableLoading) {
+        dbg('init effect: waiting for WSL availability')
+        return
+      }
+      if (wslAvailable && isWslDistrosLoading) {
+        dbg('init effect: waiting for WSL distros')
+        return
+      }
+    }
+
     dbg('init effect: INITIALIZING FLOW')
     initializedFlowRef.current = true
 
@@ -403,7 +518,15 @@ function OnboardingDialogContent() {
       setCodexLoginAttempt(0)
       setOpencodeLoginAttempt(0)
       setGhLoginAttempt(0)
+      setWslModeSelection('native')
+      setSelectedWslDistro(preferences?.wsl_distro ?? '')
     })
+
+    if (wslChoiceAvailable && step !== 'wsl-select') {
+      dbg('init effect: wsl selection required → wsl-select')
+      queueMicrotask(() => setStep('wsl-select'))
+      return
+    }
 
     if (onboardingStartStep === 'gh') {
       dbg('init effect: startStep=gh → gh-setup')
@@ -425,49 +548,7 @@ function OnboardingDialogContent() {
       return
     }
 
-    const readyBackends = AI_BACKENDS.filter(isBackendReady)
-    const ghReady = !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
-    dbg(
-      'init effect: readyBackends:',
-      readyBackends,
-      'ghReady:',
-      ghReady,
-      'manuallyTriggered:',
-      onboardingManuallyTriggered
-    )
-
-    // When manually triggered, start at backend-select so users can
-    // install additional CLIs (e.g. Codex) even if minimum requirements are met.
-    // But if ALL backends are already installed, skip to GH or complete.
-    if (onboardingManuallyTriggered) {
-      const uninstalledBackends = AI_BACKENDS.filter(b => !isBackendReady(b))
-      dbg('init effect: manual trigger, uninstalled:', uninstalledBackends)
-      if (uninstalledBackends.length > 0) {
-        queueMicrotask(() => setStep('backend-select'))
-        return
-      }
-      // All backends installed — skip to GH check or complete
-      queueMicrotask(() => setStep(getNextStepAfterBackends()))
-      return
-    }
-
-    if (ghReady && readyBackends.length > 0) {
-      dbg('init effect: all ready → complete')
-      queueMicrotask(() => setStep('complete'))
-      return
-    }
-
-    if (readyBackends.length > 0) {
-      dbg('init effect: some backends ready → skip to after backends')
-      queueMicrotask(() => {
-        setSelectedBackends(readyBackends)
-        setStep(getNextStepAfterBackends())
-      })
-      return
-    }
-
-    dbg('init effect: nothing ready → backend-select')
-    queueMicrotask(() => setStep('backend-select'))
+    advanceMainFlow()
   }, [
     onboardingOpen,
     onboardingStartStep,
@@ -478,6 +559,14 @@ function OnboardingDialogContent() {
     ghSetup.status?.installed,
     ghAuth.data?.authenticated,
     getNextStepAfterBackends,
+    advanceMainFlow,
+    preferences?.wsl_distro,
+    wslFlowVersion,
+    wslAvailable,
+    isWslAvailableLoading,
+    isWslDistrosLoading,
+    wslChoiceAvailable,
+    step,
   ])
 
   // Handle AI backend auth check steps
@@ -866,6 +955,67 @@ function OnboardingDialogContent() {
     setGhLoginAttempt(prev => prev + 1)
   }, [])
 
+  useEffect(() => {
+    if (step !== 'wsl-select') return
+
+    setWslModeSelection(preferences?.wsl_enabled ? 'wsl' : 'native')
+    setSelectedWslDistro(
+      preferences?.wsl_distro ?? availableWslDistros[0] ?? ''
+    )
+  }, [
+    step,
+    preferences?.wsl_enabled,
+    preferences?.wsl_distro,
+    availableWslDistros,
+  ])
+
+  const handleWslSelectionContinue = useCallback(() => {
+    if (!preferences) {
+      toast.error('Preferences are still loading. Try again.')
+      return
+    }
+
+    if (wslModeSelection === 'wsl' && wslAvailable !== true) {
+      toast.error('WSL is not available on this machine.')
+      return
+    }
+
+    const chosenDistro =
+      selectedWslDistro ||
+      availableWslDistros[0] ||
+      preferences.wsl_distro ||
+      ''
+
+    if (wslModeSelection === 'wsl' && !chosenDistro) {
+      toast.error('Select a WSL distro before continuing.')
+      return
+    }
+
+    patchPreferences.mutate(
+      {
+        wsl_mode_chosen: true,
+        wsl_enabled: wslModeSelection === 'wsl',
+        wsl_distro:
+          wslModeSelection === 'wsl' ? chosenDistro : preferences.wsl_distro,
+      },
+      {
+        onSuccess: async () => {
+          await invalidateWslSensitiveQueries(queryClient)
+          initializedFlowRef.current = false
+          setWslFlowVersion(version => version + 1)
+        },
+      }
+    )
+  }, [
+    preferences,
+    patchPreferences,
+    wslModeSelection,
+    wslAvailable,
+    selectedWslDistro,
+    availableWslDistros,
+    queryClient,
+  ])
+
   const handleComplete = useCallback(() => {
     claudeSetup.refetchStatus()
     codexSetup.refetchStatus()
@@ -1049,6 +1199,14 @@ function OnboardingDialogContent() {
   })
 
   const getDialogContent = () => {
+    if (step === 'wsl-select') {
+      return {
+        title: 'Choose Windows Mode',
+        description:
+          'Jean can run supported commands natively on Windows or inside WSL. Pick the mode you want to use.',
+      }
+    }
+
     if (step === 'backend-select') {
       return {
         title: onboardingManuallyTriggered
@@ -1159,54 +1317,85 @@ function OnboardingDialogContent() {
   const dialogContent = getDialogContent()
 
   const renderStepIndicator = () => {
+    const isWslSelection = step === 'wsl-select'
     const isBackendSelection = step === 'backend-select'
     const isBackendStep =
       step.startsWith('claude-') ||
       step.startsWith('codex-') ||
       step.startsWith('opencode-')
     const isGhStep = step.startsWith('gh-')
-
     const backendComplete = !isBackendSelection && !isBackendStep
     const ghComplete = step === 'complete'
 
+    const showWslStep = step === 'wsl-select' || wslChoiceAvailable
+
+    const items = showWslStep
+      ? [
+          {
+            number: '1',
+            label: 'Windows Mode',
+            active: isWslSelection,
+            complete: preferences?.wsl_mode_chosen === true,
+          },
+          {
+            number: '2',
+            label: 'AI Backend(s)',
+            active: isBackendSelection || isBackendStep,
+            complete: backendComplete,
+          },
+          {
+            number: '3',
+            label: 'GitHub CLI',
+            active: isGhStep,
+            complete: ghComplete,
+          },
+          {
+            number: '4',
+            label: 'Done',
+            active: step === 'complete',
+            complete: step === 'complete',
+          },
+        ]
+      : [
+          {
+            number: '1',
+            label: 'AI Backend(s)',
+            active: isBackendSelection || isBackendStep,
+            complete: backendComplete,
+          },
+          {
+            number: '2',
+            label: 'GitHub CLI',
+            active: isGhStep,
+            complete: ghComplete,
+          },
+          {
+            number: '3',
+            label: 'Done',
+            active: step === 'complete',
+            complete: step === 'complete',
+          },
+        ]
+
     return (
-      <div className="flex items-center justify-center gap-2 mb-4">
-        <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
-            isBackendSelection || isBackendStep
-              ? 'bg-primary text-primary-foreground'
-              : backendComplete
-                ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          <span className="font-medium">1</span>
-          <span>AI Backend(s)</span>
-        </div>
-        <div className="w-4 h-px bg-border" />
-        <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
-            isGhStep
-              ? 'bg-primary text-primary-foreground'
-              : ghComplete
-                ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          <span className="font-medium">2</span>
-          <span>GitHub CLI</span>
-        </div>
-        <div className="w-4 h-px bg-border" />
-        <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
-            step === 'complete'
-              ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-              : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          <span className="font-medium">3</span>
-          <span>Done</span>
-        </div>
+      <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
+        {items.map((item, index) => (
+          <Fragment key={item.label}>
+            <div
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
+                item.active
+                  ? 'bg-primary text-primary-foreground'
+                  : item.complete
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                    : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              <span className="font-medium">{item.number}</span>
+              <span>{item.label}</span>
+            </div>
+            {index < items.length - 1 && <div className="w-4 h-px bg-border" />}
+          </Fragment>
+        ))}
       </div>
     )
   }
@@ -1236,7 +1425,22 @@ function OnboardingDialogContent() {
           {renderStepIndicator()}
 
           <div className="w-full">
-            {step === 'backend-select' ? (
+            {step === 'wsl-select' ? (
+              <WslSelectionState
+                mode={wslModeSelection}
+                selectedDistro={selectedWslDistro}
+                availableDistros={availableWslDistros}
+                isAvailable={wslAvailable === true}
+                isLoading={
+                  isWslAvailableLoading ||
+                  isWslDistrosLoading ||
+                  patchPreferences.isPending
+                }
+                onModeChange={setWslModeSelection}
+                onDistroChange={setSelectedWslDistro}
+                onContinue={handleWslSelectionContinue}
+              />
+            ) : step === 'backend-select' ? (
               <BackendSelectionState
                 selectedBackends={selectedBackends}
                 onToggle={handleBackendToggle}
@@ -1289,7 +1493,14 @@ function OnboardingDialogContent() {
               <CliPathSelector
                 cliName="Claude CLI"
                 pathVersion={pathDetection.data.version}
-                pathPath={pathDetection.data.path}
+                pathPath={
+                  pathDetection.data.path
+                    ? getDisplayPath(
+                        pathDetection.data.path,
+                        preferences?.wsl_enabled
+                      )
+                    : null
+                }
                 isLoading={claudePathSelected}
                 onSelectPath={handleClaudePathSelect}
                 onSelectJean={() => {
@@ -1302,7 +1513,14 @@ function OnboardingDialogContent() {
               <CliPathSelector
                 cliName="Codex CLI"
                 pathVersion={codexPathDetection.data.version}
-                pathPath={codexPathDetection.data.path}
+                pathPath={
+                  codexPathDetection.data.path
+                    ? getDisplayPath(
+                        codexPathDetection.data.path,
+                        preferences?.wsl_enabled
+                      )
+                    : null
+                }
                 isLoading={codexPathSelected}
                 onSelectPath={handleCodexPathSelect}
                 onSelectJean={() => {
@@ -1315,7 +1533,14 @@ function OnboardingDialogContent() {
               <CliPathSelector
                 cliName="OpenCode CLI"
                 pathVersion={opencodePathDetection.data.version}
-                pathPath={opencodePathDetection.data.path}
+                pathPath={
+                  opencodePathDetection.data.path
+                    ? getDisplayPath(
+                        opencodePathDetection.data.path,
+                        preferences?.wsl_enabled
+                      )
+                    : null
+                }
                 isLoading={opencodePathSelected}
                 onSelectPath={handleOpencodePathSelect}
                 onSelectJean={() => {
@@ -1370,7 +1595,14 @@ function OnboardingDialogContent() {
               <CliPathSelector
                 cliName="GitHub CLI"
                 pathVersion={ghPathDetection.data.version}
-                pathPath={ghPathDetection.data.path}
+                pathPath={
+                  ghPathDetection.data.path
+                    ? getDisplayPath(
+                        ghPathDetection.data.path,
+                        preferences?.wsl_enabled
+                      )
+                    : null
+                }
                 isLoading={ghPathSelected}
                 onSelectPath={handleGhPathSelect}
                 onSelectJean={() => {
@@ -1461,6 +1693,104 @@ function OnboardingDialogContent() {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface WslSelectionStateProps {
+  mode: 'native' | 'wsl'
+  selectedDistro: string
+  availableDistros: string[]
+  isAvailable: boolean
+  isLoading: boolean
+  onModeChange: (mode: 'native' | 'wsl') => void
+  onDistroChange: (distro: string) => void
+  onContinue: () => void
+}
+
+function WslSelectionState({
+  mode,
+  selectedDistro,
+  availableDistros,
+  isAvailable,
+  isLoading,
+  onModeChange,
+  onDistroChange,
+  onContinue,
+}: WslSelectionStateProps) {
+  const canUseWsl = isAvailable && availableDistros.length > 0
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Button
+          type="button"
+          variant={mode === 'native' ? 'default' : 'outline'}
+          className="h-auto min-h-20 flex-col items-start justify-start gap-1 px-4 py-3 text-left"
+          onClick={() => onModeChange('native')}
+        >
+          <span className="font-medium">Use Windows</span>
+          <span className="text-xs opacity-80">
+            Run Jean-supported commands natively on Windows.
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant={mode === 'wsl' ? 'default' : 'outline'}
+          className="h-auto min-h-20 flex-col items-start justify-start gap-1 px-4 py-3 text-left"
+          onClick={() => onModeChange('wsl')}
+          disabled={!canUseWsl && mode !== 'wsl'}
+        >
+          <span className="font-medium">Use WSL</span>
+          <span className="text-xs opacity-80">
+            Run supported commands inside a Linux distro.
+          </span>
+        </Button>
+      </div>
+
+      {mode === 'wsl' && (
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">WSL distro</p>
+            <p className="text-xs text-muted-foreground">
+              Supported commands will run inside the selected distro.
+            </p>
+          </div>
+
+          {canUseWsl ? (
+            <Select value={selectedDistro} onValueChange={onDistroChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a distro" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableDistros.map(distro => (
+                  <SelectItem key={distro} value={distro}>
+                    {distro}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+              WSL is not available yet. Install WSL and at least one Linux
+              distro before using this mode.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground">
+        You can change this later in Settings.
+      </div>
+
+      <Button
+        onClick={onContinue}
+        className="w-full"
+        size="lg"
+        disabled={isLoading || (mode === 'wsl' && !canUseWsl)}
+      >
+        Continue
+      </Button>
+    </div>
   )
 }
 

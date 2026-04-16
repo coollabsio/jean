@@ -159,6 +159,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -283,6 +286,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -380,6 +386,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
 
@@ -477,6 +486,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -576,6 +588,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -675,6 +690,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -772,6 +790,9 @@ describe('preferences service', () => {
         codex_cli_source: 'jean',
         opencode_cli_source: 'jean',
         gh_cli_source: 'jean',
+        wsl_mode_chosen: false,
+        wsl_enabled: false,
+        wsl_distro: '',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

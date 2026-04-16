@@ -33,6 +33,8 @@ import {
   useOpencodeCliStatus,
   useOpencodeCliAuth,
 } from './services/opencode-cli'
+import { usePreferences } from './services/preferences'
+import { useWslAvailability, useWslDistros } from './services/wsl'
 import { useUIStore } from './store/ui-store'
 import type { AppPreferences } from './types/preferences'
 import { useChatStore } from './store/chat-store'
@@ -46,6 +48,7 @@ import { useAutoArchiveOnMerge } from './hooks/useAutoArchiveOnMerge'
 import { useMagicPromptAutoDefaults } from './hooks/useMagicPromptAutoDefaults'
 import useStreamingEvents from './components/chat/hooks/useStreamingEvents'
 import { preloadAllSounds } from './lib/sounds'
+import { isWindows } from './lib/platform'
 import {
   beginSessionStateHydration,
   endSessionStateHydration,
@@ -574,12 +577,40 @@ function App() {
   const { data: ghAuth, isLoading: isGhAuthLoading } = useGhCliAuth({
     enabled: cliCheckReady && !!ghStatus?.installed && isNativeApp(),
   })
+  const { data: preferences } = usePreferences()
+  const { data: wslAvailable, isLoading: isWslAvailableLoading } =
+    useWslAvailability({
+      enabled: cliCheckReady && isNativeApp() && isWindows,
+    })
+  const { data: wslDistros, isLoading: isWslDistrosLoading } = useWslDistros({
+    enabled:
+      cliCheckReady && isNativeApp() && isWindows && wslAvailable === true,
+  })
 
-  // Show onboarding if GitHub CLI is not ready, or no AI backend is ready.
+  // Show onboarding when Windows mode has not been chosen yet, or when
+  // GitHub CLI / at least one AI backend still needs setup.
   // Only in native app - web view uses the desktop's CLIs via WebSocket
   useEffect(() => {
     if (!isNativeApp()) return
     if (!cliCheckReady) return
+
+    if (isWindows) {
+      if (!preferences || isWslAvailableLoading) return
+      if (wslAvailable && isWslDistrosLoading) return
+      const hasWslDistroChoices = (wslDistros?.length ?? 0) > 0
+      if (
+        !useUIStore.getState().onboardingDismissed &&
+        wslAvailable &&
+        hasWslDistroChoices &&
+        !preferences.wsl_mode_chosen
+      ) {
+        logger.info('WSL mode selection needed, showing onboarding', {
+          wslDistros,
+        })
+        useUIStore.getState().setOnboardingOpen(true)
+        return
+      }
+    }
 
     // Wait until the status queries have actually resolved before deciding.
     if (!claudeStatus || !codexStatus || !opencodeStatus || !ghStatus) return
@@ -640,6 +671,11 @@ function App() {
     isCodexAuthLoading,
     isOpencodeAuthLoading,
     isGhAuthLoading,
+    preferences,
+    wslAvailable,
+    isWslAvailableLoading,
+    isWslDistrosLoading,
+    wslDistros,
     cliCheckReady,
     queryClient,
   ])

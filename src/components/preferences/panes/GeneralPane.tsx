@@ -95,6 +95,11 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import {
+  useWslAvailability,
+  useWslDistros,
+  invalidateWslSensitiveQueries,
+} from '@/services/wsl'
 import type { AppPreferences } from '@/types/preferences'
 import {
   modelOptions,
@@ -140,6 +145,7 @@ import {
   setGitPollInterval,
   setRemotePollInterval,
 } from '@/services/git-status'
+import { getDisplayPath, isWindows } from '@/lib/platform'
 
 /** Get [command, args] for updating a PATH-mode CLI, respecting package manager.
  *  Returns null when the CLI has no self-update command and no known package manager. */
@@ -219,6 +225,13 @@ export const GeneralPane: React.FC = () => {
   const { data: opencodePathDetection } = useOpenCodePathDetection()
   const { data: ghPathDetection } = useGhPathDetection()
   const { data: cursorPathDetection } = useCursorPathDetection()
+  const { data: wslAvailable, isLoading: isWslAvailableLoading } =
+    useWslAvailability({
+      enabled: isNativeApp() && isWindows,
+    })
+  const { data: wslDistros, isLoading: isWslDistrosLoading } = useWslDistros({
+    enabled: isNativeApp() && isWindows && wslAvailable === true,
+  })
 
   // CLI status hooks
   const { data: cliStatus, isLoading: isCliLoading } = useClaudeCliStatus()
@@ -517,6 +530,79 @@ export const GeneralPane: React.FC = () => {
         }
       )
     }
+  }
+
+  const wslDistroOptions = useMemo(() => {
+    const distros = Array.from(new Set(wslDistros ?? [])).sort((a, b) =>
+      a.localeCompare(b)
+    )
+    if (preferences?.wsl_distro && !distros.includes(preferences.wsl_distro)) {
+      distros.unshift(preferences.wsl_distro)
+    }
+    return distros
+  }, [preferences?.wsl_distro, wslDistros])
+
+  const displayCliPath = useCallback(
+    (path: string | null | undefined) =>
+      getDisplayPath(path ?? '', preferences?.wsl_enabled),
+    [preferences?.wsl_enabled]
+  )
+
+  const handleWslModeChange = (enabled: boolean) => {
+    if (!preferences) return
+
+    if (enabled) {
+      if (isWslAvailableLoading || isWslDistrosLoading) {
+        toast.info('Checking WSL support...')
+        return
+      }
+      if (wslAvailable !== true) {
+        toast.error('WSL is not available on this machine.')
+        return
+      }
+      if (wslDistroOptions.length === 0) {
+        toast.error('Install a Linux distro before enabling WSL.')
+        return
+      }
+    }
+
+    const nextDistro =
+      enabled && wslDistroOptions.length > 0
+        ? preferences.wsl_distro &&
+          wslDistroOptions.includes(preferences.wsl_distro)
+          ? preferences.wsl_distro
+          : wslDistroOptions[0]
+        : preferences.wsl_distro
+
+    patchPreferences.mutate(
+      {
+        wsl_mode_chosen: true,
+        wsl_enabled: enabled,
+        wsl_distro: nextDistro,
+      },
+      {
+        onSuccess: async () => {
+          await invalidateWslSensitiveQueries(queryClient)
+        },
+      }
+    )
+  }
+
+  const handleWslDistroChange = (distro: string) => {
+    if (!preferences) return
+
+    patchPreferences.mutate(
+      {
+        wsl_mode_chosen: true,
+        wsl_enabled: true,
+        wsl_distro: distro,
+      },
+      {
+        onSuccess: async () => {
+          await invalidateWslSensitiveQueries(queryClient)
+        },
+      }
+    )
   }
 
   const handleBackendChange = (value: CliBackend) => {
@@ -884,6 +970,91 @@ export const GeneralPane: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {isNativeApp() && isWindows && (
+        <SettingsSection
+          title="Windows / WSL"
+          actions={
+            isWslAvailableLoading ? (
+              <span className="text-sm text-muted-foreground flex items-center gap-2">
+                <Loader2 className="size-3 animate-spin" />
+                Checking...
+              </span>
+            ) : wslAvailable ? (
+              <span className="text-sm text-muted-foreground">
+                {wslDistroOptions.length > 0
+                  ? 'WSL available'
+                  : 'Install a Linux distro to enable WSL'}
+              </span>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                WSL not available
+              </span>
+            )
+          }
+        >
+          <div className="space-y-4">
+            <InlineField
+              label="Mode"
+              description={
+                wslAvailable
+                  ? 'Choose whether supported commands should run natively on Windows or inside WSL.'
+                  : 'WSL is not available on this machine yet.'
+              }
+            >
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={preferences?.wsl_enabled ?? false}
+                  onCheckedChange={handleWslModeChange}
+                />
+                <span className="text-sm text-muted-foreground">
+                  {preferences?.wsl_enabled ? 'WSL enabled' : 'Windows native'}
+                </span>
+              </div>
+            </InlineField>
+
+            <InlineField
+              label="Distro"
+              description={
+                preferences?.wsl_enabled
+                  ? 'Supported commands will run inside this distro.'
+                  : 'Selecting a distro will enable WSL for supported commands.'
+              }
+            >
+              <Select
+                value={preferences?.wsl_distro ?? ''}
+                onValueChange={handleWslDistroChange}
+                disabled={!wslAvailable || wslDistroOptions.length === 0}
+              >
+                <SelectTrigger className="w-96">
+                  <SelectValue placeholder="Select a distro" />
+                </SelectTrigger>
+                <SelectContent>
+                  {wslDistroOptions.map(distro => (
+                    <SelectItem key={distro} value={distro}>
+                      {distro}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            {!wslAvailable && (
+              <p className="text-xs text-muted-foreground">
+                WSL is not installed or not fully configured. Install WSL and a
+                Linux distro before enabling this mode.
+              </p>
+            )}
+
+            {wslAvailable && wslDistroOptions.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No WSL distros were found. Install a distro before enabling WSL
+                mode.
+              </p>
+            )}
+          </div>
+        </SettingsSection>
+      )}
+
       {isNativeApp() && (
         <SettingsSection
           title="Claude CLI"
@@ -1002,8 +1173,8 @@ export const GeneralPane: React.FC = () => {
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.claude_cli_source === 'path'
-                          ? (pathDetection?.path ?? 'System PATH')
-                          : (cliStatus?.path ?? 'Not installed')}
+                          ? displayCliPath(pathDetection?.path) || 'System PATH'
+                          : displayCliPath(cliStatus?.path) || 'Not installed'}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -1145,8 +1316,9 @@ export const GeneralPane: React.FC = () => {
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.gh_cli_source === 'path'
-                          ? (ghPathDetection?.path ?? 'System PATH')
-                          : (ghStatus?.path ?? 'Not installed')}
+                          ? displayCliPath(ghPathDetection?.path) ||
+                            'System PATH'
+                          : displayCliPath(ghStatus?.path) || 'Not installed'}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -1294,8 +1466,10 @@ export const GeneralPane: React.FC = () => {
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.codex_cli_source === 'path'
-                          ? (codexPathDetection?.path ?? 'System PATH')
-                          : (codexStatus?.path ?? 'Not installed')}
+                          ? displayCliPath(codexPathDetection?.path) ||
+                            'System PATH'
+                          : displayCliPath(codexStatus?.path) ||
+                            'Not installed'}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -1448,8 +1622,10 @@ export const GeneralPane: React.FC = () => {
                         className="text-left hover:underline cursor-pointer"
                       >
                         {preferences?.opencode_cli_source === 'path'
-                          ? (opencodePathDetection?.path ?? 'System PATH')
-                          : (opencodeStatus?.path ?? 'Not installed')}
+                          ? displayCliPath(opencodePathDetection?.path) ||
+                            'System PATH'
+                          : displayCliPath(opencodeStatus?.path) ||
+                            'Not installed'}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Click to copy path</TooltipContent>
@@ -2569,9 +2745,7 @@ export const GeneralPane: React.FC = () => {
                   preferences.waiting_sound === 'none'
                 }
                 onClick={() =>
-                  playNotificationSound(
-                    preferences?.waiting_sound ?? 'none'
-                  )
+                  playNotificationSound(preferences?.waiting_sound ?? 'none')
                 }
               >
                 <Play className="h-4 w-4" />
@@ -2607,9 +2781,7 @@ export const GeneralPane: React.FC = () => {
                   preferences.review_sound === 'none'
                 }
                 onClick={() =>
-                  playNotificationSound(
-                    preferences?.review_sound ?? 'none'
-                  )
+                  playNotificationSound(preferences?.review_sound ?? 'none')
                 }
               >
                 <Play className="h-4 w-4" />

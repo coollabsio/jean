@@ -46,3 +46,23 @@ export function getFileManagerName(): string {
   if (isWindows) return 'Explorer'
   return 'Files'
 }
+
+/**
+ * Strip WSL UNC prefixes for display when the app is running in WSL mode.
+ * Non-WSL paths are returned unchanged.
+ */
+export function getDisplayPath(path: string, wslEnabled?: boolean): string {
+  if (!wslEnabled) return path
+
+  const normalized = path.replace(/\\/g, '/')
+  for (const prefix of ['//wsl.localhost/', '//wsl$/']) {
+    if (normalized.startsWith(prefix)) {
+      const rest = normalized.slice(prefix.length)
+      const slashPos = rest.indexOf('/')
+      if (slashPos >= 0) return rest.slice(slashPos)
+      return '/'
+    }
+  }
+
+  return path
+}
