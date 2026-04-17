@@ -9282,6 +9282,134 @@ pub async fn list_codex_skills() -> Result<Vec<ClaudeSkill>, String> {
     Ok(skills)
 }
 
+/// A group of skills from an installed Claude plugin
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSkillGroup {
+    /// Plugin display name (e.g., "Superpowers", "Frontend Design")
+    pub plugin_name: String,
+    /// Skills found in this plugin's skills/ directory
+    pub skills: Vec<ClaudeSkill>,
+}
+
+/// Convert a plugin ID (e.g., "superpowers", "frontend-design") to a display name
+fn plugin_id_to_display_name(id: &str) -> String {
+    id.split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// List skills from all installed and enabled Claude plugins
+#[tauri::command]
+pub async fn list_plugin_skills() -> Result<Vec<PluginSkillGroup>, String> {
+    log::trace!("Listing plugin skills");
+
+    let home = match get_home_dir() {
+        Some(h) => h,
+        None => return Ok(vec![]),
+    };
+
+    // Read installed_plugins.json
+    let installed_plugins_path = home
+        .join(".claude")
+        .join("plugins")
+        .join("installed_plugins.json");
+    let installed_content = match std::fs::read_to_string(&installed_plugins_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(vec![]),
+    };
+
+    #[derive(serde::Deserialize)]
+    struct PluginEntry {
+        #[serde(rename = "installPath")]
+        install_path: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct InstalledPlugins {
+        plugins: std::collections::HashMap<String, Vec<PluginEntry>>,
+    }
+
+    let installed: InstalledPlugins = match serde_json::from_str(&installed_content) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("Failed to parse installed_plugins.json: {e}");
+            return Ok(vec![]);
+        }
+    };
+
+    // Read settings.json to check which plugins are enabled
+    let settings_path = home.join(".claude").join("settings.json");
+    let enabled_plugins: std::collections::HashMap<String, bool> =
+        std::fs::read_to_string(&settings_path)
+            .ok()
+            .and_then(|content| {
+                serde_json::from_str::<serde_json::Value>(&content)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("enabledPlugins").and_then(|ep| {
+                            serde_json::from_value::<std::collections::HashMap<String, bool>>(
+                                ep.clone(),
+                            )
+                            .ok()
+                        })
+                    })
+            })
+            .unwrap_or_default();
+
+    let mut groups: Vec<PluginSkillGroup> = Vec::new();
+
+    // Sort plugin keys for deterministic ordering
+    let mut plugin_keys: Vec<&String> = installed.plugins.keys().collect();
+    plugin_keys.sort();
+
+    for plugin_key in plugin_keys {
+        // Skip disabled plugins (if enabledPlugins exists, only include explicitly enabled ones)
+        if !enabled_plugins.is_empty() && !enabled_plugins.get(plugin_key).copied().unwrap_or(false)
+        {
+            continue;
+        }
+
+        let entries = &installed.plugins[plugin_key];
+        if entries.is_empty() {
+            continue;
+        }
+
+        // Use the most recently added entry (last in array)
+        let entry = entries.last().unwrap();
+        let skills_dir = std::path::Path::new(&entry.install_path).join("skills");
+
+        let mut skills_map = std::collections::HashMap::new();
+        collect_skills_from_dir(&skills_dir, &mut skills_map);
+
+        if skills_map.is_empty() {
+            continue;
+        }
+
+        // Derive display name from the part before '@'
+        let plugin_id = plugin_key.split('@').next().unwrap_or(plugin_key);
+        let plugin_name = plugin_id_to_display_name(plugin_id);
+
+        let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
+
+        groups.push(PluginSkillGroup {
+            plugin_name,
+            skills,
+        });
+    }
+
+    log::trace!("Found {} plugin skill groups", groups.len());
+    Ok(groups)
+}
+
 /// List Claude CLI custom commands from ~/.claude/commands/ and optionally <worktree>/.claude/commands/
 #[tauri::command]
 pub async fn list_claude_commands(

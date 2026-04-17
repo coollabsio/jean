@@ -30,6 +30,7 @@ import { useSyntaxHighlighting } from '@/hooks/useSyntaxHighlighting'
 import { getLanguageFromPath } from '@/lib/language-detection'
 import { getFilename } from '@/lib/path-utils'
 import { useTheme } from '@/hooks/use-theme'
+import { isNativeApp } from '@/lib/environment'
 import { usePreferences } from '@/services/preferences'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
@@ -238,7 +239,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   return (
     <Dialog open={!!filePath} onOpenChange={handleOpenChange}>
       <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm">
-        <DialogTitle className="flex flex-col gap-1 pr-8">
+        <DialogTitle className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
           <div className="flex items-center gap-2">
             {isImage ? (
               <ImageIcon className="h-4 w-4 shrink-0" />
@@ -288,7 +289,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
                       </Button>
                     )}
                   </>
-                ) : (
+                ) : isNativeApp() ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -297,7 +298,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
                     <ExternalLink className="h-4 w-4 mr-1" />
                     Open in Editor
                   </Button>
-                )}
+                ) : null}
               </div>
             )}
           </div>
@@ -313,7 +314,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
 
         {/* CodeEditor renders outside ScrollArea since it has its own scroll */}
         {isEditing && fileEditMode === 'inline' && content !== null ? (
-          <div className="h-[calc(85vh-6rem)] mt-2">
+          <div className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0">
             <Suspense
               fallback={
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -331,7 +332,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
             </Suspense>
           </div>
         ) : (
-          <ScrollArea className="h-[calc(85vh-6rem)] mt-2">
+          <ScrollArea className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0">
             {isLoading && (
               <div className="flex items-center justify-center py-8 text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />

@@ -1969,7 +1969,8 @@ pub fn execute_opencode_http(
                 if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
                     // Skip user prompt echo: OpenCode includes the user message as
                     // the first text part before any reasoning/tool parts.
-                    if !seen_non_text && content_blocks.is_empty() && text.trim() == trimmed_prompt {
+                    if !seen_non_text && content_blocks.is_empty() && text.trim() == trimmed_prompt
+                    {
                         log::trace!("OpenCode: skipping echoed user prompt in response parts");
                         continue;
                     }

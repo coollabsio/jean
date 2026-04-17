@@ -2,17 +2,28 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
-import type { ClaudeSkill, ClaudeCommand } from '@/types/chat'
+import type { ClaudeSkill, ClaudeCommand, PluginSkillGroup } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 import { isTauri } from '@/services/projects'
 
 export const skillQueryKeys = {
   all: ['cli-skills'] as const,
   claudeSkills: (worktreePath?: string | null) =>
-    [...skillQueryKeys.all, 'claude', 'skills', worktreePath ?? 'global'] as const,
+    [
+      ...skillQueryKeys.all,
+      'claude',
+      'skills',
+      worktreePath ?? 'global',
+    ] as const,
   claudeCommands: (worktreePath?: string | null) =>
-    [...skillQueryKeys.all, 'claude', 'commands', worktreePath ?? 'global'] as const,
+    [
+      ...skillQueryKeys.all,
+      'claude',
+      'commands',
+      worktreePath ?? 'global',
+    ] as const,
   codexSkills: () => [...skillQueryKeys.all, 'codex', 'skills'] as const,
+  pluginSkills: () => [...skillQueryKeys.all, 'plugin', 'skills'] as const,
 }
 
 export function useClaudeSkills(worktreePath?: string | null) {
@@ -89,6 +100,32 @@ export interface BackendSkillsGroup {
   label: string
   skills: ClaudeSkill[]
   commands: ClaudeCommand[]
+  /** Optional plugin name for plugin-sourced groups */
+  pluginName?: string
+}
+
+export function usePluginSkills() {
+  return useQuery({
+    queryKey: skillQueryKeys.pluginSkills(),
+    queryFn: async (): Promise<PluginSkillGroup[]> => {
+      if (!isTauri()) return []
+
+      try {
+        logger.debug('Loading plugin skills')
+        const groups = await invoke<PluginSkillGroup[]>(
+          'list_plugin_skills',
+          {}
+        )
+        logger.info('Plugin skills loaded', { groupCount: groups.length })
+        return groups
+      } catch (error) {
+        logger.error('Failed to load plugin skills', { error })
+        return []
+      }
+    },
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
+  })
 }
 
 export function useAllBackendSkills(
@@ -98,6 +135,7 @@ export function useAllBackendSkills(
   const claudeSkills = useClaudeSkills(worktreePath)
   const claudeCommands = useClaudeCommands(worktreePath)
   const codexSkills = useCodexSkills()
+  const pluginSkillGroups = usePluginSkills()
 
   return useMemo(() => {
     const groups: BackendSkillsGroup[] = []
@@ -108,6 +146,19 @@ export function useAllBackendSkills(
       const commands = claudeCommands.data ?? []
       if (skills.length > 0 || commands.length > 0) {
         groups.push({ backend: 'claude', label: 'Claude', skills, commands })
+      }
+
+      // Add plugin skill groups (only when claude backend is available)
+      for (const group of pluginSkillGroups.data ?? []) {
+        if (group.skills.length > 0) {
+          groups.push({
+            backend: 'claude',
+            label: group.pluginName,
+            skills: group.skills,
+            commands: [],
+            pluginName: group.pluginName,
+          })
+        }
       }
     }
 
@@ -123,6 +174,7 @@ export function useAllBackendSkills(
     claudeSkills.data,
     claudeCommands.data,
     codexSkills.data,
+    pluginSkillGroups.data,
     installedBackends,
   ])
 }

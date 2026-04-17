@@ -32,7 +32,7 @@ import type { ClaudeModel, CodexModel } from '@/types/preferences'
 export type { ClaudeModel, CodexModel }
 
 /** Default model to use when none is selected (fallback only - preferences take priority) */
-export const DEFAULT_MODEL: ClaudeModel = 'opus'
+export const DEFAULT_MODEL: ClaudeModel = 'claude-opus-4-7'
 
 /** Default Codex model */
 export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-5.4'

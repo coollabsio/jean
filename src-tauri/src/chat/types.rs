@@ -124,7 +124,7 @@ pub enum ThinkingLevel {
     Ultrathink,
 }
 
-/// Effort level for Opus 4.6 adaptive thinking
+/// Effort level for Opus adaptive thinking
 /// Controls --settings {"effort": "<level>"} via CLI
 /// Replaces ThinkingLevel when model is Opus (latest) on CLI >= 2.1.32
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -136,6 +136,7 @@ pub enum EffortLevel {
     Medium,
     #[default]
     High,
+    Xhigh,
     Max,
 }
 
@@ -147,6 +148,7 @@ impl EffortLevel {
             EffortLevel::Low => Some("low"),
             EffortLevel::Medium => Some("medium"),
             EffortLevel::High => Some("high"),
+            EffortLevel::Xhigh => Some("xhigh"),
             EffortLevel::Max => Some("max"),
         }
     }
@@ -634,6 +636,28 @@ pub struct Session {
     /// Messages queued for sending (persisted so they survive page refresh / sync across clients)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_messages: Vec<serde_json::Value>,
+
+    // ========================================================================
+    // Pagination metadata (populated by get_session)
+    // ========================================================================
+    /// Total number of runs in this session's metadata (for "more available" check)
+    #[serde(default)]
+    pub total_runs: usize,
+    /// Index (in metadata.runs) of the first run included in `messages`.
+    /// 0 means oldest run is loaded; > 0 means older runs exist on disk.
+    #[serde(default)]
+    pub loaded_run_start_index: usize,
+}
+
+/// Result of loading a window of session messages from disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadedMessages {
+    /// Parsed messages for the requested window of runs (chronological order).
+    pub messages: Vec<ChatMessage>,
+    /// Total number of runs in this session's metadata.
+    pub total_runs: usize,
+    /// Index of the first run included in `messages`.
+    pub loaded_run_start_index: usize,
 }
 
 impl Session {
@@ -692,6 +716,8 @@ impl Session {
             last_run_started_at: None,
             label: None,
             queued_messages: vec![],
+            total_runs: 0,
+            loaded_run_start_index: 0,
         }
     }
 
@@ -888,6 +914,8 @@ impl SessionMetadata {
             last_run_started_at: last_run.map(|r| r.started_at),
             label: self.label.clone(),
             queued_messages: self.queued_messages.clone(),
+            total_runs: self.runs.len(),
+            loaded_run_start_index: self.runs.len(),
         }
     }
 
@@ -1116,7 +1144,7 @@ pub struct RunEntry {
     /// Thinking level (off, think, megathink, ultrathink)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
-    /// Effort level for Opus 4.6 adaptive thinking (low, medium, high, max)
+    /// Effort level for Opus adaptive thinking (low, medium, high, xhigh, max)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort_level: Option<String>,
     /// Unix timestamp when run started

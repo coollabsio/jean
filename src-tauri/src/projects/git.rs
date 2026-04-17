@@ -727,9 +727,11 @@ pub fn git_stash(repo_path: &str) -> Result<String, String> {
         log::trace!("Stash result: {stdout}");
         Ok(stdout)
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        log::error!("Failed to stash: {stderr}");
-        Err(stderr)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = format!("{stdout}\n{stderr}").trim().to_string();
+        log::error!("Failed to stash: {combined}");
+        Err(combined)
     }
 }
 
@@ -748,9 +750,11 @@ pub fn git_stash_pop(repo_path: &str) -> Result<String, String> {
         log::trace!("Stash pop result: {stdout}");
         Ok(stdout)
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        log::error!("Failed to pop stash: {stderr}");
-        Err(stderr)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = format!("{stdout}\n{stderr}").trim().to_string();
+        log::error!("Failed to pop stash: {combined}");
+        Err(combined)
     }
 }
 

@@ -696,6 +696,8 @@ pub fn load_sessions(
                 last_run_started_at: None,
                 label: None,
                 queued_messages: vec![],
+                total_runs: 0,
+                loaded_run_start_index: 0,
             }
         };
         sessions.push(session);
@@ -786,6 +788,8 @@ where
                 last_run_started_at: None,
                 label: None,
                 queued_messages: vec![],
+                total_runs: 0,
+                loaded_run_start_index: 0,
             }
         };
         hydrated_sessions.push(session);

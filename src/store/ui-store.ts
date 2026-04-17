@@ -12,6 +12,7 @@ export type PreferencePane =
   | 'integrations'
   | 'experimental'
   | 'web-access'
+  | 'opinionated'
 
 export type OnboardingStartStep = 'claude' | 'gh' | null
 

@@ -907,7 +907,7 @@ export interface AppPreferences {
   theme: string
   selected_model: ClaudeModel // Claude model ID passed to --model flag
   thinking_level: ThinkingLevel // Thinking level: 'off' | 'think' | 'megathink' | 'ultrathink'
-  default_effort_level: EffortLevel // Effort level for Opus 4.6 adaptive thinking: 'low' | 'medium' | 'high' | 'max'
+  default_effort_level: EffortLevel // Effort level for Opus adaptive thinking: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'iterm2' | 'powershell' | 'windows-terminal'
   editor: EditorApp // Editor app: 'zed' | 'vscode' | 'cursor' | 'xcode'
   open_in: OpenInDefault // Default Open In action: 'editor' | 'terminal' | 'finder' | 'github'
@@ -1072,6 +1072,7 @@ export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
 ]
 
 export type ClaudeModel =
+  | 'claude-opus-4-7'
   | 'opus'
   | 'claude-opus-4-5-20251101'
   | 'claude-opus-4-6[1m]'
@@ -1082,6 +1083,7 @@ export type ClaudeModel =
   | 'haiku'
 
 export const modelOptions: { value: ClaudeModel; label: string }[] = [
+  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
   { value: 'opus', label: 'Claude Opus 4.6' },
   { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5' },
   { value: 'claude-opus-4-6[1m]', label: 'Claude Opus 4.6 (1M)' },
@@ -1107,6 +1109,7 @@ export const effortLevelOptions: {
   { value: 'low', label: 'Low', description: 'Minimal thinking' },
   { value: 'medium', label: 'Medium', description: 'Moderate thinking' },
   { value: 'high', label: 'High', description: 'Deep reasoning' },
+  { value: 'xhigh', label: 'xHigh', description: 'Extra high (Opus 4.7)' },
   { value: 'max', label: 'Max', description: 'No limits' },
 ]
 
@@ -1158,7 +1161,12 @@ export function normalizeCodexModel(model: string): CodexModel {
 
 export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh'
 
-export type MagicPromptReasoningEffort = 'low' | 'medium' | 'high' | null
+export type MagicPromptReasoningEffort =
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | null
 
 // =============================================================================
 // Magic Prompt Model (unified type for both Claude and Codex)
@@ -1487,7 +1495,7 @@ export function getEditorLabel(editor: EditorApp | undefined): string {
 
 export const defaultPreferences: AppPreferences = {
   theme: 'system',
-  selected_model: 'opus',
+  selected_model: 'claude-opus-4-7',
   thinking_level: 'ultrathink',
   default_effort_level: 'high',
   terminal: isWindows ? 'powershell' : 'terminal',

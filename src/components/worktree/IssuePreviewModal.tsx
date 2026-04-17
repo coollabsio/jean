@@ -640,8 +640,8 @@ export function IssuePreviewModal({
       }}
     >
       <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-4xl sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-6">
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="text-lg flex items-center gap-2">
+        <DialogHeader className="flex-shrink-0 pr-10">
+          <DialogTitle className="text-lg flex items-center gap-2 flex-wrap">
             {TYPE_LABELS[type]} {type === 'advisory' ? ghsaId : `#${number}`}
             {githubUrl && (
               <button

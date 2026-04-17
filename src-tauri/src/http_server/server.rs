@@ -501,8 +501,14 @@ async fn init_handler(Query(params): Query<WsAuth>, State(state): State<AppState
                         let wt_path = wt.path.clone();
                         let sess_id = session_id.clone();
                         async move {
-                            match crate::chat::get_session(app, wt_id, wt_path, sess_id.clone())
-                                .await
+                            match crate::chat::get_session(
+                                app,
+                                wt_id,
+                                wt_path,
+                                sess_id.clone(),
+                                None,
+                            )
+                            .await
                             {
                                 Ok(session) => Some((sess_id, session)),
                                 Err(e) => {

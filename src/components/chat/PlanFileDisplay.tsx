@@ -146,14 +146,8 @@ export function PlanDisplay({
                 '[&_ul.contains-task-list>li]:flex',
                 '[&_ul.contains-task-list>li]:items-start',
                 '[&_ul.contains-task-list>li]:gap-2.5',
-                '[&_ul.contains-task-list>li]:rounded-md',
-                '[&_ul.contains-task-list>li]:px-2',
-                '[&_ul.contains-task-list>li]:py-1.5',
-                '[&_ul.contains-task-list>li]:bg-background/40',
-                '[&_ul.contains-task-list>li>input]:mt-1',
-                '[&_ul.contains-task-list>li>input]:h-4',
-                '[&_ul.contains-task-list>li>input]:w-4',
-                '[&_ul.contains-task-list>li>input]:shrink-0'
+                '[&_ul.contains-task-list>li]:py-0.5',
+                '[&_ul.contains-task-list>li:has(button[data-state=checked])]:opacity-60'
               )}
             >
               {content}

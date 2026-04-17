@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
+import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
@@ -258,6 +259,21 @@ const components: Components = {
   p: ({ children }) => (
     <p className="my-3 leading-relaxed first:mt-0 last:mb-0">{children}</p>
   ),
+
+  // Task list checkboxes (from remark-gfm) → shadcn Checkbox for theme-aware styling
+  input: ({ type, checked, ...props }) => {
+    if (type === 'checkbox') {
+      return (
+        <Checkbox
+          checked={!!checked}
+          tabIndex={-1}
+          aria-readonly
+          className="mt-0.5 pointer-events-none"
+        />
+      )
+    }
+    return <input type={type} checked={checked} {...props} />
+  },
 
   // Tables
   table: ({ children }) => <TableBlock>{children}</TableBlock>,

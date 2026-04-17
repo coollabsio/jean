@@ -5,7 +5,6 @@ import {
   Clock,
   Hammer,
   Play,
-  Sparkles,
   X,
   Zap,
 } from 'lucide-react'
@@ -165,7 +164,6 @@ export const QueuedMessageItem = memo(function QueuedMessageItem({
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {/* Model badge */}
           <span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            <Sparkles className="h-2.5 w-2.5" />
             {MODEL_OPTIONS.find(o => o.value === message.model)?.label ??
               (message.model.includes('/') ? formatOpencodeModelLabel(message.model) : message.model)}
           </span>

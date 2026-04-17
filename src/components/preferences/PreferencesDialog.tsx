@@ -10,6 +10,7 @@ import {
   Puzzle,
   FlaskConical,
   Globe,
+  Sparkles,
 } from 'lucide-react'
 import {
   Breadcrumb,
@@ -54,12 +55,18 @@ import { UsagePane } from './panes/UsagePane'
 import { IntegrationsPane } from './panes/IntegrationsPane'
 import { ExperimentalPane } from './panes/ExperimentalPane'
 import { WebAccessPane } from './panes/WebAccessPane'
+import { OpinionatedPane } from './panes/OpinionatedPane'
 
 const navigationItems = [
   {
     id: 'general' as const,
     name: 'General',
     icon: Settings,
+  },
+  {
+    id: 'opinionated' as const,
+    name: 'Opinionated',
+    icon: Sparkles,
   },
   {
     id: 'web-access' as const,
@@ -130,6 +137,8 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'Integrations'
     case 'experimental':
       return 'Experimental'
+    case 'opinionated':
+      return 'Opinionated'
     case 'web-access':
       return 'Web Access'
     default:
@@ -257,6 +266,7 @@ export function PreferencesDialog() {
               {activePane === 'usage' && <UsagePane />}
               {activePane === 'integrations' && <IntegrationsPane />}
               {activePane === 'experimental' && <ExperimentalPane />}
+              {activePane === 'opinionated' && <OpinionatedPane />}
               {activePane === 'web-access' && <WebAccessPane />}
             </div>
           </main>

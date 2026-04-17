@@ -1121,9 +1121,7 @@ fn process_turn_events(
         }
     }
 
-    let has_executed_tools = tool_calls
-        .iter()
-        .any(|tc| tc.name != CODEX_PLAN_TOOL_NAME);
+    let has_executed_tools = tool_calls.iter().any(|tc| tc.name != CODEX_PLAN_TOOL_NAME);
     let detected_plain_text_plan =
         if !cancelled && !error_emitted && is_plan_mode && !has_executed_tools {
             ensure_plain_text_codex_plan_tool(&mut tool_calls, &mut content_blocks, &full_content)
@@ -3126,9 +3124,7 @@ pub fn parse_codex_run_to_message(
         }
     }
 
-    let has_executed_tools = tool_calls
-        .iter()
-        .any(|tc| tc.name != CODEX_PLAN_TOOL_NAME);
+    let has_executed_tools = tool_calls.iter().any(|tc| tc.name != CODEX_PLAN_TOOL_NAME);
     if is_plan_mode && !has_executed_tools {
         ensure_plain_text_codex_plan_tool(&mut tool_calls, &mut content_blocks, &content);
 

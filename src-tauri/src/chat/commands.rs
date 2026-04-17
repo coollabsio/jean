@@ -277,15 +277,20 @@ pub async fn list_all_sessions(app: AppHandle) -> Result<AllSessionsResponse, St
     Ok(AllSessionsResponse { entries })
 }
 
-/// Get a single session with full message history
+/// Get a single session with message history.
+///
+/// `limit`: optional max number of recent runs to load. When `None`, loads all runs
+/// (legacy behavior). Frontends should pass a small limit for fast initial render
+/// and use `load_older_session_messages` for scroll-up pagination.
 #[tauri::command]
 pub async fn get_session(
     app: AppHandle,
     worktree_id: String,
     worktree_path: String,
     session_id: String,
+    limit: Option<usize>,
 ) -> Result<Session, String> {
-    log::debug!("[GetSession] session={session_id} worktree={worktree_id}");
+    log::debug!("[GetSession] session={session_id} worktree={worktree_id} limit={limit:?}");
     let sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
     let mut session = sessions
         .find_session(&session_id)
@@ -293,11 +298,14 @@ pub async fn get_session(
         .ok_or_else(|| format!("Session not found: {session_id}"))?;
 
     // Load messages from NDJSON (single source of truth)
-    let mut messages = run_log::load_session_messages(&app, &session_id)?;
+    let loaded = run_log::load_session_messages_window(&app, &session_id, limit, None)?;
+    let mut messages = loaded.messages;
     log::debug!(
-        "[GetSession] session={session_id} loaded {} messages (backend={:?})",
+        "[GetSession] session={session_id} loaded {} messages of {} runs (backend={:?}, start={})",
         messages.len(),
-        session.backend
+        loaded.total_runs,
+        session.backend,
+        loaded.loaded_run_start_index,
     );
 
     // Apply approved plan status from session metadata
@@ -309,7 +317,45 @@ pub async fn get_session(
 
     session.last_message_at = messages.iter().map(|message| message.timestamp).max();
     session.messages = messages;
+    session.total_runs = loaded.total_runs;
+    session.loaded_run_start_index = loaded.loaded_run_start_index;
     Ok(session)
+}
+
+/// Load an older window of messages for an already-loaded session.
+///
+/// `before_run_index`: load runs strictly before this index in metadata.runs.
+/// `limit`: max number of runs to load (most recent within the window).
+/// Returns the parsed messages plus updated `loaded_run_start_index` so the
+/// frontend can chain further pagination.
+#[tauri::command]
+pub async fn load_older_session_messages(
+    app: AppHandle,
+    session_id: String,
+    before_run_index: usize,
+    limit: usize,
+) -> Result<crate::chat::types::LoadedMessages, String> {
+    log::debug!("[LoadOlder] session={session_id} before={before_run_index} limit={limit}");
+    let mut loaded = run_log::load_session_messages_window(
+        &app,
+        &session_id,
+        Some(limit),
+        Some(before_run_index),
+    )?;
+
+    // Apply approved plan status (read from metadata via load_sessions to find the worktree)
+    // We don't have worktree_path here, so look up via session storage directly.
+    if let Ok(Some(metadata)) = crate::chat::storage::load_metadata(&app, &session_id) {
+        let approved: std::collections::HashSet<&String> =
+            metadata.approved_plan_message_ids.iter().collect();
+        for msg in &mut loaded.messages {
+            if approved.contains(&msg.id) {
+                msg.plan_approved = true;
+            }
+        }
+    }
+
+    Ok(loaded)
 }
 
 /// Create a new session tab
@@ -1616,7 +1662,9 @@ pub async fn send_chat_message(
     let run_thinking_level = if effective_backend == Backend::Cursor {
         None
     } else {
-        thinking_level.as_ref().map(|t| format!("{t:?}").to_lowercase())
+        thinking_level
+            .as_ref()
+            .map(|t| format!("{t:?}").to_lowercase())
     };
     let run_effort_level = if effective_backend == Backend::Cursor {
         None
@@ -1898,11 +1946,13 @@ pub async fn send_chat_message(
                 log::trace!("About to call execute_codex_via_server...");
 
                 // Map EffortLevel to Codex reasoning effort values
+                // Codex has no "max"; cap at xhigh.
                 let codex_reasoning_effort: Option<String> =
                     thread_effort_level.as_ref().and_then(|e| match e {
                         super::types::EffortLevel::Low => Some("low".to_string()),
                         super::types::EffortLevel::Medium => Some("medium".to_string()),
                         super::types::EffortLevel::High => Some("high".to_string()),
+                        super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("xhigh".to_string()),
                         super::types::EffortLevel::Off => None,
                     });
@@ -2232,6 +2282,7 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Low => Some("low".to_string()),
                         super::types::EffortLevel::Medium => Some("medium".to_string()),
                         super::types::EffortLevel::High => Some("high".to_string()),
+                        super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("xhigh".to_string()),
                         super::types::EffortLevel::Off => None,
                     });
@@ -2611,7 +2662,9 @@ pub async fn send_chat_message(
                     let skip_first = matches!(first,
                         Some(super::types::ContentBlock::Text { text }) if text.trim() == trimmed_prompt
                     );
-                    if skip_first { iter.next(); }
+                    if skip_first {
+                        iter.next();
+                    }
                     iter.collect()
                 };
                 let blocks: Vec<serde_json::Value> = blocks_to_write

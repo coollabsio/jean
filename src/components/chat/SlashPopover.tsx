@@ -44,13 +44,23 @@ interface SlashPopoverProps {
 }
 
 type ListItem =
-  | { type: 'command'; backend: CliBackend; data: ClaudeCommand }
-  | { type: 'skill'; backend: CliBackend; data: ClaudeSkill }
+  | {
+      type: 'command'
+      backend: CliBackend
+      data: ClaudeCommand
+      pluginName?: string
+    }
+  | {
+      type: 'skill'
+      backend: CliBackend
+      data: ClaudeSkill
+      pluginName?: string
+    }
 
 interface RenderGroup {
   key: string
   heading: string
-  items: Array<{ item: ListItem; globalIndex: number }>
+  items: { item: ListItem; globalIndex: number }[]
 }
 
 export function SlashPopover({
@@ -76,11 +86,21 @@ export function SlashPopover({
     for (const group of backendGroups) {
       if (isAtPromptStart) {
         fuzzySearchItems(group.commands, searchQuery, 10).forEach(cmd => {
-          items.push({ type: 'command', backend: group.backend, data: cmd })
+          items.push({
+            type: 'command',
+            backend: group.backend,
+            data: cmd,
+            pluginName: group.pluginName,
+          })
         })
       }
       fuzzySearchItems(group.skills, searchQuery, 10).forEach(skill => {
-        items.push({ type: 'skill', backend: group.backend, data: skill })
+        items.push({
+          type: 'skill',
+          backend: group.backend,
+          data: skill,
+          pluginName: group.pluginName,
+        })
       })
     }
 
@@ -93,15 +113,22 @@ export function SlashPopover({
     let currentGroup: RenderGroup | null = null
 
     filteredItems.forEach((item, globalIndex) => {
-      const key = `${item.backend}-${item.type}`
+      const pluginSuffix = item.pluginName ? `-${item.pluginName}` : '-user'
+      const key = `${item.backend}-${item.type}${pluginSuffix}`
       if (key !== currentKey) {
-        const backendLabel = getBackendLabel(item.backend)
-        const typeLabel = item.type === 'command' ? 'Commands' : 'Skills'
-        currentGroup = { key, heading: `${backendLabel} ${typeLabel}`, items: [] }
+        let heading: string
+        if (item.pluginName) {
+          heading = `${item.pluginName} Skills`
+        } else {
+          const backendLabel = getBackendLabel(item.backend)
+          const typeLabel = item.type === 'command' ? 'Commands' : 'Skills'
+          heading = `${backendLabel} ${typeLabel}`
+        }
+        currentGroup = { key, heading, items: [] }
         groups.push(currentGroup)
         currentKey = key
       }
-      currentGroup!.items.push({ item, globalIndex })
+      currentGroup?.items.push({ item, globalIndex })
     })
 
     return groups

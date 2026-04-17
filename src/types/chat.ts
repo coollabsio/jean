@@ -16,15 +16,16 @@ export type MessageRole = 'user' | 'assistant'
 export type ThinkingLevel = 'off' | 'think' | 'megathink' | 'ultrathink'
 
 /**
- * Effort level for Opus 4.6 adaptive thinking
+ * Effort level for Opus adaptive thinking
  * Controls --settings {"effort": "<level>"} via CLI
  * Replaces ThinkingLevel when model is Opus (latest) on CLI >= 2.1.32
  * - low: Minimal thinking, skips for simple tasks
  * - medium: Moderate thinking, may skip for very simple queries
  * - high: Deep reasoning (default), almost always thinks
- * - max: No constraints on thinking depth (Opus 4.6 only)
+ * - xhigh: Extra high effort (Opus 4.7 recommended default for coding/agentic)
+ * - max: No constraints on thinking depth
  */
-export type EffortLevel = 'low' | 'medium' | 'high' | 'max'
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
  * Backend for a chat session (Claude CLI, Codex CLI, OpenCode, or Cursor)
@@ -250,6 +251,20 @@ export interface Session {
   label?: LabelData
   /** Messages queued for sending (synced between native + web clients) */
   queued_messages?: QueuedMessage[]
+  /** Total number of runs in this session's metadata (for "more on disk" check) */
+  total_runs?: number
+  /** Index (in metadata.runs) of the first run included in `messages`. 0 = oldest loaded. */
+  loaded_run_start_index?: number
+}
+
+/**
+ * Result of loading a window of session messages from disk.
+ * Returned by `load_older_session_messages`.
+ */
+export interface LoadedMessages {
+  messages: ChatMessage[]
+  total_runs: number
+  loaded_run_start_index: number
 }
 
 /**
@@ -943,6 +958,17 @@ export interface ClaudeCommand {
   path: string
   /** Optional description from file header */
   description?: string
+}
+
+/**
+ * A group of skills from an installed Claude plugin
+ * Returned by the list_plugin_skills Tauri command
+ */
+export interface PluginSkillGroup {
+  /** Plugin display name (e.g., "Superpowers", "Frontend Design") */
+  pluginName: string
+  /** Skills found in this plugin's skills/ directory */
+  skills: ClaudeSkill[]
 }
 
 /**

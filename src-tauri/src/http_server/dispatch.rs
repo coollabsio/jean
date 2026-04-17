@@ -730,9 +730,28 @@ pub async fn dispatch_command(
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let session_id: String = field(&args, "sessionId", "session_id")?;
-            let result =
-                crate::chat::get_session(app.clone(), worktree_id, worktree_path, session_id)
-                    .await?;
+            let limit: Option<usize> = from_field_opt(&args, "limit")?;
+            let result = crate::chat::get_session(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                limit,
+            )
+            .await?;
+            to_value(result)
+        }
+        "load_older_session_messages" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let before_run_index: usize = field(&args, "beforeRunIndex", "before_run_index")?;
+            let limit: usize = from_field(&args, "limit")?;
+            let result = crate::chat::load_older_session_messages(
+                app.clone(),
+                session_id,
+                before_run_index,
+                limit,
+            )
+            .await?;
             to_value(result)
         }
         "create_session" => {
@@ -839,7 +858,13 @@ pub async fn dispatch_command(
                     }
                     Some(crate::chat::types::ThinkingLevel::Off)
                 }
-                Some("max" | "xhigh") => {
+                Some("xhigh") => {
+                    if effort_level.is_none() {
+                        effort_level = Some(crate::chat::types::EffortLevel::Xhigh);
+                    }
+                    Some(crate::chat::types::ThinkingLevel::Off)
+                }
+                Some("max") => {
                     if effort_level.is_none() {
                         effort_level = Some(crate::chat::types::EffortLevel::Max);
                     }
@@ -1026,8 +1051,8 @@ pub async fn dispatch_command(
         // Chat - File operations
         // =====================================================================
         "read_file_content" => {
-            let file_path: String = field(&args, "filePath", "file_path")?;
-            let result = crate::chat::read_file_content(file_path).await?;
+            let path: String = from_field(&args, "path")?;
+            let result = crate::chat::read_file_content(path).await?;
             to_value(result)
         }
         "read_plan_file" => {
@@ -1361,6 +1386,10 @@ pub async fn dispatch_command(
         }
         "list_codex_skills" => {
             let result = crate::projects::list_codex_skills().await?;
+            to_value(result)
+        }
+        "list_plugin_skills" => {
+            let result = crate::projects::list_plugin_skills().await?;
             to_value(result)
         }
         "search_github_issues" => {
@@ -2414,6 +2443,21 @@ pub async fn dispatch_command(
             let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
             crate::background_tasks::commands::set_pr_worktrees_for_polling(state, worktrees)?;
             Ok(Value::Null)
+        }
+
+        // =====================================================================
+        // Opinionated plugin commands
+        // =====================================================================
+        "check_opinionated_plugin_status" => {
+            let plugin_name: String = from_field(&args, "pluginName")?;
+            let result = crate::opinionated::check_opinionated_plugin_status(plugin_name).await?;
+            to_value(result)
+        }
+        "install_opinionated_plugin" => {
+            let plugin_name: String = from_field(&args, "pluginName")?;
+            let result =
+                crate::opinionated::install_opinionated_plugin(app.clone(), plugin_name).await?;
+            to_value(result)
         }
 
         // =====================================================================
