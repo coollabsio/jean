@@ -664,30 +664,49 @@ pub async fn check_gh_cli_auth(app: AppHandle) -> Result<GhAuthStatus, String> {
         });
     }
 
-    // Run gh auth status to check authentication
-    log::trace!("Running auth check: {:?} auth status", binary_path);
+    // Use `gh auth token` to check if the active account has a valid token.
+    // This is more reliable than `gh auth status` on Windows: `gh auth status` exits
+    // non-zero if ANY registered account has issues (e.g. stale keyring entry for an
+    // inactive account), even when the active account is fully authenticated.
+    log::trace!("Running auth check: {:?} auth token", binary_path);
 
-    let output = silent_command(&binary_path)
+    let token_output = silent_command(&binary_path)
+        .args(["auth", "token"])
+        .output()
+        .map_err(|e| format!("Failed to execute GitHub CLI: {e}"))?;
+
+    if token_output.status.success() {
+        let token = String::from_utf8_lossy(&token_output.stdout)
+            .trim()
+            .to_string();
+        if !token.is_empty() {
+            log::trace!("GitHub CLI auth check successful (active account has token)");
+            return Ok(GhAuthStatus {
+                authenticated: true,
+                error: None,
+            });
+        }
+    }
+
+    // Not authenticated — run `gh auth status` to collect a human-readable error.
+    let status_output = silent_command(&binary_path)
         .args(["auth", "status"])
         .output()
         .map_err(|e| format!("Failed to execute GitHub CLI: {e}"))?;
 
-    // gh auth status returns exit code 0 if authenticated, non-zero otherwise
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        log::trace!("GitHub CLI auth check successful: {}", stdout);
-        Ok(GhAuthStatus {
-            authenticated: true,
-            error: None,
-        })
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        log::warn!("GitHub CLI auth check failed: {}", stderr);
-        Ok(GhAuthStatus {
-            authenticated: false,
-            error: Some(stderr),
-        })
-    }
+    let stderr = String::from_utf8_lossy(&status_output.stderr)
+        .trim()
+        .to_string();
+    let stdout = String::from_utf8_lossy(&status_output.stdout)
+        .trim()
+        .to_string();
+    let error_msg = if !stderr.is_empty() { stderr } else { stdout };
+
+    log::warn!("GitHub CLI auth check failed: {}", error_msg);
+    Ok(GhAuthStatus {
+        authenticated: false,
+        error: Some(error_msg),
+    })
 }
 
 /// Result of detecting GitHub CLI in system PATH
