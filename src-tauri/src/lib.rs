@@ -176,6 +176,8 @@ pub struct AppPreferences {
     pub has_seen_feature_tour: bool, // Whether user has seen the feature tour onboarding
     #[serde(default)]
     pub has_seen_jean_config_wizard: bool, // Whether user has seen the jean.json setup wizard
+    #[serde(default)]
+    pub show_full_file_path: bool, // Show full relative path in file mention badges
     #[serde(default = "default_chrome_enabled")]
     pub chrome_enabled: bool, // Enable browser automation via Chrome extension
     #[serde(default = "default_zoom_level")]
@@ -1441,6 +1443,7 @@ impl Default for AppPreferences {
             known_mcp_servers: Vec::new(),
             has_seen_feature_tour: false,
             has_seen_jean_config_wizard: false,
+            show_full_file_path: false,
             chrome_enabled: default_chrome_enabled(),
             zoom_level: default_zoom_level(),
             custom_cli_profiles: Vec::new(),

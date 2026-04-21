@@ -5,6 +5,7 @@ import type { PendingFile } from '@/types/chat'
 import { cn } from '@/lib/utils'
 import { getExtensionColor } from '@/lib/file-colors'
 import { getFilename } from '@/lib/path-utils'
+import { usePreferences } from '@/services/preferences'
 import {
   Tooltip,
   TooltipTrigger,
@@ -25,6 +26,17 @@ interface FilePreviewProps {
  * Renders above the chat input area
  */
 export function FilePreview({ files, onRemove, disabled }: FilePreviewProps) {
+  const { data: preferences } = usePreferences()
+  const showFullPath = preferences?.show_full_file_path ?? false
+
+  const getDisplayName = useCallback(
+    (file: PendingFile) => {
+      const name = showFullPath ? file.relativePath : getFilename(file.relativePath)
+      return file.isDirectory ? `${name}/` : name
+    },
+    [showFullPath]
+  )
+
   const handleRemove = useCallback(
     (e: React.MouseEvent, file: PendingFile) => {
       e.stopPropagation()
@@ -52,10 +64,8 @@ export function FilePreview({ files, onRemove, disabled }: FilePreviewProps) {
                   )}
                 />
               )}
-              <span className="max-w-32 truncate">
-                {file.isDirectory
-                  ? `${getFilename(file.relativePath)}/`
-                  : getFilename(file.relativePath)}
+              <span className={cn('truncate', showFullPath ? 'max-w-64' : 'max-w-32')}>
+                {getDisplayName(file)}
               </span>
               {!disabled && (
                 <DismissButton
