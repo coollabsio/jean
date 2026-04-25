@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
 import { MessageItem } from './MessageItem'
 import type {
@@ -7,6 +8,21 @@ import type {
   QuestionAnswer,
   Question,
 } from '@/types/chat'
+
+const copyToClipboardMock = vi.fn(async (_text: string) => undefined)
+const toastSuccessMock = vi.fn()
+const toastErrorMock = vi.fn()
+
+vi.mock('@/lib/clipboard', () => ({
+  copyToClipboard: (text: string) => copyToClipboardMock(text),
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: (msg: string) => toastSuccessMock(msg),
+    error: (msg: string) => toastErrorMock(msg),
+  },
+}))
 
 describe('MessageItem', () => {
   const noopQuestionAnswer = (
@@ -337,5 +353,111 @@ describe('MessageItem', () => {
     )
 
     expect(screen.getByText('Raptors')).toBeVisible()
+  })
+
+  describe('assistant copy button', () => {
+    it('renders copy button for assistant messages with content', () => {
+      render(
+        <MessageItem
+          {...baseProps}
+          message={{
+            ...baseMessage,
+            content: 'Hello world',
+            tool_calls: [],
+            content_blocks: [{ type: 'text', text: 'Hello world' }],
+          }}
+        />
+      )
+
+      expect(
+        screen.getByRole('button', { name: /copy message/i })
+      ).toBeInTheDocument()
+    })
+
+    it('copies the assistant message content on click', async () => {
+      copyToClipboardMock.mockClear()
+      toastSuccessMock.mockClear()
+
+      render(
+        <MessageItem
+          {...baseProps}
+          message={{
+            ...baseMessage,
+            content: 'Reply body',
+            tool_calls: [],
+            content_blocks: [{ type: 'text', text: 'Reply body' }],
+          }}
+        />
+      )
+
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: /copy message/i }))
+
+      expect(copyToClipboardMock).toHaveBeenCalledWith('Reply body')
+      expect(toastSuccessMock).toHaveBeenCalledWith('Copied to clipboard')
+    })
+
+    it('shows error toast when copy fails', async () => {
+      copyToClipboardMock.mockClear()
+      toastErrorMock.mockClear()
+      copyToClipboardMock.mockRejectedValueOnce(new Error('boom'))
+
+      render(
+        <MessageItem
+          {...baseProps}
+          message={{
+            ...baseMessage,
+            content: 'Reply body',
+            tool_calls: [],
+            content_blocks: [{ type: 'text', text: 'Reply body' }],
+          }}
+        />
+      )
+
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: /copy message/i }))
+
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to copy')
+      )
+    })
+
+    it('does not render copy button for assistant messages with empty content', () => {
+      render(
+        <MessageItem
+          {...baseProps}
+          message={{
+            ...baseMessage,
+            content: '   ',
+            tool_calls: [],
+            content_blocks: [],
+          }}
+        />
+      )
+
+      expect(
+        screen.queryByRole('button', { name: /copy message/i })
+      ).not.toBeInTheDocument()
+    })
+
+    it('does not render assistant copy button on user messages', () => {
+      render(
+        <MessageItem
+          {...baseProps}
+          message={{
+            id: 'user-1',
+            session_id: 'session-1',
+            role: 'user',
+            content: 'Hi',
+            timestamp: 1,
+            tool_calls: [],
+          }}
+        />
+      )
+
+      expect(
+        screen.queryByRole('button', { name: /copy message/i })
+      ).not.toBeInTheDocument()
+    })
   })
 })

@@ -1,6 +1,8 @@
 import { memo, useCallback } from 'react'
 import { Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { copyToClipboard } from '@/lib/clipboard'
 import { normalizePath } from '@/lib/path-utils'
 import { Markdown } from '@/components/ui/markdown'
 import type {
@@ -232,6 +234,19 @@ export const MessageItem = memo(function MessageItem({
   const handleCopyToInput = useCallback(() => {
     onCopyToInput?.(message)
   }, [onCopyToInput, message])
+
+  // Copy assistant message content to clipboard
+  const handleCopyAssistantContent = useCallback(async () => {
+    try {
+      await copyToClipboard(message.content)
+      toast.success('Copied to clipboard')
+    } catch (error) {
+      toast.error(`Failed to copy: ${error}`)
+    }
+  }, [message.content])
+
+  const canCopyAssistantContent =
+    message.role === 'assistant' && message.content.trim().length > 0
 
   // Content for the message box (shared between user and assistant)
   const resolvedPlan = resolvePlanContent({
@@ -792,8 +807,23 @@ export const MessageItem = memo(function MessageItem({
           </div>
         </div>
       ) : (
-        <div className="text-foreground/90 w-full min-w-0 break-words">
+        <div className="relative group text-foreground/90 w-full min-w-0 break-words">
           {messageBoxContent}
+          {canCopyAssistantContent && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleCopyAssistantContent}
+                  aria-label="Copy message"
+                  className="absolute top-0 right-0 p-1 rounded cursor-pointer text-muted-foreground/0 hover:text-muted-foreground hover:bg-muted/50 group-hover:text-muted-foreground/50 transition-colors"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Copy message</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       )}
     </div>
