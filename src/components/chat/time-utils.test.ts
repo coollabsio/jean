@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, getAssistantDurationMs } from './time-utils'
+import {
+  formatDuration,
+  formatLocalTime,
+  getAssistantDurationMs,
+} from './time-utils'
 import type { ChatMessage } from '@/types/chat'
 
 describe('formatDuration', () => {
@@ -46,5 +50,50 @@ describe('getAssistantDurationMs', () => {
 
   it('does not produce duration for user messages', () => {
     expect(getAssistantDurationMs(messages, 0, 145_000)).toBeNull()
+  })
+})
+
+describe('formatLocalTime', () => {
+  const hourMinute: Intl.DateTimeFormatOptions = {
+    hour: '2-digit',
+    minute: '2-digit',
+  }
+
+  it('converts unix seconds to milliseconds before formatting', () => {
+    const unixSeconds = 1_700_000_000
+    const fromSeconds = new Date(unixSeconds * 1000).toLocaleTimeString(
+      [],
+      hourMinute
+    )
+    const fromRawMilliseconds = new Date(unixSeconds).toLocaleTimeString(
+      [],
+      hourMinute
+    )
+
+    expect(formatLocalTime(unixSeconds)).toBe(fromSeconds)
+    expect(fromSeconds).not.toBe(fromRawMilliseconds)
+  })
+
+  it('formats a locale hour:minute and omits seconds', () => {
+    const unixSeconds = Date.UTC(2026, 3, 25, 12, 34, 56) / 1000
+    const hourAndMinute = new Date(unixSeconds * 1000).toLocaleTimeString(
+      [],
+      hourMinute
+    )
+    const withSeconds = new Date(unixSeconds * 1000).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+
+    expect(formatLocalTime(unixSeconds)).toBe(hourAndMinute)
+    expect(withSeconds).not.toBe(hourAndMinute)
+  })
+
+  it('renders distinct times for different timestamps', () => {
+    const morning = Date.UTC(2026, 3, 25, 9, 0, 0) / 1000
+    const evening = Date.UTC(2026, 3, 25, 21, 0, 0) / 1000
+
+    expect(formatLocalTime(morning)).not.toBe(formatLocalTime(evening))
   })
 })

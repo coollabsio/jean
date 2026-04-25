@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { CompactMessageList } from './CompactMessageList'
+import { formatLocalTime } from './time-utils'
 import type {
   ChatMessage,
   Question,
@@ -146,6 +147,78 @@ describe('CompactMessageList', () => {
     expect(screen.getAllByText('Read')).toHaveLength(2)
     expect(screen.getByText('Read 20 lines')).toBeVisible()
     expect(screen.getByText('package.json')).toBeVisible()
+  })
+
+  it('keeps the activity-row receive time hidden until the row is hovered', () => {
+    const sentAt = 1_700_000_000
+    const receivedAt = sentAt + 4
+    renderCompact([
+      message('user-1', 'user', sentAt, 'check status'),
+      message('assistant-1', 'assistant', receivedAt, '', {
+        tool_calls: [
+          {
+            id: 'tool-1',
+            name: 'Bash',
+            input: { command: 'rtk git status --short' },
+            output: 'clean',
+          },
+        ],
+        content_blocks: [{ type: 'tool_use', tool_call_id: 'tool-1' }],
+      }),
+    ])
+
+    const receiveTime = screen.getByText(
+      (_, element) =>
+        element?.textContent === ` · ${formatLocalTime(receivedAt)}`
+    )
+
+    expect(receiveTime).toHaveClass(
+      '[@media(pointer:fine)]:opacity-0',
+      '[@media(pointer:fine)]:group-hover/message:opacity-100'
+    )
+    expect(receiveTime.closest('[class~="group/message"]')).not.toBeNull()
+    expect(screen.getByText('4s').parentElement).toContainElement(receiveTime)
+  })
+
+  it('keeps a question reply receive time hidden until that message is hovered', () => {
+    const sentAt = 1_700_000_000
+    const receivedAt = sentAt + 4
+    renderCompact([
+      message('user-1', 'user', sentAt, 'ask me'),
+      message('assistant-1', 'assistant', receivedAt, '', {
+        tool_calls: [
+          {
+            id: 'question-1',
+            name: 'question',
+            input: {
+              questions: [
+                {
+                  header: 'Bird Type',
+                  question: 'What is your favorite type of bird?',
+                  multiple: false,
+                  options: [
+                    { label: 'Raptors', description: 'Eagles, hawks, falcons' },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        content_blocks: [{ type: 'tool_use', tool_call_id: 'question-1' }],
+      }),
+    ])
+
+    const receiveTime = screen.getByText(
+      (_, element) =>
+        element?.textContent === ` · ${formatLocalTime(receivedAt)}`
+    )
+
+    expect(
+      screen.getByText('What is your favorite type of bird?')
+    ).toBeVisible()
+    expect(receiveTime).toHaveClass('[@media(pointer:fine)]:opacity-0')
+    expect(receiveTime.closest('[class~="group/message"]')).not.toBeNull()
+    expect(screen.getByText('4s').parentElement).toContainElement(receiveTime)
   })
 
   it('renders cancelled marker outside the compact activity card', () => {

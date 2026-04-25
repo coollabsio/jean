@@ -43,3 +43,16 @@ export function getAssistantDurationMs(
 
   return deltaSecs * 1000
 }
+
+/**
+ * Format a chat-message timestamp as a local hour:minute string.
+ *
+ * Message timestamps are Unix seconds (`now()` uses `as_secs()`), same as
+ * other callers that pass `timestamp * 1000` into `Date`.
+ */
+export function formatLocalTime(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}

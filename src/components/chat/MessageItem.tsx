@@ -45,6 +45,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { logger } from '@/lib/logger'
+import { MessageReceiveTime } from './MessageReceiveTime'
 import { formatDuration } from './time-utils'
 import {
   parseReviewFindings,
@@ -493,7 +494,8 @@ export const MessageItem = memo(function MessageItem({
   const durationBadge =
     message.role === 'assistant' && durationMs != null && durationMs > 0 ? (
       <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
-        {formatDuration(durationMs)}
+        <span>{formatDuration(durationMs)}</span>
+        <MessageReceiveTime timestamp={message.timestamp} />
       </span>
     ) : null
 
@@ -1048,7 +1050,7 @@ export const MessageItem = memo(function MessageItem({
           )}
         </div>
       ) : (
-        <div className="group relative text-foreground/90 w-full min-w-0 break-words">
+        <div className="group/message group relative text-foreground/90 w-full min-w-0 break-words">
           {messageBoxContent}
           {!zenMode && assistantResponse && (
             <div className="mt-1 flex justify-end">

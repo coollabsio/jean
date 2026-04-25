@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import userEvent from '@testing-library/user-event'
 import { MessageItem } from './MessageItem'
+import { formatLocalTime } from './time-utils'
 import type {
   ChatMessage,
   ReviewFinding,
@@ -469,6 +470,54 @@ describe('MessageItem', () => {
     render(<MessageItem {...baseProps} durationMs={23_000} />)
 
     expect(screen.getByText('23s')).toBeVisible()
+  })
+
+  it('keeps the local receive time hidden until the assistant message is hovered', () => {
+    const timestamp = 1_700_000_000
+    render(
+      <MessageItem
+        {...baseProps}
+        durationMs={23_000}
+        message={{
+          ...baseMessage,
+          content: 'Done.',
+          timestamp,
+          tool_calls: [],
+          content_blocks: [{ type: 'text', text: 'Done.' }],
+        }}
+      />
+    )
+
+    const receiveTime = screen.getByText(
+      (_, element) =>
+        element?.textContent === ` · ${formatLocalTime(timestamp)}`
+    )
+
+    expect(receiveTime).toHaveClass(
+      '[@media(pointer:fine)]:opacity-0',
+      '[@media(pointer:fine)]:group-hover/message:opacity-100'
+    )
+    expect(receiveTime.closest('[class~="group/message"]')).not.toBeNull()
+    expect(screen.getByText('23s').parentElement).toContainElement(receiveTime)
+  })
+
+  it('omits the receive time when the message has no timestamp', () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        durationMs={23_000}
+        message={{
+          ...baseMessage,
+          content: 'Done.',
+          timestamp: 0,
+          tool_calls: [],
+          content_blocks: [{ type: 'text', text: 'Done.' }],
+        }}
+      />
+    )
+
+    expect(screen.getByText('23s')).toBeVisible()
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument()
   })
 
   it('copies an assistant response to the clipboard', async () => {

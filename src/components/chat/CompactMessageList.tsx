@@ -48,6 +48,7 @@ import { parseServerResourceKey } from '@/lib/server-resource'
 import { AskUserQuestion } from './AskUserQuestion'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { buildTimeline, coalesceContentBlocks } from './tool-call-utils'
+import { MessageReceiveTime } from './MessageReceiveTime'
 import { formatDuration, getAssistantDurationMs } from './time-utils'
 import {
   TOOL_CALL_ROW_CLASS,
@@ -430,12 +431,17 @@ const CompactActivityRow = memo(function CompactActivityRow({
     () => group.some(item => item.message.cancelled),
     [group]
   )
-  const groupDurationMs = useMemo(() => {
+  const groupTiming = useMemo(() => {
     for (let i = group.length - 1; i >= 0; i--) {
       const item = group[i]
       if (!item) continue
       const duration = durationFor(item.globalIndex, item.message)
-      if (duration != null && duration > 0) return duration
+      if (duration != null && duration > 0) {
+        return {
+          durationMs: duration,
+          timestamp: item.message.timestamp,
+        }
+      }
     }
     return null
   }, [group, durationFor])
@@ -458,7 +464,7 @@ const CompactActivityRow = memo(function CompactActivityRow({
     <Collapsible
       open={isOpen}
       onOpenChange={setIsOpen}
-      className="min-w-0 pb-4"
+      className="group/message min-w-0 pb-4"
     >
       <div
         className={
@@ -509,11 +515,12 @@ const CompactActivityRow = memo(function CompactActivityRow({
           </div>
         </CollapsibleContent>
       </div>
-      {(groupDurationMs != null || hasCancelledMessage) && (
+      {(groupTiming != null || hasCancelledMessage) && (
         <div className="mt-1 flex min-h-4 items-center gap-2 text-xs leading-4 text-muted-foreground/40">
-          {groupDurationMs != null && (
+          {groupTiming != null && (
             <span className="tabular-nums font-mono">
-              {formatDuration(groupDurationMs)}
+              <span>{formatDuration(groupTiming.durationMs)}</span>
+              <MessageReceiveTime timestamp={groupTiming.timestamp} />
             </span>
           )}
           {hasCancelledMessage && (
@@ -675,7 +682,8 @@ function CompactQuestionMessage({
       })}
       {durationMs != null && durationMs > 0 && (
         <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
-          {formatDuration(durationMs)}
+          <span>{formatDuration(durationMs)}</span>
+          <MessageReceiveTime timestamp={message.timestamp} />
         </span>
       )}
     </>
@@ -1175,7 +1183,7 @@ export const CompactMessageList = memo(
                     if (el) messageRefs.current.set(item.globalIndex, el)
                     else messageRefs.current.delete(item.globalIndex)
                   }}
-                  className="pb-4"
+                  className="group/message pb-4"
                 >
                   <CompactQuestionMessage
                     message={item.message}
