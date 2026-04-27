@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
 import { MessageItem } from './MessageItem'
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn(async (id: string) => ({
+      svg: `<svg data-testid="${id}"><g>mermaid-svg</g></svg>`,
+      bindFunctions: undefined,
+    })),
+  },
+}))
 import type {
   ChatMessage,
   ReviewFinding,
@@ -337,5 +348,81 @@ describe('MessageItem', () => {
     )
 
     expect(screen.getByText('Raptors')).toBeVisible()
+  })
+
+  it('renders mermaid code blocks with a Render toggle and SVG output', async () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: '',
+          tool_calls: [],
+          content_blocks: [
+            {
+              type: 'text',
+              text: '```mermaid\ngraph TD\n  A-->B\n```',
+            },
+          ],
+        }}
+      />
+    )
+
+    const toggle = await screen.findByRole('switch', {
+      name: /toggle mermaid rendering/i,
+    })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(await screen.findByText('mermaid-svg')).toBeInTheDocument()
+  })
+
+  it('shows raw mermaid source when the Render toggle is turned off', async () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: '',
+          tool_calls: [],
+          content_blocks: [
+            {
+              type: 'text',
+              text: '```mermaid\ngraph TD\n  A-->B\n```',
+            },
+          ],
+        }}
+      />
+    )
+
+    const toggle = await screen.findByRole('switch', {
+      name: /toggle mermaid rendering/i,
+    })
+    await userEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(/A-->B/)).toBeInTheDocument()
+  })
+
+  it('does not render a mermaid toggle for non-mermaid code blocks', () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: '',
+          tool_calls: [],
+          content_blocks: [
+            {
+              type: 'text',
+              text: '```ts\nconst x = 1\n```',
+            },
+          ],
+        }}
+      />
+    )
+
+    expect(
+      screen.queryByRole('switch', { name: /toggle mermaid rendering/i })
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(/const x = 1/)).toBeInTheDocument()
   })
 })
