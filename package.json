@@ -105,6 +105,7 @@
     "diff": "^8.0.3",
     "fuse.js": "^7.1.0",
     "lucide-react": "^0.552.0",
+    "mermaid": "^11.14.0",
     "react": "^19.2.0",
     "react-day-picker": "^9.8.1",
     "react-dom": "^19.2.0",
