@@ -13,13 +13,10 @@ interface FileItem {
 interface GitDiffFileTreeProps<F extends FileItem> {
   /** Already-filtered files (search filter is applied by the parent). */
   files: F[]
-  /** Render the row for a single file at the given indent (already includes selection, checkbox, context-menu, tooltip — same UI as list view). */
   renderFile: (file: F, index: number, indentPx: number) => React.ReactNode
-  /** When true (search active), all folders are auto-expanded so matches stay visible. */
+  /** When true, all folders are auto-expanded so search matches stay visible. */
   searchActive: boolean
-  /** Collapse single-child folder chains (VSCode-style). */
   compactFolders?: boolean
-  /** Smaller row height for mobile. */
   isMobile?: boolean
 }
 
