@@ -79,6 +79,8 @@ export interface UIState {
     string,
     { worktree_id: string; session_id: string }
   >
+  /** Git diff modal file list view mode */
+  git_diff_view_mode?: 'list' | 'tree'
   version: number
 }
 
@@ -108,5 +110,6 @@ export const defaultUIState: UIState = {
   browser_modal_height: 400,
   browser_bottom_panel_open: {},
   browser_bottom_panel_height: 360,
+  git_diff_view_mode: 'list',
   version: 1,
 }
