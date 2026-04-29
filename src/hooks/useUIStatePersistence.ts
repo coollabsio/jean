@@ -197,6 +197,7 @@ export function useUIStatePersistence() {
       sessionTerminalIds,
       sessionPrimarySurface,
       seenFailedWorkflowRunIds,
+      gitDiffViewMode,
     } = useUIStore.getState()
     const { terminals, activeTerminalIds } = useTerminalStore.getState()
     const shouldPersistTerminalRuntime = !isLocalBackend()
@@ -285,6 +286,7 @@ export function useUIStatePersistence() {
       ),
       seen_failed_workflow_run_ids: seenFailedWorkflowRunIds,
       auto_resume: autoResumeForPersist,
+      git_diff_view_mode: gitDiffViewMode,
       version: 1, // Reset for first release
     }
   }, [])
@@ -399,6 +401,13 @@ export function useUIStatePersistence() {
 
     if (uiState.zen_mode !== undefined) {
       useUIStore.getState().setZenMode(uiState.zen_mode)
+    }
+
+    if (
+      uiState.git_diff_view_mode === 'list' ||
+      uiState.git_diff_view_mode === 'tree'
+    ) {
+      useUIStore.getState().setGitDiffViewMode(uiState.git_diff_view_mode)
     }
 
     // Restore active project first (selectProject clears selectedWorktreeId)
@@ -1180,6 +1189,7 @@ export function useUIStatePersistence() {
     let prevSessionPrimarySurface = useUIStore.getState().sessionPrimarySurface
     let prevSeenFailedWorkflowRunIds =
       useUIStore.getState().seenFailedWorkflowRunIds
+    let prevGitDiffViewMode = useUIStore.getState().gitDiffViewMode
     let prevWorktreeId = useChatStore.getState().activeWorktreeId
     let prevWorktreePath = useChatStore.getState().activeWorktreePath
     let prevLastActiveWorktreeId = useChatStore.getState().lastActiveWorktreeId
@@ -1225,15 +1235,19 @@ export function useUIStatePersistence() {
         state.sessionPrimarySurface !== prevSessionPrimarySurface
       const seenFailedWorkflowRunIdsChanged =
         state.seenFailedWorkflowRunIds !== prevSeenFailedWorkflowRunIds
+      const gitDiffViewModeChanged =
+        state.gitDiffViewMode !== prevGitDiffViewMode
 
       if (
         sessionTerminalIdsChanged ||
         sessionPrimarySurfaceChanged ||
-        seenFailedWorkflowRunIdsChanged
+        seenFailedWorkflowRunIdsChanged ||
+        gitDiffViewModeChanged
       ) {
         prevSessionTerminalIds = state.sessionTerminalIds
         prevSessionPrimarySurface = state.sessionPrimarySurface
         prevSeenFailedWorkflowRunIds = state.seenFailedWorkflowRunIds
+        prevGitDiffViewMode = state.gitDiffViewMode
         debouncedSaveRef.current?.()
       }
     })

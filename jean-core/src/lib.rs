@@ -3108,6 +3108,10 @@ pub struct UIState {
     #[serde(default)]
     pub auto_resume: Vec<AutoResumeEntry>,
 
+    /// Git diff modal file list view mode: "list" or "tree"
+    #[serde(default)]
+    pub git_diff_view_mode: Option<String>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -3258,6 +3262,7 @@ impl Default for UIState {
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
             auto_resume: Vec::new(),
+            git_diff_view_mode: None,
             version: default_ui_state_version(),
         }
     }

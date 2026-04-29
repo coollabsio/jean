@@ -188,6 +188,8 @@ export interface UIState {
   seen_failed_workflow_run_ids?: number[]
   /** Sessions armed for auto-continue after a usage limit resets */
   auto_resume?: AutoResumeEntry[]
+  /** Git diff modal file list view mode */
+  git_diff_view_mode?: 'list' | 'tree'
   version: number
 }
 
@@ -236,5 +238,6 @@ export const defaultUIState: UIState = {
   pinned_recent_session_ids: [],
   seen_failed_workflow_run_ids: [],
   auto_resume: [],
+  git_diff_view_mode: 'list',
   version: 1,
 }
