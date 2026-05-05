@@ -26,6 +26,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
+import { MermaidBlock } from '@/components/ui/MermaidBlock'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
 
@@ -71,6 +72,22 @@ function extractText(node: ReactNode): string {
     )
   }
   return ''
+}
+
+/**
+ * If `pre` wraps a single `<code class="language-mermaid">` child, return its
+ * raw text source. Otherwise return null so the regular CodeBlock renders.
+ */
+function extractMermaidSource(node: ReactNode): string | null {
+  const child = Array.isArray(node)
+    ? node.find(n => isValidElement(n))
+    : isValidElement(node)
+      ? node
+      : null
+  if (!child || !isValidElement(child)) return null
+  const props = (child as ReactElement<{ className?: string; children?: ReactNode }>).props
+  if (props.className !== 'language-mermaid') return null
+  return extractText(props.children).replace(/\n$/, '')
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
@@ -376,8 +393,14 @@ const components: Components = {
     )
   },
 
-  // Code blocks
-  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  // Code blocks (mermaid → rendered diagram, others → copyable code block)
+  pre: ({ children }) => {
+    const mermaidSource = extractMermaidSource(children)
+    if (mermaidSource !== null) {
+      return <MermaidBlock code={mermaidSource} />
+    }
+    return <CodeBlock>{children}</CodeBlock>
+  },
 
   // Images
   img: ({ src, alt }) => (
