@@ -46,6 +46,7 @@ import { useBackgroundInvestigation } from './hooks/useBackgroundInvestigation'
 import { useAutoArchiveOnMerge } from './hooks/useAutoArchiveOnMerge'
 import { useMagicPromptAutoDefaults } from './hooks/useMagicPromptAutoDefaults'
 import useStreamingEvents from './components/chat/hooks/useStreamingEvents'
+import { useAcpStreamingEvents } from './acp'
 import { hydrateRunningSnapshot } from './lib/hydrate-running-snapshot'
 import { preloadAllSounds } from './lib/sounds'
 import {
@@ -498,6 +499,7 @@ function App() {
   // Global streaming event listeners - must be at App level so they stay active
   // even when ChatWindow is unmounted (e.g., when viewing a different worktree)
   useStreamingEvents({ queryClient })
+  useAcpStreamingEvents({ queryClient })
 
   // Browser mode: only open WebSocket after preload + listener registration.
   // This lets us replay buffered server events before live events start arriving.

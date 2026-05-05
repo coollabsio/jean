@@ -27,6 +27,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke, listen } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
 import { GitBranch, GitMerge, Layers, Loader2 } from 'lucide-react'
+import { AcpChat } from '@/acp'
 import {
   useSession,
   useSessions,
@@ -2246,6 +2247,19 @@ export function ChatWindow({
       <div className="flex h-full items-center justify-center text-muted-foreground">
         Select a worktree to start chatting
       </div>
+    )
+  }
+
+  // Standalone ACP labs sessions are driven by `src/acp/` + `src-tauri/src/acp/`
+  // and bypass the regular chat pipeline entirely. The gate runs after all
+  // hooks above so React's rules of hooks are preserved.
+  if (session?.backend === 'acp_lab') {
+    return (
+      <AcpChat
+        session={session}
+        worktreeId={activeWorktreeId}
+        worktreePath={activeWorktreePath}
+      />
     )
   }
 

@@ -102,6 +102,14 @@ pub enum Backend {
     Codex,
     Opencode,
     Cursor,
+    /// Experimental standalone ACP module (gated by `experimental_acp`).
+    /// Sessions with this backend bypass the regular chat pipeline and are
+    /// rendered/driven by `src/acp/` + `src-tauri/src/acp/`.
+    ///
+    /// Accepts the legacy `"acp"` value as an alias so sessions written by
+    /// earlier experimental branches still deserialize.
+    #[serde(rename = "acp_lab", alias = "acp")]
+    AcpLab,
 }
 
 /// Role of a chat message sender

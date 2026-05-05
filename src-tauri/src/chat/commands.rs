@@ -375,11 +375,15 @@ pub async fn create_session(
         Some("opencode") => Backend::Opencode,
         Some("cursor") => Backend::Cursor,
         Some("claude") => Backend::Claude,
+        Some("acp_lab") => Backend::AcpLab,
         _ => {
-            // No explicit backend — check project default, then global preference
+            // No explicit backend — if experimental_acp is on, take over all
+            // new sessions with the standalone ACP labs backend.
             let mut resolved = Backend::Claude;
             if let Ok(prefs) = crate::load_preferences(app.clone()).await {
-                if prefs.default_backend == "codex" {
+                if prefs.experimental_acp {
+                    resolved = Backend::AcpLab;
+                } else if prefs.default_backend == "codex" {
                     resolved = Backend::Codex;
                 } else if prefs.default_backend == "opencode" {
                     resolved = Backend::Opencode;
@@ -1586,6 +1590,7 @@ pub async fn send_chat_message(
         Some("opencode") => Backend::Opencode,
         Some("cursor") => Backend::Cursor,
         Some("claude") => Backend::Claude,
+        Some("acp_lab") => Backend::AcpLab,
         _ => session_backend.clone(),
     };
     // Override backend based on model string (safety net: model always wins)
@@ -1707,6 +1712,7 @@ pub async fn send_chat_message(
                     }
                     Backend::Opencode => {}
                     Backend::Cursor => {}
+                    Backend::AcpLab => {}
                 }
             }
         }
@@ -2722,6 +2728,11 @@ pub async fn send_chat_message(
                     }
                 }
             }
+            Backend::AcpLab => Err(
+                "AcpLab sessions must be driven via the standalone acp_* commands, \
+                 not the chat send pipeline."
+                    .to_string(),
+            ),
         };
         let _ = tx.send(result);
     });
@@ -2992,6 +3003,9 @@ pub async fn send_chat_message(
                         Backend::Cursor => {
                             session.cursor_chat_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::AcpLab => {
+                            // Resume IDs for AcpLab are managed by src-tauri/src/acp/.
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -3122,6 +3136,9 @@ pub async fn send_chat_message(
                     }
                     Backend::Cursor => {
                         session.cursor_chat_id = Some(resume_id_for_log.clone());
+                    }
+                    Backend::AcpLab => {
+                        // Resume IDs for AcpLab are managed by src-tauri/src/acp/.
                     }
                 }
             }

@@ -1,9 +1,12 @@
-import type { ClaudeModel, CustomCliProfile } from '@/types/preferences'
+import type {
+  ClaudeModel,
+  CliBackend,
+  CustomCliProfile,
+} from '@/types/preferences'
 import type {
   ThinkingLevel,
   EffortLevel,
   ExecutionMode,
-  Backend,
 } from '@/types/chat'
 import type { McpServerInfo } from '@/types/chat'
 import type {
@@ -37,7 +40,7 @@ export interface ChatToolbarProps {
   hasPendingAttachments: boolean
   hasInputValue: boolean
   executionMode: ExecutionMode
-  selectedBackend: Backend
+  selectedBackend: CliBackend
   selectedModel: string
   selectedProvider: string | null
   selectedThinkingLevel: ThinkingLevel

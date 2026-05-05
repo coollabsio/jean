@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
+mod acp;
 mod background_tasks;
 mod browser;
 mod chat;
@@ -239,6 +240,11 @@ pub struct AppPreferences {
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
     pub expand_tool_calls_by_default: bool, // Expand all tool call collapsibles by default (default: false)
+    /// Opt-in to the experimental standalone ACP integration (`src-tauri/src/acp/`).
+    /// When false, the labs route is hidden and no `acp_*` commands are exercised.
+    /// Off by default; flipping to true exposes a labs entry in the UI.
+    #[serde(default)]
+    pub experimental_acp: bool,
 }
 
 fn default_true() -> Option<bool> {
@@ -1486,6 +1492,7 @@ impl Default for AppPreferences {
             opencode_cli_source: default_cli_source(),
             gh_cli_source: default_cli_source(),
             expand_tool_calls_by_default: false,
+            experimental_acp: false,
         }
     }
 }
@@ -3087,6 +3094,7 @@ pub fn run() {
             });
 
             log::info!("Startup: setup() completed in {:?}", setup_start.elapsed());
+            crate::acp::prewarm_all(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3102,6 +3110,20 @@ pub fn run() {
             save_emergency_data,
             load_emergency_data,
             cleanup_old_recovery_files,
+            crate::acp::commands::acp_ping,
+            crate::acp::commands::acp_list_providers,
+            crate::acp::commands::acp_create_session,
+            crate::acp::commands::acp_resume_session,
+            crate::acp::commands::acp_send_message,
+            crate::acp::commands::acp_cancel,
+            crate::acp::commands::acp_set_model,
+            crate::acp::commands::acp_set_mode,
+            crate::acp::commands::acp_set_config_option,
+            crate::acp::commands::acp_resolve_permission,
+            crate::acp::commands::acp_load_local_session_state,
+            crate::acp::commands::acp_load_session_log,
+            crate::acp::commands::acp_process_image,
+            crate::acp::commands::acp_search_files,
             // Project management commands
             projects::check_git_identity,
             projects::set_git_identity,

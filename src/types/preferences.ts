@@ -992,6 +992,12 @@ export interface AppPreferences {
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   expand_tool_calls_by_default: boolean // Expand all tool call collapsibles by default
+  /**
+   * Opt-in to the experimental standalone ACP integration (`src/acp/`,
+   * `src-tauri/src/acp/`). When false, no ACP labs UI is mounted and no
+   * `acp_*` commands are exercised. Off by default; safe to toggle.
+   */
+  experimental_acp: boolean
 }
 
 export interface CustomCliProfile {
@@ -1590,4 +1596,5 @@ export const defaultPreferences: AppPreferences = {
   opencode_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   expand_tool_calls_by_default: false, // Default: collapsed
+  experimental_acp: false, // Opt-in: enables /acp labs UI
 }

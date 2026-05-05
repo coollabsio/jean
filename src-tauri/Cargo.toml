@@ -49,11 +49,20 @@ portable-pty = "0.8"  # For terminal/PTY support
 which = "7"           # For cross-platform executable detection
 axum = { version = "0.8", features = ["ws"] }  # HTTP server + WebSocket
 tower-http = { version = "0.6", features = ["cors", "fs", "compression-br", "compression-gzip"] }  # CORS + static files + response compression
-tokio = { version = "1", features = ["sync", "macros"] }  # Channel for WS broadcast
+tokio = { version = "1", features = ["sync", "macros", "time", "process", "io-util"] }  # Channel for WS broadcast + async sleep
 futures-util = "0.3"  # Stream utilities for WebSocket split
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }  # Image resize/compression on paste
 arboard = { version = "3", features = ["wayland-data-control"] }  # Native clipboard image read (Linux WebKitGTK fallback)
 if-addrs = "0.13"
+
+# Standalone ACP labs (experimental) — typed JSON-RPC client for the
+# Agent Client Protocol. Driven by `src-tauri/src/acp/`.
+agent-client-protocol = { version = "0.11.1", features = ["unstable"] }
+agent-client-protocol-tokio = "0.11.1"
+async-trait = "0.1"
+futures = "0.3"
+mime_guess = "2.0.5"
+nucleo-matcher = "0.3.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

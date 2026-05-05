@@ -30,7 +30,7 @@ export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 /**
  * Backend for a chat session (Claude CLI, Codex CLI, OpenCode, or Cursor)
  */
-export type Backend = 'claude' | 'codex' | 'opencode' | 'cursor'
+export type Backend = 'claude' | 'codex' | 'opencode' | 'cursor' | 'acp_lab'
 
 /**
  * Execution mode for Claude CLI permission handling

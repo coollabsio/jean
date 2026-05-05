@@ -138,6 +138,23 @@ export const ExperimentalPane: React.FC = () => {
           />
         </InlineField>
       </SettingsSection>
+
+      <SettingsSection
+        title="Backends"
+        anchorId="pref-experimental-section-backends"
+      >
+        <InlineField
+          label="ACP Labs"
+          description="New sessions use the standalone ACP backend instead of the default. Existing sessions are unaffected."
+        >
+          <Switch
+            checked={preferences?.experimental_acp ?? false}
+            onCheckedChange={checked => {
+              patchPreferences.mutate({ experimental_acp: checked })
+            }}
+          />
+        </InlineField>
+      </SettingsSection>
     </div>
   )
 }

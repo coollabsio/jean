@@ -16,6 +16,110 @@ pub async fn dispatch_command(
 ) -> Result<Value, String> {
     match command {
         // =====================================================================
+        // Standalone ACP (experimental, gated by `experimental_acp` pref)
+        // =====================================================================
+        "acp_ping" => {
+            let result = crate::acp::acp_ping();
+            to_value(result)
+        }
+        "acp_list_providers" => {
+            let result = crate::acp::acp_list_providers();
+            to_value(result)
+        }
+        "acp_create_session" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let cwd: String = from_field(&args, "cwd")?;
+            let provider: String = from_field(&args, "provider")?;
+            let result =
+                crate::acp::acp_create_session(app.clone(), jean_session_id, cwd, provider).await?;
+            to_value(result)
+        }
+        "acp_resume_session" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let cwd: String = from_field(&args, "cwd")?;
+            let result = crate::acp::acp_resume_session(app.clone(), jean_session_id, cwd).await?;
+            to_value(result)
+        }
+        "acp_process_image" => {
+            let data: String = from_field(&args, "data")?;
+            let mime_type: String = field(&args, "mimeType", "mime_type")?;
+            let result = crate::acp::commands::acp_process_image(data, mime_type).await?;
+            to_value(result)
+        }
+        "acp_load_local_session_state" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let result =
+                crate::acp::acp_load_local_session_state(app.clone(), jean_session_id).await?;
+            to_value(result)
+        }
+        "acp_search_files" => {
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let query: String = from_field(&args, "query")?;
+            let limit: Option<usize> = from_field_opt(&args, "limit")?;
+            let result = crate::acp::acp_search_files(worktree_path, query, limit).await?;
+            to_value(result)
+        }
+        "acp_send_message" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let text: String = from_field(&args, "text")?;
+            let images: Option<Vec<crate::acp::commands::AcpImageInput>> =
+                from_field_opt(&args, "images")?;
+            let mentions: Option<Vec<String>> = from_field_opt(&args, "mentions")?;
+            let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
+            let result = crate::acp::acp_send_message(
+                app.clone(),
+                jean_session_id,
+                text,
+                images,
+                mentions,
+                worktree_path,
+            )
+            .await?;
+            to_value(result)
+        }
+        "acp_cancel" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            crate::acp::acp_cancel(app.clone(), jean_session_id).await?;
+            Ok(Value::Null)
+        }
+        "acp_set_model" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let model_id: String = field(&args, "modelId", "model_id")?;
+            let result = crate::acp::acp_set_model(app.clone(), jean_session_id, model_id).await?;
+            to_value(result)
+        }
+        "acp_set_mode" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let mode_id: String = field(&args, "modeId", "mode_id")?;
+            let result = crate::acp::acp_set_mode(app.clone(), jean_session_id, mode_id).await?;
+            to_value(result)
+        }
+        "acp_set_config_option" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let config_id: String = field(&args, "configId", "config_id")?;
+            let value_id: String = field(&args, "valueId", "value_id")?;
+            let result = crate::acp::acp_set_config_option(
+                app.clone(),
+                jean_session_id,
+                config_id,
+                value_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "acp_resolve_permission" => {
+            let request_id: String = field(&args, "requestId", "request_id")?;
+            let option_id: Option<String> = field_opt(&args, "optionId", "option_id")?;
+            crate::acp::acp_resolve_permission(request_id, option_id).await?;
+            Ok(Value::Null)
+        }
+        "acp_load_session_log" => {
+            let jean_session_id: String = field(&args, "jeanSessionId", "jean_session_id")?;
+            let result = crate::acp::acp_load_session_log(app.clone(), jean_session_id).await?;
+            to_value(result)
+        }
+
+        // =====================================================================
         // Preferences & UI State
         // =====================================================================
         "load_preferences" => {
