@@ -35,7 +35,7 @@ import {
 import { ThinkingBlock } from './ThinkingBlock'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { logger } from '@/lib/logger'
-import { formatDuration } from './time-utils'
+import { formatDuration, formatLocalTime } from './time-utils'
 import {
   parseReviewFindings,
   hasReviewFindings,
@@ -744,11 +744,17 @@ export const MessageItem = memo(function MessageItem({
         </span>
       )}
 
-      {message.role === 'assistant' && durationMs != null && durationMs > 0 && (
-        <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
-          {formatDuration(durationMs)}
-        </span>
-      )}
+      {message.role === 'assistant' &&
+        ((durationMs != null && durationMs > 0) || message.timestamp > 0) && (
+          <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
+            {durationMs != null && durationMs > 0 && formatDuration(durationMs)}
+            {durationMs != null &&
+              durationMs > 0 &&
+              message.timestamp > 0 &&
+              ' · '}
+            {message.timestamp > 0 && formatLocalTime(message.timestamp)}
+          </span>
+        )}
     </>
   )
 
