@@ -111,3 +111,67 @@ Learn more about our approach: [Philosophy](https://coollabs.io/philosophy/)
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=coollabsio/jean&type=Date)](https://star-history.com/#coollabsio/jean&Date)
+
+
+
+## FAQ
+
+### What is Jean?
+
+Jean is a **desktop AI assistant** built with Tauri v2 for managing multiple projects, worktrees, and chat sessions with Claude CLI, Codex CLI, Cursor CLI, and OpenCode. It gives you a powerful interface for working with AI coding assistants across multiple projects, managing git worktrees, chat sessions, terminals, GitHub and Linear integrations in one cohesive workflow.
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Project & Worktree Management** | Multi-project support, linked projects, git worktree automation |
+| **Session Management** | Multiple sessions per worktree, execution modes (Plan, Build, Yolo) |
+| **AI Chat** | Claude CLI, Codex CLI, Cursor CLI, OpenCode with model selection |
+| **Magic Commands** | Investigate issues/PRs/workflows, code review, AI commit messages |
+| **GitHub Integration** | Dashboard with Issues, PRs, Security Alerts, Dependabot investigation |
+| **Linear Integration** | Issue investigation, context loading, per-project configuration |
+| **Developer Tools** | Multi-dock terminal, command palette, git operations, diff viewer |
+| **Remote Access** | Built-in HTTP server with WebSocket support, web browser access |
+
+### Installation
+
+**Download from GitHub Releases:**
+```bash
+# macOS Homebrew
+brew tap coollabsio/jean
+brew install --cask jean
+
+# Or download directly from https://github.com/coollabsio/jean/releases
+```
+
+**Building from Source:**
+```bash
+git clone https://github.com/coollabsio/jean.git
+cd jean
+pnpm install
+pnpm tauri dev
+```
+
+### Requirements
+
+- **Node.js** for development
+- **Rust** for Tauri backend
+- **Claude CLI / Codex CLI / Cursor CLI / OpenCode** installed and authenticated
+
+### Platform Support
+
+| Platform | Status |
+|----------|--------|
+| macOS | Tested and supported |
+| Windows | Not fully tested |
+| Linux | Community tested (Arch Linux + Hyprland/Wayland) |
+
+### License
+
+MIT License — Free to use and modify.
+
+### Help Resources
+
+- 📖 [Website](https://jean.build/)
+- 🐛 [GitHub Issues](https://github.com/coollabsio/jean/issues)
+- 📝 [Contributing Guide](https://github.com/coollabsio/jean/blob/main/CONTRIBUTING.md)
