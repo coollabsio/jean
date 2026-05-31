@@ -111,3 +111,76 @@ Learn more about our approach: [Philosophy](https://coollabs.io/philosophy/)
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=coollabsio/jean&type=Date)](https://star-history.com/#coollabsio/jean&Date)
+
+
+---
+
+## FAQ
+
+### What is Jean?
+
+Jean is a desktop AI assistant for managing multiple projects, worktrees, and chat sessions with Claude CLI, Codex CLI, Cursor CLI, and OpenCode. It's built with Tauri v2, React 19, Rust, TypeScript, and provides a powerful interface for AI-assisted development.
+
+### What AI CLI tools does Jean support?
+
+Jean supports the following AI CLI tools:
+
+| CLI | Features |
+|-----|----------|
+| **Claude CLI** | Anthropic Claude models (Opus 4.5/4.6, Sonnet, Haiku), MCP server support, thinking/effort levels |
+| **Codex CLI** | OpenAI models, multi-agent collaboration, file picker & image attachments |
+| **Cursor CLI** | VS Code-style AI coding, custom system prompts, custom CLI profiles |
+| **OpenCode** | Open-source alternative, model selection, notification sounds |
+
+### What are the key features?
+
+| Feature | Description |
+|---------|-------------|
+| **Project & Worktree Management** | Multi-project support, linked projects, git worktree automation |
+| **Session Management** | Multiple sessions per worktree, execution modes (Plan/Build/Yolo), session recap/digest |
+| **AI Chat** | Model selection, thinking/effort levels, MCP server support, file picker & image attachments |
+| **Magic Commands** | Investigate issues/PRs/workflows, code review, AI commit messages, PR content generation |
+| **GitHub Integration** | Dashboard with Issues, PRs, Security Alerts, Dependabot investigation |
+| **Linear Integration** | Issue investigation, context loading, per-project API key and team configuration |
+| **Developer Tools** | Multi-dock terminal, command palette, diff viewer, file tree, debug panel |
+| **Remote Access** | Built-in HTTP server with WebSocket support, token-based auth, web browser access |
+
+### How do I install Jean?
+
+**Homebrew (macOS):**
+```bash
+brew tap coollabsio/jean
+brew install --cask jean
+```
+
+**Download from GitHub Releases:**
+Visit [jean.build](https://jean.build) or the [GitHub Releases](https://github.com/coollabsio/jean/releases) page.
+
+### What are the requirements?
+
+- macOS (tested), Windows (not fully tested), Linux (community tested)
+- Claude CLI, Codex CLI, Cursor CLI, or OpenCode installation
+- Node.js and Rust for building from source
+
+### Is there vendor lock-in?
+
+No. Everything runs locally on your machine with your own Claude CLI, Codex CLI, Cursor CLI, or OpenCode installation. No data is sent to any third-party server.
+
+### What themes are available?
+
+Jean supports themes: light, dark, and system. It also supports custom fonts, customizable AI prompts, configurable keybindings, and mobile swipe gestures.
+
+### How can I contribute?
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup and guidelines.
+
+### Where can I get help?
+
+- **Website**: [jean.build](https://jean.build)
+- **GitHub Issues**: [coollabsio/jean/issues](https://github.com/coollabsio/jean/issues)
+- **GitHub Releases**: [coollabsio/jean/releases](https://github.com/coollabsio/jean/releases)
+
+### What license does Jean use?
+
+Jean is open source. Check the [LICENSE](LICENSE) file for details.
+
