@@ -119,6 +119,8 @@ interface UIState {
   gitDiffModalOpen: boolean
   /** File paths selected for commit in GitDiffModal (uncommitted tab only) */
   gitDiffSelectedFiles: Set<string>
+  /** Git diff modal sidebar file list view mode (persisted across sessions) */
+  gitDiffViewMode: 'list' | 'tree'
   /** Whether a plan dialog is open (blocks canvas approve keybindings) */
   planDialogOpen: boolean
   /** Whether the context viewer dialog is open (blocks SessionChatModal ESC close) */
@@ -213,6 +215,7 @@ interface UIState {
   setGitDiffModalOpen: (open: boolean) => void
   toggleGitDiffSelectedFile: (filePath: string) => void
   clearGitDiffSelectedFiles: () => void
+  setGitDiffViewMode: (mode: 'list' | 'tree') => void
   setPlanDialogOpen: (open: boolean) => void
   setContextViewerOpen: (open: boolean) => void
   setFeatureTourOpen: (open: boolean) => void
@@ -286,6 +289,7 @@ export const useUIStore = create<UIState>()(
       chatToolbarMounted: false,
       gitDiffModalOpen: false,
       gitDiffSelectedFiles: new Set<string>(),
+      gitDiffViewMode: 'list',
       planDialogOpen: false,
       contextViewerOpen: false,
       featureTourOpen: false,
@@ -852,6 +856,16 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'clearGitDiffSelectedFiles'
+        ),
+
+      setGitDiffViewMode: (mode: 'list' | 'tree') =>
+        set(
+          state => {
+            if (state.gitDiffViewMode === mode) return state
+            return { gitDiffViewMode: mode }
+          },
+          undefined,
+          'setGitDiffViewMode'
         ),
 
       setPlanDialogOpen: (open: boolean) =>

@@ -25,6 +25,8 @@ import {
   ChevronsUpDown,
   PanelLeft,
   Check,
+  LayoutList,
+  FolderTree,
 } from 'lucide-react'
 import {
   parsePatchFiles,
@@ -85,6 +87,7 @@ import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
 import { CommitsTabView } from './CommitsTabView'
+import { GitDiffFileTree } from './GitDiffFileTree'
 import {
   MemoizedFileDiff,
   getStatusColor,
@@ -256,6 +259,8 @@ export function GitDiffModal({
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
   const gitDiffSelectedFiles = useUIStore(state => state.gitDiffSelectedFiles)
+  const gitDiffViewMode = useUIStore(state => state.gitDiffViewMode)
+  const setGitDiffViewMode = useUIStore(state => state.setGitDiffViewMode)
 
   // On mobile, show file sidebar as an overlay panel toggled by a button
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -920,6 +925,163 @@ export function GitDiffModal({
       ? `Commit (${selectedFileCount})`
       : 'Commit'
 
+  // File-row renderers — shared by both list and tree views.
+  // `indentPx` is added to the base padding so tree depth indents the row.
+  const renderDesktopFileRow = (
+    file: (typeof filteredFiles)[number],
+    index: number,
+    indentPx: number
+  ) => {
+    const isSelected = index === selectedFileIndex
+    const displayName =
+      displayNameMap.get(file.key) ?? getFilename(file.fileName)
+    const isCheckedForCommit =
+      activeDiffType === 'uncommitted' &&
+      gitDiffSelectedFiles.has(file.fileName)
+
+    const fileButton = (
+      <button
+        type="button"
+        data-index={index}
+        onClick={() => handleSelectFile(index)}
+        style={{ paddingLeft: indentPx + 12, paddingRight: 12 }}
+        className={cn(
+          'w-full flex items-center gap-2 py-2 text-left transition-colors',
+          'hover:bg-muted/50',
+          isSelected && 'bg-accent',
+          isCheckedForCommit && !isSelected && 'bg-primary/10'
+        )}
+      >
+        {activeDiffType === 'uncommitted' && (
+          <div
+            role="checkbox"
+            aria-checked={isCheckedForCommit}
+            onClick={e => {
+              e.stopPropagation()
+              useUIStore.getState().toggleGitDiffSelectedFile(file.fileName)
+            }}
+            className={cn(
+              'h-3.5 w-3.5 shrink-0 rounded-sm border flex items-center justify-center transition-colors cursor-pointer',
+              isCheckedForCommit
+                ? 'bg-primary border-primary text-primary-foreground'
+                : 'border-muted-foreground/40 hover:border-muted-foreground'
+            )}
+          >
+            {isCheckedForCommit && <Check className="h-2.5 w-2.5" />}
+          </div>
+        )}
+        <FileText
+          className={cn(
+            'h-[1em] w-[1em] shrink-0',
+            getStatusColor(file.fileDiff.type)
+          )}
+        />
+        <span className="truncate flex-1">{displayName}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          {file.additions > 0 && (
+            <span className="text-green-500">+{file.additions}</span>
+          )}
+          {file.deletions > 0 && (
+            <span className="text-red-500">-{file.deletions}</span>
+          )}
+        </div>
+      </button>
+    )
+
+    return activeDiffType === 'uncommitted' ? (
+      <ContextMenu key={file.key}>
+        <Tooltip>
+          <ContextMenuTrigger asChild>
+            <TooltipTrigger asChild>{fileButton}</TooltipTrigger>
+          </ContextMenuTrigger>
+          <TooltipContent>{file.fileName}</TooltipContent>
+        </Tooltip>
+        <ContextMenuContent className="w-48">
+          <ContextMenuItem
+            variant="destructive"
+            onSelect={() =>
+              setRevertTarget({
+                fileName: file.fileName,
+                fileStatus: diffTypeToStatus(file.fileDiff.type),
+              })
+            }
+          >
+            <Undo2 className="mr-2 h-4 w-4" />
+            Revert File
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    ) : (
+      <Tooltip key={file.key}>
+        <TooltipTrigger asChild>{fileButton}</TooltipTrigger>
+        <TooltipContent>{file.fileName}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  const renderMobileFileRow = (
+    file: (typeof filteredFiles)[number],
+    index: number,
+    indentPx: number
+  ) => {
+    const isSelected = index === selectedFileIndex
+    const displayName =
+      displayNameMap.get(file.key) ?? getFilename(file.fileName)
+    const isCheckedForCommit =
+      activeDiffType === 'uncommitted' &&
+      gitDiffSelectedFiles.has(file.fileName)
+
+    return (
+      <button
+        key={file.key}
+        type="button"
+        data-index={index}
+        onClick={() => handleSelectFile(index)}
+        style={{ paddingLeft: indentPx + 12, paddingRight: 12 }}
+        className={cn(
+          'w-full flex items-center gap-2 py-2.5 text-left transition-colors',
+          'hover:bg-muted/50',
+          isSelected && 'bg-accent',
+          isCheckedForCommit && !isSelected && 'bg-primary/10'
+        )}
+      >
+        {activeDiffType === 'uncommitted' && (
+          <div
+            role="checkbox"
+            aria-checked={isCheckedForCommit}
+            onClick={e => {
+              e.stopPropagation()
+              useUIStore.getState().toggleGitDiffSelectedFile(file.fileName)
+            }}
+            className={cn(
+              'h-3.5 w-3.5 shrink-0 rounded-sm border flex items-center justify-center transition-colors cursor-pointer',
+              isCheckedForCommit
+                ? 'bg-primary border-primary text-primary-foreground'
+                : 'border-muted-foreground/40 hover:border-muted-foreground'
+            )}
+          >
+            {isCheckedForCommit && <Check className="h-2.5 w-2.5" />}
+          </div>
+        )}
+        <FileText
+          className={cn(
+            'h-[1em] w-[1em] shrink-0',
+            getStatusColor(file.fileDiff.type)
+          )}
+        />
+        <span className="truncate flex-1 text-sm">{displayName}</span>
+        <div className="flex items-center gap-1 shrink-0 text-xs">
+          {file.additions > 0 && (
+            <span className="text-green-500">+{file.additions}</span>
+          )}
+          {file.deletions > 0 && (
+            <span className="text-red-500">-{file.deletions}</span>
+          )}
+        </div>
+      </button>
+    )
+  }
+
   return (
     <>
       <Dialog open={!!diffRequest} onOpenChange={open => !open && onClose()}>
@@ -1237,93 +1399,41 @@ export function GitDiffModal({
                       >
                         {flattenedFiles.length > 0 && (
                           <div className="sticky top-0 z-10 bg-background border-b border-border pb-2">
-                            <div className="relative">
-                              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-[1em] w-[1em] text-muted-foreground pointer-events-none" />
-                              <input
-                                type="text"
-                                value={fileFilter}
-                                onChange={e => {
-                                  setFileFilter(e.target.value)
-                                  setSelectedFileIndex(0)
-                                }}
-                                placeholder="Filter files..."
-                                className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
+                            <div className="flex items-stretch">
+                              <div className="relative flex-1">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-[1em] w-[1em] text-muted-foreground pointer-events-none" />
+                                <input
+                                  type="text"
+                                  value={fileFilter}
+                                  onChange={e => {
+                                    setFileFilter(e.target.value)
+                                    setSelectedFileIndex(0)
+                                  }}
+                                  placeholder="Filter files..."
+                                  className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
+                                />
+                              </div>
+                              <ViewModeToggle
+                                mode={gitDiffViewMode}
+                                onChange={setGitDiffViewMode}
                               />
                             </div>
                           </div>
                         )}
                         <div>
-                          {filteredFiles.map((file, index) => {
-                            const isSelected = index === selectedFileIndex
-                            const displayName =
-                              displayNameMap.get(file.key) ??
-                              getFilename(file.fileName)
-                            const isCheckedForCommit =
-                              activeDiffType === 'uncommitted' &&
-                              gitDiffSelectedFiles.has(file.fileName)
-                            return (
-                              <button
-                                key={file.key}
-                                type="button"
-                                data-index={index}
-                                onClick={() => handleSelectFile(index)}
-                                className={cn(
-                                  'w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors',
-                                  'hover:bg-muted/50',
-                                  isSelected && 'bg-accent',
-                                  isCheckedForCommit &&
-                                    !isSelected &&
-                                    'bg-primary/10'
-                                )}
-                              >
-                                {activeDiffType === 'uncommitted' && (
-                                  <div
-                                    role="checkbox"
-                                    aria-checked={isCheckedForCommit}
-                                    onClick={e => {
-                                      e.stopPropagation()
-                                      useUIStore
-                                        .getState()
-                                        .toggleGitDiffSelectedFile(
-                                          file.fileName
-                                        )
-                                    }}
-                                    className={cn(
-                                      'h-3.5 w-3.5 shrink-0 rounded-sm border flex items-center justify-center transition-colors cursor-pointer',
-                                      isCheckedForCommit
-                                        ? 'bg-primary border-primary text-primary-foreground'
-                                        : 'border-muted-foreground/40 hover:border-muted-foreground'
-                                    )}
-                                  >
-                                    {isCheckedForCommit && (
-                                      <Check className="h-2.5 w-2.5" />
-                                    )}
-                                  </div>
-                                )}
-                                <FileText
-                                  className={cn(
-                                    'h-[1em] w-[1em] shrink-0',
-                                    getStatusColor(file.fileDiff.type)
-                                  )}
-                                />
-                                <span className="truncate flex-1 text-sm">
-                                  {displayName}
-                                </span>
-                                <div className="flex items-center gap-1 shrink-0 text-xs">
-                                  {file.additions > 0 && (
-                                    <span className="text-green-500">
-                                      +{file.additions}
-                                    </span>
-                                  )}
-                                  {file.deletions > 0 && (
-                                    <span className="text-red-500">
-                                      -{file.deletions}
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
+                          {gitDiffViewMode === 'tree' ? (
+                            <GitDiffFileTree
+                              files={filteredFiles}
+                              renderFile={renderMobileFileRow}
+                              searchActive={fileFilter.length > 0}
+                              compactFolders
+                              isMobile
+                            />
+                          ) : (
+                            filteredFiles.map((file, index) =>
+                              renderMobileFileRow(file, index, 0)
                             )
-                          })}
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1422,134 +1532,40 @@ export function GitDiffModal({
                         >
                           {flattenedFiles.length > 0 && (
                             <div className="sticky top-0 z-10 bg-background border-b border-border pb-2">
-                              <div className="relative">
-                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-[1em] w-[1em] text-muted-foreground pointer-events-none" />
-                                <input
-                                  type="text"
-                                  value={fileFilter}
-                                  onChange={e => {
-                                    setFileFilter(e.target.value)
-                                    setSelectedFileIndex(0)
-                                  }}
-                                  placeholder="Filter files..."
-                                  className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
+                              <div className="flex items-center gap-1">
+                                <div className="relative flex-1">
+                                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-[1em] w-[1em] text-muted-foreground pointer-events-none" />
+                                  <input
+                                    type="text"
+                                    value={fileFilter}
+                                    onChange={e => {
+                                      setFileFilter(e.target.value)
+                                      setSelectedFileIndex(0)
+                                    }}
+                                    placeholder="Filter files..."
+                                    className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
+                                  />
+                                </div>
+                                <ViewModeToggle
+                                  mode={gitDiffViewMode}
+                                  onChange={setGitDiffViewMode}
                                 />
                               </div>
                             </div>
                           )}
                           <div>
-                            {filteredFiles.map((file, index) => {
-                              const isSelected = index === selectedFileIndex
-                              const displayName =
-                                displayNameMap.get(file.key) ??
-                                getFilename(file.fileName)
-
-                              const isCheckedForCommit =
-                                activeDiffType === 'uncommitted' &&
-                                gitDiffSelectedFiles.has(file.fileName)
-
-                              const fileButton = (
-                                <button
-                                  type="button"
-                                  data-index={index}
-                                  onClick={() => handleSelectFile(index)}
-                                  className={cn(
-                                    'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors',
-                                    'hover:bg-muted/50',
-                                    isSelected && 'bg-accent',
-                                    isCheckedForCommit &&
-                                      !isSelected &&
-                                      'bg-primary/10'
-                                  )}
-                                >
-                                  {activeDiffType === 'uncommitted' && (
-                                    <div
-                                      role="checkbox"
-                                      aria-checked={isCheckedForCommit}
-                                      onClick={e => {
-                                        e.stopPropagation()
-                                        useUIStore
-                                          .getState()
-                                          .toggleGitDiffSelectedFile(
-                                            file.fileName
-                                          )
-                                      }}
-                                      className={cn(
-                                        'h-3.5 w-3.5 shrink-0 rounded-sm border flex items-center justify-center transition-colors cursor-pointer',
-                                        isCheckedForCommit
-                                          ? 'bg-primary border-primary text-primary-foreground'
-                                          : 'border-muted-foreground/40 hover:border-muted-foreground'
-                                      )}
-                                    >
-                                      {isCheckedForCommit && (
-                                        <Check className="h-2.5 w-2.5" />
-                                      )}
-                                    </div>
-                                  )}
-                                  <FileText
-                                    className={cn(
-                                      'h-[1em] w-[1em] shrink-0',
-                                      getStatusColor(file.fileDiff.type)
-                                    )}
-                                  />
-                                  <span className="truncate flex-1">
-                                    {displayName}
-                                  </span>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    {file.additions > 0 && (
-                                      <span className="text-green-500">
-                                        +{file.additions}
-                                      </span>
-                                    )}
-                                    {file.deletions > 0 && (
-                                      <span className="text-red-500">
-                                        -{file.deletions}
-                                      </span>
-                                    )}
-                                  </div>
-                                </button>
+                            {gitDiffViewMode === 'tree' ? (
+                              <GitDiffFileTree
+                                files={filteredFiles}
+                                renderFile={renderDesktopFileRow}
+                                searchActive={fileFilter.length > 0}
+                                compactFolders
+                              />
+                            ) : (
+                              filteredFiles.map((file, index) =>
+                                renderDesktopFileRow(file, index, 0)
                               )
-
-                              return activeDiffType === 'uncommitted' ? (
-                                <ContextMenu key={file.key}>
-                                  <Tooltip>
-                                    <ContextMenuTrigger asChild>
-                                      <TooltipTrigger asChild>
-                                        {fileButton}
-                                      </TooltipTrigger>
-                                    </ContextMenuTrigger>
-                                    <TooltipContent>
-                                      {file.fileName}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                  <ContextMenuContent className="w-48">
-                                    <ContextMenuItem
-                                      variant="destructive"
-                                      onSelect={() =>
-                                        setRevertTarget({
-                                          fileName: file.fileName,
-                                          fileStatus: diffTypeToStatus(
-                                            file.fileDiff.type
-                                          ),
-                                        })
-                                      }
-                                    >
-                                      <Undo2 className="mr-2 h-4 w-4" />
-                                      Revert File
-                                    </ContextMenuItem>
-                                  </ContextMenuContent>
-                                </ContextMenu>
-                              ) : (
-                                <Tooltip key={file.key}>
-                                  <TooltipTrigger asChild>
-                                    {fileButton}
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    {file.fileName}
-                                  </TooltipContent>
-                                </Tooltip>
-                              )
-                            })}
+                            )}
                           </div>
                         </div>
                       </ResizablePanel>
@@ -1658,5 +1674,37 @@ export function GitDiffModal({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  )
+}
+
+interface ViewModeToggleProps {
+  mode: 'list' | 'tree'
+  onChange: (mode: 'list' | 'tree') => void
+}
+
+/** Compact list ↔ tree toggle for the GitDiffModal sidebar. */
+function ViewModeToggle({ mode, onChange }: ViewModeToggleProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => onChange(mode === 'list' ? 'tree' : 'list')}
+          aria-label={
+            mode === 'list' ? 'Switch to tree view' : 'Switch to list view'
+          }
+          className="flex shrink-0 items-center justify-center self-stretch border border-border border-l-0 bg-muted px-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+        >
+          {mode === 'list' ? (
+            <FolderTree className="h-4 w-4" />
+          ) : (
+            <LayoutList className="h-4 w-4" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {mode === 'list' ? 'Switch to tree view' : 'Switch to list view'}
+      </TooltipContent>
+    </Tooltip>
   )
 }

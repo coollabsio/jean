@@ -1821,6 +1821,10 @@ pub struct UIState {
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
 
+    /// Git diff modal file list view mode: 'list' or 'tree'
+    #[serde(default)]
+    pub git_diff_view_mode: Option<String>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -1882,6 +1886,7 @@ impl Default for UIState {
             dashboard_worktree_collapse_overrides: std::collections::HashMap::new(),
             project_canvas_settings: std::collections::HashMap::new(),
             last_opened_per_project: std::collections::HashMap::new(),
+            git_diff_view_mode: None,
             version: default_ui_state_version(),
         }
     }

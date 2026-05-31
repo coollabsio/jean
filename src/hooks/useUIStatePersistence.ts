@@ -87,7 +87,8 @@ export function useUIStatePersistence() {
       dashboardWorktreeCollapseOverrides,
       projectCanvasSettings,
     } = useProjectsStore.getState()
-    const { leftSidebarSize, leftSidebarVisible } = useUIStore.getState()
+    const { leftSidebarSize, leftSidebarVisible, gitDiffViewMode } =
+      useUIStore.getState()
     const {
       modalTerminalOpen,
       modalTerminalDockMode,
@@ -150,6 +151,8 @@ export function useUIStatePersistence() {
           { worktree_id: entry.worktreeId, session_id: entry.sessionId },
         ])
       ),
+      // Git diff modal view mode
+      git_diff_view_mode: gitDiffViewMode,
       version: 1, // Reset for first release
     }
   }, [])
@@ -222,6 +225,14 @@ export function useUIStatePersistence() {
         visible: uiState.left_sidebar_visible,
       })
       useUIStore.getState().setLeftSidebarVisible(uiState.left_sidebar_visible)
+    }
+
+    // Restore git diff view mode
+    if (
+      uiState.git_diff_view_mode === 'list' ||
+      uiState.git_diff_view_mode === 'tree'
+    ) {
+      useUIStore.getState().setGitDiffViewMode(uiState.git_diff_view_mode)
     }
 
     // Restore active project first (selectProject clears selectedWorktreeId)
@@ -522,6 +533,7 @@ export function useUIStatePersistence() {
       useProjectsStore.getState().projectCanvasSettings
     let prevLeftSidebarSize = useUIStore.getState().leftSidebarSize
     let prevLeftSidebarVisible = useUIStore.getState().leftSidebarVisible
+    let prevGitDiffViewMode = useUIStore.getState().gitDiffViewMode
     let prevWorktreeId = useChatStore.getState().activeWorktreeId
     let prevWorktreePath = useChatStore.getState().activeWorktreePath
     let prevLastActiveWorktreeId = useChatStore.getState().lastActiveWorktreeId
@@ -582,15 +594,18 @@ export function useUIStatePersistence() {
       }
     })
 
-    // Subscribe to ui-store changes (sidebar size and visibility)
+    // Subscribe to ui-store changes (sidebar size, visibility, and git diff view mode)
     const unsubUI = useUIStore.subscribe(state => {
       const sizeChanged = state.leftSidebarSize !== prevLeftSidebarSize
       const visibilityChanged =
         state.leftSidebarVisible !== prevLeftSidebarVisible
+      const gitDiffViewModeChanged =
+        state.gitDiffViewMode !== prevGitDiffViewMode
 
-      if (sizeChanged || visibilityChanged) {
+      if (sizeChanged || visibilityChanged || gitDiffViewModeChanged) {
         prevLeftSidebarSize = state.leftSidebarSize
         prevLeftSidebarVisible = state.leftSidebarVisible
+        prevGitDiffViewMode = state.gitDiffViewMode
         const currentState = getCurrentUIState()
         debouncedSaveRef.current?.(currentState)
       }
