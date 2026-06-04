@@ -11,6 +11,11 @@ import { useWorkflowRuns } from '@/services/github'
 import { ghCliQueryKeys } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import type { GhAuthStatus } from '@/types/gh-cli'
+import {
+  countVisibleLatestFailedRuns,
+  getWorkflowRunsSeenKey,
+  useSeenFailedWorkflowRunIds,
+} from '@/lib/workflow-runs'
 
 const BADGE_STALE_TIME = 5 * 60 * 1000 // 5 minutes — background badge, not active UI
 
@@ -35,7 +40,12 @@ export function FailedRunsBadge({
   })
 
   const totalRuns = result?.runs?.length ?? 0
-  const failedCount = result?.failedCount ?? 0
+  const seenKey = getWorkflowRunsSeenKey(projectPath, branch)
+  const seenFailedRunIds = useSeenFailedWorkflowRunIds(seenKey)
+  const failedCount = countVisibleLatestFailedRuns(
+    result?.runs ?? [],
+    seenFailedRunIds
+  )
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {

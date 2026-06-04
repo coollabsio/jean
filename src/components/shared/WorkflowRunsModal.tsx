@@ -15,6 +15,8 @@ import {
   Loader2,
   Wand2,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import {
   Tooltip,
@@ -56,6 +58,14 @@ import {
 } from '@/types/preferences'
 import type { WorkflowRun } from '@/types/github'
 import type { Project, Worktree } from '@/types/projects'
+import {
+  clearSeenFailedWorkflowRuns,
+  getLatestFailedRunsByWorkflow,
+  getWorkflowRunsSeenKey,
+  isFailedWorkflowRun,
+  markFailedWorkflowRunsSeen,
+  useSeenFailedWorkflowRunIds,
+} from '@/lib/workflow-runs'
 
 function timeAgo(dateString: string): string {
   const seconds = Math.floor(
@@ -68,10 +78,6 @@ function timeAgo(dateString: string): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
-}
-
-function isFailedRun(run: WorkflowRun): boolean {
-  return run.conclusion === 'failure' || run.conclusion === 'startup_failure'
 }
 
 /** Extract the numeric run ID from a GitHub Actions URL */
@@ -185,6 +191,18 @@ export function WorkflowRunsModal() {
   }, [queryClient, workflowRunsModalProjectPath, workflowRunsModalBranch])
 
   const runs = useMemo(() => result?.runs ?? [], [result?.runs])
+  const seenKey = useMemo(
+    () =>
+      workflowRunsModalProjectPath
+        ? getWorkflowRunsSeenKey(
+            workflowRunsModalProjectPath,
+            workflowRunsModalBranch
+          )
+        : '',
+    [workflowRunsModalProjectPath, workflowRunsModalBranch]
+  )
+  const seenFailedRunIds = useSeenFailedWorkflowRunIds(seenKey)
+  const [showSeenFailures, setShowSeenFailures] = useState(false)
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null)
   const [focusedIndex, setFocusedIndex] = useState(0)
   const [focusedPane, setFocusedPane] = useState<'sidebar' | 'list'>('sidebar')
@@ -194,19 +212,34 @@ export function WorkflowRunsModal() {
   const itemRefs = useRef<(HTMLDivElement | null)[]>([])
   const sidebarItemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
+  const hiddenFailedCount = useMemo(
+    () =>
+      runs.filter(
+        run => isFailedWorkflowRun(run) && seenFailedRunIds.has(run.databaseId)
+      ).length,
+    [runs, seenFailedRunIds]
+  )
+
+  const visibleRuns = useMemo(() => {
+    if (showSeenFailures) return runs
+    return runs.filter(
+      run => !isFailedWorkflowRun(run) || !seenFailedRunIds.has(run.databaseId)
+    )
+  }, [runs, seenFailedRunIds, showSeenFailures])
+
   const groups = useMemo(() => {
     const groupMap = new Map<string, WorkflowGroup>()
-    for (const run of runs) {
+    for (const run of visibleRuns) {
       const existing = groupMap.get(run.workflowName)
       if (existing) {
         existing.totalCount++
-        if (isFailedRun(run)) existing.failedCount++
+        if (isFailedWorkflowRun(run)) existing.failedCount++
       } else {
         // First occurrence per workflow = latest (runs are sorted by date)
         const status: WorkflowGroup['latestStatus'] =
           run.status === 'in_progress' || run.status === 'queued'
             ? 'pending'
-            : isFailedRun(run)
+            : isFailedWorkflowRun(run)
               ? 'failure'
               : run.conclusion === 'success'
                 ? 'success'
@@ -214,7 +247,7 @@ export function WorkflowRunsModal() {
         groupMap.set(run.workflowName, {
           workflowName: run.workflowName,
           totalCount: 1,
-          failedCount: isFailedRun(run) ? 1 : 0,
+          failedCount: isFailedWorkflowRun(run) ? 1 : 0,
           latestStatus: status,
         })
       }
@@ -222,12 +255,12 @@ export function WorkflowRunsModal() {
     return Array.from(groupMap.values()).sort((a, b) =>
       a.workflowName.localeCompare(b.workflowName)
     )
-  }, [runs])
+  }, [visibleRuns])
 
   const displayedRuns = useMemo(() => {
-    if (!selectedWorkflow) return runs
-    return runs.filter(run => run.workflowName === selectedWorkflow)
-  }, [runs, selectedWorkflow])
+    if (!selectedWorkflow) return visibleRuns
+    return visibleRuns.filter(run => run.workflowName === selectedWorkflow)
+  }, [visibleRuns, selectedWorkflow])
 
   // Reset focus when modal opens or runs change
   useEffect(() => {
@@ -240,6 +273,7 @@ export function WorkflowRunsModal() {
       setFocusedPane('sidebar')
 
       setSidebarFocusedIndex(0)
+      setShowSeenFailures(false)
       requestAnimationFrame(() => sidebarRef.current?.focus())
     }
   }, [workflowRunsModalOpen, runs.length])
@@ -278,6 +312,27 @@ export function WorkflowRunsModal() {
   const handleRunClick = useCallback((url: string) => {
     openExternal(url)
   }, [])
+
+  const handleMarkRunSeen = useCallback(
+    (run: WorkflowRun) => {
+      if (!seenKey || !isFailedWorkflowRun(run)) return
+      markFailedWorkflowRunsSeen(seenKey, [run.databaseId])
+    },
+    [seenKey]
+  )
+
+  const handleMarkFailuresSeen = useCallback(() => {
+    if (!seenKey) return
+    markFailedWorkflowRunsSeen(
+      seenKey,
+      runs.filter(isFailedWorkflowRun).map(run => run.databaseId)
+    )
+  }, [runs, seenKey])
+
+  const handleClearSeenFailures = useCallback(() => {
+    if (!seenKey) return
+    clearSeenFailedWorkflowRuns(seenKey)
+  }, [seenKey])
 
   const handleInvestigate = useCallback(
     async (run: WorkflowRun) => {
@@ -622,7 +677,13 @@ export function WorkflowRunsModal() {
           case 'm': {
             e.preventDefault()
             const run = displayedRuns[focusedIndex]
-            if (run && isFailedRun(run)) handleInvestigate(run)
+            if (run && isFailedWorkflowRun(run)) handleInvestigate(run)
+            break
+          }
+          case 'x': {
+            e.preventDefault()
+            const run = displayedRuns[focusedIndex]
+            if (run && isFailedWorkflowRun(run)) handleMarkRunSeen(run)
             break
           }
         }
@@ -637,6 +698,7 @@ export function WorkflowRunsModal() {
       focusedIndex,
       handleRunClick,
       handleInvestigate,
+      handleMarkRunSeen,
       handleRefresh,
     ]
   )
@@ -667,6 +729,60 @@ export function WorkflowRunsModal() {
                 </TooltipTrigger>
                 <TooltipContent>Refresh</TooltipContent>
               </Tooltip>
+              {hiddenFailedCount > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 p-0"
+                      onClick={() => setShowSeenFailures(value => !value)}
+                    >
+                      {showSeenFailures ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {showSeenFailures
+                      ? 'Hide seen failures'
+                      : `Show ${hiddenFailedCount} seen failure${hiddenFailedCount > 1 ? 's' : ''}`}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {showSeenFailures && hiddenFailedCount > 0 ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={handleClearSeenFailures}
+                    >
+                      Restore
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Restore seen failures</TooltipContent>
+                </Tooltip>
+              ) : (
+                getLatestFailedRunsByWorkflow(runs).length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={handleMarkFailuresSeen}
+                      >
+                        Mark seen
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Hide current failures</TooltipContent>
+                  </Tooltip>
+                )
+              )}
               <ModalCloseButton onClick={() => handleOpenChange(false)} />
             </div>
           </div>
@@ -701,13 +817,13 @@ export function WorkflowRunsModal() {
                         sidebarItemRefs.current[idx] = el
                       }}
                       label={workflowName ?? 'All'}
-                      count={group ? group.totalCount : runs.length}
+                      count={group ? group.totalCount : visibleRuns.length}
                       latestStatus={
                         group
                           ? group.latestStatus
-                          : (result?.failedCount ?? 0) > 0
+                          : groups.some(g => g.latestStatus === 'failure')
                             ? 'failure'
-                            : runs.length > 0
+                            : visibleRuns.length > 0
                               ? 'success'
                               : 'pending'
                       }
@@ -730,64 +846,86 @@ export function WorkflowRunsModal() {
               ref={listRef}
               className="flex-1 min-h-0 min-w-0 overflow-y-auto outline-none"
             >
-              <div className="space-y-1 pb-2">
-                {displayedRuns.map((run, index) => (
-                  <div
-                    key={run.databaseId}
-                    ref={el => {
-                      itemRefs.current[index] = el
-                    }}
-                    className={`group relative flex cursor-pointer items-center rounded-md px-2 py-2 transition-colors hover:bg-accent ${focusedPane === 'list' && index === focusedIndex ? 'bg-accent' : ''}`}
-                    onClick={() => handleRunClick(run.url)}
-                    onMouseEnter={() => {
-                      setFocusedIndex(index)
-                      setFocusedPane('list')
-                    }}
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                      <RunStatusIcon run={run} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <span className="min-w-0 truncate text-sm font-medium">
-                            {run.workflowName}
-                          </span>
-                          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-                            {run.headBranch}
-                          </span>
-                          {isFailedRun(run) && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  onClick={e => {
-                                    e.stopPropagation()
-                                    handleInvestigate(run)
-                                  }}
-                                  className="shrink-0 inline-flex items-center gap-0.5 rounded bg-black px-1 py-0.5 text-[10px] text-white transition-colors hover:bg-black/80 dark:bg-yellow-500/20 dark:text-yellow-400 dark:hover:bg-yellow-500/30 dark:hover:text-yellow-300"
-                                >
-                                  <Wand2 className="h-3 w-3" />
-                                  <span>M</span>
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                Investigate this failure
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
-                        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                          <span className="min-w-0 truncate">
-                            {run.displayTitle}
-                          </span>
-                          <span className="shrink-0">·</span>
-                          <span className="shrink-0">
-                            {timeAgo(run.createdAt)}
-                          </span>
+              {displayedRuns.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  No visible workflow runs
+                </div>
+              ) : (
+                <div className="space-y-1 pb-2">
+                  {displayedRuns.map((run, index) => (
+                    <div
+                      key={run.databaseId}
+                      ref={el => {
+                        itemRefs.current[index] = el
+                      }}
+                      className={`group relative flex cursor-pointer items-center rounded-md px-2 py-2 transition-colors hover:bg-accent ${focusedPane === 'list' && index === focusedIndex ? 'bg-accent' : ''}`}
+                      onClick={() => handleRunClick(run.url)}
+                      onMouseEnter={() => {
+                        setFocusedIndex(index)
+                        setFocusedPane('list')
+                      }}
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                        <RunStatusIcon run={run} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="min-w-0 truncate text-sm font-medium">
+                              {run.workflowName}
+                            </span>
+                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                              {run.headBranch}
+                            </span>
+                            {isFailedWorkflowRun(run) && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      handleInvestigate(run)
+                                    }}
+                                    className="shrink-0 inline-flex items-center gap-0.5 rounded bg-black px-1 py-0.5 text-[10px] text-white transition-colors hover:bg-black/80 dark:bg-yellow-500/20 dark:text-yellow-400 dark:hover:bg-yellow-500/30 dark:hover:text-yellow-300"
+                                  >
+                                    <Wand2 className="h-3 w-3" />
+                                    <span>M</span>
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Investigate this failure
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            {isFailedWorkflowRun(run) && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      handleMarkRunSeen(run)
+                                    }}
+                                    className="shrink-0 inline-flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                  >
+                                    <EyeOff className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>Mark seen</TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
+                          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="min-w-0 truncate">
+                              {run.displayTitle}
+                            </span>
+                            <span className="shrink-0">·</span>
+                            <span className="shrink-0">
+                              {timeAgo(run.createdAt)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
