@@ -3012,9 +3012,6 @@ export function ChatWindow({
                                 }
                                 selectedModel={selectedModel}
                                 selectedProvider={selectedProvider}
-                                providerLocked={
-                                  (session?.messages?.length ?? 0) > 0
-                                }
                                 selectedThinkingLevel={selectedThinkingLevel}
                                 selectedEffortLevel={selectedEffortLevel}
                                 useAdaptiveThinking={useAdaptiveThinkingFlag}

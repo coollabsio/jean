@@ -58,7 +58,6 @@ export function BackendModelPickerContent({
   selectedProvider,
   installedBackends,
   customCliProfiles,
-  sessionHasMessages,
   providerLocked,
   onModelChange,
   onBackendModelChange,
@@ -78,7 +77,7 @@ export function BackendModelPickerContent({
     /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
   const fastShortcutLabel = isApplePlatform ? '⌘F' : 'Ctrl F'
 
-  const isLocked = Boolean(sessionHasMessages)
+  const isLocked = false
 
   const { data: prefs } = usePreferences()
   const patchPreferences = usePatchPreferences()
@@ -166,17 +165,13 @@ export function BackendModelPickerContent({
 
   const showSidebar = sidebarBackends.length > 1
 
-  // Sync active backend with locked selection / when picker opens
+  // Sync active backend when picker opens
   useEffect(() => {
     if (!open) return
-    if (isLocked) {
-      setActiveBackend(selectedBackend)
-    } else {
-      setActiveBackend(prev =>
-        sidebarBackends.includes(prev) ? prev : selectedBackend
-      )
-    }
-  }, [open, isLocked, selectedBackend, sidebarBackends])
+    setActiveBackend(prev =>
+      sidebarBackends.includes(prev) ? prev : selectedBackend
+    )
+  }, [open, selectedBackend, sidebarBackends])
 
   // Reset search whenever active backend changes or picker opens
   useEffect(() => {
@@ -274,13 +269,12 @@ export function BackendModelPickerContent({
 
   const handleBackendButtonClick = useCallback(
     (backend: CliBackend) => {
-      if (isLocked && backend !== selectedBackend) return
       setActiveBackend(backend)
       window.requestAnimationFrame(() => {
         searchInputRef.current?.focus()
       })
     },
-    [isLocked, selectedBackend]
+    []
   )
 
   const handleUseHighlightedFastMode = useCallback(() => {

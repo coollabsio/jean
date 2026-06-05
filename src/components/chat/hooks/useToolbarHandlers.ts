@@ -247,6 +247,11 @@ export function useToolbarHandlers({
     (provider: string | null) => {
       if (activeSessionId) {
         useChatStore.getState().setSelectedProvider(activeSessionId, provider)
+        queryClient.setQueryData(
+          chatQueryKeys.session(activeSessionId),
+          (old: Session | null | undefined) =>
+            old ? { ...old, selected_provider: provider } : old
+        )
         if (activeWorktreeId && activeWorktreePath) {
           setSessionProvider.mutate({
             sessionId: activeSessionId,

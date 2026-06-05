@@ -157,7 +157,7 @@ export function DesktopBackendModelPicker({
         </TooltipTrigger>
         <TooltipContent>
           {sessionHasMessages
-            ? 'Model (⌘⇧M)'
+            ? 'Backend + model (⌘⇧M)'
             : 'Backend + model (⌘⇧M) · Tab cycles backend'}
         </TooltipContent>
       </Tooltip>

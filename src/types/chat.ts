@@ -215,7 +215,7 @@ export interface Session {
   /** Selected effort level for this session */
   selected_effort_level?: EffortLevel
   /** Selected provider (custom CLI profile name) for this session */
-  selected_provider?: string
+  selected_provider?: string | null
   /** Selected execution mode for this session (plan/build/yolo) */
   selected_execution_mode?: ExecutionMode
   /** Whether session naming has been attempted for this session */

@@ -172,7 +172,7 @@ describe('DesktopBackendModelPicker', () => {
     expect(onBackendModelChange).not.toHaveBeenCalled()
   })
 
-  it('disables non-selected backend tabs while a session has messages', async () => {
+  it('keeps non-selected backend tabs enabled while a session has messages', async () => {
     const user = userEvent.setup()
 
     render(
@@ -197,10 +197,10 @@ describe('DesktopBackendModelPicker', () => {
 
     expect(
       within(list as HTMLElement).getByRole('tab', { name: 'Claude' })
-    ).toBeDisabled()
+    ).not.toBeDisabled()
     expect(codexTab).not.toBeDisabled()
     expect(
       within(list as HTMLElement).getByRole('tab', { name: 'OpenCode' })
-    ).toBeDisabled()
+    ).not.toBeDisabled()
   })
 })
