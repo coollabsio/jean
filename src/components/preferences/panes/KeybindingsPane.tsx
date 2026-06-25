@@ -65,9 +65,10 @@ const categoryTitles: Record<string, string> = {
   chat: 'Chat',
   navigation: 'Navigation',
   git: 'Git',
+  terminal: 'Terminal',
 }
 
-const categoryOrder = ['chat', 'navigation', 'git']
+const categoryOrder = ['chat', 'navigation', 'git', 'terminal']
 
 interface KeybindingsPaneProps {
   searchTargetAction?: KeybindingAction | null

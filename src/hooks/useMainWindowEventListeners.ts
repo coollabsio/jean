@@ -6,7 +6,17 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
-import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
+import {
+  getActiveGroup,
+  isPanelTerminal,
+  useTerminalStore,
+} from '@/store/terminal-store'
+import {
+  collectLeafIds,
+  countLeaves,
+  hasLeaf,
+  type SplitOrientation,
+} from '@/lib/terminal-split'
 import { useBrowserStore } from '@/store/browser-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
@@ -147,15 +157,90 @@ export function switchActiveTerminalTabByIndexForShortcut(
   if (!worktreeId) return false
 
   const terminalStore = useTerminalStore.getState()
-  const terminals = (terminalStore.terminals[worktreeId] ?? []).filter(
-    isPanelTerminal
-  )
-  const targetTerminal = terminals[index]
+  // Tabs are views (groups) now; switch by view index.
+  const targetGroup = (terminalStore.groups[worktreeId] ?? [])[index]
 
-  if (targetTerminal) {
-    terminalStore.setActiveTerminal(worktreeId, targetTerminal.id)
+  if (targetGroup) {
+    terminalStore.setActiveGroup(worktreeId, targetGroup.id)
   }
 
+  return true
+}
+
+/** The worktree whose terminal surface is current (modal-aware), regardless of
+ * DOM focus — split shortcuts work whether or not the terminal has focus. */
+function getActiveTerminalWorktreeId(): string | null {
+  const uiState = useUIStore.getState()
+  const chatState = useChatStore.getState()
+  const worktreeId = uiState.sessionChatModalOpen
+    ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
+    : chatState.activeWorktreeId
+  if (!worktreeId) return null
+
+  const terminalState = useTerminalStore.getState()
+  const open =
+    terminalState.terminalPanelOpen[worktreeId] ||
+    terminalState.modalTerminalOpen[worktreeId]
+  return open ? worktreeId : null
+}
+
+export function splitTerminalForShortcut(
+  orientation: SplitOrientation
+): boolean {
+  // Split panes are a native-desktop affordance only.
+  if (!isNativeApp()) return false
+  const worktreeId = getActiveTerminalWorktreeId()
+  if (!worktreeId) return false
+  return (
+    useTerminalStore.getState().splitTerminal(worktreeId, orientation) !==
+    undefined
+  )
+}
+
+export function closeFocusedTerminalPaneForShortcut(): boolean {
+  if (!isNativeApp()) return false
+  const worktreeId = getActiveTerminalWorktreeId()
+  if (!worktreeId) return false
+
+  const store = useTerminalStore.getState()
+  const focusedId = store.activeTerminalIds[worktreeId]
+  const activeGroup = getActiveGroup(store, worktreeId)
+  // Only acts inside a real split (>1 pane); single-pane views use Close tab.
+  if (
+    !focusedId ||
+    !activeGroup ||
+    countLeaves(activeGroup.layout) < 2 ||
+    !hasLeaf(activeGroup.layout, focusedId)
+  ) {
+    return false
+  }
+
+  invoke('stop_terminal', { terminalId: focusedId }).catch(() => {
+    /* noop */
+  })
+  // disposeTerminal is async; fire-and-forget but swallow rejections.
+  void disposeTerminal(focusedId).catch(() => {
+    /* noop */
+  })
+  store.closeSplitPane(worktreeId, focusedId)
+  return true
+}
+
+export function focusNextTerminalPaneForShortcut(): boolean {
+  if (!isNativeApp()) return false
+  const worktreeId = getActiveTerminalWorktreeId()
+  if (!worktreeId) return false
+
+  const store = useTerminalStore.getState()
+  const activeGroup = getActiveGroup(store, worktreeId)
+  if (!activeGroup) return false
+  const ids = collectLeafIds(activeGroup.layout)
+  if (ids.length < 2) return false
+
+  const current = store.activeTerminalIds[worktreeId] ?? ''
+  const index = ids.indexOf(current)
+  const next = ids[(index + 1) % ids.length]
+  if (next) store.setActiveTerminal(worktreeId, next)
   return true
 }
 
@@ -460,6 +545,22 @@ function executeKeybindingAction(
       }
       break
     }
+    case 'split_terminal_horizontal':
+      logger.debug('Keybinding: split_terminal_horizontal')
+      splitTerminalForShortcut('horizontal')
+      break
+    case 'split_terminal_vertical':
+      logger.debug('Keybinding: split_terminal_vertical')
+      splitTerminalForShortcut('vertical')
+      break
+    case 'close_terminal_pane':
+      logger.debug('Keybinding: close_terminal_pane')
+      closeFocusedTerminalPaneForShortcut()
+      break
+    case 'focus_next_pane':
+      logger.debug('Keybinding: focus_next_pane')
+      focusNextTerminalPaneForShortcut()
+      break
     case 'toggle_browser': {
       logger.debug('Keybinding: toggle_browser')
       const uiState = useUIStore.getState()
@@ -681,7 +782,11 @@ export function useMainWindowEventListeners() {
             shortcut === kb.toggle_terminal ||
             shortcut === kb.toggle_browser ||
             shortcut === kb.open_new_session_modal ||
-            shortcut === kb.cancel_prompt
+            shortcut === kb.cancel_prompt ||
+            shortcut === kb.split_terminal_horizontal ||
+            shortcut === kb.split_terminal_vertical ||
+            shortcut === kb.close_terminal_pane ||
+            shortcut === kb.focus_next_pane
           ) {
             // Let these fall through to the normal keybinding handler below
           } else {

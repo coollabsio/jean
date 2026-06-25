@@ -6,22 +6,28 @@ import {
   addTerminalTabForShortcut,
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
+  closeFocusedTerminalPaneForShortcut,
   findKeybindingAction,
+  focusNextTerminalPaneForShortcut,
   getTerminalShortcutWorktreeId,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
   shouldLetPlanDialogHandleAction,
+  splitTerminalForShortcut,
   switchActiveTerminalTabByIndexForShortcut,
 } from './useMainWindowEventListeners'
+import { collectLeafIds } from '@/lib/terminal-split'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 
-const { mockInvoke, mockListen, mockDisposeTerminal } = vi.hoisted(() => ({
-  mockInvoke: vi.fn().mockResolvedValue(undefined),
-  mockListen: vi.fn().mockResolvedValue(() => {
-    /* noop cleanup */
-  }),
-  mockDisposeTerminal: vi.fn(),
-}))
+const { mockInvoke, mockListen, mockDisposeTerminal, isNativeAppMock } =
+  vi.hoisted(() => ({
+    mockInvoke: vi.fn().mockResolvedValue(undefined),
+    mockListen: vi.fn().mockResolvedValue(() => {
+      /* noop cleanup */
+    }),
+    mockDisposeTerminal: vi.fn().mockResolvedValue(undefined),
+    isNativeAppMock: vi.fn(() => true),
+  }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
@@ -32,6 +38,11 @@ vi.mock('@/lib/terminal-instances', () => ({
   disposeTerminal: mockDisposeTerminal,
   startHeadless: vi.fn(),
 }))
+
+vi.mock('@/lib/environment', async importOriginal => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return { ...actual, isNativeApp: () => isNativeAppMock() }
+})
 
 function focusTerminal() {
   document.body.innerHTML = ''
@@ -318,11 +329,27 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
           },
         ],
       },
+      groups: {
+        'modal-worktree': [
+          {
+            id: 'gm1',
+            layout: { type: 'leaf', terminalId: 'term-1' },
+            focusedTerminalId: 'term-1',
+          },
+          {
+            id: 'gm2',
+            layout: { type: 'leaf', terminalId: 'term-2' },
+            focusedTerminalId: 'term-2',
+          },
+        ],
+      },
+      activeGroupIds: { 'modal-worktree': 'gm1' },
       activeTerminalIds: { 'modal-worktree': 'term-1' },
       modalTerminalOpen: { 'modal-worktree': true },
       terminalVisible: true,
     })
 
+    // Tabs are views (groups) now; index 1 = the second view (term-2).
     expect(switchActiveTerminalTabByIndexForShortcut(1)).toBe(true)
     expect(
       useTerminalStore.getState().activeTerminalIds['modal-worktree']
@@ -425,5 +452,106 @@ describe('dialog overlay keybinding passthrough', () => {
         useUIStore.getState()
       )
     ).toBe(false)
+  })
+})
+
+describe('terminal split-pane shortcuts', () => {
+  const activeLayoutIds = (worktreeId: string): string[] => {
+    const s = useTerminalStore.getState()
+    const group = (s.groups[worktreeId] ?? []).find(
+      g => g.id === s.activeGroupIds[worktreeId]
+    )
+    return group ? collectLeafIds(group.layout) : []
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    isNativeAppMock.mockReturnValue(true)
+    document.body.innerHTML = ''
+
+    useChatStore.setState({ activeWorktreeId: 'w1' })
+    useUIStore.setState({
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+    })
+    useTerminalStore.setState({
+      terminals: {},
+      groups: {},
+      activeGroupIds: {},
+      activeTerminalIds: {},
+      runningTerminals: new Set(),
+      failedTerminals: new Set(),
+      terminalVisible: true,
+      terminalPanelOpen: { w1: true },
+      modalTerminalOpen: {},
+    })
+  })
+
+  it('splits the focused pane (in the active view) on native desktop', () => {
+    const a = useTerminalStore.getState().addTerminal('w1')
+
+    expect(splitTerminalForShortcut('horizontal')).toBe(true)
+
+    const ids = activeLayoutIds('w1')
+    expect(ids).toHaveLength(2)
+    expect(ids[0]).toBe(a)
+  })
+
+  it('does not split on web access (non-native)', () => {
+    isNativeAppMock.mockReturnValue(false)
+    useTerminalStore.getState().addTerminal('w1')
+
+    expect(splitTerminalForShortcut('horizontal')).toBe(false)
+    expect(activeLayoutIds('w1')).toHaveLength(1)
+  })
+
+  it('does not split when the terminal panel is closed', () => {
+    // addTerminal opens the panel, so close it afterwards.
+    useTerminalStore.getState().addTerminal('w1')
+    useTerminalStore.setState({ terminalPanelOpen: {} })
+
+    expect(splitTerminalForShortcut('horizontal')).toBe(false)
+  })
+
+  it('focus_next_pane cycles focus across panes of the active view', () => {
+    const a = useTerminalStore.getState().addTerminal('w1')
+    const b = useTerminalStore.getState().splitTerminal('w1', 'horizontal')
+
+    // After split the new pane (b) is focused; next wraps to a, then back to b.
+    expect(useTerminalStore.getState().activeTerminalIds.w1).toBe(b)
+    focusNextTerminalPaneForShortcut()
+    expect(useTerminalStore.getState().activeTerminalIds.w1).toBe(a)
+    focusNextTerminalPaneForShortcut()
+    expect(useTerminalStore.getState().activeTerminalIds.w1).toBe(b)
+  })
+
+  it('focus_next_pane is a no-op without a split', () => {
+    useTerminalStore.getState().addTerminal('w1')
+    expect(focusNextTerminalPaneForShortcut()).toBe(false)
+  })
+
+  it('close_terminal_pane stops + disposes the focused pane, view survives', () => {
+    const a = useTerminalStore.getState().addTerminal('w1')
+    const b = useTerminalStore.getState().splitTerminal('w1', 'horizontal')
+
+    expect(closeFocusedTerminalPaneForShortcut()).toBe(true)
+
+    // PTY stopped + xterm disposed for the focused pane (b).
+    expect(mockInvoke).toHaveBeenCalledWith('stop_terminal', {
+      terminalId: b,
+    })
+    expect(mockDisposeTerminal).toHaveBeenCalledWith(b)
+
+    const state = useTerminalStore.getState()
+    expect(state.terminals.w1?.map(t => t.id)).toEqual([a])
+    // The view stays as a single-pane view focused on the sibling.
+    expect(activeLayoutIds('w1')).toEqual([a])
+    expect(state.activeTerminalIds.w1).toBe(a)
+  })
+
+  it('close_terminal_pane is a no-op for a single-pane view', () => {
+    useTerminalStore.getState().addTerminal('w1')
+    expect(closeFocusedTerminalPaneForShortcut()).toBe(false)
+    expect(mockDisposeTerminal).not.toHaveBeenCalled()
   })
 })

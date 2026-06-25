@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useTerminalStore } from './terminal-store'
+import { useTerminalStore, type TerminalGroup } from './terminal-store'
+import { collectLeafIds, leaf } from '@/lib/terminal-split'
 
 // Mock crypto.randomUUID
 vi.stubGlobal('crypto', {
@@ -12,6 +13,8 @@ describe('TerminalStore', () => {
   beforeEach(() => {
     useTerminalStore.setState({
       terminals: {},
+      groups: {},
+      activeGroupIds: {},
       activeTerminalIds: {},
       runningTerminals: new Set(),
       failedTerminals: new Set(),
@@ -234,28 +237,24 @@ describe('TerminalStore', () => {
       )
     })
 
-    it('reorders panel terminals while preserving session terminals and active terminal', () => {
-      const { addTerminal, reorderPanelTerminals } = useTerminalStore.getState()
+    it('reorders views (tabs) by group id without changing the active view', () => {
+      const { addTerminal, reorderGroups } = useTerminalStore.getState()
 
-      const panelA = addTerminal('worktree-1', null, 'A')
-      const sessionId = addTerminal('worktree-1', null, 'Session Terminal', {
-        kind: 'session',
-        activate: false,
-        openPanel: false,
-      })
-      const panelB = addTerminal('worktree-1', null, 'B')
-      const panelC = addTerminal('worktree-1', null, 'C')
+      addTerminal('worktree-1', null, 'A')
+      addTerminal('worktree-1', null, 'B')
+      addTerminal('worktree-1', null, 'C') // last added view is active
 
-      reorderPanelTerminals('worktree-1', [panelC, panelA, panelB])
+      const groupIds = (
+        useTerminalStore.getState().groups['worktree-1'] ?? []
+      ).map(g => g.id)
+      const [gA, gB, gC] = groupIds
+
+      reorderGroups('worktree-1', [gC as string, gA as string, gB as string])
 
       const state = useTerminalStore.getState()
-      expect(state.terminals['worktree-1']?.map(t => t.id)).toEqual([
-        panelC,
-        sessionId,
-        panelA,
-        panelB,
-      ])
-      expect(state.activeTerminalIds['worktree-1']).toBe(panelC)
+      expect(state.groups['worktree-1']?.map(g => g.id)).toEqual([gC, gA, gB])
+      // Active view is preserved across reorder.
+      expect(state.activeGroupIds['worktree-1']).toBe(gC)
     })
 
     it('gets terminals for worktree', () => {
@@ -482,6 +481,293 @@ describe('TerminalStore', () => {
       expect(useTerminalStore.getState().terminalPanelOpen['worktree-1']).toBe(
         false
       )
+    })
+  })
+
+  describe('views (split panes / multiplexer)', () => {
+    const requireActiveGroup = (worktreeId: string): TerminalGroup => {
+      const s = useTerminalStore.getState()
+      const group = (s.groups[worktreeId] ?? []).find(
+        g => g.id === s.activeGroupIds[worktreeId]
+      )
+      if (!group) throw new Error('no active group')
+      return group
+    }
+
+    it('each new terminal is its own single-pane view (tab)', () => {
+      const { addTerminal } = useTerminalStore.getState()
+      addTerminal('w1')
+      addTerminal('w1')
+      const s = useTerminalStore.getState()
+      expect(s.groups['w1']).toHaveLength(2)
+      expect(
+        s.groups['w1']?.every(g => collectLeafIds(g.layout).length === 1)
+      ).toBe(true)
+    })
+
+    it('splitTerminal adds a pane to the ACTIVE view (no new tab) and focuses it', () => {
+      const { addTerminal, splitTerminal } = useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const groupId = useTerminalStore.getState().activeGroupIds['w1']
+
+      const newId = splitTerminal('w1', 'horizontal')
+
+      const s = useTerminalStore.getState()
+      expect(newId).toBeDefined()
+      expect(s.groups['w1']).toHaveLength(1) // same view, no extra tab
+      expect(s.activeGroupIds['w1']).toBe(groupId)
+      const group = requireActiveGroup('w1')
+      expect(group.layout.type).toBe('split')
+      expect(group.layout.type === 'split' && group.layout.orientation).toBe(
+        'horizontal'
+      )
+      expect(collectLeafIds(group.layout)).toEqual([a, newId])
+      expect(s.activeTerminalIds['w1']).toBe(newId)
+      expect(group.focusedTerminalId).toBe(newId)
+    })
+
+    it('does not split without an active view', () => {
+      expect(
+        useTerminalStore.getState().splitTerminal('w1', 'horizontal')
+      ).toBeUndefined()
+      expect(useTerminalStore.getState().groups['w1']).toBeUndefined()
+    })
+
+    it('supports nested mixed (H + V) splits within a view', () => {
+      const { addTerminal, splitTerminal } = useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const b = splitTerminal('w1', 'horizontal')
+      const c = splitTerminal('w1', 'vertical')
+
+      const group = requireActiveGroup('w1')
+      expect(collectLeafIds(group.layout)).toEqual([a, b, c])
+      expect(group.layout.type === 'split' && group.layout.orientation).toBe(
+        'horizontal'
+      )
+    })
+
+    it('closeSplitPane prunes a pane and keeps the view (now single pane)', () => {
+      const { addTerminal, splitTerminal, closeSplitPane } =
+        useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const b = splitTerminal('w1', 'horizontal')
+
+      closeSplitPane('w1', b as string)
+
+      const s = useTerminalStore.getState()
+      expect(s.terminals['w1']?.map(t => t.id)).toEqual([a])
+      expect(s.groups['w1']).toHaveLength(1)
+      expect(collectLeafIds(requireActiveGroup('w1').layout)).toEqual([a])
+      expect(s.activeTerminalIds['w1']).toBe(a)
+    })
+
+    it('closeSplitPane keeps the split when 3 → 2 panes remain', () => {
+      const { addTerminal, splitTerminal, closeSplitPane } =
+        useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const b = splitTerminal('w1', 'horizontal')
+      const c = splitTerminal('w1', 'horizontal')
+
+      closeSplitPane('w1', c as string)
+
+      expect(collectLeafIds(requireActiveGroup('w1').layout)).toEqual([a, b])
+    })
+
+    it('closing the last pane removes the view and selects a neighbour', () => {
+      const { addTerminal, removeTerminal } = useTerminalStore.getState()
+      const a = addTerminal('w1') // view A
+      const b = addTerminal('w1') // view B (active)
+
+      removeTerminal('w1', b)
+
+      const s = useTerminalStore.getState()
+      expect(s.groups['w1']).toHaveLength(1)
+      expect(s.activeGroupIds['w1']).toBe(s.groups['w1']?.[0]?.id)
+      expect(s.activeTerminalIds['w1']).toBe(a)
+    })
+
+    it('removeTerminal of a tiled pane prunes its view', () => {
+      const { addTerminal, splitTerminal, removeTerminal } =
+        useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const b = splitTerminal('w1', 'horizontal')
+
+      removeTerminal('w1', a)
+
+      expect(useTerminalStore.getState().groups['w1']).toHaveLength(1)
+      expect(collectLeafIds(requireActiveGroup('w1').layout)).toEqual([b])
+    })
+
+    it('moveTerminalToPane merges a single-pane view into another view', () => {
+      const { addTerminal, moveTerminalToPane } = useTerminalStore.getState()
+      const a = addTerminal('w1') // view A
+      const b = addTerminal('w1') // view B (active)
+
+      moveTerminalToPane('w1', a, b, 'horizontal')
+
+      const s = useTerminalStore.getState()
+      expect(s.groups['w1']).toHaveLength(1) // source view removed
+      // splitLeaf puts the target pane first, the moved terminal second.
+      expect(collectLeafIds(requireActiveGroup('w1').layout)).toEqual([b, a])
+      expect(s.activeTerminalIds['w1']).toBe(a)
+    })
+
+    it('moveTerminalToPane moves a pane out of a multi-pane view (source survives)', () => {
+      const { addTerminal, splitTerminal, moveTerminalToPane } =
+        useTerminalStore.getState()
+      const a = addTerminal('w1') // view A (single)
+      const bTerm = addTerminal('w1') // view B (active)
+      const cTerm = splitTerminal('w1', 'horizontal') // view B = [bTerm, cTerm]
+
+      // Move cTerm out of view B into view A.
+      moveTerminalToPane('w1', cTerm as string, a, 'horizontal')
+
+      const s = useTerminalStore.getState()
+      expect(s.groups['w1']).toHaveLength(2) // both views survive
+      const groups = s.groups['w1'] ?? []
+      // View A now tiles [a, cTerm]; view B collapsed to [bTerm].
+      const viewA = groups.find(g => collectLeafIds(g.layout).includes(a))
+      const viewB = groups.find(g => collectLeafIds(g.layout).includes(bTerm))
+      expect(viewA && collectLeafIds(viewA.layout)).toEqual([a, cTerm])
+      expect(viewB && collectLeafIds(viewB.layout)).toEqual([bTerm])
+      expect(s.activeTerminalIds['w1']).toBe(cTerm)
+    })
+
+    it('moveTerminalToPane relocates a pane within the same view', () => {
+      const { addTerminal, splitTerminal, moveTerminalToPane } =
+        useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const b = splitTerminal('w1', 'horizontal') // view = [a, b] horizontal
+
+      // Relocate a to split b vertically ⇒ [b, a] vertical, still one view.
+      moveTerminalToPane('w1', a, b as string, 'vertical')
+
+      const s = useTerminalStore.getState()
+      expect(s.groups['w1']).toHaveLength(1)
+      const layout = requireActiveGroup('w1').layout
+      expect(collectLeafIds(layout)).toEqual([b, a])
+      expect(layout.type === 'split' && layout.orientation).toBe('vertical')
+      expect(s.activeTerminalIds['w1']).toBe(a)
+    })
+
+    it('detachPane pops a pane out of a split into its own view', () => {
+      const { addTerminal, splitTerminal, detachPane } =
+        useTerminalStore.getState()
+      const a = addTerminal('w1')
+      const b = splitTerminal('w1', 'horizontal') // one view [a, b]
+
+      detachPane('w1', b as string)
+
+      const s = useTerminalStore.getState()
+      expect(s.groups['w1']).toHaveLength(2) // source view + new detached view
+      const groups = s.groups['w1'] ?? []
+      expect(collectLeafIds(groups[0]?.layout ?? leaf('x'))).toEqual([a])
+      expect(collectLeafIds(groups[1]?.layout ?? leaf('x'))).toEqual([b])
+      // The detached pane becomes the active view/terminal.
+      expect(s.activeTerminalIds['w1']).toBe(b)
+      expect(s.activeGroupIds['w1']).toBe(groups[1]?.id)
+    })
+
+    it('detachPane is a no-op for a single-pane view', () => {
+      const { addTerminal, detachPane } = useTerminalStore.getState()
+      addTerminal('w1')
+      const before = useTerminalStore.getState().groups['w1']
+      detachPane(
+        'w1',
+        collectLeafIds(before?.[0]?.layout ?? leaf('x'))[0] ?? ''
+      )
+      expect(useTerminalStore.getState().groups['w1']).toBe(before)
+    })
+
+    it('setDragTerminal tracks the dragged terminal and guards no-ops', () => {
+      const { setDragTerminal } = useTerminalStore.getState()
+      setDragTerminal('t1')
+      expect(useTerminalStore.getState().dragTerminalId).toBe('t1')
+      const ref = useTerminalStore.getState()
+      setDragTerminal('t1') // no-op ⇒ same state reference
+      expect(useTerminalStore.getState()).toBe(ref)
+      setDragTerminal(null)
+      expect(useTerminalStore.getState().dragTerminalId).toBeNull()
+    })
+
+    it('renameGroup sets a custom view name (trimmed); blank reverts it', () => {
+      const { addTerminal, renameGroup } = useTerminalStore.getState()
+      addTerminal('w1')
+      const groupId = useTerminalStore.getState().groups['w1']?.[0]?.id ?? ''
+
+      renameGroup('w1', groupId, '  Build  ')
+      expect(useTerminalStore.getState().groups['w1']?.[0]?.name).toBe('Build')
+
+      renameGroup('w1', groupId, '   ')
+      expect(
+        useTerminalStore.getState().groups['w1']?.[0]?.name
+      ).toBeUndefined()
+    })
+
+    it('renameTerminal sets a custom label; blank reverts to the derived one', () => {
+      const { addTerminal, renameTerminal, getTerminals } =
+        useTerminalStore.getState()
+      const id = addTerminal('w1', 'bun run dev') // derived label "bun"
+
+      renameTerminal('w1', id, 'Dev server')
+      expect(getTerminals('w1')[0]?.label).toBe('Dev server')
+
+      renameTerminal('w1', id, '   ')
+      expect(getTerminals('w1')[0]?.label).toBe('bun')
+    })
+
+    it('setActiveGroup switches the active view and its focus', () => {
+      const { addTerminal, setActiveGroup } = useTerminalStore.getState()
+      addTerminal('w1') // view A
+      addTerminal('w1') // view B (active)
+
+      const groupA = useTerminalStore.getState().groups['w1']?.[0]
+      if (!groupA) throw new Error('missing group')
+      setActiveGroup('w1', groupA.id)
+
+      const s = useTerminalStore.getState()
+      expect(s.activeGroupIds['w1']).toBe(groupA.id)
+      expect(s.activeTerminalIds['w1']).toBe(groupA.focusedTerminalId)
+    })
+
+    it('setPaneSizes stores sizes on the active view and guards no-ops', () => {
+      const { addTerminal, splitTerminal, setPaneSizes } =
+        useTerminalStore.getState()
+      addTerminal('w1')
+      splitTerminal('w1', 'horizontal')
+
+      setPaneSizes('w1', [], [30, 70])
+      const group = requireActiveGroup('w1')
+      expect(group.layout.type === 'split' && group.layout.sizes).toEqual([
+        30, 70,
+      ])
+
+      const groupsRef = useTerminalStore.getState().groups['w1']
+      setPaneSizes('w1', [], [30, 70]) // no-op ⇒ same groups reference
+      expect(useTerminalStore.getState().groups['w1']).toBe(groupsRef)
+    })
+
+    it('closeAllTerminals clears all views', () => {
+      const { addTerminal, splitTerminal, closeAllTerminals } =
+        useTerminalStore.getState()
+      addTerminal('w1')
+      splitTerminal('w1', 'horizontal')
+
+      closeAllTerminals('w1')
+
+      expect(useTerminalStore.getState().groups['w1']).toBeUndefined()
+      expect(useTerminalStore.getState().activeGroupIds['w1']).toBe('')
+    })
+
+    it('closePanelTerminals clears all views', () => {
+      const { addTerminal, splitTerminal, closePanelTerminals } =
+        useTerminalStore.getState()
+      addTerminal('w1')
+      splitTerminal('w1', 'horizontal')
+
+      closePanelTerminals('w1')
+
+      expect(useTerminalStore.getState().groups['w1']).toBeUndefined()
     })
   })
 

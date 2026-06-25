@@ -43,6 +43,10 @@ export type KeybindingAction =
   | 'open_quick_menu'
   | 'open_usage_dropdown'
   | 'search_chat'
+  | 'split_terminal_horizontal'
+  | 'split_terminal_vertical'
+  | 'close_terminal_pane'
+  | 'focus_next_pane'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -57,7 +61,7 @@ export interface KeybindingDefinition {
   label: string
   description: string
   default_shortcut: ShortcutString
-  category: 'navigation' | 'git' | 'chat'
+  category: 'navigation' | 'git' | 'chat' | 'terminal'
 }
 
 // Default keybindings configuration
@@ -105,6 +109,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_quick_menu: 'mod+period',
   open_usage_dropdown: 'mod+u',
   search_chat: 'mod+f',
+  split_terminal_horizontal: 'mod+backslash',
+  split_terminal_vertical: 'mod+shift+backslash',
+  close_terminal_pane: 'mod+shift+w',
+  focus_next_pane: 'mod+bracketright',
 }
 
 // UI definitions for the settings pane
@@ -290,7 +298,7 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     label: 'Toggle terminal',
     description: 'Show or hide the terminal panel',
     default_shortcut: 'mod+backquote',
-    category: 'chat',
+    category: 'terminal',
   },
   {
     action: 'toggle_browser',
@@ -412,6 +420,34 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     default_shortcut: 'mod+f',
     category: 'chat',
   },
+  {
+    action: 'split_terminal_horizontal',
+    label: 'Split terminal right',
+    description: 'Split the focused terminal pane into left/right panes',
+    default_shortcut: 'mod+backslash',
+    category: 'terminal',
+  },
+  {
+    action: 'split_terminal_vertical',
+    label: 'Split terminal down',
+    description: 'Split the focused terminal pane into top/bottom panes',
+    default_shortcut: 'mod+shift+backslash',
+    category: 'terminal',
+  },
+  {
+    action: 'close_terminal_pane',
+    label: 'Close terminal pane',
+    description: 'Close the focused split pane and collapse to its sibling',
+    default_shortcut: 'mod+shift+w',
+    category: 'terminal',
+  },
+  {
+    action: 'focus_next_pane',
+    label: 'Focus next pane',
+    description: 'Move keyboard focus to the next terminal split pane',
+    default_shortcut: 'mod+bracketright',
+    category: 'terminal',
+  },
 ]
 
 // Helper to convert shortcut string to display format
@@ -452,6 +488,12 @@ export function formatShortcutDisplay(
           return '→'
         case 'slash':
           return '/'
+        case 'backslash':
+          return '\\'
+        case 'bracketleft':
+          return '['
+        case 'bracketright':
+          return ']'
         case 'backspace':
           return isMac ? '⌫' : 'Backspace'
         case 'enter':

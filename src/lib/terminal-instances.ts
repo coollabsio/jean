@@ -540,6 +540,12 @@ function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
   if (!event.shiftKey && !event.altKey && /^Digit[1-9]$/.test(code)) {
     return true
   }
+  // CMD+\ / CMD+Shift+\ → split terminal pane (right / down)
+  if (!event.altKey && code === 'Backslash') return true
+  // CMD+Shift+W → close focused split pane
+  if (event.shiftKey && !event.altKey && code === 'KeyW') return true
+  // CMD+] → focus next split pane
+  if (!event.shiftKey && !event.altKey && code === 'BracketRight') return true
   // CMD+Alt+Backspace → cancel prompt
   return event.altKey && (code === 'Backspace' || code === 'Delete')
 }
