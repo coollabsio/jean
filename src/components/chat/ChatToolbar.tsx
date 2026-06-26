@@ -55,12 +55,15 @@ import {
 } from '@/components/chat/toolbar/toolbar-utils'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
+import { useCodexUsage } from '@/services/codex-cli'
+import { useClaudeUsage } from '@/services/claude-cli'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   BackendLabel,
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
 import type { RevertCommitResponse } from '@/types/projects'
+import { hasBackend } from '@/lib/environment'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export {
@@ -200,6 +203,32 @@ export const ChatToolbar = memo(function ChatToolbar({
       availableMcpServers,
       enabledMcpServers,
     })
+  const backendUsageEnabled = hasBackend()
+  const codexUsage = useCodexUsage({
+    enabled: backendUsageEnabled && selectedBackend === 'codex',
+  })
+  const claudeUsage = useClaudeUsage({
+    enabled: backendUsageEnabled && selectedBackend === 'claude',
+  })
+  const backendUsageSnapshot =
+    selectedBackend === 'codex'
+      ? codexUsage.data
+      : selectedBackend === 'claude'
+        ? claudeUsage.data
+        : null
+  const backendUsageIsFetching =
+    selectedBackend === 'codex'
+      ? codexUsage.isFetching
+      : selectedBackend === 'claude'
+        ? claudeUsage.isFetching
+        : false
+  const backendUsageError =
+    selectedBackend === 'codex'
+      ? codexUsage.error
+      : selectedBackend === 'claude'
+        ? claudeUsage.error
+        : null
+
   const availableExecutionModes = getSupportedExecutionModes(selectedBackend)
   const hasMultipleBackendModelChoices =
     backendModelSections.reduce(
@@ -493,6 +522,9 @@ export const ChatToolbar = memo(function ChatToolbar({
             providerLocked={providerLocked}
             customCliProfiles={customCliProfiles}
             isCodex={isCodex}
+            backendUsageSnapshot={backendUsageSnapshot}
+            backendUsageIsFetching={backendUsageIsFetching}
+            backendUsageError={backendUsageError}
             prUrl={prUrl}
             prNumber={prNumber}
             displayStatus={displayStatus}

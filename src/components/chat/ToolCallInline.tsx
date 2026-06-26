@@ -40,6 +40,8 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { InlineFileDiff } from './InlineFileDiff'
+import { ToolArtifactPreview } from './ToolArtifactPreview'
+import { extractToolArtifacts, sanitizeToolOutput } from './tool-artifacts'
 
 function shouldRenderRawOutput(toolCall: ToolCall): boolean {
   return (
@@ -89,6 +91,8 @@ export function ToolCallInline({
   )
   const { icon, label, detail, filePath, expandedContent } =
     getToolDisplay(toolCall)
+  const artifacts = extractToolArtifacts(toolCall)
+  const rawOutput = sanitizeToolOutput(toolCall.output, artifacts)
 
   const handleFileClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -150,14 +154,23 @@ export function ToolCallInline({
             <div className="whitespace-pre-wrap text-xs text-muted-foreground">
               {expandedContent}
             </div>
+            {artifacts.length > 0 && (
+              <>
+                <div className="border-t border-border/30 my-2" />
+                <ToolArtifactPreview
+                  artifacts={artifacts}
+                  onFileClick={onFileClick}
+                />
+              </>
+            )}
             {shouldRenderRawOutput(toolCall) && (
               <>
                 <div className="border-t border-border/30 my-2" />
                 <div className="text-xs text-muted-foreground/60 mb-1">
-                  Output:
+                  {artifacts.length > 0 ? 'Raw output:' : 'Output:'}
                 </div>
                 <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs font-mono text-foreground/80 bg-muted/50 rounded p-2">
-                  {toolCall.output}
+                  {rawOutput}
                 </pre>
               </>
             )}
@@ -1198,7 +1211,8 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     default: {
-      const isMcpTool = toolCall.name.startsWith('mcp__')
+      const isMcpTool =
+        toolCall.name.startsWith('mcp__') || toolCall.name.startsWith('mcp:')
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: isMcpTool ? toolCall.name : `${toolCall.name} (unhandled tool)`,

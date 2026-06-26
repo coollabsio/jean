@@ -20,6 +20,8 @@ import remend from 'remend'
 import { Copy, Check, Table, ListChecks } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
+import { SmartLink } from '@/components/chat/SmartLink'
+import { enrichFilePaths } from '@/lib/path-enrichment'
 import {
   Tooltip,
   TooltipTrigger,
@@ -28,6 +30,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
+import type { AppPreferences } from '@/types/preferences'
 
 interface MarkdownProps {
   children: string
@@ -42,7 +45,25 @@ interface MarkdownProps {
   sessionId?: string
   /** Smaller mobile heading + spacing for narrow modal contexts */
   compact?: boolean
+  /** Worktree path used to resolve relative file links */
+  worktreePath?: string | null
+  /** Preferred editor used when opening file links */
+  editor?: AppPreferences['editor']
+  /** Optional override for file-link opening */
+  onOpenFile?: ((filePath: string, line?: number, column?: number) => void) | null
 }
+
+interface SmartLinkContextValue {
+  worktreePath: string | null
+  editor?: AppPreferences['editor']
+  onOpenFile: ((filePath: string, line?: number, column?: number) => void) | null
+}
+
+const SmartLinkContext = createContext<SmartLinkContextValue>({
+  worktreePath: null,
+  editor: undefined,
+  onOpenFile: null,
+})
 
 interface MarkdownTableContextValue {
   messageId: string | null
@@ -65,6 +86,26 @@ const ChecklistInjectionContext = createContext<ChecklistInjectionContextValue>(
     onToggle: () => undefined,
   }
 )
+
+function MarkdownLink({
+  href,
+  children,
+}: {
+  href?: string
+  children?: ReactNode
+}) {
+  const smartLinkContext = useContext(SmartLinkContext)
+  return (
+    <SmartLink
+      href={href}
+      worktreePath={smartLinkContext.worktreePath}
+      editor={smartLinkContext.editor}
+      onOpenFile={smartLinkContext.onOpenFile}
+    >
+      {children}
+    </SmartLink>
+  )
+}
 
 function extractText(node: ReactNode): string {
   if (typeof node === 'string') return node
@@ -393,16 +434,7 @@ const components: Components = {
   ),
 
   // Links
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      className="underline underline-offset-2 hover:text-foreground"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {children}
-    </a>
-  ),
+  a: MarkdownLink,
 
   // Lists - generous spacing and indentation
   ul: ({ children, className, ...props }) => (
@@ -544,13 +576,26 @@ const Markdown = memo(function Markdown({
   messageId,
   sessionId,
   compact = false,
+  worktreePath,
+  editor,
+  onOpenFile = null,
 }: MarkdownProps) {
+  const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
   // Apply remend preprocessing for streaming content to auto-close incomplete markdown
-  const content = streaming ? remend(children) : children
+  const rawContent = streaming ? remend(children) : children
+  const content = useMemo(() => enrichFilePaths(rawContent), [rawContent])
 
   const contextValue = useMemo(
     () => ({ messageId: messageId ?? null, sessionId: sessionId ?? null }),
     [messageId, sessionId]
+  )
+  const smartLinkContextValue = useMemo(
+    () => ({
+      worktreePath: worktreePath ?? activeWorktreePath ?? null,
+      editor,
+      onOpenFile,
+    }),
+    [worktreePath, activeWorktreePath, editor, onOpenFile]
   )
 
   const componentsToUse = streaming
@@ -566,13 +611,15 @@ const Markdown = memo(function Markdown({
   return (
     <div className={cn('markdown leading-relaxed break-words', className)}>
       <MarkdownTableContext.Provider value={contextValue}>
-        <ReactMarkdown
-          components={componentsToUse}
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeRaw]}
-        >
-          {content}
-        </ReactMarkdown>
+        <SmartLinkContext.Provider value={smartLinkContextValue}>
+          <ReactMarkdown
+            components={componentsToUse}
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
+          >
+            {content}
+          </ReactMarkdown>
+        </SmartLinkContext.Provider>
       </MarkdownTableContext.Provider>
     </div>
   )

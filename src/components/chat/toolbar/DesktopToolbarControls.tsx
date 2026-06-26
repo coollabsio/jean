@@ -65,6 +65,10 @@ import {
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import {
+  BackendUsageLimits,
+  type UsageLimitSnapshot,
+} from '@/components/chat/toolbar/BackendUsageLimits'
 
 interface DesktopToolbarControlsProps {
   hasPendingQuestions: boolean
@@ -80,6 +84,9 @@ interface DesktopToolbarControlsProps {
   providerLocked?: boolean
   customCliProfiles: CustomCliProfile[]
   isCodex: boolean
+  backendUsageSnapshot?: UsageLimitSnapshot | null
+  backendUsageIsFetching?: boolean
+  backendUsageError?: unknown
 
   prUrl: string | undefined
   prNumber: number | undefined
@@ -145,6 +152,9 @@ export function DesktopToolbarControls({
   providerLocked,
   customCliProfiles,
   isCodex,
+  backendUsageSnapshot,
+  backendUsageIsFetching,
+  backendUsageError,
   prUrl,
   prNumber,
   displayStatus,
@@ -623,6 +633,16 @@ export function DesktopToolbarControls({
         onModelChange={handleModelChange}
         onBackendModelChange={handleBackendModelChange}
       />
+
+      {(selectedBackend === 'codex' || selectedBackend === 'claude') && (
+        <BackendUsageLimits
+          backend={selectedBackend}
+          usage={backendUsageSnapshot}
+          isFetching={backendUsageIsFetching}
+          error={backendUsageError}
+          className="hidden @xl:flex"
+        />
+      )}
 
       {!hideReasoningControl && (
         <div className="hidden @xl:block h-4 w-px bg-border/50" />

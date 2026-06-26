@@ -159,6 +159,30 @@ describe('DesktopToolbarControls', () => {
     expect(onAttach).toHaveBeenCalledTimes(1)
   })
 
+  it('shows backend usage limits beside the model picker', () => {
+    renderDesktopToolbarControls({
+      backendUsageSnapshot: {
+        session: {
+          usedPercent: 40,
+          resetsAt: null,
+          limitWindowSeconds: 18_000,
+        },
+        weekly: {
+          usedPercent: 10,
+          resetsAt: null,
+          limitWindowSeconds: 604_800,
+        },
+        fetchedAt: Date.parse('2026-06-18T12:00:00Z') / 1000,
+      },
+    })
+
+    expect(
+      screen.getByRole('status', { name: /Codex limits: 5h 60% remaining/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText('7d')).toBeInTheDocument()
+    expect(screen.getByText('90%')).toBeInTheDocument()
+  })
+
   it('keeps desktop Magic and settings controls usable while questions are pending', () => {
     renderDesktopToolbarControls({ hasPendingQuestions: true })
 

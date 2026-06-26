@@ -143,4 +143,61 @@ describe('ToolCallInline', () => {
     expect(container.querySelector('diffs-container')).not.toBeNull()
     expect(screen.queryByText('Output:')).not.toBeInTheDocument()
   })
+
+  it('renders image artifacts from Canva tool output', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-canva-1',
+          name: 'mcp:canva:generate_design',
+          input: {},
+          output: JSON.stringify({
+            job: {
+              result: {
+                generated_designs: [
+                  {
+                    candidate_id: 'dg-1',
+                    url: 'https://www.canva.com/d/example',
+                    thumbnail: {
+                      url: 'https://design.canva.ai/preview-token',
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        }}
+      />
+    )
+
+    expect(screen.getByText('mcp:canva:generate_design')).toBeInTheDocument()
+    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    const image = screen.getByAltText('Preview')
+    expect(image).toHaveAttribute('src', 'https://design.canva.ai/preview-token')
+    expect(screen.getByText('Raw output:')).toBeInTheDocument()
+    expect(screen.queryByText(/design\.canva\.ai\/preview-token/)).toBeNull()
+  })
+
+  it('renders local file artifacts as clickable file cards', () => {
+    const onFileClick = vi.fn()
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-file-artifact-1',
+          name: 'Write',
+          input: {},
+          output: 'Saved report to /tmp/report.pdf',
+        }}
+        onFileClick={onFileClick}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button'))
+    fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
+
+    expect(onFileClick).toHaveBeenCalledWith('/tmp/report.pdf')
+  })
 })
