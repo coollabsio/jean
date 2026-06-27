@@ -13,12 +13,16 @@ const {
   mockSaveWorktreePr,
   mockPlayNotificationSound,
   registeredListeners,
+  mockNotifyIfBackground,
+  mockNotifySessionNeedsAttention,
 } = vi.hoisted(() => ({
   mockInvoke: vi.fn().mockResolvedValue(undefined),
   mockListen: vi.fn(),
   mockSaveWorktreePr: vi.fn(),
   mockPlayNotificationSound: vi.fn(),
   registeredListeners: new Map<string, (event: { payload: unknown }) => void>(),
+  mockNotifyIfBackground: vi.fn(),
+  mockNotifySessionNeedsAttention: vi.fn(),
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -30,6 +34,15 @@ vi.mock('@/lib/transport', () => ({
 vi.mock('@/lib/sounds', () => ({
   playNotificationSound: mockPlayNotificationSound,
 }))
+
+vi.mock('@/lib/session-notifications', async () => {
+  const actual = await vi.importActual('@/lib/session-notifications')
+  return {
+    ...actual,
+    notifyIfBackground: mockNotifyIfBackground,
+    notifySessionNeedsAttention: mockNotifySessionNeedsAttention,
+  }
+})
 
 vi.mock('@/services/projects', () => ({
   isTauri: () => true,
@@ -2545,5 +2558,116 @@ describe('useStreamingEvents tool results', () => {
     const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
     expect(toolCall?.output).toBe('command not found')
     expect(toolCall?.is_error).toBe(true)
+  })
+})
+
+describe('useStreamingEvents notification session names', () => {
+  beforeEach(() => {
+    setupListenMock()
+    mockNotifyIfBackground.mockClear()
+    mockNotifySessionNeedsAttention.mockClear()
+    useChatStore.setState({
+      pendingCodexPermissionRequests: {},
+      waitingForInputSessionIds: {},
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+    })
+  })
+
+  async function renderWithNotifications(queryClient: QueryClient) {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      desktop_notifications_enabled: true,
+      waiting_sound: 'none',
+      web_access_sounds_enabled: true,
+    } as AppPreferences)
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() => {
+      expect(registeredListeners.has('chat:codex_permission_request')).toBe(
+        true
+      )
+      expect(registeredListeners.has('chat:error')).toBe(true)
+    })
+  }
+
+  it('falls back to the session id when the cached name is missing', async () => {
+    const queryClient = createQueryClient()
+    const waitingId = 'abcd1234-waiting'
+    const failedId = 'efgh5678-failed'
+    queryClient.setQueryData(['chat', 'session', waitingId], {
+      id: waitingId,
+      name: '   ',
+      messages: [],
+    })
+
+    await renderWithNotifications(queryClient)
+
+    registeredListeners.get('chat:codex_permission_request')?.({
+      payload: {
+        session_id: waitingId,
+        worktree_id: 'worktree-1',
+        request: { request_id: 'perm-1', permissions: ['network'] },
+      },
+    })
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: failedId,
+        worktree_id: 'worktree-1',
+        error: 'boom',
+      },
+    })
+
+    expect(mockNotifySessionNeedsAttention).toHaveBeenCalledWith(
+      waitingId,
+      'Needs your input',
+      'Session abcd1234'
+    )
+    expect(mockNotifyIfBackground).toHaveBeenCalledWith(
+      'Session failed',
+      'Session efgh5678'
+    )
+  })
+
+  it('uses the trimmed session name for waiting and lifecycle notifications', async () => {
+    const queryClient = createQueryClient()
+    const waitingId = 'session-waiting'
+    const failedId = 'session-failed'
+    queryClient.setQueryData(['chat', 'session', waitingId], {
+      id: waitingId,
+      name: '  Waiting work  ',
+      messages: [],
+    })
+    queryClient.setQueryData(['chat', 'session', failedId], {
+      id: failedId,
+      name: '  Failed work  ',
+      messages: [],
+    })
+
+    await renderWithNotifications(queryClient)
+
+    registeredListeners.get('chat:codex_permission_request')?.({
+      payload: {
+        session_id: waitingId,
+        worktree_id: 'worktree-1',
+        request: { request_id: 'perm-1', permissions: ['network'] },
+      },
+    })
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: failedId,
+        worktree_id: 'worktree-1',
+        error: 'boom',
+      },
+    })
+
+    expect(mockNotifySessionNeedsAttention).toHaveBeenCalledWith(
+      waitingId,
+      'Needs your input',
+      'Waiting work'
+    )
+    expect(mockNotifyIfBackground).toHaveBeenCalledWith(
+      'Session failed',
+      'Failed work'
+    )
   })
 })
