@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 use super::github_issues::{
@@ -117,6 +120,7 @@ pub struct LinearTeam {
 // =============================================================================
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
+const MAX_LINEAR_CONTEXT_IMAGE_BYTES: usize = 15 * 1024 * 1024;
 
 async fn linear_graphql(
     api_key: &str,
@@ -261,6 +265,216 @@ pub fn format_linear_issue_context_markdown(detail: &LinearIssueDetail) -> Strin
     content.push_str("*Investigate this issue and propose a solution.*\n");
 
     content
+}
+
+fn is_trusted_linear_image_url(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    parsed
+        .host_str()
+        .map(|host| host == "uploads.linear.app" || host.ends_with(".linear.app"))
+        .unwrap_or(false)
+}
+
+fn extract_linear_image_urls(markdown: &str) -> Vec<String> {
+    let markdown_image_re = regex::Regex::new(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?\s*\)").unwrap();
+    let html_image_re =
+        regex::Regex::new(r#"<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap();
+    let mut seen = HashSet::new();
+    let mut urls = Vec::new();
+
+    for captures in markdown_image_re.captures_iter(markdown) {
+        if let Some(url) = captures.get(1).map(|m| m.as_str()) {
+            if is_trusted_linear_image_url(url) && seen.insert(url.to_string()) {
+                urls.push(url.to_string());
+            }
+        }
+    }
+
+    for captures in html_image_re.captures_iter(markdown) {
+        if let Some(url) = captures.get(1).map(|m| m.as_str()) {
+            if is_trusted_linear_image_url(url) && seen.insert(url.to_string()) {
+                urls.push(url.to_string());
+            }
+        }
+    }
+
+    urls
+}
+
+fn rewrite_linear_image_urls(markdown: &str, replacements: &HashMap<String, PathBuf>) -> String {
+    let markdown_image_re = regex::Regex::new(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?\s*\)").unwrap();
+    let html_image_re =
+        regex::Regex::new(r#"(<img\b[^>]*\bsrc\s*=\s*["'])([^"']+)(["'][^>]*>)"#).unwrap();
+
+    let rewritten = markdown_image_re.replace_all(markdown, |captures: &regex::Captures| {
+        let alt = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+        let url = captures.get(2).map(|m| m.as_str()).unwrap_or("");
+        match replacements.get(url) {
+            Some(path) => format!("![{alt}](<{}>)", path.to_string_lossy()),
+            None => captures
+                .get(0)
+                .map(|m| m.as_str())
+                .unwrap_or("")
+                .to_string(),
+        }
+    });
+
+    html_image_re
+        .replace_all(&rewritten, |captures: &regex::Captures| {
+            let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+            let url = captures.get(2).map(|m| m.as_str()).unwrap_or("");
+            let suffix = captures.get(3).map(|m| m.as_str()).unwrap_or("");
+            match replacements.get(url) {
+                Some(path) => format!("{prefix}{}{suffix}", path.to_string_lossy()),
+                None => captures
+                    .get(0)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            }
+        })
+        .to_string()
+}
+
+fn linear_image_extension(url: &str, content_type: Option<&str>) -> &'static str {
+    match content_type
+        .and_then(|ct| ct.split(';').next())
+        .unwrap_or("")
+    {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ if url.to_lowercase().contains(".png") => "png",
+        _ if url.to_lowercase().contains(".jpg") || url.to_lowercase().contains(".jpeg") => "jpg",
+        _ if url.to_lowercase().contains(".gif") => "gif",
+        _ if url.to_lowercase().contains(".webp") => "webp",
+        _ if url.to_lowercase().contains(".svg") => "svg",
+        _ => "bin",
+    }
+}
+
+async fn download_linear_context_image(
+    client: &reqwest::Client,
+    api_key: &str,
+    url: &str,
+    cache_dir: &Path,
+) -> Result<PathBuf, String> {
+    if !is_trusted_linear_image_url(url) {
+        return Err(format!("Refusing untrusted Linear image URL: {url}"));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    let response = client
+        .get(url)
+        .header("Authorization", api_key)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download Linear image: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Linear image download failed with status {}",
+            response.status()
+        ));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|s| s.to_string());
+    if let Some(ct) = &content_type {
+        if !ct.starts_with("image/") {
+            return Err(format!(
+                "Linear image URL returned non-image content type: {ct}"
+            ));
+        }
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read Linear image bytes: {e}"))?;
+    if bytes.len() > MAX_LINEAR_CONTEXT_IMAGE_BYTES {
+        return Err("Linear image is too large to cache".to_string());
+    }
+
+    std::fs::create_dir_all(cache_dir)
+        .map_err(|e| format!("Failed to create Linear image cache directory: {e}"))?;
+    let extension = linear_image_extension(url, content_type.as_deref());
+    let path = cache_dir.join(format!("{hash}.{extension}"));
+    if !path.exists() {
+        std::fs::write(&path, bytes)
+            .map_err(|e| format!("Failed to write Linear image cache file: {e}"))?;
+    }
+    Ok(path)
+}
+
+async fn cache_linear_markdown_images(
+    markdown: &str,
+    client: &reqwest::Client,
+    api_key: &str,
+    cache_dir: &Path,
+    replacements: &mut HashMap<String, PathBuf>,
+) -> String {
+    for url in extract_linear_image_urls(markdown) {
+        if replacements.contains_key(&url) {
+            continue;
+        }
+        match download_linear_context_image(client, api_key, &url, cache_dir).await {
+            Ok(path) => {
+                replacements.insert(url, path);
+            }
+            Err(e) => {
+                log::warn!("Failed to cache Linear context image: {e}");
+            }
+        }
+    }
+
+    rewrite_linear_image_urls(markdown, replacements)
+}
+
+async fn cache_linear_context_images(
+    detail: &mut LinearIssueDetail,
+    api_key: &str,
+    cache_dir: &Path,
+) {
+    let client = reqwest::Client::new();
+    let mut replacements = HashMap::new();
+
+    if let Some(description) = &detail.description {
+        detail.description = Some(
+            cache_linear_markdown_images(
+                description,
+                &client,
+                api_key,
+                cache_dir,
+                &mut replacements,
+            )
+            .await,
+        );
+    }
+
+    for comment in &mut detail.comments {
+        comment.body = cache_linear_markdown_images(
+            &comment.body,
+            &client,
+            api_key,
+            cache_dir,
+            &mut replacements,
+        )
+        .await;
+    }
 }
 
 /// Linear config resolved from project + global preferences.
@@ -697,7 +911,7 @@ pub async fn load_linear_issue_context(
     let config = get_linear_config(&app, &project_id)?;
     let project_name = config.project_name;
 
-    let detail = get_linear_issue(app.clone(), project_id, issue_id).await?;
+    let mut detail = get_linear_issue(app.clone(), project_id, issue_id).await?;
 
     // Write to shared git-context directory
     let contexts_dir = get_github_contexts_dir(&app)?;
@@ -705,6 +919,12 @@ pub async fn load_linear_issue_context(
         .map_err(|e| format!("Failed to create git-context directory: {e}"))?;
 
     let identifier_lower = detail.identifier.to_lowercase();
+    let image_cache_dir = contexts_dir
+        .join("linear-context-images")
+        .join(&project_name)
+        .join(&identifier_lower);
+    cache_linear_context_images(&mut detail, &config.api_key, &image_cache_dir).await;
+
     let context_file = contexts_dir.join(format!("{project_name}-linear-{identifier_lower}.md"));
     let context_content = format_linear_issue_context_markdown(&detail);
 
@@ -1007,5 +1227,53 @@ pub fn linear_context_to_detail(ctx: &LinearIssueContext) -> LinearIssueDetail {
         priority: 0,
         priority_label: "No priority".to_string(),
         comments: ctx.comments.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    #[test]
+    fn rewrite_linear_image_urls_replaces_markdown_and_html_images() {
+        let markdown = "Before ![shot](https://uploads.linear.app/a.png) after <img alt=\"diagram\" src=\"https://uploads.linear.app/b.jpg\" />";
+        let mut replacements = HashMap::new();
+        replacements.insert(
+            "https://uploads.linear.app/a.png".to_string(),
+            Path::new("/tmp/linear/a.png").to_path_buf(),
+        );
+        replacements.insert(
+            "https://uploads.linear.app/b.jpg".to_string(),
+            Path::new("/tmp/linear/b.jpg").to_path_buf(),
+        );
+
+        let rewritten = rewrite_linear_image_urls(markdown, &replacements);
+
+        assert_eq!(
+            rewritten,
+            "Before ![shot](</tmp/linear/a.png>) after <img alt=\"diagram\" src=\"/tmp/linear/b.jpg\" />"
+        );
+    }
+
+    #[test]
+    fn extract_linear_image_urls_only_returns_trusted_linear_images() {
+        let markdown = concat!(
+            "![one](https://uploads.linear.app/a.png)\n",
+            "<img src=\"https://uploads.linear.app/b.jpg\" />\n",
+            "![skip](https://example.com/not-linear.png)\n",
+            "![skip](http://uploads.linear.app/insecure.png)\n"
+        );
+
+        let urls = extract_linear_image_urls(markdown);
+
+        assert_eq!(
+            urls,
+            vec![
+                "https://uploads.linear.app/a.png".to_string(),
+                "https://uploads.linear.app/b.jpg".to_string(),
+            ]
+        );
     }
 }
