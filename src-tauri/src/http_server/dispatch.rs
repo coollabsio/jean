@@ -208,6 +208,19 @@ pub async fn dispatch_command(
             // preventing WorktreeSetupCard from appearing on the canvas.
             to_value(result)
         }
+        "fork_session_to_worktree" => {
+            let source_worktree_id: String =
+                field(&args, "sourceWorktreeId", "source_worktree_id")?;
+            let source_session_id: String = field(&args, "sourceSessionId", "source_session_id")?;
+            let result = crate::projects::fork_session_to_worktree(
+                app.clone(),
+                source_worktree_id,
+                source_session_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["projects", "sessions", "session"]);
+            to_value(result)
+        }
         "delete_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::delete_worktree(app.clone(), worktree_id).await?;

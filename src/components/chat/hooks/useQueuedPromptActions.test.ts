@@ -110,7 +110,7 @@ describe('useQueuedPromptActions', () => {
     )
   })
 
-  it('does not edit when the queued message was already dequeued', async () => {
+  it('drops the stale local copy when the queued message was already dequeued', async () => {
     vi.mocked(persistUpdateQueued).mockResolvedValue(false)
     const { result } = renderHook(() => useQueuedPromptActions())
 
@@ -124,7 +124,7 @@ describe('useQueuedPromptActions', () => {
 
     expect(
       useChatStore.getState().messageQueues['session-1']?.map(m => m.message)
-    ).toEqual(['prompt msg-1', 'prompt msg-2', 'prompt msg-3'])
+    ).toEqual(['prompt msg-1', 'prompt msg-3'])
   })
 
   it('does not edit queued messages that can be steered', async () => {

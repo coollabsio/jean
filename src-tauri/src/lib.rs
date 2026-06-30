@@ -4480,6 +4480,7 @@ pub fn run() {
             projects::get_worktree_diff,
             projects::create_worktree,
             projects::create_worktree_from_existing_branch,
+            projects::fork_session_to_worktree,
             projects::checkout_pr,
             projects::delete_worktree,
             projects::create_base_session,

@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -45,7 +46,7 @@ use super::types::{
     WorktreeDeletingEvent, WorktreeOrigin, WorktreePathExistsEvent,
     WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent, WorktreeUnarchivedEvent,
 };
-use crate::chat::types::LabelData;
+use crate::chat::types::{LabelData, Session, SessionMetadata, WorktreeSessions};
 use crate::claude_cli::resolve_cli_binary;
 use crate::coderabbit_cli::resolve_coderabbit_binary;
 use crate::codex_cli::resolve_cli_binary as resolve_codex_cli_binary;
@@ -101,6 +102,12 @@ const FAVICON_CANDIDATES: &[&str] = &[
     "assets/logo.png",
     ".idea/icon.svg",
 ];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForkSessionToWorktreeResponse {
+    pub worktree: Worktree,
+    pub session: Session,
+}
 
 const ICON_SOURCE_FILES: &[&str] = &[
     "index.html",
@@ -1005,6 +1012,217 @@ fn truncate_utf8(input: &str, max_bytes: usize) -> (String, bool) {
         ),
         true,
     )
+}
+
+fn run_git_with_input(repo_path: &Path, args: &[&str], input: &[u8]) -> Result<(), String> {
+    let mut child = silent_command("git")
+        .args(args)
+        .current_dir(repo_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run git {}: {e}", args.join(" ")))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input)
+            .map_err(|e| format!("Failed to write to git {} stdin: {e}", args.join(" ")))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git {}: {e}", args.join(" ")))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git {} failed: {stderr}", args.join(" ")))
+    }
+}
+
+fn git_output_bytes(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    let output = silent_command("git")
+        .args(args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run git {}: {e}", args.join(" ")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git {} failed: {stderr}", args.join(" ")));
+    }
+    Ok(output.stdout)
+}
+
+fn copy_untracked_files(source_path: &Path, target_path: &Path) -> Result<(), String> {
+    let output = git_output_bytes(
+        source_path,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )?;
+    for raw_path in output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+    {
+        let relative = std::str::from_utf8(raw_path)
+            .map_err(|e| format!("Git returned a non-UTF8 untracked path: {e}"))?;
+        let source_file = source_path.join(relative);
+        if !source_file.is_file() {
+            continue;
+        }
+        let target_file = target_path.join(relative);
+        if let Some(parent) = target_file.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+        }
+        fs::copy(&source_file, &target_file).map_err(|e| {
+            format!(
+                "Failed to copy untracked file {} to {}: {e}",
+                source_file.display(),
+                target_file.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn copy_dirty_worktree_state(source_path: &Path, target_path: &Path) -> Result<(), String> {
+    let patch = git_output_bytes(source_path, &["diff", "--binary", "HEAD"])?;
+    if !patch.is_empty() {
+        run_git_with_input(
+            target_path,
+            &["apply", "--binary", "--whitespace=nowarn"],
+            &patch,
+        )?;
+    }
+    copy_untracked_files(source_path, target_path)
+}
+
+fn forked_session_name(source_name: &str) -> String {
+    let trimmed = source_name.trim();
+    if trimmed.is_empty() {
+        "Forked Session".to_string()
+    } else if trimmed.starts_with("Fork of ") {
+        trimmed.to_string()
+    } else {
+        format!("Fork of {trimmed}")
+    }
+}
+
+fn clear_session_runtime_state(session: &mut Session) {
+    session.claude_session_id = None;
+    session.codex_thread_id = None;
+    session.codex_goal = None;
+    session.opencode_session_id = None;
+    session.cursor_chat_id = None;
+    session.pi_session_id = None;
+    session.commandcode_session_id = None;
+    session.grok_session_id = None;
+    session.is_reviewing = false;
+    session.waiting_for_input = false;
+    session.waiting_for_input_type = None;
+    session.pending_permission_denials.clear();
+    session.pending_codex_permission_requests.clear();
+    session.pending_codex_command_approval_requests.clear();
+    session.pending_codex_user_input_requests.clear();
+    session.pending_codex_mcp_elicitation_requests.clear();
+    session.pending_codex_dynamic_tool_call_requests.clear();
+    session.denied_message_context = None;
+    session.queued_messages.clear();
+    session.scheduled_wakeup = None;
+    session.last_run_status = None;
+    session.last_run_execution_mode = None;
+    session.last_run_started_at = None;
+}
+
+fn prepare_forked_session(
+    source: &Session,
+    _new_worktree_id: &str,
+    order: u32,
+    created_at: u64,
+) -> Session {
+    let mut forked = source.clone();
+    forked.id = Uuid::new_v4().to_string();
+    forked.name = forked_session_name(&source.name);
+    forked.order = order;
+    forked.created_at = created_at;
+    forked.updated_at = created_at;
+    forked.last_opened_at = Some(created_at);
+    forked.archived_at = None;
+    forked.archived_by_base_close = None;
+    forked.session_naming_completed = false;
+    clear_session_runtime_state(&mut forked);
+    forked
+}
+
+fn prepare_forked_metadata(
+    source: Option<SessionMetadata>,
+    forked_session: &Session,
+    new_worktree_id: &str,
+) -> SessionMetadata {
+    let mut metadata = source.unwrap_or_else(|| {
+        SessionMetadata::new(
+            forked_session.id.clone(),
+            new_worktree_id.to_string(),
+            forked_session.name.clone(),
+            forked_session.order,
+        )
+    });
+    metadata.id = forked_session.id.clone();
+    metadata.worktree_id = new_worktree_id.to_string();
+    metadata.name = forked_session.name.clone();
+    metadata.order = forked_session.order;
+    metadata.created_at = forked_session.created_at;
+    metadata.claude_session_id = None;
+    metadata.codex_thread_id = None;
+    metadata.codex_goal = None;
+    metadata.opencode_session_id = None;
+    metadata.cursor_chat_id = None;
+    metadata.pi_session_id = None;
+    metadata.commandcode_session_id = None;
+    metadata.grok_session_id = None;
+    metadata.session_naming_completed = false;
+    metadata.archived_at = None;
+    metadata.archived_by_base_close = None;
+    metadata.pending_permission_denials.clear();
+    metadata.pending_codex_permission_requests.clear();
+    metadata.pending_codex_command_approval_requests.clear();
+    metadata.pending_codex_user_input_requests.clear();
+    metadata.pending_codex_mcp_elicitation_requests.clear();
+    metadata.pending_codex_dynamic_tool_call_requests.clear();
+    metadata.denied_message_context = None;
+    metadata.is_reviewing = false;
+    metadata.waiting_for_input = false;
+    metadata.waiting_for_input_type = None;
+    metadata.queued_messages.clear();
+    metadata.scheduled_wakeup = None;
+    metadata
+}
+
+fn copy_session_run_files(
+    app: &AppHandle,
+    source_session_id: &str,
+    target_session_id: &str,
+) -> Result<(), String> {
+    let source_dir = crate::chat::storage::get_session_dir(app, source_session_id)?;
+    if !source_dir.exists() {
+        return Ok(());
+    }
+    let target_dir = crate::chat::storage::get_session_dir(app, target_session_id)?;
+    fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("Failed to create forked session log directory: {e}"))?;
+    for entry in fs::read_dir(&source_dir)
+        .map_err(|e| format!("Failed to read source session log directory: {e}"))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read source session log entry: {e}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to read session log entry type: {e}"))?;
+        if file_type.is_file() {
+            fs::copy(entry.path(), target_dir.join(entry.file_name()))
+                .map_err(|e| format!("Failed to copy session log file: {e}"))?;
+        }
+    }
+    Ok(())
 }
 
 /// Create a new worktree for a project (runs in background)
@@ -1933,6 +2151,196 @@ pub async fn create_worktree(
 
     log::trace!("Returning pending worktree: {}", pending_worktree.name);
     Ok(pending_worktree)
+}
+
+/// Fork an existing Jean session into a new worktree and continue from there.
+///
+/// The new worktree is created at the source worktree's current HEAD. Dirty tracked changes
+/// are copied with a binary git patch, and untracked non-ignored files are copied directly.
+/// The Jean session metadata and run log files are copied, but backend-native resume IDs and
+/// pending runtime prompts are cleared so the next turn starts a fresh backend conversation in
+/// the forked working directory.
+#[tauri::command]
+pub async fn fork_session_to_worktree(
+    app: AppHandle,
+    source_worktree_id: String,
+    source_session_id: String,
+) -> Result<ForkSessionToWorktreeResponse, String> {
+    log::trace!(
+        "Forking session {source_session_id} from worktree {source_worktree_id} into a new worktree"
+    );
+
+    let mut data = load_projects_data(&app)?;
+    let source_worktree = data
+        .find_worktree(&source_worktree_id)
+        .cloned()
+        .ok_or_else(|| format!("Worktree not found: {source_worktree_id}"))?;
+    let project = data
+        .find_project(&source_worktree.project_id)
+        .cloned()
+        .ok_or_else(|| format!("Project not found: {}", source_worktree.project_id))?;
+
+    let source_sessions =
+        crate::chat::storage::load_sessions(&app, &source_worktree.path, &source_worktree_id)?;
+    let source_session = source_sessions
+        .find_session(&source_session_id)
+        .cloned()
+        .ok_or_else(|| format!("Session not found: {source_session_id}"))?;
+
+    let source_path = Path::new(&source_worktree.path);
+    if !source_path.exists() {
+        return Err(format!(
+            "Source worktree path does not exist: {}",
+            source_worktree.path
+        ));
+    }
+
+    let source_head = git_output(&source_worktree.path, &["rev-parse", "--verify", "HEAD"])?
+        .trim()
+        .to_string();
+    if source_head.is_empty() {
+        return Err("Cannot fork session: source worktree has no HEAD commit".to_string());
+    }
+
+    let base_name = {
+        let sanitized = sanitize_folder_name(&format!("fork-{}", source_worktree.name));
+        if sanitized == "fork-" {
+            "fork-session".to_string()
+        } else {
+            sanitized
+        }
+    };
+    let name = generate_unique_suffix_name(&base_name, &project.path, &project.id, Some(&data));
+
+    let project_worktrees_dir =
+        get_project_worktrees_dir(&project.name, project.worktrees_dir.as_deref())?;
+    allow_project_in_asset_scope(&app, &project.path);
+    if let Some(worktrees_dir) = project_worktrees_dir.to_str() {
+        allow_project_in_asset_scope(&app, worktrees_dir);
+    }
+    let worktree_path = project_worktrees_dir.join(sanitize_folder_name(&name));
+    if worktree_path.exists() {
+        return Err(format!(
+            "Cannot fork session: target worktree path already exists: {}",
+            worktree_path.display()
+        ));
+    }
+    let worktree_path_str = worktree_path
+        .to_str()
+        .ok_or_else(|| "Invalid fork worktree path".to_string())?
+        .to_string();
+
+    git::create_worktree(&project.path, &worktree_path_str, &name, &source_head)?;
+
+    let created_at = now();
+    let max_order = data
+        .worktrees
+        .iter()
+        .filter(|w| w.project_id == project.id)
+        .map(|w| w.order)
+        .max()
+        .unwrap_or(0);
+    let worktree_id = Uuid::new_v4().to_string();
+    let worktree = Worktree {
+        id: worktree_id.clone(),
+        project_id: project.id.clone(),
+        name: name.clone(),
+        path: worktree_path_str.clone(),
+        branch: name.clone(),
+        base_branch: source_worktree
+            .base_branch
+            .clone()
+            .or(Some(project.default_branch.clone())),
+        created_at,
+        setup_output: None,
+        setup_script: None,
+        setup_success: None,
+        session_type: SessionType::Worktree,
+        pr_number: source_worktree.pr_number,
+        pr_url: source_worktree.pr_url.clone(),
+        issue_number: source_worktree.issue_number,
+        linear_issue_identifier: source_worktree.linear_issue_identifier.clone(),
+        security_alert_number: source_worktree.security_alert_number,
+        security_alert_url: source_worktree.security_alert_url.clone(),
+        advisory_ghsa_id: source_worktree.advisory_ghsa_id.clone(),
+        advisory_url: source_worktree.advisory_url.clone(),
+        cached_pr_status: None,
+        cached_check_status: None,
+        cached_behind_count: None,
+        cached_ahead_count: None,
+        cached_status_at: None,
+        cached_uncommitted_added: None,
+        cached_uncommitted_removed: None,
+        cached_branch_diff_added: None,
+        cached_branch_diff_removed: None,
+        cached_base_branch_ahead_count: None,
+        cached_base_branch_behind_count: None,
+        cached_worktree_ahead_count: None,
+        cached_unpushed_count: None,
+        pr_push_remote: source_worktree.pr_push_remote.clone(),
+        pr_push_branch: source_worktree.pr_push_branch.clone(),
+        order: max_order + 1,
+        origin: Some(WorktreeOrigin::Manual),
+        archived_at: None,
+        labels: source_worktree.labels.clone(),
+        label: source_worktree.label.clone(),
+        last_opened_at: Some(created_at),
+    };
+
+    let result = (|| -> Result<ForkSessionToWorktreeResponse, String> {
+        copy_dirty_worktree_state(source_path, &worktree_path)?;
+
+        let mut forked_session =
+            prepare_forked_session(&source_session, &worktree_id, 0, created_at);
+        let source_metadata = crate::chat::storage::load_metadata(&app, &source_session_id)?;
+        copy_session_run_files(&app, &source_session_id, &forked_session.id)?;
+        let forked_metadata =
+            prepare_forked_metadata(source_metadata, &forked_session, &worktree_id);
+
+        let saved_session = crate::chat::storage::with_sessions_mut(
+            &app,
+            &worktree.path,
+            &worktree_id,
+            |sessions: &mut WorktreeSessions| {
+                sessions.sessions.clear();
+                sessions.sessions.push(forked_session.clone());
+                sessions.active_session_id = Some(forked_session.id.clone());
+                Ok(forked_session.clone())
+            },
+        )?;
+        crate::chat::storage::save_metadata(&app, &forked_metadata)?;
+        forked_session = saved_session;
+
+        data.add_worktree(worktree.clone());
+        save_projects_data(&app, &data)?;
+
+        let created_event = WorktreeCreatedEvent {
+            worktree: worktree.clone(),
+            auto_open_in_jean: false,
+        };
+        let _ = app.emit_all("worktree:created", &created_event);
+        let _ = app.emit_all(
+            "worktrees:changed",
+            &serde_json::json!({ "project_id": project.id }),
+        );
+        let _ = app.emit_all(
+            "cache:invalidate",
+            &serde_json::json!({ "keys": ["sessions", "projects"] }),
+        );
+
+        Ok(ForkSessionToWorktreeResponse {
+            worktree,
+            session: forked_session,
+        })
+    })();
+
+    if let Err(error) = result.as_ref() {
+        log::warn!("Fork session failed after git worktree creation; cleaning up {worktree_path_str}: {error}");
+        let _ = git::remove_worktree(&project.path, &worktree_path_str);
+        let _ = git::delete_branch(&project.path, &name);
+    }
+
+    result
 }
 
 fn parse_worktree_origin(origin: Option<&str>) -> Result<Option<WorktreeOrigin>, String> {
@@ -11542,6 +11950,22 @@ pub async fn revert_last_local_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::Backend;
+    use std::path::Path;
+
+    fn run_test_git(repo: &Path, args: &[&str]) {
+        let output = silent_command("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[test]
     fn parse_worktree_origin_preserves_manual_origin() {
@@ -12046,6 +12470,82 @@ Body
         assert!(args
             .windows(2)
             .any(|w| w == ["--json-schema", REVIEW_SCHEMA]));
+    }
+
+    #[test]
+    fn prepare_forked_session_clears_backend_resume_ids_and_runtime_state() {
+        let mut source = Session::new("Build auth".to_string(), 3, Backend::Codex);
+        source.claude_session_id = Some("claude-1".to_string());
+        source.codex_thread_id = Some("codex-1".to_string());
+        source.codex_goal = Some("ship the feature".to_string());
+        source.opencode_session_id = Some("opencode-1".to_string());
+        source.cursor_chat_id = Some("cursor-1".to_string());
+        source.pi_session_id = Some("pi-1".to_string());
+        source.commandcode_session_id = Some("command-1".to_string());
+        source.grok_session_id = Some("grok-1".to_string());
+        source.waiting_for_input = true;
+        source.is_reviewing = true;
+
+        let forked = prepare_forked_session(&source, "new-worktree", 0, 1234);
+
+        assert_ne!(forked.id, source.id);
+        assert_eq!(forked.name, "Fork of Build auth");
+        assert_eq!(forked.order, 0);
+        assert_eq!(forked.created_at, 1234);
+        assert_eq!(forked.updated_at, 1234);
+        assert_eq!(forked.backend, Backend::Codex);
+        assert_eq!(forked.claude_session_id, None);
+        assert_eq!(forked.codex_thread_id, None);
+        assert_eq!(forked.codex_goal, None);
+        assert_eq!(forked.opencode_session_id, None);
+        assert_eq!(forked.cursor_chat_id, None);
+        assert_eq!(forked.pi_session_id, None);
+        assert_eq!(forked.commandcode_session_id, None);
+        assert_eq!(forked.grok_session_id, None);
+        assert!(!forked.waiting_for_input);
+        assert!(!forked.is_reviewing);
+        assert!(forked.pending_codex_permission_requests.is_empty());
+        assert!(forked.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn copy_dirty_worktree_state_copies_tracked_changes_and_untracked_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        let fork = temp.path().join("fork");
+        std::fs::create_dir(&repo).expect("repo dir");
+        run_test_git(&repo, &["init", "-b", "main"]);
+        run_test_git(&repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(&repo, &["config", "user.name", "Test User"]);
+        std::fs::write(repo.join("tracked.txt"), "before\n").expect("write tracked");
+        run_test_git(&repo, &["add", "."]);
+        run_test_git(&repo, &["commit", "-m", "initial"]);
+        run_test_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "fork",
+                fork.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+
+        std::fs::write(repo.join("tracked.txt"), "after\n").expect("modify tracked");
+        std::fs::create_dir_all(repo.join("notes")).expect("notes dir");
+        std::fs::write(repo.join("notes/untracked.md"), "scratch\n").expect("write untracked");
+
+        copy_dirty_worktree_state(&repo, &fork).expect("copy dirty state");
+
+        assert_eq!(
+            std::fs::read_to_string(fork.join("tracked.txt")).unwrap(),
+            "after\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fork.join("notes/untracked.md")).unwrap(),
+            "scratch\n"
+        );
     }
 
     #[test]

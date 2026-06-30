@@ -7,6 +7,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  GitBranchPlus,
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
@@ -122,6 +123,28 @@ export function MobileToolbarMenu({
             )}
           >
             K
+          </span>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => {
+            setMenuOpen(false)
+            window.dispatchEvent(
+              new CustomEvent('magic-command', {
+                detail: { command: 'fork-session' },
+              })
+            )
+          }}
+        >
+          <GitBranchPlus className="h-4 w-4" />
+          Fork Session
+          <span
+            className={cn(
+              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+              isMobile && 'hidden'
+            )}
+          >
+            W
           </span>
         </DropdownMenuItem>
 

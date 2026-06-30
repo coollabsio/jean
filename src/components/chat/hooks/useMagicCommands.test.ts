@@ -10,6 +10,7 @@ function renderUseMagicCommands(
     handleSaveContext: vi.fn(),
     handleLoadContext: vi.fn(),
     handleLinkedProjects: vi.fn(),
+    handleForkSession: vi.fn(),
     handleCommit: vi.fn(),
     handleCommitAndPush: vi.fn(),
     handlePull: vi.fn(),
@@ -33,6 +34,18 @@ describe('useMagicCommands review comments batch', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useChatStore.getState().setPendingMagicCommand(null)
+  })
+
+  it('dispatches the fork session magic command', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'fork-session' },
+      })
+    )
+
+    expect(handlers.handleForkSession).toHaveBeenCalledTimes(1)
   })
 
   it('passes separate review comment prompts and plan mode from event detail', () => {

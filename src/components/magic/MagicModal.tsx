@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpToLine,
   GitCommitHorizontal,
+  GitBranchPlus,
   GitMerge,
   GitPullRequest,
   GitPullRequestArrow,
@@ -111,6 +112,7 @@ type MagicOption =
   | 'save-context'
   | 'load-context'
   | 'linked-projects'
+  | 'fork-session'
   | 'commit'
   | 'commit-and-push'
   | 'pull'
@@ -231,6 +233,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           icon: Link2,
           key: 'K',
         },
+        {
+          id: 'fork-session',
+          label: 'Fork Session',
+          icon: GitBranchPlus,
+          key: 'W',
+        },
       ],
     },
     {
@@ -343,6 +351,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   s: 'save-context',
   l: 'load-context',
   k: 'linked-projects',
+  w: 'fork-session',
   c: 'commit',
   p: 'commit-and-push',
   d: 'pull',

@@ -532,6 +532,14 @@ describe('MagicModal manual PR link', () => {
     expect(screen.queryByRole('button', { name: /release post/i })).toBeNull()
   })
 
+  it('shows the fork session magic command', () => {
+    render(<MagicModal />)
+
+    expect(
+      screen.getByRole('button', { name: /fork session/i })
+    ).toBeInTheDocument()
+  })
+
   it('reverts the last commit only after confirmation', async () => {
     const user = userEvent.setup()
     mocks.invokeMock.mockImplementation((command: string) => {

@@ -43,7 +43,12 @@ import {
   reconnectNativeCliSession,
   canReconnectSession,
 } from '@/services/chat'
-import { useWorktree, useProjects, useRunScripts } from '@/services/projects'
+import {
+  useWorktree,
+  useProjects,
+  useRunScripts,
+  projectsQueryKeys,
+} from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import type {
   Worktree,
@@ -155,6 +160,11 @@ import type { QueuedMessage, Session, WorktreeSessions } from '@/types/chat'
 import type { DiffRequest } from '@/types/git-diff'
 import { getEffectiveSessionWaiting } from './session-card-utils'
 
+interface ForkSessionToWorktreeResponse {
+  worktree: Worktree
+  session: Session
+}
+
 // Lazy-loaded heavy modals (code splitting)
 const GitDiffModal = lazy(() =>
   import('./GitDiffModal').then(mod => ({ default: mod.GitDiffModal }))
@@ -199,6 +209,7 @@ import { useActiveTodosAndAgents } from './hooks/useActiveTodosAndAgents'
 import { usePendingAttachments } from './hooks/usePendingAttachments'
 import { dedupeInFlightAssistantMessage } from './in-flight-message-dedupe'
 import { shouldShowPermissionApproval } from './permission-approval-utils'
+import { navigateToForkedSession } from './fork-session-navigation'
 
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
 // When Zustand selectors return [], a new reference is created each time
@@ -2090,11 +2101,84 @@ export function ChatWindow({
     useUIStore.getState().setLinkedProjectsModalOpen(open)
   }, [])
 
+  const handleForkSession = useCallback(async () => {
+    if (!activeWorktreeId || !activeSessionId) {
+      toast.error('No active session to fork')
+      return
+    }
+
+    const toastId = toast.loading('Forking session to a new worktree...')
+    try {
+      const result = await invoke<ForkSessionToWorktreeResponse>(
+        'fork_session_to_worktree',
+        {
+          sourceWorktreeId: activeWorktreeId,
+          sourceSessionId: activeSessionId,
+        }
+      )
+
+      const { worktree: forkedWorktree, session: forkedSession } = result
+      queryClient.setQueryData<Worktree>(
+        [...projectsQueryKeys.all, 'worktree', forkedWorktree.id],
+        forkedWorktree
+      )
+      queryClient.setQueryData<Session>(
+        chatQueryKeys.session(forkedSession.id),
+        forkedSession
+      )
+      queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
+      queryClient.invalidateQueries({
+        queryKey: projectsQueryKeys.worktrees(forkedWorktree.project_id),
+      })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(forkedWorktree.id),
+      })
+
+      const projectsStore = useProjectsStore.getState()
+      const chatStore = useChatStore.getState()
+      navigateToForkedSession(
+        forkedWorktree,
+        forkedSession,
+        {
+          activeWorktreePath,
+          sessionChatModalOpen: isModal || sessionModalOpen,
+        },
+        {
+          expandProject: projectsStore.expandProject,
+          selectWorktree: projectsStore.selectWorktree,
+          registerWorktreePath: chatStore.registerWorktreePath,
+          setActiveWorktree: chatStore.setActiveWorktree,
+          setActiveSession: chatStore.setActiveSession,
+          addUserInitiatedSession: chatStore.addUserInitiatedSession,
+          openWorktreeModal: (worktreeId, worktreePath) => {
+            window.dispatchEvent(
+              new CustomEvent('open-worktree-modal', {
+                detail: { worktreeId, worktreePath },
+              })
+            )
+          },
+        }
+      )
+
+      toast.success(`Forked session to ${forkedWorktree.name}`, { id: toastId })
+    } catch (err) {
+      toast.error(`Failed to fork session: ${err}`, { id: toastId })
+    }
+  }, [
+    activeSessionId,
+    activeWorktreeId,
+    activeWorktreePath,
+    isModal,
+    queryClient,
+    sessionModalOpen,
+  ])
+
   // Listen for magic-command events from MagicModal
   useMagicCommands({
     handleSaveContext,
     handleLoadContext,
     handleLinkedProjects,
+    handleForkSession,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
@@ -2357,8 +2441,7 @@ export function ChatWindow({
     handleRemoveQueuedMessage,
     handleEditQueuedMessage,
     handleSendQueuedNow,
-  } =
-    useQueuedPromptActions()
+  } = useQueuedPromptActions()
 
   // Pending attachment removal, slash command execution
   const {

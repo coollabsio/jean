@@ -333,8 +333,10 @@ describe('CompactMessageList', () => {
     const editedFiles = screen.getByText('Edited 1 file:')
 
     expect(editedFiles).toBeVisible()
+    expect(latestText).toBeDefined()
+    if (!latestText) throw new Error('Expected changed chat UI text to render')
     expect(
-      latestText!.compareDocumentPosition(editedFiles) &
+      latestText.compareDocumentPosition(editedFiles) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })

@@ -21,6 +21,7 @@ interface MagicCommandHandlers {
   handleSaveContext: () => void
   handleLoadContext: () => void
   handleLinkedProjects: () => void
+  handleForkSession: () => void
   handleCommit: () => void
   handleCommitAndPush: () => void
   handlePull: () => void
@@ -62,6 +63,7 @@ export function useMagicCommands({
   handleSaveContext,
   handleLoadContext,
   handleLinkedProjects,
+  handleForkSession,
   handleCommit,
   handleCommitAndPush,
   handlePull,
@@ -83,6 +85,7 @@ export function useMagicCommands({
     handleSaveContext,
     handleLoadContext,
     handleLinkedProjects,
+    handleForkSession,
     handleCommit,
     handleCommitAndPush,
     handlePull,
@@ -105,6 +108,7 @@ export function useMagicCommands({
       handleSaveContext,
       handleLoadContext,
       handleLinkedProjects,
+      handleForkSession,
       handleCommit,
       handleCommitAndPush,
       handlePull,
@@ -150,6 +154,9 @@ export function useMagicCommands({
           break
         case 'linked-projects':
           handlers.handleLinkedProjects()
+          break
+        case 'fork-session':
+          handlers.handleForkSession()
           break
         case 'commit':
           handlers.handleCommit()
