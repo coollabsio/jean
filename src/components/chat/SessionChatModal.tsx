@@ -396,6 +396,32 @@ export function SessionChatModal({
     [handleRenameSubmit]
   )
 
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleRenameSessionCommand = (
+      e: CustomEvent<{ sessionId?: string }>
+    ) => {
+      const sessionId = e.detail?.sessionId
+      if (!sessionId) return
+      const session = sessions.find(s => s.id === sessionId)
+      if (!session || session.archived_at) return
+
+      setRenameValue(session.name)
+      setRenamingSessionId(session.id)
+    }
+
+    window.addEventListener(
+      'command:rename-session',
+      handleRenameSessionCommand as EventListener
+    )
+    return () =>
+      window.removeEventListener(
+        'command:rename-session',
+        handleRenameSessionCommand as EventListener
+      )
+  }, [isOpen, sessions])
+
   const renameInputRef = useCallback((node: HTMLInputElement | null) => {
     if (node) {
       node.focus()
@@ -474,7 +500,7 @@ export function SessionChatModal({
   )
 
   const handleTabAuxClick = useCallback(
-    (e: MouseEvent<HTMLButtonElement>, session: Session) => {
+    (e: MouseEvent<HTMLDivElement>, session: Session) => {
       if (e.button !== 1) return
       e.preventDefault()
       e.stopPropagation()
@@ -542,10 +568,11 @@ export function SessionChatModal({
 
   const handleTabClick = useCallback(
     (sessionId: string) => {
+      if (renamingSessionId === sessionId) return
       const { setActiveSession } = useChatStore.getState()
       setActiveSession(worktreeId, sessionId)
     },
-    [worktreeId]
+    [renamingSessionId, worktreeId]
   )
 
   const reorderSessions = useReorderSessions()
@@ -588,7 +615,7 @@ export function SessionChatModal({
   }, [cards])
 
   const handleSessionDragStart = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, sessionId: string) => {
+    (e: React.DragEvent<HTMLDivElement>, sessionId: string) => {
       setDraggedSessionId(sessionId)
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', sessionId)
@@ -597,7 +624,7 @@ export function SessionChatModal({
   )
 
   const handleSessionDragOver = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, targetSessionId: string) => {
+    (e: React.DragEvent<HTMLDivElement>, targetSessionId: string) => {
       if (
         draggedSessionId &&
         buildReorderedSessionIdsWithinStatus(
@@ -614,7 +641,7 @@ export function SessionChatModal({
   )
 
   const handleSessionDrop = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, targetSessionId: string) => {
+    (e: React.DragEvent<HTMLDivElement>, targetSessionId: string) => {
       e.preventDefault()
       const sourceId =
         draggedSessionId || e.dataTransfer.getData('text/plain') || null
@@ -1129,8 +1156,10 @@ export function SessionChatModal({
                     return (
                       <ContextMenu key={session.id}>
                         <ContextMenuTrigger asChild>
-                          <button
+                          <div
                             data-session-id={session.id}
+                            role="button"
+                            tabIndex={0}
                             draggable={renamingSessionId !== session.id}
                             onDragStart={e =>
                               handleSessionDragStart(e, session.id)
@@ -1142,6 +1171,13 @@ export function SessionChatModal({
                             onDragEnd={() => setDraggedSessionId(null)}
                             onClick={() => handleTabClick(session.id)}
                             onAuxClick={e => handleTabAuxClick(e, session)}
+                            onKeyDown={e => {
+                              if (renamingSessionId === session.id) return
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                handleTabClick(session.id)
+                              }
+                            }}
                             onDoubleClick={() =>
                               handleStartRenameImmediate(
                                 session.id,
@@ -1178,6 +1214,7 @@ export function SessionChatModal({
                                 onKeyDown={e =>
                                   handleRenameKeyDown(e, session.id)
                                 }
+                                onPointerDown={e => e.stopPropagation()}
                                 onClick={e => e.stopPropagation()}
                                 className="w-full min-w-0 bg-transparent text-base outline-none md:text-xs"
                               />
@@ -1209,7 +1246,7 @@ export function SessionChatModal({
                                 size="xs"
                               />
                             )}
-                          </button>
+                          </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent className="w-64">
                           <ContextMenuItem

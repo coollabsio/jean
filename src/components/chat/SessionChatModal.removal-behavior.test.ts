@@ -6,6 +6,25 @@ const readSource = (path: string) =>
   readFileSync(join(process.cwd(), path), 'utf8')
 
 describe('SessionChatModal removal behavior', () => {
+  it('listens for command-palette session rename requests', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+
+    expect(source).toMatch(
+      /window\.addEventListener\(\s*'command:rename-session'/
+    )
+    expect(source).toMatch(
+      /window\.removeEventListener\(\s*'command:rename-session'/
+    )
+  })
+
+  it('keeps rename input out of the clickable tab button to avoid accidental close/cancel', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+
+    expect(source).not.toContain('<button\n                            data-session-id=')
+    expect(source).toContain('<div\n                            data-session-id=')
+    expect(source).toContain('onPointerDown={e => e.stopPropagation()}')
+  })
+
   it('uses the delete-aware handler when removing non-last tabs', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
     const start = source.indexOf('const removeSessionTab = useCallback(')

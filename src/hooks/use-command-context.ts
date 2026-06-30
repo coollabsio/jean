@@ -192,13 +192,16 @@ export function useCommandContext(
 
   // Sessions - Rename session
   const renameSession = useCallback(() => {
-    const { activeWorktreeId, getActiveSession } = useChatStore.getState()
-    if (!activeWorktreeId) {
+    const chatState = useChatStore.getState()
+    const worktreeId =
+      chatState.activeWorktreeId ??
+      useProjectsStore.getState().selectedWorktreeId
+    if (!worktreeId) {
       notify('No worktree selected', undefined, { type: 'error' })
       return
     }
 
-    const sessionId = getActiveSession(activeWorktreeId)
+    const sessionId = chatState.getActiveSession(worktreeId)
     if (!sessionId) {
       notify('No session selected', undefined, { type: 'error' })
       return
@@ -451,9 +454,12 @@ export function useCommandContext(
 
   // State getters
   const hasActiveSession = useCallback(() => {
-    const { activeWorktreeId, getActiveSession } = useChatStore.getState()
-    if (!activeWorktreeId) return false
-    return !!getActiveSession(activeWorktreeId)
+    const chatState = useChatStore.getState()
+    const worktreeId =
+      chatState.activeWorktreeId ??
+      useProjectsStore.getState().selectedWorktreeId
+    if (!worktreeId) return false
+    return !!chatState.getActiveSession(worktreeId)
   }, [])
 
   const hasActiveWorktree = useCallback(() => {

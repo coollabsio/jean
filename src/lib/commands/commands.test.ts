@@ -231,6 +231,13 @@ describe('Project Commands', () => {
     expect(useUIStore.getState().onboardingDismissed).toBe(false)
     expect(useUIStore.getState().featureTourOpen).toBe(false)
   })
+
+  it('rename session command delegates to session rename wiring', async () => {
+    const result = await executeCommand('rename-session', mockContext)
+
+    expect(result.success).toBe(true)
+    expect(mockContext.renameSession).toHaveBeenCalled()
+  })
 })
 
 describe('Notification Commands', () => {

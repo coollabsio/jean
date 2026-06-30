@@ -8,6 +8,7 @@ import {
   RefreshCw,
   BellDot,
   Download,
+  Pencil,
 } from 'lucide-react'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
@@ -172,6 +173,21 @@ export const projectCommands: AppCommand[] = [
 
     execute: context => {
       context.openUnreadSessions()
+    },
+  },
+
+  {
+    id: 'rename-session',
+    label: 'Rename Session',
+    description: 'Rename the current session tab',
+    icon: Pencil,
+    group: 'sessions',
+    keywords: ['session', 'title', 'name', 'rename', 'tab'],
+
+    isAvailable: context => context.hasActiveSession(),
+
+    execute: context => {
+      context.renameSession()
     },
   },
 
