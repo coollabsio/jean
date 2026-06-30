@@ -6,6 +6,7 @@ import {
   cancelChatMessage,
   persistMoveQueuedFront,
   persistRemoveQueued,
+  persistUpdateQueued,
   steerCodexTurn,
   steerOpencodeTurn,
   steerPiTurn,
@@ -16,6 +17,7 @@ vi.mock('@/services/chat', () => ({
   cancelChatMessage: vi.fn().mockResolvedValue(true),
   persistMoveQueuedFront: vi.fn().mockResolvedValue(true),
   persistRemoveQueued: vi.fn(),
+  persistUpdateQueued: vi.fn().mockResolvedValue(true),
   steerCodexTurn: vi.fn().mockResolvedValue(undefined),
   steerOpencodeTurn: vi.fn().mockResolvedValue(undefined),
   steerPiTurn: vi.fn().mockResolvedValue(undefined),
@@ -47,6 +49,7 @@ describe('useQueuedPromptActions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(persistMoveQueuedFront).mockResolvedValue(true)
+    vi.mocked(persistUpdateQueued).mockResolvedValue(true)
     vi.mocked(steerCodexTurn).mockResolvedValue(undefined)
     vi.mocked(steerOpencodeTurn).mockResolvedValue(undefined)
     vi.mocked(steerPiTurn).mockResolvedValue(undefined)
@@ -81,6 +84,68 @@ describe('useQueuedPromptActions', () => {
       '/tmp/worktree-1',
       'session-1',
       'msg-2'
+    )
+  })
+
+  it('edits a queued message locally and persists update', async () => {
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleEditQueuedMessage(
+        'session-1',
+        'msg-2',
+        'updated prompt'
+      )
+    })
+
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.message)
+    ).toEqual(['prompt msg-1', 'updated prompt', 'prompt msg-3'])
+    expect(persistUpdateQueued).toHaveBeenCalledWith(
+      'worktree-1',
+      '/tmp/worktree-1',
+      'session-1',
+      'msg-2',
+      'updated prompt'
+    )
+  })
+
+  it('does not edit when the queued message was already dequeued', async () => {
+    vi.mocked(persistUpdateQueued).mockResolvedValue(false)
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleEditQueuedMessage(
+        'session-1',
+        'msg-2',
+        'updated prompt'
+      )
+    })
+
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.message)
+    ).toEqual(['prompt msg-1', 'prompt msg-2', 'prompt msg-3'])
+  })
+
+  it('does not edit queued messages that can be steered', async () => {
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [createMessage('msg-1', { backend: 'codex' })],
+      },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleEditQueuedMessage(
+        'session-1',
+        'msg-1',
+        'updated prompt'
+      )
+    })
+
+    expect(persistUpdateQueued).not.toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']?.[0]?.message).toBe(
+      'prompt msg-1'
     )
   })
 

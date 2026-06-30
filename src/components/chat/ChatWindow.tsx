@@ -2353,7 +2353,11 @@ export function ChatWindow({
   )
 
   // Queued prompts panel actions (remove / send-now)
-  const { handleRemoveQueuedMessage, handleSendQueuedNow } =
+  const {
+    handleRemoveQueuedMessage,
+    handleEditQueuedMessage,
+    handleSendQueuedNow,
+  } =
     useQueuedPromptActions()
 
   // Pending attachment removal, slash command execution
@@ -3035,6 +3039,7 @@ export function ChatWindow({
                                 isSessionBusy={isSending || isWaitingForInput}
                                 onRemove={handleRemoveQueuedMessage}
                                 onSendNow={handleSendQueuedNow}
+                                onEdit={handleEditQueuedMessage}
                               />
                             )}
                           {/* Input area - unified container with textarea and toolbar */}

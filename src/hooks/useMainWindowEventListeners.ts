@@ -934,10 +934,7 @@ export function useMainWindowEventListeners() {
             const currentQueue =
               useChatStore.getState().messageQueues[sessionId] ?? []
             // Skip if the queue already matches (this client caused the event)
-            if (
-              currentQueue.length === queue.length &&
-              currentQueue[0]?.id === queue[0]?.id
-            )
+            if (JSON.stringify(currentQueue) === JSON.stringify(queue))
               return
             useChatStore.setState(state => ({
               messageQueues: {

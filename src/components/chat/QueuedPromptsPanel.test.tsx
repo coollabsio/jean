@@ -3,7 +3,11 @@ import { render, screen, fireEvent } from '@/test/test-utils'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
 import type { QueuedMessage } from '@/types/chat'
 
-const createMessage = (id: string, message: string): QueuedMessage => ({
+const createMessage = (
+  id: string,
+  message: string,
+  overrides?: Partial<QueuedMessage>
+): QueuedMessage => ({
   id,
   message,
   pendingImages: [],
@@ -15,6 +19,7 @@ const createMessage = (id: string, message: string): QueuedMessage => ({
   executionMode: 'plan',
   thinkingLevel: 'off',
   queuedAt: 0,
+  ...overrides,
 })
 
 describe('QueuedPromptsPanel', () => {
@@ -32,9 +37,11 @@ describe('QueuedPromptsPanel', () => {
     messages?: QueuedMessage[]
     onRemove?: (sessionId: string, messageId: string) => void
     onSendNow?: (sessionId: string, messageId: string) => void
+    onEdit?: (sessionId: string, messageId: string, message: string) => void
   }) => {
     const onRemove = overrides?.onRemove ?? vi.fn()
     const onSendNow = overrides?.onSendNow ?? vi.fn()
+    const onEdit = overrides?.onEdit ?? vi.fn()
     const result = render(
       <QueuedPromptsPanel
         sessionId="session-1"
@@ -42,9 +49,10 @@ describe('QueuedPromptsPanel', () => {
         isSessionBusy={false}
         onRemove={onRemove}
         onSendNow={onSendNow}
+        onEdit={onEdit}
       />
     )
-    return { ...result, onRemove, onSendNow }
+    return { ...result, onRemove, onSendNow, onEdit }
   }
 
   it('renders count badge and all queued prompts', () => {
@@ -135,6 +143,7 @@ describe('QueuedPromptsPanel', () => {
         isSessionBusy={false}
         onRemove={vi.fn()}
         onSendNow={onSendNow}
+        onEdit={vi.fn()}
       />
     )
 
@@ -168,5 +177,46 @@ describe('QueuedPromptsPanel', () => {
 
     fireEvent.click(thirdSend as HTMLElement)
     expect(onSendNow).toHaveBeenCalledWith('session-1', 'msg-3')
+  })
+
+  it('edits queued prompts when steering is not supported', () => {
+    const { onEdit } = renderPanel()
+
+    const editButton = screen.getAllByLabelText('Edit queued prompt')[0]
+    expect(editButton).toBeDefined()
+    fireEvent.click(editButton as HTMLElement)
+    const editor = screen.getByLabelText('Queued prompt text')
+    fireEvent.change(editor, { target: { value: 'Updated prompt' } })
+    fireEvent.click(screen.getByLabelText('Save queued prompt'))
+
+    expect(onEdit).toHaveBeenCalledWith('session-1', 'msg-1', 'Updated prompt')
+  })
+
+  it('does not show edit for steerable queued prompts', () => {
+    renderPanel({
+      messages: [
+        createMessage('msg-1', 'Codex prompt', {
+          backend: 'codex',
+        } as Partial<QueuedMessage>),
+        createMessage('msg-2', 'OpenCode prompt', {
+          backend: 'opencode',
+        } as Partial<QueuedMessage>),
+      ],
+    })
+
+    expect(screen.queryByLabelText('Edit queued prompt')).not.toBeInTheDocument()
+  })
+
+  it('shows edit for text-only steering backends when attachments prevent steering', () => {
+    renderPanel({
+      messages: [
+        createMessage('msg-1', 'Pi prompt', {
+          backend: 'pi',
+          pendingFiles: [{ id: 'file-1', path: '/tmp/file.txt' }] as never,
+        } as Partial<QueuedMessage>),
+      ],
+    })
+
+    expect(screen.getByLabelText('Edit queued prompt')).toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@ import {
   cancelChatMessage,
   persistMoveQueuedFront,
   persistRemoveQueued,
+  persistUpdateQueued,
   steerCodexTurn,
   steerOpencodeTurn,
   steerPiTurn,
@@ -27,6 +28,12 @@ function hasAttachments(msg: QueuedMessage): boolean {
   )
 }
 
+function supportsSteering(msg: QueuedMessage): boolean {
+  const backend = msg.backend ?? 'claude'
+  if (backend === 'codex') return true
+  return (backend === 'opencode' || backend === 'pi') && !hasAttachments(msg)
+}
+
 /**
  * Actions for the queued prompts panel: remove a queued prompt, or send a
  * specific queued prompt immediately.
@@ -49,6 +56,36 @@ export function useQueuedPromptActions() {
       if (worktreeId && worktreePath) {
         persistRemoveQueued(worktreeId, worktreePath, sessionId, messageId)
       }
+    },
+    []
+  )
+
+  const handleEditQueuedMessage = useCallback(
+    async (sessionId: string, messageId: string, message: string) => {
+      const trimmed = message.trim()
+      if (!trimmed) return
+
+      const msg = useChatStore
+        .getState()
+        .getQueuedMessages(sessionId)
+        .find(m => m.id === messageId)
+      if (!msg || supportsSteering(msg)) return
+
+      const { worktreeId, worktreePath } = resolveWorktree(sessionId)
+      if (!worktreeId || !worktreePath) return
+
+      const updated = await persistUpdateQueued(
+        worktreeId,
+        worktreePath,
+        sessionId,
+        messageId,
+        trimmed
+      )
+      if (!updated) return
+
+      useChatStore
+        .getState()
+        .updateQueuedMessage(sessionId, messageId, trimmed)
     },
     []
   )
@@ -138,5 +175,9 @@ export function useQueuedPromptActions() {
     [handleRemoveQueuedMessage]
   )
 
-  return { handleRemoveQueuedMessage, handleSendQueuedNow }
+  return {
+    handleRemoveQueuedMessage,
+    handleEditQueuedMessage,
+    handleSendQueuedNow,
+  }
 }

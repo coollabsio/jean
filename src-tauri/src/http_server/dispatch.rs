@@ -2623,6 +2623,23 @@ pub async fn dispatch_command(
             .await?;
             Ok(Value::Null)
         }
+        "update_queued_message" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message_id: String = field(&args, "messageId", "message_id")?;
+            let message: String = from_field(&args, "message")?;
+            let result = crate::chat::update_queued_message(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                message_id,
+                message,
+            )
+            .await?;
+            to_value(result)
+        }
         "clear_message_queue" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

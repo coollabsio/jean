@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronRight, Clock, Paperclip, Play, X } from 'lucide-react'
+import { Check, ChevronRight, Clock, Paperclip, Pencil, Play, X } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
@@ -20,6 +20,7 @@ interface QueuedPromptsPanelProps {
   isSessionBusy: boolean
   onRemove: (sessionId: string, messageId: string) => void
   onSendNow: (sessionId: string, messageId: string) => void
+  onEdit: (sessionId: string, messageId: string, message: string) => void
 }
 
 function attachmentCount(msg: QueuedMessage): number {
@@ -29,6 +30,15 @@ function attachmentCount(msg: QueuedMessage): number {
     msg.pendingSkills.length +
     msg.pendingTextFiles.length
   )
+}
+
+function canEditQueuedMessage(msg: QueuedMessage): boolean {
+  const backend = msg.backend ?? 'claude'
+  if (backend === 'codex') return false
+  if ((backend === 'opencode' || backend === 'pi') && attachmentCount(msg) === 0) {
+    return false
+  }
+  return true
 }
 
 /**
@@ -46,9 +56,12 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   isSessionBusy,
   onRemove,
   onSendNow,
+  onEdit,
 }: QueuedPromptsPanelProps) {
   const [isOpen, setIsOpen] = useState(true)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const rowRefs = useRef<(HTMLDivElement | null)[]>([])
 
@@ -109,6 +122,24 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
     [messages, selectedIndex, sessionId, onRemove, onSendNow, scrollRowIntoView]
   )
 
+  const startEditing = useCallback((msg: QueuedMessage) => {
+    setEditingId(msg.id)
+    setEditingText(msg.message)
+  }, [])
+
+  const cancelEditing = useCallback(() => {
+    setEditingId(null)
+    setEditingText('')
+  }, [])
+
+  const saveEditing = useCallback(() => {
+    if (!editingId) return
+    const next = editingText.trim()
+    if (!next) return
+    onEdit(sessionId, editingId, next)
+    cancelEditing()
+  }, [cancelEditing, editingId, editingText, onEdit, sessionId])
+
   if (messages.length === 0) return null
 
   return (
@@ -143,6 +174,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
             {messages.map((msg, index) => {
               const isSelected = index === selectedIndex
               const attachments = attachmentCount(msg)
+              const isEditing = editingId === msg.id
               return (
                 <div
                   key={msg.id}
@@ -161,9 +193,30 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   <span className="shrink-0 text-muted-foreground/60 tabular-nums">
                     #{index + 1}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-foreground">
-                    {msg.message}
-                  </span>
+                  {isEditing ? (
+                    <textarea
+                      aria-label="Queued prompt text"
+                      value={editingText}
+                      onChange={e => setEditingText(e.target.value)}
+                      onClick={e => e.stopPropagation()}
+                      onKeyDown={e => {
+                        e.stopPropagation()
+                        if (e.key === 'Escape') {
+                          e.preventDefault()
+                          cancelEditing()
+                        } else if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          saveEditing()
+                        }
+                      }}
+                      className="min-h-8 flex-1 resize-none rounded border border-input bg-background px-2 py-1 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      autoFocus
+                    />
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {msg.message}
+                    </span>
+                  )}
                   {attachments > 0 && (
                     <span className="flex shrink-0 items-center gap-0.5 rounded bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground">
                       <Paperclip className="h-2.5 w-2.5" />
@@ -178,42 +231,90 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                         : 'opacity-0 group-hover:opacity-100'
                     )}
                   >
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                    {isEditing ? (
+                      <>
                         <button
                           type="button"
-                          aria-label="Remove from queue"
+                          aria-label="Save queued prompt"
+                          disabled={!editingText.trim()}
                           onClick={e => {
                             e.stopPropagation()
-                            onRemove(sessionId, msg.id)
+                            saveEditing()
                           }}
-                          className="rounded p-0.5 text-muted-foreground hover:bg-destructive hover:text-white transition-colors"
+                          className="rounded p-0.5 text-muted-foreground hover:bg-green-600 hover:text-white disabled:opacity-40 transition-colors"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Cancel queued prompt edit"
+                          onClick={e => {
+                            e.stopPropagation()
+                            cancelEditing()
+                          }}
+                          className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
-                      </TooltipTrigger>
-                      <TooltipContent>Remove from queue</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="Send now"
-                          onClick={e => {
-                            e.stopPropagation()
-                            onSendNow(sessionId, msg.id)
-                          }}
-                          className="rounded p-0.5 text-muted-foreground hover:bg-green-600 hover:text-white transition-colors"
-                        >
-                          <Play className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {isSessionBusy
-                          ? 'Send now (interrupts current run)'
-                          : 'Send now'}
-                      </TooltipContent>
-                    </Tooltip>
+                      </>
+                    ) : (
+                      <>
+                        {canEditQueuedMessage(msg) && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label="Edit queued prompt"
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  startEditing(msg)
+                                }}
+                                className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>Edit queued prompt</TooltipContent>
+                          </Tooltip>
+                        )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label="Remove from queue"
+                              onClick={e => {
+                                e.stopPropagation()
+                                onRemove(sessionId, msg.id)
+                              }}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-destructive hover:text-white transition-colors"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Remove from queue</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label="Send now"
+                              onClick={e => {
+                                e.stopPropagation()
+                                onSendNow(sessionId, msg.id)
+                              }}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-green-600 hover:text-white transition-colors"
+                            >
+                              <Play className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {isSessionBusy
+                              ? 'Send now (interrupts current run)'
+                              : 'Send now'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </>
+                    )}
                   </div>
                 </div>
               )

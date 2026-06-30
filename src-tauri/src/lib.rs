@@ -4697,6 +4697,7 @@ pub fn run() {
             chat::enqueue_message,
             chat::dequeue_message,
             chat::remove_queued_message,
+            chat::update_queued_message,
             chat::clear_message_queue,
             chat::move_queued_message_front,
             chat::steer_codex_turn,

@@ -2665,6 +2665,26 @@ export function persistRemoveQueued(
 }
 
 /**
+ * Persist a queued message text edit.
+ * Returns false when the message is no longer queued.
+ */
+export async function persistUpdateQueued(
+  worktreeId: string,
+  worktreePath: string,
+  sessionId: string,
+  messageId: string,
+  message: string
+): Promise<boolean> {
+  return invoke<boolean>('update_queued_message', {
+    worktreeId,
+    worktreePath,
+    sessionId,
+    messageId,
+    message,
+  })
+}
+
+/**
  * Atomically move a specific queued message to the front of the persisted queue.
  * Returns false when the message is no longer queued (another client dequeued
  * or removed it) — callers must abort their send-now flow in that case.
