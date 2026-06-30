@@ -9,8 +9,13 @@ describe('useCommandContext session rename wiring', () => {
   it('falls back to the selected worktree when dispatching rename-session', () => {
     const source = readSource('src/hooks/use-command-context.ts')
     const start = source.indexOf('const renameSession = useCallback(')
-    const end = source.indexOf('\n\n  // Worktrees - Create new worktree', start)
-    const renameSession = start === -1 || end === -1 ? '' : source.slice(start, end)
+    // Anchor on the callback's closing `}, [...])` rather than a comment or
+    // blank-line spacing, so harmless refactors above/below don't silently
+    // truncate the extracted body to '' and mask a real regression.
+    const close = source.indexOf('\n  }, [', start)
+    const end = close === -1 ? -1 : source.indexOf(')', close)
+    const renameSession =
+      start === -1 || end === -1 ? '' : source.slice(start, end)
 
     expect(renameSession).toContain('useProjectsStore.getState().selectedWorktreeId')
     expect(renameSession).toContain("new CustomEvent('command:rename-session'")

@@ -20,8 +20,8 @@ describe('SessionChatModal removal behavior', () => {
   it('keeps rename input out of the clickable tab button to avoid accidental close/cancel', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
 
-    expect(source).not.toContain('<button\n                            data-session-id=')
-    expect(source).toContain('<div\n                            data-session-id=')
+    expect(source).not.toMatch(/<button\s+data-session-id=/)
+    expect(source).toMatch(/<div\s+data-session-id=/)
     expect(source).toContain('onPointerDown={e => e.stopPropagation()}')
   })
 
