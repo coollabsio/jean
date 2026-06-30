@@ -65,8 +65,8 @@ export function useQueuedPromptActions() {
       const trimmed = message.trim()
       if (!trimmed) return
 
-      const msg = useChatStore
-        .getState()
+      const store = useChatStore.getState()
+      const msg = store
         .getQueuedMessages(sessionId)
         .find(m => m.id === messageId)
       if (!msg || supportsSteering(msg)) return
@@ -74,18 +74,27 @@ export function useQueuedPromptActions() {
       const { worktreeId, worktreePath } = resolveWorktree(sessionId)
       if (!worktreeId || !worktreePath) return
 
-      const updated = await persistUpdateQueued(
-        worktreeId,
-        worktreePath,
-        sessionId,
-        messageId,
-        trimmed
-      )
-      if (!updated) return
-
-      useChatStore
-        .getState()
-        .updateQueuedMessage(sessionId, messageId, trimmed)
+      try {
+        const updated = await persistUpdateQueued(
+          worktreeId,
+          worktreePath,
+          sessionId,
+          messageId,
+          trimmed
+        )
+        if (!updated) {
+          // Another client already dequeued it — drop the stale local copy.
+          store.removeQueuedMessage(sessionId, messageId)
+          return
+        }
+        store.updateQueuedMessage(sessionId, messageId, trimmed)
+      } catch (error) {
+        logger.error('Failed to persist queued edit', {
+          error,
+          sessionId,
+          messageId,
+        })
+      }
     },
     []
   )
