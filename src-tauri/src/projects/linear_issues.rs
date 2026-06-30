@@ -276,7 +276,7 @@ fn is_trusted_linear_image_url(url: &str) -> bool {
     }
     parsed
         .host_str()
-        .map(|host| host == "uploads.linear.app" || host.ends_with(".linear.app"))
+        .map(|host| host == "uploads.linear.app" || host.ends_with(".uploads.linear.app"))
         .unwrap_or(false)
 }
 
@@ -374,18 +374,16 @@ async fn download_linear_context_image(
     hasher.update(url.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
 
-    let response = client
+    let mut response = client
         .get(url)
         .header("Authorization", api_key)
         .send()
         .await
         .map_err(|e| format!("Failed to download Linear image: {e}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Linear image download failed with status {}",
-            response.status()
-        ));
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Linear image download failed with status {status}"));
     }
 
     let content_type = response
@@ -401,12 +399,16 @@ async fn download_linear_context_image(
         }
     }
 
-    let bytes = response
-        .bytes()
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| format!("Failed to read Linear image bytes: {e}"))?;
-    if bytes.len() > MAX_LINEAR_CONTEXT_IMAGE_BYTES {
-        return Err("Linear image is too large to cache".to_string());
+        .map_err(|e| format!("Failed to read Linear image bytes: {e}"))?
+    {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_LINEAR_CONTEXT_IMAGE_BYTES {
+            return Err("Linear image is too large to cache".to_string());
+        }
     }
 
     std::fs::create_dir_all(cache_dir)
@@ -1263,6 +1265,7 @@ mod tests {
             "![one](https://uploads.linear.app/a.png)\n",
             "<img src=\"https://uploads.linear.app/b.jpg\" />\n",
             "![skip](https://example.com/not-linear.png)\n",
+            "![skip](https://workspace.linear.app/not-upload.png)\n",
             "![skip](http://uploads.linear.app/insecure.png)\n"
         );
 
