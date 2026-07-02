@@ -14,6 +14,8 @@ use crate::projects::types::{Project, ProjectAutoFixSettings, Worktree, Worktree
 const AUTO_FIX_TICK_SECONDS: u64 = 10;
 const AUTO_YOLO_WATCH_SECONDS: u64 = 2;
 const AUTO_YOLO_WATCH_ATTEMPTS: usize = 900; // 30 minutes
+const AUTO_FIX_WORKTREE_READY_POLL_MS: u64 = 500;
+const AUTO_FIX_WORKTREE_READY_ATTEMPTS: usize = 240; // 2 minutes
 
 #[derive(Debug, Clone)]
 struct PendingAutoYolo {
@@ -461,17 +463,33 @@ async fn start_issue_auto_fix(
 }
 
 async fn wait_for_worktree_ready(app: &AppHandle, worktree_id: &str) -> Result<Worktree, String> {
-    for _ in 0..30 {
-        if let Ok(worktree) =
-            crate::projects::get_worktree(app.clone(), worktree_id.to_string()).await
-        {
-            return Ok(worktree);
+    let mut last_error: Option<String> = None;
+    for _ in 0..AUTO_FIX_WORKTREE_READY_ATTEMPTS {
+        match crate::projects::get_worktree(app.clone(), worktree_id.to_string()).await {
+            Ok(worktree) => return Ok(worktree),
+            Err(err) => last_error = Some(err),
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(AUTO_FIX_WORKTREE_READY_POLL_MS)).await;
     }
-    Err(format!(
-        "Timed out waiting for Mr. Robot worktree {worktree_id} to be ready"
+    Err(worktree_ready_timeout_message(
+        worktree_id,
+        last_error.as_deref(),
     ))
+}
+
+fn auto_fix_worktree_ready_timeout() -> Duration {
+    Duration::from_millis(AUTO_FIX_WORKTREE_READY_POLL_MS * AUTO_FIX_WORKTREE_READY_ATTEMPTS as u64)
+}
+
+fn worktree_ready_timeout_message(worktree_id: &str, last_error: Option<&str>) -> String {
+    let timeout_secs = auto_fix_worktree_ready_timeout().as_secs();
+    let mut message = format!(
+        "Timed out after {timeout_secs}s waiting for Mr. Robot worktree {worktree_id} to be ready"
+    );
+    if let Some(error) = last_error {
+        message.push_str(&format!(". Last error: {error}"));
+    }
+    message
 }
 
 async fn run_auto_yolo_watch(app: &AppHandle) {
@@ -966,6 +984,20 @@ mod tests {
 
         clear_auto_yolo_in_flight(&mut in_flight, "session-1");
         assert!(mark_auto_yolo_in_flight(&mut in_flight, "session-1"));
+    }
+
+    #[test]
+    fn worktree_ready_waits_two_minutes() {
+        assert_eq!(auto_fix_worktree_ready_timeout(), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn worktree_ready_timeout_message_includes_last_error() {
+        let message =
+            worktree_ready_timeout_message("worktree-1", Some("Worktree not found: worktree-1"));
+
+        assert!(message.contains("worktree-1"));
+        assert!(message.contains("Last error: Worktree not found: worktree-1"));
     }
 
     #[test]
