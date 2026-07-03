@@ -195,6 +195,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "pi" => Backend::Pi,
         "commandcode" => Backend::Commandcode,
         "grok" => Backend::Grok,
+        "antigravity" => Backend::Antigravity,
         _ => Backend::Claude,
     };
 
@@ -216,6 +217,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "pi" => Backend::Pi,
                         "commandcode" => Backend::Commandcode,
                         "grok" => Backend::Grok,
+                        "antigravity" => Backend::Antigravity,
                         "claude" => Backend::Claude,
                         _ => resolved,
                     };
@@ -241,6 +243,7 @@ pub(crate) fn resolve_magic_prompt_backend(
             "pi" => return Backend::Pi,
             "commandcode" => return Backend::Commandcode,
             "grok" => return Backend::Grok,
+            "antigravity" => return Backend::Antigravity,
             "codex" => return Backend::Codex,
             "claude" => return Backend::Claude,
             _ => {}
@@ -260,6 +263,8 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Commandcode
     } else if crate::is_grok_model(model) {
         Backend::Grok
+    } else if crate::is_antigravity_model(model) {
+        Backend::Antigravity
     } else if crate::is_codex_model(model) {
         Backend::Codex
     } else {
@@ -301,6 +306,7 @@ fn default_model_for_backend(
         Backend::Pi => &preferences.selected_pi_model,
         Backend::Commandcode => &preferences.selected_commandcode_model,
         Backend::Grok => &preferences.selected_grok_model,
+        Backend::Antigravity => &preferences.selected_antigravity_model,
         Backend::Claude => &preferences.selected_model,
     };
 
@@ -685,6 +691,7 @@ pub async fn create_session(
         Some("pi") => Backend::Pi,
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
+        Some("antigravity") => Backend::Antigravity,
         Some("claude") => Backend::Claude,
         _ => {
             // No explicit backend — check project default, then global preference
@@ -702,6 +709,8 @@ pub async fn create_session(
                     resolved = Backend::Commandcode;
                 } else if prefs.default_backend == "grok" {
                     resolved = Backend::Grok;
+                } else if prefs.default_backend == "antigravity" {
+                    resolved = Backend::Antigravity;
                 }
             }
             // Check project-level override
@@ -723,6 +732,7 @@ pub async fn create_session(
                             "pi" => Backend::Pi,
                             "commandcode" => Backend::Commandcode,
                             "grok" => Backend::Grok,
+                            "antigravity" => Backend::Antigravity,
                             "claude" => Backend::Claude,
                             _ => resolved,
                         };
@@ -1531,8 +1541,10 @@ fn plan_mode_content_waits_for_approval(
     has_content: bool,
     has_plan_tool: bool,
 ) -> bool {
-    matches!(backend, Backend::Codex | Backend::Opencode | Backend::Grok)
-        && execution_mode == Some("plan")
+    matches!(
+        backend,
+        Backend::Codex | Backend::Opencode | Backend::Grok | Backend::Antigravity
+    ) && execution_mode == Some("plan")
         && has_content
         && !has_plan_tool
 }
@@ -2254,6 +2266,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         // run continues the worktree conversation via `-c`.
         Backend::Commandcode => session.commandcode_session_id = Some(sid.to_string()),
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
+        Backend::Antigravity => session.antigravity_session_id = Some(sid.to_string()),
     }
 }
 
@@ -2564,6 +2577,9 @@ pub async fn send_chat_message(
     let grok_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.grok_session_id.clone());
+    let antigravity_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.antigravity_session_id.clone());
     // Command Code has no native resume id; a non-empty sentinel marks that a
     // prior Command Code turn completed in this worktree, so the next run can
     // pass `-c` (cwd-scoped continue) to resume the conversation.
@@ -2730,6 +2746,7 @@ pub async fn send_chat_message(
                     Backend::Pi => {}
                     Backend::Commandcode => {}
                     Backend::Grok => {}
+                    Backend::Antigravity => {}
                 }
             }
         }
@@ -2781,6 +2798,7 @@ pub async fn send_chat_message(
     let thread_cursor_chat_id = cursor_chat_id.clone();
     let thread_pi_session_id = pi_session_id.clone();
     let thread_grok_session_id = grok_session_id.clone();
+    let thread_antigravity_session_id = antigravity_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
@@ -4278,6 +4296,38 @@ pub async fn send_chat_message(
                     }
                 }
             }
+            Backend::Antigravity => {
+                match super::antigravity::execute_antigravity(
+                    &thread_app,
+                    &thread_session_id,
+                    &thread_worktree_id,
+                    std::path::Path::new(&thread_working_dir),
+                    thread_antigravity_session_id.as_deref(),
+                    thread_model.as_deref(),
+                    thread_execution_mode.as_deref(),
+                    &thread_message,
+                    Some(make_pid_callback()),
+                ) {
+                    Ok(response) => Ok((
+                        0,
+                        UnifiedResponse {
+                            content: response.content,
+                            resume_id: response.conversation_id,
+                            tool_calls: response.tool_calls,
+                            content_blocks: response.content_blocks,
+                            cancelled: response.cancelled,
+                            waiting_for_plan: false,
+                            error_emitted: false,
+                            usage: response.usage,
+                            backend: Backend::Antigravity,
+                        },
+                    )),
+                    Err(e) => {
+                        log::error!("execute_antigravity FAILED: {e}");
+                        Err(e)
+                    }
+                }
+            }
         };
 
         let _ = tx.send(result);
@@ -4417,7 +4467,12 @@ pub async fn send_chat_message(
     // but are intentionally excluded from visible chat history on reload.
     if matches!(
         unified_response.backend,
-        Backend::Opencode | Backend::Cursor | Backend::Pi | Backend::Commandcode | Backend::Grok
+        Backend::Opencode
+            | Backend::Cursor
+            | Backend::Pi
+            | Backend::Commandcode
+            | Backend::Grok
+            | Backend::Antigravity
     ) && !unified_response.cancelled
     {
         if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&output_file) {
@@ -4613,6 +4668,9 @@ pub async fn send_chat_message(
                         Backend::Grok => {
                             session.grok_session_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::Antigravity => {
+                            session.antigravity_session_id = Some(resume_id_for_log.clone());
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -4759,6 +4817,9 @@ pub async fn send_chat_message(
                     Backend::Grok => {
                         session.grok_session_id = Some(resume_id_for_log.clone());
                     }
+                    Backend::Antigravity => {
+                        session.antigravity_session_id = Some(resume_id_for_log.clone());
+                    }
                 }
             }
 
@@ -4858,6 +4919,7 @@ pub async fn clear_session_history(
             session.pi_session_id = None;
             session.commandcode_session_id = None;
             session.grok_session_id = None;
+            session.antigravity_session_id = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_effort_level = selected_effort_level;
@@ -4981,6 +5043,7 @@ pub async fn set_session_backend(
                 "pi" => super::types::Backend::Pi,
                 "commandcode" => super::types::Backend::Commandcode,
                 "grok" => super::types::Backend::Grok,
+                "antigravity" => super::types::Backend::Antigravity,
                 _ => super::types::Backend::Claude,
             };
             log::trace!("Backend selection saved");
@@ -7107,6 +7170,7 @@ pub async fn get_session_debug_info(
     let cursor_chat_id = session.and_then(|s| s.cursor_chat_id.clone());
     let pi_session_id = session.and_then(|s| s.pi_session_id.clone());
     let grok_session_id = session.and_then(|s| s.grok_session_id.clone());
+    let antigravity_session_id = session.and_then(|s| s.antigravity_session_id.clone());
 
     // Try to find Claude CLI's JSONL file
     let claude_jsonl_file = claude_session_id.as_ref().and_then(|sid| {
@@ -7192,6 +7256,7 @@ pub async fn get_session_debug_info(
         pi_session_id,
         commandcode_session_id: None,
         grok_session_id,
+        antigravity_session_id,
         claude_jsonl_file,
         run_log_files,
         total_usage,

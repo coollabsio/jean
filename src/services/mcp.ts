@@ -300,6 +300,7 @@ export const BACKEND_LABELS: Record<CliBackend, string> = {
   pi: 'PI',
   commandcode: 'Command Code',
   grok: 'Grok',
+  antigravity: 'Antigravity',
 }
 
 /** Group servers by their backend field */

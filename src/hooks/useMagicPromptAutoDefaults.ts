@@ -12,6 +12,8 @@ import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
 } from '@/types/preferences'
 
 /**
@@ -36,6 +38,7 @@ export function useMagicPromptAutoDefaults() {
     const hasPi = installedBackends.includes('pi')
     const hasCommandcode = installedBackends.includes('commandcode')
     const hasGrok = installedBackends.includes('grok')
+    const hasAntigravity = installedBackends.includes('antigravity')
 
     // If claude is installed (or nothing detected yet), keep Claude defaults
     if (hasClaude || installedBackends.length === 0) {
@@ -72,6 +75,12 @@ export function useMagicPromptAutoDefaults() {
       patchPreferences.mutate({
         magic_prompt_models: GROK_DEFAULT_MAGIC_PROMPT_MODELS,
         magic_prompt_backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
+        magic_models_auto_initialized: true,
+      })
+    } else if (hasAntigravity) {
+      patchPreferences.mutate({
+        magic_prompt_models: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+        magic_prompt_backends: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
         magic_models_auto_initialized: true,
       })
     }

@@ -5,6 +5,7 @@ import {
   MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatCommandCodeModelLabel,
@@ -21,6 +22,7 @@ import {
   isCommandCodeModel,
   isCursorModel,
   isGrokModel,
+  isAntigravityModel,
   isOpenCodeModel,
   isPiModel,
 } from '@/types/preferences'
@@ -33,6 +35,7 @@ const ALL_MODEL_OPTIONS = [
   ...CURSOR_MODEL_OPTIONS,
   ...PI_MODEL_OPTIONS,
   ...GROK_MODEL_OPTIONS,
+  ...ANTIGRAVITY_MODEL_OPTIONS,
 ]
 
 export function getMessageModelLabel(model: string): string {
@@ -76,6 +79,7 @@ export function getMessagePromptModelLabel(model: string): string {
   if (isCursorModel(model)) return `Cursor · ${getMessageModelLabel(model)}`
   if (isPiModel(model)) return `PI · ${getMessageModelLabel(model)}`
   if (isGrokModel(model)) return `Grok · ${formatGrokPromptModelLabel(model)}`
+  if (isAntigravityModel(model)) return `Antigravity · ${getMessageModelLabel(model)}`
   if (isClaudeMessageModel(model))
     return `Claude · ${getMessageModelLabel(model)}`
   return getMessageModelLabel(model)

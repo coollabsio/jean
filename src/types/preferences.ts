@@ -804,6 +804,10 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 export const GROK_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('grok/grok-composer-2.5-fast')
 
+/** Antigravity preset for all magic prompts */
+export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
+  makeMagicPromptModelsPreset('Gemini 3.5 Flash (Low)')
+
 /** Default reasoning efforts for Claude backend (null = use model default) */
 export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_issue_effort: null,
@@ -981,6 +985,8 @@ export const PI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('pi')
 export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('commandcode')
 export const GROK_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('grok')
+export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS =
+  makeBackendsPreset('antigravity')
 
 /**
  * Resolve a magic prompt provider for a given key.
@@ -1099,6 +1105,7 @@ export interface AppPreferences {
   selected_pi_model: PiModel // Default PI model
   selected_commandcode_model?: string // Default Command Code model (CLI default)
   selected_grok_model: GrokModel // Default Grok model
+  selected_antigravity_model: AntigravityModel // Default Antigravity model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
   codex_goal_execution_mode: CodexGoalExecutionMode // Execution mode used when starting a Codex /goal
   codex_multi_agent_enabled: boolean // Enable Codex multi-agent collaboration (experimental)
@@ -1122,6 +1129,7 @@ export interface AppPreferences {
   codex_cli_source: 'jean' | 'path' // Codex CLI source: 'jean' (managed) or 'path' (system PATH)
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   grok_cli_source: 'jean' | 'path' // Grok CLI source: 'jean' (managed) or 'path' (system PATH)
+  antigravity_cli_source: 'jean' | 'path' // Antigravity CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
   commandcode_cli_source?: 'jean' | 'path' // Command Code CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1501,6 +1509,7 @@ export type CursorModel = `cursor/${string}`
 export type PiModel = `pi/${string}`
 export type CommandCodeModel = `commandcode/${string}`
 export type GrokModel = `grok/${string}`
+export type AntigravityModel = string
 export type MagicPromptModel =
   | ClaudeModel
   | CodexModel
@@ -1509,6 +1518,7 @@ export type MagicPromptModel =
   | PiModel
   | CommandCodeModel
   | GrokModel
+  | AntigravityModel
 
 /** Check if a model string identifies an OpenCode model */
 export function isOpenCodeModel(model: string): model is OpenCodeModel {
@@ -1532,6 +1542,21 @@ export function isCommandCodeModel(model: string): model is CommandCodeModel {
 /** Check if a model string identifies a Grok model */
 export function isGrokModel(model: string): model is GrokModel {
   return model.startsWith('grok/')
+}
+
+const KNOWN_ANTIGRAVITY_MODELS = [
+  'Gemini 3.5 Flash (Low)',
+  'Gemini 3.5 Flash (Medium)',
+  'Gemini 3.5 Flash (High)',
+  'Claude Sonnet 4.6 (Thinking)',
+]
+
+/** Check if a model string identifies an Antigravity model */
+export function isAntigravityModel(model: string): model is AntigravityModel {
+  return (
+    model.startsWith('antigravity/') ||
+    KNOWN_ANTIGRAVITY_MODELS.includes(model)
+  )
 }
 
 /** Check if a model string identifies a Codex model */
@@ -1562,6 +1587,7 @@ export type CliBackend =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
 
 export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'claude', label: 'Claude' },
@@ -1571,6 +1597,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'pi', label: 'Pi (Beta)' },
   { value: 'commandcode', label: 'Command Code (Beta)' },
   { value: 'grok', label: 'Grok (Beta)' },
+  { value: 'antigravity', label: 'Antigravity' },
 ]
 
 export type TerminalApp =
@@ -1670,6 +1697,7 @@ export const newSessionKindOptions: {
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
   { value: 'grok', label: 'Grok (Beta)' },
+  { value: 'antigravity', label: 'Antigravity' },
 ]
 
 export function getNewSessionKindLabel(
@@ -1960,6 +1988,7 @@ export const defaultPreferences: AppPreferences = {
   selected_pi_model: 'pi/sonnet', // Default PI model
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
   selected_grok_model: 'grok/grok-composer-2.5-fast', // Default Grok model
+  selected_antigravity_model: 'Gemini 3.5 Flash (Low)', // Default Antigravity model
   default_codex_reasoning_effort: 'high', // Default: high reasoning
   codex_goal_execution_mode: 'build', // Default: build mode for goals
   codex_multi_agent_enabled: true, // Default: enabled to match parallel execution prompting
@@ -1983,6 +2012,7 @@ export const defaultPreferences: AppPreferences = {
   codex_cli_source: 'jean', // Default: Jean-managed
   opencode_cli_source: 'jean', // Default: Jean-managed
   grok_cli_source: 'jean', // Default: Jean-managed
+  antigravity_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed
   commandcode_cli_source: 'jean', // Default: Jean-managed

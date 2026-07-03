@@ -97,6 +97,13 @@ import {
   useAvailableGrokModels,
   grokCliQueryKeys,
 } from '@/services/grok-cli'
+import {
+  useAntigravityCliStatus,
+  useAntigravityCliAuth,
+  useAntigravityPathDetection,
+  useAvailableAntigravityModels,
+  antigravityCliQueryKeys,
+} from '@/services/antigravity-cli'
 import type { ClaudeAuthStatus } from '@/types/claude-cli'
 import type { GhAuthStatus } from '@/types/gh-cli'
 import type { CodexAuthStatus } from '@/types/codex-cli'
@@ -106,6 +113,7 @@ import type { CursorAuthStatus } from '@/types/cursor-cli'
 import type { PiAuthStatus } from '@/types/pi-cli'
 import type { CommandCodeAuthStatus } from '@/types/commandcode-cli'
 import type { GrokAuthStatus } from '@/types/grok-cli'
+import type { AntigravityAuthStatus } from '@/types/antigravity-cli'
 import {
   Select,
   SelectContent,
@@ -155,6 +163,7 @@ import {
   type CursorModel,
   type PiModel,
   type GrokModel,
+  type AntigravityModel,
   type CliBackend,
   type TerminalApp,
   type EditorApp,
@@ -170,6 +179,7 @@ import {
   GROK_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatCursorModelLabel,
@@ -224,6 +234,7 @@ type PreferencesPaneScope =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
   | 'github'
   | 'coderabbit'
 
@@ -249,6 +260,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     | 'coderabbit'
     | 'commandcode'
     | 'grok'
+    | 'antigravity'
     | null
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
@@ -272,6 +284,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const { data: piPathDetection } = usePiPathDetection()
   const { data: commandcodePathDetection } = useCommandCodePathDetection()
   const { data: grokPathDetection } = useGrokPathDetection()
+  const { data: antigravityPathDetection } = useAntigravityPathDetection()
 
   // CLI status hooks
   const { data: cliStatus, isLoading: isCliLoading } = useClaudeCliStatus()
@@ -290,6 +303,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const { data: commandcodeStatus, isLoading: isCommandCodeLoading } =
     useCommandCodeCliStatus()
   const { data: grokStatus, isLoading: isGrokLoading } = useGrokCliStatus()
+  const { data: antigravityStatus, isLoading: isAntigravityLoading } = useAntigravityCliStatus()
   const isGhPathSource = preferences?.gh_cli_source === 'path'
   const { data: ghVersions, isLoading: isGhVersionsLoading } =
     useAvailableGhVersions({ enabled: isGhPathSource && !!ghStatus?.installed })
@@ -386,6 +400,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const { data: availableGrokModels } = useAvailableGrokModels({
     enabled: !!grokStatus?.installed,
   })
+  const { data: antigravityAuth, isLoading: isAntigravityAuthLoading } = useAntigravityCliAuth({
+    enabled: !!antigravityStatus?.installed,
+  })
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: !!antigravityStatus?.installed,
+  })
 
   // Re-check CLI status when the source preference changes (handles initial load
   // with source already set to "path" and any timing issues with onSuccess invalidation)
@@ -396,6 +416,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     opencode: preferences?.opencode_cli_source,
     pi: preferences?.pi_cli_source,
     grok: preferences?.grok_cli_source,
+    antigravity: preferences?.antigravity_cli_source,
     coderabbit: preferences?.coderabbit_cli_source,
     commandcode: preferences?.commandcode_cli_source,
   })
@@ -407,6 +428,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       opencode: preferences?.opencode_cli_source,
       pi: preferences?.pi_cli_source,
       grok: preferences?.grok_cli_source,
+      antigravity: preferences?.antigravity_cli_source,
       coderabbit: preferences?.coderabbit_cli_source,
       commandcode: preferences?.commandcode_cli_source,
     }
@@ -424,6 +446,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
     if (cur.grok !== prevSources.current.grok) {
       queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.status() })
+    }
+    if (cur.antigravity !== prevSources.current.antigravity) {
+      queryClient.invalidateQueries({ queryKey: antigravityCliQueryKeys.status() })
     }
     if (cur.coderabbit !== prevSources.current.coderabbit) {
       queryClient.invalidateQueries({
@@ -445,6 +470,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     preferences?.codex_cli_source,
     preferences?.opencode_cli_source,
     preferences?.grok_cli_source,
+    preferences?.antigravity_cli_source,
     preferences?.coderabbit_cli_source,
     preferences?.commandcode_cli_source,
     queryClient,
@@ -472,6 +498,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const [checkingPiAuth, setCheckingPiAuth] = useState(false)
   const [checkingCommandCodeAuth, setCheckingCommandCodeAuth] = useState(false)
   const [checkingGrokAuth, setCheckingGrokAuth] = useState(false)
+  const [checkingAntigravityAuth, setCheckingAntigravityAuth] = useState(false)
   const [openCodeModelPopoverOpen, setOpenCodeModelPopoverOpen] =
     useState(false)
   const [cursorModelPopoverOpen, setCursorModelPopoverOpen] = useState(false)
@@ -711,6 +738,19 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handleAntigravitySourceChange = (value: 'jean' | 'path') => {
+    if (preferences) {
+      patchPreferences.mutate(
+        { antigravity_cli_source: value },
+        {
+          onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: antigravityCliQueryKeys.all })
+          },
+        }
+      )
+    }
+  }
+
   const handleConfirmDeleteCli = async () => {
     if (!deleteCliTarget) return
     const target = deleteCliTarget
@@ -732,6 +772,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         cmd: 'uninstall_commandcode_cli' as const,
       },
       grok: { name: 'Grok CLI', cmd: 'uninstall_grok_cli' as const },
+      antigravity: { name: 'Antigravity CLI', cmd: 'uninstall_antigravity_cli' as const },
     }
     const { name, cmd } = labelMap[target]
     setIsDeletingCli(true)
@@ -753,7 +794,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     ? 'commandcode_cli_source'
                     : target === 'grok'
                       ? 'grok_cli_source'
-                      : 'coderabbit_cli_source'
+                      : target === 'antigravity'
+                        ? 'antigravity_cli_source'
+                        : 'coderabbit_cli_source'
       await new Promise<void>((resolve, reject) => {
         patchPreferences.mutate(
           { [sourceKey]: 'path' } as Partial<AppPreferences>,
@@ -778,7 +821,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     ? commandcodeCliQueryKeys.all
                     : target === 'grok'
                       ? grokCliQueryKeys.all
-                      : coderabbitCliQueryKeys.all
+                      : target === 'antigravity'
+                        ? antigravityCliQueryKeys.all
+                        : coderabbitCliQueryKeys.all
       queryClient.invalidateQueries({ queryKey: queryKeys })
       const pathFound =
         target === 'claude'
@@ -795,7 +840,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     ? commandcodePathDetection?.found
                     : target === 'grok'
                       ? grokPathDetection?.found
-                      : coderabbitPathDetection?.found
+                      : target === 'antigravity'
+                        ? antigravityPathDetection?.found
+                        : coderabbitPathDetection?.found
       if (pathFound) {
         toast.success(`Jean-managed ${name} removed. Using system PATH.`, {
           id: toastId,
@@ -842,6 +889,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const piInstalled = piStatus?.installed
   const commandcodeInstalled = commandcodeStatus?.installed
   const grokInstalled = grokStatus?.installed
+  const antigravityInstalled = antigravityStatus?.installed
   const installedBackendOptions = useMemo(
     () =>
       backendOptions.filter(option =>
@@ -857,7 +905,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   ? piStatus?.installed
                   : option.value === 'commandcode'
                     ? commandcodeStatus?.installed
-                    : grokStatus?.installed
+                    : option.value === 'grok'
+                      ? grokStatus?.installed
+                      : antigravityStatus?.installed
       ),
     [
       cliStatus?.installed,
@@ -867,6 +917,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       piStatus?.installed,
       commandcodeStatus?.installed,
       grokStatus?.installed,
+      antigravityStatus?.installed,
     ]
   )
 
@@ -879,6 +930,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       pi: piInstalled,
       commandcode: commandcodeInstalled,
       grok: grokInstalled,
+      antigravity: antigravityInstalled,
     }
     if (installed[stored]) return stored
     const first = installedBackendOptions[0]
@@ -892,6 +944,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     piInstalled,
     commandcodeInstalled,
     grokInstalled,
+    antigravityInstalled,
     installedBackendOptions,
   ])
 
@@ -947,6 +1000,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       patchPreferences.mutate({ selected_grok_model: value })
     }
   }
+  const handleAntigravityModelChange = (value: AntigravityModel) => {
+    if (preferences) {
+      patchPreferences.mutate({ selected_antigravity_model: value })
+    }
+  }
 
   const selectedOpenCodeModel =
     preferences?.selected_opencode_model ?? 'opencode/gpt-5.5'
@@ -999,6 +1057,23 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedGrokModelLabel =
     grokModelOptions.find(option => option.value === selectedGrokModel)
       ?.label ?? selectedGrokModel.replace(/^grok\//, '')
+
+  const selectedAntigravityModel =
+    preferences?.selected_antigravity_model ?? 'Gemini 3.5 Flash (Low)'
+  const antigravityModelOptions: { value: AntigravityModel; label: string }[] = (
+    availableAntigravityModels?.length
+      ? availableAntigravityModels.map(model => ({
+          value: model.id as AntigravityModel,
+          label: model.label || model.id,
+        }))
+      : (ANTIGRAVITY_MODEL_OPTIONS as { value: AntigravityModel; label: string }[])
+  ).map(option => ({
+    value: option.value,
+    label: option.label,
+  }))
+  const selectedAntigravityModelLabel =
+    antigravityModelOptions.find(option => option.value === selectedAntigravityModel)
+      ?.label ?? selectedAntigravityModel
   const buildBackendOptions = backendOptions
   const effectiveBuildBackend = (preferences?.build_backend ??
     effectiveBackend) as CliBackend
@@ -1493,6 +1568,38 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
     openCliUpdateModal('grok')
   }, [openCliUpdateModal, patchPreferences, preferences?.grok_cli_source])
+
+  const handleAntigravityLogin = useCallback(async () => {
+    if (!antigravityStatus?.path) return
+    setCheckingAntigravityAuth(true)
+    try {
+      await queryClient.invalidateQueries({
+        queryKey: antigravityCliQueryKeys.auth(),
+      })
+      const result = await queryClient.fetchQuery<AntigravityAuthStatus>({
+        queryKey: antigravityCliQueryKeys.auth(),
+      })
+      if (result?.authenticated) {
+        toast.success('Antigravity CLI is already authenticated')
+        return
+      }
+    } finally {
+      setCheckingAntigravityAuth(false)
+    }
+    openCliLoginModal('antigravity', antigravityStatus.path, ['login'])
+  }, [antigravityStatus?.path, openCliLoginModal, queryClient])
+
+  const handleAntigravityRelogin = useCallback(() => {
+    if (!antigravityStatus?.path) return
+    openCliLoginModal('antigravity', antigravityStatus.path, ['login'])
+  }, [antigravityStatus?.path, openCliLoginModal])
+
+  const handleAntigravityInstall = useCallback(() => {
+    if (preferences?.antigravity_cli_source !== 'jean') {
+      patchPreferences.mutate({ antigravity_cli_source: 'jean' })
+    }
+    openCliUpdateModal('antigravity')
+  }, [openCliUpdateModal, patchPreferences, preferences?.antigravity_cli_source])
 
   const handleCopyPath = useCallback((path: string | null | undefined) => {
     if (!path) return
@@ -3321,6 +3428,164 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         </SettingsSection>
       )}
 
+      {scope === 'antigravity' && (
+        <SettingsSection
+          title={
+            <span className="inline-flex items-center gap-2">
+              <BackendLabel backend="antigravity" />
+              <span>Settings</span>
+            </span>
+          }
+          anchorId="pref-antigravity-section-settings"
+          actions={
+            antigravityStatus?.installed ? (
+              checkingAntigravityAuth || isAntigravityAuthLoading ? (
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="size-3 animate-spin" />
+                  Checking...
+                </span>
+              ) : antigravityAuth?.authenticated ? (
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  Logged in
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAntigravityRelogin}
+                  >
+                    Relogin
+                  </Button>
+                </span>
+              ) : (
+                <Button variant="outline" size="sm" onClick={handleAntigravityLogin}>
+                  Login
+                </Button>
+              )
+            ) : (
+              <Button variant="outline" size="sm" onClick={handleAntigravityInstall}>
+                Install
+              </Button>
+            )
+          }
+        >
+          <div className="space-y-4">
+            <InlineField
+              label={antigravityStatus?.installed ? 'Version' : 'Status'}
+              description={
+                antigravityStatus?.installed
+                  ? 'Enables Antigravity sessions through the Antigravity CLI.'
+                  : 'Antigravity can be Jean-managed or discovered from your system PATH.'
+              }
+            >
+              {isAntigravityLoading ? (
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              ) : antigravityStatus?.installed ? (
+                <Button
+                  variant="outline"
+                  className="w-full sm:w-40 justify-between"
+                  onClick={handleAntigravityInstall}
+                >
+                  {antigravityStatus.version ?? 'Installed'}
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    Not found in PATH
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAntigravityInstall}
+                  >
+                    Install now
+                  </Button>
+                </div>
+              )}
+            </InlineField>
+            {antigravityAuth?.error && (
+              <p className="text-xs text-muted-foreground">{antigravityAuth.error}</p>
+            )}
+            <InlineField
+              label="Source"
+              description={
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() =>
+                        handleCopyPath(
+                          preferences?.antigravity_cli_source === 'path'
+                            ? antigravityPathDetection?.path
+                            : antigravityStatus?.path
+                        )
+                      }
+                      className="text-left hover:underline cursor-pointer"
+                    >
+                      {preferences?.antigravity_cli_source === 'path'
+                        ? (antigravityPathDetection?.path ?? 'System PATH')
+                        : (antigravityStatus?.path ?? 'Not installed')}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Click to copy path</TooltipContent>
+                </Tooltip>
+              }
+            >
+              <div className="flex items-center gap-2">
+                <Select
+                  value={preferences?.antigravity_cli_source ?? 'jean'}
+                  onValueChange={handleAntigravitySourceChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="jean">Jean (managed)</SelectItem>
+                    <SelectItem
+                      value="path"
+                      disabled={!antigravityPathDetection?.found}
+                    >
+                      System PATH
+                      {!antigravityPathDetection?.found && ' (not found)'}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {preferences?.antigravity_cli_source === 'jean' &&
+                  antigravityStatus?.installed && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setDeleteCliTarget('antigravity')}
+                    >
+                      Delete managed install
+                    </Button>
+                  )}
+              </div>
+            </InlineField>
+            <InlineField
+              label="Model"
+              description="Antigravity model for AI assistance"
+            >
+              <Select
+                value={selectedAntigravityModel}
+                onValueChange={value =>
+                  handleAntigravityModelChange(value as AntigravityModel)
+                }
+              >
+                <SelectTrigger className="w-80 max-w-full">
+                  <SelectValue>{selectedAntigravityModelLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {antigravityModelOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+          </div>
+        </SettingsSection>
+      )}
+
       {isGeneralScope && (
         <SettingsSection
           title="Defaults"
@@ -4491,7 +4756,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                         ? 'Command Code CLI'
                         : deleteCliTarget === 'grok'
                           ? 'Grok CLI'
-                          : 'GitHub CLI'}
+                          : deleteCliTarget === 'antigravity'
+                            ? 'Antigravity CLI'
+                            : 'GitHub CLI'}
               ?
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -4511,7 +4778,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                               ? commandcodePathDetection?.found
                               : deleteCliTarget === 'grok'
                                 ? grokPathDetection?.found
-                                : false
+                                : deleteCliTarget === 'antigravity'
+                                  ? antigravityPathDetection?.found
+                                  : false
                 return pathFound
                   ? 'The Jean-managed binary will be removed and the source will switch to System PATH. You can reinstall it later from this page.'
                   : 'The Jean-managed binary will be removed. No System PATH version was detected, so this backend will be unavailable until you reinstall it.'
