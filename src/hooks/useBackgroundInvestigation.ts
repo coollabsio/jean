@@ -46,7 +46,9 @@ export function useBackgroundInvestigation(): void {
 
   // Ref for unstable preferences dependency; keeps effect deps stable.
   const preferencesRef = useRef(preferences)
-  preferencesRef.current = preferences
+  useEffect(() => {
+    preferencesRef.current = preferences
+  })
 
   // Subscribe to auto-investigate flags — re-run effect when they change
   const hasAutoInvestigate = useUIStore(
