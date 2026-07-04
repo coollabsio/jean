@@ -32,14 +32,18 @@ const fallbackAntigravityVersions: AntigravityReleaseInfo[] = [
 export function useAntigravityPathDetection(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...antigravityCliQueryKeys.all, 'path-detection'],
-    queryFn: async (): Promise<{ found: boolean; path: string | null }> => {
-      if (!isTauri()) return { found: false, path: null }
+    queryFn: async (): Promise<{
+      found: boolean
+      path: string | null
+      version: string | null
+    }> => {
+      if (!isTauri()) return { found: false, path: null, version: null }
       try {
         const path = await invoke<string | null>('detect_antigravity_in_path')
-        return { found: path !== null, path }
+        return { found: path !== null, path, version: null }
       } catch (error) {
         logger.debug('Antigravity path detection failed', { error })
-        return { found: false, path: null }
+        return { found: false, path: null, version: null }
       }
     },
     enabled: options?.enabled ?? true,
