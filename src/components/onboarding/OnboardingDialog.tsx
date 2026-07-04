@@ -1047,6 +1047,39 @@ function OnboardingDialogContent() {
   ])
 
   useEffect(() => {
+    if (step !== 'antigravity-auth-checking') return
+    dbg('antigravity-auth-checking effect:', {
+      isLoading: antigravityAuth.isLoading,
+      isFetching: antigravityAuth.isFetching,
+      status: antigravityAuth.status,
+      fetchStatus: antigravityAuth.fetchStatus,
+      authenticated: antigravityAuth.data?.authenticated,
+      error: antigravityAuth.error,
+      enabled: !!antigravitySetup.status?.installed,
+    })
+    if (antigravityAuth.isLoading || antigravityAuth.isFetching) return
+
+    if (antigravityAuth.data?.authenticated) {
+      dbg('antigravity auth OK → moveToNextBackendOrGh')
+      queueMicrotask(() => moveToNextBackendOrGh('antigravity'))
+    } else {
+      dbg('antigravity auth NOT OK → antigravity-auth-login')
+      queueMicrotask(() => setStep('antigravity-auth-login'))
+    }
+  }, [
+    step,
+    antigravityAuth.isLoading,
+    antigravityAuth.isFetching,
+    antigravityAuth.data?.authenticated,
+    antigravityAuth.status,
+    antigravityAuth.fetchStatus,
+    antigravityAuth.error,
+    antigravitySetup.status?.installed,
+    moveToNextBackendOrGh,
+    setStep,
+  ])
+
+  useEffect(() => {
     if (step !== 'gh-auth-checking') return
     dbg('gh-auth-checking effect:', {
       isLoading: ghAuth.isLoading,
