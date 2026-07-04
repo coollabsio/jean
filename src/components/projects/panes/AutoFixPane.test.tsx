@@ -363,7 +363,7 @@ describe('AutoFixPane', () => {
       'Pi (Beta)',
       'Command Code (Beta)',
       'Grok (Beta)',
-      'Antigravity',
+      'Antigravity (Beta)',
     ]
 
     await user.click(
