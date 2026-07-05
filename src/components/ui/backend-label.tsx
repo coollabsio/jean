@@ -59,7 +59,12 @@ export function getBackendLabel(backend: CliBackend): string {
 }
 
 export function isBetaBackend(backend: CliBackend): boolean {
-  return backend === 'pi' || backend === 'commandcode' || backend === 'grok'
+  return (
+    backend === 'pi' ||
+    backend === 'commandcode' ||
+    backend === 'grok' ||
+    backend === 'antigravity'
+  )
 }
 
 export function getBackendPlainLabel(backend: CliBackend): string {
