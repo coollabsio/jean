@@ -2,14 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::AppHandle;
 
 use super::config::{
-    binary_exists, ensure_cli_dir, find_system_antigravity_binary, get_cli_binary_path,
-    get_cli_dir, resolve_cli_binary,
+    binary_exists, ensure_cli_dir, find_system_antigravity_binary, get_cli_dir, resolve_cli_binary,
 };
 use crate::platform::silent_command;
 
@@ -122,7 +120,7 @@ fn run_command_with_timeout(
     mut command: Command,
     timeout: Duration,
 ) -> Result<TimedCommandResult, String> {
-    let mut child = command
+    let child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -248,7 +246,7 @@ fn attempt_credential_migration() {
 }
 
 /// Auto-trust the current workspace directory in ~/.gemini/antigravity-cli/settings.json
-pub fn auto_trust_workspace(app: &AppHandle, working_dir: &std::path::Path) {
+pub fn auto_trust_workspace(_app: &AppHandle, working_dir: &std::path::Path) {
     if let Some(home) = dirs::home_dir() {
         let settings_file = home
             .join(".gemini")
@@ -267,13 +265,11 @@ pub fn auto_trust_workspace(app: &AppHandle, working_dir: &std::path::Path) {
                         trusted.push(Value::String(dir_str));
                         changed = true;
                     }
-                } else {
-                    value.as_object_mut().map(|obj| {
-                        obj.insert(
-                            "trustedWorkspaces".to_string(),
-                            serde_json::json!([dir_str]),
-                        );
-                    });
+                } else if let Some(obj) = value.as_object_mut() {
+                    obj.insert(
+                        "trustedWorkspaces".to_string(),
+                        serde_json::json!([dir_str]),
+                    );
                     changed = true;
                 }
 

@@ -1866,7 +1866,7 @@ pub fn is_antigravity_model(model: &str) -> bool {
         "Gemini 3.5 Flash (High)",
         "Claude Sonnet 4.6 (Thinking)",
     ];
-    model.starts_with("antigravity/") || KNOWN_ANTIGRAVITY_MODELS.iter().any(|m| *m == model)
+    model.starts_with("antigravity/") || KNOWN_ANTIGRAVITY_MODELS.contains(&model)
 }
 
 /// Returns true if the given model string identifies a Grok model.
