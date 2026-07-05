@@ -47,6 +47,7 @@ export type Backend =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -224,6 +225,8 @@ export interface Session {
   commandcode_session_id?: string
   /** Grok headless session ID for resuming conversations */
   grok_session_id?: string
+  /** Antigravity CLI session ID for resuming conversations */
+  antigravity_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

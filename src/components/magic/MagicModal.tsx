@@ -984,6 +984,7 @@ export function MagicModal() {
               branchLabel: worktree.branch,
               projectId: worktree.project_id ?? undefined,
               remote,
+              // eslint-disable-next-line react-hooks/immutability
               onMergeConflict: () => executeGitDirectly('resolve-conflicts'),
             })
           })

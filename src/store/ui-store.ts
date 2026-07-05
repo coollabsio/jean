@@ -11,6 +11,7 @@ export type PreferencePane =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
   | 'github'
   | 'coderabbit'
   | 'appearance'
@@ -47,6 +48,7 @@ export type CliUpdateModalType =
   | 'coderabbit'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
   | null
 
 export interface PendingCliUpdate {
@@ -68,6 +70,7 @@ export type CliLoginModalType =
   | 'commandcode'
   | 'grok'
   | 'coderabbit'
+  | 'antigravity'
   | null
 
 interface UIState {
@@ -289,7 +292,7 @@ export const useUIStore = create<UIState>()(
       cliLoginModalType: null,
       cliLoginModalCommand: null,
       cliLoginModalCommandArgs: null,
-      cliLoginModalAction: 'login',
+      cliLoginModalAction: 'login' as const,
       autoInvestigateWorktreeIds: new Set(),
       autoInvestigatePRWorktreeIds: new Set(),
       autoInvestigateSecurityAlertWorktreeIds: new Set(),
@@ -592,7 +595,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalType: null,
             cliLoginModalCommand: null,
             cliLoginModalCommandArgs: null,
-            cliLoginModalAction: 'login',
+            cliLoginModalAction: 'login' as const,
           },
           undefined,
           'closeCliLoginModal'
@@ -798,9 +801,9 @@ export const useUIStore = create<UIState>()(
         ),
 
       consumeAutoOpenSession: worktreeId => {
-        const state = useUIStore.getState()
+        const state: UIState = useUIStore.getState()
         if (state.autoOpenSessionWorktreeIds.has(worktreeId)) {
-          const sessionId = state.pendingAutoOpenSessionIds[worktreeId]
+          const sessionId: string | undefined = state.pendingAutoOpenSessionIds[worktreeId]
           set(
             state => {
               const newSet = new Set(state.autoOpenSessionWorktreeIds)

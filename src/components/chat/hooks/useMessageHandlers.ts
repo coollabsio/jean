@@ -250,6 +250,9 @@ function getDefaultModelForBackend(
   if (backend === 'grok') {
     return preferences?.selected_grok_model ?? 'grok/grok-composer-2.5-fast'
   }
+  if (backend === 'antigravity') {
+    return preferences?.selected_antigravity_model ?? 'Gemini 3.5 Flash (Low)'
+  }
   return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
 }
 
@@ -260,6 +263,7 @@ const SESSION_BACKENDS = new Set<Session['backend']>([
   'cursor',
   'commandcode',
   'grok',
+  'antigravity',
 ])
 
 function asSessionBackend(

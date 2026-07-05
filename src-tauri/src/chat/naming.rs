@@ -363,6 +363,9 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
     if backend == super::types::Backend::Pi {
         return generate_names_pi(app, &prompt, &request.model, request);
     }
+    if backend == super::types::Backend::Antigravity {
+        return Err("Session and branch naming is not supported with the Antigravity backend. Choose another Magic Prompt backend in Settings.".to_string());
+    }
 
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {

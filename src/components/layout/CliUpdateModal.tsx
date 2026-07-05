@@ -19,6 +19,7 @@ import { piCliQueryKeys } from '@/services/pi-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
+import { antigravityCliQueryKeys } from '@/services/antigravity-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
   ClaudeCliReinstallModal,
@@ -29,6 +30,7 @@ import {
   CodeRabbitCliReinstallModal,
   CommandCodeCliReinstallModal,
   GrokCliReinstallModal,
+  AntigravityCliReinstallModal,
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
@@ -57,6 +59,8 @@ export function CliUpdateModal() {
         queryClient.invalidateQueries({ queryKey: commandcodeCliQueryKeys.all })
       } else if (cliUpdateModalType === 'grok') {
         queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
+      } else if (cliUpdateModalType === 'antigravity') {
+        queryClient.invalidateQueries({ queryKey: antigravityCliQueryKeys.all })
       }
 
       // Dismiss any lingering update toast for this CLI type
@@ -100,6 +104,10 @@ export function CliUpdateModal() {
       />
       <GrokCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'grok'}
+        onOpenChange={handleOpenChange}
+      />
+      <AntigravityCliReinstallModal
+        open={cliUpdateModalOpen && cliUpdateModalType === 'antigravity'}
         onOpenChange={handleOpenChange}
       />
     </>

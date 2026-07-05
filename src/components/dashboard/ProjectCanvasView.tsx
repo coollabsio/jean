@@ -1036,7 +1036,9 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   // Keep a ref to sessionsByWorktreeId so effects/callbacks can read the
   // latest value without re-triggering when the Map reference changes.
   const sessionsByWorktreeIdRef = useRef(sessionsByWorktreeId)
-  sessionsByWorktreeIdRef.current = sessionsByWorktreeId
+  useEffect(() => {
+    sessionsByWorktreeIdRef.current = sessionsByWorktreeId
+  })
 
   // React to explicit auto-open requests immediately. The effect below still
   // reads the latest store state imperatively, but this primitive signal makes
@@ -1084,6 +1086,12 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     },
     [projectId, queryClient]
   )
+
+  // Selection state
+  const [selectedWorktreeModal, setSelectedWorktreeModal] = useState<{
+    worktreeId: string
+    worktreePath: string
+  } | null>(null)
 
   const openWorktreeModal = useCallback(
     (worktreeId: string, worktreePath: string) => {
@@ -1504,10 +1512,6 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
-  const [selectedWorktreeModal, setSelectedWorktreeModal] = useState<{
-    worktreeId: string
-    worktreePath: string
-  } | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   // Track highlighted card to survive reordering
   const highlightedCardRef = useRef<{
@@ -3383,6 +3387,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
               onDrop={handleNativeCanvasDrop}
               onDragEnd={handleNativeCanvasDragEnd}
             >
+              {/* eslint-disable-next-line react-hooks/refs */}
               {(() => {
                 let shortcutNum = 0
                 return worktreeSections.map(section => {

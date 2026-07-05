@@ -9,6 +9,7 @@ import { CursorIcon } from '@/components/icons/CursorIcon'
 import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
+import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
 import type { CliBackend } from '@/types/preferences'
 
 export type BackendIconComponent = ForwardRefExoticComponent<
@@ -31,6 +32,8 @@ export function getBackendIcon(backend: CliBackend): BackendIconComponent {
       return CommandCodeIcon
     case 'grok':
       return GrokIcon
+    case 'antigravity':
+      return AntigravityIcon
   }
 }
 
@@ -50,11 +53,18 @@ export function getBackendLabel(backend: CliBackend): string {
       return 'Command Code'
     case 'grok':
       return 'Grok'
+    case 'antigravity':
+      return 'Antigravity'
   }
 }
 
 export function isBetaBackend(backend: CliBackend): boolean {
-  return backend === 'pi' || backend === 'commandcode' || backend === 'grok'
+  return (
+    backend === 'pi' ||
+    backend === 'commandcode' ||
+    backend === 'grok' ||
+    backend === 'antigravity'
+  )
 }
 
 export function getBackendPlainLabel(backend: CliBackend): string {

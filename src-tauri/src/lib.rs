@@ -34,6 +34,7 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
+mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
 mod browser;
@@ -285,7 +286,7 @@ pub struct AppPreferences {
     #[serde(default = "default_execution_mode")]
     pub default_execution_mode: String, // Default execution mode: "plan", "build", or "yolo"
     #[serde(default = "default_backend")]
-    pub default_backend: String, // Default CLI backend: "claude", "codex", "opencode", "cursor", "pi", or "commandcode"
+    pub default_backend: String, // Default CLI backend: "claude", "codex", "opencode", "cursor", "pi", "commandcode", "grok", or "antigravity"
     #[serde(default = "default_new_session_kind")]
     pub default_new_session_kind: String, // Default new session action: "chat", "terminal", or a CLI backend
     #[serde(default = "default_codex_model")]
@@ -300,6 +301,8 @@ pub struct AppPreferences {
     pub selected_commandcode_model: String, // Default Command Code model
     #[serde(default = "default_grok_model")]
     pub selected_grok_model: String, // Default Grok model
+    #[serde(default = "default_antigravity_model")]
+    pub selected_antigravity_model: String, // Default Antigravity model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
     #[serde(default = "default_codex_goal_execution_mode")]
@@ -358,6 +361,8 @@ pub struct AppPreferences {
     pub commandcode_cli_source: String, // Command Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub coderabbit_cli_source: String, // CodeRabbit CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default = "default_cli_source")]
+    pub antigravity_cli_source: String, // Antigravity CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
     pub expand_tool_calls_by_default: bool, // Expand all tool call collapsibles by default (default: false)
     #[serde(default)]
@@ -653,6 +658,10 @@ fn default_commandcode_model() -> String {
 
 fn default_grok_model() -> String {
     "grok/grok-composer-2.5-fast".to_string()
+}
+
+fn default_antigravity_model() -> String {
+    "Gemini 3.5 Flash (Low)".to_string()
 }
 
 fn default_grok_cli_source() -> String {
@@ -1849,6 +1858,17 @@ pub fn is_pi_model(model: &str) -> bool {
     model.starts_with("pi/")
 }
 
+/// Returns true if the given model string identifies an Antigravity model.
+pub fn is_antigravity_model(model: &str) -> bool {
+    const KNOWN_ANTIGRAVITY_MODELS: &[&str] = &[
+        "Gemini 3.5 Flash (Low)",
+        "Gemini 3.5 Flash (Medium)",
+        "Gemini 3.5 Flash (High)",
+        "Claude Sonnet 4.6 (Thinking)",
+    ];
+    model.starts_with("antigravity/") || KNOWN_ANTIGRAVITY_MODELS.contains(&model)
+}
+
 /// Returns true if the given model string identifies a Grok model.
 /// Grok model IDs are prefixed with "grok/" (e.g. "grok/grok-composer-2.5-fast").
 pub fn is_grok_model(model: &str) -> bool {
@@ -1862,6 +1882,7 @@ pub fn is_codex_model(model: &str) -> bool {
         && !is_cursor_model(model)
         && !is_pi_model(model)
         && !is_grok_model(model)
+        && !is_antigravity_model(model)
         && (model.contains("codex") || model.starts_with("gpt-"))
 }
 
@@ -2154,6 +2175,7 @@ impl Default for AppPreferences {
             selected_pi_model: default_pi_model(),
             selected_commandcode_model: default_commandcode_model(),
             selected_grok_model: default_grok_model(),
+            selected_antigravity_model: default_antigravity_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: default_codex_multi_agent_enabled(),
@@ -2183,6 +2205,7 @@ impl Default for AppPreferences {
             pi_cli_source: default_cli_source(),
             commandcode_cli_source: default_cli_source(),
             coderabbit_cli_source: default_cli_source(),
+            antigravity_cli_source: default_cli_source(),
             expand_tool_calls_by_default: false,
             window_vibrancy: false,
             terminal_background: default_terminal_background(),
@@ -4827,6 +4850,15 @@ pub fn run() {
             // Chat commands - Session resume (detached process recovery)
             chat::resume_session,
             chat::check_resumable_sessions,
+            // Antigravity CLI management commands
+            antigravity_cli::check_antigravity_cli_installed,
+            antigravity_cli::check_antigravity_cli_auth,
+            antigravity_cli::detect_antigravity_in_path,
+            antigravity_cli::list_antigravity_models,
+            antigravity_cli::get_available_antigravity_versions,
+            antigravity_cli::check_antigravity_cli_version_exists,
+            antigravity_cli::install_antigravity_cli,
+            antigravity_cli::uninstall_antigravity_cli,
             // Claude CLI management commands
             claude_cli::check_claude_cli_installed,
             claude_cli::check_claude_cli_auth,

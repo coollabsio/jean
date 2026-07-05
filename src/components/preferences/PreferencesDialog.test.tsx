@@ -150,6 +150,7 @@ describe('PreferencesDialog', () => {
       'PIBeta',
       'Command CodeBeta',
       'GrokBeta',
+      'AntigravityBeta',
       'GitHub CLI',
       'CodeRabbit CLI',
       'Terminal',
@@ -183,6 +184,17 @@ describe('PreferencesDialog', () => {
     }
 
     expect(within(grokButton).getByText('Beta')).toHaveClass(
+      'bg-yellow-500/10'
+    )
+
+    const antigravityButton = within(navigationMenu)
+      .getByText('Antigravity')
+      .closest('button')
+    if (!antigravityButton) {
+      throw new Error('Expected Antigravity navigation button to be rendered')
+    }
+
+    expect(within(antigravityButton).getByText('Beta')).toHaveClass(
       'bg-yellow-500/10'
     )
   })

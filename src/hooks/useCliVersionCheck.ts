@@ -46,6 +46,9 @@ import {
   useCodeRabbitPathDetection,
   coderabbitCliQueryKeys,
 } from '@/services/coderabbit-cli'
+import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
+import { grokCliQueryKeys } from '@/services/grok-cli'
+import { antigravityCliQueryKeys } from '@/services/antigravity-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNewerVersion } from '@/lib/version-utils'
 import { logger } from '@/lib/logger'
@@ -74,6 +77,9 @@ const JEAN_INSTALL_COMMANDS: Record<CliType, string> = {
   pi: 'install_pi_cli',
   gh: 'install_gh_cli',
   coderabbit: 'install_coderabbit_cli',
+  commandcode: 'install_commandcode_cli',
+  grok: 'install_grok_cli',
+  antigravity: 'install_antigravity_cli',
 }
 
 const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
@@ -83,6 +89,9 @@ const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
   pi: () => piCliQueryKeys.all,
   gh: () => ghCliQueryKeys.all,
   coderabbit: () => coderabbitCliQueryKeys.all,
+  commandcode: () => commandcodeCliQueryKeys.all,
+  grok: () => grokCliQueryKeys.all,
+  antigravity: () => antigravityCliQueryKeys.all,
 }
 
 /**

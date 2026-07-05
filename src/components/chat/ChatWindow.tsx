@@ -1048,29 +1048,30 @@ export function ChatWindow({
   const mcpServersDataRef = useRef<McpServerInfo[]>(availableMcpServers)
   const selectedBackendRef = useRef(selectedBackend)
 
-  // Keep refs in sync with current values (runs on every render, but cheap)
-  activeSessionIdRef.current = activeSessionId
-  activeWorktreeIdRef.current = activeWorktreeId
-  activeWorktreePathRef.current = activeWorktreePath
-  selectedModelRef.current = selectedModel
-  buildModelRef.current = preferences?.build_model ?? null
-  yoloModelRef.current = preferences?.yolo_model ?? null
-  buildBackendRef.current = preferences?.build_backend ?? null
-  buildThinkingLevelRef.current = preferences?.build_thinking_level ?? null
-  buildEffortLevelRef.current = preferences?.build_effort_level ?? null
-  yoloBackendRef.current = preferences?.yolo_backend ?? null
-  yoloThinkingLevelRef.current = preferences?.yolo_thinking_level ?? null
-  yoloEffortLevelRef.current = preferences?.yolo_effort_level ?? null
-  selectedProviderRef.current = selectedProvider
-  selectedThinkingLevelRef.current = selectedThinkingLevel
-  selectedEffortLevelRef.current = selectedEffortLevel
-  useAdaptiveThinkingRef.current = useAdaptiveThinkingFlag
-  isCodexBackendRef.current = isCodexBackend
-  executionModeRef.current = executionMode
-  projectIdRef.current = worktree?.project_id ?? null
-  enabledMcpServersRef.current = enabledMcpServers
-  mcpServersDataRef.current = availableMcpServers
-  selectedBackendRef.current = selectedBackend
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+    activeWorktreeIdRef.current = activeWorktreeId
+    activeWorktreePathRef.current = activeWorktreePath
+    selectedModelRef.current = selectedModel
+    buildModelRef.current = preferences?.build_model ?? null
+    yoloModelRef.current = preferences?.yolo_model ?? null
+    buildBackendRef.current = preferences?.build_backend ?? null
+    buildThinkingLevelRef.current = preferences?.build_thinking_level ?? null
+    buildEffortLevelRef.current = preferences?.build_effort_level ?? null
+    yoloBackendRef.current = preferences?.yolo_backend ?? null
+    yoloThinkingLevelRef.current = preferences?.yolo_thinking_level ?? null
+    yoloEffortLevelRef.current = preferences?.yolo_effort_level ?? null
+    selectedProviderRef.current = selectedProvider
+    selectedThinkingLevelRef.current = selectedThinkingLevel
+    selectedEffortLevelRef.current = selectedEffortLevel
+    useAdaptiveThinkingRef.current = useAdaptiveThinkingFlag
+    isCodexBackendRef.current = isCodexBackend
+    executionModeRef.current = executionMode
+    projectIdRef.current = worktree?.project_id ?? null
+    enabledMcpServersRef.current = enabledMcpServers
+    mcpServersDataRef.current = availableMcpServers
+    selectedBackendRef.current = selectedBackend
+  })
 
   // Stable callback for useMessageHandlers to build MCP config from current refs
   const getMcpConfig = useCallback(

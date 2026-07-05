@@ -614,7 +614,7 @@ export function GitDiffModal({
               hunks: [],
               splitLineCount: 0,
               unifiedLineCount: 0,
-            } as FileDiffMetadata,
+            } as unknown as FileDiffMetadata,
             fileName: backendFile.path,
             key: `backend-${backendFile.path}`,
             additions: backendFile.additions,
@@ -1454,7 +1454,9 @@ export function GitDiffModal({
                                 'github-light'
                               }
                               diffStyle={diffStyle}
-                              onLineSelected={getLineSelectedCallback(
+                              onLineSelected={
+                                // eslint-disable-next-line react-hooks/refs
+                                getLineSelectedCallback(
                                 selectedFile.fileName
                               )}
                               onRemoveComment={handleRemoveComment}
@@ -1658,7 +1660,9 @@ export function GitDiffModal({
                                   'github-light'
                                 }
                                 diffStyle={diffStyle}
-                                onLineSelected={getLineSelectedCallback(
+                                onLineSelected={
+                                  // eslint-disable-next-line react-hooks/refs
+                                  getLineSelectedCallback(
                                   selectedFile.fileName
                                 )}
                                 onRemoveComment={handleRemoveComment}

@@ -7,6 +7,23 @@ import {
   getHunkLineStats,
 } from './diff-stats'
 
+const ADDTION_LINES = [
+  'const before = true',
+  "name: 'Web Access'",
+  'icon: Globe',
+  'switch (pane) {',
+  "return 'Web Access'",
+  'default:',
+]
+const DELETION_LINES = [
+  'const before = true',
+  "name: 'Web Access (Experimental)'",
+  'icon: Globe',
+  'switch (pane) {',
+  "return 'Web Access (Experimental)'",
+  'default:',
+]
+
 function createFileDiff(
   overrides: Partial<FileDiffMetadata> = {}
 ): FileDiffMetadata {
@@ -14,6 +31,9 @@ function createFileDiff(
     name: 'src/example.ts',
     prevName: undefined,
     type: 'change',
+    isPartial: true,
+    deletionLines: DELETION_LINES,
+    additionLines: ADDTION_LINES,
     hunks: [
       {
         collapsedBefore: 0,
@@ -24,64 +44,44 @@ function createFileDiff(
         additionCount: 7,
         additionStart: 10,
         additionLines: 1,
+        additionLineIndex: 0,
         deletionCount: 7,
         deletionStart: 10,
         deletionLines: 1,
+        deletionLineIndex: 0,
         hunkContent: [
-          {
-            type: 'context',
-            lines: ['const before = true'],
-            noEOFCR: false,
-          },
-          {
-            type: 'change',
-            deletions: ["name: 'Web Access (Experimental)'"],
-            additions: ["name: 'Web Access'"],
-            noEOFCRDeletions: false,
-            noEOFCRAdditions: false,
-          },
-          {
-            type: 'context',
-            lines: ['icon: Globe'],
-            noEOFCR: false,
-          },
+          { type: 'context', lines: 1, additionLineIndex: 0, deletionLineIndex: 0 },
+          { type: 'change', deletions: 1, deletionLineIndex: 1, additions: 1, additionLineIndex: 1 },
+          { type: 'context', lines: 1, additionLineIndex: 2, deletionLineIndex: 2 },
         ],
         hunkContext: undefined,
         hunkSpecs: '@@ -10,7 +10,7 @@',
+        noEOFCRDeletions: false,
+        noEOFCRAdditions: false,
       },
       {
         collapsedBefore: 0,
-        splitLineStart: 0,
+        splitLineStart: 3,
         splitLineCount: 3,
-        unifiedLineStart: 0,
+        unifiedLineStart: 4,
         unifiedLineCount: 4,
         additionCount: 7,
         additionStart: 20,
         additionLines: 1,
+        additionLineIndex: 3,
         deletionCount: 7,
         deletionStart: 20,
         deletionLines: 1,
+        deletionLineIndex: 3,
         hunkContent: [
-          {
-            type: 'context',
-            lines: ['switch (pane) {'],
-            noEOFCR: false,
-          },
-          {
-            type: 'change',
-            deletions: ["return 'Web Access (Experimental)'"],
-            additions: ["return 'Web Access'"],
-            noEOFCRDeletions: false,
-            noEOFCRAdditions: false,
-          },
-          {
-            type: 'context',
-            lines: ['default:'],
-            noEOFCR: false,
-          },
+          { type: 'context', lines: 1, additionLineIndex: 3, deletionLineIndex: 3 },
+          { type: 'change', deletions: 1, deletionLineIndex: 4, additions: 1, additionLineIndex: 4 },
+          { type: 'context', lines: 1, additionLineIndex: 5, deletionLineIndex: 5 },
         ],
         hunkContext: undefined,
         hunkSpecs: '@@ -20,7 +20,7 @@',
+        noEOFCRDeletions: false,
+        noEOFCRAdditions: false,
       },
     ],
     splitLineCount: 6,

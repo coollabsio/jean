@@ -25,6 +25,7 @@ fn backend_label(backend: &Backend) -> &'static str {
         Backend::Pi => "pi",
         Backend::Commandcode => "commandcode",
         Backend::Grok => "grok",
+        Backend::Antigravity => "antigravity",
     }
 }
 
@@ -334,6 +335,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         assert_eq!(latest_completed_backend(&metadata), Some(Backend::Claude));
@@ -392,6 +394,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-2".to_string(),
@@ -416,6 +419,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         assert_eq!(

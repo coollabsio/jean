@@ -50,6 +50,11 @@ import {
   useGrokPathDetection,
 } from '@/services/grok-cli'
 import {
+  useAntigravityCliSetup,
+  useAntigravityCliAuth,
+  useAntigravityPathDetection,
+} from '@/services/antigravity-cli'
+import {
   useGhCliSetup,
   useGhCliAuth,
   useGhPathDetection,
@@ -75,6 +80,8 @@ import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   type MagicPromptBackends,
   type MagicPromptModels,
 } from '@/types/preferences'
@@ -82,7 +89,7 @@ import { isServerWindows } from '@/lib/platform'
 import { WslSetupStep } from './WslSetupStep'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
-type AIBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'commandcode' | 'grok'
+type AIBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'commandcode' | 'grok' | 'antigravity'
 type CliType = AIBackend | 'gh'
 
 const AI_BACKENDS: AIBackend[] = [
@@ -92,6 +99,7 @@ const AI_BACKENDS: AIBackend[] = [
   'pi',
   'commandcode',
   'grok',
+  'antigravity',
 ]
 
 type OnboardingStep =
@@ -121,6 +129,10 @@ type OnboardingStep =
   | 'grok-installing'
   | 'grok-auth-checking'
   | 'grok-auth-login'
+  | 'antigravity-setup'
+  | 'antigravity-installing'
+  | 'antigravity-auth-checking'
+  | 'antigravity-auth-login'
   | 'gh-setup'
   | 'gh-installing'
   | 'gh-auth-checking'
@@ -148,6 +160,8 @@ const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
   'commandcode-auth-login',
   'grok-setup',
   'grok-auth-login',
+  'antigravity-setup',
+  'antigravity-auth-login',
   'gh-setup',
   'gh-auth-login',
 ] as const
@@ -186,6 +200,7 @@ const backendLabel: Record<CliType, string> = {
   pi: 'PI CLI',
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
+  antigravity: 'Antigravity CLI',
   gh: 'GitHub CLI',
 }
 
@@ -224,6 +239,12 @@ function magicDefaultsForBackend(
       backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
     }
   }
+  if (backend === 'antigravity') {
+    return {
+      models: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+      backends: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+    }
+  }
   return null
 }
 
@@ -234,6 +255,7 @@ function stepToBackend(step: OnboardingStep): AIBackend | null {
   if (step.startsWith('pi-')) return 'pi'
   if (step.startsWith('commandcode-')) return 'commandcode'
   if (step.startsWith('grok-')) return 'grok'
+  if (step.startsWith('antigravity-')) return 'antigravity'
   return null
 }
 
@@ -267,11 +289,13 @@ function OnboardingDialogContent() {
   const piPathDetection = usePiPathDetection()
   const commandcodePathDetection = useCommandCodePathDetection()
   const grokPathDetection = useGrokPathDetection()
+  const antigravityPathDetection = useAntigravityPathDetection()
   const codexSetup = useCodexCliSetup()
   const opencodeSetup = useOpenCodeCliSetup()
   const piSetup = usePiCliSetup()
   const commandcodeSetup = useCommandCodeCliSetup()
   const grokSetup = useGrokCliSetup()
+  const antigravitySetup = useAntigravityCliSetup()
   const ghPathDetection = useGhPathDetection()
   const ghSetup = useGhCliSetup()
 
@@ -287,6 +311,9 @@ function OnboardingDialogContent() {
     enabled: !!commandcodeSetup.status?.installed,
   })
   const grokAuth = useGrokCliAuth({ enabled: !!grokSetup.status?.installed })
+  const antigravityAuth = useAntigravityCliAuth({
+    enabled: !!antigravitySetup.status?.installed,
+  })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
 
   const [step, _setStepRaw] = useState<OnboardingStep>('backend-select')
@@ -321,6 +348,9 @@ function OnboardingDialogContent() {
     null
   )
   const [grokVersion, setGrokVersion] = useState<string | null>(null)
+  const [antigravityVersion, setAntigravityVersion] = useState<string | null>(
+    null
+  )
   const [ghVersion, setGhVersion] = useState<string | null>(null)
 
   const [claudeInstallFailed, setClaudeInstallFailed] = useState(false)
@@ -330,6 +360,8 @@ function OnboardingDialogContent() {
   const [commandcodeInstallFailed, setCommandcodeInstallFailed] =
     useState(false)
   const [grokInstallFailed, setGrokInstallFailed] = useState(false)
+  const [antigravityInstallFailed, setAntigravityInstallFailed] =
+    useState(false)
   const [ghInstallFailed, setGhInstallFailed] = useState(false)
   const [claudePathSelected, setClaudePathSelected] = useState(false)
   const [codexPathSelected, setCodexPathSelected] = useState(false)
@@ -337,6 +369,8 @@ function OnboardingDialogContent() {
   const [piPathSelected, setPiPathSelected] = useState(false)
   const [commandcodePathSelected, setCommandcodePathSelected] = useState(false)
   const [grokPathSelected, setGrokPathSelected] = useState(false)
+  const [antigravityPathSelected, setAntigravityPathSelected] =
+    useState(false)
   const [ghPathSelected, setGhPathSelected] = useState(false)
   const [claudeLoginAttempt, setClaudeLoginAttempt] = useState(0)
   const [codexLoginAttempt, setCodexLoginAttempt] = useState(0)
@@ -344,6 +378,7 @@ function OnboardingDialogContent() {
   const [piLoginAttempt, setPiLoginAttempt] = useState(0)
   const [commandcodeLoginAttempt, setCommandcodeLoginAttempt] = useState(0)
   const [grokLoginAttempt, setGrokLoginAttempt] = useState(0)
+  const [antigravityLoginAttempt, setAntigravityLoginAttempt] = useState(0)
   const [ghLoginAttempt, setGhLoginAttempt] = useState(0)
 
   const goBack = useCallback(() => {
@@ -387,6 +422,12 @@ function OnboardingDialogContent() {
       setGrokInstallFailed(false)
       return
     }
+    if (current === 'antigravity-setup' && antigravityPathSelected) {
+      dbg('step: BACK (sub-state) antigravity-setup installer → picker')
+      setAntigravityPathSelected(false)
+      setAntigravityInstallFailed(false)
+      return
+    }
     if (current === 'gh-setup' && ghPathSelected) {
       dbg('step: BACK (sub-state) gh-setup installer → picker')
       setGhPathSelected(false)
@@ -418,6 +459,9 @@ function OnboardingDialogContent() {
       } else if (prev === 'grok-setup') {
         setGrokPathSelected(false)
         setGrokInstallFailed(false)
+      } else if (prev === 'antigravity-setup') {
+        setAntigravityPathSelected(false)
+        setAntigravityInstallFailed(false)
       } else if (prev === 'gh-setup') {
         setGhPathSelected(false)
         setGhInstallFailed(false)
@@ -433,6 +477,7 @@ function OnboardingDialogContent() {
     piPathSelected,
     commandcodePathSelected,
     grokPathSelected,
+    antigravityPathSelected,
     ghPathSelected,
   ])
 
@@ -445,6 +490,7 @@ function OnboardingDialogContent() {
     (step === 'pi-setup' && piPathSelected) ||
     (step === 'commandcode-setup' && commandcodePathSelected) ||
     (step === 'grok-setup' && grokPathSelected) ||
+    (step === 'antigravity-setup' && antigravityPathSelected) ||
     (step === 'gh-setup' && ghPathSelected)
   const canGoBack =
     (historyStack.length > 0 || hasSubStateBack) &&
@@ -466,6 +512,7 @@ function OnboardingDialogContent() {
   const commandcodeLoginTerminalId = `onboarding-commandcode-login-${loginSessionSeed}-${commandcodeLoginAttempt}`
   const grokLoginTerminalId = `onboarding-grok-login-${loginSessionSeed}-${grokLoginAttempt}`
   const ghLoginTerminalId = `onboarding-gh-login-${loginSessionSeed}-${ghLoginAttempt}`
+  const antigravityLoginTerminalId = `onboarding-antigravity-login-${loginSessionSeed}-${antigravityLoginAttempt}`
 
   const stableClaudeVersions = claudeSetup.versions.filter(v => !v.prerelease)
   const stableCodexVersions = codexSetup.versions.filter(v => !v.prerelease)
@@ -477,6 +524,9 @@ function OnboardingDialogContent() {
     v => !v.prerelease
   )
   const stableGrokVersions = grokSetup.versions.filter(v => !v.prerelease)
+  const stableAntigravityVersions = antigravitySetup.versions.filter(
+    v => !v.prerelease
+  )
   const stableGhVersions = ghSetup.versions.filter(v => !v.prerelease)
 
   useEffect(() => {
@@ -526,6 +576,14 @@ function OnboardingDialogContent() {
   }, [grokVersion, stableGrokVersions])
 
   useEffect(() => {
+    if (!antigravityVersion && stableAntigravityVersions.length > 0) {
+      queueMicrotask(() =>
+        setAntigravityVersion(stableAntigravityVersions[0]?.version ?? null)
+      )
+    }
+  }, [antigravityVersion, stableAntigravityVersions])
+
+  useEffect(() => {
     if (!ghVersion && stableGhVersions.length > 0) {
       queueMicrotask(() => setGhVersion(stableGhVersions[0]?.version ?? null))
     }
@@ -550,8 +608,12 @@ function OnboardingDialogContent() {
         ready =
           !!commandcodeSetup.status?.installed &&
           !!commandcodeAuth.data?.authenticated
-      } else {
+      } else if (backend === 'grok') {
         ready = !!grokSetup.status?.installed && !!grokAuth.data?.authenticated
+      } else {
+        ready =
+          !!antigravitySetup.status?.installed &&
+          !!antigravityAuth.data?.authenticated
       }
       dbg('isBackendReady:', backend, '→', ready)
       return ready
@@ -569,6 +631,8 @@ function OnboardingDialogContent() {
       commandcodeAuth.data?.authenticated,
       grokSetup.status?.installed,
       grokAuth.data?.authenticated,
+      antigravitySetup.status?.installed,
+      antigravityAuth.data?.authenticated,
     ]
   )
 
@@ -630,6 +694,7 @@ function OnboardingDialogContent() {
     piSetup.isStatusLoading ||
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
+    antigravitySetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
     (codexSetup.status?.installed &&
@@ -639,7 +704,9 @@ function OnboardingDialogContent() {
     (piSetup.status?.installed && (piAuth.isLoading || piAuth.isFetching)) ||
     (commandcodeSetup.status?.installed &&
       (commandcodeAuth.isLoading || commandcodeAuth.isFetching)) ||
-    (grokSetup.status?.installed && (grokAuth.isLoading || grokAuth.isFetching))
+    (grokSetup.status?.installed && (grokAuth.isLoading || grokAuth.isFetching)) ||
+    (antigravitySetup.status?.installed &&
+      (antigravityAuth.isLoading || antigravityAuth.isFetching))
 
   const loadingInitialState =
     claudeSetup.isStatusLoading ||
@@ -648,6 +715,7 @@ function OnboardingDialogContent() {
     piSetup.isStatusLoading ||
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
+    antigravitySetup.isStatusLoading ||
     ghSetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
@@ -660,6 +728,8 @@ function OnboardingDialogContent() {
       (commandcodeAuth.isLoading || commandcodeAuth.isFetching)) ||
     (grokSetup.status?.installed &&
       (grokAuth.isLoading || grokAuth.isFetching)) ||
+    (antigravitySetup.status?.installed &&
+      (antigravityAuth.isLoading || antigravityAuth.isFetching)) ||
     (ghSetup.status?.installed && (ghAuth.isLoading || ghAuth.isFetching))
 
   dbg('loadingInitialState:', loadingInitialState, {
@@ -669,6 +739,7 @@ function OnboardingDialogContent() {
     piStatusLoading: piSetup.isStatusLoading,
     commandcodeStatusLoading: commandcodeSetup.isStatusLoading,
     grokStatusLoading: grokSetup.isStatusLoading,
+    antigravityStatusLoading: antigravitySetup.isStatusLoading,
     ghStatusLoading: ghSetup.isStatusLoading,
     claudeInstalled: claudeSetup.status?.installed,
     codexInstalled: codexSetup.status?.installed,
@@ -676,6 +747,7 @@ function OnboardingDialogContent() {
     piInstalled: piSetup.status?.installed,
     commandcodeInstalled: commandcodeSetup.status?.installed,
     grokInstalled: grokSetup.status?.installed,
+    antigravityInstalled: antigravitySetup.status?.installed,
     ghInstalled: ghSetup.status?.installed,
     claudeAuthLoading: claudeAuth.isLoading,
     codexAuthLoading: codexAuth.isLoading,
@@ -683,6 +755,7 @@ function OnboardingDialogContent() {
     piAuthLoading: piAuth.isLoading,
     commandcodeAuthLoading: commandcodeAuth.isLoading,
     grokAuthLoading: grokAuth.isLoading,
+    antigravityAuthLoading: antigravityAuth.isLoading,
     ghAuthLoading: ghAuth.isLoading,
   })
 
@@ -969,6 +1042,39 @@ function OnboardingDialogContent() {
     grokAuth.isLoading,
     grokAuth.isFetching,
     grokAuth.data?.authenticated,
+    moveToNextBackendOrGh,
+    setStep,
+  ])
+
+  useEffect(() => {
+    if (step !== 'antigravity-auth-checking') return
+    dbg('antigravity-auth-checking effect:', {
+      isLoading: antigravityAuth.isLoading,
+      isFetching: antigravityAuth.isFetching,
+      status: antigravityAuth.status,
+      fetchStatus: antigravityAuth.fetchStatus,
+      authenticated: antigravityAuth.data?.authenticated,
+      error: antigravityAuth.error,
+      enabled: !!antigravitySetup.status?.installed,
+    })
+    if (antigravityAuth.isLoading || antigravityAuth.isFetching) return
+
+    if (antigravityAuth.data?.authenticated) {
+      dbg('antigravity auth OK → moveToNextBackendOrGh')
+      queueMicrotask(() => moveToNextBackendOrGh('antigravity'))
+    } else {
+      dbg('antigravity auth NOT OK → antigravity-auth-login')
+      queueMicrotask(() => setStep('antigravity-auth-login'))
+    }
+  }, [
+    step,
+    antigravityAuth.isLoading,
+    antigravityAuth.isFetching,
+    antigravityAuth.data?.authenticated,
+    antigravityAuth.status,
+    antigravityAuth.fetchStatus,
+    antigravityAuth.error,
+    antigravitySetup.status?.installed,
     moveToNextBackendOrGh,
     setStep,
   ])
@@ -1387,6 +1493,58 @@ function OnboardingDialogContent() {
     )
   }, [preferences, patchPreferences, grokAuth, setStep])
 
+  const handleAntigravityJeanSelect = useCallback(() => {
+    dbg('handleAntigravityJeanSelect: saving antigravity_cli_source=jean')
+    setAntigravityPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { antigravity_cli_source: 'jean' },
+      {
+        onSuccess: () => {
+          if (antigravitySetup.status?.installed) {
+            setStep('antigravity-auth-checking')
+            antigravityAuth.refetch()
+          }
+        },
+        onError: err => {
+          dbg('handleAntigravityJeanSelect: FAILED to save preference', err)
+          setAntigravityPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [
+    preferences,
+    patchPreferences,
+    antigravitySetup.status?.installed,
+    antigravityAuth,
+    setStep,
+  ])
+
+  const handleAntigravityPathSelect = useCallback(() => {
+    dbg('handleAntigravityPathSelect: saving antigravity_cli_source=path')
+    setAntigravityPathSelected(true)
+    if (preferences) {
+      patchPreferences.mutate(
+        { antigravity_cli_source: 'path' },
+        {
+          onSuccess: () => {
+            dbg(
+              'handleAntigravityPathSelect: preference saved, refetching auth'
+            )
+            setStep('antigravity-auth-checking')
+            antigravityAuth.refetch()
+          },
+          onError: err => {
+            dbg('handleAntigravityPathSelect: FAILED to save preference', err)
+            setAntigravityPathSelected(false)
+            toast.error('Failed to save CLI source preference')
+          },
+        }
+      )
+    }
+  }, [preferences, patchPreferences, antigravityAuth, setStep])
+
   const handleGhPathSelect = useCallback(() => {
     dbg('handleGhPathSelect: saving gh_cli_source=path')
     setGhPathSelected(true)
@@ -1490,6 +1648,24 @@ function OnboardingDialogContent() {
     })
   }, [grokVersion, grokSetup, grokAuth])
 
+  const handleAntigravityInstall = useCallback(() => {
+    dbg('handleAntigravityInstall: version =', antigravityVersion)
+    if (!antigravityVersion) return
+    setStep('antigravity-installing')
+    antigravitySetup.install(antigravityVersion, {
+      onSuccess: () => {
+        dbg('handleAntigravityInstall: SUCCESS, moving to auth-checking')
+        setStep('antigravity-auth-checking')
+        antigravityAuth.refetch()
+      },
+      onError: () => {
+        dbg('handleAntigravityInstall: FAILED')
+        setAntigravityInstallFailed(true)
+        setStep('antigravity-setup')
+      },
+    })
+  }, [antigravityVersion, antigravitySetup, antigravityAuth])
+
   const handleGhInstall = useCallback(() => {
     dbg('handleGhInstall: version =', ghVersion)
     if (!ghVersion) return
@@ -1544,6 +1720,13 @@ function OnboardingDialogContent() {
     await grokAuth.refetch()
   }, [grokAuth, setStep])
 
+  const handleAntigravityLoginComplete = useCallback(async () => {
+    dbg('handleAntigravityLoginComplete: refetching auth')
+    setStep('antigravity-auth-checking')
+    const result = await antigravityAuth.refetch()
+    dbg('handleAntigravityLoginComplete: refetch result =', result.data)
+  }, [antigravityAuth, setStep])
+
   const handleGhLoginComplete = useCallback(async () => {
     dbg('handleGhLoginComplete: refetching auth')
     setStep('gh-auth-checking')
@@ -1575,6 +1758,10 @@ function OnboardingDialogContent() {
     setGrokLoginAttempt(prev => prev + 1)
   }, [])
 
+  const handleAntigravityLoginRetry = useCallback(() => {
+    setAntigravityLoginAttempt(prev => prev + 1)
+  }, [])
+
   const handleGhLoginRetry = useCallback(() => {
     setGhLoginAttempt(prev => prev + 1)
   }, [])
@@ -1586,6 +1773,7 @@ function OnboardingDialogContent() {
     piSetup.refetchStatus()
     commandcodeSetup.refetchStatus()
     grokSetup.refetchStatus()
+    antigravitySetup.refetchStatus()
     ghSetup.refetchStatus()
     // Set the first selected backend as the default so the preference
     // isn't left pointing at an uninstalled backend (e.g. 'claude').
@@ -1616,6 +1804,7 @@ function OnboardingDialogContent() {
     piSetup,
     commandcodeSetup,
     grokSetup,
+    antigravitySetup,
     ghSetup,
     selectedBackends,
     preferences,
@@ -1745,6 +1934,25 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (step === 'antigravity-setup' || step === 'antigravity-installing') {
+      return {
+        type: 'antigravity',
+        title: 'Antigravity CLI',
+        description: 'Antigravity CLI enables Antigravity-backed AI sessions.',
+        versions: stableAntigravityVersions,
+        isVersionsLoading: antigravitySetup.isVersionsLoading,
+        isVersionsError: antigravitySetup.isVersionsError,
+        onRetryVersions: antigravitySetup.refetchVersions,
+        isInstalling: antigravitySetup.isInstalling,
+        installError: antigravityInstallFailed
+          ? antigravitySetup.installError
+          : null,
+        progress: antigravitySetup.progress,
+        install: antigravitySetup.install,
+        currentVersion: antigravitySetup.status?.version,
+      }
+    }
+
     if (step === 'gh-setup' || step === 'gh-installing') {
       return {
         type: 'gh',
@@ -1777,6 +1985,8 @@ function OnboardingDialogContent() {
   const isCommandcodeReinstall =
     commandcodeSetup.status?.installed && step === 'commandcode-setup'
   const isGrokReinstall = grokSetup.status?.installed && step === 'grok-setup'
+  const isAntigravityReinstall =
+    antigravitySetup.status?.installed && step === 'antigravity-setup'
   const isGhReinstall = ghSetup.status?.installed && step === 'gh-setup'
 
   // When CLI source is 'path', use the path detection result for login command
@@ -1813,6 +2023,11 @@ function OnboardingDialogContent() {
       ? grokPathDetection.data.path
       : (grokSetup.status?.path ?? '')
   const grokLoginArgs = ['login']
+  const antigravityLoginCommand =
+    antigravityPathSelected && antigravityPathDetection.data?.path
+      ? antigravityPathDetection.data.path
+      : (antigravitySetup.status?.path ?? '')
+  const antigravityLoginArgs = ['login']
   const ghLoginCommand =
     ghPathSelected && ghPathDetection.data?.path
       ? ghPathDetection.data.path
@@ -1861,6 +2076,13 @@ function OnboardingDialogContent() {
       path: grokSetup.status?.path,
       pathSelected: grokPathSelected,
       detectedPath: grokPathDetection.data?.path,
+    },
+    antigravity: {
+      cmd: antigravityLoginCommand,
+      args: antigravityLoginArgs,
+      path: antigravitySetup.status?.path,
+      pathSelected: antigravityPathSelected,
+      detectedPath: antigravityPathDetection.data?.path,
     },
     gh: {
       cmd: ghLoginCommand,
@@ -2178,6 +2400,11 @@ function OnboardingDialogContent() {
               />
             ) : step === 'grok-installing' && cliData ? (
               <InstallingState cliName="Grok CLI" progress={cliData.progress} />
+            ) : step === 'antigravity-installing' && cliData ? (
+              <InstallingState
+                cliName="Antigravity CLI"
+                progress={cliData.progress}
+              />
             ) : step === 'gh-installing' && cliData ? (
               <InstallingState
                 cliName="GitHub CLI"
@@ -2195,6 +2422,8 @@ function OnboardingDialogContent() {
               <AuthCheckingState cliName="Command Code CLI" />
             ) : step === 'grok-auth-checking' ? (
               <AuthCheckingState cliName="Grok CLI" />
+            ) : step === 'antigravity-auth-checking' ? (
+              <AuthCheckingState cliName="Antigravity CLI" />
             ) : step === 'gh-auth-checking' ? (
               <AuthCheckingState cliName="GitHub CLI" />
             ) : step === 'claude-setup' && !claudePathSelected ? (
@@ -2268,6 +2497,18 @@ function OnboardingDialogContent() {
                 jeanInstalled={!!grokSetup.status?.installed}
                 onSelectPath={handleGrokPathSelect}
                 onSelectJean={handleGrokJeanSelect}
+              />
+            ) : step === 'antigravity-setup' && !antigravityPathSelected ? (
+              <CliPathSelector
+                cliName="Antigravity CLI"
+                pathFound={!!antigravityPathDetection.data?.found}
+                pathVersion={antigravityPathDetection.data?.version ?? null}
+                pathPath={antigravityPathDetection.data?.path ?? null}
+                isLoading={antigravityPathSelected}
+                currentSource={preferences?.antigravity_cli_source ?? null}
+                jeanInstalled={!!antigravitySetup.status?.installed}
+                onSelectPath={handleAntigravityPathSelect}
+                onSelectJean={handleAntigravityJeanSelect}
               />
             ) : step === 'claude-auth-login' ? (
               claudeLoginCommand ? (
@@ -2353,6 +2594,20 @@ function OnboardingDialogContent() {
               ) : (
                 <AuthCheckingState cliName="Grok CLI" />
               )
+            ) : step === 'antigravity-auth-login' ? (
+              antigravityLoginCommand ? (
+                <AuthLoginState
+                  key={antigravityLoginTerminalId}
+                  cliName="Antigravity CLI"
+                  terminalId={antigravityLoginTerminalId}
+                  command={antigravityLoginCommand}
+                  commandArgs={antigravityLoginArgs}
+                  onComplete={handleAntigravityLoginComplete}
+                  onRetry={handleAntigravityLoginRetry}
+                />
+              ) : (
+                <AuthCheckingState cliName="Antigravity CLI" />
+              )
             ) : step === 'gh-setup' && !ghPathSelected ? (
               <CliPathSelector
                 cliName="GitHub CLI"
@@ -2397,7 +2652,9 @@ function OnboardingDialogContent() {
                               ? handleCommandcodeInstall
                               : cliData.type === 'grok'
                                 ? handleGrokInstall
-                                : handleGhInstall
+                                : cliData.type === 'antigravity'
+                                  ? handleAntigravityInstall
+                                  : handleGhInstall
                   }
                 />
               ) : (
@@ -2417,7 +2674,9 @@ function OnboardingDialogContent() {
                               ? commandcodeVersion
                               : cliData.type === 'grok'
                                 ? grokVersion
-                                : ghVersion
+                                : cliData.type === 'antigravity'
+                                  ? antigravityVersion
+                                  : ghVersion
                   }
                   currentVersion={
                     (cliData.type === 'claude' && isClaudeReinstall) ||
@@ -2427,6 +2686,7 @@ function OnboardingDialogContent() {
                     (cliData.type === 'commandcode' &&
                       isCommandcodeReinstall) ||
                     (cliData.type === 'grok' && isGrokReinstall) ||
+                    (cliData.type === 'antigravity' && isAntigravityReinstall) ||
                     (cliData.type === 'gh' && isGhReinstall)
                       ? cliData.currentVersion
                       : null
@@ -2447,7 +2707,9 @@ function OnboardingDialogContent() {
                               ? setCommandcodeVersion
                               : cliData.type === 'grok'
                                 ? setGrokVersion
-                                : setGhVersion
+                                : cliData.type === 'antigravity'
+                                  ? setAntigravityVersion
+                                  : setGhVersion
                   }
                   onInstall={
                     cliData.type === 'claude'
@@ -2462,7 +2724,9 @@ function OnboardingDialogContent() {
                               ? handleCommandcodeInstall
                               : cliData.type === 'grok'
                                 ? handleGrokInstall
-                                : handleGhInstall
+                                : cliData.type === 'antigravity'
+                                  ? handleAntigravityInstall
+                                  : handleGhInstall
                   }
                 />
               )
