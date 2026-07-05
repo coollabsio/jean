@@ -147,7 +147,7 @@ describe('PreferencesDialog', () => {
       'Codex',
       'OpenCode',
       'Cursor',
-      'PIBeta',
+      'PiBeta',
       'Command CodeBeta',
       'GrokBeta',
       'AntigravityBeta',
@@ -167,7 +167,7 @@ describe('PreferencesDialog', () => {
       navigationMenu.querySelectorAll('[data-sidebar="separator"]')
     ).toHaveLength(5)
 
-    for (const label of ['PI', 'Command Code']) {
+    for (const label of ['Pi', 'Command Code']) {
       const button = within(navigationMenu).getByText(label).closest('button')
       if (!button) {
         throw new Error(`Expected ${label} navigation button to be rendered`)

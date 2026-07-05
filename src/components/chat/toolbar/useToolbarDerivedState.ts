@@ -81,7 +81,7 @@ export function buildBackendModelSections({
     } else if (backend === 'pi') {
       sections.push({
         backend,
-        label: 'PI',
+        label: 'Pi',
         options: piModelOptions ?? PI_MODEL_OPTIONS,
       })
     } else if (backend === 'commandcode') {

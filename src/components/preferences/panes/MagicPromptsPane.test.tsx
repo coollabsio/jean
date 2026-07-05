@@ -111,11 +111,11 @@ describe('MagicPromptsPane', () => {
 
     await user.click(screen.getByRole('combobox', { name: 'Backend' }))
 
-    expect(screen.getByRole('option', { name: /Pi/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Pi/i })).toBeInTheDocument()
     expect(
-      screen.getByRole('option', { name: /Command Code/ })
+      screen.getByRole('option', { name: /Command Code/i })
     ).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /Grok/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Grok/i })).toBeInTheDocument()
   })
 
   it('keeps magic prompt control labels paired with dropdowns on mobile', () => {
