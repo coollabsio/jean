@@ -362,6 +362,7 @@ describe('AutoFixPane', () => {
       'Cursor',
       'Pi (Beta)',
       'Command Code (Beta)',
+      'Antigravity',
     ]
 
     await user.click(

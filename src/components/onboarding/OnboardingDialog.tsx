@@ -75,6 +75,8 @@ import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   type MagicPromptBackends,
   type MagicPromptModels,
 } from '@/types/preferences'
@@ -82,7 +84,7 @@ import { isServerWindows } from '@/lib/platform'
 import { WslSetupStep } from './WslSetupStep'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
-type AIBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'commandcode' | 'grok'
+type AIBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'commandcode' | 'grok' | 'antigravity'
 type CliType = AIBackend | 'gh'
 
 const AI_BACKENDS: AIBackend[] = [
@@ -92,6 +94,7 @@ const AI_BACKENDS: AIBackend[] = [
   'pi',
   'commandcode',
   'grok',
+  'antigravity',
 ]
 
 type OnboardingStep =
@@ -121,6 +124,10 @@ type OnboardingStep =
   | 'grok-installing'
   | 'grok-auth-checking'
   | 'grok-auth-login'
+  | 'antigravity-setup'
+  | 'antigravity-installing'
+  | 'antigravity-auth-checking'
+  | 'antigravity-auth-login'
   | 'gh-setup'
   | 'gh-installing'
   | 'gh-auth-checking'
@@ -148,6 +155,8 @@ const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
   'commandcode-auth-login',
   'grok-setup',
   'grok-auth-login',
+  'antigravity-setup',
+  'antigravity-auth-login',
   'gh-setup',
   'gh-auth-login',
 ] as const
@@ -186,6 +195,7 @@ const backendLabel: Record<CliType, string> = {
   pi: 'PI CLI',
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
+  antigravity: 'Antigravity CLI',
   gh: 'GitHub CLI',
 }
 
@@ -224,6 +234,12 @@ function magicDefaultsForBackend(
       backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
     }
   }
+  if (backend === 'antigravity') {
+    return {
+      models: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+      backends: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+    }
+  }
   return null
 }
 
@@ -234,6 +250,7 @@ function stepToBackend(step: OnboardingStep): AIBackend | null {
   if (step.startsWith('pi-')) return 'pi'
   if (step.startsWith('commandcode-')) return 'commandcode'
   if (step.startsWith('grok-')) return 'grok'
+  if (step.startsWith('antigravity-')) return 'antigravity'
   return null
 }
 

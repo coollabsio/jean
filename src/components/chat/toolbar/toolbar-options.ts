@@ -95,6 +95,13 @@ export const GROK_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'grok/grok-build', label: 'Grok Build' },
 ]
 
+export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Gemini 3.5 Flash (Low)', label: 'Gemini 3.5 Flash (Low)' },
+  { value: 'Gemini 3.5 Flash (Medium)', label: 'Gemini 3.5 Flash (Medium)' },
+  { value: 'Gemini 3.5 Flash (High)', label: 'Gemini 3.5 Flash (High)' },
+  { value: 'Claude Sonnet 4.6 (Thinking)', label: 'Claude Sonnet 4.6 (Thinking)' },
+]
+
 export const THINKING_LEVEL_OPTIONS: {
   value: ThinkingLevel
   label: string

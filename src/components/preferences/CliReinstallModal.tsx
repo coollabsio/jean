@@ -29,6 +29,7 @@ import { usePiCliSetup } from '@/services/pi-cli'
 import { useCodeRabbitCliSetup } from '@/services/coderabbit-cli'
 import { useCommandCodeCliSetup } from '@/services/commandcode-cli'
 import { useGrokCliSetup } from '@/services/grok-cli'
+import { useAntigravityCliSetup } from '@/services/antigravity-cli'
 import { logger } from '@/lib/logger'
 import {
   SetupState,
@@ -203,6 +204,25 @@ export function GrokCliReinstallModal({ open, onOpenChange }: ModalProps) {
   )
 }
 
+export function AntigravityCliReinstallModal({ open, onOpenChange }: ModalProps) {
+  if (!open) return null
+  return (
+    <AntigravityCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  )
+}
+
+function AntigravityCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+  const setup = useAntigravityCliSetup()
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType="antigravity"
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
 function GrokCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
   const setup = useGrokCliSetup()
   return (
@@ -257,6 +277,7 @@ interface CliReinstallModalUIProps {
     | 'coderabbit'
     | 'commandcode'
     | 'grok'
+    | 'antigravity'
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -282,7 +303,9 @@ function CliReinstallModalUI({
                 ? 'Command Code CLI'
                 : cliType === 'grok'
                   ? 'Grok CLI'
-                  : 'GitHub CLI'
+                  : cliType === 'antigravity'
+                    ? 'Antigravity CLI'
+                    : 'GitHub CLI'
 
   // Store setup in ref for stable callback reference
   const setupRef = useRef(setup)
@@ -407,7 +430,9 @@ function CliReinstallModalUI({
                               ? 'Command Code AI sessions'
                               : cliType === 'grok'
                                 ? 'Grok AI sessions'
-                                : 'GitHub integration'
+                                : cliType === 'antigravity'
+                                  ? 'Antigravity AI sessions'
+                                  : 'GitHub integration'
                   }.`}
           </DialogDescription>
         </DialogHeader>

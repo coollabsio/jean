@@ -103,6 +103,7 @@ pub enum Backend {
     Pi,
     Commandcode,
     Grok,
+    Antigravity,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -123,6 +124,7 @@ impl<'de> Deserialize<'de> for Backend {
             "pi" => Backend::Pi,
             "commandcode" => Backend::Commandcode,
             "grok" => Backend::Grok,
+            "antigravity" => Backend::Antigravity,
             "claude" | "" => Backend::Claude,
             other => {
                 log::warn!("Unknown chat backend '{other}', falling back to claude");
@@ -141,6 +143,12 @@ mod backend_tests {
     fn backend_deserializes_grok() {
         let backend: Backend = serde_json::from_str("\"grok\"").unwrap();
         assert_eq!(backend, Backend::Grok);
+    }
+
+    #[test]
+    fn backend_deserializes_antigravity() {
+        let backend: Backend = serde_json::from_str("\"antigravity\"").unwrap();
+        assert_eq!(backend, Backend::Antigravity);
     }
 }
 
@@ -599,6 +607,9 @@ pub struct Session {
     /// Grok headless session ID for resuming conversations
     #[serde(default)]
     pub grok_session_id: Option<String>,
+    /// Antigravity session ID for resuming conversations
+    #[serde(default)]
+    pub antigravity_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -804,6 +815,7 @@ impl Session {
             pi_session_id: None,
             commandcode_session_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -1020,6 +1032,7 @@ impl SessionMetadata {
             pi_session_id: self.pi_session_id.clone(),
             commandcode_session_id: self.commandcode_session_id.clone(),
             grok_session_id: self.grok_session_id.clone(),
+            antigravity_session_id: self.antigravity_session_id.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
@@ -1082,6 +1095,7 @@ impl SessionMetadata {
         self.cursor_chat_id = session.cursor_chat_id.clone();
         self.pi_session_id = session.pi_session_id.clone();
         self.commandcode_session_id = session.commandcode_session_id.clone();
+        self.antigravity_session_id = session.antigravity_session_id.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
@@ -1354,6 +1368,9 @@ pub struct RunEntry {
     /// Grok headless session ID — persisted per-run for conversation continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grok_session_id: Option<String>,
+    /// Antigravity session ID — persisted per-run for conversation continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_session_id: Option<String>,
 }
 
 impl RunEntry {
@@ -1432,6 +1449,9 @@ pub struct SessionMetadata {
     /// Grok headless session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grok_session_id: Option<String>,
+    /// Antigravity session ID for resuming conversations
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
@@ -1601,6 +1621,8 @@ pub struct SessionDebugInfo {
     pub commandcode_session_id: Option<String>,
     /// Grok headless session ID (if any)
     pub grok_session_id: Option<String>,
+    /// Antigravity session ID (if any)
+    pub antigravity_session_id: Option<String>,
     /// Path to Claude CLI's JSONL file (in ~/.claude/projects/)
     pub claude_jsonl_file: Option<String>,
     /// List of JSONL run log files for this session
@@ -1631,6 +1653,7 @@ impl SessionMetadata {
             pi_session_id: None,
             commandcode_session_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -2081,6 +2104,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         let restored = metadata.to_session();
@@ -2122,6 +2146,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         assert!(metadata.find_run("run-1").is_some());
@@ -2205,6 +2230,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-completed".to_string(),
@@ -2229,6 +2255,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         // Cancelled partial turn (user + assistant) + completed turn (user + assistant) = 4.
@@ -2271,6 +2298,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         assert!(metadata.latest_claude_session_id().is_none());
@@ -2299,6 +2327,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            antigravity_session_id: None,
         });
 
         assert_eq!(metadata.latest_claude_session_id(), Some("claude-sess-abc"));

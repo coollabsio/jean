@@ -13,6 +13,7 @@ export type CliType =
   | 'opencode'
   | 'pi'
   | 'coderabbit'
+  | 'antigravity'
 
 /** Binary name used by the package manager (e.g. `brew upgrade <name>`). */
 export const CLI_BINARY_NAMES: Record<CliType, string> = {
@@ -22,6 +23,7 @@ export const CLI_BINARY_NAMES: Record<CliType, string> = {
   opencode: 'opencode',
   pi: 'pi',
   coderabbit: 'coderabbit',
+  antigravity: 'agy',
 }
 
 /** npm package name for CLIs that ship as npm/bun globals. */
@@ -38,6 +40,7 @@ export const CLI_SELF_UPDATE_ARGS: Record<CliType, string[] | null> = {
   pi: ['update', '--self'],
   gh: null,
   codex: null,
+  antigravity: null,
 }
 
 export const CLI_DISPLAY_NAMES: Record<CliType, string> = {
@@ -47,6 +50,7 @@ export const CLI_DISPLAY_NAMES: Record<CliType, string> = {
   opencode: 'OpenCode CLI',
   pi: 'PI CLI',
   coderabbit: 'CodeRabbit CLI',
+  antigravity: 'Antigravity CLI',
 }
 
 /** Get [command, args] for updating a PATH-mode CLI, respecting package manager.

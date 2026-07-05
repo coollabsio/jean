@@ -11,6 +11,7 @@ export type PreferencePane =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
   | 'github'
   | 'coderabbit'
   | 'appearance'
@@ -47,6 +48,7 @@ export type CliUpdateModalType =
   | 'coderabbit'
   | 'commandcode'
   | 'grok'
+  | 'antigravity'
   | null
 
 export interface PendingCliUpdate {
@@ -68,6 +70,7 @@ export type CliLoginModalType =
   | 'commandcode'
   | 'grok'
   | 'coderabbit'
+  | 'antigravity'
   | null
 
 interface UIState {

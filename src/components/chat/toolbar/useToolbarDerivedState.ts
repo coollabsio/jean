@@ -10,6 +10,7 @@ import {
   GROK_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { sortModelOptionsByRawModel } from '@/components/chat/toolbar/toolbar-utils'
 import {
@@ -28,6 +29,7 @@ interface UseToolbarDerivedStateArgs {
   piModelOptions?: { value: string; label: string }[]
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
+  antigravityModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
   installedBackends?: CliBackend[]
   availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
@@ -49,6 +51,7 @@ export function buildBackendModelSections({
   piModelOptions,
   commandcodeModelOptions,
   grokModelOptions,
+  antigravityModelOptions,
 }: {
   installedBackends: CliBackend[]
   claudeModelOptions: { value: string; label: string }[]
@@ -58,6 +61,7 @@ export function buildBackendModelSections({
   piModelOptions?: { value: string; label: string }[]
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
+  antigravityModelOptions?: { value: string; label: string }[]
 }): BackendModelSection[] {
   const sections: BackendModelSection[] = []
 
@@ -92,6 +96,12 @@ export function buildBackendModelSections({
         label: 'Grok',
         options: grokModelOptions ?? GROK_MODEL_OPTIONS,
       })
+    } else if (backend === 'antigravity') {
+      sections.push({
+        backend,
+        label: 'Antigravity',
+        options: antigravityModelOptions ?? ANTIGRAVITY_MODEL_OPTIONS,
+      })
     }
   }
 
@@ -108,6 +118,7 @@ export function useToolbarDerivedState({
   commandcodeModelOptions,
   customCliProfiles,
   grokModelOptions,
+  antigravityModelOptions,
   installedBackends = [
     'claude',
     'codex',
@@ -116,6 +127,7 @@ export function useToolbarDerivedState({
     'pi',
     'commandcode',
     'grok',
+    'antigravity',
   ],
   availableMcpServers = [],
   enabledMcpServers = [],
@@ -126,6 +138,7 @@ export function useToolbarDerivedState({
   const isPi = selectedBackend === 'pi'
   const isCommandCode = selectedBackend === 'commandcode'
   const isGrok = selectedBackend === 'grok'
+  const isAntigravity = selectedBackend === 'antigravity'
 
   const { data: modelCatalog } = useModelCatalog()
 
@@ -189,6 +202,7 @@ export function useToolbarDerivedState({
   const resolvedCommandCodeModelOptions =
     commandcodeModelOptions ?? COMMANDCODE_MODEL_OPTIONS
   const resolvedGrokModelOptions = grokModelOptions ?? GROK_MODEL_OPTIONS
+  const resolvedAntigravityModelOptions = antigravityModelOptions ?? ANTIGRAVITY_MODEL_OPTIONS
 
   const backendModelSections = useMemo(
     () =>
@@ -201,6 +215,7 @@ export function useToolbarDerivedState({
         piModelOptions: resolvedPiModelOptions,
         commandcodeModelOptions: resolvedCommandCodeModelOptions,
         grokModelOptions: resolvedGrokModelOptions,
+        antigravityModelOptions: resolvedAntigravityModelOptions,
       }),
     [
       claudeModelOptions,
@@ -209,6 +224,7 @@ export function useToolbarDerivedState({
       resolvedCursorModelOptions,
       resolvedCommandCodeModelOptions,
       resolvedGrokModelOptions,
+      resolvedAntigravityModelOptions,
       resolvedOpencodeModelOptions,
       resolvedPiModelOptions,
     ]
@@ -221,6 +237,7 @@ export function useToolbarDerivedState({
     if (isPi) return resolvedPiModelOptions
     if (isCommandCode) return resolvedCommandCodeModelOptions
     if (isGrok) return resolvedGrokModelOptions
+    if (isAntigravity) return resolvedAntigravityModelOptions
     return claudeModelOptions
   }, [
     claudeModelOptions,
@@ -230,10 +247,12 @@ export function useToolbarDerivedState({
     isPi,
     isCommandCode,
     isGrok,
+    isAntigravity,
     isOpencode,
     resolvedCommandCodeModelOptions,
     resolvedCursorModelOptions,
     resolvedGrokModelOptions,
+    resolvedAntigravityModelOptions,
     resolvedOpencodeModelOptions,
     resolvedPiModelOptions,
   ])
@@ -272,7 +291,9 @@ export function useToolbarDerivedState({
     opencodeModelOptions: resolvedOpencodeModelOptions,
     piModelOptions: resolvedPiModelOptions,
     grokModelOptions: resolvedGrokModelOptions,
+    antigravityModelOptions: resolvedAntigravityModelOptions,
     isGrok,
+    isAntigravity,
     selectedModelLabel,
   }
 }

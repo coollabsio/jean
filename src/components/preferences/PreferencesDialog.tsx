@@ -58,6 +58,7 @@ import { CursorIcon } from '@/components/icons/CursorIcon'
 import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
+import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
 import type { CliBackend, MagicPrompts } from '@/types/preferences'
 import { GeneralPane } from './panes/GeneralPane'
 import { ClaudePane } from './panes/ClaudePane'
@@ -67,6 +68,7 @@ import { CursorPane } from './panes/CursorPane'
 import { PiPane } from './panes/PiPane'
 import { CommandCodePane } from './panes/CommandCodePane'
 import { GrokPane } from './panes/GrokPane'
+import { AntigravityPane } from './panes/AntigravityPane'
 import { GitHubPane } from './panes/GitHubPane'
 import { CodeRabbitPane } from './panes/CodeRabbitPane'
 import { AppearancePane } from './panes/AppearancePane'
@@ -169,6 +171,13 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
   },
   {
     type: 'item',
+    id: 'antigravity',
+    name: 'Antigravity',
+    icon: AntigravityIcon,
+    backend: 'antigravity',
+  },
+  {
+    type: 'item',
     id: 'github',
     name: 'GitHub CLI',
     icon: Github,
@@ -253,6 +262,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   pi: PiIcon,
   commandcode: CommandCodeIcon,
   grok: GrokIcon,
+  antigravity: AntigravityIcon,
   github: Github,
   coderabbit: Rabbit,
   opinionated: Sparkles,
@@ -848,6 +858,11 @@ export function PreferencesDialog() {
               {activePane === 'grok' && (
                 <div id="pref-pane-grok">
                   <GrokPane />
+                </div>
+              )}
+              {activePane === 'antigravity' && (
+                <div id="pref-pane-antigravity" className="min-w-0 max-w-full">
+                  <AntigravityPane />
                 </div>
               )}
               {activePane === 'github' && (

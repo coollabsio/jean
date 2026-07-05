@@ -24,6 +24,7 @@ import { useCursorCliStatus } from '@/services/cursor-cli'
 import { usePiCliStatus } from '@/services/pi-cli'
 import { useCommandCodeCliStatus } from '@/services/commandcode-cli'
 import { useGrokCliStatus } from '@/services/grok-cli'
+import { useAntigravityCliStatus } from '@/services/antigravity-cli'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import {
@@ -46,6 +47,7 @@ const BACKEND_ORDER: CliBackend[] = [
   'pi',
   'commandcode',
   'grok',
+  'antigravity',
 ]
 
 const backendCommands: Record<CliBackend, string> = {
@@ -56,6 +58,7 @@ const backendCommands: Record<CliBackend, string> = {
   pi: 'pi',
   commandcode: 'commandcode',
   grok: 'grok',
+  antigravity: 'agy',
 }
 
 const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
@@ -63,6 +66,7 @@ const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
   codex: ['--dangerously-bypass-approvals-and-sandbox'],
   cursor: ['--yolo', '--sandbox', 'disabled'],
   grok: ['--always-approve', '--sandbox', 'off'],
+  antigravity: ['--dangerously-skip-permissions'],
 }
 
 export function NewSessionModeModal() {
@@ -78,6 +82,7 @@ export function NewSessionModeModal() {
     enabled: target !== null,
   })
   const grokStatus = useGrokCliStatus({ enabled: target !== null })
+  const antigravityStatus = useAntigravityCliStatus({ enabled: target !== null })
   const { data: preferences } = usePreferences()
   const [nativePickerKind, setNativePickerKind] =
     useState<NativeCliSessionKind | null>(null)
@@ -105,7 +110,9 @@ export function NewSessionModeModal() {
                     ? piStatus
                     : backend === 'commandcode'
                       ? commandcodeStatus
-                      : grokStatus
+                      : backend === 'grok'
+                        ? grokStatus
+                        : antigravityStatus
         return {
           backend,
           shortcut: String(index + 2),
@@ -126,6 +133,8 @@ export function NewSessionModeModal() {
       commandcodeStatus.data?.path,
       grokStatus.data?.installed,
       grokStatus.data?.path,
+      antigravityStatus.data?.installed,
+      antigravityStatus.data?.path,
       opencodeStatus.data?.installed,
       opencodeStatus.data?.path,
     ]
@@ -137,7 +146,9 @@ export function NewSessionModeModal() {
     opencodeStatus.isLoading ||
     cursorStatus.isLoading ||
     piStatus.isLoading ||
-    commandcodeStatus.isLoading
+    commandcodeStatus.isLoading ||
+    grokStatus.isLoading ||
+    antigravityStatus.isLoading
 
   const nativePickerCommand = useMemo(() => {
     if (nativePickerKind === null || nativePickerKind === 'terminal') {

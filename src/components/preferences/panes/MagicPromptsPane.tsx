@@ -69,12 +69,14 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
   CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
   CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
   OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   codexModelOptions,
   isCommandCodeModel,
   isCodexModel,
@@ -1001,6 +1003,14 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     })
   }, [preferences, patchPreferences])
 
+  const handleApplyAntigravityDefaults = useCallback(() => {
+    if (!preferences) return
+    patchPreferences.mutate({
+      magic_prompt_models: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_prompt_backends: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+    })
+  }, [preferences, patchPreferences])
+
   // Flush pending save when switching prompts
   const prevSelectedKeyRef = useRef(selectedKey)
   useEffect(() => {
@@ -1096,6 +1106,15 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           className="h-7 text-xs"
         >
           Grok Defaults
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleApplyAntigravityDefaults}
+          disabled={!installedBackends.includes('antigravity')}
+          className="h-7 text-xs"
+        >
+          Antigravity Defaults
         </Button>
       </div>
 

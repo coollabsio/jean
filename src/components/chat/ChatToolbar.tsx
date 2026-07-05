@@ -45,6 +45,7 @@ import {
   PI_EFFORT_LEVEL_OPTIONS,
   PI_MODEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { useToolbarDropdownShortcuts } from '@/components/chat/toolbar/useToolbarDropdownShortcuts'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
@@ -55,6 +56,7 @@ import {
 } from '@/components/chat/toolbar/toolbar-utils'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   BackendLabel,
@@ -70,6 +72,7 @@ export {
   THINKING_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 }
 export type { ChatToolbarProps }
 
@@ -190,6 +193,16 @@ export const ChatToolbar = memo(function ChatToolbar({
       is_default: model.is_default,
     })) ?? PI_MODEL_OPTIONS
 
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: selectedBackend === 'antigravity',
+  })
+  const antigravityModelOptions =
+    availableAntigravityModels?.map(model => ({
+      value: model.id,
+      label: model.label || model.id,
+      is_default: model.isDefault,
+    })) ?? ANTIGRAVITY_MODEL_OPTIONS
+
   const { isCodex, activeMcpCount, backendModelSections, selectedModelLabel } =
     useToolbarDerivedState({
       selectedBackend,
@@ -197,6 +210,7 @@ export const ChatToolbar = memo(function ChatToolbar({
       selectedModel,
       opencodeModelOptions,
       piModelOptions,
+      antigravityModelOptions,
       customCliProfiles,
       installedBackends,
       availableMcpServers,

@@ -150,6 +150,7 @@ describe('PreferencesDialog', () => {
       'PIBeta',
       'Command CodeBeta',
       'GrokBeta',
+      'Antigravity',
       'GitHub CLI',
       'CodeRabbit CLI',
       'Terminal',
