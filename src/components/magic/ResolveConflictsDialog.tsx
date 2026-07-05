@@ -142,7 +142,9 @@ export function ResolveConflictsDialog({
               : backend === 'grok'
                 ? (preferences?.selected_grok_model ??
                   'grok/grok-composer-2.5-fast')
-                : (preferences?.selected_model ?? 'sonnet'))
+                : backend === 'antigravity'
+                  ? (preferences?.selected_antigravity_model ?? 'Gemini 3.5 Flash (Low)')
+                  : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       RESOLVE_CONFLICTS_PROVIDER_KEY,

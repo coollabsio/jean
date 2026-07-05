@@ -70,6 +70,14 @@ vi.mock('@/services/commandcode-cli', () => ({
   useAvailableCommandCodeModels: () => ({ data: undefined }),
 }))
 
+vi.mock('@/services/grok-cli', () => ({
+  useAvailableGrokModels: () => ({ data: undefined }),
+}))
+
+vi.mock('@/services/antigravity-cli', () => ({
+  useAvailableAntigravityModels: () => ({ data: undefined }),
+}))
+
 const baseAutoFixSettings: ProjectAutoFixSettings = {
   enabled: false,
   interval_minutes: 30,

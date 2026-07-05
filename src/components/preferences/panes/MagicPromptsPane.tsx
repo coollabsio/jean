@@ -29,6 +29,7 @@ import { useAvailableCursorModels } from '@/services/cursor-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import {
   formatCursorModelLabel,
   formatOpencodeModelLabel,
@@ -39,6 +40,7 @@ import {
   OPENCODE_MODEL_OPTIONS as OPENCODE_FALLBACK_OPTIONS,
   PI_MODEL_OPTIONS as PI_FALLBACK_OPTIONS,
   GROK_MODEL_OPTIONS as GROK_FALLBACK_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS as ANTIGRAVITY_FALLBACK_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
@@ -83,6 +85,7 @@ import {
   isCursorModel,
   isGrokModel,
   isPiModel,
+  isAntigravityModel,
   type MagicPrompts,
   type MagicPromptModels,
   type MagicPromptProviders,
@@ -570,6 +573,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const { data: availableCommandCodeModels } = useAvailableCommandCodeModels()
   const { data: availablePiModels } = useAvailablePiModels()
   const { data: availableGrokModels } = useAvailableGrokModels()
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels()
   const { installedBackends } = useInstalledBackends()
 
   const formatOpenCodeLabel = (value: string) => {
@@ -642,6 +646,19 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     }))
   }, [availableGrokModels])
 
+  const antigravityModelOptions = useMemo(() => {
+    const models = availableAntigravityModels?.length
+      ? availableAntigravityModels.map(model => ({
+          value: model.id,
+          label: model.label || model.id,
+        }))
+      : ANTIGRAVITY_FALLBACK_OPTIONS
+    return models.map(option => ({
+      value: option.value as MagicPromptModel,
+      label: option.label,
+    }))
+  }, [availableAntigravityModels])
+
   const currentPrompts = preferences?.magic_prompts ?? DEFAULT_MAGIC_PROMPTS
   const currentModels =
     preferences?.magic_prompt_models ?? DEFAULT_MAGIC_PROMPT_MODELS
@@ -687,6 +704,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     : false
   const currentModelIsPi = currentModel ? isPiModel(currentModel) : false
   const currentModelIsGrok = currentModel ? isGrokModel(currentModel) : false
+  const currentModelIsAntigravity = currentModel ? isAntigravityModel(currentModel) : false
   const filteredClaudeOptions = useMemo(() => {
     if (
       !currentProvider ||
@@ -695,7 +713,8 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       currentModelIsCursor ||
       currentModelIsCommandCode ||
       currentModelIsPi ||
-      currentModelIsGrok
+      currentModelIsGrok ||
+      currentModelIsAntigravity
     ) {
       return CLAUDE_MODEL_OPTIONS
     }
@@ -731,6 +750,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     currentModelIsOpenCode,
     currentModelIsPi,
     currentModelIsGrok,
+    currentModelIsAntigravity,
     profiles,
   ])
 
@@ -900,6 +920,8 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           defaultModel = commandCodeModelOptions[0]?.value
         } else if (backend === 'grok') {
           defaultModel = grokModelOptions[0]?.value
+        } else if (backend === 'antigravity') {
+          defaultModel = antigravityModelOptions[0]?.value
         }
       }
       patchPreferences.mutate({
@@ -929,6 +951,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       piModelOptions,
       commandCodeModelOptions,
       grokModelOptions,
+      antigravityModelOptions,
       opencodeModelOptions,
     ]
   )
@@ -1241,6 +1264,11 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                         <BackendLabel backend="grok" />
                       </SelectItem>
                     )}
+                    {installedBackends.includes('antigravity') && (
+                      <SelectItem value="antigravity">
+                        <BackendLabel backend="antigravity" />
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1253,12 +1281,14 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
               !currentModelIsOpenCode &&
               !currentModelIsPi &&
               !currentModelIsGrok &&
+              !currentModelIsAntigravity &&
               effectiveBackend !== 'opencode' &&
               effectiveBackend !== 'cursor' &&
               effectiveBackend !== 'commandcode' &&
               effectiveBackend !== 'pi' &&
               effectiveBackend !== 'codex' &&
-              effectiveBackend !== 'grok' && (
+              effectiveBackend !== 'grok' &&
+              effectiveBackend !== 'antigravity' && (
                 <div className="flex items-center gap-2 max-md:w-full md:contents">
                   <span className="text-xs text-muted-foreground">
                     Provider
@@ -1313,6 +1343,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                             ...commandCodeModelOptions,
                             ...piModelOptions,
                             ...grokModelOptions,
+                            ...antigravityModelOptions,
                           ]
                           return (
                             allOptions.find(o => o.value === currentModel)
@@ -1327,7 +1358,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                                     ? currentModel.replace(/^pi\//, '')
                                     : isGrokModel(currentModel)
                                       ? currentModel.replace(/^grok\//, '')
-                                      : currentModel)
+                                      : isAntigravityModel(currentModel)
+                                        ? currentModel
+                                        : currentModel)
                           )
                         })()}
                       </span>
@@ -1343,7 +1376,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                                 ? piModelOptions
                                 : effectiveBackend === 'grok'
                                   ? grokModelOptions
-                                  : opencodeModelOptions
+                                  : effectiveBackend === 'antigravity'
+                                    ? antigravityModelOptions
+                                    : opencodeModelOptions
                       ).length > 1 && (
                         <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-50" />
                       )}
@@ -1487,6 +1522,56 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                             heading={<BackendLabel backend="commandcode" />}
                           >
                             {commandCodeModelOptions.map(opt => (
+                              <CommandItem
+                                key={opt.value}
+                                value={`${opt.label} ${opt.value}`}
+                                onSelect={() => {
+                                  handleModelChange(opt.value)
+                                  setModelPopoverOpen(false)
+                                }}
+                              >
+                                <span className="text-xs">{opt.label}</span>
+                                <Check
+                                  className={cn(
+                                    'ml-auto h-3 w-3',
+                                    currentModel === opt.value
+                                      ? 'opacity-100'
+                                      : 'opacity-0'
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        )}
+                        {effectiveBackend === 'grok' && (
+                          <CommandGroup heading={<BackendLabel backend="grok" />}>
+                            {grokModelOptions.map(opt => (
+                              <CommandItem
+                                key={opt.value}
+                                value={`${opt.label} ${opt.value}`}
+                                onSelect={() => {
+                                  handleModelChange(opt.value)
+                                  setModelPopoverOpen(false)
+                                }}
+                              >
+                                <span className="text-xs">{opt.label}</span>
+                                <Check
+                                  className={cn(
+                                    'ml-auto h-3 w-3',
+                                    currentModel === opt.value
+                                      ? 'opacity-100'
+                                      : 'opacity-0'
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        )}
+                        {effectiveBackend === 'antigravity' && (
+                          <CommandGroup
+                            heading={<BackendLabel backend="antigravity" />}
+                          >
+                            {antigravityModelOptions.map(opt => (
                               <CommandItem
                                 key={opt.value}
                                 value={`${opt.label} ${opt.value}`}

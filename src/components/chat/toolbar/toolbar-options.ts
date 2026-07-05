@@ -99,7 +99,11 @@ export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'Gemini 3.5 Flash (Low)', label: 'Gemini 3.5 Flash (Low)' },
   { value: 'Gemini 3.5 Flash (Medium)', label: 'Gemini 3.5 Flash (Medium)' },
   { value: 'Gemini 3.5 Flash (High)', label: 'Gemini 3.5 Flash (High)' },
+  { value: 'Gemini 3.1 Pro (Low)', label: 'Gemini 3.1 Pro (Low)' },
+  { value: 'Gemini 3.1 Pro (High)', label: 'Gemini 3.1 Pro (High)' },
   { value: 'Claude Sonnet 4.6 (Thinking)', label: 'Claude Sonnet 4.6 (Thinking)' },
+  { value: 'Claude Opus 4.6 (Thinking)', label: 'Claude Opus 4.6 (Thinking)' },
+  { value: 'GPT-OSS 120B (Medium)', label: 'GPT-OSS 120B (Medium)' },
 ]
 
 export const THINKING_LEVEL_OPTIONS: {

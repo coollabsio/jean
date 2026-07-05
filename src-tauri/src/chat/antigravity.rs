@@ -55,10 +55,22 @@ pub fn execute_antigravity(
         .arg(message)
         .args(["--output-format", "json"]);
 
+    // Clear any parent agent workspace env variables so the CLI resolves CWD correctly
+    cmd.env_remove("ANTIGRAVITY_PROJECT_ID")
+        .env_remove("ANTIGRAVITY_CONVERSATION_ID")
+        .env_remove("ANTIGRAVITY_LS_ADDRESS")
+        .env_remove("ANTIGRAVITY_TRAJECTORY_ID")
+        .env_remove("ANTIGRAVITY_AGENT")
+        .env_remove("ANTIGRAVITY_SOURCE_METADATA");
+
     if let Some(conv_id) = existing_conversation_id {
         if !conv_id.is_empty() {
             cmd.args(["--conversation", conv_id]);
+        } else {
+            cmd.arg("--new-project");
         }
+    } else {
+        cmd.arg("--new-project");
     }
 
     if let Some(m) = model {

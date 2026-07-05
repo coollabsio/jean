@@ -61,8 +61,28 @@ fn fallback_models() -> Vec<AntigravityModelInfo> {
             is_default: false,
         },
         AntigravityModelInfo {
+            id: "Gemini 3.1 Pro (Low)".to_string(),
+            label: "Gemini 3.1 Pro (Low)".to_string(),
+            is_default: false,
+        },
+        AntigravityModelInfo {
+            id: "Gemini 3.1 Pro (High)".to_string(),
+            label: "Gemini 3.1 Pro (High)".to_string(),
+            is_default: false,
+        },
+        AntigravityModelInfo {
             id: "Claude Sonnet 4.6 (Thinking)".to_string(),
             label: "Claude Sonnet 4.6 (Thinking)".to_string(),
+            is_default: false,
+        },
+        AntigravityModelInfo {
+            id: "Claude Opus 4.6 (Thinking)".to_string(),
+            label: "Claude Opus 4.6 (Thinking)".to_string(),
+            is_default: false,
+        },
+        AntigravityModelInfo {
+            id: "GPT-OSS 120B (Medium)".to_string(),
+            label: "GPT-OSS 120B (Medium)".to_string(),
             is_default: false,
         },
     ]
@@ -82,7 +102,7 @@ pub fn parse_version(stdout: &[u8], stderr: &[u8]) -> Option<String> {
 }
 
 pub fn parse_models(stdout: &[u8]) -> Vec<AntigravityModelInfo> {
-    let out = String::from_utf8_lossy(stdout);
+    let out = String::from_utf8_lossy(stdout).replace('\r', "\n");
     let mut models = Vec::new();
     for line in out.lines() {
         let trimmed = line.trim();
@@ -422,6 +442,15 @@ mod tests {
         assert!(models[0].is_default);
         assert_eq!(models[1].id, "Gemini 3.5 Flash (High)");
         assert!(!models[1].is_default);
+    }
+
+    #[test]
+    fn test_parse_models_with_carriage_returns() {
+        let output = b"\xE2\xA0\x8B Fetching...\r\xE2\xA0\x99 Fetching...\rGemini 3.5 Flash (Low)\nGemini 3.5 Flash (High)\n";
+        let models = parse_models(output);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "Gemini 3.5 Flash (Low)");
+        assert_eq!(models[1].id, "Gemini 3.5 Flash (High)");
     }
 
     #[test]

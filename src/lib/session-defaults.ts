@@ -9,6 +9,7 @@ interface BackendModelPreferences {
   selected_pi_model?: string
   selected_commandcode_model?: string
   selected_grok_model?: string
+  selected_antigravity_model?: string
 }
 
 export interface ModelOption {
@@ -60,6 +61,9 @@ export function resolveDefaultModelForBackend(
   }
   if (backend === 'grok') {
     return preferences?.selected_grok_model ?? 'grok/grok-composer-2.5-fast'
+  }
+  if (backend === 'antigravity') {
+    return preferences?.selected_antigravity_model ?? 'Gemini 3.5 Flash (Low)'
   }
   return preferences?.selected_model ?? DEFAULT_MODEL
 }

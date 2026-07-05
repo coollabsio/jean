@@ -21,6 +21,7 @@ import { useAvailableCursorModels } from '@/services/cursor-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import {
   getCatalogModelFastInfo,
   useModelCatalog,
@@ -149,6 +150,9 @@ export function BackendModelPickerContent({
   const { data: availableGrokModels } = useAvailableGrokModels({
     enabled: installedBackends.includes('grok'),
   })
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: installedBackends.includes('antigravity'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -190,6 +194,14 @@ export function BackendModelPickerContent({
       })),
     [availableGrokModels]
   )
+  const antigravityModelOptions = useMemo(
+    () =>
+      availableAntigravityModels?.map(model => ({
+        value: model.id,
+        label: model.label || model.id,
+      })),
+    [availableAntigravityModels]
+  )
 
   const { backendModelSections: baseBackendModelSections } =
     useToolbarDerivedState({
@@ -201,6 +213,7 @@ export function BackendModelPickerContent({
       piModelOptions,
       commandcodeModelOptions,
       grokModelOptions,
+      antigravityModelOptions,
       customCliProfiles,
       installedBackends,
     })
