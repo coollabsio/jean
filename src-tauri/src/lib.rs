@@ -57,6 +57,7 @@ mod opinionated;
 mod pi_cli;
 mod platform;
 mod projects;
+mod scheduled_prompts;
 mod terminal;
 
 // Validation functions
@@ -4335,6 +4336,7 @@ pub fn run() {
             task_manager.start();
             app.manage(task_manager);
             auto_fix::scheduler::start_auto_fix_scheduler(app.handle().clone());
+            scheduled_prompts::start_scheduled_prompts_scheduler(app.handle().clone());
             log::trace!("Background task manager initialized");
 
             // Initialize HTTP server infrastructure
@@ -4703,6 +4705,9 @@ pub fn run() {
             chat::cancel_session_wakeup,
             chat::get_scheduled_wakeup,
             chat::list_pending_wakeups,
+            scheduled_prompts::create_scheduled_prompt,
+            scheduled_prompts::list_scheduled_prompts,
+            scheduled_prompts::cancel_scheduled_prompt,
             // Chat commands - Image handling
             chat::read_clipboard_image,
             chat::write_clipboard_text,

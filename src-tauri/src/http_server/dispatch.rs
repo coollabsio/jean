@@ -2675,6 +2675,41 @@ pub async fn dispatch_command(
             let entries = crate::chat::list_pending_wakeups().await?;
             to_value(entries)
         }
+        "create_scheduled_prompt" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let prompt: String = from_field(&args, "prompt")?;
+            let backend: String = from_field(&args, "backend")?;
+            let model: Option<String> = from_field_opt(&args, "model")?;
+            let trigger: crate::scheduled_prompts::ScheduleTrigger = serde_json::from_value(
+                args.get("trigger").cloned().unwrap_or(Value::Null),
+            )
+            .map_err(|e| format!("Invalid trigger: {e}"))?;
+            let result = crate::scheduled_prompts::create_scheduled_prompt(
+                app.clone(),
+                session_id,
+                worktree_id,
+                worktree_path,
+                prompt,
+                backend,
+                model,
+                trigger,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["scheduled-prompts"]);
+            to_value(result)
+        }
+        "list_scheduled_prompts" => {
+            let entries = crate::scheduled_prompts::list_scheduled_prompts(app.clone()).await?;
+            to_value(entries)
+        }
+        "cancel_scheduled_prompt" => {
+            let id: String = from_field(&args, "id")?;
+            let removed = crate::scheduled_prompts::cancel_scheduled_prompt(app.clone(), id).await?;
+            emit_cache_invalidation(app, &["scheduled-prompts"]);
+            to_value(removed)
+        }
 
         // =====================================================================
         // Chat (additional)
