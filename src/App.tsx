@@ -57,7 +57,7 @@ import { useMagicPromptAutoDefaults } from './hooks/useMagicPromptAutoDefaults'
 import { usePreferences } from './services/preferences'
 import useStreamingEvents from './components/chat/hooks/useStreamingEvents'
 import { hydrateRunningSnapshot } from './lib/hydrate-running-snapshot'
-import { preloadAllSounds } from './lib/sounds'
+import { installAudioUnlockListeners, preloadAllSounds } from './lib/sounds'
 import {
   beginSessionStateHydration,
   endSessionStateHydration,
@@ -142,6 +142,9 @@ function App() {
 
   // Linux: route OS file drops (intercepted in Rust) to a terminal or the chat.
   useLinuxFileDrop()
+
+  // Unlock Web Audio on first interaction so background session sounds can play.
+  useEffect(() => installAudioUnlockListeners(), [])
 
   // Holds the update object so the title bar indicator can trigger install later
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -64,12 +64,52 @@ function getAudioContext(): AudioContext | null {
     }
   }
 
-  // Resume if suspended (the context is unlocked by any prior user gesture).
-  if (audioContext.state === 'suspended') {
-    void audioContext.resume().catch(() => undefined)
+  return audioContext
+}
+
+/** Kick off resume synchronously (must run inside the user-gesture call stack). */
+function beginAudioContextResume(ctx: AudioContext): void {
+  if (ctx.state === 'suspended') {
+    void ctx.resume().catch(() => undefined)
+  }
+}
+
+/** Await a running context before starting playback. */
+async function ensureAudioContextRunning(
+  ctx: AudioContext
+): Promise<boolean> {
+  if (ctx.state === 'running') return true
+  if (ctx.state === 'closed') return false
+
+  try {
+    await ctx.resume()
+  } catch {
+    // Still attempt playback — some webviews report non-running state incorrectly.
   }
 
-  return audioContext
+  return true
+}
+
+/**
+ * Unlock notification audio on the first user interaction.
+ * Call once at app startup so background session events can play sounds later.
+ */
+export function installAudioUnlockListeners(): () => void {
+  if (typeof document === 'undefined') return () => undefined
+
+  const unlock = () => {
+    const ctx = getAudioContext()
+    if (ctx) beginAudioContextResume(ctx)
+  }
+
+  const options: AddEventListenerOptions = { capture: true, passive: true }
+  document.addEventListener('pointerdown', unlock, options)
+  document.addEventListener('keydown', unlock, options)
+
+  return () => {
+    document.removeEventListener('pointerdown', unlock, options)
+    document.removeEventListener('keydown', unlock, options)
+  }
 }
 
 function loadBuffer(
@@ -169,24 +209,29 @@ export function playNotificationSound(
   const ctx = getAudioContext()
   if (!ctx) return
 
+  // Resume while the click/key handler is still on the stack (settings preview).
+  beginAudioContextResume(ctx)
+
   // Claim the latest request slot so stale async loads can be discarded.
   const requestId = ++playRequestId
 
   // Stop any currently playing sound to prevent overlap.
   stopCurrentSource()
 
-  loadBuffer(sound, ctx)
-    .then(buffer => {
+  void loadBuffer(sound, ctx)
+    .then(async buffer => {
       // A newer request superseded this one — drop the stale completion.
       if (requestId !== playRequestId) return
+      await ensureAudioContextRunning(ctx)
       if (buffer) {
         playBuffer(ctx, buffer)
       } else {
         playFallbackBeep(ctx, sound)
       }
     })
-    .catch(() => {
+    .catch(async () => {
       if (requestId !== playRequestId) return
+      await ensureAudioContextRunning(ctx)
       playFallbackBeep(ctx, sound)
     })
 }

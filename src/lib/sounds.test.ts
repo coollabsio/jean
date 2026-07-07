@@ -122,6 +122,35 @@ describe('notification sounds', () => {
     expect(workworkOsc?.frequency.value).not.toBe(jobsdoneOsc?.frequency.value)
   })
 
+  it('awaits resume before playing when the audio context starts suspended', async () => {
+    nativeApp = true
+    let resolveResume: (() => void) | undefined
+    const resumePromise = new Promise<void>(resolve => {
+      resolveResume = resolve
+    })
+
+    class SuspendedAudioContext extends MockAudioContext {
+      override state = 'suspended'
+      override resume = vi.fn(() => {
+        const promise = resumePromise.then(() => {
+          this.state = 'running'
+        })
+        return promise
+      })
+    }
+
+    vi.stubGlobal('AudioContext', SuspendedAudioContext)
+
+    const { playNotificationSound } = await import('./sounds')
+
+    playNotificationSound('workwork')
+    expect(startedBuffers).toHaveLength(0)
+
+    resolveResume?.()
+    await resumePromise
+    await vi.waitFor(() => expect(startedBuffers).toHaveLength(1))
+  })
+
   it('ignores a stale decode so only the latest requested sound plays', async () => {
     nativeApp = true
 

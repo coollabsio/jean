@@ -303,6 +303,16 @@ export default function useStreamingEvents({
       notifyIfBackground(title, name)
     }
 
+    const playWaitingSound = (): void => {
+      const prefs = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences()
+      )
+      const waitingSound = (prefs?.waiting_sound ?? 'none') as NotificationSound
+      playNotificationSound(waitingSound, {
+        webAccessSoundsEnabled: prefs?.web_access_sounds_enabled ?? true,
+      })
+    }
+
     // Hydrate ScheduleWakeup indicator store from backend so reloads do not
     // show historical tool_use blocks stuck in the "pending" spinner state.
     invoke<PendingWakeupEntry[]>('list_pending_wakeups')
@@ -660,6 +670,8 @@ export default function useStreamingEvents({
       const next = [...current, request]
       setPendingCodexMcpElicitationRequests(sessionId, next)
       setWaitingForInput(sessionId, true)
+      playWaitingSound()
+      notifySession(sessionId, 'Needs your input')
       persistCodexPendingState(sessionId, worktreeId, {
         pendingCodexMcpElicitationRequests: next,
       })
@@ -677,6 +689,7 @@ export default function useStreamingEvents({
         const next = [...current, request]
         setPendingCodexPermissionRequests(session_id, next)
         setWaitingForInput(session_id, true)
+        playWaitingSound()
         notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexPermissionRequests: next,
@@ -698,6 +711,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexCommandApprovalRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          playWaitingSound()
           notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexCommandApprovalRequests: next,
@@ -732,6 +746,7 @@ export default function useStreamingEvents({
         addToolCall(session_id, toolCall)
         addToolBlock(session_id, toolCall.id)
 
+        playWaitingSound()
         notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexUserInputRequests: next,
@@ -779,6 +794,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexDynamicToolCallRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          playWaitingSound()
           notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexDynamicToolCallRequests: next,
