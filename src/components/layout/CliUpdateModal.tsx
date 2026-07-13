@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { useUIStore } from '@/store/ui-store'
 import { claudeCliQueryKeys } from '@/services/claude-cli'
 import { ghCliQueryKeys } from '@/services/gh-cli'
+import { glabCliQueryKeys } from '@/services/glab-cli'
 import { codexCliQueryKeys } from '@/services/codex-cli'
 import { opencodeCliQueryKeys } from '@/services/opencode-cli'
 import { piCliQueryKeys } from '@/services/pi-cli'
@@ -23,6 +24,7 @@ import { githubQueryKeys } from '@/services/github'
 import {
   ClaudeCliReinstallModal,
   GhCliReinstallModal,
+  GlabCliReinstallModal,
   CodexCliReinstallModal,
   OpenCodeCliReinstallModal,
   PiCliReinstallModal,
@@ -45,6 +47,8 @@ export function CliUpdateModal() {
       } else if (cliUpdateModalType === 'gh') {
         queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.all })
         queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
+      } else if (cliUpdateModalType === 'glab') {
+        queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.all })
       } else if (cliUpdateModalType === 'codex') {
         queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.all })
       } else if (cliUpdateModalType === 'opencode') {
@@ -76,6 +80,10 @@ export function CliUpdateModal() {
       />
       <GhCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'gh'}
+        onOpenChange={handleOpenChange}
+      />
+      <GlabCliReinstallModal
+        open={cliUpdateModalOpen && cliUpdateModalType === 'glab'}
         onOpenChange={handleOpenChange}
       />
       <CodexCliReinstallModal

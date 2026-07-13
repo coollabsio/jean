@@ -6,6 +6,13 @@ use tauri::{AppHandle, Manager};
 
 use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
+use crate::projects::provider::{resolve_git_provider, GitProvider};
+
+/// True when the project resolves to the GitLab provider, so the GitHub
+/// commands below should delegate to [`super::gitlab_issues`].
+fn is_gitlab_project(project_path: &str) -> bool {
+    resolve_git_provider(project_path).0 == GitProvider::Gitlab
+}
 
 fn gh_command(gh: &Path, project_path: &str) -> Command {
     crate::platform::resolved_cli_command(gh, Some(Path::new(project_path)))
@@ -86,6 +93,10 @@ pub async fn list_github_labels(
 ) -> Result<Vec<GitHubLabel>, String> {
     log::trace!("Listing GitHub labels for {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_labels(&app, &project_path).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args(["label", "list", "--json", "name,color", "-L", "1000"])
@@ -161,6 +172,10 @@ pub async fn list_github_issues(
     state: Option<String>,
 ) -> Result<GitHubIssueListResult, String> {
     log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_issues(&app, &project_path, state).await;
+    }
 
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
@@ -252,6 +267,10 @@ pub async fn search_github_issues(
 ) -> Result<Vec<GitHubIssue>, String> {
     log::trace!("Searching GitHub issues for {project_path} with query: {query}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::search_issues(&app, &project_path, query).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -303,6 +322,10 @@ pub async fn get_github_issue_by_number(
 ) -> Result<GitHubIssue, String> {
     log::trace!("Getting GitHub issue #{issue_number} by number for {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_issue_by_number(&app, &project_path, issue_number).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -344,6 +367,10 @@ pub async fn get_github_issue(
     issue_number: u32,
 ) -> Result<GitHubIssueDetail, String> {
     log::trace!("Getting GitHub issue #{issue_number} for {project_path}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_issue_detail(&app, &project_path, issue_number).await;
+    }
 
     let gh = resolve_gh_binary(&app);
     // Run gh issue view
@@ -1531,6 +1558,10 @@ pub async fn list_github_prs(
 ) -> Result<Vec<GitHubPullRequest>, String> {
     log::trace!("Listing GitHub PRs for {project_path} with state: {state:?}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_mrs(&app, &project_path, state).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
@@ -1583,6 +1614,10 @@ pub async fn search_github_prs(
 ) -> Result<Vec<GitHubPullRequest>, String> {
     log::trace!("Searching GitHub PRs for {project_path} with query: {query}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::search_mrs(&app, &project_path, query).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -1634,6 +1669,10 @@ pub async fn get_github_pr_by_number(
 ) -> Result<GitHubPullRequest, String> {
     log::trace!("Getting GitHub PR #{pr_number} by number for {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_mr_by_number(&app, &project_path, pr_number).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -1675,6 +1714,10 @@ pub async fn get_github_pr(
     pr_number: u32,
 ) -> Result<GitHubPullRequestDetail, String> {
     log::trace!("Getting GitHub PR #{pr_number} for {project_path}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_mr_detail(&app, &project_path, pr_number).await;
+    }
 
     let gh = resolve_gh_binary(&app);
     // Run gh pr view

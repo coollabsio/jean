@@ -12,7 +12,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useProjectsStore } from '@/store/projects-store'
-import { useProjects, useSaveJeanConfig } from '@/services/projects'
+import {
+  useProjects,
+  useSaveJeanConfig,
+  useJeanConfig,
+} from '@/services/projects'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 
 export function JeanConfigWizard() {
@@ -32,6 +36,7 @@ function JeanConfigWizardContent() {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const saveConfig = useSaveJeanConfig()
+  const { data: existingConfig } = useJeanConfig(project?.path ?? null)
 
   const [setupScript, setSetupScript] = useState('')
   const [teardownScript, setTeardownScript] = useState('')
@@ -66,6 +71,8 @@ function JeanConfigWizardContent() {
     await saveConfig.mutateAsync({
       projectPath: project.path,
       config: {
+        // Preserve any pre-existing fields (e.g. provider binding).
+        ...existingConfig,
         scripts: {
           setup: setupScript.trim() || null,
           teardown: teardownScript.trim() || null,

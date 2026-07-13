@@ -1,6 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+
+use crate::projects::provider::{resolve_git_provider, GitProvider};
 
 fn gh_command(gh: &std::path::Path, project_path: &str) -> std::process::Command {
     crate::platform::resolved_cli_command(gh, Some(std::path::Path::new(project_path)))
@@ -86,18 +89,24 @@ pub struct PrStatus {
     pub checked_at: u64,
 }
 
-/// Fetch PR status using gh CLI
+/// Fetch PR/MR status for a worktree's linked PR, dispatching by git provider.
 pub fn get_pr_status(
+    app: &AppHandle,
     repo_path: &str,
     pr_number: u32,
     pr_url: &str,
     worktree_id: &str,
-    gh_binary: &std::path::Path,
 ) -> Result<PrStatus, String> {
+    if resolve_git_provider(repo_path).0 == GitProvider::Gitlab {
+        return get_mr_status(app, repo_path, pr_number, pr_url, worktree_id);
+    }
+
     log::trace!("Fetching PR status for #{pr_number} in {repo_path}");
 
+    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
+
     // Run gh pr view
-    let output = gh_command(gh_binary, repo_path)
+    let output = gh_command(&gh_binary, repo_path)
         .args([
             "pr",
             "view",
@@ -235,6 +244,78 @@ fn compute_display_status(
                 PrDisplayStatus::Open
             }
         }
+    }
+}
+
+/// Fetch merge-request status via glab and map it onto [`PrStatus`].
+///
+/// GitLab has no direct equivalent of GitHub's review-decision, so
+/// `review_decision` is always `None`; CI state comes from the MR's pipeline and
+/// mergeability from `(detailed_)merge_status`.
+fn get_mr_status(
+    app: &AppHandle,
+    repo_path: &str,
+    pr_number: u32,
+    pr_url: &str,
+    worktree_id: &str,
+) -> Result<PrStatus, String> {
+    log::trace!("Fetching MR status for !{pr_number} in {repo_path}");
+
+    let raw = crate::projects::gitlab_issues::fetch_mr_status_raw(app, repo_path, pr_number)?;
+
+    let state = parse_pr_state(&raw.state);
+    let review_decision = None;
+    let check_status = raw
+        .pipeline_status
+        .as_deref()
+        .and_then(parse_gitlab_pipeline_status);
+    let mergeable = raw.merge_status.as_deref().map(parse_gitlab_merge_status);
+    let display_status = compute_display_status(&state, raw.is_draft, &review_decision);
+
+    let checked_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    Ok(PrStatus {
+        worktree_id: worktree_id.to_string(),
+        pr_number,
+        pr_url: pr_url.to_string(),
+        state,
+        is_draft: raw.is_draft,
+        review_decision,
+        check_status,
+        display_status,
+        mergeable,
+        checked_at,
+    })
+}
+
+/// Map a GitLab pipeline status to a [`CheckStatus`] (None when there's no
+/// meaningful CI signal, e.g. canceled/skipped/no pipeline).
+fn parse_gitlab_pipeline_status(s: &str) -> Option<CheckStatus> {
+    match s {
+        "success" => Some(CheckStatus::Success),
+        "failed" => Some(CheckStatus::Failure),
+        "running"
+        | "pending"
+        | "created"
+        | "waiting_for_resource"
+        | "preparing"
+        | "scheduled"
+        | "manual" => Some(CheckStatus::Pending),
+        _ => None,
+    }
+}
+
+/// Map a GitLab `merge_status` / `detailed_merge_status` to [`MergeableStatus`].
+fn parse_gitlab_merge_status(s: &str) -> MergeableStatus {
+    match s {
+        "can_be_merged" | "mergeable" => MergeableStatus::Mergeable,
+        "cannot_be_merged" | "cannot_be_merged_recheck" | "broken_status" | "conflict" => {
+            MergeableStatus::Conflicting
+        }
+        _ => MergeableStatus::Unknown,
     }
 }
 

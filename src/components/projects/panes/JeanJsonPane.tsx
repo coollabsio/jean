@@ -102,6 +102,8 @@ export function JeanJsonPane({
     saveJeanConfig.mutate({
       projectPath,
       config: {
+        // Preserve any fields this pane doesn't manage (e.g. provider binding).
+        ...jeanConfig,
         scripts: {
           setup: localSetup.trim() || null,
           teardown: localTeardown.trim() || null,
@@ -111,6 +113,7 @@ export function JeanJsonPane({
       },
     })
   }, [
+    jeanConfig,
     localSetup,
     localTeardown,
     localRun,

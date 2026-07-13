@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useClaudeCliSetup } from '@/services/claude-cli'
 import { useGhCliSetup } from '@/services/gh-cli'
+import { useGlabCliSetup } from '@/services/glab-cli'
 import { useCodexCliSetup } from '@/services/codex-cli'
 import { useOpenCodeCliSetup } from '@/services/opencode-cli'
 import { usePiCliSetup } from '@/services/pi-cli'
@@ -99,6 +100,27 @@ function GhCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
     <CliReinstallModalUI
       setup={setup}
       cliType="gh"
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
+/**
+ * GitLab CLI specific modal - calls ONLY useGlabCliSetup
+ * This ensures only one event listener is active
+ */
+export function GlabCliReinstallModal({ open, onOpenChange }: ModalProps) {
+  if (!open) return null
+  return <GlabCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+}
+
+function GlabCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+  const setup = useGlabCliSetup()
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType="glab"
       open={open}
       onOpenChange={onOpenChange}
     />
@@ -251,6 +273,7 @@ interface CliReinstallModalUIProps {
   cliType:
     | 'claude'
     | 'gh'
+    | 'glab'
     | 'codex'
     | 'opencode'
     | 'pi'
@@ -282,7 +305,9 @@ function CliReinstallModalUI({
                 ? 'Command Code CLI'
                 : cliType === 'grok'
                   ? 'Grok CLI'
-                  : 'GitHub CLI'
+                  : cliType === 'glab'
+                    ? 'GitLab CLI'
+                    : 'GitHub CLI'
 
   // Store setup in ref for stable callback reference
   const setupRef = useRef(setup)

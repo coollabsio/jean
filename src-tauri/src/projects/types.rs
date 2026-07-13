@@ -76,6 +76,10 @@ pub struct JeanConfig {
     pub scripts: JeanScripts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<PortEntry>>,
+    /// Optional git hosting provider binding (GitHub / GitLab, incl. self-hosted host).
+    /// Absent → auto-detect from the origin remote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<super::provider::ProviderConfig>,
 }
 
 /// Run script(s) — supports both a single string and an array of strings

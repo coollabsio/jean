@@ -31,6 +31,7 @@ import { getFileManagerName } from '@/lib/platform'
 
 import type { AppPreferences } from '@/types/preferences'
 import type { AdvisoryContext } from '@/types/github'
+import type { ProviderConfig } from '@/types/provider'
 import { hasBackend, hasBackendTransport } from '@/lib/environment'
 import { openExternal, preOpenWindow } from '@/lib/platform'
 import { shouldSuppressAutoFixConflictNotification } from './worktree-conflict-events'
@@ -2114,6 +2115,7 @@ export interface JeanConfig {
     run: string | string[] | null
   }
   ports?: PortEntry[] | null
+  provider?: ProviderConfig | null
 }
 
 /**

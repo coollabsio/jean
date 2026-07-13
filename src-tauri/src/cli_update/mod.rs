@@ -10,7 +10,15 @@ pub struct CliPathUpdateOutput {
     pub exit_code: Option<i32>,
 }
 
-const ALLOWED_CLI_TYPES: &[&str] = &["claude", "codex", "opencode", "gh", "coderabbit", "pi"];
+const ALLOWED_CLI_TYPES: &[&str] = &[
+    "claude",
+    "codex",
+    "opencode",
+    "gh",
+    "glab",
+    "coderabbit",
+    "pi",
+];
 const ALLOWED_COMMANDS: &[&str] = &[
     "brew",
     "npm",

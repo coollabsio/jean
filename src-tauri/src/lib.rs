@@ -45,6 +45,7 @@ mod codex_cli;
 mod commandcode_cli;
 mod cursor_cli;
 mod gh_cli;
+mod glab_cli;
 mod grok_cli;
 pub mod http_server;
 pub mod jean_mcp_config;
@@ -354,6 +355,8 @@ pub struct AppPreferences {
     pub grok_cli_source: String, // Grok CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default = "default_cli_source")]
+    pub glab_cli_source: String, // GitLab CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
     pub wsl_mode_chosen: bool, // Whether WSL mode selection has been made (prevents re-asking)
     #[serde(default)]
@@ -2228,6 +2231,7 @@ impl Default for AppPreferences {
             opencode_cli_source: default_cli_source(),
             grok_cli_source: default_grok_cli_source(),
             gh_cli_source: default_cli_source(),
+            glab_cli_source: default_cli_source(),
             wsl_mode_chosen: false,
             wsl_enabled: false,
             wsl_distro: String::new(),
@@ -4968,6 +4972,13 @@ pub fn run() {
             gh_cli::check_gh_cli_version_exists,
             gh_cli::install_gh_cli,
             gh_cli::uninstall_gh_cli,
+            glab_cli::check_glab_cli_installed,
+            glab_cli::detect_glab_in_path,
+            glab_cli::check_glab_cli_auth,
+            glab_cli::get_available_glab_versions,
+            glab_cli::check_glab_cli_version_exists,
+            glab_cli::install_glab_cli,
+            glab_cli::uninstall_glab_cli,
             // Generic CLI update command (path-installed CLIs)
             cli_update::run_cli_path_update,
             // Background task commands
