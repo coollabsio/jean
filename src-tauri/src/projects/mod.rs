@@ -19,6 +19,5 @@ pub use commands::*;
 pub use github_actions::*;
 pub use github_issues::*;
 pub use linear_issues::*;
-// `provider` module is public; its items are consumed via
-// `crate::projects::provider::*` (wired up in later phases).
+pub use provider::get_git_provider;
 pub use saved_contexts::*;

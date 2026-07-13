@@ -4666,6 +4666,7 @@ pub fn run() {
             projects::get_project_branches,
             projects::update_project_settings,
             projects::get_jean_config,
+            projects::provider::get_git_provider,
             projects::save_jean_config,
             projects::get_pr_prompt,
             projects::get_review_prompt,

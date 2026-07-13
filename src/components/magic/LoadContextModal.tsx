@@ -22,6 +22,8 @@ import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
 import { usePreferences } from '@/services/preferences'
 import { useGhLogin } from '@/hooks/useGhLogin'
+import { useGlabLogin } from '@/hooks/useGlabLogin'
+import { useProjectGitProvider, providerLabels } from '@/services/git-provider'
 import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
 import { githubQueryKeys } from '@/services/github'
 import { linearQueryKeys } from '@/services/linear'
@@ -71,7 +73,22 @@ export function LoadContextModal({
 }: LoadContextModalProps) {
   const queryClient = useQueryClient()
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
+  const { triggerLogin: triggerGlabLogin, isGlabInstalled } = useGlabLogin()
   const { data: preferences } = usePreferences()
+
+  // Resolve the project's git host provider for provider-aware auth + wording.
+  const { data: providerInfo } = useProjectGitProvider(worktreePath)
+  const provider = providerInfo?.provider ?? 'github'
+  const labels = providerLabels(provider)
+  const triggerLogin =
+    provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
+  const isCliInstalled = provider === 'gitlab' ? isGlabInstalled : isGhInstalled
+  const displayTabs = TABS
+    // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
+    .filter(tab => tab.id !== 'security' || provider !== 'gitlab')
+    .map(tab =>
+      tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
+    )
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<TabId>('issues')
@@ -305,7 +322,7 @@ export function LoadContextModal({
 
         {/* Tabs */}
         <div className="flex overflow-x-auto border-b border-border scrollbar-hide">
-          {TABS.map(tab => (
+          {displayTabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -360,8 +377,9 @@ export function LoadContextModal({
               loadingNumbers={handlers.loadingNumbers}
               removingNumbers={handlers.removingNumbers}
               hasLoadedContexts={data.hasLoadedIssueContexts}
-              onGhLogin={triggerGhLogin}
-              isGhInstalled={isGhInstalled}
+              onLogin={triggerLogin}
+              isCliInstalled={isCliInstalled}
+              provider={provider}
             />
           )}
 
@@ -394,8 +412,9 @@ export function LoadContextModal({
               loadingNumbers={handlers.loadingNumbers}
               removingNumbers={handlers.removingNumbers}
               hasLoadedContexts={data.hasLoadedPRContexts}
-              onGhLogin={triggerGhLogin}
-              isGhInstalled={isGhInstalled}
+              onLogin={triggerLogin}
+              isCliInstalled={isCliInstalled}
+              provider={provider}
             />
           )}
 

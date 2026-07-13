@@ -3069,6 +3069,11 @@ pub async fn dispatch_command(
             let result = crate::projects::get_jean_config(project_path).await;
             to_value(result)
         }
+        "get_git_provider" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let result = crate::projects::get_git_provider(project_path).await?;
+            to_value(result)
+        }
         "save_jean_config" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let config = from_field(&args, "config")?;

@@ -22,6 +22,26 @@ import { hasBackend } from '@/lib/environment'
 
 const isTauri = hasBackend
 
+/**
+ * Check if an error is a GitLab CLI authentication or installation error
+ * (mirrors `isGhAuthError`). The Rust side maps 401/auth failures to a message
+ * asking the user to run `glab auth login`.
+ */
+export function isGlabAuthError(error: unknown): boolean {
+  if (!error) return false
+  const message = error instanceof Error ? error.message : String(error)
+  const lower = message.toLowerCase()
+
+  return (
+    lower.includes('gitlab cli not authenticated') ||
+    lower.includes('glab auth login') ||
+    lower.includes('requires authentication') ||
+    lower.includes('authentication required') ||
+    lower.includes('invalid token') ||
+    lower.includes('the system cannot find the file specified')
+  )
+}
+
 // Query keys for GitLab CLI
 export const glabCliQueryKeys = {
   all: ['glab-cli'] as const,

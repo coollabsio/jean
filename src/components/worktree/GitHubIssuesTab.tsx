@@ -1,6 +1,9 @@
 import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
+import { isGlabAuthError } from '@/services/glab-cli'
+import { GlabAuthError } from '@/components/shared/GlabAuthError'
+import { providerLabels } from '@/services/git-provider'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -12,6 +15,7 @@ import {
 import { cn } from '@/lib/utils'
 import { IssueItem } from './NewWorktreeItems'
 import type { GitHubIssue } from '@/types/github'
+import type { GitProvider } from '@/types/provider'
 
 export interface GitHubIssuesTabProps {
   searchQuery: string
@@ -31,8 +35,9 @@ export interface GitHubIssuesTabProps {
   onPreviewIssue: (issue: GitHubIssue) => void
   creatingFromNumber: number | null
   searchInputRef: React.RefObject<HTMLInputElement | null>
-  onGhLogin: () => void
-  isGhInstalled: boolean
+  onLogin: () => void
+  isCliInstalled: boolean
+  provider?: GitProvider
 }
 
 export function GitHubIssuesTab({
@@ -53,9 +58,11 @@ export function GitHubIssuesTab({
   onPreviewIssue,
   creatingFromNumber,
   searchInputRef,
-  onGhLogin,
-  isGhInstalled,
+  onLogin,
+  isCliInstalled,
+  provider = 'github',
 }: GitHubIssuesTabProps) {
+  const labels = providerLabels(provider)
   const handleLabelClick = (labelName: string) => {
     const token = `label:"${labelName}"`
     if (!searchQuery.includes(token)) {
@@ -129,8 +136,12 @@ export function GitHubIssuesTab({
         )}
 
         {error &&
-          (isGhAuthError(error) ? (
-            <GhAuthError onLogin={onGhLogin} isGhInstalled={isGhInstalled} />
+          ((provider === 'gitlab' ? isGlabAuthError(error) : isGhAuthError(error)) ? (
+            provider === 'gitlab' ? (
+              <GlabAuthError onLogin={onLogin} isGlabInstalled={isCliInstalled} />
+            ) : (
+              <GhAuthError onLogin={onLogin} isGhInstalled={isCliInstalled} />
+            )
           ) : (
             <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
               <AlertCircle className="h-5 w-5 text-destructive mb-2" />
@@ -154,7 +165,7 @@ export function GitHubIssuesTab({
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             <span className="ml-2 text-sm text-muted-foreground">
-              Searching GitHub...
+              Searching {labels.name}...
             </span>
           </div>
         )}
@@ -179,7 +190,7 @@ export function GitHubIssuesTab({
               <div className="flex items-center justify-center py-2">
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                 <span className="ml-1.5 text-xs text-muted-foreground">
-                  Searching GitHub for more results...
+                  Searching {labels.name} for more results...
                 </span>
               </div>
             )}

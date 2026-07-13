@@ -5,6 +5,8 @@ import { Zap, CircleDot, GitPullRequest, Shield, GitBranch } from 'lucide-react'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type { LucideIcon } from 'lucide-react'
 import { useGhLogin } from '@/hooks/useGhLogin'
+import { useGlabLogin } from '@/hooks/useGlabLogin'
+import { useProjectGitProvider, providerLabels } from '@/services/git-provider'
 import {
   Dialog,
   DialogContent,
@@ -51,6 +53,7 @@ export const TABS: Tab[] = [
 
 export function NewWorktreeModal() {
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
+  const { triggerLogin: triggerGlabLogin, isGlabInstalled } = useGlabLogin()
   const { newWorktreeModalOpen } = useUIStore()
   const isMobile = useIsMobile()
 
@@ -70,6 +73,21 @@ export function NewWorktreeModal() {
 
   // Hooks
   const data = useNewWorktreeData(searchQuery, includeClosed)
+
+  // Resolve the project's git host provider for provider-aware auth + wording.
+  const { data: providerInfo } = useProjectGitProvider(data.selectedProject?.path)
+  const provider = providerInfo?.provider ?? 'github'
+  const labels = providerLabels(provider)
+  const triggerLogin =
+    provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
+  const isCliInstalled = provider === 'gitlab' ? isGlabInstalled : isGhInstalled
+  const displayTabs = TABS
+    // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
+    .filter(tab => tab.id !== 'security' || provider !== 'gitlab')
+    .map(tab =>
+      tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
+    )
+
   const handlers = useNewWorktreeHandlers(data, {
     setActiveTab,
     setSearchQuery,
@@ -227,7 +245,7 @@ export function NewWorktreeModal() {
           <SessionTabBar
             activeTab={activeTab}
             onTabChange={setActiveTab}
-            tabs={TABS}
+            tabs={displayTabs}
           />
 
           {/* Tab content */}
@@ -265,8 +283,9 @@ export function NewWorktreeModal() {
                 onPreviewIssue={handlePreviewIssue}
                 creatingFromNumber={handlers.creatingFromNumber}
                 searchInputRef={searchInputRef}
-                onGhLogin={triggerGhLogin}
-                isGhInstalled={isGhInstalled}
+                onLogin={triggerLogin}
+                isCliInstalled={isCliInstalled}
+                provider={provider}
               />
             )}
 
@@ -291,8 +310,9 @@ export function NewWorktreeModal() {
                 creatingFromNumber={handlers.creatingFromNumber}
                 stackingFromPR={handlers.stackingFromPR}
                 searchInputRef={searchInputRef}
-                onGhLogin={triggerGhLogin}
-                isGhInstalled={isGhInstalled}
+                onLogin={triggerLogin}
+                isCliInstalled={isCliInstalled}
+                provider={provider}
               />
             )}
 

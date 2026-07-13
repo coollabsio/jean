@@ -176,6 +176,26 @@ pub fn resolve_git_provider(repo_path: &str) -> (GitProvider, String) {
     (provider, host)
 }
 
+/// Resolved provider info surfaced to the frontend.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitProviderInfo {
+    /// `"github"` | `"gitlab"`
+    pub provider: String,
+    /// Effective host (e.g. `github.com`, `gitlab.com`, or a self-hosted host).
+    pub host: String,
+}
+
+/// Resolve the git host provider + host for a project path (for provider-aware UI).
+#[tauri::command]
+pub async fn get_git_provider(project_path: String) -> Result<GitProviderInfo, String> {
+    let (provider, host) = resolve_git_provider(&project_path);
+    Ok(GitProviderInfo {
+        provider: provider.as_str().to_string(),
+        host,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
