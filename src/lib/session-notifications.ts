@@ -8,13 +8,15 @@ import { invoke } from '@/lib/transport'
 import { isNativeApp } from './environment'
 
 /**
- * Fire a native OS banner only when the app is unfocused.
- * No-op in web access (non-native) or when the window is focused.
+ * Ask the native backend to fire an OS banner when the app is unfocused.
+ * Native window focus is checked in Rust because `document.hasFocus()` can be
+ * stale while a desktop webview is backgrounded.
  */
 export function notifyIfBackground(title: string, body?: string): void {
   if (!isNativeApp()) return
-  if (document.hasFocus()) return // sound already covers the focused case
-  void invoke('send_native_notification', { title, body }).catch(
-    () => undefined
-  )
+  void invoke('send_native_notification', {
+    title,
+    body,
+    backgroundOnly: true,
+  }).catch(() => undefined)
 }

@@ -19,6 +19,7 @@ import {
 import { openExternal } from '@/lib/platform'
 import { attachOrphanCompositionEndGuard } from '@/lib/terminal-composition-guard'
 import { LocalTerminalLinkProvider } from '@/lib/terminal-local-links'
+import { ensureTerminalFontLoaded } from '@/lib/terminal-font-loading'
 import {
   invoke,
   isTransportConnected,
@@ -70,6 +71,7 @@ interface PersistentTerminal {
   outputReadyPromise: Promise<void> | null
   pendingOutput: string[]
   lastAppearance: TerminalAppearance | null
+  appearanceLoadVersion: number
   appearanceResizeTimer: ReturnType<typeof setTimeout> | null
   touchScrollCleanup: (() => void) | null
   compositionGuardCleanup: (() => void) | null
@@ -147,6 +149,26 @@ function getTerminalAppearance(): TerminalAppearance {
     fontFamily: getTerminalFontFamily(),
     fontSize: getTerminalFontSize(),
     theme: getTerminalTheme(),
+  }
+}
+
+function hasSameFont(
+  first: TerminalAppearance,
+  second: TerminalAppearance
+): boolean {
+  return (
+    first.fontFamily === second.fontFamily && first.fontSize === second.fontSize
+  )
+}
+
+async function getLoadedTerminalAppearance(): Promise<TerminalAppearance> {
+  let appearance = getTerminalAppearance()
+
+  while (true) {
+    await ensureTerminalFontLoaded(appearance.fontFamily, appearance.fontSize)
+    const current = getTerminalAppearance()
+    if (hasSameFont(appearance, current)) return current
+    appearance = current
   }
 }
 
@@ -336,9 +358,12 @@ function scheduleGhosttyOutputReady(
   return instance.outputReadyPromise
 }
 
-function applyTerminalAppearance(instance: PersistentTerminal): void {
+async function applyTerminalAppearance(
+  instance: PersistentTerminal
+): Promise<void> {
   if (!instance.terminal) return
 
+  const loadVersion = ++instance.appearanceLoadVersion
   const next = getTerminalAppearance()
   const previous = instance.lastAppearance
   const fontChanged =
@@ -349,16 +374,31 @@ function applyTerminalAppearance(instance: PersistentTerminal): void {
 
   if (!fontChanged && !themeChanged) return
 
-  if (themeChanged) {
-    instance.terminal.options.theme = next.theme
+  if (fontChanged) {
+    await ensureTerminalFontLoaded(next.fontFamily, next.fontSize)
+    if (
+      loadVersion !== instance.appearanceLoadVersion ||
+      !isCurrentInstance(instance.terminalId, instance) ||
+      !instance.terminal ||
+      !hasSameFont(next, getTerminalAppearance())
+    ) {
+      return
+    }
+  }
+
+  const current = getTerminalAppearance()
+  const currentThemeChanged = hasThemeChanged(previous, current)
+
+  if (currentThemeChanged) {
+    instance.terminal.options.theme = current.theme
   }
   if (fontChanged) {
-    instance.terminal.options.fontFamily = next.fontFamily
-    instance.terminal.options.fontSize = next.fontSize
+    instance.terminal.options.fontFamily = current.fontFamily
+    instance.terminal.options.fontSize = current.fontSize
     scheduleAppearanceResize(instance)
   }
 
-  instance.lastAppearance = next
+  instance.lastAppearance = current
 }
 
 function ensurePreferencesSubscription(): void {
@@ -368,7 +408,7 @@ function ensurePreferencesSubscription(): void {
     if (event.query.queryHash !== '["preferences"]') return
     if (event.type !== 'updated') return
     for (const instance of instances.values()) {
-      applyTerminalAppearance(instance)
+      void applyTerminalAppearance(instance)
     }
   })
 }
@@ -616,11 +656,13 @@ async function createTerminalForRenderer(
   fitAddon: EmbeddedFitAddon
   appearance: TerminalAppearance
 }> {
-  const appearance = getTerminalAppearance()
+  const appearance = await getLoadedTerminalAppearance()
   const terminalOptions = {
     cursorBlink: true,
     fontSize: appearance.fontSize,
     fontFamily: appearance.fontFamily,
+    fontWeight: 400,
+    fontWeightBold: 500,
     theme: appearance.theme,
   }
 
@@ -898,6 +940,7 @@ export function getOrCreateTerminal(
     outputReadyPromise: renderer === 'ghostty-web' ? null : Promise.resolve(),
     pendingOutput: [],
     lastAppearance: null,
+    appearanceLoadVersion: 0,
     appearanceResizeTimer: null,
     touchScrollCleanup: null,
     compositionGuardCleanup: null,
@@ -1152,6 +1195,7 @@ export async function disposeTerminal(terminalId: string): Promise<void> {
   instance.readyForOutput = false
   instance.outputReadyPromise = null
   pendingOnStopped.delete(terminalId)
+  instance.appearanceLoadVersion += 1
   if (instance.appearanceResizeTimer) {
     clearTimeout(instance.appearanceResizeTimer)
     instance.appearanceResizeTimer = null

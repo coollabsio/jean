@@ -168,6 +168,13 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
 const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>(['merge'])
 
+/** Git-only actions should not depend on a mounted ChatWindow event listener. */
+const DIRECT_MAGIC_GIT_OPTIONS = new Set<MagicOption>([
+  'commit',
+  'commit-and-push',
+  'push',
+])
+
 interface MagicOptionItem {
   id: MagicOption
   label: string
@@ -940,7 +947,17 @@ export function MagicModal() {
                 fetchWorktreesStatus(worktree.project_id)
               }
               const result = job.response
-              if (result.push_fell_back) {
+              if (result.push_permission_denied) {
+                opToast.error(
+                  `No permission to push to PR #${worktree.pr_number}. Create a separate PR instead.`,
+                  {
+                    action: {
+                      label: toastActionLabel('Open PR'),
+                      onClick: () => executeGitDirectly('open-pr'),
+                    },
+                  }
+                )
+              } else if (result.push_fell_back) {
                 opToast.warning(
                   'Could not push to PR branch, pushed to new branch instead'
                 )
@@ -1015,7 +1032,17 @@ export function MagicModal() {
               )
               triggerImmediateGitPoll()
               if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
-              if (result.fellBack) {
+              if (result.permissionDenied) {
+                opToast.error(
+                  `No permission to push to PR #${worktree.pr_number}. Create a separate PR instead.`,
+                  {
+                    action: {
+                      label: toastActionLabel('Open PR'),
+                      onClick: () => executeGitDirectly('open-pr'),
+                    },
+                  }
+                )
+              } else if (result.fellBack) {
                 opToast.warning(
                   'Could not push to PR branch, pushed to new branch instead'
                 )
@@ -2083,6 +2110,12 @@ ${resolveInstructions}`
       if (option === 'open-pr' && worktree?.pr_url) {
         await openExternal(worktree.pr_url)
         setMagicModalOpen(false)
+        return
+      }
+
+      if (DIRECT_MAGIC_GIT_OPTIONS.has(option)) {
+        setMagicModalOpen(false)
+        void executeGitDirectly(option)
         return
       }
 

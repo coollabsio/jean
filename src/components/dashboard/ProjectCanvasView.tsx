@@ -3258,6 +3258,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
               <div className="flex items-center gap-2 shrink-0 justify-end col-start-3">
                 <OpenInButton worktreePath={project.path} />
                 <ScriptsButton
+                  projectId={project.id}
                   worktreePath={project.path}
                   onRun={handlePackageScript}
                 />

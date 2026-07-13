@@ -1358,61 +1358,39 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const handleApplyCodexDefaults = useCallback(
     (models: MagicPromptModels) => {
       if (!preferences) return
+      const presetModels = {
+        ...models,
+        commit_message_model:
+          CODEX_56_LUNA_FAST_DEFAULT_MAGIC_PROMPT_MODELS.commit_message_model,
+      }
       patchPreferences.mutate({
-        magic_prompt_models: models,
+        magic_prompt_models: presetModels,
         magic_code_review_configs: [
           makeCodeReviewConfig(modelCatalog, 'codex', models.code_review_model),
         ],
         magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_prompt_efforts: getMagicPromptReasoningDefaults(
-          modelCatalog,
-          'codex',
-          models
-        ),
+        magic_prompt_efforts: {
+          ...getMagicPromptReasoningDefaults(
+            modelCatalog,
+            'codex',
+            presetModels
+          ),
+          commit_message_effort: 'low',
+        },
       })
     },
     [preferences, patchPreferences, modelCatalog]
   )
 
-  const handleApplyLegacyCodexDefaults = useCallback(() => {
-    if (!preferences) return
-    patchPreferences.mutate({
-      magic_prompt_models: CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
-      magic_code_review_configs: [
-        makeCodeReviewConfig(
-          modelCatalog,
-          'codex',
-          CODEX_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model
-        ),
-      ],
-      magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
-      magic_prompt_efforts: getMagicPromptReasoningDefaults(
-        modelCatalog,
-        'codex',
-        CODEX_DEFAULT_MAGIC_PROMPT_MODELS
-      ),
-    })
-  }, [preferences, patchPreferences, modelCatalog])
+  const handleApplyLegacyCodexDefaults = useCallback(
+    () => handleApplyCodexDefaults(CODEX_DEFAULT_MAGIC_PROMPT_MODELS),
+    [handleApplyCodexDefaults]
+  )
 
-  const handleApplyCodexFastDefaults = useCallback(() => {
-    if (!preferences) return
-    patchPreferences.mutate({
-      magic_prompt_models: CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
-      magic_code_review_configs: [
-        makeCodeReviewConfig(
-          modelCatalog,
-          'codex',
-          CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model
-        ),
-      ],
-      magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
-      magic_prompt_efforts: getMagicPromptReasoningDefaults(
-        modelCatalog,
-        'codex',
-        CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS
-      ),
-    })
-  }, [preferences, patchPreferences, modelCatalog])
+  const handleApplyCodexFastDefaults = useCallback(
+    () => handleApplyCodexDefaults(CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS),
+    [handleApplyCodexDefaults]
+  )
 
   const handleApplyOpenCodeDefaults = useCallback(() => {
     if (!preferences) return

@@ -998,6 +998,7 @@ export function SessionChatModal({
                     branch={worktree?.branch}
                   />
                   <ScriptsButton
+                    projectId={worktree?.project_id}
                     worktreePath={worktreePath}
                     onRun={handlePackageScript}
                   />

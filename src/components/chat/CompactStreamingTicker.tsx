@@ -116,6 +116,58 @@ function filterActivityBlocks(
   })
 }
 
+type CompactStreamSegment =
+  | { type: 'activity'; blocks: ContentBlock[]; toolCalls: ToolCall[] }
+  | { type: 'steered'; texts: string[] }
+
+function splitAtSteeredInputs(
+  contentBlocks: ContentBlock[],
+  toolCalls: ToolCall[],
+  appendWorkingSection: boolean
+): CompactStreamSegment[] {
+  const segments: CompactStreamSegment[] = []
+  let activityBlocks: ContentBlock[] = []
+
+  const flushActivity = () => {
+    if (activityBlocks.length === 0) return
+    const toolIds = new Set(
+      activityBlocks.flatMap(block =>
+        block.type === 'tool_use' ? [block.tool_call_id] : []
+      )
+    )
+    segments.push({
+      type: 'activity',
+      blocks: activityBlocks,
+      toolCalls: toolCalls.filter(tool => toolIds.has(tool.id)),
+    })
+    activityBlocks = []
+  }
+
+  for (const block of contentBlocks) {
+    if (block.type !== 'user_input') {
+      activityBlocks.push(block)
+      continue
+    }
+
+    flushActivity()
+    if (!block.text.trim()) continue
+
+    const last = segments[segments.length - 1]
+    if (last?.type === 'steered') {
+      last.texts.push(block.text)
+    } else {
+      segments.push({ type: 'steered', texts: [block.text] })
+    }
+  }
+
+  flushActivity()
+  if (appendWorkingSection && segments.at(-1)?.type === 'steered') {
+    segments.push({ type: 'activity', blocks: [], toolCalls: [] })
+  }
+
+  return segments
+}
+
 function hasVisibleActivity(
   contentBlocks: ContentBlock[],
   toolCalls: ToolCall[],
@@ -162,6 +214,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     planToolCalls,
     planStreamingContent,
     steeredTexts,
+    orderedActivityBlocks,
   } = useMemo(() => {
     const plan = resolvePlanContent({
       toolCalls,
@@ -169,12 +222,24 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
       contentBlocks,
     }).content
     const plans = toolCalls.filter(isPlanToolCall)
+    const ordered = contentBlocks.filter(block => {
+      if (isPlanToolBlock(block, toolCalls)) return false
+      if (
+        block.type === 'text' &&
+        plan &&
+        isDuplicatePlanTextBlock(block.text, plan)
+      ) {
+        return false
+      }
+      return true
+    })
     return {
-      activityBlocks: filterActivityBlocks(contentBlocks, toolCalls, plan),
+      activityBlocks: filterActivityBlocks(ordered, toolCalls, plan),
       activityToolCalls: toolCalls.filter(tc => !isPlanToolCall(tc)),
       planBlocks: filterPlanToolBlocks(contentBlocks, toolCalls),
       planToolCalls: plans,
       planStreamingContent: plan ?? '',
+      orderedActivityBlocks: ordered,
       // User prompts injected mid-turn (Codex turn/steer) — surfaced as
       // separate visible bubbles instead of buried in the collapsed ticker.
       steeredTexts: contentBlocks.flatMap(block =>
@@ -189,6 +254,53 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     planToolCalls.length > 0 ? '' : streamingContent
   )
   const hasPlan = planToolCalls.length > 0
+
+  const steeredSegments = useMemo(
+    () =>
+      splitAtSteeredInputs(orderedActivityBlocks, activityToolCalls, !hasPlan),
+    [orderedActivityBlocks, activityToolCalls, hasPlan]
+  )
+
+  if (steeredTexts.length > 0) {
+    let lastActivityIndex = -1
+    steeredSegments.forEach((segment, index) => {
+      if (segment.type === 'activity') lastActivityIndex = index
+    })
+    return (
+      <div className="space-y-3">
+        {steeredSegments.map((segment, index) =>
+          segment.type === 'steered' ? (
+            <SteeredPromptGroup
+              key={`steered-${index}`}
+              texts={segment.texts}
+              worktreePath={worktreePath}
+              onCopyText={onCopySteeredText}
+            />
+          ) : (
+            <CompactStreamingTicker
+              key={`activity-${index}`}
+              {...props}
+              contentBlocks={segment.blocks}
+              toolCalls={segment.toolCalls}
+              streamingContent={
+                index === lastActivityIndex && segment.blocks.length > 0
+                  ? streamingContent
+                  : ''
+              }
+            />
+          )
+        )}
+        {hasPlan && (
+          <StreamingMessage
+            {...props}
+            contentBlocks={planBlocks}
+            toolCalls={planToolCalls}
+            streamingContent={planStreamingContent}
+          />
+        )}
+      </div>
+    )
+  }
 
   if (hasPlan && !hasActivity) {
     return (

@@ -743,10 +743,18 @@ fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
 mod tests {
     use super::{
         default_global_system_prompt, parse_cli_args_from, resolve_headless_bind_host,
-        resolve_headless_token_required, resolve_http_server_bind_host, validate_headless_security,
-        AppPreferences,
+        resolve_headless_token_required, resolve_http_server_bind_host,
+        should_send_native_notification, validate_headless_security, AppPreferences,
     };
     use serde_json::json;
+
+    #[test]
+    fn background_notification_uses_native_window_focus() {
+        assert!(!should_send_native_notification(true, Some(true)));
+        assert!(should_send_native_notification(true, Some(false)));
+        assert!(should_send_native_notification(true, None));
+        assert!(should_send_native_notification(false, Some(true)));
+    }
 
     #[test]
     fn default_global_system_prompt_prefers_interactive_plan_questions() {
@@ -2915,7 +2923,15 @@ async fn send_native_notification(
     app: AppHandle,
     title: String,
     body: Option<String>,
+    background_only: Option<bool>,
 ) -> Result<(), String> {
+    let window_focused = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok());
+    if !should_send_native_notification(background_only.unwrap_or(false), window_focused) {
+        return Ok(());
+    }
+
     log::trace!("Sending native notification: {title}");
 
     #[cfg(not(mobile))]
@@ -2945,6 +2961,10 @@ async fn send_native_notification(
         log::warn!("Native notifications not supported on mobile");
         Err("Native notifications not supported on mobile".to_string())
     }
+}
+
+fn should_send_native_notification(background_only: bool, window_focused: Option<bool>) -> bool {
+    !background_only || window_focused != Some(true)
 }
 
 // Recovery functions - simple pattern for saving JSON data to disk

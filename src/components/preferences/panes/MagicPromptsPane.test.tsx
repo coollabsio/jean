@@ -325,6 +325,26 @@ describe('MagicPromptsPane', () => {
     )
   })
 
+  it('uses Luna Fast with low reasoning for Codex commit message presets', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
+    await user.click(screen.getByRole('menuitem', { name: 'GPT 5.6 Sol' }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'gpt-5.6-sol',
+          commit_message_model: 'gpt-5.6-luna-fast',
+        }),
+        magic_prompt_efforts: expect.objectContaining({
+          commit_message_effort: 'low',
+        }),
+      })
+    )
+  })
+
   it('adds a second unique backend and model to code review', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)

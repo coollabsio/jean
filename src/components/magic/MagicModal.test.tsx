@@ -32,7 +32,11 @@ const mocks = vi.hoisted(() => {
     clearInputDraft: vi.fn(),
     toastSuccess: vi.fn(),
     toastError: vi.fn(),
+    toastLoading: vi.fn(() => 'toast-1'),
+    startCommitJob: vi.fn(),
+    gitPush: vi.fn(),
     openExternal: vi.fn(),
+    activeWorktreePath: null as string | null,
     worktree,
   }
 })
@@ -80,6 +84,8 @@ vi.mock('@/store/ui-store', () => ({
         setReviewCommentsModalOpen: vi.fn(),
         setReleaseNotesModalOpen: vi.fn(),
         setLinkedProjectsModalOpen: vi.fn(),
+        gitDiffSelectedFiles: new Set<string>(),
+        clearGitDiffSelectedFiles: vi.fn(),
       }),
     }
   ),
@@ -103,14 +109,14 @@ vi.mock('@/store/chat-store', () => ({
     (selector?: (state: ChatState) => unknown) => {
       const state: ChatState = {
         activeWorktreeId: null,
-        activeWorktreePath: null,
+        activeWorktreePath: mocks.activeWorktreePath,
         activeSessionIds: {},
       }
       return selector ? selector(state) : state
     },
     {
       getState: () => ({
-        activeWorktreePath: null,
+        activeWorktreePath: mocks.activeWorktreePath,
         activeSessionIds: {},
         setWorktreeLoading: vi.fn(),
         clearWorktreeLoading: vi.fn(),
@@ -187,14 +193,19 @@ vi.mock('@/hooks/useInstalledBackends', () => ({
 }))
 
 vi.mock('@/hooks/useRemotePicker', () => ({
-  useRemotePicker: () => vi.fn(),
+  useRemotePicker: () =>
+    vi.fn((action: (remote: string) => void) => action('origin')),
 }))
 
 vi.mock('@/services/git-status', () => ({
   triggerImmediateGitPoll: mocks.triggerImmediateGitPoll,
   fetchWorktreesStatus: mocks.fetchWorktreesStatus,
-  gitPush: vi.fn(),
+  gitPush: mocks.gitPush,
   performGitPull: vi.fn(),
+}))
+
+vi.mock('@/services/commit-jobs', () => ({
+  startCommitJob: mocks.startCommitJob,
 }))
 
 vi.mock('@/lib/transport', () => ({ invoke: mocks.invokeMock }))
@@ -217,7 +228,7 @@ vi.mock('sonner', () => ({
   toast: {
     success: mocks.toastSuccess,
     error: mocks.toastError,
-    loading: vi.fn(() => 'toast-1'),
+    loading: mocks.toastLoading,
     info: vi.fn(),
     warning: vi.fn(),
   },
@@ -232,6 +243,7 @@ describe('MagicModal manual PR link', () => {
     vi.clearAllMocks()
     mocks.worktree.pr_number = null
     mocks.worktree.pr_url = null
+    mocks.activeWorktreePath = null
     mocks.invokeMock.mockImplementation((command: string) => {
       if (command === 'detect_and_link_pr') return Promise.resolve(null)
       if (command === 'link_worktree_pr') {
@@ -538,6 +550,54 @@ describe('MagicModal manual PR link', () => {
     expect(
       screen.getByRole('button', { name: /fork session/i })
     ).toBeInTheDocument()
+  })
+
+  it('starts commit and push actions directly with loading notifications when chat is active', async () => {
+    const user = userEvent.setup()
+    mocks.activeWorktreePath = '/repo/worktree'
+    mocks.startCommitJob.mockResolvedValue({})
+    mocks.gitPush.mockResolvedValue({ fellBack: false })
+
+    const { rerender } = render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /^commit c$/i }))
+
+    expect(mocks.toastLoading).toHaveBeenCalledWith(
+      'Creating commit on feature-branch...',
+      expect.any(Object)
+    )
+    expect(mocks.startCommitJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreePath: '/repo/worktree',
+        push: false,
+      }),
+      expect.any(Function)
+    )
+
+    rerender(<MagicModal />)
+    await user.click(screen.getByRole('button', { name: /^push u$/i }))
+
+    expect(mocks.toastLoading).toHaveBeenCalledWith(
+      'Pushing feature-branch...',
+      expect.any(Object)
+    )
+    expect(mocks.gitPush).toHaveBeenCalledWith('/repo/worktree', null, 'origin')
+
+    rerender(<MagicModal />)
+    await user.click(screen.getByRole('button', { name: /^commit & push p$/i }))
+
+    expect(mocks.toastLoading).toHaveBeenCalledWith(
+      'Committing and pushing on feature-branch...',
+      expect.any(Object)
+    )
+    expect(mocks.startCommitJob).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        worktreePath: '/repo/worktree',
+        push: true,
+        remote: 'origin',
+      }),
+      expect.any(Function)
+    )
   })
 
   it('reverts the last commit only after confirmation', async () => {

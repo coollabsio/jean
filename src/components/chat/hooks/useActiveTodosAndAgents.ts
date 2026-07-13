@@ -87,6 +87,7 @@ function normalizeCodexAgentStatus(
   }
   if (
     agentStatus === 'errored' ||
+    agentStatus === 'interrupted' ||
     agentStatus === 'notFound' ||
     toolCallStatus === 'failed'
   ) {
@@ -125,8 +126,7 @@ export function extractCodexAgents(
         id: threadId,
         prompt: truncateAgentPrompt(prompt),
         status: normalizeCodexAgentStatus(state?.status, toolCallStatus),
-        message:
-          typeof state?.message === 'string' ? state.message : undefined,
+        message: typeof state?.message === 'string' ? state.message : undefined,
       })
     }
 

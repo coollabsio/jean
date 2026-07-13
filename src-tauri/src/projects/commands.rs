@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
@@ -8835,7 +8835,7 @@ pub async fn get_commit_job(job_id: String) -> Result<Option<CommitJob>, String>
 }
 
 fn emit_commit_job_update(app: &AppHandle, job: &CommitJob) {
-    let _ = app.emit("commit-job:updated", job);
+    let _ = app.emit_all("commit-job:updated", job);
 }
 
 // =============================================================================
@@ -9719,7 +9719,7 @@ pub async fn cancel_review_job(job_id: String) -> Result<bool, String> {
 }
 
 fn emit_review_job_update(app: &AppHandle, job: &ReviewJob) {
-    let _ = app.emit("review-job:updated", job);
+    let _ = app.emit_all("review-job:updated", job);
 }
 
 async fn update_review_session_state(

@@ -73,13 +73,14 @@ describe('CompactStreamingTicker', () => {
     expect(screen.queryByText('3 Bash')).not.toBeInTheDocument()
   })
 
-  it('shows steered user prompts as separate bubbles above the ticker', () => {
+  it('splits compact activity around steered user prompts', () => {
     render(
       <CompactStreamingTicker
         {...baseProps}
         contentBlocks={[
           { type: 'tool_use', tool_call_id: 'bash-1' },
           { type: 'user_input', text: 'also update the docs' },
+          { type: 'tool_use', tool_call_id: 'read-1' },
         ]}
         toolCalls={[
           {
@@ -88,14 +89,27 @@ describe('CompactStreamingTicker', () => {
             input: { command: 'rtk git status' },
             output: 'ok',
           },
+          {
+            id: 'read-1',
+            name: 'Read',
+            input: { file_path: 'docs/developer/architecture-guide.md' },
+          },
         ]}
       />
     )
 
-    // Steered prompt visible without expanding the ticker
-    expect(screen.getByText('also update the docs')).toBeVisible()
-    // Ticker still summarizes the latest activity, not the steered text
-    expect(screen.getByText('Bash')).toBeVisible()
+    const beforeSteer = screen.getByRole('button', { name: /Bash/ })
+    const steeredPrompt = screen.getByText('also update the docs')
+    const afterSteer = screen.getByRole('button', { name: /Read/ })
+
+    expect(
+      beforeSteer.compareDocumentPosition(steeredPrompt) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      steeredPrompt.compareDocumentPosition(afterSteer) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 
   it('summarizes fragmented PI text deltas as one meaningful line while streaming', () => {
@@ -119,8 +133,12 @@ describe('CompactStreamingTicker', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: /Created `tmp\/test\.txt`\./ })).toBeVisible()
-    expect(screen.queryByRole('button', { name: /^`\./ })).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Created `tmp\/test\.txt`\./ })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: /^`\./ })
+    ).not.toBeInTheDocument()
   })
 
   it('surfaces edited files outside the collapsed streaming ticker', () => {

@@ -2396,6 +2396,7 @@ fn normalize_item_types(item: &serde_json::Value) -> serde_json::Value {
                 "mcpToolCall" => "mcp_tool_call",
                 "agentMessage" => "agent_message",
                 "collabAgentToolCall" => "collab_tool_call",
+                "subAgentActivity" => "sub_agent_activity",
                 "todoList" => "todo_list",
                 "webSearch" => "web_search",
                 "imageGeneration" => "image_generation",
@@ -2417,8 +2418,50 @@ fn normalize_item_types(item: &serde_json::Value) -> serde_json::Value {
         if let Some(states) = obj.remove("agentsStates") {
             obj.insert("agents_states".to_string(), states);
         }
+        if let Some(thread_id) = obj.remove("agentThreadId") {
+            obj.insert("agent_thread_id".to_string(), thread_id);
+        }
+        if let Some(agent_path) = obj.remove("agentPath") {
+            obj.insert("agent_path".to_string(), agent_path);
+        }
     }
     item
+}
+
+fn sub_agent_activity_tool(item: &serde_json::Value) -> Option<(&'static str, serde_json::Value)> {
+    let kind = item.get("kind").and_then(|value| value.as_str())?;
+    let thread_id = item
+        .get("agent_thread_id")
+        .or_else(|| item.get("agentThreadId"))
+        .and_then(|value| value.as_str())?;
+    let agent_path = item
+        .get("agent_path")
+        .or_else(|| item.get("agentPath"))
+        .and_then(|value| value.as_str())
+        .unwrap_or(thread_id);
+    let (tool_name, agent_status) = match kind {
+        "started" => ("SpawnAgent", "running"),
+        "interacted" => ("SendInput", "running"),
+        "interrupted" => ("CloseAgent", "interrupted"),
+        _ => return None,
+    };
+
+    let mut agents_states = serde_json::Map::new();
+    agents_states.insert(
+        thread_id.to_string(),
+        serde_json::json!({ "status": agent_status, "message": null }),
+    );
+    let input = serde_json::json!({
+        "id": item.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "type": "sub_agent_activity",
+        "kind": kind,
+        "prompt": agent_path,
+        "receiver_thread_ids": [thread_id],
+        "agents_states": agents_states,
+        "status": "completed",
+    });
+
+    Some((tool_name, input))
 }
 
 /// Handle an approval request from the app-server.
@@ -3401,6 +3444,40 @@ fn process_codex_event(
                         );
                     }
                 }
+                "sub_agent_activity" => {
+                    if let Some((tool_name, input)) = sub_agent_activity_tool(item) {
+                        let tool_id = if item_id.is_empty() {
+                            uuid::Uuid::new_v4().to_string()
+                        } else {
+                            item_id.to_string()
+                        };
+                        if let Some(tool) = tool_calls.iter_mut().find(|tool| tool.id == tool_id) {
+                            tool.input = input.clone();
+                        } else {
+                            tool_calls.push(ToolCall {
+                                id: tool_id.clone(),
+                                name: tool_name.to_string(),
+                                input: input.clone(),
+                                output: Some("completed".to_string()),
+                                parent_tool_use_id: None,
+                            });
+                            content_blocks.push(ContentBlock::ToolUse {
+                                tool_call_id: tool_id.clone(),
+                            });
+                        }
+                        let _ = app.emit_all(
+                            "chat:tool_use",
+                            &ToolUseEvent {
+                                session_id: session_id.to_string(),
+                                worktree_id: worktree_id.to_string(),
+                                id: tool_id,
+                                name: tool_name.to_string(),
+                                input,
+                                parent_tool_use_id: None,
+                            },
+                        );
+                    }
+                }
                 // Informational tool-like events — populate output for UI
                 "web_search" | "image_generation" | "image_view" | "context_compaction" => {
                     let output = if item_type == "context_compaction" {
@@ -3749,7 +3826,9 @@ pub fn parse_codex_run_to_message(
                 upsert_codex_plan_tool_call(&mut tool_calls, &mut content_blocks, &tool_id, input);
             }
             "item.started" => {
-                let item = msg.get("item").unwrap_or(&serde_json::Value::Null);
+                let normalized_item =
+                    normalize_item_types(msg.get("item").unwrap_or(&serde_json::Value::Null));
+                let item = &normalized_item;
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -3908,7 +3987,9 @@ pub fn parse_codex_run_to_message(
                 );
             }
             "item.completed" => {
-                let item = msg.get("item").unwrap_or(&serde_json::Value::Null);
+                let normalized_item =
+                    normalize_item_types(msg.get("item").unwrap_or(&serde_json::Value::Null));
+                let item = &normalized_item;
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -4072,6 +4153,25 @@ pub fn parse_codex_run_to_message(
                                 tc.output = Some(output);
                                 tc.input = item.clone();
                             }
+                        }
+                    }
+                    "sub_agent_activity" => {
+                        if let Some((tool_name, input)) = sub_agent_activity_tool(item) {
+                            let tool_id = if item_id.is_empty() {
+                                uuid::Uuid::new_v4().to_string()
+                            } else {
+                                item_id.to_string()
+                            };
+                            tool_calls.push(ToolCall {
+                                id: tool_id.clone(),
+                                name: tool_name.to_string(),
+                                input,
+                                output: Some("completed".to_string()),
+                                parent_tool_use_id: None,
+                            });
+                            content_blocks.push(ContentBlock::ToolUse {
+                                tool_call_id: tool_id,
+                            });
                         }
                     }
                     _ => {}
@@ -4735,6 +4835,42 @@ mod tests {
             snapshot_lines.contains(&live_line),
             "snapshot lines {snapshot_lines:?} must contain live line {live_line}"
         );
+    }
+
+    #[test]
+    fn normalize_item_types_supports_v2_sub_agent_activity() {
+        let item = serde_json::json!({
+            "id": "call-1",
+            "type": "subAgentActivity",
+            "kind": "started",
+            "agentThreadId": "agent-1",
+            "agentPath": "/root/reviewer"
+        });
+
+        let normalized = normalize_item_types(&item);
+
+        assert_eq!(normalized["type"], "sub_agent_activity");
+        assert_eq!(normalized["agent_thread_id"], "agent-1");
+        assert_eq!(normalized["agent_path"], "/root/reviewer");
+    }
+
+    #[test]
+    fn parse_codex_run_surfaces_v2_sub_agent_activity() {
+        let run = test_run_entry();
+        let lines = vec![
+            r#"{"type":"item.completed","item":{"id":"call-1","type":"subAgentActivity","kind":"started","agentThreadId":"agent-1","agentPath":"/root/reviewer"}}"#.to_string(),
+        ];
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+        let agent = message
+            .tool_calls
+            .iter()
+            .find(|tool| tool.name == "SpawnAgent")
+            .expect("spawned agent tool");
+
+        assert_eq!(agent.input["receiver_thread_ids"][0], "agent-1");
+        assert_eq!(agent.input["prompt"], "/root/reviewer");
+        assert_eq!(agent.input["agents_states"]["agent-1"]["status"], "running");
     }
 
     #[test]

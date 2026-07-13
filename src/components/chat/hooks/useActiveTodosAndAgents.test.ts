@@ -68,4 +68,31 @@ describe('extractCodexAgents', () => {
       },
     ])
   })
+
+  it('marks interrupted v2 agents as errored', () => {
+    const tools = [
+      toolCall('SpawnAgent', {
+        receiver_thread_ids: ['agent-a'],
+        prompt: '/root/reviewer',
+        agents_states: {
+          'agent-a': { status: 'running', message: null },
+        },
+      }),
+      toolCall('CloseAgent', {
+        receiver_thread_ids: ['agent-a'],
+        agents_states: {
+          'agent-a': { status: 'interrupted', message: null },
+        },
+      }),
+    ]
+
+    expect(extractCodexAgents(tools, true)).toEqual([
+      {
+        id: 'agent-a',
+        prompt: '/root/reviewer',
+        status: 'errored',
+        message: undefined,
+      },
+    ])
+  })
 })

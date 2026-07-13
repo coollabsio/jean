@@ -47,6 +47,9 @@ notify('Update Available', 'Click to install', { native: true })
 - **Platform-aware**: Handled by OS notification system
 - **Permissions**: Automatically request permission when needed
 - **Fallback**: Falls back to toast if native notification fails
+- **Background session events**: Rust checks the native main-window focus state
+  before showing the banner. Do not gate these with `document.hasFocus()` in the
+  webview because that value can be stale while the desktop window is inactive.
 
 ## Options
 
@@ -126,6 +129,8 @@ try {
 - **Command**: `send_native_notification`
 - **Plugin**: `tauri-plugin-notification`
 - **Platform support**: Desktop only (mobile shows error)
+- **Background-only calls**: Pass `backgroundOnly: true`; the Rust command skips
+  the banner when the native main window is focused
 - **Logging**: Comprehensive logging of notification attempts
 
 ### Permissions
