@@ -380,6 +380,7 @@ export function NativeCliSessionsModal({
               commandArgs,
               activate: false,
               openPanel: false,
+              sessionId: session.id,
             }
           )
         }

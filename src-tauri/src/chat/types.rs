@@ -1061,11 +1061,14 @@ impl SessionMetadata {
         let waiting_for_input = self.waiting_for_input || is_pending_plan_waiting;
         let is_reviewing = self.is_reviewing && !is_pending_plan_waiting;
 
+        // Native-terminal sessions have no runs; their freshness comes from the
+        // last Claude Code hook signal so the unread bell can surface them.
         let updated_at = self
             .runs
             .last()
             .map(|r| r.ended_at.unwrap_or(r.started_at))
-            .unwrap_or(self.created_at);
+            .unwrap_or(self.created_at)
+            .max(self.terminal_activity_at.unwrap_or(0));
         let last_message_at = self.runs.last().map(|r| r.ended_at.unwrap_or(r.started_at));
         Session {
             id: self.id.clone(),
@@ -1607,6 +1610,11 @@ pub struct SessionMetadata {
     /// Display label for the terminal tab/session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_label: Option<String>,
+    /// Unix timestamp of the last native-terminal activity signal (Claude Code
+    /// hooks). Terminal sessions have no `runs`, so this drives `updated_at` /
+    /// the unread bell. None for chat sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_activity_at: Option<u64>,
 
     /// Run history - each entry corresponds to one Claude CLI execution
     #[serde(default)]
@@ -1730,6 +1738,7 @@ impl SessionMetadata {
             terminal_command: None,
             terminal_command_args: vec![],
             terminal_label: None,
+            terminal_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
             version: 1,

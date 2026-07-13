@@ -367,7 +367,7 @@ fn find_neighbor_non_archived_session_id(
     None
 }
 
-fn emit_sessions_cache_invalidation(app: &AppHandle) {
+pub(crate) fn emit_sessions_cache_invalidation(app: &AppHandle) {
     if let Err(e) = app.emit_all(
         "cache:invalidate",
         &serde_json::json!({ "keys": ["sessions"] }),
@@ -2229,10 +2229,29 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
             .unwrap_or_default()
             .as_secs();
         metadata.last_opened_at = Some(now);
+        // Viewing a native-terminal Claude session means the user has dealt with
+        // the "needs attention" signal → clear it so the bell/badge resets.
+        let cleared = clear_terminal_waiting(&mut metadata);
         save_metadata(&app, &metadata)?;
+        if cleared {
+            emit_sessions_cache_invalidation(&app);
+        }
     }
 
     Ok(())
+}
+
+/// Clear the native-terminal "waiting for you" state. No-op for chat sessions,
+/// whose `waiting_for_input` (plan/question) must persist until answered.
+/// Returns true when it changed something.
+fn clear_terminal_waiting(metadata: &mut super::types::SessionMetadata) -> bool {
+    if metadata.primary_surface.as_deref() == Some("terminal") && metadata.waiting_for_input {
+        metadata.waiting_for_input = false;
+        metadata.waiting_for_input_type = None;
+        true
+    } else {
+        false
+    }
 }
 
 /// Bulk-update last_opened_at for multiple sessions in a single call.
@@ -2251,14 +2270,117 @@ pub async fn set_sessions_last_opened_bulk(
         .unwrap_or_default()
         .as_secs();
 
+    let mut any_cleared = false;
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
+            any_cleared |= clear_terminal_waiting(&mut metadata);
             save_metadata(&app, &metadata)?;
         }
     }
+    if any_cleared {
+        emit_sessions_cache_invalidation(&app);
+    }
 
     Ok(())
+}
+
+/// Auto-name a native-terminal Claude session (and its git branch) from the
+/// first submitted prompt, reusing the exact Jean Chat naming machinery.
+///
+/// Terminal sessions have no Jean-parsed messages, so "first message" is gated
+/// purely by the naming-completed flags (set once here). Background and
+/// best-effort; honors the same `auto_session_naming` / `auto_branch_naming`
+/// preferences, base-session / PR-worktree guards, model, prompt, backend and
+/// provider overrides as the chat flow. Called from the terminal hooks tailer.
+pub async fn trigger_terminal_session_naming(
+    app: AppHandle,
+    session_id: String,
+    first_prompt: String,
+) {
+    if first_prompt.trim().is_empty() {
+        return;
+    }
+    let Ok(Some(metadata)) = load_metadata(&app, &session_id) else {
+        return;
+    };
+    let worktree_id = metadata.worktree_id.clone();
+    let Ok(projects_data) = load_projects_data(&app) else {
+        return;
+    };
+    let Some(worktree_record) = projects_data.find_worktree(&worktree_id).cloned() else {
+        return;
+    };
+    let worktree_path = worktree_record.path.clone();
+
+    let sessions = match load_sessions(&app, &worktree_path, &worktree_id) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    // No parsed messages for terminal sessions → rely on the completed flags.
+    let is_first_worktree_message = !sessions.branch_naming_completed;
+    let is_first_session_message = sessions
+        .find_session(&session_id)
+        .map(|s| !s.session_naming_completed)
+        .unwrap_or(false);
+    if !is_first_worktree_message && !is_first_session_message {
+        return;
+    }
+
+    if let Ok(prefs) = crate::load_preferences(app.clone()).await {
+        let is_base_session = worktree_record.session_type == SessionType::Base;
+        let is_pr_worktree = worktree_record.pr_number.is_some();
+        let generate_branch = is_first_worktree_message
+            && prefs.auto_branch_naming
+            && !is_base_session
+            && !is_pr_worktree;
+        let generate_session = is_first_session_message && prefs.auto_session_naming;
+
+        if generate_branch || generate_session {
+            let existing_names = if generate_branch {
+                projects_data
+                    .worktrees
+                    .iter()
+                    .map(|w| w.name.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let custom_session_prompt = if generate_session {
+                prefs.magic_prompts.session_naming.clone()
+            } else {
+                None
+            };
+            let request = NamingRequest {
+                session_id: session_id.clone(),
+                worktree_id: worktree_id.clone(),
+                worktree_path: PathBuf::from(&worktree_path),
+                first_message: first_prompt,
+                model: prefs.magic_prompt_models.session_naming_model.clone(),
+                existing_branch_names: existing_names,
+                generate_session_name: generate_session,
+                generate_branch_name: generate_branch,
+                custom_session_prompt,
+                custom_profile_name: prefs.magic_prompt_providers.session_naming_provider.clone(),
+                backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
+                reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
+            };
+            spawn_naming_task(app.clone(), request);
+        }
+    }
+
+    // Mark completed so re-fired hooks don't re-trigger naming.
+    let _ = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if is_first_worktree_message {
+            sessions.branch_naming_completed = true;
+        }
+        if is_first_session_message {
+            if let Some(session) = sessions.find_session_mut(&session_id) {
+                session.session_naming_completed = true;
+            }
+        }
+        Ok(())
+    });
 }
 
 // ============================================================================

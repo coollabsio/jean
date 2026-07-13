@@ -1,4 +1,5 @@
 mod commands;
+mod hooks;
 mod pty;
 mod registry;
 mod types;

@@ -214,6 +214,7 @@ export async function reconnectNativeCliSession(
       commandArgs: launch.args,
       activate: false,
       openPanel: false,
+      sessionId: session.id,
     }
   )
 

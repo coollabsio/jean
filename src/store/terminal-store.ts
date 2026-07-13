@@ -15,6 +15,8 @@ export interface TerminalInstance {
   label: string
   /** Panel terminals belong to side/bottom/drawer tabs; session terminals are single full-screen sessions. */
   kind?: TerminalKind
+  /** Jean session id backing this terminal (session terminals only). Enables Claude Code attention hooks. */
+  sessionId?: string
 }
 
 export interface AddTerminalOptions {
@@ -24,6 +26,8 @@ export interface AddTerminalOptions {
   activate?: boolean
   /** Whether adding this terminal should open/show the side/bottom terminal panel. */
   openPanel?: boolean
+  /** Jean session id backing this terminal (session terminals only). */
+  sessionId?: string
 }
 
 export function isPanelTerminal(terminal: TerminalInstance): boolean {
@@ -232,6 +236,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       commandArgs: options?.commandArgs ?? null,
       label: label ?? getDefaultLabel(command),
       kind,
+      sessionId: options?.sessionId,
     }
 
     set(state => {

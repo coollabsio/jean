@@ -12,6 +12,7 @@ struct StartTerminalArgs {
     rows: u16,
     command: Option<String>,
     command_args: Option<Vec<String>>,
+    session_id: Option<String>,
 }
 
 fn parse_start_terminal_args(args: &Value) -> Result<StartTerminalArgs, String> {
@@ -22,6 +23,7 @@ fn parse_start_terminal_args(args: &Value) -> Result<StartTerminalArgs, String> 
         rows: from_field(args, "rows")?,
         command: from_field_opt(args, "command")?,
         command_args: field_opt(args, "commandArgs", "command_args")?,
+        session_id: field_opt(args, "sessionId", "session_id")?,
     })
 }
 
@@ -1919,6 +1921,7 @@ pub async fn dispatch_command(
                 parsed.rows,
                 parsed.command,
                 parsed.command_args,
+                parsed.session_id,
             )
             .await?;
             Ok(Value::Null)
@@ -3390,6 +3393,7 @@ mod tests {
                 rows: 40,
                 command: Some("bun".to_string()),
                 command_args: Some(vec!["run".to_string(), "dev".to_string()]),
+                session_id: None,
             }
         );
     }
@@ -3413,6 +3417,7 @@ mod tests {
                 rows: 24,
                 command: None,
                 command_args: Some(vec!["-lc".to_string(), "echo ok".to_string()]),
+                session_id: None,
             }
         );
     }

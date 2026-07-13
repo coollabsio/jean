@@ -961,6 +961,11 @@ export function useMainWindowEventListeners() {
                   queryClient.invalidateQueries({
                     queryKey: chatQueryKeys.all,
                   })
+                  // The unread bell reads a separate ['all-sessions'] query; keep
+                  // it in sync so finished/waiting sessions surface live.
+                  queryClient.invalidateQueries({
+                    queryKey: ['all-sessions'],
+                  })
                   break
                 case 'projects':
                   queryClient.invalidateQueries({

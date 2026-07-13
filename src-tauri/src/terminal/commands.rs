@@ -44,6 +44,9 @@ pub async fn start_terminal(
     rows: u16,
     command: Option<String>,
     command_args: Option<Vec<String>>,
+    // Jean session id this terminal backs (when opened as a native CLI session).
+    // Used to wire Claude Code "needs attention" hooks; None for plain shells.
+    session_id: Option<String>,
 ) -> Result<(), String> {
     log::trace!("start_terminal called for terminal: {terminal_id}");
     if command.is_some() || command_args.is_some() {
@@ -59,15 +62,37 @@ pub async fn start_terminal(
         return Err("Terminal already exists".to_string());
     }
 
+    // For a native-terminal Claude session, inject Claude Code hooks so Jean can
+    // detect turn completion / attention requests (parity with Jean Chat).
+    let (command_args, signal) = match (command.as_deref(), session_id.as_deref()) {
+        (Some(cmd), Some(sid)) => {
+            let had_args = command_args.is_some();
+            let base = command_args.unwrap_or_default();
+            let (args, path) = super::hooks::inject_claude_hooks(&app, sid, cmd, base);
+            match path {
+                Some(p) => (Some(args), Some((sid.to_string(), p))),
+                // Not injected: restore original Option semantics so spawn_terminal
+                // still distinguishes "shell-wrapped" from "direct binary".
+                None => (if had_args { Some(args) } else { None }, None),
+            }
+        }
+        _ => (command_args, None),
+    };
+
     spawn_terminal(
         &app,
-        terminal_id,
+        terminal_id.clone(),
         worktree_path,
         cols,
         rows,
         command,
         command_args,
-    )
+    )?;
+
+    if let Some((sid, path)) = signal {
+        super::hooks::spawn_signal_tailer(app, sid, terminal_id, path);
+    }
+    Ok(())
 }
 
 /// Prepare context-only command args for an embedded backend terminal session.
