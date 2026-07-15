@@ -35,7 +35,12 @@ sudo pacman -S webkit2gtk-4.1 librsvg patchelf libayatana-appindicator
 
 **Linux Remote Desktop (RDP/xrdp)**: See [Linux Remote Development](#linux-remote-development-rdpxrdp) section below.
 
-**Windows**: No additional dependencies
+**Windows**: In the Visual Studio Installer, select the **Desktop development
+with C++** workload, which includes:
+
+- MSVC C++ build tools
+- Windows SDK (provides `kernel32.lib` and other system libraries required by
+  Rust)
 
 ## Quick Start
 
