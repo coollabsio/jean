@@ -44,6 +44,7 @@ import type {
 } from '@/types/projects'
 import { clearPlanApprovalTransientState } from './plan-approval-state'
 import type { ApprovalModelOverride } from '../ApprovalModelSubmenu'
+import { resolveCodexUserInputResponseToolCallId } from '../codex-user-input-utils'
 
 /** Git commands to auto-approve for magic prompts (no permission prompts needed) */
 export const GIT_ALLOWED_TOOLS = [
@@ -172,7 +173,8 @@ interface MessageHandlers {
   handleCodexPermissionRequestDecline: (request: CodexPermissionRequest) => void
   handleCodexUserInputAnswer: (
     request: CodexUserInputRequest,
-    answers: QuestionAnswer[]
+    answers: QuestionAnswer[],
+    renderedToolCallId?: string
   ) => void
   handleCodexMcpElicitationAccept: (
     request: CodexMcpElicitationRequest,
@@ -2916,14 +2918,21 @@ export function useMessageHandlers({
   )
 
   const handleCodexUserInputAnswer = useCallback(
-    (request: CodexUserInputRequest, answers: QuestionAnswer[]) => {
+    (
+      request: CodexUserInputRequest,
+      answers: QuestionAnswer[],
+      renderedToolCallId?: string
+    ) => {
       const sessionId = activeSessionIdRef.current
       const worktreeId = activeWorktreeIdRef.current
       const worktreePath = activeWorktreePathRef.current
       if (!sessionId || !worktreeId || !worktreePath) return
 
       const store = useChatStore.getState()
-      const toolCallId = request.item_id || `codex-user-input-${request.rpc_id}`
+      const toolCallId = resolveCodexUserInputResponseToolCallId(
+        request,
+        renderedToolCallId
+      )
       store.markQuestionAnswered(sessionId, toolCallId, answers)
       store.updateToolCallOutput(sessionId, toolCallId, JSON.stringify(answers))
       store.setPendingCodexUserInputRequests(

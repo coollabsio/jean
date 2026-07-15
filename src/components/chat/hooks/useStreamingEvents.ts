@@ -67,6 +67,11 @@ import {
   hasMeaningfulAssistantPayload,
   shouldHydrateCompletedSessionFromBackend,
 } from '@/components/chat/hooks/completion-hydration'
+import {
+  getCodexUserInputRequestToolCallId,
+  isSameCodexUserInputRequest,
+  upsertCodexUserInputRequest,
+} from '@/components/chat/codex-user-input-utils'
 
 interface UseStreamingEventsParams {
   queryClient: QueryClient
@@ -718,14 +723,19 @@ export default function useStreamingEvents({
         const current =
           useChatStore.getState().pendingCodexUserInputRequests[session_id] ??
           []
-        const next = [...current, request]
+        const previousRequest = current.find(existing =>
+          isSameCodexUserInputRequest(existing, request)
+        )
+        const next = upsertCodexUserInputRequest(current, request)
+        if (next === current) return
+
         setPendingCodexUserInputRequests(session_id, next)
         setWaitingForInput(session_id, true)
 
         const questions = normalizeCodexQuestions(request.questions)
 
         const toolCall = {
-          id: request.item_id || `codex-user-input-${request.rpc_id}`,
+          id: getCodexUserInputRequestToolCallId(previousRequest ?? request),
           name: 'AskUserQuestion',
           input: { questions },
         }
@@ -2073,7 +2083,14 @@ export default function useStreamingEvents({
         case 'effortLevel':
           store.setEffortLevel(
             session_id,
-            value as 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode'
+            value as
+              | 'low'
+              | 'medium'
+              | 'high'
+              | 'xhigh'
+              | 'max'
+              | 'ultra'
+              | 'ultracode'
           )
           break
         case 'executionMode':

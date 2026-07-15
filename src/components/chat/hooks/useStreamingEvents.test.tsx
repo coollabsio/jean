@@ -176,6 +176,121 @@ describe('useStreamingEvents Codex MCP elicitation', () => {
   })
 })
 
+describe('useStreamingEvents Codex user input', () => {
+  beforeEach(() => {
+    setupListenMock()
+
+    useChatStore.setState({
+      pendingCodexUserInputRequests: {},
+      waitingForInputSessionIds: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+    })
+  })
+
+  it('deduplicates identical replays and retains the latest request for an item_id', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:codex_user_input_request')).toBe(
+        true
+      )
+    )
+
+    const emitRequest = (rpcId: number, itemId: string) => {
+      registeredListeners.get('chat:codex_user_input_request')?.({
+        payload: {
+          session_id: 'session-1',
+          worktree_id: 'worktree-1',
+          request: {
+            rpc_id: rpcId,
+            item_id: itemId,
+            questions: [
+              {
+                id: 'choice',
+                question: 'Which option?',
+                options: [{ label: 'One' }, { label: 'Two' }],
+              },
+            ],
+          },
+        },
+      })
+    }
+
+    emitRequest(42, 'item-42')
+    emitRequest(42, 'item-42')
+    emitRequest(99, 'item-42')
+
+    expect(
+      useChatStore.getState().pendingCodexUserInputRequests['session-1']
+    ).toEqual([expect.objectContaining({ rpc_id: 99, item_id: 'item-42' })])
+    expect(useChatStore.getState().activeToolCalls['session-1']).toEqual([
+      expect.objectContaining({ id: 'item-42', name: 'AskUserQuestion' }),
+    ])
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [{ type: 'tool_use', tool_call_id: 'item-42' }]
+    )
+    expect(
+      mockInvoke.mock.calls.filter(
+        ([command]) => command === 'update_session_state'
+      )
+    ).toHaveLength(2)
+  })
+
+  it('keeps one tool-call representation when a rpc-only request gains an item_id', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:codex_user_input_request')).toBe(
+        true
+      )
+    )
+
+    const basePayload = {
+      session_id: 'session-1',
+      worktree_id: 'worktree-1',
+      request: {
+        rpc_id: 42,
+        item_id: '',
+        questions: [
+          {
+            id: 'choice',
+            question: 'Which option?',
+            options: [{ label: 'One' }, { label: 'Two' }],
+          },
+        ],
+      },
+    }
+
+    registeredListeners.get('chat:codex_user_input_request')?.({
+      payload: basePayload,
+    })
+    registeredListeners.get('chat:codex_user_input_request')?.({
+      payload: {
+        ...basePayload,
+        request: { ...basePayload.request, item_id: 'item-42' },
+      },
+    })
+
+    expect(
+      useChatStore.getState().pendingCodexUserInputRequests['session-1']
+    ).toEqual([expect.objectContaining({ rpc_id: 42, item_id: 'item-42' })])
+    expect(useChatStore.getState().activeToolCalls['session-1']).toEqual([
+      expect.objectContaining({ id: 'codex-user-input-42' }),
+    ])
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [{ type: 'tool_use', tool_call_id: 'codex-user-input-42' }]
+    )
+  })
+})
+
 describe('useStreamingEvents cancellation sanitization', () => {
   beforeEach(() => {
     vi.clearAllMocks()
