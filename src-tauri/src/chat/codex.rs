@@ -1230,7 +1230,11 @@ pub fn resume_codex_after_crash(
                         }
                     } else if response.cancelled {
                         if run_was_explicitly_cancelled(app, session_id, run_id) {
-                            if let Err(e) = writer.cancel(Some(&assistant_message_id), None) {
+                            if let Err(e) = writer.cancel_with_usage(
+                                Some(&assistant_message_id),
+                                None,
+                                response.usage,
+                            ) {
                                 log::error!("Failed to cancel run after Codex crash recovery: {e}");
                             }
                         } else if let Err(e) = writer.crash() {
