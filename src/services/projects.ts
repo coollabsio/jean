@@ -2510,7 +2510,7 @@ export async function updateWorktreeCachedStatus(
 
 /**
  * Hook to fetch available branches for a project
- * Fetches from origin first, then returns remote branches (or local if no remote)
+ * Fetches from origin first, then returns the combined local and remote branches
  */
 export function useProjectBranches(projectId: string | null) {
   return useQuery({

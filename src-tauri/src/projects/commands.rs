@@ -5484,10 +5484,20 @@ pub async fn list_worktree_files(
     Ok(files)
 }
 
-/// Get available branches for a project (prefers remote branches if available)
+fn merge_project_branches(
+    mut remote_branches: Vec<String>,
+    local_branches: Vec<String>,
+) -> Vec<String> {
+    remote_branches.extend(local_branches);
+    remote_branches.sort();
+    remote_branches.dedup();
+    remote_branches
+}
+
+/// Get available local and remote branches for a project
 ///
 /// This command fetches from origin first to get the latest branches,
-/// then returns remote branches if available, otherwise local branches.
+/// then returns the sorted, deduplicated union of remote and local branches.
 #[tauri::command]
 pub async fn get_project_branches(
     app: AppHandle,
@@ -5503,32 +5513,16 @@ pub async fn get_project_branches(
     // Fetch from origin to get latest branches (best effort)
     let _ = git::fetch_origin(&project.path);
 
-    // Try to get remote branches first
     let remote_branches = git::get_remote_branches(&project.path)?;
-
-    if !remote_branches.is_empty() {
-        log::trace!(
-            "Found {} remote branches for project {}",
-            remote_branches.len(),
-            project.name
-        );
-        let mut branches = remote_branches;
-        branches.sort();
-        branches.dedup();
-        return Ok(branches);
-    }
-
-    // Fall back to local branches
     let local_branches = git::get_branches(&project.path)?;
     log::trace!(
-        "Found {} local branches for project {} (no remote)",
+        "Found {} remote and {} local branches for project {}",
+        remote_branches.len(),
         local_branches.len(),
         project.name
     );
 
-    let mut branches = local_branches;
-    branches.sort();
-    Ok(branches)
+    Ok(merge_project_branches(remote_branches, local_branches))
 }
 
 /// Update project settings
@@ -13024,6 +13018,57 @@ mod tests {
                 current_dir: None,
             }
         );
+    }
+
+    #[test]
+    fn merge_project_branches_includes_local_and_remote_branches() {
+        let branches = merge_project_branches(
+            vec!["main".to_string(), "fork/release".to_string()],
+            vec!["feat/local-only".to_string(), "fix/local-only".to_string()],
+        );
+
+        assert_eq!(
+            branches,
+            vec!["feat/local-only", "fix/local-only", "fork/release", "main"]
+        );
+    }
+
+    #[test]
+    fn merge_project_branches_sorts_and_deduplicates_matching_names() {
+        let branches = merge_project_branches(
+            vec!["release".to_string(), "main".to_string()],
+            vec![
+                "release".to_string(),
+                "develop".to_string(),
+                "main".to_string(),
+                "develop".to_string(),
+            ],
+        );
+
+        assert_eq!(branches, vec!["develop", "main", "release"]);
+    }
+
+    #[test]
+    fn merge_project_branches_handles_local_only_repositories() {
+        let branches =
+            merge_project_branches(Vec::new(), vec!["topic/z".to_string(), "main".to_string()]);
+
+        assert_eq!(branches, vec!["main", "topic/z"]);
+    }
+
+    #[test]
+    fn merge_project_branches_handles_remote_only_repositories() {
+        let branches = merge_project_branches(
+            vec!["fork/topic".to_string(), "main".to_string()],
+            Vec::new(),
+        );
+
+        assert_eq!(branches, vec!["fork/topic", "main"]);
+    }
+
+    #[test]
+    fn merge_project_branches_handles_empty_repositories() {
+        assert!(merge_project_branches(Vec::new(), Vec::new()).is_empty());
     }
 
     #[test]
