@@ -270,8 +270,8 @@ export function clearQuestionWaitingStateInSessionListCache(
   worktreeId: string,
   sessionId: string
 ): void {
-  queryClient.setQueryData<WorktreeSessions>(
-    chatQueryKeys.sessions(worktreeId),
+  queryClient.setQueriesData<WorktreeSessions>(
+    { queryKey: chatQueryKeys.sessions(worktreeId) },
     old => {
       if (!old) return old
 
@@ -285,6 +285,7 @@ export function clearQuestionWaitingStateInSessionListCache(
         session.waiting_for_input === true &&
         (session.waiting_for_input_type === null ||
           session.waiting_for_input_type === undefined) &&
+        !session.pending_plan_message_id &&
         !hasPermissionInput
       if (!isExplicitQuestionWait && !isLegacyQuestionWait) {
         return old

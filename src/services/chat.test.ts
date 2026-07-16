@@ -62,7 +62,19 @@ describe('question waiting session cache', () => {
       active_session_id: 'session-1',
       version: 2,
     }
+    const withCountsSession: Session = {
+      ...waitingSession,
+      message_count: 3,
+    }
+    const sessionsWithCounts: WorktreeSessions = {
+      ...sessions,
+      sessions: [withCountsSession, { ...otherSession, message_count: 1 }],
+    }
     queryClient.setQueryData(chatQueryKeys.sessions('wt-1'), sessions)
+    queryClient.setQueryData(
+      [...chatQueryKeys.sessions('wt-1'), 'with-counts'],
+      sessionsWithCounts
+    )
 
     clearQuestionWaitingStateInSessionListCache(
       queryClient,
@@ -78,6 +90,16 @@ describe('question waiting session cache', () => {
       waiting_for_input_type: undefined,
     })
     expect(updated?.sessions[1]).toBe(otherSession)
+    const updatedWithCounts = queryClient.getQueryData<WorktreeSessions>([
+      ...chatQueryKeys.sessions('wt-1'),
+      'with-counts',
+    ])
+    expect(updatedWithCounts?.sessions[0]).toMatchObject({
+      waiting_for_input: false,
+      waiting_for_input_type: undefined,
+      message_count: 3,
+    })
+    expect(updatedWithCounts?.sessions[1]).toBe(sessionsWithCounts.sessions[1])
 
     clearQuestionWaitingStateInSessionListCache(
       queryClient,
@@ -87,6 +109,12 @@ describe('question waiting session cache', () => {
     expect(queryClient.getQueryData(chatQueryKeys.sessions('wt-1'))).toBe(
       updated
     )
+    expect(
+      queryClient.getQueryData([
+        ...chatQueryKeys.sessions('wt-1'),
+        'with-counts',
+      ])
+    ).toBe(updatedWithCounts)
   })
 
   it('clears a legacy typeless question wait', () => {
@@ -125,6 +153,13 @@ describe('question waiting session cache', () => {
       {
         waiting_for_input: true,
         waiting_for_input_type: 'plan' as const,
+      },
+    ],
+    [
+      'legacy plan',
+      {
+        waiting_for_input: true,
+        pending_plan_message_id: 'plan-message-1',
       },
     ],
     [

@@ -190,7 +190,8 @@ export function WorktreeItem({
         lastAssistantMsg?.tool_calls?.some(
           tc =>
             isAskUserQuestion(tc) &&
-            !state.answeredQuestions[session.id]?.has(tc.id)
+            !state.answeredQuestions[session.id]?.has(tc.id) &&
+            !session.answered_questions?.includes(tc.id)
         )
       ) {
         return true

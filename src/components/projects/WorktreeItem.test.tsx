@@ -195,4 +195,22 @@ describe('WorktreeItem question indicator', () => {
       'idle'
     )
   })
+
+  it('keeps an inactive persisted question answered after reload', () => {
+    sessionMocks.sessions = [
+      {
+        ...questionSession,
+        id: 'session-2',
+        name: 'Inactive answered question',
+        answered_questions: ['question-1'],
+      },
+    ]
+
+    renderWorktreeItem()
+
+    expect(screen.getByTestId('worktree-status')).toHaveAttribute(
+      'data-status',
+      'idle'
+    )
+  })
 })
