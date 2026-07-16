@@ -7,6 +7,43 @@ when Jean is headless. The Docker image starts `Xvfb` automatically. For a raw
 Linux binary on a server without `DISPLAY`, run it under `xvfb-run` or provide an
 X/Wayland display.
 
+## Linux prerequisites (Debian/Ubuntu)
+
+When running a prebuilt Jean binary on a server without a desktop environment,
+install the GTK/WebKit runtime libraries and the virtual display packages. These
+packages match the Debian runtime used by Jean's server image:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libgtk-3-0 \
+  libwebkit2gtk-4.1-0 \
+  libayatana-appindicator3-1 \
+  librsvg2-2 \
+  xdg-utils \
+  xvfb \
+  xauth
+```
+
+If you are building Jean from source on the server, install the development
+packages instead:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libgtk-3-dev \
+  libwebkit2gtk-4.1-dev \
+  libappindicator3-dev \
+  librsvg2-dev \
+  patchelf \
+  xdg-utils \
+  xvfb \
+  xauth
+```
+
+Package names can vary between Linux distributions and releases. Jean currently
+builds against WebKitGTK 4.1.
+
 ## Start locally
 
 When running a debug binary directly with `cargo build` / `./target/debug/jean`,
@@ -27,7 +64,13 @@ curl http://127.0.0.1:3456/healthz
 You can also run the server entrypoint when packaged/available:
 
 ```bash
-jean-server --host 127.0.0.1 --port 3456
+xvfb-run -a jean-server --host 127.0.0.1 --port 3456
+```
+
+The desktop binary exposes the same server mode through `--headless`:
+
+```bash
+xvfb-run -a jean --headless --host 127.0.0.1 --port 3456
 ```
 
 For a production single-binary server:
