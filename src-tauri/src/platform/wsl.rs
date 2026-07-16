@@ -55,6 +55,33 @@ pub fn get_wsl_config() -> WslConfig {
         .unwrap_or_default()
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn detect_wsl_runtime(
+    has_wsl_interop: bool,
+    has_wsl_distro_name: bool,
+    kernel_release: Option<&str>,
+) -> bool {
+    has_wsl_interop
+        || has_wsl_distro_name
+        || kernel_release.is_some_and(|release| release.to_ascii_lowercase().contains("microsoft"))
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_running_in_wsl() -> bool {
+    detect_wsl_runtime(
+        std::env::var_os("WSL_INTEROP").is_some(),
+        std::env::var_os("WSL_DISTRO_NAME").is_some(),
+        std::fs::read_to_string("/proc/sys/kernel/osrelease")
+            .ok()
+            .as_deref(),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_running_in_wsl() -> bool {
+    false
+}
+
 /// Update WSL config at runtime (e.g., when preferences change).
 pub fn update_wsl_config(enabled: bool, distro: String) {
     let config = normalize_wsl_config(enabled, distro);
@@ -624,6 +651,26 @@ pub fn get_wsl_home_dir(_distro: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_wsl_runtime_accepts_environment_markers() {
+        assert!(detect_wsl_runtime(true, false, None));
+        assert!(detect_wsl_runtime(false, true, None));
+    }
+
+    #[test]
+    fn detect_wsl_runtime_accepts_microsoft_kernel_release() {
+        assert!(detect_wsl_runtime(
+            false,
+            false,
+            Some("5.15.153.1-microsoft-standard-WSL2")
+        ));
+    }
+
+    #[test]
+    fn detect_wsl_runtime_rejects_native_linux() {
+        assert!(!detect_wsl_runtime(false, false, Some("6.8.0-52-generic")));
+    }
 
     #[test]
     fn test_normalize_wsl_config_disables_empty_enabled_distro() {

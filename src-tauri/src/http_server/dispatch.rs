@@ -75,6 +75,19 @@ fn parse_worktree_path_args(args: &Value) -> Result<WorktreePathArgs, String> {
     })
 }
 
+#[derive(Debug, PartialEq)]
+struct OpenWorktreeInEditorArgs {
+    worktree_path: String,
+    editor: Option<String>,
+}
+
+fn parse_open_worktree_in_editor_args(args: &Value) -> Result<OpenWorktreeInEditorArgs, String> {
+    Ok(OpenWorktreeInEditorArgs {
+        worktree_path: field(args, "worktreePath", "worktree_path")?,
+        editor: from_field_opt(args, "editor")?,
+    })
+}
+
 /// Dispatch a command by name to the corresponding Rust handler.
 /// This mirrors Tauri's invoke system but routes through WebSocket.
 ///
@@ -1712,11 +1725,13 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "open_worktree_in_finder" => {
-            // NATIVE ONLY: Finder doesn't exist in browser mode
+            let parsed = parse_worktree_path_args(&args)?;
+            crate::projects::open_worktree_in_finder(parsed.worktree_path).await?;
             Ok(Value::Null)
         }
         "open_project_worktrees_folder" => {
-            // NATIVE ONLY: Finder doesn't exist in browser mode
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::open_project_worktrees_folder(app.clone(), project_id).await?;
             Ok(Value::Null)
         }
         "open_worktree_in_terminal" => {
@@ -1724,7 +1739,8 @@ pub async fn dispatch_command(
             Ok(Value::Null)
         }
         "open_worktree_in_editor" => {
-            // NATIVE ONLY: Cannot open native editor from browser
+            let parsed = parse_open_worktree_in_editor_args(&args)?;
+            crate::projects::open_worktree_in_editor(parsed.worktree_path, parsed.editor).await?;
             Ok(Value::Null)
         }
         "open_pull_request" => {
@@ -3555,6 +3571,31 @@ mod tests {
             parse_worktree_path_args(&json!({ "worktree_path": "/tmp/b" })).unwrap(),
             WorktreePathArgs {
                 worktree_path: "/tmp/b".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_open_worktree_in_editor_args_accepts_web_transport_fields() {
+        assert_eq!(
+            parse_open_worktree_in_editor_args(&json!({
+                "worktreePath": "/tmp/a",
+                "editor": "zed"
+            }))
+            .unwrap(),
+            OpenWorktreeInEditorArgs {
+                worktree_path: "/tmp/a".to_string(),
+                editor: Some("zed".to_string()),
+            }
+        );
+        assert_eq!(
+            parse_open_worktree_in_editor_args(&json!({
+                "worktree_path": "/tmp/b"
+            }))
+            .unwrap(),
+            OpenWorktreeInEditorArgs {
+                worktree_path: "/tmp/b".to_string(),
+                editor: None,
             }
         );
     }

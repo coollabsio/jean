@@ -4700,8 +4700,14 @@ pub async fn open_worktree_in_finder(worktree_path: String) -> Result<(), String
 
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(&worktree_path)
+        let plan =
+            linux_file_manager_launch_plan(&worktree_path, crate::platform::is_running_in_wsl());
+        let mut command = std::process::Command::new(plan.program);
+        command.args(plan.args);
+        if let Some(current_dir) = plan.current_dir {
+            command.current_dir(current_dir);
+        }
+        command
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {e}"))?;
     }
@@ -4713,6 +4719,31 @@ pub async fn open_worktree_in_finder(worktree_path: String) -> Result<(), String
     }
 
     Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, PartialEq)]
+struct LinuxFileManagerLaunchPlan {
+    program: &'static str,
+    args: Vec<String>,
+    current_dir: Option<String>,
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn linux_file_manager_launch_plan(worktree_path: &str, is_wsl: bool) -> LinuxFileManagerLaunchPlan {
+    if is_wsl {
+        LinuxFileManagerLaunchPlan {
+            program: "explorer.exe",
+            args: vec![".".to_string()],
+            current_dir: Some(worktree_path.to_string()),
+        }
+    } else {
+        LinuxFileManagerLaunchPlan {
+            program: "xdg-open",
+            args: vec![worktree_path.to_string()],
+            current_dir: None,
+        }
+    }
 }
 
 /// Format a spawn error with a user-friendly message when the executable is not found
@@ -12968,6 +12999,30 @@ mod tests {
             "git {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn linux_file_manager_uses_windows_explorer_inside_wsl() {
+        assert_eq!(
+            linux_file_manager_launch_plan("/home/user/project", true),
+            LinuxFileManagerLaunchPlan {
+                program: "explorer.exe",
+                args: vec![".".to_string()],
+                current_dir: Some("/home/user/project".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn linux_file_manager_uses_xdg_open_outside_wsl() {
+        assert_eq!(
+            linux_file_manager_launch_plan("/home/user/project", false),
+            LinuxFileManagerLaunchPlan {
+                program: "xdg-open",
+                args: vec!["/home/user/project".to_string()],
+                current_dir: None,
+            }
         );
     }
 
