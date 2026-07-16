@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use tauri::AppHandle;
+use serde::Deserialize;
+use tauri::{AppHandle, Listener};
 
 use super::types::{AutoFixIssueCandidate, AutoFixStoppedEvent};
 use crate::chat::types::{EffortLevel, ThinkingLevel};
@@ -15,8 +16,48 @@ use crate::projects::types::{Project, ProjectAutoFixSettings, Worktree, Worktree
 const AUTO_FIX_TICK_SECONDS: u64 = 10;
 const AUTO_YOLO_WATCH_SECONDS: u64 = 2;
 const AUTO_YOLO_WATCH_ATTEMPTS: usize = 900; // 30 minutes
-const AUTO_FIX_WORKTREE_READY_POLL_MS: u64 = 500;
-const AUTO_FIX_WORKTREE_READY_ATTEMPTS: usize = 240; // 2 minutes
+const AUTO_FIX_WORKTREE_CREATION_TIMEOUT_SECS: u64 = 120;
+
+#[derive(Debug)]
+enum WorktreeCreationOutcome {
+    Created(Box<Worktree>),
+    Failed { id: String, error: String },
+}
+
+impl WorktreeCreationOutcome {
+    fn id(&self) -> &str {
+        match self {
+            Self::Created(worktree) => &worktree.id,
+            Self::Failed { id, .. } => id,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct WorktreeCreatedPayload {
+    worktree: Worktree,
+}
+
+#[derive(Deserialize)]
+struct WorktreeCreateErrorPayload {
+    id: String,
+    error: String,
+}
+
+fn parse_worktree_created_event(payload: &str) -> Result<WorktreeCreationOutcome, String> {
+    serde_json::from_str::<WorktreeCreatedPayload>(payload)
+        .map(|event| WorktreeCreationOutcome::Created(Box::new(event.worktree)))
+        .map_err(|err| format!("Failed to parse worktree:created event: {err}"))
+}
+
+fn parse_worktree_create_error_event(payload: &str) -> Result<WorktreeCreationOutcome, String> {
+    serde_json::from_str::<WorktreeCreateErrorPayload>(payload)
+        .map(|event| WorktreeCreationOutcome::Failed {
+            id: event.id,
+            error: event.error,
+        })
+        .map_err(|err| format!("Failed to parse worktree:error event: {err}"))
+}
 
 #[derive(Debug, Clone)]
 struct PendingAutoYolo {
@@ -434,23 +475,7 @@ async fn start_issue_auto_fix(
         comments,
     };
 
-    let pending_worktree = crate::projects::create_worktree(
-        app.clone(),
-        project.id.clone(),
-        None,
-        Some(issue_context),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(false),
-        Some("auto_fix".to_string()),
-    )
-    .await?;
-
-    let ready_worktree = wait_for_worktree_ready(app, &pending_worktree.id).await?;
+    let ready_worktree = create_auto_fix_worktree(app, project.id.clone(), issue_context).await?;
     let prefs = crate::load_preferences(app.clone()).await?;
     let prompt = build_auto_fix_investigation_prompt(&prefs, &ready_worktree);
     let model = settings
@@ -501,34 +526,88 @@ async fn start_issue_auto_fix(
     Ok(())
 }
 
-async fn wait_for_worktree_ready(app: &AppHandle, worktree_id: &str) -> Result<Worktree, String> {
-    let mut last_error: Option<String> = None;
-    for _ in 0..AUTO_FIX_WORKTREE_READY_ATTEMPTS {
-        match crate::projects::get_worktree(app.clone(), worktree_id.to_string()).await {
-            Ok(worktree) => return Ok(worktree),
-            Err(err) => last_error = Some(err),
+async fn create_auto_fix_worktree(
+    app: &AppHandle,
+    project_id: String,
+    issue_context: IssueContext,
+) -> Result<Worktree, String> {
+    let (outcome_tx, mut outcome_rx) = tokio::sync::mpsc::unbounded_channel();
+    let created_tx = outcome_tx.clone();
+    let created_listener =
+        app.listen(
+            "worktree:created",
+            move |event| match parse_worktree_created_event(event.payload()) {
+                Ok(outcome) => {
+                    let _ = created_tx.send(outcome);
+                }
+                Err(err) => log::warn!("Mr. Robot: {err}"),
+            },
+        );
+    let error_listener =
+        app.listen(
+            "worktree:error",
+            move |event| match parse_worktree_create_error_event(event.payload()) {
+                Ok(outcome) => {
+                    let _ = outcome_tx.send(outcome);
+                }
+                Err(err) => log::warn!("Mr. Robot: {err}"),
+            },
+        );
+
+    let pending_result = crate::projects::create_worktree(
+        app.clone(),
+        project_id,
+        None,
+        Some(issue_context),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(false),
+        Some("auto_fix".to_string()),
+    )
+    .await;
+
+    let pending_worktree = match pending_result {
+        Ok(worktree) => worktree,
+        Err(err) => {
+            app.unlisten(created_listener);
+            app.unlisten(error_listener);
+            return Err(err);
         }
-        tokio::time::sleep(Duration::from_millis(AUTO_FIX_WORKTREE_READY_POLL_MS)).await;
-    }
-    Err(worktree_ready_timeout_message(
-        worktree_id,
-        last_error.as_deref(),
-    ))
-}
+    };
 
-fn auto_fix_worktree_ready_timeout() -> Duration {
-    Duration::from_millis(AUTO_FIX_WORKTREE_READY_POLL_MS * AUTO_FIX_WORKTREE_READY_ATTEMPTS as u64)
-}
+    let result = tokio::time::timeout(
+        Duration::from_secs(AUTO_FIX_WORKTREE_CREATION_TIMEOUT_SECS),
+        async {
+            while let Some(outcome) = outcome_rx.recv().await {
+                if outcome.id() != pending_worktree.id {
+                    continue;
+                }
+                return match outcome {
+                    WorktreeCreationOutcome::Created(worktree) => Ok(*worktree),
+                    WorktreeCreationOutcome::Failed { error, .. } => Err(error),
+                };
+            }
+            Err(format!(
+                "Worktree creation event channel closed for {}",
+                pending_worktree.id
+            ))
+        },
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(format!(
+            "Timed out after {AUTO_FIX_WORKTREE_CREATION_TIMEOUT_SECS}s waiting for Mr. Robot worktree {} creation to finish",
+            pending_worktree.id
+        ))
+    });
 
-fn worktree_ready_timeout_message(worktree_id: &str, last_error: Option<&str>) -> String {
-    let timeout_secs = auto_fix_worktree_ready_timeout().as_secs();
-    let mut message = format!(
-        "Timed out after {timeout_secs}s waiting for Mr. Robot worktree {worktree_id} to be ready"
-    );
-    if let Some(error) = last_error {
-        message.push_str(&format!(". Last error: {error}"));
-    }
-    message
+    app.unlisten(created_listener);
+    app.unlisten(error_listener);
+    result
 }
 
 async fn run_auto_yolo_watch(app: &AppHandle) {
@@ -1120,17 +1199,33 @@ mod tests {
     }
 
     #[test]
-    fn worktree_ready_waits_two_minutes() {
-        assert_eq!(auto_fix_worktree_ready_timeout(), Duration::from_secs(120));
-    }
+    fn creation_events_return_the_completed_worktree_or_exact_error() {
+        let worktree = test_worktree("worktree-1", Some(42), Some(WorktreeOrigin::AutoFix), None);
+        let created_payload = serde_json::json!({
+            "worktree": worktree,
+            "autoOpenInJean": false,
+        })
+        .to_string();
+        let error_payload = serde_json::json!({
+            "id": "worktree-1",
+            "project_id": "project",
+            "error": "git worktree add failed",
+        })
+        .to_string();
 
-    #[test]
-    fn worktree_ready_timeout_message_includes_last_error() {
-        let message =
-            worktree_ready_timeout_message("worktree-1", Some("Worktree not found: worktree-1"));
+        let created = parse_worktree_created_event(&created_payload).unwrap();
+        let failed = parse_worktree_create_error_event(&error_payload).unwrap();
 
-        assert!(message.contains("worktree-1"));
-        assert!(message.contains("Last error: Worktree not found: worktree-1"));
+        assert_eq!(created.id(), "worktree-1");
+        assert_eq!(failed.id(), "worktree-1");
+        assert!(matches!(
+            created,
+            WorktreeCreationOutcome::Created(worktree) if worktree.issue_number == Some(42)
+        ));
+        assert!(matches!(
+            failed,
+            WorktreeCreationOutcome::Failed { error, .. } if error == "git worktree add failed"
+        ));
     }
 
     #[test]
