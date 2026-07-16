@@ -72,7 +72,6 @@ export function WorktreeItem({
   const isChatRunning = useChatStore(state =>
     state.isWorktreeRunning(worktree.id)
   )
-  const isQuestionAnswered = useChatStore(state => state.isQuestionAnswered)
   const sendingSessionKey = useChatStore(state => {
     const ids: string[] = []
     for (const [sessionId, isSending] of Object.entries(
@@ -173,11 +172,11 @@ export function WorktreeItem({
   })
 
   // Check if any session has unanswered AskUserQuestion in persisted messages (blinks)
-  const hasPendingQuestion = useMemo(() => {
+  const hasPendingQuestion = useChatStore(state => {
     const sessions = sessionsData?.sessions ?? []
     for (const session of sessions) {
       // Skip sessions that are currently streaming (handled by isStreamingWaitingQuestion)
-      if (useChatStore.getState().sendingSessionIds[session.id]) continue
+      if (state.sendingSessionIds[session.id]) continue
 
       // Find last assistant message by iterating from end (avoids array copy from .reverse())
       let lastAssistantMsg = null
@@ -189,19 +188,16 @@ export function WorktreeItem({
       }
       if (
         lastAssistantMsg?.tool_calls?.some(
-          tc => isAskUserQuestion(tc) && !isQuestionAnswered(session.id, tc.id)
+          tc =>
+            isAskUserQuestion(tc) &&
+            !state.answeredQuestions[session.id]?.has(tc.id)
         )
       ) {
         return true
       }
     }
     return false
-  }, [
-    sessionsData?.sessions,
-    sendingSessionKey,
-    isQuestionAnswered,
-    useChatStore,
-  ])
+  })
 
   // Check if any session has unanswered ExitPlanMode in persisted messages (solid)
   // Uses plan_approved / approved_plan_message_ids (matching session-card-utils.tsx)

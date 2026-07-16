@@ -20,6 +20,8 @@ vi.mock('sonner', () => ({
 
 import {
   canReconnectSession,
+  chatQueryKeys,
+  clearQuestionWaitingStateInSessionListCache,
   prefetchSessions,
   reconnectNativeCliSession,
 } from './chat'
@@ -29,12 +31,146 @@ import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { toast } from 'sonner'
 import { disposeTerminal } from '@/lib/terminal-instances'
-import type { Session } from '@/types/chat'
+import type { Session, WorktreeSessions } from '@/types/chat'
 
 const toastMock = toast as unknown as {
   success: ReturnType<typeof vi.fn>
   error: ReturnType<typeof vi.fn>
 }
+
+describe('question waiting session cache', () => {
+  it('clears only the target session and preserves the cache on repeated clears', () => {
+    const queryClient = new QueryClient()
+    const waitingSession: Session = {
+      id: 'session-1',
+      name: 'Waiting',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [],
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+    }
+    const otherSession: Session = {
+      ...waitingSession,
+      id: 'session-2',
+      name: 'Other',
+    }
+    const sessions: WorktreeSessions = {
+      worktree_id: 'wt-1',
+      sessions: [waitingSession, otherSession],
+      active_session_id: 'session-1',
+      version: 2,
+    }
+    queryClient.setQueryData(chatQueryKeys.sessions('wt-1'), sessions)
+
+    clearQuestionWaitingStateInSessionListCache(
+      queryClient,
+      'wt-1',
+      'session-1'
+    )
+
+    const updated = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions('wt-1')
+    )
+    expect(updated?.sessions[0]).toMatchObject({
+      waiting_for_input: false,
+      waiting_for_input_type: undefined,
+    })
+    expect(updated?.sessions[1]).toBe(otherSession)
+
+    clearQuestionWaitingStateInSessionListCache(
+      queryClient,
+      'wt-1',
+      'session-1'
+    )
+    expect(queryClient.getQueryData(chatQueryKeys.sessions('wt-1'))).toBe(
+      updated
+    )
+  })
+
+  it('clears a legacy typeless question wait', () => {
+    const queryClient = new QueryClient()
+    const legacySession: Session = {
+      id: 'session-1',
+      name: 'Legacy question',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [],
+      waiting_for_input: true,
+    }
+    queryClient.setQueryData<WorktreeSessions>(chatQueryKeys.sessions('wt-1'), {
+      worktree_id: 'wt-1',
+      sessions: [legacySession],
+      active_session_id: 'session-1',
+      version: 2,
+    })
+
+    clearQuestionWaitingStateInSessionListCache(
+      queryClient,
+      'wt-1',
+      'session-1'
+    )
+
+    expect(
+      queryClient.getQueryData<WorktreeSessions>(chatQueryKeys.sessions('wt-1'))
+        ?.sessions[0]
+    ).toMatchObject({ waiting_for_input: false })
+  })
+
+  it.each([
+    [
+      'plan',
+      {
+        waiting_for_input: true,
+        waiting_for_input_type: 'plan' as const,
+      },
+    ],
+    [
+      'permission',
+      {
+        waiting_for_input: true,
+        waiting_for_input_type: 'question' as const,
+        pending_permission_denials: [
+          {
+            tool_name: 'Bash',
+            tool_use_id: 'tool-1',
+            tool_input: { command: 'echo test' },
+          },
+        ],
+      },
+    ],
+  ])('does not clear a %s wait', (_kind, waitingState) => {
+    const queryClient = new QueryClient()
+    const session: Session = {
+      id: 'session-1',
+      name: 'Other wait',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [],
+      ...waitingState,
+    }
+    const sessions: WorktreeSessions = {
+      worktree_id: 'wt-1',
+      sessions: [session],
+      active_session_id: 'session-1',
+      version: 2,
+    }
+    queryClient.setQueryData(chatQueryKeys.sessions('wt-1'), sessions)
+
+    clearQuestionWaitingStateInSessionListCache(
+      queryClient,
+      'wt-1',
+      'session-1'
+    )
+
+    expect(queryClient.getQueryData(chatQueryKeys.sessions('wt-1'))).toBe(
+      sessions
+    )
+  })
+})
 
 describe('transient WebSocket query failures', () => {
   it('rethrows disconnects so TanStack Query preserves cached session data', () => {

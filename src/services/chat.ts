@@ -254,6 +254,58 @@ export const chatQueryKeys = {
     ] as const,
 }
 
+function hasPendingPermissionInput(session: Session): boolean {
+  return [
+    session.pending_permission_denials,
+    session.pending_codex_permission_requests,
+    session.pending_codex_command_approval_requests,
+    session.pending_codex_user_input_requests,
+    session.pending_codex_mcp_elicitation_requests,
+    session.pending_codex_dynamic_tool_call_requests,
+  ].some(requests => (requests?.length ?? 0) > 0)
+}
+
+export function clearQuestionWaitingStateInSessionListCache(
+  queryClient: QueryClient,
+  worktreeId: string,
+  sessionId: string
+): void {
+  queryClient.setQueryData<WorktreeSessions>(
+    chatQueryKeys.sessions(worktreeId),
+    old => {
+      if (!old) return old
+
+      const session = old.sessions.find(item => item.id === sessionId)
+      if (!session) return old
+
+      const hasPermissionInput = hasPendingPermissionInput(session)
+      const isExplicitQuestionWait =
+        session.waiting_for_input_type === 'question' && !hasPermissionInput
+      const isLegacyQuestionWait =
+        session.waiting_for_input === true &&
+        (session.waiting_for_input_type === null ||
+          session.waiting_for_input_type === undefined) &&
+        !hasPermissionInput
+      if (!isExplicitQuestionWait && !isLegacyQuestionWait) {
+        return old
+      }
+
+      return {
+        ...old,
+        sessions: old.sessions.map(item =>
+          item.id === sessionId
+            ? {
+                ...item,
+                waiting_for_input: false,
+                waiting_for_input_type: undefined,
+              }
+            : item
+        ),
+      }
+    }
+  )
+}
+
 export interface NativeCliHistorySession {
   backend: NonNullable<Session['backend']>
   id: string

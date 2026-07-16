@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { invoke, listen } from '@/lib/transport'
 import {
   chatQueryKeys,
+  clearQuestionWaitingStateInSessionListCache,
   markPlanApproved as markPlanApprovedService,
   readPlanFile,
   persistEnqueue,
@@ -338,6 +339,11 @@ export function useMessageHandlers({
         clearStreamingContentBlocks,
       } = useChatStore.getState()
       markQuestionAnswered(sessionId, toolCallId, answers)
+      clearQuestionWaitingStateInSessionListCache(
+        queryClient,
+        worktreeId,
+        sessionId
+      )
 
       // Persist answer data as JSON in the tool output so the collapsed view
       // can reconstruct which options were selected (Zustand state is ephemeral)
@@ -497,6 +503,11 @@ export function useMessageHandlers({
 
       // Mark this question as answered (empty answers = skipped)
       markQuestionAnswered(sessionId, toolCallId, [])
+      clearQuestionWaitingStateInSessionListCache(
+        queryClient,
+        worktreeId,
+        sessionId
+      )
 
       // Set session-level skip state to auto-skip all subsequent questions
       // No message is sent to Claude - the flow is simply cancelled
