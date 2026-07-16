@@ -29,6 +29,10 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
 import { convertFileSrc } from '@/lib/transport'
+import { useSyntaxHighlighting } from '@/hooks/useSyntaxHighlighting'
+import { useTheme } from '@/hooks/use-theme'
+import { usePreferences } from '@/services/preferences'
+import type { SyntaxTheme } from '@/types/preferences'
 
 interface MarkdownProps {
   children: string
@@ -82,7 +86,12 @@ function extractText(node: ReactNode): string {
   return ''
 }
 
-function CodeBlock({ children }: { children: ReactNode }) {
+interface CodeBlockFrameProps {
+  children: ReactNode
+  highlightedHtml?: string | null
+}
+
+function CodeBlockFrame({ children, highlightedHtml }: CodeBlockFrameProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
@@ -95,12 +104,21 @@ function CodeBlock({ children }: { children: ReactNode }) {
 
   return (
     <div className="relative my-5 min-w-0 max-w-full">
-      <pre className="max-w-full overflow-x-auto rounded-lg bg-muted p-4 pr-10 text-sm">
-        {children}
-      </pre>
+      {highlightedHtml ? (
+        <div
+          className="max-w-full overflow-x-auto rounded-lg bg-muted p-4 pr-10 text-sm [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:!p-0"
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
+      ) : (
+        <pre className="max-w-full overflow-x-auto rounded-lg bg-muted p-4 pr-10 text-sm">
+          {children}
+        </pre>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
+            aria-label="Copy code"
             onClick={handleCopy}
             className="absolute right-2 top-2 opacity-50 hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground cursor-pointer"
           >
@@ -115,6 +133,57 @@ function CodeBlock({ children }: { children: ReactNode }) {
       </Tooltip>
     </div>
   )
+}
+
+function getCSharpLanguage(children: ReactNode): 'csharp' | null {
+  const codeElement = Children.toArray(children).find(child =>
+    isValidElement(child)
+  ) as ReactElement<{ className?: string }> | undefined
+  const className = codeElement?.props.className
+  const language = className
+    ?.match(/(?:^|\s)language-([^\s]+)/)?.[1]
+    ?.toLowerCase()
+
+  return language === 'csharp' || language === 'cs' ? 'csharp' : null
+}
+
+function HighlightedCodeBlock({
+  children,
+  language,
+}: {
+  children: ReactNode
+  language: 'csharp'
+}) {
+  const code = extractText(children)
+  const { theme } = useTheme()
+  const { data: preferences } = usePreferences()
+  const resolvedTheme =
+    theme === 'system'
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light'
+      : theme
+  const syntaxTheme: SyntaxTheme =
+    resolvedTheme === 'dark'
+      ? (preferences?.syntax_theme_dark ?? 'vitesse-black')
+      : (preferences?.syntax_theme_light ?? 'github-light')
+  const { html } = useSyntaxHighlighting(code, language, syntaxTheme)
+
+  return <CodeBlockFrame highlightedHtml={html}>{children}</CodeBlockFrame>
+}
+
+function CodeBlock({ children }: { children: ReactNode }) {
+  const language = getCSharpLanguage(children)
+
+  return language ? (
+    <HighlightedCodeBlock language={language}>{children}</HighlightedCodeBlock>
+  ) : (
+    <CodeBlockFrame>{children}</CodeBlockFrame>
+  )
+}
+
+function StreamingCodeBlock({ children }: { children: ReactNode }) {
+  return <CodeBlockFrame>{children}</CodeBlockFrame>
 }
 
 function extractTableData(table: HTMLTableElement): string[][] {
@@ -485,6 +554,7 @@ const components: Components = {
 
 const streamingComponents: Components = {
   ...components,
+  pre: ({ children }) => <StreamingCodeBlock>{children}</StreamingCodeBlock>,
   p: ({ children }) => (
     <p className="my-0 leading-relaxed first:mt-0 last:mb-0">{children}</p>
   ),
@@ -504,6 +574,7 @@ const toolCallComponents: Components = {
 
 const toolCallStreamingComponents: Components = {
   ...toolCallComponents,
+  pre: ({ children }) => <StreamingCodeBlock>{children}</StreamingCodeBlock>,
   p: ({ children }) => (
     <p className="my-0 leading-relaxed first:mt-0 last:mb-0">{children}</p>
   ),

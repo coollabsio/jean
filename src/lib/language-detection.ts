@@ -35,6 +35,7 @@ const EXTENSION_TO_LANGUAGE: Record<string, string> = {
   cxx: 'cpp',
   hpp: 'cpp',
   hxx: 'cpp',
+  cs: 'csharp',
   zig: 'zig',
 
   // JVM

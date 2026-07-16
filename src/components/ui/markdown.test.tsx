@@ -1,6 +1,31 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@/test/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import { Markdown } from './markdown'
+
+const mocks = vi.hoisted(() => ({
+  copyToClipboard: vi.fn(),
+  useSyntaxHighlighting: vi.fn(),
+}))
+
+vi.mock('@/lib/clipboard', () => ({
+  copyToClipboard: mocks.copyToClipboard,
+}))
+
+vi.mock('@/hooks/useSyntaxHighlighting', () => ({
+  useSyntaxHighlighting: mocks.useSyntaxHighlighting,
+}))
+
+beforeEach(() => {
+  mocks.copyToClipboard.mockReset()
+  mocks.useSyntaxHighlighting.mockReset()
+  mocks.useSyntaxHighlighting.mockImplementation(
+    (code: string, language: string) => ({
+      html: `<pre class="shiki"><code><span data-language="${language}">${code}</span></code></pre>`,
+      isLoading: false,
+      error: null,
+    })
+  )
+})
 
 describe('Markdown', () => {
   it('preserves ordered-list start attributes from parsed markdown', () => {
@@ -57,6 +82,45 @@ describe('Markdown', () => {
     expect(container.querySelector('pre')).not.toBeNull()
   })
 
+  it.each(['csharp', 'cs'])(
+    'highlights completed C# fences using the %s info string',
+    infoString => {
+      const { container } = render(
+        <Markdown>{`\`\`\`${infoString}\npublic class Bird {}\n\`\`\``}</Markdown>
+      )
+
+      expect(mocks.useSyntaxHighlighting).toHaveBeenCalledWith(
+        'public class Bird {}\n',
+        'csharp',
+        'github-light'
+      )
+      expect(container.querySelector('.shiki')).not.toBeNull()
+      expect(
+        container.querySelector('[data-language="csharp"]')
+      ).toHaveTextContent('public class Bird {}')
+    }
+  )
+
+  it('keeps C# fences plain and skips highlighting while streaming', () => {
+    const { container } = render(
+      <Markdown streaming>{'```cs\npublic class Bird {}'}</Markdown>
+    )
+
+    expect(mocks.useSyntaxHighlighting).not.toHaveBeenCalled()
+    expect(container.querySelector('.shiki')).toBeNull()
+    expect(container.querySelector('pre')).toHaveTextContent(
+      'public class Bird {}'
+    )
+  })
+
+  it('copies the original code text after highlighting', () => {
+    render(<Markdown>{'```csharp\npublic class Bird {}\n```'}</Markdown>)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }))
+
+    expect(mocks.copyToClipboard).toHaveBeenCalledWith('public class Bird {}\n')
+  })
+
   it('renders raw HTML in completed messages', () => {
     const { container } = render(
       <Markdown>{'before <b>bold</b> after'}</Markdown>
@@ -90,5 +154,4 @@ describe('Markdown', () => {
       '/api/files/linear-context-images/ENG-123/image.png'
     )
   })
-
 })

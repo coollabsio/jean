@@ -49,6 +49,7 @@ async function getHighlighter(): Promise<Highlighter> {
         'html',
         'css',
         'rust',
+        'csharp',
         'python',
         'go',
         'bash',
