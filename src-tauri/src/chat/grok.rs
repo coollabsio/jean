@@ -4225,6 +4225,7 @@ mod tests {
             claude_session_id: None,
             pid: Some(42),
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
