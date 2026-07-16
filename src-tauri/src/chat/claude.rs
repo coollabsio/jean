@@ -3,7 +3,7 @@ use tauri::Manager;
 use super::coalesce::ChunkCoalescer;
 use super::types::{
     is_claude_compaction_summary_text, CompactMetadata, ContentBlock, EffortLevel,
-    PermissionDenial, PermissionDeniedEvent, ThinkingLevel, ToolCall, UsageData,
+    PermissionDenial, PermissionDeniedEvent, ThinkingLevel, ToolCall, UsageData, UsageReport,
 };
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{
@@ -130,7 +130,7 @@ pub struct ClaudeResponse {
     /// Whether the response was cancelled by the user
     pub cancelled: bool,
     /// Token usage for this response
-    pub usage: Option<UsageData>,
+    pub usage: UsageReport,
 }
 
 /// Payload for text chunk events sent to frontend
@@ -1232,7 +1232,7 @@ pub fn execute_claude_detached(
                 tool_calls: vec![],
                 content_blocks: vec![],
                 cancelled: true,
-                usage: None,
+                usage: UsageReport::default(),
             },
         ));
     }
@@ -1340,7 +1340,7 @@ pub fn tail_claude_output(
     let mut completed = false;
     let mut cancelled = false;
     let mut user_cancelled = false; // True only for explicit user cancel (not process death)
-    let mut usage: Option<UsageData> = None;
+    let mut usage = UsageReport::default();
     let mut error_lines: Vec<String> = Vec::new();
 
     // Track Monitor tool_use_ids that are currently armed along with their
@@ -1554,7 +1554,7 @@ pub fn tail_claude_output(
                             tool_calls,
                             content_blocks,
                             cancelled: false,
-                            usage: None,
+                            usage,
                         });
                     }
 
@@ -1579,6 +1579,7 @@ pub fn tail_claude_output(
                         .map(|(id, _)| id.clone());
 
                     if let Some(message) = msg.get("message") {
+                        observe_claude_usage(&mut usage, &msg);
                         if let Some(blocks) = message.get("content").and_then(|c| c.as_array()) {
                             for block in blocks {
                                 let block_type =
@@ -1856,7 +1857,7 @@ pub fn tail_claude_output(
                                                 tool_calls,
                                                 content_blocks,
                                                 cancelled: false,
-                                                usage: None, // No usage for partial responses
+                                                usage,
                                             });
                                         }
                                     }
@@ -2032,34 +2033,19 @@ pub fn tail_claude_output(
                     }
 
                     // Extract token usage data
-                    if let Some(usage_obj) = msg.get("usage") {
-                        usage = Some(UsageData {
-                            input_tokens: usage_obj
-                                .get("input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0),
-                            output_tokens: usage_obj
-                                .get("output_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0),
-                            cache_read_input_tokens: usage_obj
-                                .get("cache_read_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0),
-                            cache_creation_input_tokens: usage_obj
-                                .get("cache_creation_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0),
-                        });
+                    if msg.get("usage").is_some() {
+                        observe_claude_usage(&mut usage, &msg);
                         log::trace!(
                             "Token usage: input={}, output={}, cache_read={}, cache_create={}",
-                            usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
-                            usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
+                            usage.total.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+                            usage.total.as_ref().map(|u| u.output_tokens).unwrap_or(0),
                             usage
+                                .total
                                 .as_ref()
                                 .map(|u| u.cache_read_input_tokens)
                                 .unwrap_or(0),
                             usage
+                                .total
                                 .as_ref()
                                 .map(|u| u.cache_creation_input_tokens)
                                 .unwrap_or(0),
@@ -2484,9 +2470,100 @@ pub fn tail_claude_output(
     })
 }
 
+fn claude_usage(usage: &serde_json::Value) -> Option<UsageData> {
+    let parsed = UsageData {
+        input_tokens: usage
+            .get("input_tokens")
+            .or_else(|| usage.get("inputTokens"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        output_tokens: usage
+            .get("output_tokens")
+            .or_else(|| usage.get("outputTokens"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        cache_read_input_tokens: usage
+            .get("cache_read_input_tokens")
+            .or_else(|| usage.get("cacheReadInputTokens"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        cache_creation_input_tokens: usage
+            .get("cache_creation_input_tokens")
+            .or_else(|| usage.get("cacheCreationInputTokens"))
+            .or_else(|| usage.get("cache_write_input_tokens"))
+            .or_else(|| usage.get("cacheWriteInputTokens"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+    };
+    (!parsed.is_empty()).then_some(parsed)
+}
+
+fn observe_claude_usage(report: &mut UsageReport, event: &serde_json::Value) {
+    match event.get("type").and_then(serde_json::Value::as_str) {
+        Some("assistant") => {
+            if let Some(message_usage) = event
+                .get("message")
+                .and_then(|message| message.get("usage"))
+                .and_then(claude_usage)
+            {
+                // Assistant message usage is the active-context snapshot for
+                // this provider call and a billing fallback for interrupted streams.
+                report.add_run_step(message_usage);
+            }
+        }
+        Some("result") => {
+            if let Some(result_usage) = event.get("usage").and_then(claude_usage) {
+                // The result is authoritative for the whole CLI run.
+                if report.latest.is_none() {
+                    report.latest = Some(result_usage.clone());
+                }
+                report.total = Some(result_usage);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multi_event_usage_keeps_last_context_and_authoritative_run_total() {
+        let events = [
+            serde_json::json!({
+                "type": "assistant",
+                "message": { "usage": { "input_tokens": 10, "output_tokens": 2 } }
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "usage": {
+                        "input_tokens": 20,
+                        "output_tokens": 3,
+                        "cache_read_input_tokens": 80
+                    }
+                }
+            }),
+            serde_json::json!({
+                "type": "result",
+                "usage": {
+                    "input_tokens": 30,
+                    "output_tokens": 5,
+                    "cache_read_input_tokens": 80
+                }
+            }),
+        ];
+        let mut report = UsageReport::default();
+        for event in &events {
+            observe_claude_usage(&mut report, event);
+        }
+
+        assert_eq!(report.latest.as_ref().unwrap().input_tokens, 20);
+        assert_eq!(report.latest.as_ref().unwrap().output_tokens, 3);
+        assert_eq!(report.total.as_ref().unwrap().input_tokens, 30);
+        assert_eq!(report.total.as_ref().unwrap().output_tokens, 5);
+    }
 
     #[test]
     fn compact_metadata_accepts_snake_case_from_claude_cli() {

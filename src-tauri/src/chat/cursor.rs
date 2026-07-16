@@ -1,6 +1,6 @@
 //! Cursor Agent execution engine.
 
-use super::types::{ContentBlock, ToolCall, UsageData};
+use super::types::{ContentBlock, ToolCall, UsageData, UsageReport};
 use crate::http_server::EmitExt;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -57,7 +57,7 @@ pub struct CursorResponse {
     pub tool_calls: Vec<ToolCall>,
     pub content_blocks: Vec<ContentBlock>,
     pub cancelled: bool,
-    pub usage: Option<UsageData>,
+    pub usage: UsageReport,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +204,8 @@ fn extract_usage(value: &Value) -> Option<UsageData> {
     let cache_creation_input_tokens = usage
         .get("cache_creation_input_tokens")
         .or_else(|| usage.get("cacheCreationInputTokens"))
+        .or_else(|| usage.get("cache_write_input_tokens"))
+        .or_else(|| usage.get("cacheWriteInputTokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
 
@@ -851,7 +853,7 @@ where
     let mut content_blocks = Vec::new();
     let mut tool_calls = Vec::new();
     let mut chat_id = initial_chat_id.unwrap_or_default().to_string();
-    let mut usage = None;
+    let mut usage = UsageReport::default();
     let mut saw_partial_text = false;
     let mut final_result_text: Option<String> = None;
     let mut text_snapshots = Vec::new();
@@ -876,16 +878,24 @@ where
         if let Some(extracted_chat_id) = extract_chat_id(&parsed) {
             chat_id = extracted_chat_id;
         }
-        if usage.is_none() {
-            usage = extract_usage(&parsed);
-        }
-
         let event_type = parsed
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
         *event_counts.entry(event_type.clone()).or_insert(0) += 1;
+
+        if let Some(event_usage) = extract_usage(&parsed) {
+            // Cursor's final result is authoritative for the whole CLI run,
+            // but background-completion follow-ups can make it an aggregate
+            // rather than an active-context snapshot. Only assistant events
+            // are eligible to populate latest context.
+            if event_type == "result" {
+                usage.total = Some(event_usage);
+            } else {
+                usage = UsageReport::run(Some(event_usage.clone()), Some(event_usage));
+            }
+        }
 
         match event_type.as_str() {
             "assistant" => {
@@ -1126,7 +1136,7 @@ pub fn execute_cursor(
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
-            usage: None,
+            usage: UsageReport::default(),
         });
     }
 
@@ -1278,11 +1288,11 @@ mod tests {
     #[test]
     fn parse_cursor_stream_handles_partial_text_and_tool_events() {
         let stream = r#"
-{"type":"assistant","text":"hello "}
+{"type":"assistant","text":"hello ","usage":{"inputTokens":5,"outputTokens":8}}
 {"type":"tool_call","id":"tool-1","name":"Read","input":{"file_path":"README.md"}}
 {"type":"result","tool_use_id":"tool-1","output":"ok"}
 {"type":"assistant","text":"world"}
-{"type":"result","chat_id":"chat-123","usage":{"input_tokens":10,"output_tokens":20}}
+{"type":"result","chat_id":"chat-123","usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":30,"cache_write_input_tokens":10}}
 "#;
 
         let response = parse_cursor_stream_inner(
@@ -1309,7 +1319,21 @@ mod tests {
                 Some(ContentBlock::Text { text }) if text == "hello world"
             )
         );
-        assert_eq!(response.usage.as_ref().map(|u| u.output_tokens), Some(20));
+        assert_eq!(
+            response.usage.total.as_ref().map(|u| u.output_tokens),
+            Some(20)
+        );
+        assert_eq!(response.usage.latest.as_ref().unwrap().output_tokens, 8);
+        assert_eq!(response.usage.total.as_ref().unwrap().input_tokens, 100);
+        assert_eq!(
+            response
+                .usage
+                .total
+                .as_ref()
+                .unwrap()
+                .cache_creation_input_tokens,
+            10
+        );
     }
 
     #[test]

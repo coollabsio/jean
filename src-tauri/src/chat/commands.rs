@@ -2800,7 +2800,7 @@ pub async fn send_chat_message(
         waiting_for_plan: bool,
         /// Whether a chat:error event was emitted during execution
         error_emitted: bool,
-        usage: Option<super::types::UsageData>,
+        usage: super::types::UsageReport,
         backend: Backend,
     }
 
@@ -2928,7 +2928,7 @@ pub async fn send_chat_message(
                                 !response.content.is_empty(),
                                 !response.tool_calls.is_empty(),
                                 !response.content_blocks.is_empty(),
-                                response.usage.is_some(),
+                                !response.usage.is_empty(),
                                 response.cancelled,
                             ) {
                                 log::warn!(
@@ -4002,7 +4002,7 @@ pub async fn send_chat_message(
                             cancelled: response.cancelled,
                             waiting_for_plan: response.waiting_for_plan,
                             error_emitted: false,
-                            usage: response.usage,
+                            usage: super::types::UsageReport::single(response.usage),
                             backend: Backend::Commandcode,
                         },
                     )),
@@ -4145,7 +4145,7 @@ pub async fn send_chat_message(
                             cancelled: response.cancelled,
                             waiting_for_plan: false,
                             error_emitted: false,
-                            usage: response.usage,
+                            usage: super::types::UsageReport::single(response.usage),
                             backend: Backend::Pi,
                         },
                     )),
@@ -4301,7 +4301,7 @@ pub async fn send_chat_message(
                             cancelled: response.cancelled,
                             waiting_for_plan: false,
                             error_emitted: false,
-                            usage: response.usage,
+                            usage: super::types::UsageReport::single(response.usage),
                             backend: Backend::Grok,
                         },
                     )),
@@ -4617,7 +4617,9 @@ pub async fn send_chat_message(
             has_resume_worthy_payload,
         );
         // Cancel the run log, persisting session ID if available so next run can --resume
-        if let Err(e) = run_log_writer.cancel(None, resume_sid) {
+        if let Err(e) =
+            run_log_writer.cancel_with_usage(None, resume_sid, unified_response.usage.clone())
+        {
             log::warn!("Failed to cancel run log: {e}");
         }
 
@@ -4735,7 +4737,7 @@ pub async fn send_chat_message(
         thinking_level: None,
         effort_level: None,
         recovered: false,
-        usage: unified_response.usage.clone(),
+        usage: unified_response.usage.latest.clone(),
     };
     // Note: Assistant message is stored in NDJSON, not sessions JSON.
     // Messages are loaded from NDJSON on demand via load_session_messages().
@@ -4747,7 +4749,11 @@ pub async fn send_chat_message(
             &resume_id_for_log,
             has_resume_worthy_payload,
         );
-        if let Err(e) = run_log_writer.cancel(Some(&assistant_msg_id), cancel_resume_sid) {
+        if let Err(e) = run_log_writer.cancel_with_usage(
+            Some(&assistant_msg_id),
+            cancel_resume_sid,
+            unified_response.usage.clone(),
+        ) {
             log::warn!("Failed to cancel run log: {e}");
         }
     } else {
@@ -4756,9 +4762,11 @@ pub async fn send_chat_message(
             &resume_id_for_log,
             has_resume_worthy_payload,
         );
-        if let Err(e) =
-            run_log_writer.complete(&assistant_msg_id, resume_sid, unified_response.usage)
-        {
+        if let Err(e) = run_log_writer.complete_with_usage(
+            &assistant_msg_id,
+            resume_sid,
+            unified_response.usage,
+        ) {
             log::warn!("Failed to complete run log: {e}");
         }
     }
@@ -7183,7 +7191,9 @@ pub async fn get_session_debug_info(
 
     // Build JSONL file info list
     let mut run_log_files = Vec::new();
+    let mut total_usage = UsageData::default();
     if let Some(metadata) = metadata {
+        total_usage = metadata.session_usage().1.unwrap_or_default();
         for run in &metadata.runs {
             let jsonl_path = session_dir.join(format!("{}.jsonl", run.run_id));
             if jsonl_path.exists() {
@@ -7202,23 +7212,11 @@ pub async fn get_session_debug_info(
                     path: jsonl_path.to_str().unwrap_or("unknown").to_string(),
                     status: run.status.clone(),
                     user_message_preview: preview,
-                    usage: run.usage.clone(),
+                    usage: run.resolved_usage(&metadata.backend).total,
                 });
             }
         }
     }
-
-    // Calculate total usage across all runs
-    let total_usage = run_log_files.iter().filter_map(|f| f.usage.as_ref()).fold(
-        UsageData::default(),
-        |mut acc, u| {
-            acc.input_tokens += u.input_tokens;
-            acc.output_tokens += u.output_tokens;
-            acc.cache_read_input_tokens += u.cache_read_input_tokens;
-            acc.cache_creation_input_tokens += u.cache_creation_input_tokens;
-            acc
-        },
-    );
 
     Ok(SessionDebugInfo {
         app_data_dir: app_data_str,
@@ -7688,7 +7686,7 @@ pub async fn resume_session(
                         Some(resume_id.as_str())
                     };
                     if let Err(e) =
-                        writer.complete(&assistant_message_id, resume_sid, usage.clone())
+                        writer.complete_with_usage(&assistant_message_id, resume_sid, usage.clone())
                     {
                         log::error!("Failed to mark run as completed: {e}");
                     }

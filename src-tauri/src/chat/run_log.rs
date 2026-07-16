@@ -15,7 +15,7 @@ use super::storage::{
 };
 use super::types::{
     is_claude_compaction_summary_text, Backend, ChatMessage, ContentBlock, LoadedMessages,
-    MessageRole, RunEntry, RunStatus, ToolCall, UsageData,
+    MessageRole, RunEntry, RunStatus, ToolCall, UsageData, UsageReport,
 };
 
 // ============================================================================
@@ -66,6 +66,21 @@ impl RunLogWriter {
         claude_session_id: Option<&str>,
         usage: Option<UsageData>,
     ) -> Result<(), String> {
+        self.complete_with_usage(
+            assistant_message_id,
+            claude_session_id,
+            UsageReport::single(usage),
+        )
+    }
+
+    /// Mark the run as completed while preserving separate active-context and
+    /// billing-total usage semantics.
+    pub fn complete_with_usage(
+        &mut self,
+        assistant_message_id: &str,
+        claude_session_id: Option<&str>,
+        usage_report: UsageReport,
+    ) -> Result<(), String> {
         let now = now_timestamp();
         let run_id = self.run_id.clone();
         let claude_sid = claude_session_id.map(|s| s.to_string());
@@ -82,7 +97,8 @@ impl RunLogWriter {
                     run.ended_at = Some(now);
                     run.assistant_message_id = Some(assistant_message_id.to_string());
                     run.claude_session_id = claude_sid.clone();
-                    run.usage = usage.clone();
+                    run.usage = usage_report.latest.clone();
+                    run.usage_report = (!usage_report.is_empty()).then(|| usage_report.clone());
                 }
 
                 // Update metadata's claude_session_id for resumption
@@ -105,6 +121,19 @@ impl RunLogWriter {
         assistant_message_id: Option<&str>,
         claude_session_id: Option<&str>,
     ) -> Result<(), String> {
+        self.cancel_with_usage(
+            assistant_message_id,
+            claude_session_id,
+            UsageReport::default(),
+        )
+    }
+
+    pub fn cancel_with_usage(
+        &mut self,
+        assistant_message_id: Option<&str>,
+        claude_session_id: Option<&str>,
+        usage_report: UsageReport,
+    ) -> Result<(), String> {
         let now = now_timestamp();
         let run_id = self.run_id.clone();
         let asst_id = assistant_message_id.map(|s| s.to_string());
@@ -123,6 +152,10 @@ impl RunLogWriter {
                     run.cancelled = true;
                     run.assistant_message_id = asst_id;
                     run.claude_session_id = claude_sid.clone();
+                    if !usage_report.is_empty() {
+                        run.usage = usage_report.latest.clone();
+                        run.usage_report = Some(usage_report.clone());
+                    }
                 }
 
                 // Persist session ID so the next run can --resume with full context
@@ -385,6 +418,7 @@ pub fn start_run(
         claude_session_id: None,
         pid: None,   // Set later via set_pid() after spawning detached process
         usage: None, // Set on completion via complete()
+        usage_report: None,
         codex_thread_id: None,
         codex_turn_id: None,
         cursor_chat_id: None,
@@ -1383,6 +1417,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -1692,6 +1727,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,

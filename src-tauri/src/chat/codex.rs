@@ -14,6 +14,7 @@ use super::types::{
     CodexDynamicToolCallRequest, CodexDynamicToolCallRequestEvent, CodexNetworkApprovalContext,
     CodexNetworkPolicyAmendment, CodexPermissionRequest, CodexPermissionRequestEvent,
     CodexUserInputRequest, CodexUserInputRequestEvent, ContentBlock, ToolCall, UsageData,
+    UsageReport,
 };
 use crate::http_server::EmitExt;
 
@@ -38,8 +39,8 @@ pub struct CodexResponse {
     pub cancelled: bool,
     /// Whether a chat:error event was emitted during execution
     pub error_emitted: bool,
-    /// Token usage for this response
-    pub usage: Option<UsageData>,
+    /// Final active-context snapshot and billing usage for this response.
+    pub usage: UsageReport,
 }
 
 // =============================================================================
@@ -1239,7 +1240,7 @@ pub fn resume_codex_after_crash(
                             );
                         }
                     } else if let Err(e) =
-                        writer.complete(&assistant_message_id, None, response.usage)
+                        writer.complete_with_usage(&assistant_message_id, None, response.usage)
                     {
                         log::error!("Failed to complete run after crash recovery: {e}");
                     } else if let Err(e) =
@@ -1499,7 +1500,7 @@ fn process_turn_events(
     let mut cancelled = false;
     let mut server_interrupted = false;
     let mut error_emitted = false;
-    let mut usage: Option<UsageData> = None;
+    let mut usage = UsageReport::default();
     let mut received_completed_agent_message = false;
 
     // Coalesce token-rate text/thinking deltas into fewer, larger
@@ -1996,7 +1997,7 @@ fn process_server_notification(
     completed: &mut bool,
     cancelled: &mut bool,
     server_interrupted: &mut bool,
-    usage: &mut Option<UsageData>,
+    usage: &mut UsageReport,
     error_emitted: &mut bool,
     received_completed_agent_message: &mut bool,
     is_plan_mode: bool,
@@ -2324,9 +2325,9 @@ fn process_server_notification(
             }
         }
         "thread/tokenUsage/updated" => {
-            // ThreadTokenUsage contains cumulative `total` and per-turn `last`
-            // breakdowns. Persist only `last`; SessionMetadata derives the
-            // session total by adding each run exactly once.
+            // `last` is the active-context snapshot while `total` is already
+            // cumulative for the Codex thread. Replace older notifications;
+            // summing them would double count earlier turns.
             *usage = codex_app_server_usage(params);
         }
         "account/rateLimits/updated" => {
@@ -2885,50 +2886,50 @@ fn upsert_file_change_tool_call(
     tool_id
 }
 
-fn normalize_codex_usage(input_tokens: u64, output_tokens: u64, cached_tokens: u64) -> UsageData {
-    UsageData {
-        // Codex reports OpenAI-style input where cached tokens are included in
-        // inputTokens. Jean stores Anthropic-style additive counters instead.
-        input_tokens: input_tokens.saturating_sub(cached_tokens),
-        output_tokens,
-        cache_read_input_tokens: cached_tokens,
-        cache_creation_input_tokens: 0,
-    }
+fn usage_counter(value: &serde_json::Value, camel: &str, snake: &str) -> u64 {
+    value
+        .get(camel)
+        .or_else(|| value.get(snake))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
 }
 
-fn codex_app_server_usage(params: &serde_json::Value) -> Option<UsageData> {
-    let latest = params.get("tokenUsage")?.get("last")?;
-    Some(normalize_codex_usage(
-        latest
-            .get("inputTokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-        latest
-            .get("outputTokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-        latest
-            .get("cachedInputTokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-    ))
+fn normalize_codex_usage(usage: &serde_json::Value) -> UsageData {
+    let cache_read = usage_counter(usage, "cachedInputTokens", "cached_input_tokens");
+    let cache_creation = usage_counter(usage, "cacheWriteInputTokens", "cache_write_input_tokens")
+        .saturating_add(usage_counter(
+            usage,
+            "cacheCreationInputTokens",
+            "cache_creation_input_tokens",
+        ));
+    UsageData::from_inclusive_input(
+        usage_counter(usage, "inputTokens", "input_tokens"),
+        usage_counter(usage, "outputTokens", "output_tokens"),
+        cache_read,
+        cache_creation,
+    )
+}
+
+fn codex_app_server_usage(params: &serde_json::Value) -> UsageReport {
+    let Some(token_usage) = params
+        .get("tokenUsage")
+        .or_else(|| params.get("token_usage"))
+    else {
+        return UsageReport::default();
+    };
+    let latest = token_usage.get("last").map(normalize_codex_usage);
+    let total = token_usage.get("total").map(normalize_codex_usage);
+    UsageReport::session_cumulative(latest, total)
 }
 
 fn codex_exec_usage(usage: &serde_json::Value) -> UsageData {
-    normalize_codex_usage(
-        usage
-            .get("input_tokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-        usage
-            .get("output_tokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-        usage
-            .get("cached_input_tokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
-    )
+    normalize_codex_usage(usage)
+}
+
+fn observe_codex_exec_usage(report: &mut UsageReport, usage: &serde_json::Value) {
+    // `codex exec --json` forwards cumulative thread usage, including when a
+    // thread is resumed. The newest snapshot is authoritative.
+    *report = UsageReport::session_cumulative(None, Some(codex_exec_usage(usage)));
 }
 
 /// Process a single Codex JSONL event. Shared between attached and detached tailers.
@@ -2946,7 +2947,7 @@ fn process_codex_event(
     content_blocks: &mut Vec<ContentBlock>,
     pending_tool_ids: &mut HashMap<String, String>,
     completed: &mut bool,
-    usage: &mut Option<UsageData>,
+    usage: &mut UsageReport,
     error_emitted: &mut bool,
 ) {
     match event_type {
@@ -3619,7 +3620,10 @@ fn process_codex_event(
         }
         "turn.completed" => {
             if let Some(usage_obj) = msg.get("usage") {
-                *usage = Some(codex_exec_usage(usage_obj));
+                // `codex exec --json` forwards the thread token usage `total`
+                // into this event. It is cumulative, including after resume,
+                // so the newest event replaces the older snapshot.
+                observe_codex_exec_usage(usage, usage_obj);
             }
             *completed = true;
             log::trace!("Codex turn completed for session: {session_id}");
@@ -4286,7 +4290,7 @@ pub fn parse_codex_run_to_message(
         thinking_level: None,
         effort_level: None,
         recovered: run.recovered,
-        usage: run.usage.clone(),
+        usage: run.resolved_usage(&super::types::Backend::Codex).latest,
     })
 }
 
@@ -4560,7 +4564,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_server_usage_reads_latest_breakdown_and_normalizes_cached_input() {
+    fn app_server_usage_separates_latest_context_from_cumulative_total() {
         let params = serde_json::json!({
             "threadId": "thread-1",
             "turnId": "turn-2",
@@ -4568,6 +4572,7 @@ mod tests {
                 "last": {
                     "inputTokens": 180_000,
                     "cachedInputTokens": 150_000,
+                    "cacheWriteInputTokens": 5_000,
                     "outputTokens": 2_500,
                     "reasoningOutputTokens": 500,
                     "totalTokens": 182_500
@@ -4575,6 +4580,7 @@ mod tests {
                 "total": {
                     "inputTokens": 300_000,
                     "cachedInputTokens": 250_000,
+                    "cacheWriteInputTokens": 10_000,
                     "outputTokens": 4_000,
                     "reasoningOutputTokens": 800,
                     "totalTokens": 304_000
@@ -4584,12 +4590,20 @@ mod tests {
 
         assert_eq!(
             codex_app_server_usage(&params),
-            Some(UsageData {
-                input_tokens: 30_000,
-                output_tokens: 2_500,
-                cache_read_input_tokens: 150_000,
-                cache_creation_input_tokens: 0,
-            })
+            UsageReport::session_cumulative(
+                Some(UsageData {
+                    input_tokens: 25_000,
+                    output_tokens: 2_500,
+                    cache_read_input_tokens: 150_000,
+                    cache_creation_input_tokens: 5_000,
+                }),
+                Some(UsageData {
+                    input_tokens: 40_000,
+                    output_tokens: 4_000,
+                    cache_read_input_tokens: 250_000,
+                    cache_creation_input_tokens: 10_000,
+                }),
+            )
         );
     }
 
@@ -4613,7 +4627,7 @@ mod tests {
     }
 
     #[test]
-    fn app_server_usage_requires_the_per_turn_last_breakdown() {
+    fn app_server_usage_keeps_cumulative_total_when_latest_is_missing() {
         let params = serde_json::json!({
             "tokenUsage": {
                 "total": {
@@ -4624,7 +4638,67 @@ mod tests {
             }
         });
 
-        assert_eq!(codex_app_server_usage(&params), None);
+        assert_eq!(
+            codex_app_server_usage(&params),
+            UsageReport::session_cumulative(
+                None,
+                Some(UsageData {
+                    input_tokens: 50_000,
+                    output_tokens: 4_000,
+                    cache_read_input_tokens: 250_000,
+                    cache_creation_input_tokens: 0,
+                }),
+            )
+        );
+    }
+
+    #[test]
+    fn codex_usage_supports_snake_case_cache_write_and_subtracts_both_cache_slices() {
+        let usage = serde_json::json!({
+            "input_tokens": 100,
+            "cached_input_tokens": 30,
+            "cache_write_input_tokens": 20,
+            "output_tokens": 5
+        });
+
+        assert_eq!(
+            codex_exec_usage(&usage),
+            UsageData {
+                input_tokens: 50,
+                output_tokens: 5,
+                cache_read_input_tokens: 30,
+                cache_creation_input_tokens: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn exec_usage_replaces_older_cumulative_snapshots() {
+        let mut report = UsageReport::default();
+        observe_codex_exec_usage(
+            &mut report,
+            &serde_json::json!({
+                "input_tokens": 100,
+                "cached_input_tokens": 60,
+                "output_tokens": 5
+            }),
+        );
+        observe_codex_exec_usage(
+            &mut report,
+            &serde_json::json!({
+                "input_tokens": 180,
+                "cached_input_tokens": 100,
+                "output_tokens": 9
+            }),
+        );
+
+        assert_eq!(report.latest, None);
+        assert_eq!(report.total.as_ref().unwrap().input_tokens, 80);
+        assert_eq!(report.total.as_ref().unwrap().output_tokens, 9);
+        assert_eq!(
+            report.total_semantics,
+            crate::chat::types::UsageTotalSemantics::SessionCumulative
+        );
     }
 
     #[cfg(unix)]
@@ -5263,6 +5337,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5319,6 +5394,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5372,6 +5448,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5428,6 +5505,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5523,6 +5601,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5579,6 +5658,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5640,6 +5720,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -5682,6 +5763,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,

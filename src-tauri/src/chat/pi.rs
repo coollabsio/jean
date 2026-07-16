@@ -1788,6 +1788,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,

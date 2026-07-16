@@ -1,6 +1,6 @@
 //! OpenCode HTTP execution engine (opencode serve).
 
-use super::types::{ContentBlock, ToolCall, UsageData};
+use super::types::{ContentBlock, ToolCall, UsageData, UsageReport};
 use crate::http_server::EmitExt;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use once_cell::sync::Lazy;
@@ -76,7 +76,34 @@ pub struct OpenCodeResponse {
     pub tool_calls: Vec<ToolCall>,
     pub content_blocks: Vec<ContentBlock>,
     pub cancelled: bool,
-    pub usage: Option<UsageData>,
+    pub usage: UsageReport,
+}
+
+fn opencode_step_usage(part: &serde_json::Value) -> Option<UsageData> {
+    if part.get("type").and_then(serde_json::Value::as_str) != Some("step-finish") {
+        return None;
+    }
+    let tokens = part.get("tokens")?;
+    let cache = tokens.get("cache").cloned().unwrap_or_default();
+    let usage = UsageData {
+        input_tokens: tokens
+            .get("input")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        output_tokens: tokens
+            .get("output")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        cache_read_input_tokens: cache
+            .get("read")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        cache_creation_input_tokens: cache
+            .get("write")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+    };
+    (!usage.is_empty()).then_some(usage)
 }
 
 #[derive(Debug, Clone)]
@@ -2125,7 +2152,7 @@ pub fn execute_opencode_http(
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
-            usage: None,
+            usage: UsageReport::default(),
         });
     }
 
@@ -2237,7 +2264,7 @@ pub fn execute_opencode_http(
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
-            usage: None,
+            usage: UsageReport::default(),
         });
     }
 
@@ -2293,7 +2320,7 @@ pub fn execute_opencode_http(
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
-            usage: None,
+            usage: UsageReport::default(),
         });
     }
 
@@ -2343,7 +2370,7 @@ pub fn execute_opencode_http(
             tool_calls: vec![],
             content_blocks: vec![],
             cancelled: true,
-            usage: None,
+            usage: UsageReport::default(),
         });
     };
     log::info!(
@@ -2432,7 +2459,7 @@ pub fn execute_opencode_http(
     let mut content = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
-    let mut usage: Option<UsageData> = None;
+    let mut usage = UsageReport::default();
 
     let parts = response_json
         .get("parts")
@@ -2591,18 +2618,9 @@ pub fn execute_opencode_http(
                 }
             }
             Some("step-finish") => {
-                let tokens = part.get("tokens").cloned().unwrap_or_default();
-                let input = tokens.get("input").and_then(|v| v.as_u64()).unwrap_or(0);
-                let output = tokens.get("output").and_then(|v| v.as_u64()).unwrap_or(0);
-                let cache = tokens.get("cache").cloned().unwrap_or_default();
-                let cache_read = cache.get("read").and_then(|v| v.as_u64()).unwrap_or(0);
-                let cache_write = cache.get("write").and_then(|v| v.as_u64()).unwrap_or(0);
-                usage = Some(UsageData {
-                    input_tokens: input,
-                    output_tokens: output,
-                    cache_read_input_tokens: cache_read,
-                    cache_creation_input_tokens: cache_write,
-                });
+                if let Some(step_usage) = opencode_step_usage(&part) {
+                    usage.add_run_step(step_usage);
+                }
             }
             _ => {}
         }
@@ -3016,6 +3034,33 @@ pub fn answer_opencode_question(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multi_step_usage_keeps_final_context_and_sums_run_billing() {
+        let parts = [
+            serde_json::json!({
+                "type": "step-finish",
+                "tokens": { "input": 10, "output": 2, "cache": { "read": 90, "write": 3 } }
+            }),
+            serde_json::json!({
+                "type": "step-finish",
+                "tokens": { "input": 20, "output": 4, "cache": { "read": 180, "write": 5 } }
+            }),
+        ];
+        let mut report = UsageReport::default();
+        for part in &parts {
+            report.add_run_step(opencode_step_usage(part).unwrap());
+        }
+
+        assert_eq!(report.latest.as_ref().unwrap().input_tokens, 20);
+        assert_eq!(report.total.as_ref().unwrap().input_tokens, 30);
+        assert_eq!(report.total.as_ref().unwrap().output_tokens, 6);
+        assert_eq!(report.total.as_ref().unwrap().cache_read_input_tokens, 270);
+        assert_eq!(
+            report.total.as_ref().unwrap().cache_creation_input_tokens,
+            8
+        );
+    }
 
     #[test]
     fn turn_started_gate_returns_false_for_unknown_session_quickly() {

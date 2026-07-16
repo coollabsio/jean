@@ -88,14 +88,14 @@ pub struct UsageData {
 }
 
 impl UsageData {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.input_tokens == 0
             && self.output_tokens == 0
             && self.cache_read_input_tokens == 0
             && self.cache_creation_input_tokens == 0
     }
 
-    fn saturating_add_assign(&mut self, other: &Self) {
+    pub(crate) fn saturating_add_assign(&mut self, other: &Self) {
         self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
         self.cache_read_input_tokens = self
@@ -104,6 +104,108 @@ impl UsageData {
         self.cache_creation_input_tokens = self
             .cache_creation_input_tokens
             .saturating_add(other.cache_creation_input_tokens);
+    }
+
+    /// Normalize providers that include cached tokens in their input counter.
+    pub(crate) fn from_inclusive_input(
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_input_tokens: u64,
+        cache_creation_input_tokens: u64,
+    ) -> Self {
+        Self {
+            input_tokens: input_tokens.saturating_sub(
+                cache_read_input_tokens.saturating_add(cache_creation_input_tokens),
+            ),
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+        }
+    }
+}
+
+/// Describes whether a persisted usage total belongs to one Jean run or is an
+/// authoritative cumulative total for the provider-owned session/thread.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageTotalSemantics {
+    #[default]
+    RunTotal,
+    SessionCumulative,
+}
+
+fn current_usage_report_version() -> u8 {
+    1
+}
+
+/// Persisted usage semantics for one run. `latest` is the provider's final
+/// active-context snapshot; `total` is billing usage under `total_semantics`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageReport {
+    #[serde(default = "current_usage_report_version")]
+    pub version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<UsageData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<UsageData>,
+    #[serde(default)]
+    pub total_semantics: UsageTotalSemantics,
+}
+
+impl Default for UsageReport {
+    fn default() -> Self {
+        Self {
+            version: current_usage_report_version(),
+            latest: None,
+            total: None,
+            total_semantics: UsageTotalSemantics::RunTotal,
+        }
+    }
+}
+
+impl UsageReport {
+    pub(crate) fn single(usage: Option<UsageData>) -> Self {
+        let usage = usage.filter(|usage| !usage.is_empty());
+        Self {
+            latest: usage.clone(),
+            total: usage,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn run(latest: Option<UsageData>, total: Option<UsageData>) -> Self {
+        Self {
+            latest: latest.filter(|usage| !usage.is_empty()),
+            total: total.filter(|usage| !usage.is_empty()),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn session_cumulative(latest: Option<UsageData>, total: Option<UsageData>) -> Self {
+        Self {
+            latest: latest.filter(|usage| !usage.is_empty()),
+            total: total.filter(|usage| !usage.is_empty()),
+            total_semantics: UsageTotalSemantics::SessionCumulative,
+            ..Self::default()
+        }
+    }
+
+    /// Observe another provider call in a single Jean run.
+    pub(crate) fn add_run_step(&mut self, usage: UsageData) {
+        if usage.is_empty() {
+            return;
+        }
+        self.latest = Some(usage.clone());
+        match self.total.as_mut() {
+            Some(total) => total.saturating_add_assign(&usage),
+            None => self.total = Some(usage),
+        }
+        self.total_semantics = UsageTotalSemantics::RunTotal;
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.latest.as_ref().is_none_or(UsageData::is_empty)
+            && self.total.as_ref().is_none_or(UsageData::is_empty)
     }
 }
 
@@ -1166,18 +1268,37 @@ impl SessionMetadata {
         }
     }
 
-    fn session_usage(&self) -> (Option<UsageData>, Option<UsageData>) {
-        let latest_usage = self
-            .runs
-            .iter()
-            .rev()
-            .filter_map(|run| run.usage.as_ref())
-            .find(|usage| !usage.is_empty())
-            .cloned();
+    pub(crate) fn session_usage(&self) -> (Option<UsageData>, Option<UsageData>) {
+        let mut latest_usage = None;
+        let mut run_totals = UsageData::default();
+        let mut cumulative_totals = HashMap::<String, UsageData>::new();
+        for run in &self.runs {
+            let report = run.resolved_usage(&self.backend);
+            if !report.is_empty() {
+                latest_usage = report.latest.clone();
+            }
+            if let Some(total) = report.total {
+                match report.total_semantics {
+                    UsageTotalSemantics::RunTotal => run_totals.saturating_add_assign(&total),
+                    UsageTotalSemantics::SessionCumulative => {
+                        let backend = run.backend.as_ref().unwrap_or(&self.backend);
+                        let provider_session = match backend {
+                            Backend::Codex => run.codex_thread_id.as_deref(),
+                            Backend::Claude => run.claude_session_id.as_deref(),
+                            Backend::Cursor => run.cursor_chat_id.as_deref(),
+                            Backend::Grok => run.grok_session_id.as_deref(),
+                            _ => None,
+                        };
+                        let key = format!("{backend:?}:{}", provider_session.unwrap_or("default"));
+                        cumulative_totals.insert(key, total);
+                    }
+                }
+            }
+        }
 
-        let mut total_usage = UsageData::default();
-        for usage in self.runs.iter().filter_map(|run| run.usage.as_ref()) {
-            total_usage.saturating_add_assign(usage);
+        let mut total_usage = run_totals;
+        for cumulative in cumulative_totals.values() {
+            total_usage.saturating_add_assign(cumulative);
         }
 
         let total_usage = (!total_usage.is_empty()).then_some(total_usage);
@@ -1454,8 +1575,12 @@ pub struct RunEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     /// Normalized token usage for this run, when reported by the backend.
+    /// Legacy field retained for backward compatibility with existing metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<UsageData>,
+    /// Versioned context-vs-billing usage semantics for newly completed runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_report: Option<UsageReport>,
     /// Codex thread ID — persisted per-run so crash recovery can resume via thread/resume
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_thread_id: Option<String>,
@@ -1472,6 +1597,28 @@ pub struct RunEntry {
 }
 
 impl RunEntry {
+    pub(crate) fn resolved_usage(&self, session_backend: &Backend) -> UsageReport {
+        if let Some(report) = self.usage_report.as_ref() {
+            return report.clone();
+        }
+
+        let Some(legacy_usage) = self.usage.as_ref().filter(|usage| !usage.is_empty()) else {
+            return UsageReport::default();
+        };
+
+        let backend = self.backend.as_ref().unwrap_or(session_backend);
+        if *backend == Backend::Codex {
+            // Codex usage was first persisted after Jean had already normalized
+            // inclusive provider input. Re-normalizing marker-less rows would
+            // subtract cached tokens twice. Its unversioned total semantics are
+            // ambiguous (`last` context vs cumulative exec total), so retain it
+            // only as a latest snapshot and do not guess a billing total.
+            return UsageReport::run(Some(legacy_usage.clone()), None);
+        }
+
+        UsageReport::single(Some(legacy_usage.clone()))
+    }
+
     /// Whether this run should appear as user/assistant messages in the visible chat timeline.
     ///
     /// Cancelled runs remain in metadata and JSONL for diagnostics. Instant
@@ -2124,6 +2271,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2266,6 +2414,187 @@ mod tests {
     }
 
     #[test]
+    fn session_usage_keeps_latest_context_separate_from_run_billing_total() {
+        let mut metadata = SessionMetadata::new(
+            "sess-report".to_string(),
+            "wt-456".to_string(),
+            "Usage Report".to_string(),
+            0,
+        );
+        let mut run = run_with_usage("one", 1, None);
+        run.usage_report = Some(UsageReport::run(
+            Some(UsageData {
+                input_tokens: 10,
+                output_tokens: 2,
+                cache_read_input_tokens: 90,
+                cache_creation_input_tokens: 0,
+            }),
+            Some(UsageData {
+                input_tokens: 30,
+                output_tokens: 6,
+                cache_read_input_tokens: 270,
+                cache_creation_input_tokens: 5,
+            }),
+        ));
+        metadata.runs.push(run);
+
+        let session = metadata.to_session();
+        assert_eq!(session.latest_usage.unwrap().input_tokens, 10);
+        assert_eq!(session.total_usage.unwrap().input_tokens, 30);
+    }
+
+    #[test]
+    fn cumulative_usage_replaces_older_thread_snapshots_instead_of_summing() {
+        let mut metadata = SessionMetadata::new(
+            "sess-cumulative".to_string(),
+            "wt-456".to_string(),
+            "Cumulative".to_string(),
+            0,
+        );
+        metadata.backend = Backend::Codex;
+        let mut first = run_with_usage("one", 1, None);
+        first.backend = Some(Backend::Codex);
+        first.usage_report = Some(UsageReport::session_cumulative(
+            Some(UsageData {
+                input_tokens: 10,
+                ..UsageData::default()
+            }),
+            Some(UsageData {
+                input_tokens: 100,
+                ..UsageData::default()
+            }),
+        ));
+        let mut second = run_with_usage("two", 3, None);
+        second.backend = Some(Backend::Codex);
+        second.usage_report = Some(UsageReport::session_cumulative(
+            Some(UsageData {
+                input_tokens: 20,
+                ..UsageData::default()
+            }),
+            Some(UsageData {
+                input_tokens: 160,
+                ..UsageData::default()
+            }),
+        ));
+        metadata.runs = vec![first, second];
+
+        let session = metadata.to_session();
+        assert_eq!(session.latest_usage.unwrap().input_tokens, 20);
+        assert_eq!(session.total_usage.unwrap().input_tokens, 160);
+    }
+
+    #[test]
+    fn cumulative_usage_preserves_other_provider_and_thread_totals() {
+        let mut metadata = SessionMetadata::new(
+            "sess-mixed".to_string(),
+            "wt-456".to_string(),
+            "Mixed".to_string(),
+            0,
+        );
+        let claude = run_with_usage(
+            "claude",
+            1,
+            Some(UsageData {
+                input_tokens: 40,
+                ..UsageData::default()
+            }),
+        );
+        let mut codex_a_old = run_with_usage("codex-a-old", 3, None);
+        codex_a_old.backend = Some(Backend::Codex);
+        codex_a_old.codex_thread_id = Some("thread-a".to_string());
+        codex_a_old.usage_report = Some(UsageReport::session_cumulative(
+            None,
+            Some(UsageData {
+                input_tokens: 100,
+                ..UsageData::default()
+            }),
+        ));
+        let mut codex_b = run_with_usage("codex-b", 5, None);
+        codex_b.backend = Some(Backend::Codex);
+        codex_b.codex_thread_id = Some("thread-b".to_string());
+        codex_b.usage_report = Some(UsageReport::session_cumulative(
+            None,
+            Some(UsageData {
+                input_tokens: 50,
+                ..UsageData::default()
+            }),
+        ));
+        let mut codex_a_new = run_with_usage("codex-a-new", 7, None);
+        codex_a_new.backend = Some(Backend::Codex);
+        codex_a_new.codex_thread_id = Some("thread-a".to_string());
+        codex_a_new.usage_report = Some(UsageReport::session_cumulative(
+            None,
+            Some(UsageData {
+                input_tokens: 160,
+                ..UsageData::default()
+            }),
+        ));
+        metadata.runs = vec![claude, codex_a_old, codex_b, codex_a_new];
+
+        assert_eq!(metadata.to_session().total_usage.unwrap().input_tokens, 250);
+    }
+
+    #[test]
+    fn legacy_codex_usage_is_not_normalized_twice_and_zero_rows_stay_absent() {
+        let mut metadata = SessionMetadata::new(
+            "sess-legacy-codex".to_string(),
+            "wt-456".to_string(),
+            "Legacy Codex".to_string(),
+            0,
+        );
+        metadata.backend = Backend::Codex;
+        let mut legacy = run_with_usage(
+            "legacy",
+            1,
+            Some(UsageData {
+                input_tokens: 100,
+                output_tokens: 5,
+                cache_read_input_tokens: 30,
+                cache_creation_input_tokens: 20,
+            }),
+        );
+        legacy.backend = Some(Backend::Codex);
+        let mut zero = run_with_usage("zero", 3, Some(UsageData::default()));
+        zero.backend = Some(Backend::Codex);
+        metadata.runs = vec![legacy, zero];
+
+        let session = metadata.to_session();
+        let latest = session.latest_usage.unwrap();
+        assert_eq!(latest.input_tokens, 100);
+        assert_eq!(latest.cache_read_input_tokens, 30);
+        assert_eq!(latest.cache_creation_input_tokens, 20);
+        assert_eq!(session.total_usage, None);
+    }
+
+    #[test]
+    fn newer_total_only_report_clears_stale_latest_context() {
+        let mut metadata = SessionMetadata::new(
+            "sess-total-only".to_string(),
+            "wt-456".to_string(),
+            "Total only".to_string(),
+            0,
+        );
+        let mut context_run = run_with_usage("context", 1, None);
+        context_run.usage_report = Some(UsageReport::single(Some(UsageData {
+            input_tokens: 10,
+            ..UsageData::default()
+        })));
+        let mut total_only = run_with_usage("total-only", 3, None);
+        total_only.backend = Some(Backend::Codex);
+        total_only.codex_thread_id = Some("thread-1".to_string());
+        total_only.usage_report = Some(UsageReport::session_cumulative(
+            None,
+            Some(UsageData {
+                input_tokens: 100,
+                ..UsageData::default()
+            }),
+        ));
+        metadata.runs = vec![context_run, total_only];
+
+        assert_eq!(metadata.to_session().latest_usage, None);
+    }
+
+    #[test]
     fn test_session_metadata_unknown_backend_falls_back_to_claude() {
         let json = serde_json::json!({
             "id": "sess-unknown-backend",
@@ -2374,6 +2703,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2415,6 +2745,7 @@ mod tests {
             claude_session_id: None,
             pid: Some(12345),
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2446,6 +2777,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2498,6 +2830,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2522,6 +2855,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: Some("thread-1".to_string()),
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2564,6 +2898,7 @@ mod tests {
             claude_session_id: None,
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
@@ -2592,6 +2927,7 @@ mod tests {
             claude_session_id: Some("claude-sess-abc".to_string()),
             pid: None,
             usage: None,
+            usage_report: None,
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
