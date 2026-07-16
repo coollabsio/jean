@@ -4624,39 +4624,67 @@ pub async fn open_log_directory(app: AppHandle) -> Result<(), String> {
 }
 
 /// Open a worktree path in the system file explorer
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileManagerLaunchPlan {
+    program: String,
+    args: Vec<String>,
+    cwd: Option<std::path::PathBuf>,
+    display_name: &'static str,
+}
+
+fn file_manager_launch_plan(
+    worktree_path: &str,
+    target_os: &str,
+    running_in_wsl: bool,
+) -> Result<FileManagerLaunchPlan, String> {
+    match target_os {
+        "macos" => Ok(FileManagerLaunchPlan {
+            program: "open".to_string(),
+            args: vec![worktree_path.to_string()],
+            cwd: None,
+            display_name: "Finder",
+        }),
+        "windows" => Ok(FileManagerLaunchPlan {
+            program: "explorer".to_string(),
+            args: vec![worktree_path.to_string()],
+            cwd: None,
+            display_name: "Explorer",
+        }),
+        "linux" if running_in_wsl => Ok(FileManagerLaunchPlan {
+            program: "explorer.exe".to_string(),
+            args: vec![".".to_string()],
+            cwd: Some(std::path::PathBuf::from(worktree_path)),
+            display_name: "Explorer",
+        }),
+        "linux" => Ok(FileManagerLaunchPlan {
+            program: "xdg-open".to_string(),
+            args: vec![worktree_path.to_string()],
+            cwd: None,
+            display_name: "file manager",
+        }),
+        _ => Err("File explorer not supported on this platform".to_string()),
+    }
+}
+
+fn is_running_in_wsl() -> bool {
+    cfg!(target_os = "linux")
+        && (std::env::var_os("WSL_DISTRO_NAME").is_some()
+            || std::env::var_os("WSL_INTEROP").is_some())
+}
+
 #[tauri::command]
 pub async fn open_worktree_in_finder(worktree_path: String) -> Result<(), String> {
     log::trace!("Opening worktree in file explorer: {worktree_path}");
 
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&worktree_path)
-            .spawn()
-            .map_err(|e| format!("Failed to open Finder: {e}"))?;
+    let plan = file_manager_launch_plan(&worktree_path, std::env::consts::OS, is_running_in_wsl())?;
+    let mut command = std::process::Command::new(&plan.program);
+    command.args(&plan.args);
+    if let Some(cwd) = &plan.cwd {
+        command.current_dir(cwd);
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&worktree_path)
-            .spawn()
-            .map_err(|e| format!("Failed to open Explorer: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&worktree_path)
-            .spawn()
-            .map_err(|e| format!("Failed to open file manager: {e}"))?;
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        log::warn!("File explorer not supported on this platform");
-        return Err("File explorer not supported on this platform".to_string());
-    }
+    command
+        .spawn()
+        .map_err(|e| format!("Failed to open {}: {e}", plan.display_name))?;
 
     Ok(())
 }
@@ -12781,6 +12809,58 @@ mod tests {
             "git {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn file_manager_launch_plan_uses_windows_explorer_inside_wsl() {
+        assert_eq!(
+            file_manager_launch_plan("/home/alice/project", "linux", true).unwrap(),
+            FileManagerLaunchPlan {
+                program: "explorer.exe".to_string(),
+                args: vec![".".to_string()],
+                cwd: Some(std::path::PathBuf::from("/home/alice/project")),
+                display_name: "Explorer",
+            }
+        );
+    }
+
+    #[test]
+    fn file_manager_launch_plan_keeps_native_platform_openers() {
+        assert_eq!(
+            file_manager_launch_plan("/tmp/project", "linux", false).unwrap(),
+            FileManagerLaunchPlan {
+                program: "xdg-open".to_string(),
+                args: vec!["/tmp/project".to_string()],
+                cwd: None,
+                display_name: "file manager",
+            }
+        );
+        assert_eq!(
+            file_manager_launch_plan("C:\\project", "windows", false).unwrap(),
+            FileManagerLaunchPlan {
+                program: "explorer".to_string(),
+                args: vec!["C:\\project".to_string()],
+                cwd: None,
+                display_name: "Explorer",
+            }
+        );
+        assert_eq!(
+            file_manager_launch_plan("/tmp/project", "macos", false).unwrap(),
+            FileManagerLaunchPlan {
+                program: "open".to_string(),
+                args: vec!["/tmp/project".to_string()],
+                cwd: None,
+                display_name: "Finder",
+            }
+        );
+    }
+
+    #[test]
+    fn file_manager_launch_plan_rejects_unsupported_platforms() {
+        assert_eq!(
+            file_manager_launch_plan("/tmp/project", "unknown", false),
+            Err("File explorer not supported on this platform".to_string())
         );
     }
 
