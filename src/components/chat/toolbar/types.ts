@@ -8,6 +8,7 @@ import type {
   EffortLevel,
   ExecutionMode,
   Backend,
+  UsageData,
 } from '@/types/chat'
 import type { McpServerInfo } from '@/types/chat'
 import type {
@@ -51,6 +52,8 @@ export interface ChatToolbarProps {
   hideThinkingLevel?: boolean
   sessionHasMessages?: boolean
   providerLocked?: boolean
+  latestUsage?: UsageData
+  totalUsage?: UsageData
 
   baseBranch: string
   uncommittedAdded: number

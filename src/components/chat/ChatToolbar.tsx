@@ -27,6 +27,7 @@ import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
+import { SessionUsageChip } from '@/components/chat/toolbar/SessionUsageChip'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -88,6 +89,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   hideThinkingLevel,
   sessionHasMessages,
   providerLocked,
+  latestUsage,
+  totalUsage,
   baseBranch,
   prUrl,
   prNumber,
@@ -577,6 +580,8 @@ export const ChatToolbar = memo(function ChatToolbar({
           />
 
           <div className="h-4 w-px shrink-0 bg-border/50" />
+
+          <SessionUsageChip latestUsage={latestUsage} totalUsage={totalUsage} />
 
           <div className="shrink-0">
             <SendCancelButton

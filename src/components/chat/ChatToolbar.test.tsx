@@ -127,3 +127,26 @@ describe('ChatToolbar pending questions', () => {
     expect(screen.getByText('Model')).toBeInTheDocument()
   })
 })
+
+describe('ChatToolbar session usage', () => {
+  it('wires the active session usage into the compact chip', () => {
+    renderChatToolbar({
+      latestUsage: {
+        input_tokens: 25_000,
+        output_tokens: 2_000,
+        cache_read_input_tokens: 125_000,
+        cache_creation_input_tokens: 10_000,
+      },
+      totalUsage: {
+        input_tokens: 50_000,
+        output_tokens: 5_000,
+        cache_read_input_tokens: 200_000,
+        cache_creation_input_tokens: 20_000,
+      },
+    })
+
+    expect(
+      screen.getByRole('status', { name: '160.0k context tokens' })
+    ).toHaveTextContent('160.0k ctx')
+  })
+})

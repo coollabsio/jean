@@ -2324,24 +2324,10 @@ fn process_server_notification(
             }
         }
         "thread/tokenUsage/updated" => {
-            // Extract usage data
-            if let Some(token_usage) = params.get("tokenUsage") {
-                *usage = Some(UsageData {
-                    input_tokens: token_usage
-                        .get("inputTokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                    output_tokens: token_usage
-                        .get("outputTokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                    cache_read_input_tokens: token_usage
-                        .get("cachedInputTokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                    cache_creation_input_tokens: 0,
-                });
-            }
+            // ThreadTokenUsage contains cumulative `total` and per-turn `last`
+            // breakdowns. Persist only `last`; SessionMetadata derives the
+            // session total by adding each run exactly once.
+            *usage = codex_app_server_usage(params);
         }
         "account/rateLimits/updated" => {
             if let Err(e) =
@@ -2897,6 +2883,52 @@ fn upsert_file_change_tool_call(
     }
 
     tool_id
+}
+
+fn normalize_codex_usage(input_tokens: u64, output_tokens: u64, cached_tokens: u64) -> UsageData {
+    UsageData {
+        // Codex reports OpenAI-style input where cached tokens are included in
+        // inputTokens. Jean stores Anthropic-style additive counters instead.
+        input_tokens: input_tokens.saturating_sub(cached_tokens),
+        output_tokens,
+        cache_read_input_tokens: cached_tokens,
+        cache_creation_input_tokens: 0,
+    }
+}
+
+fn codex_app_server_usage(params: &serde_json::Value) -> Option<UsageData> {
+    let latest = params.get("tokenUsage")?.get("last")?;
+    Some(normalize_codex_usage(
+        latest
+            .get("inputTokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        latest
+            .get("outputTokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        latest
+            .get("cachedInputTokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+    ))
+}
+
+fn codex_exec_usage(usage: &serde_json::Value) -> UsageData {
+    normalize_codex_usage(
+        usage
+            .get("input_tokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        usage
+            .get("output_tokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        usage
+            .get("cached_input_tokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+    )
 }
 
 /// Process a single Codex JSONL event. Shared between attached and detached tailers.
@@ -3587,21 +3619,7 @@ fn process_codex_event(
         }
         "turn.completed" => {
             if let Some(usage_obj) = msg.get("usage") {
-                *usage = Some(UsageData {
-                    input_tokens: usage_obj
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                    output_tokens: usage_obj
-                        .get("output_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                    cache_read_input_tokens: usage_obj
-                        .get("cached_input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                    cache_creation_input_tokens: 0,
-                });
+                *usage = Some(codex_exec_usage(usage_obj));
             }
             *completed = true;
             log::trace!("Codex turn completed for session: {session_id}");
@@ -4540,6 +4558,74 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_server_usage_reads_latest_breakdown_and_normalizes_cached_input() {
+        let params = serde_json::json!({
+            "threadId": "thread-1",
+            "turnId": "turn-2",
+            "tokenUsage": {
+                "last": {
+                    "inputTokens": 180_000,
+                    "cachedInputTokens": 150_000,
+                    "outputTokens": 2_500,
+                    "reasoningOutputTokens": 500,
+                    "totalTokens": 182_500
+                },
+                "total": {
+                    "inputTokens": 300_000,
+                    "cachedInputTokens": 250_000,
+                    "outputTokens": 4_000,
+                    "reasoningOutputTokens": 800,
+                    "totalTokens": 304_000
+                }
+            }
+        });
+
+        assert_eq!(
+            codex_app_server_usage(&params),
+            Some(UsageData {
+                input_tokens: 30_000,
+                output_tokens: 2_500,
+                cache_read_input_tokens: 150_000,
+                cache_creation_input_tokens: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn codex_usage_normalization_saturates_malformed_cached_input() {
+        let usage = serde_json::json!({
+            "input_tokens": 100,
+            "cached_input_tokens": 120,
+            "output_tokens": 5
+        });
+
+        assert_eq!(
+            codex_exec_usage(&usage),
+            UsageData {
+                input_tokens: 0,
+                output_tokens: 5,
+                cache_read_input_tokens: 120,
+                cache_creation_input_tokens: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn app_server_usage_requires_the_per_turn_last_breakdown() {
+        let params = serde_json::json!({
+            "tokenUsage": {
+                "total": {
+                    "inputTokens": 300_000,
+                    "cachedInputTokens": 250_000,
+                    "outputTokens": 4_000
+                }
+            }
+        });
+
+        assert_eq!(codex_app_server_usage(&params), None);
+    }
 
     #[cfg(unix)]
     #[test]

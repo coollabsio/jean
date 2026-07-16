@@ -3482,6 +3482,8 @@ export function ChatWindow({
                                 sessionHasMessages={
                                   (session?.messages?.length ?? 0) > 0
                                 }
+                                latestUsage={session?.latest_usage}
+                                totalUsage={session?.total_usage}
                                 selectedModel={selectedModel}
                                 selectedProvider={selectedProvider}
                                 providerLocked={
