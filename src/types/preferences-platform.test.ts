@@ -8,11 +8,23 @@ describe('server platform option filtering', () => {
     expect(getTerminalOptions().map(option => option.value)).toEqual([
       'terminal',
       'ghostty',
+      'kitty',
+    ])
+
+    setServerPlatform('mac')
+    expect(getTerminalOptions().map(option => option.value)).toEqual([
+      'terminal',
+      'warp',
+      'ghostty',
+      'kitty',
+      'iterm2',
     ])
 
     setServerPlatform('windows')
-    expect(getTerminalOptions().map(option => option.value)).toContain(
-      'powershell'
-    )
+    expect(getTerminalOptions().map(option => option.value)).toEqual([
+      'warp',
+      'powershell',
+      'windows-terminal',
+    ])
   })
 })

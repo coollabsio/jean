@@ -4746,6 +4746,119 @@ fn linux_file_manager_launch_plan(worktree_path: &str, is_wsl: bool) -> LinuxFil
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[derive(Debug, PartialEq)]
+struct TerminalLaunchPlan {
+    program: &'static str,
+    args: Vec<String>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_terminal_launch_plan(terminal_app: &str, worktree_path: &str) -> TerminalLaunchPlan {
+    let escaped_path = worktree_path.replace('\'', "'\\''");
+
+    match terminal_app {
+        "warp" => TerminalLaunchPlan {
+            program: "open",
+            args: vec![format!("warp://action/new_tab?path={escaped_path}")],
+        },
+        "ghostty" => TerminalLaunchPlan {
+            program: "open",
+            args: vec!["-a".into(), "Ghostty".into(), worktree_path.into()],
+        },
+        "kitty" => TerminalLaunchPlan {
+            program: "open",
+            // Kitty recommends a new Launch Services instance on macOS.
+            // Keep the directory separate from the shell so all path characters are literal.
+            args: vec![
+                "-a".into(),
+                "kitty.app".into(),
+                "-n".into(),
+                "--args".into(),
+                "--directory".into(),
+                worktree_path.into(),
+            ],
+        },
+        "iterm2" => TerminalLaunchPlan {
+            program: "osascript",
+            args: vec![
+                "-e".into(),
+                format!(
+                    r#"tell application "iTerm"
+                    activate
+                    if (count of windows) = 0 then
+                        set newWindow to (create window with default profile)
+                        set sess to current session of newWindow
+                    else
+                        tell current window
+                            set newTab to (create tab with default profile)
+                            set sess to current session of newTab
+                        end tell
+                    end if
+                    tell sess
+                        write text "cd '{}' && clear"
+                    end tell
+                end tell"#,
+                    escaped_path
+                ),
+            ],
+        },
+        _ => TerminalLaunchPlan {
+            program: "osascript",
+            args: vec![
+                "-e".into(),
+                format!(
+                    r#"tell application "Terminal"
+                        activate
+                        do script "cd '{}'"
+                    end tell"#,
+                    escaped_path
+                ),
+            ],
+        },
+    }
+}
+
+#[cfg(any(target_os = "linux", all(test, unix)))]
+fn linux_terminal_launch_plans(terminal_app: &str, worktree_path: &str) -> Vec<TerminalLaunchPlan> {
+    let kitty = TerminalLaunchPlan {
+        program: "kitty",
+        args: vec!["--directory".into(), worktree_path.into()],
+    };
+
+    if terminal_app == "kitty" {
+        return vec![kitty];
+    }
+
+    vec![
+        TerminalLaunchPlan {
+            program: "gnome-terminal",
+            args: vec!["--working-directory".into(), worktree_path.into()],
+        },
+        TerminalLaunchPlan {
+            program: "konsole",
+            args: vec!["--workdir".into(), worktree_path.into()],
+        },
+        TerminalLaunchPlan {
+            program: "alacritty",
+            args: vec!["--working-directory".into(), worktree_path.into()],
+        },
+        kitty,
+        TerminalLaunchPlan {
+            program: "xterm",
+            args: vec![
+                "-e".into(),
+                "bash".into(),
+                "-c".into(),
+                format!(
+                    "cd {}; exec bash",
+                    crate::platform::shell_escape(worktree_path)
+                ),
+            ],
+        },
+    ]
+}
+
 /// Format a spawn error with a user-friendly message when the executable is not found
 fn format_open_error(app_name: &str, error: &std::io::Error) -> String {
     let display_name = match app_name {
@@ -4773,113 +4886,53 @@ pub async fn open_worktree_in_terminal(
 
     #[cfg(target_os = "macos")]
     {
-        let escaped_path = worktree_path.replace("'", "'\\''");
-
-        let script = match terminal_app.as_str() {
-            "warp" => {
-                let output = std::process::Command::new("open")
-                    .arg(format!("warp://action/new_tab?path={escaped_path}"))
-                    .spawn();
-
-                match output {
-                    Ok(_) => return Ok(()),
-                    Err(e) => return Err(format_open_error("Warp", &e)),
-                }
-            }
-            "ghostty" => {
-                // Opening a directory path with Ghostty creates a new tab
-                // in an existing instance with that directory as the working directory
-                let output = std::process::Command::new("open")
-                    .args(["-a", "Ghostty", &worktree_path])
-                    .spawn();
-
-                match output {
-                    Ok(_) => return Ok(()),
-                    Err(e) => return Err(format_open_error("Ghostty", &e)),
-                }
-            }
-            "iterm2" => {
-                // Open new window/tab in iTerm2 and cd into the directory
-                format!(
-                    r#"tell application "iTerm"
-                    activate
-                    if (count of windows) = 0 then
-                        set newWindow to (create window with default profile)
-                        set sess to current session of newWindow
-                    else
-                        tell current window
-                            set newTab to (create tab with default profile)
-                            set sess to current session of newTab
-                        end tell
-                    end if
-                    tell sess
-                        write text "cd '{}' && clear"
-                    end tell
-                end tell"#,
-                    escaped_path
-                )
-            }
-            _ => {
-                // Default to Terminal.app
-                format!(
-                    r#"tell application "Terminal"
-                        activate
-                        do script "cd '{}'"
-                    end tell"#,
-                    escaped_path
-                )
-            }
+        let plan = macos_terminal_launch_plan(&terminal_app, &worktree_path);
+        let display_name = match terminal_app.as_str() {
+            "warp" => "Warp",
+            "ghostty" => "Ghostty",
+            "kitty" => "Kitty",
+            other => other,
         };
-
-        std::process::Command::new("osascript")
-            .args(["-e", &script])
+        std::process::Command::new(plan.program)
+            .args(plan.args)
             .spawn()
-            .map_err(|e| format_open_error(&terminal_app, &e))?;
+            .map_err(|e| format_open_error(display_name, &e))?;
     }
 
     #[cfg(target_os = "linux")]
     {
-        // Try common Linux terminal emulators in order of preference
-        // Use owned Strings to avoid borrowing temporaries.
-        let terminals: Vec<(&str, Vec<String>)> = vec![
-            (
-                "gnome-terminal",
-                vec!["--working-directory".into(), worktree_path.clone()],
-            ),
-            ("konsole", vec!["--workdir".into(), worktree_path.clone()]),
-            (
-                "alacritty",
-                vec!["--working-directory".into(), worktree_path.clone()],
-            ),
-            ("kitty", vec!["--directory".into(), worktree_path.clone()]),
-            (
-                "xterm",
-                vec![
-                    "-e".into(),
-                    "bash".into(),
-                    "-c".into(),
-                    format!("cd '{}'; exec bash", worktree_path),
-                ],
-            ),
-        ];
+        let terminals = linux_terminal_launch_plans(&terminal_app, &worktree_path);
+        let kitty_selected = terminal_app == "kitty";
 
         let mut opened = false;
-        for (term, args) in terminals {
-            if crate::platform::executable_exists(term) {
-                match std::process::Command::new(term).args(args).spawn() {
+        for plan in terminals {
+            if crate::platform::executable_exists(plan.program) {
+                match std::process::Command::new(plan.program)
+                    .args(plan.args)
+                    .spawn()
+                {
                     Ok(_) => {
-                        log::trace!("Opened terminal with {term}");
+                        log::trace!("Opened terminal with {}", plan.program);
                         opened = true;
                         break;
                     }
                     Err(e) => {
-                        log::trace!("Failed to open {term}: {e}");
+                        if kitty_selected {
+                            return Err(format_open_error("Kitty", &e));
+                        }
+                        log::trace!("Failed to open {}: {e}", plan.program);
                     }
                 }
             }
         }
 
         if !opened {
+            if kitty_selected {
+                return Err(
+                    "Kitty not found. Make sure it is installed and available in your PATH."
+                        .to_string(),
+                );
+            }
             return Err("No supported terminal emulator found. Install gnome-terminal, konsole, alacritty, kitty, or xterm.".to_string());
         }
     }
@@ -13023,6 +13076,79 @@ mod tests {
                 args: vec!["/home/user/project".to_string()],
                 current_dir: None,
             }
+        );
+    }
+
+    #[test]
+    fn macos_kitty_launch_preserves_worktree_path_as_one_argument() {
+        let worktree_path = r#"/Users/Ada's Projects/"Jean""#;
+
+        assert_eq!(
+            macos_terminal_launch_plan("kitty", worktree_path),
+            TerminalLaunchPlan {
+                program: "open",
+                args: vec![
+                    "-a".to_string(),
+                    "kitty.app".to_string(),
+                    "-n".to_string(),
+                    "--args".to_string(),
+                    "--directory".to_string(),
+                    worktree_path.to_string(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn macos_generic_terminal_still_uses_terminal_app() {
+        let plan = macos_terminal_launch_plan("terminal", "/Users/ada/Jean Project");
+
+        assert_eq!(plan.program, "osascript");
+        assert_eq!(plan.args[0], "-e");
+        assert!(plan.args[1].contains("tell application \"Terminal\""));
+        assert!(plan.args[1].contains("cd '/Users/ada/Jean Project'"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn linux_selected_kitty_uses_only_the_kitty_launch_plan() {
+        let worktree_path = r#"/home/ada/Jean's "workspace""#;
+
+        assert_eq!(
+            linux_terminal_launch_plans("kitty", worktree_path),
+            vec![TerminalLaunchPlan {
+                program: "kitty",
+                args: vec!["--directory".to_string(), worktree_path.to_string()],
+            }]
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn linux_generic_terminal_keeps_existing_fallback_order() {
+        let worktree_path = r#"/home/ada/Jean's "workspace""#;
+        let plans = linux_terminal_launch_plans("terminal", worktree_path);
+
+        assert_eq!(
+            plans.iter().map(|plan| plan.program).collect::<Vec<_>>(),
+            vec!["gnome-terminal", "konsole", "alacritty", "kitty", "xterm",]
+        );
+        assert_eq!(
+            plans[0].args,
+            vec!["--working-directory".to_string(), worktree_path.to_string(),]
+        );
+        assert_eq!(
+            plans[3].args,
+            vec!["--directory".to_string(), worktree_path.to_string(),]
+        );
+        assert_eq!(
+            plans[4].args,
+            vec![
+                "-e".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                r#"cd '/home/ada/Jean'\''s "workspace"'; exec bash"#.to_string(),
+            ]
         );
     }
 

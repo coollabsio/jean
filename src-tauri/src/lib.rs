@@ -159,7 +159,7 @@ pub struct AppPreferences {
     #[serde(default = "default_effort_level")]
     pub default_effort_level: String, // Effort level for Opus adaptive thinking: low, medium, high, xhigh, max, ultracode
     #[serde(default = "default_terminal")]
-    pub terminal: String, // Terminal app: terminal, warp, ghostty, iterm2, powershell, windows-terminal
+    pub terminal: String, // Terminal app: terminal, warp, ghostty, kitty, iterm2, powershell, windows-terminal
     #[serde(default = "default_terminal_renderer")]
     pub terminal_renderer: String, // Embedded terminal renderer: "xterm" or "ghostty-web" (experimental)
     #[serde(default = "default_terminal_font")]
