@@ -3058,7 +3058,12 @@ async fn send_native_notification(
 ) -> Result<(), String> {
     log::trace!("Sending native notification: {title}");
 
-    #[cfg(not(mobile))]
+    #[cfg(target_os = "windows")]
+    {
+        return platform::notifications::show_notification(&app, title, body);
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(mobile)))]
     {
         use tauri_plugin_notification::NotificationExt;
 

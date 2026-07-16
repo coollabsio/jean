@@ -45,6 +45,7 @@ notify('Update Available', 'Click to install', { native: true })
 
 - **macOS**: Appear in Notification Center
 - **Platform-aware**: Handled by OS notification system
+- **Windows activation**: Clicking a notification restores and focuses Jean
 - **Permissions**: Automatically request permission when needed
 - **Fallback**: Falls back to toast if native notification fails
 

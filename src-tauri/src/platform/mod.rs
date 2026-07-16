@@ -1,6 +1,7 @@
 // Cross-platform abstractions for shell execution and process management
 
 pub mod cli_detect;
+pub mod notifications;
 pub mod process;
 pub mod shell;
 pub mod wsl;

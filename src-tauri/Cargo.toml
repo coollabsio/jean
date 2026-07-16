@@ -74,6 +74,7 @@ webkit2gtk = "=2.0.2"
 gtk = "=0.18.2"
 
 [target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7.2"
 windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
@@ -99,3 +100,4 @@ incremental = true       # Reuse compilation across local rebuilds
 
 [dev-dependencies]
 tempfile = "3.23.0"
+tauri = { version = "2", features = ["test"] }
