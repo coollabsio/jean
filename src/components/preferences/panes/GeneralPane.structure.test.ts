@@ -106,4 +106,45 @@ describe('GeneralPane settings structure', () => {
     expect(executionOverrides).toContain('yoloReasoning.levels.map')
     expect(executionOverrides).not.toContain('? codexReasoningOptions')
   })
+
+  it('renders the app version and build commit at the bottom of general settings', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const versionSectionIndex = source.indexOf('title="Version"')
+    const generalSettingsEnd = source.indexOf(
+      '\n        </>\n      )}',
+      versionSectionIndex
+    )
+
+    expect(source).toContain(
+      "import { CLIENT_BUILD_INFO } from '@/lib/build-info'"
+    )
+    expect(versionSectionIndex).toBeGreaterThan(-1)
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'CLIENT_BUILD_INFO.appVersion'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'CLIENT_BUILD_INFO.gitSha'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'Source commit used for this build'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'openExternal('
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      '`https://github.com/coollabsio/jean/commit/${CLIENT_BUILD_INFO.gitSha}`'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'CLIENT_BUILD_INFO.builtAt'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'toLocaleString()'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).not.toContain(
+      '<SettingsSection'
+    )
+  })
 })

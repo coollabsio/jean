@@ -188,9 +188,10 @@ import {
   formatPiModelLabel,
 } from '@/components/chat/toolbar/toolbar-utils'
 import { playNotificationSound } from '@/lib/sounds'
+import { CLIENT_BUILD_INFO } from '@/lib/build-info'
 import type { ThinkingLevel, EffortLevel } from '@/types/chat'
 import { hasBackend, isNativeApp } from '@/lib/environment'
-import { isWindows } from '@/lib/platform'
+import { isWindows, openExternal } from '@/lib/platform'
 import { isNewerVersion } from '@/lib/version-utils'
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -4852,6 +4853,45 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </div>
             </SettingsSection>
           )}
+
+          <SettingsSection
+            title="Version"
+            anchorId="pref-general-section-version"
+          >
+            <div className="space-y-4">
+              <InlineField label="Jean" description="Application version">
+                <span className="font-mono text-sm text-muted-foreground">
+                  v{CLIENT_BUILD_INFO.appVersion}
+                </span>
+              </InlineField>
+
+              {CLIENT_BUILD_INFO.gitSha && (
+                <InlineField
+                  label="Commit"
+                  description="Source commit used for this build"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openExternal(
+                          `https://github.com/coollabsio/jean/commit/${CLIENT_BUILD_INFO.gitSha}`
+                        )
+                      }
+                      className="font-mono hover:text-foreground hover:underline"
+                    >
+                      {CLIENT_BUILD_INFO.gitSha}
+                    </button>
+                    {CLIENT_BUILD_INFO.builtAt && (
+                      <span>
+                        · {new Date(CLIENT_BUILD_INFO.builtAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </InlineField>
+              )}
+            </div>
+          </SettingsSection>
         </>
       )}
 
