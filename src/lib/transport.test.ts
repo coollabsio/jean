@@ -54,6 +54,17 @@ async function loadTransportModule() {
   return import('./transport')
 }
 
+async function loadNativeTransportModule(tauriInvoke: ReturnType<typeof vi.fn>) {
+  vi.resetModules()
+  vi.doMock('./environment', () => ({
+    isNativeApp: () => true,
+    setWsConnected: setWsConnectedMock,
+    setWebAccessEnabled: vi.fn(),
+  }))
+  vi.doMock('@tauri-apps/api/core', () => ({ invoke: tauriInvoke }))
+  return import('./transport')
+}
+
 describe('transport bootstrap', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -73,6 +84,30 @@ describe('transport bootstrap', () => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.doUnmock('./environment')
+    vi.doUnmock('@tauri-apps/api/core')
+  })
+
+  it('routes shared native commands through the jean-core dispatcher', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue([{ id: 'project-1' }])
+    const transport = await loadNativeTransportModule(tauriInvoke)
+
+    await transport.invoke('list_projects')
+
+    expect(tauriInvoke).toHaveBeenCalledWith('dispatch_core_command', {
+      command: 'list_projects',
+      args: {},
+    })
+  })
+
+  it('keeps desktop-only commands on their native Tauri handlers', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadNativeTransportModule(tauriInvoke)
+
+    await transport.invoke('set_window_vibrancy', { enabled: true })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('set_window_vibrancy', {
+      enabled: true,
+    })
   })
   it('does not open websocket until bootstrap explicitly connects it', async () => {
     const transport = await loadTransportModule()

@@ -184,7 +184,7 @@ Additional systems (no dedicated docs yet):
   re-checking the race.
 
 - **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
-- **HTTP Server** - Embedded Axum server + WebSocket for headless/web mode (`src-tauri/src/http_server/`)
+- **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
 - **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`)
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))

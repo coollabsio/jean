@@ -1,11 +1,9 @@
 # Jean Headless Server
 
-Jean can run as a browser-accessible server without creating a visible Tauri WebView/window. This is intended first for Linux VPS, systemd, Docker, and Tailscale deployments.
-
-On Linux, the Tauri/GTK runtime still needs a display backend to initialize even
-when Jean is headless. The Docker image starts `Xvfb` automatically. For a raw
-Linux binary on a server without `DISPLAY`, run it under `xvfb-run` or provide an
-X/Wayland display.
+Jean can run as a browser-accessible Tokio/Axum server with no Tauri, WebView,
+GTK, or display-server dependency. `jean-core` owns shared state, commands,
+events, persistence, projects, chat backends, terminals, background work, and
+the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 
 ## Start locally
 
@@ -19,7 +17,7 @@ cargo build --manifest-path src-server/Cargo.toml
 ```
 
 ```bash
-xvfb-run -a ./src-server/target/debug/jean-server --host 127.0.0.1 --port 3456
+env -u DISPLAY -u WAYLAND_DISPLAY ./src-server/target/debug/jean-server --host 127.0.0.1 --port 3456
 curl http://127.0.0.1:3456/healthz
 ```
 
@@ -34,7 +32,7 @@ For a production single-binary server:
 ```bash
 bun run build
 cargo build --release --manifest-path src-server/Cargo.toml
-xvfb-run -a ./src-server/target/release/jean-server --host 0.0.0.0 --port 3456 --token "$JEAN_TOKEN"
+./src-server/target/release/jean-server --host 0.0.0.0 --port 3456 --token "$JEAN_TOKEN"
 ```
 
 After the release build finishes, `dist/` is no longer needed on the target
@@ -46,7 +44,7 @@ Install the Linux build dependencies once on Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xdg-utils
+sudo apt-get install -y libssl-dev pkg-config
 ```
 
 On a Linux host where `jean-server.service` already runs the binary at
@@ -113,7 +111,7 @@ User=jean
 Environment=JEAN_HOST=127.0.0.1
 Environment=JEAN_PORT=3456
 Environment=JEAN_TOKEN=change-me-long-random-token
-ExecStart=/usr/bin/xvfb-run -a /usr/local/bin/jean-server
+ExecStart=/usr/local/bin/jean-server
 Restart=on-failure
 RestartSec=5
 
@@ -129,7 +127,7 @@ browser terminals can find tools installed by shell setup scripts (for example
 
 - The server Docker image is published by the Server Release workflow as
   `ghcr.io/<owner>/<repo>-server:<tag>`.
-- The image starts `Xvfb` internally before launching `jean-server`.
+- The image launches `jean-server` directly and contains no GTK/WebKit/Xvfb packages.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
 - Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
 - Put TLS/auth in front of the container for internet exposure.

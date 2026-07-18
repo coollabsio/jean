@@ -67,7 +67,7 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo apt-get install -y libssl-dev pkg-config
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -79,7 +79,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: |
-            ./src-tauri -> target
+            ./jean-core -> target
             ./src-server -> target
           shared-key: server-${{ matrix.arch }}
 
@@ -90,7 +90,21 @@ jobs:
         run: bun run build
 
       - name: Build jean-server
-        run: cd src-server && cargo build --release
+        run: cd src-server && cargo build --release --locked
+
+      - name: Verify Tauri-free headless runtime
+        run: |
+          ! cargo tree --manifest-path src-server/Cargo.toml -p jean-server | grep -Ei 'tauri|wry|webkit|gtk'
+          ! ldd src-server/target/release/jean-server | grep -Ei 'webkit|gtk|appindicator'
+          env -u DISPLAY -u WAYLAND_DISPLAY JEAN_DATA_DIR="$RUNNER_TEMP/jean-data" \
+            src-server/target/release/jean-server --host 127.0.0.1 --port 3457 --no-token &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for _ in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:3457/readyz && break
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:3457/readyz
 
       - name: Package binary
         env:

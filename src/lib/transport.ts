@@ -92,6 +92,41 @@ export function convertProjectFileSrc(filePath: string): string {
 /** Unlisten function type — compatible with Tauri's UnlistenFn. */
 export type UnlistenFn = () => void
 
+const DESKTOP_ONLY_COMMANDS = new Set([
+  'set_window_vibrancy',
+  'send_native_notification',
+  'read_clipboard_image',
+  'write_clipboard_text',
+  'save_dropped_image',
+  'open_file_in_default_app',
+  'open_worktree_in_finder',
+  'open_project_worktrees_folder',
+  'open_worktree_in_terminal',
+  'open_worktree_in_editor',
+  'open_project_on_github',
+  'open_branch_on_github',
+  'open_log_directory',
+  'set_project_avatar',
+  'start_http_server',
+  'stop_http_server',
+  'browser_create',
+  'browser_navigate',
+  'browser_back',
+  'browser_forward',
+  'browser_reload',
+  'browser_stop',
+  'browser_set_bounds',
+  'browser_set_visible',
+  'browser_set_focus',
+  'browser_get_url',
+  'browser_close',
+  'browser_report_title',
+  'browser_enable_grab',
+  'browser_report_grab_context',
+  'get_active_browser_tabs',
+  'has_active_browser_tab',
+])
+
 // ---------------------------------------------------------------------------
 // Public API (same signatures as Tauri)
 // ---------------------------------------------------------------------------
@@ -115,7 +150,13 @@ export async function invoke<T>(
 
   if (isNativeApp()) {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
-    return tauriInvoke<T>(command, args)
+    if (DESKTOP_ONLY_COMMANDS.has(command)) {
+      return tauriInvoke<T>(command, args)
+    }
+    return tauriInvoke<T>('dispatch_core_command', {
+      command,
+      args: args ?? {},
+    })
   }
   return wsTransport.invoke<T>(command, args)
 }
