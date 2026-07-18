@@ -415,24 +415,19 @@ async fn test_app_commands() {
 }
 ```
 
-#### Windows: `STATUS_ENTRYPOINT_NOT_FOUND` with Tauri tests
+#### Windows: avoid `tauri::test::mock_app` in lib unit tests
 
-Using `tauri` with `features = ["test"]` (or creating windows in unit tests) links
-Common Controls v6. The main app binary gets the required Windows application
-manifest via `tauri-build`/winres, but `cargo test --lib` builds a separate
-harness that does not.
+Do **not** add `tauri = { features = ["test"] }` or `tauri::test::mock_app()` /
+`WebviewWindowBuilder` unit tests to this crate for Windows CI.
 
-Without the manifest, the entire test process fails to start on Windows MSVC:
+That path links Common Controls v6. The lib test harness does not get the app
+manifest that the main binary receives via `tauri-build`/winres, so the process
+fails to start with `STATUS_ENTRYPOINT_NOT_FOUND` (`0xc0000139`). Embedding a
+second manifest via `cargo:rustc-link-arg` then collides with winres on
+`bin "jean" test` (`CVT1100: duplicate resource`).
 
-```text
-error: test failed, to rerun pass `--lib`
-Caused by:
-  process didn't exit successfully: `...\jean_lib-….exe` (exit code: 0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND)
-```
-
-Jean's `src-tauri/build.rs` embeds `windows-app-manifest.xml` into test/bench
-binaries on Windows MSVC (Tauri's recommended workaround). Keep that embed if you
-add more `tauri::test` coverage.
+Prefer pure unit tests of extractable logic (see
+`platform::notifications::toast_app_id_for_exe_dir`) instead of mock-window tests.
 
 ### Testing File Operations
 
