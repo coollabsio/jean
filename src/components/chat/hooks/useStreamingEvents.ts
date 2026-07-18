@@ -1897,9 +1897,11 @@ export default function useStreamingEvents({
           const runIds = cancelledRunIds.get(session_id) ?? new Set<string>()
           runIds.add(eventRunId)
           cancelledRunIds.set(session_id, runIds)
-        } else {
-          cancelledUntaggedSessionIds.add(session_id)
         }
+        // Some backends (including Grok ACP) do not tag chunks with run_id.
+        // Block their delayed output too; chat:sending clears this guard when a
+        // legitimate next run starts for the session.
+        cancelledUntaggedSessionIds.add(session_id)
 
         // Override reviewing state based on whether visible messages remain.
         const updatedSession = queryClient.getQueryData<Session>(

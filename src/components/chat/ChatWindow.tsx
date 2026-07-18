@@ -116,8 +116,6 @@ import { TextFilePreview } from './TextFilePreview'
 import { SkillBadge } from './SkillBadge'
 import { FileContentModal } from './FileContentModal'
 import { FilePreview } from './FilePreview'
-import { ContextPreview } from './ContextPreview'
-import { getLinkedPrContextPreviewExclusion } from './context-preview-utils'
 import { ChatInput } from './ChatInput'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
@@ -3342,30 +3340,6 @@ export function ChatWindow({
                                 : undefined
                             }
                           >
-                            {/* Loaded context preview (# mentions) */}
-                            <ContextPreview
-                              sessionId={activeSessionId}
-                              worktreeId={null}
-                              worktreePath={activeWorktreePath}
-                              projectId={worktree?.project_id ?? null}
-                              disabled={isSending}
-                              excludeIssueNumber={
-                                worktree?.issue_number ?? null
-                              }
-                              excludePrNumber={getLinkedPrContextPreviewExclusion(
-                                worktree
-                              )}
-                              excludeSecurityAlertNumber={
-                                worktree?.security_alert_number ?? null
-                              }
-                              excludeAdvisoryGhsaId={
-                                worktree?.advisory_ghsa_id ?? null
-                              }
-                              excludeLinearIssueIdentifier={
-                                worktree?.linear_issue_identifier ?? null
-                              }
-                            />
-
                             {/* Pending file preview (@ mentions) */}
                             <FilePreview
                               files={currentPendingFiles}

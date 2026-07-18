@@ -249,6 +249,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
     useChatStore.setState({
       streamingContents: {},
       streamingContentBlocks: {},
+      streamingReplayContentBlocks: {},
       streamingThinkingContent: {},
       activeToolCalls: {},
       sendingSessionIds: {},
@@ -973,6 +974,70 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().streamingContents['session-1']).toBe(
       'New run chunk.'
     )
+  })
+
+  it('ignores late untagged chunks after a tagged cancellation', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [],
+    })
+
+    useChatStore.setState({
+      streamingContents: { 'session-1': 'Partial response.' },
+      streamingContentBlocks: {
+        'session-1': [{ type: 'text', text: 'Partial response.' }],
+      },
+      sendingSessionIds: { 'session-1': true },
+      sendStartedAt: { 'session-1': 1000 },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: 2000,
+        run_id: 'run-old',
+      },
+    })
+
+    // Session persistence may restore is_reviewing=false before a delayed
+    // backend chunk arrives, so cancellation filtering cannot rely on it.
+    useChatStore.getState().setSessionReviewing('session-1', false)
+
+    const chunkListener = registeredListeners.get('chat:chunk')
+    expect(chunkListener).toBeDefined()
+    chunkListener?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Late untagged Grok chunk.',
+      },
+    })
+
+    expect(useChatStore.getState().sendingSessionIds['session-1']).toBeUndefined()
+    expect(useChatStore.getState().streamingContents['session-1']).toBeUndefined()
   })
 
   it('continues ignoring cancelled run chunks after accepting a new run chunk', async () => {
