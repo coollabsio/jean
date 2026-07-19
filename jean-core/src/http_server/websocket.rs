@@ -33,6 +33,10 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
     )
 }
 
+fn command_must_run_in_ws_order(command: &str) -> bool {
+    matches!(command, "terminal_write")
+}
+
 async fn dispatch_invoke_response(
     app: AppHandle,
     id: String,
@@ -88,7 +92,7 @@ fn spawn_dispatch_response(
 
 #[cfg(test)]
 mod tests {
-    use super::command_should_run_on_blocking_pool;
+    use super::{command_must_run_in_ws_order, command_should_run_on_blocking_pool};
 
     #[test]
     fn commit_generation_runs_on_blocking_pool() {
@@ -106,6 +110,13 @@ mod tests {
     #[test]
     fn lightweight_session_creation_stays_on_async_runtime() {
         assert!(!command_should_run_on_blocking_pool("create_session"));
+    }
+
+    #[test]
+    fn terminal_input_writes_run_in_websocket_order() {
+        assert!(command_must_run_in_ws_order("terminal_write"));
+        assert!(!command_must_run_in_ws_order("terminal_resize"));
+        assert!(!command_must_run_in_ws_order("create_session"));
     }
 }
 
@@ -216,15 +227,35 @@ pub async fn handle_ws_connection(
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<WsClientMessage>(&text) {
                             Ok(WsClientMessage::Invoke { id, command, args }) => {
-                                // Spawn dispatch as a separate task so the
-                                // select loop stays free to drain events.
-                                spawn_dispatch_response(
-                                    app.clone(),
-                                    id,
-                                    command,
-                                    args,
-                                    resp_tx.clone(),
-                                );
+                                if command_must_run_in_ws_order(&command) {
+                                    // Terminal input must preserve websocket
+                                    // message order. Spawning each write as an
+                                    // independent task lets fast input chunks
+                                    // race for the PTY writer lock, which can
+                                    // reorder typed text in browser access.
+                                    let resp = dispatch_invoke_response(
+                                        app.clone(),
+                                        id,
+                                        command,
+                                        args,
+                                    )
+                                    .await;
+                                    if let Ok(json) = serde_json::to_string(&resp) {
+                                        if feed_and_drain(&mut ws_tx, &mut event_rx, &mut resp_rx, json).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    // Spawn dispatch as a separate task so the
+                                    // select loop stays free to drain events.
+                                    spawn_dispatch_response(
+                                        app.clone(),
+                                        id,
+                                        command,
+                                        args,
+                                        resp_tx.clone(),
+                                    );
+                                }
                             }
                             Ok(WsClientMessage::TerminalReplay { terminal_id, last_seq }) => {
                                 // Restore terminal output after a full page refresh.
@@ -241,13 +272,28 @@ pub async fn handle_ws_connection(
                                 // Try legacy format (no "type" field — old clients send bare invoke)
                                 match serde_json::from_str::<InvokeRequest>(&text) {
                                     Ok(req) => {
-                                        spawn_dispatch_response(
-                                            app.clone(),
-                                            req.id,
-                                            req.command,
-                                            req.args,
-                                            resp_tx.clone(),
-                                        );
+                                        if command_must_run_in_ws_order(&req.command) {
+                                            let resp = dispatch_invoke_response(
+                                                app.clone(),
+                                                req.id,
+                                                req.command,
+                                                req.args,
+                                            )
+                                            .await;
+                                            if let Ok(json) = serde_json::to_string(&resp) {
+                                                if feed_and_drain(&mut ws_tx, &mut event_rx, &mut resp_rx, json).await.is_err() {
+                                                    break;
+                                                }
+                                            }
+                                        } else {
+                                            spawn_dispatch_response(
+                                                app.clone(),
+                                                req.id,
+                                                req.command,
+                                                req.args,
+                                                resp_tx.clone(),
+                                            );
+                                        }
                                     }
                                     Err(_) => {
                                         let resp = InvokeResponse {
