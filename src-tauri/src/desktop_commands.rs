@@ -235,7 +235,10 @@ pub async fn open_worktree_in_terminal(
     worktree_path: String,
     terminal: Option<String>,
 ) -> Result<(), String> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     let terminal = terminal.unwrap_or_else(|| "terminal".to_string());
+    #[cfg(target_os = "windows")]
+    let _ = terminal;
     #[cfg(target_os = "macos")]
     {
         let application = match terminal.as_str() {

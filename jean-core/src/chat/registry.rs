@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(unix)]
 use super::claude::CancelledEvent;
 use super::run_log;
 use super::storage;

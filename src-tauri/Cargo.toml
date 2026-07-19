@@ -16,11 +16,11 @@ name = "jean_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 jean-core = { path = "../jean-core" }
-tauri = { version = "2", features = ["protocol-asset", "macos-private-api", "unstable", "webview-data-url"] }
+tauri = { version = "2.11.5", features = ["protocol-asset", "macos-private-api", "unstable", "webview-data-url"] }
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
@@ -55,6 +55,13 @@ tauri-winrt-notification = "0.7.2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+# Temporary until Tao publishes a release containing the fix after 0.35.3.
+# Older versions can deadlock the Windows UI thread when PeekMessageW re-enters
+# while an input lock is held.
+# Upstream: https://github.com/tauri-apps/tao/pull/1215
+[patch.crates-io]
+tao = { git = "https://github.com/tauri-apps/tao", rev = "c704261c519c58cfdd0bc2d58ba24e06a0b71c92" }
 
 # Optimize for smaller binary size in release builds
 [profile.release]
