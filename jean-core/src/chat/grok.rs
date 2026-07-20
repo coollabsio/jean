@@ -403,15 +403,14 @@ fn normalize_grok_tool_call(mut tool: ParsedToolCall) -> ParsedToolCall {
                     &["path", "target_directory", "targetDirectory", "directory"],
                 );
             }
-            "WebSearch" => {
+            "WebSearch"
                 if map
                     .get("query")
                     .and_then(Value::as_str)
-                    .is_none_or(|s| s.is_empty())
-                {
-                    if let Some(query) = query_from_web_search_title(&original_name) {
-                        map.insert("query".to_string(), Value::String(query));
-                    }
+                    .is_none_or(|s| s.is_empty()) =>
+            {
+                if let Some(query) = query_from_web_search_title(&original_name) {
+                    map.insert("query".to_string(), Value::String(query));
                 }
             }
             "WebFetch" => {

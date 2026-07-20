@@ -385,12 +385,10 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
                 _ => {}
             }
         }
-        "message_update" => {
-            if value.get("role").and_then(Value::as_str) != Some("user") {
-                if let Some(text) = text_delta_from_value(value) {
-                    response.content.push_str(text);
-                    push_text_block(&mut response.content_blocks, text);
-                }
+        "message_update" if value.get("role").and_then(Value::as_str) != Some("user") => {
+            if let Some(text) = text_delta_from_value(value) {
+                response.content.push_str(text);
+                push_text_block(&mut response.content_blocks, text);
             }
         }
         "assistant" => {

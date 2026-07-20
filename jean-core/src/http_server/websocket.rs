@@ -267,10 +267,10 @@ pub async fn handle_ws_connection(
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(data))) => {
-                        if ws_tx.send(Message::Pong(data)).await.is_err() {
-                            break;
-                        }
+                    Some(Ok(Message::Ping(data)))
+                        if ws_tx.send(Message::Pong(data.clone())).await.is_err() =>
+                    {
+                        break;
                     }
                     Some(Ok(Message::Pong(_))) => {} // liveness already bumped above
                     _ => {} // Ignore binary

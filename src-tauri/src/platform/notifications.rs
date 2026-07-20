@@ -72,8 +72,7 @@ mod tests {
 
     #[test]
     fn packaged_builds_use_app_identifier() {
-        let app_id =
-            toast_app_id_for_exe_dir(Path::new(r"C:\Program Files\Jean"), "io.jean.app");
+        let app_id = toast_app_id_for_exe_dir(Path::new(r"C:\Program Files\Jean"), "io.jean.app");
         assert_eq!(app_id, "io.jean.app");
     }
 }

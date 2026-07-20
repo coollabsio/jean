@@ -3686,14 +3686,13 @@ pub(crate) fn codex_run_log_has_visible_assistant_artifacts(
             .unwrap_or("")
         {
             "turn.plan_updated" | "item.plan.delta" if is_plan_mode => return true,
-            "turn.completed" => {
+            "turn.completed"
                 if msg
                     .get("output")
                     .and_then(extract_text_from_turn_output)
-                    .is_some_and(|text| !text.trim().is_empty())
-                {
-                    return true;
-                }
+                    .is_some_and(|text| !text.trim().is_empty()) =>
+            {
+                return true;
             }
             "item.started" | "item.completed" => {
                 let item = msg.get("item").unwrap_or(&serde_json::Value::Null);
@@ -3702,12 +3701,11 @@ pub(crate) fn codex_run_log_has_visible_assistant_artifacts(
                     .and_then(|value| value.as_str())
                     .unwrap_or("");
                 match item_type {
-                    "agent_message" => {
+                    "agent_message"
                         if extract_agent_message_text(item)
-                            .is_some_and(|text| !text.trim().is_empty())
-                        {
-                            return true;
-                        }
+                            .is_some_and(|text| !text.trim().is_empty()) =>
+                    {
+                        return true;
                     }
                     "plan" if is_plan_mode => return true,
                     "command_execution" | "file_change" | "mcp_tool_call" | "collab_tool_call"
