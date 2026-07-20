@@ -125,7 +125,8 @@ jobs:
             artifacts/*.sha256
 
       - name: Upload release assets
-        if: github.event_name == 'release'
+        # Allow workflow_dispatch re-runs after fixing a tagged release (e.g. lockfile).
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
@@ -135,9 +136,14 @@ jobs:
   publish-update-manifest:
     name: Publish server-latest.json
     needs: [metadata, build-binaries]
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
     runs-on: ubuntu-latest
     steps:
+      # gh release upload needs repo context; without checkout it fails with
+      # "fatal: not a git repository" even when GH_TOKEN is set.
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Download amd64 artifact
         uses: actions/download-artifact@v4
         with:
@@ -153,6 +159,7 @@ jobs:
       - name: Build and upload server-latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
           VERSION: ${{ needs.metadata.outputs.version }}
           REPO: ${{ github.repository }}
@@ -243,7 +250,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest-${{ matrix.arch }},enable=${{ github.event_name == 'release' }}
+            type=raw,value=latest-${{ matrix.arch }},enable=${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '') }}
             type=raw,value=${{ needs.metadata.outputs.tag }}-${{ matrix.arch }}
             type=sha,prefix=sha-,suffix=-${{ matrix.arch }}
 
@@ -290,6 +297,6 @@ jobs:
           create_manifest "$RELEASE_TAG"
           create_manifest "sha-${GITHUB_SHA::7}"
 
-          if [ "${{ github.event_name }}" = "release" ]; then
+          if [ "${{ github.event_name }}" = "release" ] || { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; }; then
             create_manifest "latest"
           fi

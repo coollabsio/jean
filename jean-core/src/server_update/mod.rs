@@ -64,7 +64,8 @@ pub struct ServerUpdateApplyResult {
 
 /// Check GitHub for a newer jean-server release. Does not install anything.
 pub async fn check_server_update(_app: &AppHandle) -> Result<ServerUpdateStatus, String> {
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    // Must use the host binary version (jean-server), not jean-core's crate version.
+    let current_version = crate::app_version().to_string();
     let eligibility = update_eligibility();
     if let Some(reason) = &eligibility.block_reason {
         if eligibility.hard_block {
@@ -125,7 +126,7 @@ pub async fn apply_server_update(app: AppHandle) -> Result<ServerUpdateApplyResu
 
     let manifest = fetch_manifest().await?;
     let latest = normalize_version(&manifest.version);
-    let current = env!("CARGO_PKG_VERSION");
+    let current = crate::app_version();
     if !is_newer_version(&latest, current) {
         return Ok(ServerUpdateApplyResult {
             success: true,
@@ -541,6 +542,15 @@ mod tests {
         assert!(is_newer_version("v0.2.0", "0.1.99"));
         assert!(!is_newer_version("0.1.67", "0.1.67"));
         assert!(!is_newer_version("0.1.66", "0.1.67"));
+    }
+
+    #[test]
+    fn current_version_uses_host_override_not_library_crate() {
+        // Regression: self-update used env!("CARGO_PKG_VERSION") from jean-core
+        // (e.g. 0.1.67) while jean-server was already 0.1.68, so "update available"
+        // never cleared after install.
+        crate::set_app_version("9.9.9-host");
+        assert_eq!(crate::app_version(), "9.9.9-host");
     }
 
     #[test]

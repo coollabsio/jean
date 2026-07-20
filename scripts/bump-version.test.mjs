@@ -23,6 +23,7 @@ test('bump-version updates the desktop and jean-server versions', () => {
     mkdirSync(join(tempRoot, 'scripts'))
     mkdirSync(join(tempRoot, 'src-tauri'))
     mkdirSync(join(tempRoot, 'src-server'))
+    mkdirSync(join(tempRoot, 'jean-core'))
 
     cpSync('scripts/bump-version.js', join(tempRoot, 'scripts/bump-version.js'))
     writeFileSync(
@@ -45,6 +46,22 @@ test('bump-version updates the desktop and jean-server versions', () => {
       join(tempRoot, 'src-server/Cargo.toml'),
       '[package]\nname = "jean-server"\nversion = "1.2.3"\n'
     )
+    writeFileSync(
+      join(tempRoot, 'jean-core/Cargo.toml'),
+      '[package]\nname = "jean-core"\nversion = "1.2.3"\n'
+    )
+    writeFileSync(
+      join(tempRoot, 'src-tauri/Cargo.lock'),
+      '[[package]]\nname = "jean"\nversion = "1.2.3"\n\n[[package]]\nname = "jean-core"\nversion = "1.2.3"\n'
+    )
+    writeFileSync(
+      join(tempRoot, 'src-server/Cargo.lock'),
+      '[[package]]\nname = "jean-server"\nversion = "1.2.3"\n\n[[package]]\nname = "jean-core"\nversion = "1.2.3"\n'
+    )
+    writeFileSync(
+      join(tempRoot, 'jean-core/Cargo.lock'),
+      '[[package]]\nname = "jean-core"\nversion = "1.2.3"\n'
+    )
 
     execFileSync('node', ['scripts/bump-version.js', '1.2.4'], {
       cwd: tempRoot,
@@ -62,6 +79,26 @@ test('bump-version updates the desktop and jean-server versions', () => {
     assert.match(
       readFileSync(join(tempRoot, 'src-server/Cargo.toml'), 'utf8'),
       /^version = "1\.2\.4"/m
+    )
+    assert.match(
+      readFileSync(join(tempRoot, 'jean-core/Cargo.toml'), 'utf8'),
+      /^version = "1\.2\.4"/m
+    )
+    assert.match(
+      readFileSync(join(tempRoot, 'src-tauri/Cargo.lock'), 'utf8'),
+      /name = "jean"\nversion = "1\.2\.4"/
+    )
+    assert.match(
+      readFileSync(join(tempRoot, 'src-tauri/Cargo.lock'), 'utf8'),
+      /name = "jean-core"\nversion = "1\.2\.4"/
+    )
+    assert.match(
+      readFileSync(join(tempRoot, 'src-server/Cargo.lock'), 'utf8'),
+      /name = "jean-server"\nversion = "1\.2\.4"/
+    )
+    assert.match(
+      readFileSync(join(tempRoot, 'src-server/Cargo.lock'), 'utf8'),
+      /name = "jean-core"\nversion = "1\.2\.4"/
     )
   } finally {
     rmSync(tempRoot, { recursive: true, force: true })

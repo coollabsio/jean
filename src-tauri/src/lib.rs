@@ -322,6 +322,9 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Product version must be the desktop package, not jean-core's library version.
+    jean_core::set_app_version(env!("CARGO_PKG_VERSION"));
+
     if should_run_server() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
