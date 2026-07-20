@@ -5,16 +5,17 @@ import type { AppPreferences } from '@/types/preferences'
 const preferences = {
   selected_model: 'claude-sonnet-4-6[1m]',
   selected_codex_model: 'gpt-5.5-fast',
-  selected_opencode_model: 'opencode/gpt-5.5',
+  selected_opencode_model: 'opencode/gpt-5.6-sol',
   selected_cursor_model: 'cursor/auto',
   selected_commandcode_model: 'commandcode/deepseek/deepseek-v4-flash',
+  selected_kimi_model: 'kimi/custom-coding-model',
 } as unknown as AppPreferences
 
 describe('resolveDefaultModelForBackend', () => {
   it.each([
     ['claude', 'claude-opus-4-8[1m]'],
-    ['codex', 'gpt-5.5'],
-    ['opencode', 'opencode/gpt-5.5'],
+    ['codex', 'gpt-5.6-sol'],
+    ['opencode', 'opencode/gpt-5.6-sol'],
     ['cursor', 'cursor/auto'],
   ] as const)(
     'falls back to the built-in %s default when no preference exists',
@@ -35,6 +36,18 @@ describe('resolveDefaultModelForBackend', () => {
     expect(
       resolveDefaultModelForBackend('commandcode', {} as AppPreferences)
     ).toBe('commandcode/default')
+  })
+
+  it('uses the Kimi model preference for Kimi Code sessions', () => {
+    expect(resolveDefaultModelForBackend('kimi', preferences)).toBe(
+      'kimi/custom-coding-model'
+    )
+  })
+
+  it('falls back to the Kimi Code configured default model', () => {
+    expect(resolveDefaultModelForBackend('kimi', {} as AppPreferences)).toBe(
+      'kimi/default'
+    )
   })
 
   it('uses the first available PI provider model when the stored PI default is unavailable', () => {

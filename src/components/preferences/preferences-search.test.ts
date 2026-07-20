@@ -10,6 +10,7 @@ const nativeOnlyEntryIds = [
   'opencode-cli',
   'cursor-cli',
   'pi-cli',
+  'kimi-cli',
   'github-cli',
   'coderabbit-cli',
   'general-troubleshooting',
@@ -75,6 +76,7 @@ describe('preferences search index', () => {
     expect(searchPreferenceEntries('opencode login')[0]?.pane).toBe('opencode')
     expect(searchPreferenceEntries('cursor model')[0]?.pane).toBe('cursor')
     expect(searchPreferenceEntries('pi model')[0]?.pane).toBe('pi')
+    expect(searchPreferenceEntries('kimi model')[0]?.pane).toBe('kimi')
     expect(searchPreferenceEntries('github login')[0]?.pane).toBe('github')
     expect(searchPreferenceEntries('coderabbit login')[0]?.pane).toBe(
       'coderabbit'

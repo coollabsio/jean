@@ -79,6 +79,12 @@ export interface Project {
   linear_api_key?: string | null
   /** Linear team ID to filter issues (undefined/null = show all teams) */
   linear_team_id?: string | null
+  /** Sentry auth token override for this project */
+  sentry_auth_token?: string | null
+  /** Sentry organization slug */
+  sentry_organization_slug?: string | null
+  /** Sentry project slug */
+  sentry_project_slug?: string | null
   /** IDs of linked projects for cross-project context sharing */
   linked_project_ids?: string[]
   /** Per-project automated issue fixing settings */

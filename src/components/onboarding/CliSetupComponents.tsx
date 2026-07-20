@@ -398,6 +398,7 @@ export interface AuthLoginStateProps {
   terminalId: string
   command: string
   commandArgs?: string[] | null
+  action?: 'login' | 'install'
   onComplete: () => void
   onRetry?: () => void
   onSkip?: () => void
@@ -408,11 +409,17 @@ export function AuthLoginState({
   terminalId,
   command,
   commandArgs,
+  action = 'login',
   onComplete,
   onRetry,
   onSkip,
 }: AuthLoginStateProps) {
+  const actionLabel = action === 'install' ? 'Installation' : 'Login'
   const observerRef = useRef<ResizeObserver | null>(null)
+  const completionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  const completionStartedRef = useRef(false)
   const initialized = useRef(false)
   const [exitStatus, setExitStatus] = useState<{
     exitCode: number | null
@@ -426,6 +433,16 @@ export function AuthLoginState({
     command,
     commandArgs,
   })
+
+  const handleCompleteOnce = useCallback(() => {
+    if (completionStartedRef.current) return
+    completionStartedRef.current = true
+    if (completionTimeoutRef.current) {
+      clearTimeout(completionTimeoutRef.current)
+      completionTimeoutRef.current = null
+    }
+    onComplete()
+  }, [onComplete])
 
   const containerCallbackRef = useCallback(
     (container: HTMLDivElement | null) => {
@@ -489,7 +506,9 @@ export function AuthLoginState({
       if (exitCode === 0) {
         dbg('AuthLoginState: exit 0, calling onComplete in 1.5s')
         // Brief delay so user can see the success output
-        setTimeout(() => onComplete(), 1500)
+        if (!completionStartedRef.current) {
+          completionTimeoutRef.current = setTimeout(handleCompleteOnce, 1500)
+        }
         return
       }
 
@@ -497,7 +516,7 @@ export function AuthLoginState({
       setExitStatus({ exitCode, signal })
     })
     return () => setOnStopped(terminalId, undefined)
-  }, [terminalId, onComplete, cliName])
+  }, [terminalId, handleCompleteOnce, cliName])
 
   useEffect(() => {
     setExitStatus(null)
@@ -509,6 +528,9 @@ export function AuthLoginState({
       if (observerRef.current) {
         observerRef.current.disconnect()
       }
+      if (completionTimeoutRef.current) {
+        clearTimeout(completionTimeoutRef.current)
+      }
       invoke('stop_terminal', { terminalId }).catch(() => {
         /* noop */
       })
@@ -519,9 +541,13 @@ export function AuthLoginState({
   return (
     <div className="space-y-4">
       <div className="text-center">
-        <p className="font-medium">{cliName} Login Required</p>
+        <p className="font-medium">
+          {cliName} {action === 'install' ? 'Installation' : 'Login'} Required
+        </p>
         <p className="text-sm text-muted-foreground mt-1">
-          Complete the authentication process below.
+          Complete the{' '}
+          {action === 'install' ? 'installation' : 'authentication'}
+          {' process below.'}
         </p>
       </div>
 
@@ -532,7 +558,7 @@ export function AuthLoginState({
       {exitStatus && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
           <p className="text-sm font-medium text-destructive">
-            Login process exited unexpectedly
+            {actionLabel} process exited unexpectedly
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             {exitStatus.signal
@@ -545,8 +571,8 @@ export function AuthLoginState({
       <div className="flex gap-2">
         {exitStatus ? (
           <>
-            <Button onClick={onComplete} className="flex-1" size="lg">
-              Check Login Status
+            <Button onClick={handleCompleteOnce} className="flex-1" size="lg">
+              Check {actionLabel} Status
             </Button>
             {onRetry && (
               <Button
@@ -555,13 +581,13 @@ export function AuthLoginState({
                 className="flex-1"
                 size="lg"
               >
-                Retry Login
+                Retry {actionLabel}
               </Button>
             )}
           </>
         ) : (
-          <Button onClick={onComplete} className="flex-1" size="lg">
-            I&apos;ve Completed Login
+          <Button onClick={handleCompleteOnce} className="flex-1" size="lg">
+            I&apos;ve Completed {actionLabel}
           </Button>
         )}
         {onSkip && (

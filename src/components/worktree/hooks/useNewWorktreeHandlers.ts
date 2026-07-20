@@ -17,6 +17,7 @@ import type {
   AdvisoryContext,
 } from '@/types/github'
 import type { LinearIssue, LinearIssueDetail } from '@/types/linear'
+import type { SentryIssue, SentryIssueContext } from '@/types/sentry'
 import type { useNewWorktreeData } from './useNewWorktreeData'
 import type { TabId } from '../NewWorktreeModal'
 
@@ -55,6 +56,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
   const [creatingFromLinearId, setCreatingFromLinearId] = useState<
     string | null
   >(null)
+  const [creatingFromSentryId, setCreatingFromSentryId] = useState<
+    string | null
+  >(null)
   const [creatingFromBranch, setCreatingFromBranch] = useState<string | null>(
     null
   )
@@ -62,18 +66,15 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     null
   )
   const [stackingFromPR, setStackingFromPR] = useState<number | null>(null)
-  const [stackingFromBranch, setStackingFromBranch] = useState<string | null>(
-    null
-  )
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
       setCreatingFromNumber(null)
       setCreatingFromLinearId(null)
+      setCreatingFromSentryId(null)
       setCreatingFromBranch(null)
       setCreatingFromGhsaId(null)
       setStackingFromPR(null)
-      setStackingFromBranch(null)
       setSearchQuery('')
       setSelectedItemIndex(0)
 
@@ -124,6 +125,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           // Invalidate Linear issues cache
           queryClient.invalidateQueries({
             queryKey: ['linear', 'issues', selectedProjectId],
+          })
+          queryClient.invalidateQueries({
+            queryKey: ['sentry', 'issues', selectedProjectId],
           })
         }
       }
@@ -805,7 +809,58 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
   )
 
   // =========================================================================
-  // Stack handlers: create new worktree branched off a PR head or a branch
+  // Sentry issue handlers
+  // =========================================================================
+
+  const createFromSentryIssue = useCallback(
+    async (issue: SentryIssue, investigate: boolean, background = false) => {
+      if (!selectedProjectId) {
+        toast.error('No project selected')
+        return
+      }
+
+      setCreatingFromSentryId(issue.id)
+      try {
+        const sentryContext = await invoke<SentryIssueContext>(
+          'get_sentry_issue',
+          { projectId: selectedProjectId, issueId: issue.id }
+        )
+        if (background)
+          useUIStore.getState().incrementPendingBackgroundCreations()
+        const worktree = await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          sentryContext,
+          background,
+        })
+        if (investigate) {
+          useUIStore
+            .getState()
+            .markWorktreeForAutoInvestigateSentryIssue(worktree.id)
+        }
+        if (background) setCreatingFromSentryId(null)
+        else handleOpenChange(false)
+      } catch (error) {
+        toast.error(`Failed to create worktree from Sentry issue: ${error}`)
+        setCreatingFromSentryId(null)
+      }
+    },
+    [selectedProjectId, createWorktree, handleOpenChange]
+  )
+
+  const handleSelectSentryIssue = useCallback(
+    (issue: SentryIssue, background = false) =>
+      createFromSentryIssue(issue, false, background),
+    [createFromSentryIssue]
+  )
+
+  const handleSelectSentryIssueAndInvestigate = useCallback(
+    (issue: SentryIssue, background = false) =>
+      createFromSentryIssue(issue, true, background),
+    [createFromSentryIssue]
+  )
+
+  // =========================================================================
+  // Stack handler: create a new worktree branched off a PR head
   // =========================================================================
 
   const handleStackOnPR = useCallback(
@@ -835,40 +890,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     [selectedProjectId, createWorktree, handleOpenChange]
   )
 
-  const handleStackOnBranch = useCallback(
-    (branchName: string, background = false) => {
-      if (!selectedProjectId) {
-        toast.error('No project selected')
-        return
-      }
-      setStackingFromBranch(branchName)
-      if (background)
-        useUIStore.getState().incrementPendingBackgroundCreations()
-      createWorktree.mutate(
-        {
-          projectId: selectedProjectId,
-          baseBranch: branchName,
-          background,
-        },
-        {
-          onError: () => setStackingFromBranch(null),
-          onSuccess: () => {
-            if (background) setStackingFromBranch(null)
-          },
-        }
-      )
-      if (!background) handleOpenChange(false)
-    },
-    [selectedProjectId, createWorktree, handleOpenChange]
-  )
-
   return {
     creatingFromNumber,
     creatingFromLinearId,
+    creatingFromSentryId,
     creatingFromBranch,
     creatingFromGhsaId,
     stackingFromPR,
-    stackingFromBranch,
     handleOpenChange,
     handleCreateWorktree,
     handleBaseSession,
@@ -878,12 +906,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     handleSelectPR,
     handleSelectPRAndInvestigate,
     handleStackOnPR,
-    handleStackOnBranch,
     handleSelectSecurityAlert,
     handleSelectSecurityAlertAndInvestigate,
     handleSelectAdvisory,
     handleSelectAdvisoryAndInvestigate,
     handleSelectLinearIssue,
     handleSelectLinearIssueAndInvestigate,
+    handleSelectSentryIssue,
+    handleSelectSentryIssueAndInvestigate,
   }
 }

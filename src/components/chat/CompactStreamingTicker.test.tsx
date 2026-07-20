@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import { CompactStreamingTicker } from './CompactStreamingTicker'
 import type { Question, QuestionAnswer } from '@/types/chat'
 
@@ -110,6 +110,45 @@ describe('CompactStreamingTicker', () => {
       steeredPrompt.compareDocumentPosition(afterSteer) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+
+    expect(beforeSteer.querySelector('.animate-spin')).not.toBeInTheDocument()
+    expect(afterSteer.querySelector('.animate-spin')).toBeInTheDocument()
+  })
+
+  it('does not repeat fallback text inside activity after a steered prompt', () => {
+    render(
+      <CompactStreamingTicker
+        {...baseProps}
+        streamingContent="also after reloading it is good"
+        contentBlocks={[
+          { type: 'tool_use', tool_call_id: 'grep-1' },
+          {
+            type: 'user_input',
+            text: 'also after reloading it is good',
+          },
+          { type: 'tool_use', tool_call_id: 'bash-1' },
+        ]}
+        toolCalls={[
+          {
+            id: 'grep-1',
+            name: 'Grep',
+            input: { pattern: 'streamingContent' },
+            output: 'match',
+          },
+          {
+            id: 'bash-1',
+            name: 'Bash',
+            input: { command: 'bun run test' },
+          },
+        ]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Bash/ }))
+
+    expect(screen.getAllByText('also after reloading it is good')).toHaveLength(
+      1
+    )
   })
 
   it('summarizes fragmented PI text deltas as one meaningful line while streaming', () => {
@@ -174,5 +213,35 @@ describe('CompactStreamingTicker', () => {
         name: /View changes to CompactStreamingTicker\.tsx/,
       })
     ).toBeVisible()
+  })
+
+  it('renders a blocking user-input question without requiring ticker expansion', () => {
+    const { rerender } = render(<CompactStreamingTicker {...baseProps} />)
+
+    rerender(
+      <CompactStreamingTicker
+        {...baseProps}
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'codex-question-1' }]}
+        toolCalls={[
+          {
+            id: 'codex-question-1',
+            name: 'AskUserQuestion',
+            input: {
+              questions: [
+                {
+                  header: 'Agent model',
+                  question: 'How should I continue?',
+                  multiSelect: false,
+                  options: [{ label: 'Wait' }, { label: 'Use Codex' }],
+                },
+              ],
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('How should I continue?')).toBeVisible()
+    expect(screen.getAllByRole('button', { name: /Answer/ })).toHaveLength(1)
   })
 })

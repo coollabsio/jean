@@ -55,6 +55,7 @@ import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
+  KIMI_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -92,7 +93,6 @@ interface DesktopToolbarControlsProps {
 
   availableMcpServers: McpServerInfo[]
   enabledMcpServers: string[]
-  activeMcpCount: number
   isHealthChecking: boolean
   mcpStatuses: Record<string, McpHealthStatus> | undefined
 
@@ -156,7 +156,6 @@ export function DesktopToolbarControls({
   activeWorktreePath: _activeWorktreePath,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
-  activeMcpCount,
   isHealthChecking: _isHealthChecking,
   mcpStatuses: _mcpStatuses,
   loadedIssueContexts,
@@ -194,10 +193,11 @@ export function DesktopToolbarControls({
 }: DesktopToolbarControlsProps) {
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
+  const isKimi = selectedBackend === 'kimi'
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
-      (useAdaptiveThinking || isCodex || isPi || isGrok))
+      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? modelReasoning.levels
@@ -205,9 +205,11 @@ export function DesktopToolbarControls({
         ? PI_EFFORT_LEVEL_OPTIONS
         : isCodex
           ? CODEX_EFFORT_LEVEL_OPTIONS
-          : isGrok
-            ? GROK_EFFORT_LEVEL_OPTIONS
-            : EFFORT_LEVEL_OPTIONS
+          : isKimi
+            ? KIMI_EFFORT_LEVEL_OPTIONS
+            : isGrok
+              ? GROK_EFFORT_LEVEL_OPTIONS
+              : EFFORT_LEVEL_OPTIONS
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
       ? modelReasoning.levels
@@ -259,10 +261,7 @@ export function DesktopToolbarControls({
 
   return (
     <>
-      <DockBurgerButton
-        activeMcpCount={activeMcpCount}
-        className="hidden @xl:flex"
-      />
+      <DockBurgerButton className="hidden @xl:flex" />
 
       <Tooltip>
         <TooltipTrigger asChild>

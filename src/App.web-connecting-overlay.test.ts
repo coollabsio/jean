@@ -5,7 +5,7 @@ describe('web connecting overlay', () => {
   const source = readFileSync(`${process.cwd()}/src/App.tsx`, 'utf8')
 
   it('uses the same opaque theme background as initial loading', () => {
-    expect(source).toContain('!isNativeApp() && !wsConnected')
+    expect(source).toContain('webBackend && !wsConnected && !wsAuthError')
     expect(source).toContain(
       'fixed inset-0 z-[70] flex items-center justify-center bg-background'
     )
@@ -32,6 +32,12 @@ describe('web connecting overlay', () => {
   it('uses a stable system font while preferences load', () => {
     expect(source).toContain(
       'fontFamily: \'system-ui, -apple-system, "Segoe UI", sans-serif\''
+    )
+  })
+
+  it('loads the server platform for both local and remote backends', () => {
+    expect(source).toMatch(
+      /useEffect\(\(\) => \{\s*invoke<'mac' \| 'windows' \| 'linux'>\('get_server_platform'\)/
     )
   })
 })

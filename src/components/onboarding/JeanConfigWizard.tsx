@@ -104,8 +104,8 @@ function JeanConfigWizardContent() {
         if (!open) handleSkip()
       }}
     >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="!fixed !inset-0 !h-dvh !w-screen !max-w-none !max-h-none !translate-x-0 !translate-y-0 flex flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!h-auto sm:!max-h-[90dvh] sm:!w-full sm:!max-w-md sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:rounded-lg sm:border sm:shadow-lg [&>[data-slot=dialog-close]]:top-[calc(env(safe-area-inset-top)+1rem)] sm:[&>[data-slot=dialog-close]]:top-4">
+        <DialogHeader className="shrink-0 border-b px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pr-14 pb-4 text-left sm:border-b-0 sm:px-6 sm:pt-6 sm:pb-0">
           <DialogTitle>Configure Automation</DialogTitle>
           <DialogDescription>
             {project?.name
@@ -114,7 +114,10 @@ function JeanConfigWizardContent() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div
+          data-testid="jean-config-wizard-scroll"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6"
+        >
           {/* Education callout */}
           <div className="flex gap-3 rounded-lg border border-border/50 bg-muted/30 p-3">
             <FileCode2 className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
@@ -224,7 +227,7 @@ function JeanConfigWizardContent() {
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs"
+              className="h-11 text-xs sm:h-7"
               onClick={() => setRunScripts([...runScripts, ''])}
             >
               <Plus className="mr-1 h-3 w-3" />
@@ -239,42 +242,47 @@ function JeanConfigWizardContent() {
           <div className="space-y-1.5">
             <Label className="text-sm">Ports</Label>
             {ports.map((entry, i) => (
-              <div key={i} className="flex items-center gap-1">
-                <Input
-                  placeholder="Port"
-                  type="number"
-                  value={entry.port}
-                  onChange={e => {
-                    const next = [...ports]
-                    next[i] = { ...entry, port: e.target.value }
-                    setPorts(next)
-                  }}
-                  className="font-mono text-base md:text-sm w-24"
-                />
-                <Input
-                  placeholder="Host (optional)"
-                  value={entry.host}
-                  onChange={e => {
-                    const next = [...ports]
-                    next[i] = { ...entry, host: e.target.value }
-                    setPorts(next)
-                  }}
-                  className="font-mono text-base md:text-sm w-40"
-                />
-                <Input
-                  placeholder="Label"
-                  value={entry.label}
-                  onChange={e => {
-                    const next = [...ports]
-                    next[i] = { ...entry, label: e.target.value }
-                    setPorts(next)
-                  }}
-                  className="text-base md:text-sm"
-                />
+              <div key={i} className="flex items-start gap-1">
+                <div
+                  data-testid="jean-config-wizard-port-fields"
+                  className="grid min-w-0 flex-1 grid-cols-2 gap-2 sm:flex sm:gap-1"
+                >
+                  <Input
+                    placeholder="Port"
+                    type="number"
+                    value={entry.port}
+                    onChange={e => {
+                      const next = [...ports]
+                      next[i] = { ...entry, port: e.target.value }
+                      setPorts(next)
+                    }}
+                    className="w-full font-mono text-base sm:w-24 md:text-sm"
+                  />
+                  <Input
+                    placeholder="Host (optional)"
+                    value={entry.host}
+                    onChange={e => {
+                      const next = [...ports]
+                      next[i] = { ...entry, host: e.target.value }
+                      setPorts(next)
+                    }}
+                    className="w-full font-mono text-base sm:w-40 md:text-sm"
+                  />
+                  <Input
+                    placeholder="Label"
+                    value={entry.label}
+                    onChange={e => {
+                      const next = [...ports]
+                      next[i] = { ...entry, label: e.target.value }
+                      setPorts(next)
+                    }}
+                    className="col-span-2 w-full text-base sm:w-auto sm:flex-1 md:text-sm"
+                  />
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="size-11 shrink-0 sm:size-8"
                   onClick={() => setPorts(ports.filter((_, j) => j !== i))}
                 >
                   <X className="h-3.5 w-3.5" />
@@ -284,7 +292,7 @@ function JeanConfigWizardContent() {
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs"
+              className="h-11 text-xs sm:h-7"
               onClick={() =>
                 setPorts([...ports, { port: '', label: '', host: '' }])
               }
@@ -299,11 +307,19 @@ function JeanConfigWizardContent() {
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={handleSkip}>
+        <DialogFooter
+          data-testid="jean-config-wizard-actions"
+          className="shrink-0 flex-row justify-end border-t bg-background px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:px-6 sm:py-4"
+        >
+          <Button
+            variant="ghost"
+            className="h-11 min-w-20 sm:h-9"
+            onClick={handleSkip}
+          >
             Skip
           </Button>
           <Button
+            className="h-11 min-w-20 sm:h-9"
             onClick={handleSave}
             disabled={!hasContent || saveConfig.isPending}
           >

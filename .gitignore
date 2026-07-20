@@ -35,4 +35,5 @@ playwright/.cache
 
 # Rust build artifacts for standalone server wrapper
 src-server/target/
-src-server/Cargo.lock
+jean-core/target/
+jean-core/Cargo.lock

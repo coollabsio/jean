@@ -1,12 +1,114 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildNativeClientSessionInput,
   computeSessionCardData,
   getEffectiveSessionWaiting,
+  getResumeArgs,
   shouldShowCodeReviewLoadingPanel,
   statusConfig,
   type ChatStoreState,
 } from './session-card-utils'
 import type { ContentBlock, Session } from '@/types/chat'
+
+describe('native client resume sessions', () => {
+  const session: Session = {
+    id: 'session-1',
+    name: 'Fix dashboard bug',
+    order: 0,
+    created_at: 1,
+    updated_at: 1,
+    messages: [],
+    backend: 'codex',
+    codex_thread_id: 'thread-123',
+  }
+
+  it('builds a Codex resume launch without requiring a prior terminal command', () => {
+    expect(getResumeArgs(session)).toEqual({
+      command: 'codex',
+      args: ['resume', 'thread-123'],
+    })
+  })
+
+  it('builds a separate Jean terminal session for the native client', () => {
+    expect(
+      buildNativeClientSessionInput(session, 'worktree-1', '/tmp/worktree-1')
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Fix dashboard bug (Native)',
+      backend: 'codex',
+      primarySurface: 'terminal',
+      terminalCommand: 'codex',
+      terminalCommandArgs: ['resume', 'thread-123'],
+      terminalLabel: 'Fix dashboard bug (Native)',
+      nativeSessionId: 'thread-123',
+    })
+  })
+
+  it('builds a Grok resume launch with --resume (not --session-id)', () => {
+    const grokSession: Session = {
+      ...session,
+      name: 'Grok tool call support',
+      backend: 'grok',
+      codex_thread_id: undefined,
+      grok_session_id: 'grok-acp-1',
+    }
+
+    expect(getResumeArgs(grokSession)).toEqual({
+      command: 'grok',
+      args: ['--resume', 'grok-acp-1'],
+    })
+    expect(
+      buildNativeClientSessionInput(
+        grokSession,
+        'worktree-1',
+        '/tmp/worktree-1'
+      )
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Grok tool call support (Native)',
+      backend: 'grok',
+      primarySurface: 'terminal',
+      terminalCommand: 'grok',
+      terminalCommandArgs: ['--resume', 'grok-acp-1'],
+      terminalLabel: 'Grok tool call support (Native)',
+      nativeSessionId: 'grok-acp-1',
+    })
+  })
+
+  it('builds a Kimi Code resume launch with --session', () => {
+    const kimiSession: Session = {
+      ...session,
+      name: 'Kimi ACP support',
+      backend: 'kimi',
+      codex_thread_id: undefined,
+      kimi_session_id: 'kimi-acp-1',
+    }
+
+    expect(getResumeArgs(kimiSession)).toEqual({
+      command: 'kimi',
+      args: ['--session', 'kimi-acp-1'],
+    })
+    expect(
+      buildNativeClientSessionInput(
+        kimiSession,
+        'worktree-1',
+        '/tmp/worktree-1'
+      )
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Kimi ACP support (Native)',
+      backend: 'kimi',
+      primarySurface: 'terminal',
+      terminalCommand: 'kimi',
+      terminalCommandArgs: ['--session', 'kimi-acp-1'],
+      terminalLabel: 'Kimi ACP support (Native)',
+      nativeSessionId: 'kimi-acp-1',
+    })
+  })
+})
 
 describe('computeSessionCardData', () => {
   function createBaseSession(overrides: Partial<Session> = {}): Session {

@@ -39,6 +39,8 @@ export function getSessionProviderDisplayName(
   if (selectedBackend === 'cursor') return 'Cursor'
   if (selectedBackend === 'pi') return 'PI'
   if (selectedBackend === 'commandcode') return 'Command Code'
+  if (selectedBackend === 'grok') return 'xAI'
+  if (selectedBackend === 'kimi') return 'Kimi Code'
   return getProviderDisplayName(selectedProvider ?? null)
 }
 
@@ -251,7 +253,6 @@ export function formatCommandCodeModelLabel(raw: string): string {
 
   return `Command Code · ${formatModelIdTailLabel(value)}`
 }
-
 
 export function formatGrokPromptModelLabel(raw: string): string {
   const value = raw.startsWith('grok/') ? raw.slice('grok/'.length) : raw

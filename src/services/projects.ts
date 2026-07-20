@@ -462,6 +462,7 @@ export function useCreateWorktree() {
       securityContext,
       advisoryContext,
       linearContext,
+      sentryContext,
       customName,
       origin,
       background: _background,
@@ -524,6 +525,14 @@ export function useCreateWorktree() {
           createdAt: string
         }[]
       }
+      /** Sentry issue context to attach to the new worktree */
+      sentryContext?: {
+        id: string
+        shortId: string
+        title: string
+        permalink: string
+        content: string
+      }
       /** Custom worktree name (used when retrying after path conflict) */
       customName?: string
       /** Origin/category for the worktree */
@@ -552,6 +561,7 @@ export function useCreateWorktree() {
         securityContext,
         advisoryContext,
         linearContext,
+        sentryContext,
         customName,
         origin,
       })
@@ -2553,6 +2563,9 @@ export function useUpdateProjectSettings() {
       worktreesDir,
       linearApiKey,
       linearTeamId,
+      sentryAuthToken,
+      sentryOrganizationSlug,
+      sentryProjectSlug,
       autoFixSettings,
     }: {
       projectId: string
@@ -2566,6 +2579,9 @@ export function useUpdateProjectSettings() {
       worktreesDir?: string
       linearApiKey?: string
       linearTeamId?: string
+      sentryAuthToken?: string
+      sentryOrganizationSlug?: string
+      sentryProjectSlug?: string
       autoFixSettings?: Project['auto_fix_settings']
       linkedProjectIds?: string[]
     }): Promise<Project> => {
@@ -2590,6 +2606,9 @@ export function useUpdateProjectSettings() {
         worktreesDir,
         linearApiKey,
         linearTeamId,
+        sentryAuthToken,
+        sentryOrganizationSlug,
+        sentryProjectSlug,
         autoFixSettings,
         linkedProjectIds,
       })

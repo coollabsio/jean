@@ -67,7 +67,7 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo apt-get install -y libssl-dev pkg-config
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -79,7 +79,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: |
-            ./src-tauri -> target
+            ./jean-core -> target
             ./src-server -> target
           shared-key: server-${{ matrix.arch }}
 
@@ -90,7 +90,21 @@ jobs:
         run: bun run build
 
       - name: Build jean-server
-        run: cd src-server && cargo build --release
+        run: cd src-server && cargo build --release --locked
+
+      - name: Verify Tauri-free headless runtime
+        run: |
+          ! cargo tree --manifest-path src-server/Cargo.toml -p jean-server | grep -Ei 'tauri|wry|webkit|gtk'
+          ! ldd src-server/target/release/jean-server | grep -Ei 'webkit|gtk|appindicator'
+          env -u DISPLAY -u WAYLAND_DISPLAY JEAN_DATA_DIR="$RUNNER_TEMP/jean-data" \
+            src-server/target/release/jean-server --host 127.0.0.1 --port 3457 --no-token &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for _ in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:3457/readyz && break
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:3457/readyz
 
       - name: Package binary
         env:
@@ -117,6 +131,65 @@ jobs:
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
         run: |
           gh release upload "$RELEASE_TAG" artifacts/*.tar.gz artifacts/*.sha256 --clobber
+
+  publish-update-manifest:
+    name: Publish server-latest.json
+    needs: [metadata, build-binaries]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jean-server-linux-amd64
+          path: artifacts/amd64
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jean-server-linux-arm64
+          path: artifacts/arm64
+
+      - name: Build and upload server-latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          amd64_sha=$(awk '{print $1}' artifacts/amd64/jean-server-linux-amd64-${VERSION}.tar.gz.sha256)
+          arm64_sha=$(awk '{print $1}' artifacts/arm64/jean-server-linux-arm64-${VERSION}.tar.gz.sha256)
+          pub_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          PUB_DATE="$pub_date" AMD64_SHA="$amd64_sha" ARM64_SHA="$arm64_sha" \
+          VERSION="$VERSION" RELEASE_TAG="$RELEASE_TAG" REPO="$REPO" python3 <<'PY'
+          import json, os
+
+          version = os.environ["VERSION"]
+          tag = os.environ["RELEASE_TAG"]
+          repo = os.environ["REPO"]
+          manifest = {
+              "version": version,
+              "pubDate": os.environ["PUB_DATE"],
+              "platforms": {
+                  "linux-amd64": {
+                      "url": f"https://github.com/{repo}/releases/download/{tag}/jean-server-linux-amd64-{version}.tar.gz",
+                      "sha256": os.environ["AMD64_SHA"],
+                  },
+                  "linux-arm64": {
+                      "url": f"https://github.com/{repo}/releases/download/{tag}/jean-server-linux-arm64-{version}.tar.gz",
+                      "sha256": os.environ["ARM64_SHA"],
+                  },
+              },
+          }
+          with open("server-latest.json", "w", encoding="utf-8") as fh:
+              json.dump(manifest, fh, separators=(",", ":"), sort_keys=True)
+          print(json.dumps(manifest, indent=2))
+          PY
+
+          gh release upload "$RELEASE_TAG" server-latest.json --clobber
 
   docker-image:
     name: Build Docker image (${{ matrix.arch }})

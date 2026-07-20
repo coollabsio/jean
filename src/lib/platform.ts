@@ -5,6 +5,16 @@ export type PlatformName = 'mac' | 'windows' | 'linux'
 
 let serverPlatform: PlatformName = 'linux'
 
+// Window chrome belongs to the local client, even when commands target a
+// remote Jean server running on a different operating system.
+const clientPlatform =
+  typeof navigator === 'undefined'
+    ? ''
+    : (navigator.platform || navigator.userAgent).toLowerCase()
+
+export const isClientMacOS = clientPlatform.includes('mac')
+export const isClientLinux = clientPlatform.includes('linux')
+
 export let isMacOS = false
 export let isWindows = false
 export let isLinux = true
@@ -59,7 +69,7 @@ export async function openExternal(
  * Mac native app uses ⌘, Mac web uses ⌃ (Ctrl works in browser, Cmd is intercepted).
  */
 export const getModifierSymbol = (): string => {
-  if (!isMacOS) return 'Ctrl'
+  if (!isClientMacOS) return 'Ctrl'
   return isNativeApp() ? '⌘' : '⌃'
 }
 

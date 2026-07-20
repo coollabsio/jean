@@ -11,9 +11,9 @@ import type {
   CursorInstallCommand,
   CursorModelInfo,
 } from '@/types/cursor-cli'
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 
 export const cursorCliQueryKeys = {
   all: ['cursor-cli'] as const,

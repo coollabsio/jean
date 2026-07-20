@@ -104,6 +104,30 @@ describe('useToolbarDerivedState', () => {
     ).toEqual(['opus', 'sonnet', 'haiku'])
   })
 
+  it('exposes Kimi Code as an installed backend with its configured default', () => {
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'kimi',
+        selectedProvider: null,
+        selectedModel: 'kimi/default',
+        customCliProfiles: [],
+        installedBackends: ['kimi'],
+        kimiModelOptions: [
+          { value: 'kimi/default', label: 'Configured default' },
+        ],
+      })
+    )
+
+    expect(result.current.backendModelSections).toEqual([
+      {
+        backend: 'kimi',
+        label: 'Kimi Code',
+        options: [{ value: 'kimi/default', label: 'Configured default' }],
+      },
+    ])
+    expect(result.current.selectedModelLabel).toBe('Configured default')
+  })
+
   it('counts enabled MCP servers identified by backend-prefixed keys', () => {
     const { result } = renderHook(() =>
       useToolbarDerivedState({

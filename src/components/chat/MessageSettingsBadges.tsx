@@ -5,7 +5,12 @@ import {
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { getMessagePromptModelLabel } from '@/components/chat/message-settings-labels'
-import { isCodexModel } from '@/types/preferences'
+import {
+  isCodexModel,
+  isGrokModel,
+  isKimiModel,
+  isPiModel,
+} from '@/types/preferences'
 import type { EffortLevel, ExecutionMode, ThinkingLevel } from '@/types/chat'
 
 interface MessageSettingsBadgesProps {
@@ -28,6 +33,14 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
   const modelLabel = getMessagePromptModelLabel(model)
   const isCodex =
     !model.startsWith('pi/') && (isCodexModel(model) || model.includes('codex'))
+  // Effort-based backends should never fall back to Claude thinking labels
+  // (e.g. "Think") when effort is missing from a message/run.
+  const usesEffortOnly =
+    isCodex ||
+    isGrokModel(model) ||
+    isKimiModel(model) ||
+    isPiModel(model) ||
+    model.startsWith('pi/')
   const executionModeLabel = executionMode
     ? executionMode.charAt(0).toUpperCase() + executionMode.slice(1)
     : null
@@ -41,7 +54,7 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
     : null
 
   const thinkingLabel =
-    !isCodex && thinkingLevel && thinkingLevel !== 'off'
+    !usesEffortOnly && thinkingLevel && thinkingLevel !== 'off'
       ? (THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ??
         thinkingLevel)
       : null

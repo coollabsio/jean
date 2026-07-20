@@ -50,3 +50,23 @@ export function buildReorderedSessionIdsWithinStatus(
   ids.splice(toIndex, 0, draggedSessionId)
   return ids
 }
+
+/**
+ * Resolve which session ChatWindow should mount in SessionChatModal.
+ *
+ * When the sessions query is transiently empty (invalidate after send, web
+ * reconnect), keep the store's active session so ChatWindow is not unmounted —
+ * unmounting blanks the modal and shows FloatingDock instead of chat input.
+ */
+export function resolveModalSessionId(
+  activeSessionId: string | undefined,
+  sessionIds: readonly string[]
+): string | null {
+  if (
+    activeSessionId &&
+    (sessionIds.length === 0 || sessionIds.includes(activeSessionId))
+  ) {
+    return activeSessionId
+  }
+  return sessionIds[0] ?? null
+}

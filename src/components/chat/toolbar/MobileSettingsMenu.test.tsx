@@ -109,7 +109,9 @@ describe('MobileSettingsMenu', () => {
     await user.click(screen.getByRole('button', { name: /settings/i }))
 
     const mcpItem = screen.getByText('MCP').closest('[role="menuitem"]')
+    const mcpIcon = mcpItem?.querySelector('svg.lucide-plug')
     expect(mcpItem).toHaveAttribute('aria-disabled', 'true')
+    expect(mcpIcon).not.toHaveClass('mr-2')
     expect(mcpItem?.querySelector('svg.lucide-chevron-right')).toBeNull()
     expect(screen.getByText('None')).toBeInTheDocument()
   })

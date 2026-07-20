@@ -46,13 +46,12 @@ export function useArchiveCleanup() {
 
         const deletedContexts = result.deleted_contexts ?? 0
         const deletedOrphanIndexes = result.deleted_orphan_indexes ?? 0
-
-        if (
+        const deletedArchiveItems =
           result.deleted_worktrees > 0 ||
           result.deleted_sessions > 0 ||
-          deletedContexts > 0 ||
-          deletedOrphanIndexes > 0
-        ) {
+          deletedContexts > 0
+
+        if (deletedArchiveItems) {
           // Invalidate archive queries to refresh UI
           queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
           queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
@@ -74,19 +73,15 @@ export function useArchiveCleanup() {
               `${deletedContexts} context${deletedContexts === 1 ? '' : 's'}`
             )
           }
-          if (deletedOrphanIndexes > 0) {
-            parts.push(
-              `${deletedOrphanIndexes} orphaned session index file${deletedOrphanIndexes === 1 ? '' : 's'}`
-            )
-          }
-
           toast.info(`Cleaned up ${parts.join(' and ')} from archive`, {
             description:
               preferences.archive_retention_days === 0
                 ? 'Archive retention disabled; removed stale metadata only'
                 : `Archives older than ${preferences.archive_retention_days} days`,
           })
+        }
 
+        if (deletedArchiveItems || deletedOrphanIndexes > 0) {
           logger.info('Archive cleanup complete', {
             deleted_worktrees: result.deleted_worktrees,
             deleted_sessions: result.deleted_sessions,

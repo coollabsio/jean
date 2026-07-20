@@ -7,6 +7,9 @@ import { MagicPromptsPane } from './MagicPromptsPane'
 const mutateMock = vi.fn()
 let installedBackendsMock = ['claude', 'codex']
 let preferencesMock = { ...defaultPreferences }
+let availableGrokModelsMock:
+  | { id: string; label: string; isDefault: boolean }[]
+  | undefined
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
@@ -19,7 +22,9 @@ vi.mock('@/services/preferences', () => ({
         investigate_security_alert_mode: 'plan',
         investigate_advisory_mode: 'plan',
         investigate_linear_issue_mode: 'plan',
+        investigate_sentry_issue_mode: 'plan',
         review_comments_mode: 'plan',
+        final_review_mode: 'yolo',
         resolve_conflicts_mode: 'yolo',
       },
     },
@@ -48,7 +53,7 @@ vi.mock('@/services/pi-cli', () => ({
 }))
 
 vi.mock('@/services/grok-cli', () => ({
-  useAvailableGrokModels: () => ({ data: undefined }),
+  useAvailableGrokModels: () => ({ data: availableGrokModelsMock }),
 }))
 
 vi.mock('@/services/model-catalog', () => ({
@@ -93,6 +98,7 @@ beforeEach(() => {
   mutateMock.mockReset()
   installedBackendsMock = ['claude', 'codex']
   preferencesMock = { ...defaultPreferences }
+  availableGrokModelsMock = undefined
   globalThis.ResizeObserver = ResizeObserverMock as never
   HTMLElement.prototype.scrollIntoView = vi.fn()
   HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -132,6 +138,36 @@ describe('MagicPromptsPane', () => {
     expect(screen.queryByText('Release Post')).toBeNull()
   })
 
+  it('provides a dedicated Sentry investigation prompt', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Investigate Sentry Issue' })
+    )
+
+    expect(screen.getByText('{sentryRefs}')).toBeInTheDocument()
+    expect(screen.getByText('{sentryContext}')).toBeInTheDocument()
+  })
+
+  it('provides dedicated Final Review settings', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Final Review' }))
+
+    expect(
+      screen.getByRole('combobox', { name: 'Backend' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('combobox', { name: 'Default mode' })
+    ).toHaveTextContent('Yolo')
+    expect(
+      screen.getByDisplayValue(/final pre-merge audit/i)
+    ).toBeInTheDocument()
+  })
+
   it('uses the catalog Claude models for magic prompt model choices', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
@@ -153,6 +189,54 @@ describe('MagicPromptsPane', () => {
       screen.getByRole('option', { name: 'Command Code' })
     ).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Grok' })).toBeInTheDocument()
+  })
+
+  it('lists Codex second in the magic prompt backend menu', async () => {
+    installedBackendsMock = [
+      'claude',
+      'codex',
+      'opencode',
+      'cursor',
+      'pi',
+      'commandcode',
+      'grok',
+      'kimi',
+    ]
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Backend' }))
+
+    const options = screen.getAllByRole('option')
+    expect(options[0]).toHaveTextContent('Claude')
+    expect(options[1]).toHaveTextContent('Codex')
+  })
+
+  it('shows the available Grok models when Grok is selected', async () => {
+    installedBackendsMock = ['claude', 'grok']
+    availableGrokModelsMock = [
+      { id: 'grok-4.5', label: 'Grok 4.5', isDefault: true },
+    ]
+    preferencesMock = {
+      ...defaultPreferences,
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_issue_backend: 'grok',
+      },
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_issue_model: 'grok/grok-4.5',
+      },
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Model' }))
+
+    expect(
+      screen.getByRole('option', { name: /Grok 4\.5/ })
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No models found.')).toBeNull()
   })
 
   it('keeps magic prompt control labels paired with dropdowns on mobile', () => {

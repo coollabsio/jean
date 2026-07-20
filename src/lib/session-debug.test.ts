@@ -118,6 +118,27 @@ describe('resolveSessionDebugDetails', () => {
 
     expect(result.selectedBackend).toBe('pi')
   })
+
+  it('reports xAI as the provider for Grok sessions', () => {
+    const session = {
+      id: 'session-grok',
+      name: 'Grok session',
+      order: 0,
+      created_at: 0,
+      updated_at: 0,
+      messages: [],
+      backend: 'grok',
+      selected_model: 'grok/grok-4.5',
+    } as Session
+
+    expect(
+      resolveSessionDebugDetails({
+        session,
+        preferences,
+        installedBackends: ['claude', 'grok'],
+      }).providerDisplay
+    ).toBe('xAI')
+  })
 })
 
 describe('formatSessionDebugDetails', () => {

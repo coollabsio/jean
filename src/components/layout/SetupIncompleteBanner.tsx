@@ -4,7 +4,9 @@ import {
   useOpencodeCliStatus,
   useOpencodeCliAuth,
 } from '@/services/opencode-cli'
+import { useCursorCliAuth, useCursorCliStatus } from '@/services/cursor-cli'
 import { useGrokCliStatus, useGrokCliAuth } from '@/services/grok-cli'
+import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
 import { useGhCliStatus, useGhCliAuth } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNativeApp } from '@/lib/environment'
@@ -17,7 +19,9 @@ export function SetupIncompleteBanner() {
   const claudeStatus = useClaudeCliStatus()
   const codexStatus = useCodexCliStatus()
   const opencodeStatus = useOpencodeCliStatus()
+  const cursorStatus = useCursorCliStatus()
   const grokStatus = useGrokCliStatus()
+  const kimiStatus = useKimiCliStatus()
   const ghStatus = useGhCliStatus()
 
   const claudeAuth = useClaudeCliAuth({
@@ -27,9 +31,13 @@ export function SetupIncompleteBanner() {
   const opencodeAuth = useOpencodeCliAuth({
     enabled: !!opencodeStatus.data?.installed,
   })
+  const cursorAuth = useCursorCliAuth({
+    enabled: !!cursorStatus.data?.installed,
+  })
   const grokAuth = useGrokCliAuth({
     enabled: !!grokStatus.data?.installed,
   })
+  const kimiAuth = useKimiCliAuth({ enabled: !!kimiStatus.data?.installed })
   const ghAuth = useGhCliAuth({ enabled: !!ghStatus.data?.installed })
 
   if (!isNativeApp()) return null
@@ -40,7 +48,11 @@ export function SetupIncompleteBanner() {
     claudeStatus.isLoading ||
     codexStatus.isLoading ||
     opencodeStatus.isLoading ||
+    cursorStatus.isLoading ||
+    (cursorStatus.data?.installed &&
+      (cursorAuth.isLoading || cursorAuth.isFetching)) ||
     grokStatus.isLoading ||
+    kimiStatus.isLoading ||
     ghStatus.isLoading
 
   if (isLoading) {
@@ -57,7 +69,9 @@ export function SetupIncompleteBanner() {
     (!!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated) ||
     (!!codexStatus.data?.installed && !!codexAuth.data?.authenticated) ||
     (!!opencodeStatus.data?.installed && !!opencodeAuth.data?.authenticated) ||
-    (!!grokStatus.data?.installed && !!grokAuth.data?.authenticated)
+    (!!cursorStatus.data?.installed && !!cursorAuth.data?.authenticated) ||
+    (!!grokStatus.data?.installed && !!grokAuth.data?.authenticated) ||
+    (!!kimiStatus.data?.installed && !!kimiAuth.data?.authenticated)
 
   // Everything is set up — no banner needed
   if (ghReady && hasAiBackendReady) return null

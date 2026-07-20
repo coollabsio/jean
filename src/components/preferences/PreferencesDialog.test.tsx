@@ -150,6 +150,7 @@ describe('PreferencesDialog', () => {
       'PIBeta',
       'Command CodeBeta',
       'GrokBeta',
+      'Kimi CodeBeta',
       'Git Provider',
       'CodeRabbit CLI',
       'Terminal',
@@ -182,8 +183,17 @@ describe('PreferencesDialog', () => {
       throw new Error('Expected Grok navigation button to be rendered')
     }
 
-    expect(within(grokButton).getByText('Beta')).toHaveClass(
-      'bg-yellow-500/10'
+    expect(within(grokButton).getByText('Beta')).toHaveClass('bg-yellow-500/10')
+
+    const kimiButton = within(navigationMenu)
+      .getByText('Kimi Code')
+      .closest('button')
+    if (!kimiButton) {
+      throw new Error('Expected Kimi Code navigation button to be rendered')
+    }
+
+    expect(within(kimiButton).getByLabelText('Kimi Code')).toHaveClass(
+      'translate-x-0.5'
     )
   })
 

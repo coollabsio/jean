@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react'
-import { Bot, Loader2, Rabbit } from 'lucide-react'
+import { Bot, Loader2, Rabbit, ShieldCheck } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -10,11 +10,14 @@ import {
 import { Kbd } from '@/components/ui/kbd'
 import { useCodeRabbitCliStatus } from '@/services/coderabbit-cli'
 import { cn } from '@/lib/utils'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { isNativeApp } from '@/lib/environment'
 
 interface ReviewMethodModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAiReview: () => void
+  onFinalReview: () => void
   onCodeRabbitCliReview: () => void
   onCodeRabbitPrReview: () => void
   codeRabbitPrAvailable: boolean
@@ -24,10 +27,13 @@ export function ReviewMethodModal({
   open,
   onOpenChange,
   onAiReview,
+  onFinalReview,
   onCodeRabbitCliReview,
   onCodeRabbitPrReview,
   codeRabbitPrAvailable,
 }: ReviewMethodModalProps) {
+  const isMobile = useIsMobile()
+  const keyboardShortcutsEnabled = isNativeApp() && !isMobile
   const { data: coderabbitStatus, isLoading } = useCodeRabbitCliStatus({
     enabled: open,
   })
@@ -42,7 +48,7 @@ export function ReviewMethodModal({
   )
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !keyboardShortcutsEnabled) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
@@ -56,14 +62,21 @@ export function ReviewMethodModal({
         return
       }
 
-      if (event.key === '2' && codeRabbitReady && !isLoading) {
+      if (event.key === '2') {
+        event.preventDefault()
+        event.stopPropagation()
+        choose(onFinalReview)
+        return
+      }
+
+      if (event.key === '3' && codeRabbitReady && !isLoading) {
         event.preventDefault()
         event.stopPropagation()
         choose(onCodeRabbitCliReview)
         return
       }
 
-      if (event.key === '3' && codeRabbitPrAvailable) {
+      if (event.key === '4' && codeRabbitPrAvailable) {
         event.preventDefault()
         event.stopPropagation()
         choose(onCodeRabbitPrReview)
@@ -76,10 +89,12 @@ export function ReviewMethodModal({
     codeRabbitReady,
     isLoading,
     onAiReview,
+    onFinalReview,
     onCodeRabbitCliReview,
     onCodeRabbitPrReview,
     codeRabbitPrAvailable,
     choose,
+    keyboardShortcutsEnabled,
     open,
   ])
 
@@ -98,11 +113,19 @@ export function ReviewMethodModal({
         <div className="grid min-w-0 gap-2">
           <ReviewChoice
             icon={<Bot className="size-4" />}
-            title="Jean"
-            subtitle="Uses your configured review backend"
+            title="Jean review"
+            subtitle="Reviews your current branch against its base, including uncommitted changes"
             badge="Default"
-            shortcut="1"
+            shortcut={keyboardShortcutsEnabled ? '1' : undefined}
             onClick={() => choose(onAiReview)}
+          />
+
+          <ReviewChoice
+            icon={<ShieldCheck className="size-4" />}
+            title="Final review"
+            subtitle="Read-only merge-readiness audit in a new session"
+            shortcut={keyboardShortcutsEnabled ? '2' : undefined}
+            onClick={() => choose(onFinalReview)}
           />
 
           <CodeRabbitChoice
@@ -123,6 +146,7 @@ export function ReviewMethodModal({
                 ? 'Add @coderabbitai review comment'
                 : 'Open or link a PR in Jean first'
             }
+            showShortcuts={keyboardShortcutsEnabled}
             onCliReview={() => choose(onCodeRabbitCliReview)}
             onPrReview={() => choose(onCodeRabbitPrReview)}
           />
@@ -138,6 +162,7 @@ function CodeRabbitChoice({
   cliSubtitle,
   prDisabled,
   prSubtitle,
+  showShortcuts,
   onCliReview,
   onPrReview,
 }: {
@@ -146,6 +171,7 @@ function CodeRabbitChoice({
   cliSubtitle: string
   prDisabled?: boolean
   prSubtitle: string
+  showShortcuts: boolean
   onCliReview: () => void
   onPrReview: () => void
 }) {
@@ -179,7 +205,9 @@ function CodeRabbitChoice({
           )}
         >
           CLI
-          <Kbd className="h-4 min-w-4 px-1 text-[10px]">2</Kbd>
+          {showShortcuts && (
+            <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
+          )}
         </button>
         <button
           type="button"
@@ -193,7 +221,9 @@ function CodeRabbitChoice({
           )}
         >
           PR
-          <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
+          {showShortcuts && (
+            <Kbd className="h-4 min-w-4 px-1 text-[10px]">4</Kbd>
+          )}
         </button>
       </span>
     </div>

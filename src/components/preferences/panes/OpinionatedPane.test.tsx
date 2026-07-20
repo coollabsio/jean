@@ -127,4 +127,42 @@ describe('OpinionatedPane', () => {
         .closest('span')
     ).toHaveClass('flex-wrap')
   })
+
+  it('disables unsupported RTK installation and explains why', async () => {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (
+        command === 'check_opinionated_plugin_status' &&
+        (args as { pluginName?: string })?.pluginName === 'rtk'
+      ) {
+        return {
+          installed: false,
+          version: null,
+          install_supported: false,
+          unsupported_reason:
+            "RTK's Linux ARM64 binary requires glibc 2.39 or newer; this system has glibc 2.35",
+        }
+      }
+      if (command === 'check_opinionated_plugin_status') {
+        return { installed: false, version: null, install_supported: true }
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+
+    render(<OpinionatedPane />)
+
+    const rtkLabel = await screen.findByText('RTK')
+    const rtkCard = rtkLabel.closest('.rounded-lg')
+    if (!rtkCard) throw new Error('Expected RTK card')
+
+    expect(
+      within(rtkCard as HTMLElement).getByRole('button', {
+        name: 'Unsupported',
+      })
+    ).toBeDisabled()
+
+    await userEvent.click(rtkLabel)
+    expect(
+      screen.getByText(/requires glibc 2\.39 or newer/)
+    ).toBeInTheDocument()
+  })
 })

@@ -164,7 +164,9 @@ const fallbackModelCatalog: ModelCatalog = {
   updated_at: 'bundled',
   defaults: {
     claude: 'claude-opus-4-8[1m]',
-    codex: 'gpt-5.5',
+    codex: 'gpt-5.6-sol',
+    opencode: 'opencode/gpt-5.6-sol',
+    grok: 'grok/grok-4.5',
   },
   backends: {
     claude: {

@@ -47,6 +47,7 @@ vi.mock('@/lib/transport', () => ({
 }))
 
 vi.mock('@/lib/platform', () => ({
+  isClientMacOS: true,
   isMacOS: true,
   isWindows: false,
   isLinux: false,
@@ -161,13 +162,13 @@ describe('model option helpers', () => {
     expect(normalizeCodexModel('gpt-5.5-fast')).toBe('gpt-5.5-fast')
   })
 
-  it('uses GPT 5.5 for Codex magic presets', () => {
+  it('uses GPT 5.6 Sol for Codex magic presets', () => {
     expect(new Set(Object.values(CODEX_DEFAULT_MAGIC_PROMPT_MODELS))).toEqual(
-      new Set(['gpt-5.5'])
+      new Set(['gpt-5.6-sol'])
     )
     expect(
       new Set(Object.values(CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS))
-    ).toEqual(new Set(['gpt-5.5-fast']))
+    ).toEqual(new Set(['gpt-5.6-sol-fast']))
   })
 
   it('provides standard and fast GPT 5.6 magic presets for every variant', () => {
@@ -216,6 +217,18 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Clickable References')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'include clickable links when available'
+    )
+  })
+
+  it('requires GitHub issue and discussion discovery after changes', () => {
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      'GitHub Issue and Discussion Discovery'
+    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      "search the current repository's existing GitHub issues and discussions"
+    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      'Include the results in both the main response and the `## Recap`'
     )
   })
 })
@@ -324,14 +337,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
@@ -425,8 +440,8 @@ describe('preferences service', () => {
         git_poll_interval: 60,
         remote_poll_interval: 60,
         keybindings: {
-          ...DEFAULT_KEYBINDINGS,
           toggle_left_sidebar: 'mod+1', // Old default
+          restore_last_archived: 'mod+alt+shift+t', // Broken modifier order
         },
         archive_retention_days: 30,
         syntax_theme_dark: 'vitesse-black',
@@ -480,14 +495,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
@@ -531,6 +548,15 @@ describe('preferences service', () => {
       // Should migrate to new default
       expect(result.current.data?.keybindings?.toggle_left_sidebar).toBe(
         'mod+b'
+      )
+      expect(result.current.data?.keybindings?.restore_last_archived).toBe(
+        'mod+shift+alt+t'
+      )
+      expect(result.current.data?.keybindings?.open_quick_menu).toBe(
+        DEFAULT_KEYBINDINGS.open_quick_menu
+      )
+      expect(Object.keys(result.current.data?.keybindings ?? {})).toHaveLength(
+        Object.keys(DEFAULT_KEYBINDINGS).length
       )
     })
 
@@ -607,14 +633,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
@@ -734,14 +762,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
@@ -863,14 +893,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
@@ -1034,14 +1066,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,
@@ -1161,14 +1195,16 @@ describe('preferences service', () => {
         selected_opencode_model: 'opencode/gpt-5.5',
         selected_cursor_model: 'cursor/auto',
         selected_pi_model: 'pi/sonnet',
-        selected_grok_model: 'grok/grok-composer-2.5-fast',
+        selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
         codex_max_agent_threads: 3,
         codex_auto_steer_enabled: true,
         opencode_auto_steer_enabled: true,
         pi_auto_steer_enabled: true,
+        grok_auto_steer_enabled: true,
         restore_last_session: true,
         close_original_on_clear_context: true,
         build_model: null,

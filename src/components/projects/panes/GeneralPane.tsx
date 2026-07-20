@@ -6,11 +6,12 @@ import {
   GitBranch,
   ImageIcon,
   Loader2,
-  RefreshCw,
   RotateCcw,
   X,
 } from 'lucide-react'
+import { isLocalBackend } from '@/lib/environment'
 import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
+import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -39,8 +40,6 @@ import {
   useRemoveProjectAvatar,
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
-import { useLinearTeams, linearQueryKeys } from '@/services/linear'
-import { useQueryClient } from '@tanstack/react-query'
 import {
   Select,
   SelectContent,
@@ -108,27 +107,7 @@ export function GeneralPane({
   const [localWorktreesDir, setLocalWorktreesDir] = useState<string | null>(
     null
   )
-  const [localLinearApiKey, setLocalLinearApiKey] = useState<string | null>(
-    null
-  )
-  const [showLinearApiKey, setShowLinearApiKey] = useState(false)
-
-  // Linear has access if either project key or global key is set
-  const hasLinearAccess =
-    !!project?.linear_api_key || !!preferences?.linear_api_key
-
-  const queryClient = useQueryClient()
-  const { data: linearTeams = [], isLoading: teamsLoading } = useLinearTeams(
-    projectId,
-    { enabled: hasLinearAccess }
-  )
-
-  const handleRefreshTeams = useCallback(() => {
-    queryClient.invalidateQueries({
-      queryKey: linearQueryKeys.teams(projectId),
-    })
-  }, [projectId, queryClient])
-
+  const [worktreesBrowserOpen, setWorktreesBrowserOpen] = useState(false)
   // Track image load errors
   const avatarKey = project?.avatar_path ?? project?.default_avatar_path ?? null
   const [imgErrorKey, setImgErrorKey] = useState<string | null>(null)
@@ -221,48 +200,14 @@ export function GeneralPane({
     )
   }, [projectId, updateSettings])
 
-  const displayedLinearApiKey =
-    localLinearApiKey ?? project?.linear_api_key ?? ''
-
-  const linearApiKeyChanged =
-    localLinearApiKey !== null &&
-    localLinearApiKey !== (project?.linear_api_key ?? '')
-
-  const handleSaveLinearApiKey = useCallback(() => {
-    if (localLinearApiKey === null) return
-    updateSettings.mutate(
-      { projectId, linearApiKey: localLinearApiKey.trim() },
-      { onSuccess: () => setLocalLinearApiKey(null) }
-    )
-  }, [localLinearApiKey, projectId, updateSettings])
-
-  const handleClearLinearApiKey = useCallback(() => {
-    updateSettings.mutate(
-      { projectId, linearApiKey: '' },
-      { onSuccess: () => setLocalLinearApiKey(null) }
-    )
-  }, [projectId, updateSettings])
-
-  const handleTeamChange = useCallback(
-    (value: string) => {
-      updateSettings.mutate(
-        { projectId, linearTeamId: value === 'all' ? '' : value },
-        {
-          onSuccess: () => {
-            queryClient.invalidateQueries({
-              queryKey: linearQueryKeys.issues(projectId),
-            })
-            queryClient.invalidateQueries({
-              queryKey: ['linear', 'issue-search', projectId],
-            })
-          },
-        }
-      )
-    },
-    [projectId, updateSettings, queryClient]
-  )
-
   const handleBrowseWorktreesDir = useCallback(async () => {
+    // Remote backends must browse the server filesystem — the native OS
+    // picker only sees the local machine.
+    if (!isLocalBackend()) {
+      setWorktreesBrowserOpen(true)
+      return
+    }
+
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({
       directory: true,
@@ -275,170 +220,197 @@ export function GeneralPane({
   }, [])
 
   return (
-    <div className="space-y-6">
-      <SettingsSection title="Project Name">
-        <InlineField
-          label="Display Name"
-          description="Rename the project without changing the underlying folder"
-        >
-          <div className="flex items-center gap-2">
-            <Input
-              value={displayedName}
-              onChange={e => setLocalName(e.target.value)}
-              className="flex-1 text-base md:text-sm"
-            />
-            <Button
-              size="sm"
-              onClick={handleSaveName}
-              disabled={!nameChanged || updateSettings.isPending}
-            >
-              {updateSettings.isPending && (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              )}
-              Save
-            </Button>
-          </div>
-        </InlineField>
-      </SettingsSection>
-
-      <SettingsSection title="Avatar">
-        <InlineField
-          label="Project Avatar"
-          description="Custom image displayed in the sidebar"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted-foreground/20 overflow-hidden">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={project?.name ?? 'Project avatar'}
-                  className="size-full object-cover"
-                  onError={() => setImgErrorKey(avatarKey)}
-                />
-              ) : (
-                <span className="text-lg font-medium uppercase text-muted-foreground">
-                  {project?.name?.[0] ?? '?'}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
+    <>
+      <div className="space-y-6">
+        <SettingsSection title="Project Name">
+          <InlineField
+            label="Display Name"
+            description="Rename the project without changing the underlying folder"
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                value={displayedName}
+                onChange={e => setLocalName(e.target.value)}
+                className="flex-1 text-base md:text-sm"
+              />
               <Button
-                variant="outline"
                 size="sm"
-                onClick={() => setProjectAvatar.mutate(projectId)}
-                disabled={setProjectAvatar.isPending}
+                onClick={handleSaveName}
+                disabled={!nameChanged || updateSettings.isPending}
               >
-                {setProjectAvatar.isPending ? (
+                {updateSettings.isPending && (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ImageIcon className="h-4 w-4" />
                 )}
-                {project?.avatar_path || project?.default_avatar_path
-                  ? 'Change'
-                  : 'Add Image'}
+                Save
               </Button>
-              {project?.avatar_path && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeProjectAvatar.mutate(projectId)}
-                  disabled={removeProjectAvatar.isPending}
-                >
-                  {removeProjectAvatar.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <X className="h-4 w-4" />
-                  )}
-                  Remove
-                </Button>
-              )}
             </div>
-          </div>
-        </InlineField>
-      </SettingsSection>
+          </InlineField>
+        </SettingsSection>
 
-      <SettingsSection title="Defaults">
-        <InlineField
-          label="Default Branch"
-          description="New worktrees will be created from this branch"
-        >
-          {branchesLoading ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Fetching branches...
-            </div>
-          ) : branchesError ? (
-            <div className="py-2 text-sm text-destructive">
-              Failed to load branches
-            </div>
-          ) : branches.length === 0 ? (
-            <div className="py-2 text-sm text-muted-foreground">
-              No branches found
-            </div>
-          ) : (
-            <Popover
-              open={branchPopoverOpen}
-              onOpenChange={setBranchPopoverOpen}
-            >
-              <PopoverTrigger asChild>
+        <SettingsSection title="Avatar">
+          <InlineField
+            label="Project Avatar"
+            description="Custom image displayed in the sidebar"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted-foreground/20 overflow-hidden">
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={project?.name ?? 'Project avatar'}
+                    className="size-full object-cover"
+                    onError={() => setImgErrorKey(avatarKey)}
+                  />
+                ) : (
+                  <span className="text-lg font-medium uppercase text-muted-foreground">
+                    {project?.name?.[0] ?? '?'}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
                 <Button
                   variant="outline"
-                  role="combobox"
-                  aria-expanded={branchPopoverOpen}
-                  aria-controls="default-branch-selector"
-                  className="w-full justify-between"
+                  size="sm"
+                  onClick={() => setProjectAvatar.mutate(projectId)}
+                  disabled={setProjectAvatar.isPending}
                 >
-                  <span className="flex items-center gap-2 truncate">
-                    <GitBranch className="h-4 w-4 shrink-0" />
-                    {selectedBranch || 'Select a branch'}
-                  </span>
-                  <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                  {setProjectAvatar.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ImageIcon className="h-4 w-4" />
+                  )}
+                  {project?.avatar_path || project?.default_avatar_path
+                    ? 'Change'
+                    : 'Add Image'}
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                id="default-branch-selector"
-                align="start"
-                className="!w-[var(--radix-popover-trigger-width)] p-0"
-              >
-                <Command>
-                  <CommandInput placeholder="Search branches..." />
-                  <CommandList>
-                    <CommandEmpty>No branch found.</CommandEmpty>
-                    <CommandGroup>
-                      {branches.map(branch => (
-                        <CommandItem
-                          key={branch}
-                          value={branch}
-                          onSelect={handleSelectBranch}
-                        >
-                          <GitBranch className="h-4 w-4" />
-                          {branch}
-                          <Check
-                            className={cn(
-                              'ml-auto h-4 w-4',
-                              selectedBranch === branch
-                                ? 'opacity-100'
-                                : 'opacity-0'
-                            )}
-                          />
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          )}
-        </InlineField>
+                {project?.avatar_path && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeProjectAvatar.mutate(projectId)}
+                    disabled={removeProjectAvatar.isPending}
+                  >
+                    {removeProjectAvatar.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <X className="h-4 w-4" />
+                    )}
+                    Remove
+                  </Button>
+                )}
+              </div>
+            </div>
+          </InlineField>
+        </SettingsSection>
 
-        {profiles.length > 0 && (
+        <SettingsSection title="Defaults">
           <InlineField
-            label="Default Provider"
-            description="Default provider for new sessions in this project"
+            label="Default Branch"
+            description="New worktrees will be created from this branch"
+          >
+            {branchesLoading ? (
+              <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Fetching branches...
+              </div>
+            ) : branchesError ? (
+              <div className="py-2 text-sm text-destructive">
+                Failed to load branches
+              </div>
+            ) : branches.length === 0 ? (
+              <div className="py-2 text-sm text-muted-foreground">
+                No branches found
+              </div>
+            ) : (
+              <Popover
+                open={branchPopoverOpen}
+                onOpenChange={setBranchPopoverOpen}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={branchPopoverOpen}
+                    aria-controls="default-branch-selector"
+                    className="w-full justify-between"
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <GitBranch className="h-4 w-4 shrink-0" />
+                      {selectedBranch || 'Select a branch'}
+                    </span>
+                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  id="default-branch-selector"
+                  align="start"
+                  className="!w-[var(--radix-popover-trigger-width)] p-0"
+                >
+                  <Command>
+                    <CommandInput placeholder="Search branches..." />
+                    <CommandList>
+                      <CommandEmpty>No branch found.</CommandEmpty>
+                      <CommandGroup>
+                        {branches.map(branch => (
+                          <CommandItem
+                            key={branch}
+                            value={branch}
+                            onSelect={handleSelectBranch}
+                          >
+                            <GitBranch className="h-4 w-4" />
+                            {branch}
+                            <Check
+                              className={cn(
+                                'ml-auto h-4 w-4',
+                                selectedBranch === branch
+                                  ? 'opacity-100'
+                                  : 'opacity-0'
+                              )}
+                            />
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            )}
+          </InlineField>
+
+          {profiles.length > 0 && (
+            <InlineField
+              label="Default Provider"
+              description="Default provider for new sessions in this project"
+            >
+              <Select
+                value={project?.default_provider ?? 'global-default'}
+                onValueChange={handleProviderChange}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="global-default">
+                    Use global default
+                  </SelectItem>
+                  <SelectItem value="__anthropic__">Anthropic</SelectItem>
+                  {profiles.map(p => (
+                    <SelectItem key={p.name} value={p.name}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+          )}
+
+          <InlineField
+            label="Default Backend"
+            description="CLI to use for new sessions in this project"
           >
             <Select
-              value={project?.default_provider ?? 'global-default'}
-              onValueChange={handleProviderChange}
+              value={project?.default_backend ?? 'global-default'}
+              onValueChange={handleBackendChange}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -447,207 +419,105 @@ export function GeneralPane({
                 <SelectItem value="global-default">
                   Use global default
                 </SelectItem>
-                <SelectItem value="__anthropic__">Anthropic</SelectItem>
-                {profiles.map(p => (
-                  <SelectItem key={p.name} value={p.name}>
-                    {p.name}
-                  </SelectItem>
-                ))}
+                <SelectItem value="claude">Claude</SelectItem>
+                <SelectItem value="codex">Codex</SelectItem>
+                <SelectItem value="opencode">OpenCode</SelectItem>
+                <SelectItem value="cursor">
+                  <BackendLabel backend="cursor" />
+                </SelectItem>
               </SelectContent>
             </Select>
           </InlineField>
-        )}
+        </SettingsSection>
 
-        <InlineField
-          label="Default Backend"
-          description="CLI to use for new sessions in this project"
-        >
-          <Select
-            value={project?.default_backend ?? 'global-default'}
-            onValueChange={handleBackendChange}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="global-default">Use global default</SelectItem>
-              <SelectItem value="claude">Claude</SelectItem>
-              <SelectItem value="codex">Codex</SelectItem>
-              <SelectItem value="opencode">OpenCode</SelectItem>
-              <SelectItem value="cursor">
-                <BackendLabel backend="cursor" />
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </InlineField>
-      </SettingsSection>
-
-      <SettingsSection title="Worktrees Location">
-        <InlineField
-          label="Base Directory"
-          description={
-            <>
-              Where new worktrees are created. Defaults to{' '}
-              <code className="text-[11px] bg-muted px-1 py-0.5 rounded">
-                ~/jean
-              </code>
-            </>
-          }
-        >
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="~/jean (default)"
-              value={displayedWorktreesDir}
-              onChange={e => setLocalWorktreesDir(e.target.value)}
-              className="flex-1 text-base md:text-sm"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleBrowseWorktreesDir}
-            >
-              <FolderOpen className="h-4 w-4" />
-              Browse
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={handleSaveWorktreesDir}
-              disabled={!worktreesDirChanged || updateSettings.isPending}
-            >
-              {updateSettings.isPending && (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              )}
-              Save
-            </Button>
-            {project?.worktrees_dir && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleResetWorktreesDir}
-                disabled={updateSettings.isPending}
-              >
-                <RotateCcw className="h-4 w-4" />
-                Reset to default
-              </Button>
-            )}
-          </div>
-        </InlineField>
-      </SettingsSection>
-
-      <SettingsSection title="Linear Integration">
-        <InlineField
-          label="Project API Key Override"
-          description="Overrides the global key from Settings → Integrations for this project only. Leave empty to use the global key."
-        >
-          <div className="flex items-center gap-2">
-            <Input
-              type={showLinearApiKey ? 'text' : 'password'}
-              placeholder="lin_api_..."
-              value={displayedLinearApiKey}
-              onChange={e => setLocalLinearApiKey(e.target.value)}
-              className="flex-1 text-base md:text-sm font-mono"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowLinearApiKey(!showLinearApiKey)}
-            >
-              {showLinearApiKey ? 'Hide' : 'Show'}
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={handleSaveLinearApiKey}
-              disabled={!linearApiKeyChanged || updateSettings.isPending}
-            >
-              {updateSettings.isPending && (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              )}
-              Save
-            </Button>
-            {project?.linear_api_key && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleClearLinearApiKey}
-                disabled={updateSettings.isPending}
-              >
-                <RotateCcw className="h-4 w-4" />
-                Remove
-              </Button>
-            )}
-          </div>
-        </InlineField>
-
-        {hasLinearAccess && (
+        <SettingsSection title="Worktrees Location">
           <InlineField
-            label="Team Filter"
-            description="Restrict Linear issues to a specific team. Leave as 'All teams' to see everything."
+            label="Base Directory"
+            description={
+              <>
+                Where new worktrees are created. Defaults to{' '}
+                <code className="text-[11px] bg-muted px-1 py-0.5 rounded">
+                  ~/jean
+                </code>
+              </>
+            }
           >
             <div className="flex items-center gap-2">
-              <Select
-                value={project?.linear_team_id ?? 'all'}
-                onValueChange={handleTeamChange}
-                disabled={teamsLoading}
-              >
-                <SelectTrigger className="flex-1">
-                  <SelectValue
-                    placeholder={
-                      teamsLoading ? 'Loading teams...' : 'All teams'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All teams</SelectItem>
-                  {linearTeams.map(team => (
-                    <SelectItem key={team.id} value={team.id}>
-                      {team.key} — {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                placeholder="~/jean (default)"
+                value={displayedWorktreesDir}
+                onChange={e => setLocalWorktreesDir(e.target.value)}
+                className="flex-1 text-base md:text-sm"
+              />
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleRefreshTeams}
-                disabled={teamsLoading}
+                onClick={handleBrowseWorktreesDir}
               >
-                <RefreshCw
-                  className={cn('h-4 w-4', teamsLoading && 'animate-spin')}
-                />
+                <FolderOpen className="h-4 w-4" />
+                Browse
               </Button>
             </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={handleSaveWorktreesDir}
+                disabled={!worktreesDirChanged || updateSettings.isPending}
+              >
+                {updateSettings.isPending && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
+                Save
+              </Button>
+              {project?.worktrees_dir && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetWorktreesDir}
+                  disabled={updateSettings.isPending}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Reset to default
+                </Button>
+              )}
+            </div>
           </InlineField>
-        )}
-      </SettingsSection>
+        </SettingsSection>
 
-      <SettingsSection title="System Prompt">
-        <InlineField
-          label="Custom System Prompt"
-          description="Appended to every session's system prompt in this project"
-        >
-          <Textarea
-            placeholder="e.g. Always use TypeScript strict mode. Prefer functional components..."
-            value={displayedSystemPrompt}
-            onChange={e => setLocalSystemPrompt(e.target.value)}
-            rows={4}
-            className="resize-y text-base md:text-sm"
-          />
-          <Button
-            size="sm"
-            onClick={handleSaveSystemPrompt}
-            disabled={!systemPromptChanged || updateSettings.isPending}
+        <SettingsSection title="System Prompt">
+          <InlineField
+            label="Custom System Prompt"
+            description="Appended to every session's system prompt in this project"
           >
-            {updateSettings.isPending && (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            )}
-            Save
-          </Button>
-        </InlineField>
-      </SettingsSection>
-    </div>
+            <Textarea
+              placeholder="e.g. Always use TypeScript strict mode. Prefer functional components..."
+              value={displayedSystemPrompt}
+              onChange={e => setLocalSystemPrompt(e.target.value)}
+              rows={4}
+              className="resize-y text-base md:text-sm"
+            />
+            <Button
+              size="sm"
+              onClick={handleSaveSystemPrompt}
+              disabled={!systemPromptChanged || updateSettings.isPending}
+            >
+              {updateSettings.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              Save
+            </Button>
+          </InlineField>
+        </SettingsSection>
+      </div>
+
+      <DirectoryBrowser
+        open={worktreesBrowserOpen}
+        onOpenChange={setWorktreesBrowserOpen}
+        onSelect={setLocalWorktreesDir}
+        mode="select"
+        title="Select worktrees base directory"
+        description="Choose the parent directory where new worktrees will be created."
+      />
+    </>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { isTodoWrite, isPlanToolCall } from '@/types/chat'
+import { getTodoWriteTodos, isPlanToolCall } from '@/types/chat'
 import type {
   ToolCall,
   ChatMessage,
@@ -190,12 +190,14 @@ export function useActiveTodosAndAgents({
       return { todos: [], sourceMessageId: null, isFromStreaming: false }
 
     if (isSending && currentToolCalls.length > 0) {
-      // Prefer TodoWrite tool calls
+      // Prefer TodoWrite tool calls (Claude TodoWrite, Grok todo_write / TodoWrite)
       for (let i = currentToolCalls.length - 1; i >= 0; i--) {
         const tc = currentToolCalls[i]
-        if (tc && isTodoWrite(tc)) {
+        if (!tc) continue
+        const todos = getTodoWriteTodos(tc)
+        if (todos.length > 0) {
           return {
-            todos: tc.input.todos,
+            todos,
             sourceMessageId: null,
             isFromStreaming: true,
           }
@@ -213,12 +215,14 @@ export function useActiveTodosAndAgents({
     }
 
     if (lastAssistantMessage?.tool_calls) {
-      // Prefer TodoWrite tool calls
+      // Prefer TodoWrite tool calls (Claude TodoWrite, Grok todo_write / TodoWrite)
       for (let i = lastAssistantMessage.tool_calls.length - 1; i >= 0; i--) {
         const tc = lastAssistantMessage.tool_calls[i]
-        if (tc && isTodoWrite(tc)) {
+        if (!tc) continue
+        const todos = getTodoWriteTodos(tc)
+        if (todos.length > 0) {
           return {
-            todos: tc.input.todos,
+            todos,
             sourceMessageId: lastAssistantMessage.id,
             isFromStreaming: false,
           }

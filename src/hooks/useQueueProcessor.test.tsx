@@ -15,6 +15,7 @@ const sendMessageMutate = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/environment', () => ({
   isNativeApp: () => env.isNativeApp,
+  isLocalBackend: () => env.isNativeApp,
   hasBackend: () => env.hasBackend,
 }))
 

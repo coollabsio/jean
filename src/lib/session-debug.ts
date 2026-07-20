@@ -63,9 +63,9 @@ export function resolveSessionDebugDetails(params: {
 
   const defaultModel =
     finalBackend === 'codex'
-      ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+      ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
       : finalBackend === 'opencode'
-        ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+        ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
         : finalBackend === 'cursor'
           ? (preferences?.selected_cursor_model ?? 'cursor/auto')
           : finalBackend === 'pi'
@@ -73,7 +73,11 @@ export function resolveSessionDebugDetails(params: {
             : finalBackend === 'commandcode'
               ? (preferences?.selected_commandcode_model ??
                 'commandcode/default')
-              : (preferences?.selected_model ?? 'claude-opus-4-8[1m]')
+              : finalBackend === 'grok'
+                ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                : finalBackend === 'kimi'
+                  ? (preferences?.selected_kimi_model ?? 'kimi/default')
+                  : (preferences?.selected_model ?? 'claude-opus-4-8[1m]')
 
   return {
     selectedBackend: finalBackend,

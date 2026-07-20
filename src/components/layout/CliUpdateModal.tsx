@@ -20,6 +20,7 @@ import { piCliQueryKeys } from '@/services/pi-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
+import { kimiCliQueryKeys } from '@/services/kimi-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
   ClaudeCliReinstallModal,
@@ -31,6 +32,7 @@ import {
   CodeRabbitCliReinstallModal,
   CommandCodeCliReinstallModal,
   GrokCliReinstallModal,
+  KimiCliReinstallModal,
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
@@ -61,6 +63,8 @@ export function CliUpdateModal() {
         queryClient.invalidateQueries({ queryKey: commandcodeCliQueryKeys.all })
       } else if (cliUpdateModalType === 'grok') {
         queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
+      } else if (cliUpdateModalType === 'kimi') {
+        queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
       }
 
       // Dismiss any lingering update toast for this CLI type
@@ -108,6 +112,10 @@ export function CliUpdateModal() {
       />
       <GrokCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'grok'}
+        onOpenChange={handleOpenChange}
+      />
+      <KimiCliReinstallModal
+        open={cliUpdateModalOpen && cliUpdateModalType === 'kimi'}
         onOpenChange={handleOpenChange}
       />
     </>

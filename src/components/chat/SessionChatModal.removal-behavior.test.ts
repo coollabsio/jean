@@ -60,13 +60,20 @@ describe('SessionChatModal removal behavior', () => {
     expect(source).not.toContain('group/tab flex rounded items-center')
   })
 
+  it('keeps the new session button after the tabs until they overflow on desktop', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+
+    expect(source).toContain(
+      '<ScrollArea\n                className="min-w-0 flex-1 sm:flex-initial"'
+    )
+  })
+
   it('falls back to a real session when restored active session state is stale', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
 
     expect(source).toMatch(
-      /sessions\.some\(\s*session => session\.id === activeSessionId\s*\)/
+      /resolveModalSessionId\(\s*activeSessionId,\s*sessions\.map\(session => session\.id\)\s*\)/
     )
-    expect(source).toContain('sessions[0]?.id ?? null')
   })
 
   it('keeps a yellow background on waiting session tabs', () => {
@@ -74,6 +81,17 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(source).toContain(
       "status === 'waiting' &&\n                                'bg-yellow-500/10"
+    )
+  })
+
+  it('offers to open resumable chat sessions in a separate native client session', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+
+    expect(source).toContain('buildNativeClientSessionInput')
+    expect(source).toContain('handleOpenInNativeClient')
+    expect(source).toContain('Open in Native Client')
+    expect(source).toMatch(
+      /reconnectNativeCliSession\(nativeSession, worktreeId, \{[\s\S]*?openModal: false/
     )
   })
 })

@@ -128,6 +128,29 @@ describe('resolvePlanContent', () => {
       source: 'message_text',
     })
   })
+
+  it('formats structured Codex steps when no plan text was persisted', () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'plan-1',
+        name: 'CodexPlan',
+        input: {
+          explanation: 'Extend the existing backup pipeline.',
+          steps: [
+            { step: 'Generalize the schema', status: 'completed' },
+            { step: 'Update the backup UI', status: 'in_progress' },
+            { step: 'Run regression tests', status: 'pending' },
+          ],
+        },
+      },
+    ]
+
+    expect(resolvePlanContent({ toolCalls })).toEqual({
+      content:
+        'Extend the existing backup pipeline.\n\n- [x] Generalize the schema\n- [ ] **In progress:** Update the backup UI\n- [ ] Run regression tests',
+      source: 'steps',
+    })
+  })
 })
 
 describe('isDuplicatePlanTextBlock', () => {
@@ -271,7 +294,6 @@ describe('buildTimeline with fragmented text deltas', () => {
       tool: expect.objectContaining({ id: 'codex-user-input-1' }),
     })
   })
-
 
   it('renders Claude AskUserQuestion when questions are encoded as JSON string', () => {
     const tools: ToolCall[] = [

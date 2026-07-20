@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Bot, Settings, Plug, FileJson } from 'lucide-react'
+import { Bot, Settings, Plug, FileJson, Cable } from 'lucide-react'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
   Breadcrumb,
@@ -38,11 +38,18 @@ import { GeneralPane } from './panes/GeneralPane'
 import { McpServersPane } from './panes/McpServersPane'
 import { JeanJsonPane } from './panes/JeanJsonPane'
 import { AutoFixPane } from './panes/AutoFixPane'
+import { IntegrationsPane } from './panes/IntegrationsPane'
 
-type ProjectSettingsPane = 'general' | 'mcp-servers' | 'jean-json' | 'auto-fix'
+type ProjectSettingsPane =
+  | 'general'
+  | 'integrations'
+  | 'mcp-servers'
+  | 'jean-json'
+  | 'auto-fix'
 
 const navigationItems = [
   { id: 'general' as const, name: 'General', icon: Settings },
+  { id: 'integrations' as const, name: 'Integrations', icon: Cable },
   { id: 'auto-fix' as const, name: 'Mr. Robot', icon: Bot },
   { id: 'mcp-servers' as const, name: 'MCP Servers', icon: Plug },
   { id: 'jean-json' as const, name: 'Jean.json', icon: FileJson },
@@ -52,6 +59,8 @@ const getPaneTitle = (pane: ProjectSettingsPane): string => {
   switch (pane) {
     case 'general':
       return 'General'
+    case 'integrations':
+      return 'Integrations'
     case 'auto-fix':
       return 'Mr. Robot'
     case 'mcp-servers':
@@ -210,6 +219,9 @@ function ProjectSettingsDialogContent({
                       projectId={safeProjectId}
                       projectPath={projectPath}
                     />
+                  )}
+                  {activePane === 'integrations' && (
+                    <IntegrationsPane projectId={safeProjectId} />
                   )}
                   {activePane === 'auto-fix' && (
                     <AutoFixPane projectId={safeProjectId} />

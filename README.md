@@ -80,18 +80,65 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup and guidelines
 
 ## Headless Web Access
 
-Run Jean without the desktop window and expose the web UI over HTTP:
+Run Jean as a standalone Linux server (`jean-server`) with browser Web Access —
+no desktop window, GTK, or WebView required. Linux **amd64** and **arm64** only
+(glibc + OpenSSL 3; Ubuntu 22.04+ / Debian 12+ recommended).
+
+### Install (release binary + systemd)
+
+Interactive install (prompts for bind interface + port when a TTY is available):
 
 ```bash
-jean --headless --host 127.0.0.1 --port 3456
+curl -fsSL https://raw.githubusercontent.com/coollabsio/jean/main/scripts/install-jean-server.sh | sudo bash
 ```
 
-`--host` accepts `localhost` or an IP address. Passing a specific address such
-as your Tailscale IP binds Jean only to that interface.
+Non-interactive (defaults to `127.0.0.1:3456`, or pass `--host` / `--port`):
 
-## Roadmap
+```bash
+curl -fsSL https://raw.githubusercontent.com/coollabsio/jean/main/scripts/install-jean-server.sh | sudo bash -s -- -y
+```
 
-- Enhance remote web access
+Or from a clone:
+
+```bash
+sudo ./scripts/install-jean-server.sh --host 127.0.0.1 --port 3456 -y
+```
+
+The installer downloads the latest release, installs the binary, writes an env
+file (host/port/token), and registers a systemd service. Re-run to upgrade;
+existing tokens are preserved unless you pass `--token`.
+
+Common options:
+
+```bash
+# Public bind with an explicit token
+sudo ./scripts/install-jean-server.sh \
+  --host 0.0.0.0 \
+  --port 3456 \
+  --token "$(openssl rand -base64 32)" \
+  -y
+
+# Tailscale-only bind (auto-detect Tailscale IPv4)
+sudo ./scripts/install-jean-server.sh --host tailscale -y
+
+# Current user only (user systemd unit)
+./scripts/install-jean-server.sh --user-install --host 127.0.0.1 -y
+```
+
+### Run manually
+
+```bash
+jean-server --host 127.0.0.1 --port 3456
+# or with an explicit token:
+jean-server --host 127.0.0.1 --port 3456 --token "$JEAN_TOKEN"
+```
+
+`--host` accepts `localhost` or an IP address (for example a Tailscale IP) to
+bind only that interface. Docker images are also published as
+`ghcr.io/coollabsio/jean-server`.
+
+See [docs/headless-server.md](docs/headless-server.md) for systemd details,
+reverse proxies, updates, and security notes.
 
 ## Contributing
 

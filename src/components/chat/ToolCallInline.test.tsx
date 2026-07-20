@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import { ToolCallInline } from './ToolCallInline'
+import { normalizeToolCallForDisplay, ToolCallInline } from './ToolCallInline'
 import type { ComponentProps } from 'react'
 import type * as InlineFileDiffModule from './InlineFileDiff'
 
@@ -254,5 +254,71 @@ describe('ToolCallInline', () => {
     expect(screen.getAllByText('legacy.ts')).toHaveLength(2)
     expect(container.querySelector('diffs-container')).not.toBeNull()
     expect(screen.queryByText('Output:')).not.toBeInTheDocument()
+  })
+})
+
+describe('normalizeToolCallForDisplay', () => {
+  it('normalizes persisted Grok ACP tool variants for the existing renderers', () => {
+    expect(
+      normalizeToolCallForDisplay('search', {
+        variant: 'Grep',
+        pattern: 'needle',
+        path: '/tmp',
+      })
+    ).toMatchObject({
+      name: 'Grep',
+      input: { pattern: 'needle', path: '/tmp' },
+    })
+
+    expect(
+      normalizeToolCallForDisplay('read', {
+        variant: 'CursorRead',
+        path: '/tmp/a.rs',
+      })
+    ).toMatchObject({
+      name: 'Read',
+      input: { file_path: '/tmp/a.rs' },
+    })
+
+    expect(
+      normalizeToolCallForDisplay('edit', {
+        variant: 'CursorWrite',
+        path: '/tmp/a.rs',
+        contents: 'hello',
+      })
+    ).toMatchObject({
+      name: 'Write',
+      input: { file_path: '/tmp/a.rs', content: 'hello' },
+    })
+
+    expect(
+      normalizeToolCallForDisplay('other', {
+        variant: 'TaskOutput',
+        task_ids: ['task-1', 'task-2'],
+      })
+    ).toMatchObject({
+      name: 'WaitForAgents',
+      input: { receiver_thread_ids: ['task-1', 'task-2'] },
+    })
+  })
+
+  it('renders a raw Grok grep update instead of the JSON fallback', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'grok-grep-1',
+          name: 'search',
+          input: {
+            variant: 'Grep',
+            pattern: 'needle',
+            path: '/tmp',
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('Grep')).toBeInTheDocument()
+    expect(screen.getByText('"needle" in /tmp')).toBeInTheDocument()
+    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
   })
 })

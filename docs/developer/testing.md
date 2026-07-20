@@ -415,6 +415,20 @@ async fn test_app_commands() {
 }
 ```
 
+#### Windows: avoid `tauri::test::mock_app` in lib unit tests
+
+Do **not** add `tauri = { features = ["test"] }` or `tauri::test::mock_app()` /
+`WebviewWindowBuilder` unit tests to this crate for Windows CI.
+
+That path links Common Controls v6. The lib test harness does not get the app
+manifest that the main binary receives via `tauri-build`/winres, so the process
+fails to start with `STATUS_ENTRYPOINT_NOT_FOUND` (`0xc0000139`). Embedding a
+second manifest via `cargo:rustc-link-arg` then collides with winres on
+`bin "jean" test` (`CVT1100: duplicate resource`).
+
+Prefer pure unit tests of extractable logic (see
+`platform::notifications::toast_app_id_for_exe_dir`) instead of mock-window tests.
+
 ### Testing File Operations
 
 ```rust

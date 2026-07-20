@@ -12,7 +12,11 @@ import {
   type PermissionDenial,
   type LabelData,
 } from '@/types/chat'
-import { getNativeTerminalResumeLaunch } from '@/lib/native-cli-session'
+import {
+  buildNativeResumeArgs,
+  getNativeTerminalResumeLaunch,
+  isNativeTerminalBackend,
+} from '@/lib/native-cli-session'
 import { findPlanFilePath, resolvePlanContent } from './tool-call-utils'
 
 export type SessionStatus =
@@ -445,8 +449,22 @@ export function getResumeCommand(session: Session): string | null {
     return `pi --session ${session.pi_session_id}`
   }
   if (session.backend === 'grok' && session.grok_session_id) {
-    return `grok -s ${session.grok_session_id}`
+    return `grok --resume ${session.grok_session_id}`
   }
+  if (session.backend === 'kimi' && session.kimi_session_id) {
+    return `kimi --session ${session.kimi_session_id}`
+  }
+  return null
+}
+
+export function getResumeSessionId(session: Session): string | null {
+  if (session.backend === 'claude') return session.claude_session_id ?? null
+  if (session.backend === 'codex') return session.codex_thread_id ?? null
+  if (session.backend === 'opencode') return session.opencode_session_id ?? null
+  if (session.backend === 'cursor') return session.cursor_chat_id ?? null
+  if (session.backend === 'pi') return session.pi_session_id ?? null
+  if (session.backend === 'grok') return session.grok_session_id ?? null
+  if (session.backend === 'kimi') return session.kimi_session_id ?? null
   return null
 }
 
@@ -461,6 +479,17 @@ export function getResumeArgs(
   const cmd = session.terminal_command || ''
   const nativeLaunch = getNativeTerminalResumeLaunch(session)
   if (nativeLaunch) return nativeLaunch
+  const nativeSessionId = getResumeSessionId(session)
+  if (isNativeTerminalBackend(session.backend) && nativeSessionId) {
+    return {
+      command: cmd || session.backend,
+      args: buildNativeResumeArgs(
+        session.backend,
+        nativeSessionId,
+        session.terminal_command_args ?? []
+      ),
+    }
+  }
   if (session.backend === 'cursor' && session.cursor_chat_id) {
     return {
       command: cmd || 'cursor-agent',
@@ -476,10 +505,39 @@ export function getResumeArgs(
   if (session.backend === 'grok' && session.grok_session_id) {
     return {
       command: cmd || 'grok',
-      args: ['-s', session.grok_session_id],
+      args: ['--resume', session.grok_session_id],
+    }
+  }
+  if (session.backend === 'kimi' && session.kimi_session_id) {
+    return {
+      command: cmd || 'kimi',
+      args: ['--session', session.kimi_session_id],
     }
   }
   return null
+}
+
+export function buildNativeClientSessionInput(
+  session: Session,
+  worktreeId: string,
+  worktreePath: string
+) {
+  const launch = getResumeArgs(session)
+  const nativeSessionId = getResumeSessionId(session)
+  if (!launch || !nativeSessionId || !session.backend) return null
+
+  const name = `${session.name} (Native)`
+  return {
+    worktreeId,
+    worktreePath,
+    name,
+    backend: session.backend,
+    primarySurface: 'terminal' as const,
+    terminalCommand: launch.command,
+    terminalCommandArgs: launch.args,
+    terminalLabel: name,
+    nativeSessionId,
+  }
 }
 
 // --- Status grouping ---

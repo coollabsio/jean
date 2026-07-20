@@ -45,6 +45,8 @@ function mcpAuthHint(backend: CliBackend): string {
       return "Run 'opencode mcp auth' in your terminal to authenticate"
     case 'cursor':
       return "Run 'cursor-agent mcp login <server>' in your terminal to authenticate"
+    case 'grok':
+      return "Run 'grok mcp doctor <server>' or open /mcps in the Grok TUI to authenticate"
     default:
       return "Run 'claude /mcp' in your terminal to authenticate"
   }

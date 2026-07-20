@@ -6,24 +6,39 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 import type {
   GrokAuthStatus,
   GrokCliStatus,
   GrokInstallCommand,
   GrokModelInfo,
   GrokReleaseInfo,
+  GrokUsageSnapshot,
 } from '@/types/grok-cli'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
+const USAGE_REFRESH_MS = 1000 * 60 * 5
 
 export const grokCliQueryKeys = {
   all: ['grok-cli'] as const,
   status: () => [...grokCliQueryKeys.all, 'status'] as const,
   auth: () => [...grokCliQueryKeys.all, 'auth'] as const,
+  usage: () => [...grokCliQueryKeys.all, 'usage'] as const,
   models: () => [...grokCliQueryKeys.all, 'models'] as const,
   versions: () => [...grokCliQueryKeys.all, 'versions'] as const,
   installCommand: () => [...grokCliQueryKeys.all, 'install-command'] as const,
+}
+
+function getUsageStaleTime(snapshot?: GrokUsageSnapshot): number {
+  if (!snapshot?.fetchedAt) return 0
+  const expiresAtMs = snapshot.fetchedAt * 1000 + USAGE_REFRESH_MS
+  return Math.max(0, expiresAtMs - Date.now())
+}
+
+function getUsageRefetchInterval(snapshot?: GrokUsageSnapshot): number {
+  if (!snapshot?.fetchedAt) return USAGE_REFRESH_MS
+  const expiresAtMs = snapshot.fetchedAt * 1000 + USAGE_REFRESH_MS
+  return Math.max(1_000, expiresAtMs - Date.now())
 }
 
 const fallbackGrokVersions: GrokReleaseInfo[] = [
@@ -112,6 +127,25 @@ export function useGrokCliAuth(options?: { enabled?: boolean }) {
   })
 }
 
+/**
+ * Hook to fetch current Grok subscription / Build usage (OAuth accounts).
+ */
+export function useGrokUsage(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: grokCliQueryKeys.usage(),
+    queryFn: async (): Promise<GrokUsageSnapshot> => {
+      if (!isTauri()) {
+        throw new Error('Grok usage is only available when connected to Jean')
+      }
+      return invoke<GrokUsageSnapshot>('get_grok_usage')
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: query => getUsageStaleTime(query.state.data),
+    gcTime: 1000 * 60 * 10,
+    refetchInterval: query => getUsageRefetchInterval(query.state.data),
+  })
+}
+
 export function useAvailableGrokModels(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: grokCliQueryKeys.models(),
@@ -119,11 +153,10 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
       if (!isTauri()) {
         return [
           {
-            id: 'grok-composer-2.5-fast',
-            label: 'Grok Composer 2.5 Fast',
+            id: 'grok-4.5',
+            label: 'Grok 4.5',
             isDefault: true,
           },
-          { id: 'grok-build', label: 'Grok Build', isDefault: false },
         ]
       }
       try {
@@ -132,11 +165,10 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
         logger.error('Failed to list Grok models', { error })
         return [
           {
-            id: 'grok-composer-2.5-fast',
-            label: 'Grok Composer 2.5 Fast',
+            id: 'grok-4.5',
+            label: 'Grok 4.5',
             isDefault: true,
           },
-          { id: 'grok-build', label: 'Grok Build', isDefault: false },
         ]
       }
     },

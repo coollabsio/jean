@@ -191,6 +191,49 @@ describe('useGitOperations conflict resolution', () => {
     expect(sentArgs?.message).toContain('Resolve and finish.')
   })
 
+  it('starts a dedicated Final review session with the configured audit prompt', async () => {
+    const { result, sendMessage } = renderGitOperations({
+      magic_prompts: {
+        final_review: 'Audit this change and return tables only.',
+      },
+      magic_prompt_backends: { final_review_backend: 'codex' },
+      magic_prompt_models: { final_review_model: 'gpt-5.5' },
+      magic_prompt_efforts: { final_review_effort: 'high' },
+      magic_prompt_modes: { final_review_mode: 'plan' },
+    })
+
+    await act(async () => {
+      await result.current.handleFinalReview()
+    })
+
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'create_session',
+      expect.objectContaining({
+        worktreeId: 'wt-1',
+        worktreePath: '/repo/worktree',
+        name: 'Final review',
+        backend: 'codex',
+      })
+    )
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'conflict-session',
+        message: 'Audit this change and return tables only.',
+        model: 'gpt-5.5',
+        effortLevel: 'high',
+        executionMode: 'plan',
+        backend: 'codex',
+      }),
+      expect.any(Object)
+    )
+    expect(mocks.invoke).toHaveBeenCalledWith('update_session_state', {
+      worktreeId: 'wt-1',
+      worktreePath: '/repo/worktree',
+      sessionId: 'conflict-session',
+      selectedExecutionMode: 'plan',
+    })
+  })
+
   it('shows a cancel button while creating a PR and cancels the backend action', async () => {
     let resolveCreatePr: ((value: unknown) => void) | undefined
     mocks.invoke.mockImplementation((command: string) => {

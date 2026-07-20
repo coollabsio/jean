@@ -117,6 +117,10 @@ import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
 import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { PlanDialog } from '@/components/chat/PlanDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
+import {
+  getStackedBaseBranch,
+  shouldShowWorktreeBranchBadge,
+} from '@/components/chat/worktree-branch-badge'
 
 import { LabelModal } from '@/components/chat/LabelModal'
 import { getLabelTextColor } from '@/lib/label-colors'
@@ -467,10 +471,14 @@ function WorktreeSectionHeader({
   onResolveConflicts?: (worktree: Worktree) => void
   disableTextSelection?: boolean
 }) {
-  const stackedOnPR =
-    worktree.base_branch && worktree.base_branch !== defaultBranch
-      ? openPRs?.find(pr => pr.headRefName === worktree.base_branch)
-      : undefined
+  const stackedBaseBranch = getStackedBaseBranch(
+    worktree.base_branch,
+    worktree.branch,
+    defaultBranch
+  )
+  const stackedOnPR = stackedBaseBranch
+    ? openPRs?.find(pr => pr.headRefName === stackedBaseBranch)
+    : undefined
   const isBase = isBaseSession(worktree)
   const { data: gitStatus } = useGitStatus(worktree.id)
 
@@ -581,6 +589,14 @@ function WorktreeSectionHeader({
 
   const lastActivity = formatRelativeTime(sessionMetrics?.latestActivityAt)
   const displayBranch = gitStatus?.current_branch ?? worktree.branch
+  const showBranchBadge = shouldShowWorktreeBranchBadge({
+    displayBranch,
+    worktreeName: worktree.name,
+    stackedBaseBranch,
+    prNumber: worktree.pr_number,
+    securityAlertNumber: worktree.security_alert_number,
+    advisoryGhsaId: worktree.advisory_ghsa_id,
+  })
   const worktreeLabels = getWorktreeLabels(worktree)
 
   const row = (
@@ -634,26 +650,25 @@ function WorktreeSectionHeader({
               <span className="min-w-0 flex-1 truncate">
                 {isBase ? 'Base Session' : worktree.name}
               </span>
-              {displayBranch && (
+              {showBranchBadge && (
                 <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground sm:inline-flex">
                   <GitBranch className="h-2.5 w-2.5" />
                   <span className="max-w-40 truncate">{displayBranch}</span>
-                  {worktree.base_branch &&
-                    worktree.base_branch !== defaultBranch && (
-                      <>
-                        <span className="text-border">·</span>
-                        <GitBranchPlus className="h-2.5 w-2.5" />
-                        <span className="max-w-32 truncate">
-                          {worktree.base_branch}
-                        </span>
-                        {stackedOnPR && (
-                          <>
-                            <GitPullRequestArrow className="h-2.5 w-2.5" />#
-                            {stackedOnPR.number}
-                          </>
-                        )}
-                      </>
-                    )}
+                  {stackedBaseBranch && (
+                    <>
+                      <span className="text-border">·</span>
+                      <GitBranchPlus className="h-2.5 w-2.5" />
+                      <span className="max-w-32 truncate">
+                        {stackedBaseBranch}
+                      </span>
+                      {stackedOnPR && (
+                        <>
+                          <GitPullRequestArrow className="h-2.5 w-2.5" />#
+                          {stackedOnPR.number}
+                        </>
+                      )}
+                    </>
+                  )}
                   {worktree.pr_number && (
                     <>
                       <span className="text-border">·</span>
@@ -694,26 +709,25 @@ function WorktreeSectionHeader({
                 />
               </span>
             </span>
-            {displayBranch && (
+            {showBranchBadge && (
               <span className="inline-flex max-w-full items-center gap-1 self-start rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground sm:hidden">
                 <GitBranch className="h-2.5 w-2.5 shrink-0" />
                 <span className="max-w-full truncate">{displayBranch}</span>
-                {worktree.base_branch &&
-                  worktree.base_branch !== defaultBranch && (
-                    <>
-                      <span className="text-border">·</span>
-                      <GitBranchPlus className="h-2.5 w-2.5 shrink-0" />
-                      <span className="max-w-32 truncate">
-                        {worktree.base_branch}
-                      </span>
-                      {stackedOnPR && (
-                        <>
-                          <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />
-                          #{stackedOnPR.number}
-                        </>
-                      )}
-                    </>
-                  )}
+                {stackedBaseBranch && (
+                  <>
+                    <span className="text-border">·</span>
+                    <GitBranchPlus className="h-2.5 w-2.5 shrink-0" />
+                    <span className="max-w-32 truncate">
+                      {stackedBaseBranch}
+                    </span>
+                    {stackedOnPR && (
+                      <>
+                        <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />
+                        #{stackedOnPR.number}
+                      </>
+                    )}
+                  </>
+                )}
                 {worktree.pr_number && (
                   <>
                     <span className="text-border">·</span>

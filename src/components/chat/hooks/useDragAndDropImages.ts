@@ -8,7 +8,7 @@ import {
   MAX_IMAGE_SIZE,
   SVG_EXTENSION,
 } from '../image-constants'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { dragHasFiles } from '@/lib/drag-drop-utils'
 import { processAttachmentFiles } from '../attachment-processing'
 
@@ -96,7 +96,7 @@ export function useDragAndDropImages(
   }, [sessionId, options?.disabled])
 
   useEffect(() => {
-    if (options?.disabled || !isNativeApp()) return
+    if (options?.disabled || !isLocalBackend()) return
 
     let cancelled = false
     let unlisten: (() => void) | null = null

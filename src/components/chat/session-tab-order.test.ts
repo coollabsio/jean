@@ -3,6 +3,7 @@ import type { Session } from '@/types/chat'
 import type { SessionCardData } from './session-card-utils'
 import {
   buildReorderedSessionIdsWithinStatus,
+  resolveModalSessionId,
   sortSessionCardsForTabs,
 } from './session-tab-order'
 
@@ -73,5 +74,25 @@ describe('session tab ordering', () => {
     expect(
       buildReorderedSessionIdsWithinStatus(cards, 'waiting-a', 'idle-a')
     ).toBeNull()
+  })
+})
+
+describe('resolveModalSessionId', () => {
+  it('keeps the active session when the sessions list is transiently empty', () => {
+    expect(resolveModalSessionId('active-1', [])).toBe('active-1')
+  })
+
+  it('keeps the active session when it is still present', () => {
+    expect(resolveModalSessionId('active-1', ['other', 'active-1'])).toBe(
+      'active-1'
+    )
+  })
+
+  it('falls back to the first session when active is missing from a non-empty list', () => {
+    expect(resolveModalSessionId('gone', ['first', 'second'])).toBe('first')
+  })
+
+  it('returns null when there is no active session and no sessions', () => {
+    expect(resolveModalSessionId(undefined, [])).toBeNull()
   })
 })

@@ -23,6 +23,7 @@ import {
   useSearchLinearIssues,
   filterLinearIssues,
 } from '@/services/linear'
+import { filterSentryIssues, useSentryIssues } from '@/services/sentry'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import {
   useProjects,
@@ -218,6 +219,20 @@ export function useNewWorktreeData(
     return [...local, ...extra]
   }, [linearIssues, searchQuery, searchedLinearIssues])
 
+  // Sentry issues. The debounced query is also sent to Sentry so structured
+  // searches can find issues outside the initial unresolved result page.
+  const {
+    data: sentryIssues = [],
+    isLoading: isLoadingSentryIssues,
+    isFetching: isRefetchingSentryIssues,
+    error: sentryIssuesError,
+    refetch: refetchSentryIssues,
+  } = useSentryIssues(selectedProjectId, debouncedSearchQuery)
+  const filteredSentryIssues = useMemo(
+    () => filterSentryIssues(sentryIssues, searchQuery),
+    [sentryIssues, searchQuery]
+  )
+
   // Jean config
   const { data: jeanConfig } = useJeanConfig(selectedProject?.path ?? null)
 
@@ -277,6 +292,13 @@ export function useNewWorktreeData(
     isSearchingLinearIssues,
     linearIssuesError,
     refetchLinearIssues,
+
+    // Sentry issues
+    filteredSentryIssues,
+    isLoadingSentryIssues,
+    isRefetchingSentryIssues,
+    sentryIssuesError,
+    refetchSentryIssues,
 
     // Mutations
     createWorktree,

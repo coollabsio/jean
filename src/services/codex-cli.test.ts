@@ -1,18 +1,28 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { renderHook, waitFor } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { codexCliQueryKeys, installCodexUsageUpdateListener } from './codex-cli'
+import {
+  codexCliQueryKeys,
+  installCodexUsageUpdateListener,
+  useCodexCliStatus,
+} from './codex-cli'
 import type { CodexUsageSnapshot } from '@/types/codex-cli'
 
-const listenMock = vi.fn()
+const { invokeMock, listenMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  listenMock: vi.fn(),
+}))
 
 vi.mock('@/lib/transport', () => ({
-  invoke: vi.fn(),
+  invoke: (...args: unknown[]) => invokeMock(...args),
   listen: (...args: unknown[]) => listenMock(...args),
   useWsConnectionStatus: vi.fn(() => true),
 }))
 
 vi.mock('@/lib/environment', () => ({
-  hasBackend: () => true,
+  hasBackend: () => false,
+  hasBackendTransport: () => true,
 }))
 
 vi.mock('@/lib/logger', () => ({
@@ -75,5 +85,29 @@ describe('Codex usage update listener', () => {
     )
     cleanup()
     expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Codex CLI status', () => {
+  beforeEach(() => {
+    invokeMock.mockReset()
+  })
+
+  it('checks the configured remote backend before its WebSocket connects', async () => {
+    invokeMock.mockResolvedValue({
+      installed: true,
+      version: '1.2.3',
+      path: '/usr/local/bin/codex',
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children)
+
+    const { result } = renderHook(() => useCodexCliStatus(), { wrapper })
+
+    await waitFor(() => expect(result.current.data?.installed).toBe(true))
+    expect(invokeMock).toHaveBeenCalledWith('check_codex_cli_installed')
   })
 })

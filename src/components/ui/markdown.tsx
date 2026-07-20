@@ -445,9 +445,13 @@ const components: Components = {
     </blockquote>
   ),
 
-  // Paragraphs - more breathing room
+  // Paragraphs - more breathing room. whitespace-pre-wrap keeps single spaces
+  // visible if a stream left odd mid-token spacing; ligatures off avoids fonts
+  // visually merging fragments (Grok ACP emits many tiny word pieces).
   p: ({ children }) => (
-    <p className="my-3 leading-relaxed first:mt-0 last:mb-0">{children}</p>
+    <p className="my-3 leading-relaxed first:mt-0 last:mb-0 whitespace-pre-wrap [font-variant-ligatures:none]">
+      {children}
+    </p>
   ),
 
   // Task list checkboxes (from remark-gfm) → shadcn Checkbox for theme-aware styling
@@ -485,8 +489,13 @@ const components: Components = {
 
 const streamingComponents: Components = {
   ...components,
+  // whitespace-pre-wrap keeps mid-stream spaces visible under rapid reparse
+  // (Grok emits many tiny word fragments per frame). Ligatures off avoids
+  // fonts collapsing adjacent tokens visually while text is still settling.
   p: ({ children }) => (
-    <p className="my-0 leading-relaxed first:mt-0 last:mb-0">{children}</p>
+    <p className="my-0 leading-relaxed first:mt-0 last:mb-0 whitespace-pre-wrap [font-variant-ligatures:none]">
+      {children}
+    </p>
   ),
 }
 
@@ -505,7 +514,9 @@ const toolCallComponents: Components = {
 const toolCallStreamingComponents: Components = {
   ...toolCallComponents,
   p: ({ children }) => (
-    <p className="my-0 leading-relaxed first:mt-0 last:mb-0">{children}</p>
+    <p className="my-0 leading-relaxed first:mt-0 last:mb-0 whitespace-pre-wrap [font-variant-ligatures:none]">
+      {children}
+    </p>
   ),
 }
 
@@ -563,8 +574,20 @@ const Markdown = memo(function Markdown({
   sessionId,
   compact = false,
 }: MarkdownProps) {
-  // Apply remend preprocessing for streaming content to auto-close incomplete markdown
-  const content = streaming ? remend(children) : children
+  // Apply remend preprocessing for streaming content to auto-close incomplete
+  // markdown. remend strips a single trailing space (incomplete-markdown
+  // heuristic) — restore it so space-bearing stream tails don't disappear
+  // mid-token when the next delta is delayed.
+  const content = streaming
+    ? (() => {
+        const hadTrailingSpace =
+          children.endsWith(' ') && !children.endsWith('  ')
+        const repaired = remend(children)
+        return hadTrailingSpace && !repaired.endsWith(' ')
+          ? `${repaired} `
+          : repaired
+      })()
+    : children
 
   const contextValue = useMemo(
     () => ({ messageId: messageId ?? null, sessionId: sessionId ?? null }),

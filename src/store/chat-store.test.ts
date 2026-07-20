@@ -653,6 +653,34 @@ describe('ChatStore', () => {
         useChatStore.getState().streamingReplayContentBlocks['session-1']
       ).toBeUndefined()
     })
+
+    it('resynchronizes when capped replay starts at a later tool block', () => {
+      const store = useChatStore.getState()
+
+      store.setStreamingReplayContentBlocks('session-1', replayBlocks)
+
+      expect(
+        store.consumeStreamingReplayToolBlock('session-1', 'tool-1')
+      ).toBe(true)
+      expect(store.consumeStreamingReplayText('session-1', 'After tool.')).toBe(
+        ''
+      )
+      expect(
+        useChatStore.getState().streamingReplayContentBlocks['session-1']
+      ).toBeUndefined()
+    })
+
+    it('resynchronizes when capped replay starts inside a later text block', () => {
+      const store = useChatStore.getState()
+
+      store.setStreamingReplayContentBlocks('session-1', replayBlocks)
+
+      expect(store.consumeStreamingReplayText('session-1', 'After ')).toBe('')
+      expect(store.consumeStreamingReplayText('session-1', 'tool.')).toBe('')
+      expect(
+        useChatStore.getState().streamingReplayContentBlocks['session-1']
+      ).toBeUndefined()
+    })
   })
 
   describe('execution mode', () => {

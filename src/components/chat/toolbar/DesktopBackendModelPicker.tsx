@@ -20,6 +20,7 @@ import { useAvailableCursorModels } from '@/services/cursor-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
+import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { BackendLabel } from '@/components/ui/backend-label'
@@ -87,6 +88,9 @@ export function DesktopBackendModelPicker({
   const { data: availableGrokModels } = useAvailableGrokModels({
     enabled: installedBackends.includes('grok'),
   })
+  const { data: availableKimiModels } = useAvailableKimiModels({
+    enabled: installedBackends.includes('kimi'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -130,6 +134,14 @@ export function DesktopBackendModelPicker({
       })),
     [availableGrokModels]
   )
+  const kimiModelOptions = useMemo(
+    () =>
+      availableKimiModels?.map(model => ({
+        value: `kimi/${model.id}`,
+        label: model.label,
+      })),
+    [availableKimiModels]
+  )
 
   const { backendModelSections, selectedModelLabel } = useToolbarDerivedState({
     selectedBackend,
@@ -140,6 +152,7 @@ export function DesktopBackendModelPicker({
     piModelOptions,
     commandcodeModelOptions,
     grokModelOptions,
+    kimiModelOptions,
     customCliProfiles,
     installedBackends,
   })

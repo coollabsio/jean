@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { useChatStore } from '@/store/chat-store'
 import {
   classifyAttachmentFile,
@@ -90,7 +90,7 @@ function routeToChat(paths: string[], sessionId: string | undefined): void {
  */
 export function useLinuxFileDrop(): void {
   useEffect(() => {
-    if (!isNativeApp()) return
+    if (!isLocalBackend()) return
 
     let unlisten: (() => void) | null = null
     let cancelled = false

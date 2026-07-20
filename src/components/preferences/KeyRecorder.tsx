@@ -12,7 +12,7 @@ import {
   eventToShortcutString,
   type ShortcutString,
 } from '@/types/keybindings'
-import { isMacOS } from '@/lib/platform'
+import { isClientMacOS } from '@/lib/platform'
 
 // Format currently held modifiers for display
 function formatModifiersDisplay(modifiers: {
@@ -23,13 +23,13 @@ function formatModifiersDisplay(modifiers: {
 }): string {
   const isWeb =
     typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)
-  const useMacCtrl = isMacOS && isWeb
+  const useMacCtrl = isClientMacOS && isWeb
 
   const parts: string[] = []
   if (modifiers.meta || modifiers.ctrl)
-    parts.push(useMacCtrl ? '⌃' : isMacOS ? '⌘' : 'Ctrl')
-  if (modifiers.shift) parts.push(isMacOS ? '⇧' : 'Shift')
-  if (modifiers.alt) parts.push(isMacOS ? '⌥' : 'Alt')
+    parts.push(useMacCtrl ? '⌃' : isClientMacOS ? '⌘' : 'Ctrl')
+  if (modifiers.shift) parts.push(isClientMacOS ? '⇧' : 'Shift')
+  if (modifiers.alt) parts.push(isClientMacOS ? '⌥' : 'Alt')
 
   if (parts.length === 0) return 'Press keys...'
   return parts.join(' + ') + ' + ...'

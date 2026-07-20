@@ -12,8 +12,10 @@ let sessionsData: { sessions: unknown[] }
 let nativeSessionsData: unknown[]
 let opencodeInstalled: boolean
 let cursorInstalled: boolean
+let piInstalled: boolean
 let commandCodeInstalled: boolean
 let grokInstalled: boolean
+let kimiInstalled: boolean
 let isMobile: boolean
 let defaultExecutionMode: 'plan' | 'build' | 'yolo'
 
@@ -83,6 +85,16 @@ vi.mock('@/services/cursor-cli', () => ({
   }),
 }))
 
+vi.mock('@/services/pi-cli', () => ({
+  usePiCliStatus: () => ({
+    data: {
+      installed: piInstalled,
+      path: piInstalled ? '/usr/local/bin/pi' : null,
+    },
+    isLoading: false,
+  }),
+}))
+
 vi.mock('@/services/commandcode-cli', () => ({
   useCommandCodeCliStatus: () => ({
     data: {
@@ -103,6 +115,16 @@ vi.mock('@/services/grok-cli', () => ({
   }),
 }))
 
+vi.mock('@/services/kimi-cli', () => ({
+  useKimiCliStatus: () => ({
+    data: {
+      installed: kimiInstalled,
+      path: kimiInstalled ? '/usr/local/bin/kimi' : null,
+    },
+    isLoading: false,
+  }),
+}))
+
 describe('NewSessionModeModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -112,8 +134,10 @@ describe('NewSessionModeModal', () => {
     nativeSessionsData = []
     opencodeInstalled = false
     cursorInstalled = false
+    piInstalled = false
     commandCodeInstalled = false
     grokInstalled = false
+    kimiInstalled = false
     isMobile = false
     defaultExecutionMode = 'plan'
     invoke.mockResolvedValue({
@@ -218,6 +242,38 @@ describe('NewSessionModeModal', () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText('Open native Grok (Beta) in a terminal session')
+    ).toBeInTheDocument()
+  })
+
+  it('does not show Kimi when only Grok is installed', () => {
+    grokInstalled = true
+    kimiInstalled = false
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    expect(screen.getByText('Grok (Beta)')).toBeInTheDocument()
+    expect(screen.queryByText('Kimi Code (Beta)')).toBeNull()
+    expect(screen.queryByText(/Kimi/)).toBeNull()
+  })
+
+  it('shows Kimi only when its CLI is installed', () => {
+    kimiInstalled = true
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    expect(screen.getByText('Kimi Code (Beta)')).toBeInTheDocument()
+    expect(
+      screen.getByText('Open native Kimi Code (Beta) in a terminal session')
     ).toBeInTheDocument()
   })
 

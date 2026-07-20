@@ -2,7 +2,7 @@
  * Onboarding Dialog for CLI Setup
  *
  * Multi-step wizard that handles installation and authentication of at least
- * one AI backend CLI (Claude/Codex/OpenCode) plus mandatory GitHub CLI.
+ * one supported AI backend CLI plus mandatory GitHub CLI.
  */
 
 /* eslint-disable no-console */
@@ -35,6 +35,12 @@ import {
   useOpenCodePathDetection,
 } from '@/services/opencode-cli'
 import {
+  getCursorInstallCommand,
+  useCursorCliAuth,
+  useCursorCliStatus,
+  useCursorPathDetection,
+} from '@/services/cursor-cli'
+import {
   usePiCliSetup,
   usePiCliAuth,
   usePiPathDetection,
@@ -49,6 +55,11 @@ import {
   useGrokCliAuth,
   useGrokPathDetection,
 } from '@/services/grok-cli'
+import {
+  useKimiCliSetup,
+  useKimiCliAuth,
+  useKimiPathDetection,
+} from '@/services/kimi-cli'
 import {
   useGhCliSetup,
   useGhCliAuth,
@@ -75,6 +86,8 @@ import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+  KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
   type MagicPromptBackends,
   type MagicPromptModels,
 } from '@/types/preferences'
@@ -82,16 +95,26 @@ import { isServerWindows } from '@/lib/platform'
 import { WslSetupStep } from './WslSetupStep'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
-type AIBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'commandcode' | 'grok'
+type AIBackend =
+  | 'claude'
+  | 'codex'
+  | 'opencode'
+  | 'cursor'
+  | 'pi'
+  | 'commandcode'
+  | 'grok'
+  | 'kimi'
 type CliType = AIBackend | 'gh'
 
-const AI_BACKENDS: AIBackend[] = [
+export const AI_BACKENDS: AIBackend[] = [
   'claude',
   'codex',
   'opencode',
+  'cursor',
   'pi',
   'commandcode',
   'grok',
+  'kimi',
 ]
 
 type OnboardingStep =
@@ -109,6 +132,10 @@ type OnboardingStep =
   | 'opencode-installing'
   | 'opencode-auth-checking'
   | 'opencode-auth-login'
+  | 'cursor-setup'
+  | 'cursor-installing'
+  | 'cursor-auth-checking'
+  | 'cursor-auth-login'
   | 'pi-setup'
   | 'pi-installing'
   | 'pi-auth-checking'
@@ -121,6 +148,10 @@ type OnboardingStep =
   | 'grok-installing'
   | 'grok-auth-checking'
   | 'grok-auth-login'
+  | 'kimi-setup'
+  | 'kimi-installing'
+  | 'kimi-auth-checking'
+  | 'kimi-auth-login'
   | 'gh-setup'
   | 'gh-installing'
   | 'gh-auth-checking'
@@ -139,15 +170,19 @@ const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
   'claude-setup',
   'codex-setup',
   'opencode-setup',
+  'cursor-setup',
   'claude-auth-login',
   'codex-auth-login',
   'opencode-auth-login',
+  'cursor-auth-login',
   'pi-setup',
   'pi-auth-login',
   'commandcode-setup',
   'commandcode-auth-login',
   'grok-setup',
   'grok-auth-login',
+  'kimi-setup',
+  'kimi-auth-login',
   'gh-setup',
   'gh-auth-login',
 ] as const
@@ -183,13 +218,15 @@ const backendLabel: Record<CliType, string> = {
   claude: 'Claude CLI',
   codex: 'Codex CLI',
   opencode: 'OpenCode CLI',
+  cursor: 'Cursor CLI',
   pi: 'PI CLI',
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
+  kimi: 'Kimi Code CLI',
   gh: 'GitHub CLI',
 }
 
-const BETA_BACKENDS = new Set<AIBackend>(['pi', 'commandcode', 'grok'])
+const BETA_BACKENDS = new Set<AIBackend>(['pi', 'commandcode', 'grok', 'kimi'])
 
 function magicDefaultsForBackend(
   backend: AIBackend
@@ -224,6 +261,12 @@ function magicDefaultsForBackend(
       backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
     }
   }
+  if (backend === 'kimi') {
+    return {
+      models: KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
+      backends: KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
+    }
+  }
   return null
 }
 
@@ -231,9 +274,11 @@ function stepToBackend(step: OnboardingStep): AIBackend | null {
   if (step.startsWith('claude-')) return 'claude'
   if (step.startsWith('codex-')) return 'codex'
   if (step.startsWith('opencode-')) return 'opencode'
+  if (step.startsWith('cursor-')) return 'cursor'
   if (step.startsWith('pi-')) return 'pi'
   if (step.startsWith('commandcode-')) return 'commandcode'
   if (step.startsWith('grok-')) return 'grok'
+  if (step.startsWith('kimi-')) return 'kimi'
   return null
 }
 
@@ -264,14 +309,18 @@ function OnboardingDialogContent() {
   const pathDetection = useClaudePathDetection()
   const codexPathDetection = useCodexPathDetection()
   const opencodePathDetection = useOpenCodePathDetection()
+  const cursorPathDetection = useCursorPathDetection()
   const piPathDetection = usePiPathDetection()
   const commandcodePathDetection = useCommandCodePathDetection()
   const grokPathDetection = useGrokPathDetection()
+  const kimiPathDetection = useKimiPathDetection()
   const codexSetup = useCodexCliSetup()
   const opencodeSetup = useOpenCodeCliSetup()
+  const cursorStatus = useCursorCliStatus()
   const piSetup = usePiCliSetup()
   const commandcodeSetup = useCommandCodeCliSetup()
   const grokSetup = useGrokCliSetup()
+  const kimiSetup = useKimiCliSetup()
   const ghPathDetection = useGhPathDetection()
   const ghSetup = useGhCliSetup()
 
@@ -282,11 +331,15 @@ function OnboardingDialogContent() {
   const opencodeAuth = useOpenCodeCliAuth({
     enabled: !!opencodeSetup.status?.installed,
   })
+  const cursorAuth = useCursorCliAuth({
+    enabled: !!cursorStatus.data?.installed,
+  })
   const piAuth = usePiCliAuth({ enabled: !!piSetup.status?.installed })
   const commandcodeAuth = useCommandCodeCliAuth({
     enabled: !!commandcodeSetup.status?.installed,
   })
   const grokAuth = useGrokCliAuth({ enabled: !!grokSetup.status?.installed })
+  const kimiAuth = useKimiCliAuth({ enabled: !!kimiSetup.status?.installed })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
 
   const [step, _setStepRaw] = useState<OnboardingStep>('backend-select')
@@ -312,6 +365,10 @@ function OnboardingDialogContent() {
   )
   const [selectedBackends, setSelectedBackends] = useState<AIBackend[]>([])
   const [, setActiveBackendIndex] = useState(0)
+  const [cursorInstallCommand, setCursorInstallCommand] = useState<{
+    command: string
+    args: string[]
+  } | null>(null)
 
   const [claudeVersion, setClaudeVersion] = useState<string | null>(null)
   const [codexVersion, setCodexVersion] = useState<string | null>(null)
@@ -321,6 +378,7 @@ function OnboardingDialogContent() {
     null
   )
   const [grokVersion, setGrokVersion] = useState<string | null>(null)
+  const [kimiVersion, setKimiVersion] = useState<string | null>(null)
   const [ghVersion, setGhVersion] = useState<string | null>(null)
 
   const [claudeInstallFailed, setClaudeInstallFailed] = useState(false)
@@ -330,6 +388,7 @@ function OnboardingDialogContent() {
   const [commandcodeInstallFailed, setCommandcodeInstallFailed] =
     useState(false)
   const [grokInstallFailed, setGrokInstallFailed] = useState(false)
+  const [kimiInstallFailed, setKimiInstallFailed] = useState(false)
   const [ghInstallFailed, setGhInstallFailed] = useState(false)
   const [claudePathSelected, setClaudePathSelected] = useState(false)
   const [codexPathSelected, setCodexPathSelected] = useState(false)
@@ -337,13 +396,17 @@ function OnboardingDialogContent() {
   const [piPathSelected, setPiPathSelected] = useState(false)
   const [commandcodePathSelected, setCommandcodePathSelected] = useState(false)
   const [grokPathSelected, setGrokPathSelected] = useState(false)
+  const [kimiPathSelected, setKimiPathSelected] = useState(false)
   const [ghPathSelected, setGhPathSelected] = useState(false)
   const [claudeLoginAttempt, setClaudeLoginAttempt] = useState(0)
   const [codexLoginAttempt, setCodexLoginAttempt] = useState(0)
   const [opencodeLoginAttempt, setOpencodeLoginAttempt] = useState(0)
+  const [cursorInstallAttempt, setCursorInstallAttempt] = useState(0)
+  const [cursorLoginAttempt, setCursorLoginAttempt] = useState(0)
   const [piLoginAttempt, setPiLoginAttempt] = useState(0)
   const [commandcodeLoginAttempt, setCommandcodeLoginAttempt] = useState(0)
   const [grokLoginAttempt, setGrokLoginAttempt] = useState(0)
+  const [kimiLoginAttempt, setKimiLoginAttempt] = useState(0)
   const [ghLoginAttempt, setGhLoginAttempt] = useState(0)
 
   const goBack = useCallback(() => {
@@ -387,6 +450,11 @@ function OnboardingDialogContent() {
       setGrokInstallFailed(false)
       return
     }
+    if (current === 'kimi-setup' && kimiPathSelected) {
+      setKimiPathSelected(false)
+      setKimiInstallFailed(false)
+      return
+    }
     if (current === 'gh-setup' && ghPathSelected) {
       dbg('step: BACK (sub-state) gh-setup installer → picker')
       setGhPathSelected(false)
@@ -418,6 +486,9 @@ function OnboardingDialogContent() {
       } else if (prev === 'grok-setup') {
         setGrokPathSelected(false)
         setGrokInstallFailed(false)
+      } else if (prev === 'kimi-setup') {
+        setKimiPathSelected(false)
+        setKimiInstallFailed(false)
       } else if (prev === 'gh-setup') {
         setGhPathSelected(false)
         setGhInstallFailed(false)
@@ -433,6 +504,7 @@ function OnboardingDialogContent() {
     piPathSelected,
     commandcodePathSelected,
     grokPathSelected,
+    kimiPathSelected,
     ghPathSelected,
   ])
 
@@ -445,6 +517,7 @@ function OnboardingDialogContent() {
     (step === 'pi-setup' && piPathSelected) ||
     (step === 'commandcode-setup' && commandcodePathSelected) ||
     (step === 'grok-setup' && grokPathSelected) ||
+    (step === 'kimi-setup' && kimiPathSelected) ||
     (step === 'gh-setup' && ghPathSelected)
   const canGoBack =
     (historyStack.length > 0 || hasSubStateBack) &&
@@ -462,9 +535,12 @@ function OnboardingDialogContent() {
   const claudeLoginTerminalId = `onboarding-claude-login-${loginSessionSeed}-${claudeLoginAttempt}`
   const codexLoginTerminalId = `onboarding-codex-login-${loginSessionSeed}-${codexLoginAttempt}`
   const opencodeLoginTerminalId = `onboarding-opencode-login-${loginSessionSeed}-${opencodeLoginAttempt}`
+  const cursorInstallTerminalId = `onboarding-cursor-install-${loginSessionSeed}-${cursorInstallAttempt}`
+  const cursorLoginTerminalId = `onboarding-cursor-login-${loginSessionSeed}-${cursorLoginAttempt}`
   const piLoginTerminalId = `onboarding-pi-login-${loginSessionSeed}-${piLoginAttempt}`
   const commandcodeLoginTerminalId = `onboarding-commandcode-login-${loginSessionSeed}-${commandcodeLoginAttempt}`
   const grokLoginTerminalId = `onboarding-grok-login-${loginSessionSeed}-${grokLoginAttempt}`
+  const kimiLoginTerminalId = `onboarding-kimi-login-${loginSessionSeed}-${kimiLoginAttempt}`
   const ghLoginTerminalId = `onboarding-gh-login-${loginSessionSeed}-${ghLoginAttempt}`
 
   const stableClaudeVersions = claudeSetup.versions.filter(v => !v.prerelease)
@@ -477,6 +553,7 @@ function OnboardingDialogContent() {
     v => !v.prerelease
   )
   const stableGrokVersions = grokSetup.versions.filter(v => !v.prerelease)
+  const stableKimiVersions = kimiSetup.versions.filter(v => !v.prerelease)
   const stableGhVersions = ghSetup.versions.filter(v => !v.prerelease)
 
   useEffect(() => {
@@ -526,6 +603,14 @@ function OnboardingDialogContent() {
   }, [grokVersion, stableGrokVersions])
 
   useEffect(() => {
+    if (!kimiVersion && stableKimiVersions.length > 0) {
+      queueMicrotask(() =>
+        setKimiVersion(stableKimiVersions[0]?.version ?? null)
+      )
+    }
+  }, [kimiVersion, stableKimiVersions])
+
+  useEffect(() => {
     if (!ghVersion && stableGhVersions.length > 0) {
       queueMicrotask(() => setGhVersion(stableGhVersions[0]?.version ?? null))
     }
@@ -544,14 +629,19 @@ function OnboardingDialogContent() {
         ready =
           !!opencodeSetup.status?.installed &&
           !!opencodeAuth.data?.authenticated
+      } else if (backend === 'cursor') {
+        ready =
+          !!cursorStatus.data?.installed && !!cursorAuth.data?.authenticated
       } else if (backend === 'pi') {
         ready = !!piSetup.status?.installed && !!piAuth.data?.authenticated
       } else if (backend === 'commandcode') {
         ready =
           !!commandcodeSetup.status?.installed &&
           !!commandcodeAuth.data?.authenticated
-      } else {
+      } else if (backend === 'grok') {
         ready = !!grokSetup.status?.installed && !!grokAuth.data?.authenticated
+      } else {
+        ready = !!kimiSetup.status?.installed && !!kimiAuth.data?.authenticated
       }
       dbg('isBackendReady:', backend, '→', ready)
       return ready
@@ -563,12 +653,16 @@ function OnboardingDialogContent() {
       codexAuth.data?.authenticated,
       opencodeSetup.status?.installed,
       opencodeAuth.data?.authenticated,
+      cursorStatus.data?.installed,
+      cursorAuth.data?.authenticated,
       piSetup.status?.installed,
       piAuth.data?.authenticated,
       commandcodeSetup.status?.installed,
       commandcodeAuth.data?.authenticated,
       grokSetup.status?.installed,
       grokAuth.data?.authenticated,
+      kimiSetup.status?.installed,
+      kimiAuth.data?.authenticated,
     ]
   )
 
@@ -627,27 +721,35 @@ function OnboardingDialogContent() {
     claudeSetup.isStatusLoading ||
     codexSetup.isStatusLoading ||
     opencodeSetup.isStatusLoading ||
+    cursorStatus.isLoading ||
     piSetup.isStatusLoading ||
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
+    kimiSetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
     (codexSetup.status?.installed &&
       (codexAuth.isLoading || codexAuth.isFetching)) ||
     (opencodeSetup.status?.installed &&
       (opencodeAuth.isLoading || opencodeAuth.isFetching)) ||
+    (cursorStatus.data?.installed &&
+      (cursorAuth.isLoading || cursorAuth.isFetching)) ||
     (piSetup.status?.installed && (piAuth.isLoading || piAuth.isFetching)) ||
     (commandcodeSetup.status?.installed &&
       (commandcodeAuth.isLoading || commandcodeAuth.isFetching)) ||
-    (grokSetup.status?.installed && (grokAuth.isLoading || grokAuth.isFetching))
+    (grokSetup.status?.installed &&
+      (grokAuth.isLoading || grokAuth.isFetching)) ||
+    (kimiSetup.status?.installed && (kimiAuth.isLoading || kimiAuth.isFetching))
 
   const loadingInitialState =
     claudeSetup.isStatusLoading ||
     codexSetup.isStatusLoading ||
     opencodeSetup.isStatusLoading ||
+    cursorStatus.isLoading ||
     piSetup.isStatusLoading ||
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
+    kimiSetup.isStatusLoading ||
     ghSetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
@@ -655,34 +757,44 @@ function OnboardingDialogContent() {
       (codexAuth.isLoading || codexAuth.isFetching)) ||
     (opencodeSetup.status?.installed &&
       (opencodeAuth.isLoading || opencodeAuth.isFetching)) ||
+    (cursorStatus.data?.installed &&
+      (cursorAuth.isLoading || cursorAuth.isFetching)) ||
     (piSetup.status?.installed && (piAuth.isLoading || piAuth.isFetching)) ||
     (commandcodeSetup.status?.installed &&
       (commandcodeAuth.isLoading || commandcodeAuth.isFetching)) ||
     (grokSetup.status?.installed &&
       (grokAuth.isLoading || grokAuth.isFetching)) ||
+    (kimiSetup.status?.installed &&
+      (kimiAuth.isLoading || kimiAuth.isFetching)) ||
     (ghSetup.status?.installed && (ghAuth.isLoading || ghAuth.isFetching))
 
   dbg('loadingInitialState:', loadingInitialState, {
     claudeStatusLoading: claudeSetup.isStatusLoading,
     codexStatusLoading: codexSetup.isStatusLoading,
     opencodeStatusLoading: opencodeSetup.isStatusLoading,
+    cursorStatusLoading: cursorStatus.isLoading,
     piStatusLoading: piSetup.isStatusLoading,
     commandcodeStatusLoading: commandcodeSetup.isStatusLoading,
     grokStatusLoading: grokSetup.isStatusLoading,
+    kimiStatusLoading: kimiSetup.isStatusLoading,
     ghStatusLoading: ghSetup.isStatusLoading,
     claudeInstalled: claudeSetup.status?.installed,
     codexInstalled: codexSetup.status?.installed,
     opencodeInstalled: opencodeSetup.status?.installed,
+    cursorInstalled: cursorStatus.data?.installed,
     piInstalled: piSetup.status?.installed,
     commandcodeInstalled: commandcodeSetup.status?.installed,
     grokInstalled: grokSetup.status?.installed,
+    kimiInstalled: kimiSetup.status?.installed,
     ghInstalled: ghSetup.status?.installed,
     claudeAuthLoading: claudeAuth.isLoading,
     codexAuthLoading: codexAuth.isLoading,
     opencodeAuthLoading: opencodeAuth.isLoading,
+    cursorAuthLoading: cursorAuth.isLoading,
     piAuthLoading: piAuth.isLoading,
     commandcodeAuthLoading: commandcodeAuth.isLoading,
     grokAuthLoading: grokAuth.isLoading,
+    kimiAuthLoading: kimiAuth.isLoading,
     ghAuthLoading: ghAuth.isLoading,
   })
 
@@ -714,20 +826,26 @@ function OnboardingDialogContent() {
       setPiInstallFailed(false)
       setCommandcodeInstallFailed(false)
       setGrokInstallFailed(false)
+      setKimiInstallFailed(false)
       setGhInstallFailed(false)
       setClaudePathSelected(false)
       setCodexPathSelected(false)
       setOpencodePathSelected(false)
+      setCursorInstallCommand(null)
       setPiPathSelected(false)
       setCommandcodePathSelected(false)
       setGrokPathSelected(false)
+      setKimiPathSelected(false)
       setGhPathSelected(false)
       setClaudeLoginAttempt(0)
       setCodexLoginAttempt(0)
       setOpencodeLoginAttempt(0)
+      setCursorInstallAttempt(0)
+      setCursorLoginAttempt(0)
       setPiLoginAttempt(0)
       setCommandcodeLoginAttempt(0)
       setGrokLoginAttempt(0)
+      setKimiLoginAttempt(0)
       setGhLoginAttempt(0)
     })
 
@@ -920,6 +1038,24 @@ function OnboardingDialogContent() {
   ])
 
   useEffect(() => {
+    if (step !== 'cursor-auth-checking') return
+    if (cursorAuth.isLoading || cursorAuth.isFetching) return
+
+    if (cursorAuth.data?.authenticated) {
+      queueMicrotask(() => moveToNextBackendOrGh('cursor'))
+    } else {
+      queueMicrotask(() => setStep('cursor-auth-login'))
+    }
+  }, [
+    step,
+    cursorAuth.isLoading,
+    cursorAuth.isFetching,
+    cursorAuth.data?.authenticated,
+    moveToNextBackendOrGh,
+    setStep,
+  ])
+
+  useEffect(() => {
     if (step !== 'pi-auth-checking') return
     if (piAuth.isLoading || piAuth.isFetching) return
 
@@ -969,6 +1105,24 @@ function OnboardingDialogContent() {
     grokAuth.isLoading,
     grokAuth.isFetching,
     grokAuth.data?.authenticated,
+    moveToNextBackendOrGh,
+    setStep,
+  ])
+
+  useEffect(() => {
+    if (step !== 'kimi-auth-checking') return
+    if (kimiAuth.isLoading || kimiAuth.isFetching) return
+
+    if (kimiAuth.data?.authenticated) {
+      queueMicrotask(() => moveToNextBackendOrGh('kimi'))
+    } else {
+      queueMicrotask(() => setStep('kimi-auth-login'))
+    }
+  }, [
+    step,
+    kimiAuth.isLoading,
+    kimiAuth.isFetching,
+    kimiAuth.data?.authenticated,
     moveToNextBackendOrGh,
     setStep,
   ])
@@ -1261,6 +1415,32 @@ function OnboardingDialogContent() {
     setStep,
   ])
 
+  const handleKimiJeanSelect = useCallback(() => {
+    setKimiPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { kimi_cli_source: 'jean' },
+      {
+        onSuccess: () => {
+          if (kimiSetup.status?.installed) {
+            setStep('kimi-auth-checking')
+            kimiAuth.refetch()
+          }
+        },
+        onError: () => {
+          setKimiPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [
+    preferences,
+    patchPreferences,
+    kimiSetup.status?.installed,
+    kimiAuth,
+    setStep,
+  ])
+
   const handleGhJeanSelect = useCallback(() => {
     dbg('handleGhJeanSelect: saving gh_cli_source=jean')
     setGhPathSelected(true)
@@ -1333,6 +1513,43 @@ function OnboardingDialogContent() {
     }
   }, [preferences, patchPreferences, opencodeAuth, setStep])
 
+  const handleCursorUsePath = useCallback(async () => {
+    await cursorStatus.refetch()
+    await cursorAuth.refetch()
+    setStep('cursor-auth-checking')
+  }, [cursorStatus, cursorAuth, setStep])
+
+  const handleCursorInstall = useCallback(async () => {
+    try {
+      const installCommand = await getCursorInstallCommand()
+      setCursorInstallCommand({
+        command: installCommand.command,
+        args: installCommand.args,
+      })
+      setCursorInstallAttempt(attempt => attempt + 1)
+      setStep('cursor-installing')
+    } catch (error) {
+      toast.error('Failed to prepare Cursor Agent install command', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [setStep])
+
+  const handleCursorInstallComplete = useCallback(async () => {
+    const status = await cursorStatus.refetch()
+    if (!status.data?.installed) {
+      toast.error('Cursor Agent was not detected after installation')
+      setHistoryStack(history =>
+        history.at(-1) === 'cursor-setup' ? history.slice(0, -1) : history
+      )
+      setStep('cursor-setup', { replace: true })
+      return
+    }
+
+    await cursorAuth.refetch()
+    setStep('cursor-auth-checking')
+  }, [cursorStatus, cursorAuth, setStep])
+
   const handlePiPathSelect = useCallback(() => {
     setPiPathSelected(true)
     if (!preferences) return
@@ -1386,6 +1603,24 @@ function OnboardingDialogContent() {
       }
     )
   }, [preferences, patchPreferences, grokAuth, setStep])
+
+  const handleKimiPathSelect = useCallback(() => {
+    setKimiPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { kimi_cli_source: 'path' },
+      {
+        onSuccess: () => {
+          setStep('kimi-auth-checking')
+          kimiAuth.refetch()
+        },
+        onError: () => {
+          setKimiPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [preferences, patchPreferences, kimiAuth, setStep])
 
   const handleGhPathSelect = useCallback(() => {
     dbg('handleGhPathSelect: saving gh_cli_source=path')
@@ -1490,6 +1725,21 @@ function OnboardingDialogContent() {
     })
   }, [grokVersion, grokSetup, grokAuth])
 
+  const handleKimiInstall = useCallback(() => {
+    if (!kimiVersion) return
+    setStep('kimi-installing')
+    kimiSetup.install(kimiVersion, {
+      onSuccess: () => {
+        setStep('kimi-auth-checking')
+        kimiAuth.refetch()
+      },
+      onError: () => {
+        setKimiInstallFailed(true)
+        setStep('kimi-setup')
+      },
+    })
+  }, [kimiVersion, kimiSetup, kimiAuth])
+
   const handleGhInstall = useCallback(() => {
     dbg('handleGhInstall: version =', ghVersion)
     if (!ghVersion) return
@@ -1529,6 +1779,11 @@ function OnboardingDialogContent() {
     dbg('handleOpencodeLoginComplete: refetch result =', result.data)
   }, [opencodeAuth, setStep])
 
+  const handleCursorLoginComplete = useCallback(async () => {
+    await cursorAuth.refetch()
+    setStep('cursor-auth-checking')
+  }, [cursorAuth, setStep])
+
   const handlePiLoginComplete = useCallback(async () => {
     setStep('pi-auth-checking')
     await piAuth.refetch()
@@ -1543,6 +1798,11 @@ function OnboardingDialogContent() {
     setStep('grok-auth-checking')
     await grokAuth.refetch()
   }, [grokAuth, setStep])
+
+  const handleKimiLoginComplete = useCallback(async () => {
+    setStep('kimi-auth-checking')
+    await kimiAuth.refetch()
+  }, [kimiAuth, setStep])
 
   const handleGhLoginComplete = useCallback(async () => {
     dbg('handleGhLoginComplete: refetching auth')
@@ -1563,6 +1823,10 @@ function OnboardingDialogContent() {
     setOpencodeLoginAttempt(prev => prev + 1)
   }, [])
 
+  const handleCursorLoginRetry = useCallback(() => {
+    setCursorLoginAttempt(prev => prev + 1)
+  }, [])
+
   const handlePiLoginRetry = useCallback(() => {
     setPiLoginAttempt(prev => prev + 1)
   }, [])
@@ -1575,6 +1839,10 @@ function OnboardingDialogContent() {
     setGrokLoginAttempt(prev => prev + 1)
   }, [])
 
+  const handleKimiLoginRetry = useCallback(() => {
+    setKimiLoginAttempt(prev => prev + 1)
+  }, [])
+
   const handleGhLoginRetry = useCallback(() => {
     setGhLoginAttempt(prev => prev + 1)
   }, [])
@@ -1583,9 +1851,11 @@ function OnboardingDialogContent() {
     claudeSetup.refetchStatus()
     codexSetup.refetchStatus()
     opencodeSetup.refetchStatus()
+    cursorStatus.refetch()
     piSetup.refetchStatus()
     commandcodeSetup.refetchStatus()
     grokSetup.refetchStatus()
+    kimiSetup.refetchStatus()
     ghSetup.refetchStatus()
     // Set the first selected backend as the default so the preference
     // isn't left pointing at an uninstalled backend (e.g. 'claude').
@@ -1613,9 +1883,11 @@ function OnboardingDialogContent() {
     claudeSetup,
     codexSetup,
     opencodeSetup,
+    cursorStatus,
     piSetup,
     commandcodeSetup,
     grokSetup,
+    kimiSetup,
     ghSetup,
     selectedBackends,
     preferences,
@@ -1745,6 +2017,23 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (step === 'kimi-setup' || step === 'kimi-installing') {
+      return {
+        type: 'kimi',
+        title: 'Kimi Code CLI',
+        description: 'Kimi Code CLI enables Moonshot AI-backed sessions.',
+        versions: stableKimiVersions,
+        isVersionsLoading: kimiSetup.isVersionsLoading,
+        isVersionsError: kimiSetup.isVersionsError,
+        onRetryVersions: kimiSetup.refetchVersions,
+        isInstalling: kimiSetup.isInstalling,
+        installError: kimiInstallFailed ? kimiSetup.installError : null,
+        progress: kimiSetup.progress,
+        install: kimiSetup.install,
+        currentVersion: kimiSetup.status?.version,
+      }
+    }
+
     if (step === 'gh-setup' || step === 'gh-installing') {
       return {
         type: 'gh',
@@ -1777,6 +2066,7 @@ function OnboardingDialogContent() {
   const isCommandcodeReinstall =
     commandcodeSetup.status?.installed && step === 'commandcode-setup'
   const isGrokReinstall = grokSetup.status?.installed && step === 'grok-setup'
+  const isKimiReinstall = kimiSetup.status?.installed && step === 'kimi-setup'
   const isGhReinstall = ghSetup.status?.installed && step === 'gh-setup'
 
   // When CLI source is 'path', use the path detection result for login command
@@ -1798,6 +2088,9 @@ function OnboardingDialogContent() {
       ? opencodePathDetection.data.path
       : (opencodeSetup.status?.path ?? '')
   const opencodeLoginArgs = ['auth', 'login']
+  const cursorLoginCommand =
+    cursorStatus.data?.path ?? cursorPathDetection.data?.path ?? ''
+  const cursorLoginArgs = ['login']
   const piLoginCommand =
     piPathSelected && piPathDetection.data?.path
       ? piPathDetection.data.path
@@ -1813,6 +2106,11 @@ function OnboardingDialogContent() {
       ? grokPathDetection.data.path
       : (grokSetup.status?.path ?? '')
   const grokLoginArgs = ['login']
+  const kimiLoginCommand =
+    kimiPathSelected && kimiPathDetection.data?.path
+      ? kimiPathDetection.data.path
+      : (kimiSetup.status?.path ?? '')
+  const kimiLoginArgs = ['login']
   const ghLoginCommand =
     ghPathSelected && ghPathDetection.data?.path
       ? ghPathDetection.data.path
@@ -1841,6 +2139,12 @@ function OnboardingDialogContent() {
       pathSelected: opencodePathSelected,
       detectedPath: opencodePathDetection.data?.path,
     },
+    cursor: {
+      cmd: cursorLoginCommand,
+      args: cursorLoginArgs,
+      path: cursorStatus.data?.path,
+      detectedPath: cursorPathDetection.data?.path,
+    },
     pi: {
       cmd: piLoginCommand,
       args: piLoginArgs,
@@ -1861,6 +2165,13 @@ function OnboardingDialogContent() {
       path: grokSetup.status?.path,
       pathSelected: grokPathSelected,
       detectedPath: grokPathDetection.data?.path,
+    },
+    kimi: {
+      cmd: kimiLoginCommand,
+      args: kimiLoginArgs,
+      path: kimiSetup.status?.path,
+      pathSelected: kimiPathSelected,
+      detectedPath: kimiPathDetection.data?.path,
     },
     gh: {
       cmd: ghLoginCommand,
@@ -1973,6 +2284,17 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (dialogStep === 'cursor-setup' || dialogStep === 'cursor-installing') {
+      return {
+        title: cursorStatus.data?.installed
+          ? `Reconfigure ${backendName}`
+          : `Setup ${backendName}`,
+        description: cursorPathDetection.data?.found
+          ? 'Use your system Cursor Agent or run the official installer again.'
+          : 'Install Cursor Agent with the official Cursor installer.',
+      }
+    }
+
     if (dialogStep === 'pi-setup' || dialogStep === 'pi-installing') {
       return {
         title: isPiReinstall
@@ -2015,6 +2337,19 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (dialogStep === 'kimi-setup' || dialogStep === 'kimi-installing') {
+      return {
+        title: isKimiReinstall
+          ? `Change ${backendName} Version`
+          : `Setup ${backendName}`,
+        description: isKimiReinstall
+          ? 'Select a version to install. This will replace the current installation.'
+          : kimiPathDetection.data?.found
+            ? 'Choose to use your system Kimi Code or install with Jean.'
+            : 'Select a version to install.',
+      }
+    }
+
     if (
       dialogStep === 'claude-auth-checking' ||
       dialogStep === 'claude-auth-login' ||
@@ -2022,12 +2357,16 @@ function OnboardingDialogContent() {
       dialogStep === 'codex-auth-login' ||
       dialogStep === 'opencode-auth-checking' ||
       dialogStep === 'opencode-auth-login' ||
+      dialogStep === 'cursor-auth-checking' ||
+      dialogStep === 'cursor-auth-login' ||
       dialogStep === 'pi-auth-checking' ||
       dialogStep === 'pi-auth-login' ||
       dialogStep === 'commandcode-auth-checking' ||
       dialogStep === 'commandcode-auth-login' ||
       dialogStep === 'grok-auth-checking' ||
-      dialogStep === 'grok-auth-login'
+      dialogStep === 'grok-auth-login' ||
+      dialogStep === 'kimi-auth-checking' ||
+      dialogStep === 'kimi-auth-login'
     ) {
       return {
         title: `Authenticate ${backendName}`,
@@ -2046,9 +2385,11 @@ function OnboardingDialogContent() {
       step.startsWith('claude-') ||
       step.startsWith('codex-') ||
       step.startsWith('opencode-') ||
+      step.startsWith('cursor-') ||
       step.startsWith('pi-') ||
       step.startsWith('commandcode-') ||
-      step.startsWith('grok-')
+      step.startsWith('grok-') ||
+      step.startsWith('kimi-')
     const isGhStep = step.startsWith('gh-')
 
     const backendComplete = !isBackendSelection && !isBackendStep
@@ -2148,9 +2489,12 @@ function OnboardingDialogContent() {
                 claudeVersion={claudeSetup.status?.version}
                 codexVersion={codexSetup.status?.version}
                 opencodeVersion={opencodeSetup.status?.version}
+                cursorInstalled={!!cursorStatus.data?.installed}
+                cursorVersion={cursorStatus.data?.version}
                 piVersion={piSetup.status?.version}
                 commandcodeVersion={commandcodeSetup.status?.version}
                 grokVersion={grokSetup.status?.version}
+                kimiVersion={kimiSetup.status?.version}
                 ghVersion={ghSetup.status?.version}
                 onContinue={handleComplete}
               />
@@ -2169,6 +2513,17 @@ function OnboardingDialogContent() {
                 cliName="OpenCode CLI"
                 progress={cliData.progress}
               />
+            ) : step === 'cursor-installing' && cursorInstallCommand ? (
+              <AuthLoginState
+                key={cursorInstallTerminalId}
+                cliName="Cursor Agent"
+                terminalId={cursorInstallTerminalId}
+                command={cursorInstallCommand.command}
+                commandArgs={cursorInstallCommand.args}
+                action="install"
+                onComplete={handleCursorInstallComplete}
+                onRetry={handleCursorInstall}
+              />
             ) : step === 'pi-installing' && cliData ? (
               <InstallingState cliName="PI CLI" progress={cliData.progress} />
             ) : step === 'commandcode-installing' && cliData ? (
@@ -2178,6 +2533,11 @@ function OnboardingDialogContent() {
               />
             ) : step === 'grok-installing' && cliData ? (
               <InstallingState cliName="Grok CLI" progress={cliData.progress} />
+            ) : step === 'kimi-installing' && cliData ? (
+              <InstallingState
+                cliName="Kimi Code CLI"
+                progress={cliData.progress}
+              />
             ) : step === 'gh-installing' && cliData ? (
               <InstallingState
                 cliName="GitHub CLI"
@@ -2189,12 +2549,16 @@ function OnboardingDialogContent() {
               <AuthCheckingState cliName="Codex CLI" />
             ) : step === 'opencode-auth-checking' ? (
               <AuthCheckingState cliName="OpenCode CLI" />
+            ) : step === 'cursor-auth-checking' ? (
+              <AuthCheckingState cliName="Cursor CLI" />
             ) : step === 'pi-auth-checking' ? (
               <AuthCheckingState cliName="PI CLI" />
             ) : step === 'commandcode-auth-checking' ? (
               <AuthCheckingState cliName="Command Code CLI" />
             ) : step === 'grok-auth-checking' ? (
               <AuthCheckingState cliName="Grok CLI" />
+            ) : step === 'kimi-auth-checking' ? (
+              <AuthCheckingState cliName="Kimi Code CLI" />
             ) : step === 'gh-auth-checking' ? (
               <AuthCheckingState cliName="GitHub CLI" />
             ) : step === 'claude-setup' && !claudePathSelected ? (
@@ -2233,6 +2597,25 @@ function OnboardingDialogContent() {
                 onSelectPath={handleOpencodePathSelect}
                 onSelectJean={handleOpencodeJeanSelect}
               />
+            ) : step === 'cursor-setup' ? (
+              <CursorSetupState
+                pathFound={
+                  !!cursorStatus.data?.installed ||
+                  !!cursorPathDetection.data?.found
+                }
+                pathVersion={
+                  cursorStatus.data?.version ??
+                  cursorPathDetection.data?.version ??
+                  null
+                }
+                pathPath={
+                  cursorStatus.data?.path ??
+                  cursorPathDetection.data?.path ??
+                  null
+                }
+                onUsePath={handleCursorUsePath}
+                onInstall={handleCursorInstall}
+              />
             ) : step === 'pi-setup' && !piPathSelected ? (
               <CliPathSelector
                 cliName="PI CLI"
@@ -2268,6 +2651,18 @@ function OnboardingDialogContent() {
                 jeanInstalled={!!grokSetup.status?.installed}
                 onSelectPath={handleGrokPathSelect}
                 onSelectJean={handleGrokJeanSelect}
+              />
+            ) : step === 'kimi-setup' && !kimiPathSelected ? (
+              <CliPathSelector
+                cliName="Kimi Code CLI"
+                pathFound={!!kimiPathDetection.data?.found}
+                pathVersion={kimiPathDetection.data?.version ?? null}
+                pathPath={kimiPathDetection.data?.path ?? null}
+                isLoading={kimiPathSelected}
+                currentSource={preferences?.kimi_cli_source ?? null}
+                jeanInstalled={!!kimiSetup.status?.installed}
+                onSelectPath={handleKimiPathSelect}
+                onSelectJean={handleKimiJeanSelect}
               />
             ) : step === 'claude-auth-login' ? (
               claudeLoginCommand ? (
@@ -2311,6 +2706,20 @@ function OnboardingDialogContent() {
               ) : (
                 <AuthCheckingState cliName="OpenCode CLI" />
               )
+            ) : step === 'cursor-auth-login' ? (
+              cursorLoginCommand ? (
+                <AuthLoginState
+                  key={cursorLoginTerminalId}
+                  cliName="Cursor CLI"
+                  terminalId={cursorLoginTerminalId}
+                  command={cursorLoginCommand}
+                  commandArgs={cursorLoginArgs}
+                  onComplete={handleCursorLoginComplete}
+                  onRetry={handleCursorLoginRetry}
+                />
+              ) : (
+                <AuthCheckingState cliName="Cursor CLI" />
+              )
             ) : step === 'pi-auth-login' ? (
               piLoginCommand ? (
                 <AuthLoginState
@@ -2352,6 +2761,20 @@ function OnboardingDialogContent() {
                 />
               ) : (
                 <AuthCheckingState cliName="Grok CLI" />
+              )
+            ) : step === 'kimi-auth-login' ? (
+              kimiLoginCommand ? (
+                <AuthLoginState
+                  key={kimiLoginTerminalId}
+                  cliName="Kimi Code CLI"
+                  terminalId={kimiLoginTerminalId}
+                  command={kimiLoginCommand}
+                  commandArgs={kimiLoginArgs}
+                  onComplete={handleKimiLoginComplete}
+                  onRetry={handleKimiLoginRetry}
+                />
+              ) : (
+                <AuthCheckingState cliName="Kimi Code CLI" />
               )
             ) : step === 'gh-setup' && !ghPathSelected ? (
               <CliPathSelector
@@ -2397,7 +2820,9 @@ function OnboardingDialogContent() {
                               ? handleCommandcodeInstall
                               : cliData.type === 'grok'
                                 ? handleGrokInstall
-                                : handleGhInstall
+                                : cliData.type === 'kimi'
+                                  ? handleKimiInstall
+                                  : handleGhInstall
                   }
                 />
               ) : (
@@ -2417,7 +2842,9 @@ function OnboardingDialogContent() {
                               ? commandcodeVersion
                               : cliData.type === 'grok'
                                 ? grokVersion
-                                : ghVersion
+                                : cliData.type === 'kimi'
+                                  ? kimiVersion
+                                  : ghVersion
                   }
                   currentVersion={
                     (cliData.type === 'claude' && isClaudeReinstall) ||
@@ -2427,6 +2854,7 @@ function OnboardingDialogContent() {
                     (cliData.type === 'commandcode' &&
                       isCommandcodeReinstall) ||
                     (cliData.type === 'grok' && isGrokReinstall) ||
+                    (cliData.type === 'kimi' && isKimiReinstall) ||
                     (cliData.type === 'gh' && isGhReinstall)
                       ? cliData.currentVersion
                       : null
@@ -2447,7 +2875,9 @@ function OnboardingDialogContent() {
                               ? setCommandcodeVersion
                               : cliData.type === 'grok'
                                 ? setGrokVersion
-                                : setGhVersion
+                                : cliData.type === 'kimi'
+                                  ? setKimiVersion
+                                  : setGhVersion
                   }
                   onInstall={
                     cliData.type === 'claude'
@@ -2462,7 +2892,9 @@ function OnboardingDialogContent() {
                               ? handleCommandcodeInstall
                               : cliData.type === 'grok'
                                 ? handleGrokInstall
-                                : handleGhInstall
+                                : cliData.type === 'kimi'
+                                  ? handleKimiInstall
+                                  : handleGhInstall
                   }
                 />
               )
@@ -2493,6 +2925,67 @@ function OnboardingDialogContent() {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface CursorSetupStateProps {
+  pathFound: boolean
+  pathVersion: string | null
+  pathPath: string | null
+  onUsePath: () => void
+  onInstall: () => void
+}
+
+export function CursorSetupState({
+  pathFound,
+  pathVersion,
+  pathPath,
+  onUsePath,
+  onInstall,
+}: CursorSetupStateProps) {
+  return (
+    <div className="space-y-4">
+      <div className="text-center text-sm text-muted-foreground">
+        Cursor Agent is installed on your system PATH using Cursor&apos;s
+        official installer.
+      </div>
+
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={onUsePath}
+          disabled={!pathFound}
+          className="w-full rounded-lg border-2 border-primary/50 bg-primary/5 p-4 text-left transition-colors hover:border-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <div className="font-medium">Use system Cursor Agent</div>
+          <div className="text-sm text-muted-foreground">
+            {pathFound
+              ? `Version: ${pathVersion || 'unknown'}`
+              : 'Not detected'}
+          </div>
+          {pathFound && pathPath && (
+            <div className="mt-1 break-all text-xs text-muted-foreground">
+              {pathPath}
+            </div>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={onInstall}
+          className="w-full rounded-lg border-2 border-border p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted"
+        >
+          <div className="font-medium">
+            {pathFound
+              ? 'Run official installer again'
+              : 'Install Cursor Agent'}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            Jean will run Cursor&apos;s official installer in the terminal.
+          </div>
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -2585,9 +3078,12 @@ interface SuccessStateProps {
   claudeVersion: string | null | undefined
   codexVersion: string | null | undefined
   opencodeVersion: string | null | undefined
+  cursorInstalled: boolean
+  cursorVersion: string | null | undefined
   piVersion: string | null | undefined
   commandcodeVersion: string | null | undefined
   grokVersion: string | null | undefined
+  kimiVersion: string | null | undefined
   ghVersion: string | null | undefined
   onContinue: () => void
 }
@@ -2596,9 +3092,12 @@ function SuccessState({
   claudeVersion,
   codexVersion,
   opencodeVersion,
+  cursorInstalled,
+  cursorVersion,
   piVersion,
   commandcodeVersion,
   grokVersion,
+  kimiVersion,
   ghVersion,
   onContinue,
 }: SuccessStateProps) {
@@ -2610,16 +3109,24 @@ function SuccessState({
           {claudeVersion && <p>Claude CLI: v{claudeVersion}</p>}
           {codexVersion && <p>Codex CLI: v{codexVersion}</p>}
           {opencodeVersion && <p>OpenCode CLI: v{opencodeVersion}</p>}
+          {cursorInstalled && (
+            <p>
+              Cursor CLI: {cursorVersion ? `v${cursorVersion}` : 'Installed'}
+            </p>
+          )}
           {piVersion && <p>PI CLI: v{piVersion}</p>}
           {commandcodeVersion && <p>Command Code CLI: v{commandcodeVersion}</p>}
           {grokVersion && <p>Grok CLI: v{grokVersion}</p>}
+          {kimiVersion && <p>Kimi Code CLI: v{kimiVersion}</p>}
           {ghVersion && <p>GitHub CLI: v{ghVersion}</p>}
           {!claudeVersion &&
             !codexVersion &&
             !opencodeVersion &&
+            !cursorInstalled &&
             !piVersion &&
             !commandcodeVersion &&
             !grokVersion &&
+            !kimiVersion &&
             !ghVersion && <p>Setup complete</p>}
         </div>
       </div>

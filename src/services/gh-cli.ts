@@ -18,9 +18,9 @@ import type {
   GhInstallProgress,
 } from '@/types/gh-cli'
 
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 
 // Query keys for GitHub CLI
 export const ghCliQueryKeys = {

@@ -9,7 +9,10 @@ import {
   persistEnqueue,
 } from '@/services/chat'
 import { useChatStore } from '@/store/chat-store'
-import { buildCodexUserInputAnswerMap } from '@/types/chat'
+import {
+  buildCodexUserInputAnswerMap,
+  getCodexUserInputRequestId,
+} from '@/types/chat'
 import type {
   ChatMessage,
   CodexCommandApprovalRequest,
@@ -44,6 +47,8 @@ import type {
 } from '@/types/projects'
 import { clearPlanApprovalTransientState } from './plan-approval-state'
 import type { ApprovalModelOverride } from '../ApprovalModelSubmenu'
+
+const respondingCodexUserInputRequests = new Set<string>()
 
 /** Git commands to auto-approve for magic prompts (no permission prompts needed) */
 export const GIT_ALLOWED_TOOLS = [
@@ -235,10 +240,10 @@ function getDefaultModelForBackend(
   preferences: AppPreferences | undefined
 ): string {
   if (backend === 'codex') {
-    return preferences?.selected_codex_model ?? 'gpt-5.5'
+    return preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   }
   if (backend === 'opencode') {
-    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.5'
+    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
   }
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
@@ -250,7 +255,10 @@ function getDefaultModelForBackend(
     return preferences?.selected_commandcode_model ?? 'commandcode/default'
   }
   if (backend === 'grok') {
-    return preferences?.selected_grok_model ?? 'grok/grok-composer-2.5-fast'
+    return preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  }
+  if (backend === 'kimi') {
+    return preferences?.selected_kimi_model ?? 'kimi/default'
   }
   return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
 }
@@ -261,7 +269,9 @@ const SESSION_BACKENDS = new Set<Session['backend']>([
   'opencode',
   'cursor',
   'commandcode',
+  'pi',
   'grok',
+  'kimi',
 ])
 
 function asSessionBackend(
@@ -2923,20 +2933,25 @@ export function useMessageHandlers({
       if (!sessionId || !worktreeId || !worktreePath) return
 
       const store = useChatStore.getState()
-      const toolCallId = request.item_id || `codex-user-input-${request.rpc_id}`
-      store.markQuestionAnswered(sessionId, toolCallId, answers)
-      store.updateToolCallOutput(sessionId, toolCallId, JSON.stringify(answers))
-      store.setPendingCodexUserInputRequests(
-        sessionId,
-        store
-          .getPendingCodexUserInputRequests(sessionId)
-          .filter(item => item.rpc_id !== request.rpc_id)
-      )
-      store.setWaitingForInput(sessionId, false)
+      const toolCallId = getCodexUserInputRequestId(request)
+      const responseKey = `${sessionId}:${request.rpc_id}`
+      if (respondingCodexUserInputRequests.has(responseKey)) return
+      respondingCodexUserInputRequests.add(responseKey)
 
       const answerMap = buildCodexUserInputAnswerMap(request.questions, answers)
 
-      const persistAnsweredState = () => {
+      const completeResponse = () => {
+        store.markQuestionAnswered(sessionId, toolCallId, answers)
+        store.updateToolCallOutput(
+          sessionId,
+          toolCallId,
+          JSON.stringify(answers)
+        )
+        const remainingRequests = store
+          .getPendingCodexUserInputRequests(sessionId)
+          .filter(item => getCodexUserInputRequestId(item) !== toolCallId)
+        store.setPendingCodexUserInputRequests(sessionId, remainingRequests)
+        store.setWaitingForInput(sessionId, remainingRequests.length > 0)
         persistCodexPendingState(sessionId, worktreeId, worktreePath)
         invoke('update_session_state', {
           worktreeId,
@@ -2948,10 +2963,11 @@ export function useMessageHandlers({
           submittedAnswers:
             useChatStore.getState().submittedAnswers[sessionId] ?? {},
         }).catch(() => undefined)
+        respondingCodexUserInputRequests.delete(responseKey)
       }
 
       if (isCodexDevUserInputRequest(request)) {
-        persistAnsweredState()
+        completeResponse()
         console.info('[Codex Dev Flow] ToolRequestUserInputResponse', {
           answers: answerMap,
         })
@@ -2965,9 +2981,10 @@ export function useMessageHandlers({
         answers: answerMap,
       })
         .then(() => {
-          persistAnsweredState()
+          completeResponse()
         })
         .catch(err => {
+          respondingCodexUserInputRequests.delete(responseKey)
           console.error(
             '[useMessageHandlers] Failed to answer Codex user-input request:',
             err

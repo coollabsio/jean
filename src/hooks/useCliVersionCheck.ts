@@ -46,6 +46,11 @@ import {
   useCodeRabbitPathDetection,
   coderabbitCliQueryKeys,
 } from '@/services/coderabbit-cli'
+import {
+  useCommandCodeCliStatus,
+  useAvailableCommandCodeVersions,
+  commandcodeCliQueryKeys,
+} from '@/services/commandcode-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNewerVersion } from '@/lib/version-utils'
 import { logger } from '@/lib/logger'
@@ -74,6 +79,7 @@ const JEAN_INSTALL_COMMANDS: Record<CliType, string> = {
   pi: 'install_pi_cli',
   gh: 'install_gh_cli',
   coderabbit: 'install_coderabbit_cli',
+  commandcode: 'install_commandcode_cli',
 }
 
 const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
@@ -83,6 +89,7 @@ const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
   pi: () => piCliQueryKeys.all,
   gh: () => ghCliQueryKeys.all,
   coderabbit: () => coderabbitCliQueryKeys.all,
+  commandcode: () => commandcodeCliQueryKeys.all,
 }
 
 /**
@@ -177,6 +184,10 @@ export function useCliVersionCheck() {
   })
   const { data: coderabbitStatus, isLoading: coderabbitLoading } =
     useCodeRabbitCliStatus({ enabled: shouldCheck && versionCheckReady })
+  const { data: commandcodeStatus, isLoading: commandcodeLoading } =
+    useCommandCodeCliStatus({
+      enabled: shouldCheck && versionCheckReady,
+    })
   const { data: claudeVersions, isLoading: claudeVersionsLoading } =
     useAvailableCliVersions({ enabled: shouldCheck && versionCheckReady })
   const { data: ghVersions, isLoading: ghVersionsLoading } =
@@ -189,6 +200,10 @@ export function useCliVersionCheck() {
     useAvailablePiVersions({ enabled: shouldCheck && versionCheckReady })
   const { data: coderabbitVersions, isLoading: coderabbitVersionsLoading } =
     useAvailableCodeRabbitVersions({
+      enabled: shouldCheck && versionCheckReady,
+    })
+  const { data: commandcodeVersions, isLoading: commandcodeVersionsLoading } =
+    useAvailableCommandCodeVersions({
       enabled: shouldCheck && versionCheckReady,
     })
 
@@ -206,12 +221,14 @@ export function useCliVersionCheck() {
       opencodeLoading ||
       piLoading ||
       coderabbitLoading ||
+      commandcodeLoading ||
       claudeVersionsLoading ||
       ghVersionsLoading ||
       codexVersionsLoading ||
       opencodeVersionsLoading ||
       piVersionsLoading ||
       coderabbitVersionsLoading ||
+      commandcodeVersionsLoading ||
       preferencesLoading
     if (isLoading) return
 
@@ -241,6 +258,11 @@ export function useCliVersionCheck() {
       coderabbitPathInfo,
       preferences?.coderabbit_cli_source
     )
+    const commandcode = resolveCliInfo(
+      commandcodeStatus,
+      undefined,
+      preferences?.commandcode_cli_source
+    )
 
     const checks: {
       type: CliUpdateInfo['type']
@@ -254,6 +276,11 @@ export function useCliVersionCheck() {
       { type: 'pi', info: pi, versions: piVersions },
       { type: 'coderabbit', info: coderabbit, versions: coderabbitVersions },
     ]
+    checks.push({
+      type: 'commandcode',
+      info: commandcode,
+      versions: commandcodeVersions,
+    })
 
     for (const { type, info, versions } of checks) {
       if (!info.version || !versions?.length) continue
@@ -326,6 +353,7 @@ export function useCliVersionCheck() {
     opencodeStatus,
     piStatus,
     coderabbitStatus,
+    commandcodeStatus,
     claudePathInfo,
     ghPathInfo,
     codexPathInfo,
@@ -338,18 +366,21 @@ export function useCliVersionCheck() {
     opencodeVersions,
     piVersions,
     coderabbitVersions,
+    commandcodeVersions,
     claudeLoading,
     ghLoading,
     codexLoading,
     opencodeLoading,
     piLoading,
     coderabbitLoading,
+    commandcodeLoading,
     claudeVersionsLoading,
     ghVersionsLoading,
     codexVersionsLoading,
     opencodeVersionsLoading,
     piVersionsLoading,
     coderabbitVersionsLoading,
+    commandcodeVersionsLoading,
     preferencesLoading,
     preferences?.auto_update_ai_backends,
     preferences?.claude_cli_source,
@@ -358,6 +389,7 @@ export function useCliVersionCheck() {
     preferences?.pi_cli_source,
     preferences?.gh_cli_source,
     preferences?.coderabbit_cli_source,
+    preferences?.commandcode_cli_source,
     queryClient,
   ])
 
@@ -374,6 +406,9 @@ export function useCliVersionCheck() {
         queryClient.invalidateQueries({ queryKey: piCliQueryKeys.all })
         queryClient.invalidateQueries({
           queryKey: coderabbitCliQueryKeys.all,
+        })
+        queryClient.invalidateQueries({
+          queryKey: commandcodeCliQueryKeys.all,
         })
       },
       60 * 60 * 1000

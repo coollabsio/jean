@@ -7,6 +7,7 @@ import type {
   RepositoryAdvisory,
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
+import type { SentryIssue } from '@/types/sentry'
 
 interface Params {
   activeTab: TabId
@@ -58,6 +59,12 @@ interface Params {
     issue: LinearIssue,
     background?: boolean
   ) => void
+  filteredSentryIssues: SentryIssue[]
+  handleSelectSentryIssue: (issue: SentryIssue, background?: boolean) => void
+  handleSelectSentryIssueAndInvestigate: (
+    issue: SentryIssue,
+    background?: boolean
+  ) => void
 }
 
 export function useNewWorktreeKeyboard({
@@ -89,6 +96,9 @@ export function useNewWorktreeKeyboard({
   filteredLinearIssues,
   handleSelectLinearIssue,
   handleSelectLinearIssueAndInvestigate,
+  filteredSentryIssues,
+  handleSelectSentryIssue,
+  handleSelectSentryIssueAndInvestigate,
 }: Params) {
   // Scroll selected item into view
   useEffect(() => {
@@ -132,6 +142,11 @@ export function useNewWorktreeKeyboard({
         if (key === '6') {
           e.preventDefault()
           setActiveTab('linear')
+          return
+        }
+        if (key === '7') {
+          e.preventDefault()
+          setActiveTab('sentry')
           return
         }
       }
@@ -357,6 +372,43 @@ export function useNewWorktreeKeyboard({
       }
 
       // Branches tab navigation
+      if (activeTab === 'sentry' && filteredSentryIssues.length > 0) {
+        if (key === 'arrowdown') {
+          e.preventDefault()
+          setSelectedItemIndex((prev: number) =>
+            Math.min(prev + 1, filteredSentryIssues.length - 1)
+          )
+          return
+        }
+        if (key === 'arrowup') {
+          e.preventDefault()
+          setSelectedItemIndex((prev: number) => Math.max(prev - 1, 0))
+          return
+        }
+        if (key === 'enter' && filteredSentryIssues[selectedItemIndex]) {
+          e.preventDefault()
+          handleSelectSentryIssue(
+            filteredSentryIssues[selectedItemIndex],
+            e.metaKey || e.ctrlKey
+          )
+          return
+        }
+        if (
+          key === 'm' &&
+          (e.metaKey || e.ctrlKey) &&
+          filteredSentryIssues[selectedItemIndex]
+        ) {
+          e.preventDefault()
+          e.nativeEvent.stopImmediatePropagation()
+          handleSelectSentryIssueAndInvestigate(
+            filteredSentryIssues[selectedItemIndex],
+            e.metaKey || e.ctrlKey
+          )
+          return
+        }
+      }
+
+      // Branches tab navigation
       if (activeTab === 'branches' && filteredBranches.length > 0) {
         if (key === 'arrowdown') {
           e.preventDefault()
@@ -401,8 +453,11 @@ export function useNewWorktreeKeyboard({
       handlePreviewAdvisory,
       handleSelectBranch,
       filteredLinearIssues,
+      filteredSentryIssues,
       handleSelectLinearIssue,
       handleSelectLinearIssueAndInvestigate,
+      handleSelectSentryIssue,
+      handleSelectSentryIssueAndInvestigate,
       creatingFromNumber,
       setActiveTab,
       setSelectedItemIndex,

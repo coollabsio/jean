@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen, waitFor } from '@/test/test-utils'
+import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { MagicModal } from './MagicModal'
 
 const mocks = vi.hoisted(() => {
@@ -178,8 +178,17 @@ vi.mock('@/services/preferences', () => ({
     data: {
       default_backend: 'claude',
       selected_codex_model: 'gpt-5.5',
-      magic_prompt_backends: { resolve_conflicts_backend: 'codex' },
-      magic_prompts: { resolve_conflicts: 'Resolve and finish.' },
+      magic_prompt_models: { final_review_model: 'gpt-5.5' },
+      magic_prompt_efforts: { final_review_effort: 'high' },
+      magic_prompt_modes: { final_review_mode: 'plan' },
+      magic_prompts: {
+        resolve_conflicts: 'Resolve and finish.',
+        final_review: 'Run the custom final audit and return tables.',
+      },
+      magic_prompt_backends: {
+        resolve_conflicts_backend: 'codex',
+        final_review_backend: 'codex',
+      },
     },
   }),
 }))
@@ -235,7 +244,18 @@ vi.mock('sonner', () => ({
 }))
 
 vi.mock('@/components/chat/ReviewMethodModal', () => ({
-  ReviewMethodModal: () => null,
+  ReviewMethodModal: ({
+    open,
+    onFinalReview,
+  }: {
+    open: boolean
+    onFinalReview: () => void
+  }) =>
+    open ? (
+      <button data-testid="final-review-choice" onClick={onFinalReview}>
+        Final review
+      </button>
+    ) : null,
 }))
 
 describe('MagicModal manual PR link', () => {
@@ -389,6 +409,56 @@ describe('MagicModal manual PR link', () => {
     expect(mocks.setExecutionMode).toHaveBeenCalledWith(
       'conflict-session',
       'yolo'
+    )
+  })
+
+  it('starts Final review as a normal plan-mode session with dedicated settings', async () => {
+    const user = userEvent.setup()
+    mocks.invokeMock.mockImplementation((command: string) => {
+      if (command === 'create_session') {
+        return Promise.resolve({
+          id: 'final-review-session',
+          name: 'Final review',
+          order: 1,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          backend: 'codex',
+        })
+      }
+      if (command === 'send_chat_message') {
+        return Promise.resolve({ id: 'message-1' })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /^review/i }))
+    fireEvent.click(screen.getByTestId('final-review-choice'))
+
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith(
+        'send_chat_message',
+        expect.objectContaining({
+          sessionId: 'final-review-session',
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          message: 'Run the custom final audit and return tables.',
+          model: 'gpt-5.5',
+          effortLevel: 'high',
+          executionMode: 'plan',
+          backend: 'codex',
+        })
+      )
+    })
+    expect(mocks.setActiveSession).toHaveBeenCalledWith(
+      'wt-1',
+      'final-review-session'
+    )
+    expect(mocks.setExecutionMode).toHaveBeenCalledWith(
+      'final-review-session',
+      'plan'
     )
   })
 

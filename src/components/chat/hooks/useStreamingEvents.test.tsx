@@ -176,6 +176,62 @@ describe('useStreamingEvents Codex MCP elicitation', () => {
   })
 })
 
+describe('useStreamingEvents Codex user input', () => {
+  beforeEach(() => {
+    setupListenMock()
+
+    useChatStore.setState({
+      pendingCodexUserInputRequests: {},
+      waitingForInputSessionIds: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+    })
+  })
+
+  it('upserts a repeated request instead of rendering a second prompt', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:codex_user_input_request')).toBe(
+        true
+      )
+    )
+
+    const event = {
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          rpc_id: 42,
+          item_id: 'question-1',
+          questions: [
+            {
+              id: 'model',
+              question: 'How should I continue?',
+              options: [{ label: 'Wait' }, { label: 'Use Codex' }],
+            },
+          ],
+        },
+      },
+    }
+    const listener = registeredListeners.get('chat:codex_user_input_request')
+    listener?.(event)
+    listener?.(event)
+
+    expect(
+      useChatStore.getState().pendingCodexUserInputRequests['session-1']
+    ).toHaveLength(1)
+    expect(useChatStore.getState().activeToolCalls['session-1']).toHaveLength(1)
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [{ type: 'tool_use', tool_call_id: 'question-1' }]
+    )
+  })
+})
+
 describe('useStreamingEvents cancellation sanitization', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -193,6 +249,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
     useChatStore.setState({
       streamingContents: {},
       streamingContentBlocks: {},
+      streamingReplayContentBlocks: {},
       streamingThinkingContent: {},
       activeToolCalls: {},
       sendingSessionIds: {},
@@ -919,6 +976,70 @@ describe('useStreamingEvents cancellation sanitization', () => {
     )
   })
 
+  it('ignores late untagged chunks after a tagged cancellation', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [],
+    })
+
+    useChatStore.setState({
+      streamingContents: { 'session-1': 'Partial response.' },
+      streamingContentBlocks: {
+        'session-1': [{ type: 'text', text: 'Partial response.' }],
+      },
+      sendingSessionIds: { 'session-1': true },
+      sendStartedAt: { 'session-1': 1000 },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: 2000,
+        run_id: 'run-old',
+      },
+    })
+
+    // Session persistence may restore is_reviewing=false before a delayed
+    // backend chunk arrives, so cancellation filtering cannot rely on it.
+    useChatStore.getState().setSessionReviewing('session-1', false)
+
+    const chunkListener = registeredListeners.get('chat:chunk')
+    expect(chunkListener).toBeDefined()
+    chunkListener?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Late untagged Grok chunk.',
+      },
+    })
+
+    expect(useChatStore.getState().sendingSessionIds['session-1']).toBeUndefined()
+    expect(useChatStore.getState().streamingContents['session-1']).toBeUndefined()
+  })
+
   it('continues ignoring cancelled run chunks after accepting a new run chunk', async () => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0)
@@ -1160,6 +1281,119 @@ describe('useStreamingEvents replay dedupe', () => {
         { type: 'text', text: 'After tool.' },
       ]
     )
+    expect(
+      useChatStore.getState().streamingReplayContentBlocks['session-1']
+    ).toBeUndefined()
+  })
+
+  it('keeps deduplicating snapshot output when replay contains unpersisted thinking', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:thinking')).toBe(true)
+    )
+
+    registeredListeners.get('chat:thinking')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Reasoning omitted from the running snapshot.',
+      },
+    })
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Before tool. ',
+      },
+    })
+    registeredListeners.get('chat:tool_block')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        tool_call_id: 'tool-1',
+      },
+    })
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'After tool.',
+      },
+    })
+
+    expect(useChatStore.getState().streamingContents['session-1']).toBe(
+      'Before tool. After tool.'
+    )
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [
+        { type: 'text', text: 'Before tool. ' },
+        { type: 'tool_use', tool_call_id: 'tool-1' },
+        { type: 'text', text: 'After tool.' },
+      ]
+    )
+    expect(
+      useChatStore.getState().streamingReplayContentBlocks['session-1']
+    ).toBeUndefined()
+  })
+
+  it('does not duplicate a steered prompt already present in the running snapshot', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    useChatStore.setState({
+      streamingContentBlocks: {
+        'session-1': [
+          { type: 'text', text: 'Before steering.' },
+          { type: 'user_input', text: 'Also fix the header.' },
+          { type: 'text', text: 'After steering.' },
+        ],
+      },
+      streamingReplayContentBlocks: {
+        'session-1': [
+          { type: 'text', text: 'Before steering.' },
+          { type: 'user_input', text: 'Also fix the header.' },
+          { type: 'text', text: 'After steering.' },
+        ],
+      },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:steered')).toBe(true)
+    )
+
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Before steering.',
+      },
+    })
+    registeredListeners.get('chat:steered')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        text: 'Also fix the header.',
+      },
+    })
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'After steering.',
+      },
+    })
+
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual([
+      { type: 'text', text: 'Before steering.' },
+      { type: 'user_input', text: 'Also fix the header.' },
+      { type: 'text', text: 'After steering.' },
+    ])
     expect(
       useChatStore.getState().streamingReplayContentBlocks['session-1']
     ).toBeUndefined()

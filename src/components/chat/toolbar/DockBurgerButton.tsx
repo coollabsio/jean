@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Archive,
+  BarChart3,
   Command,
   LayoutDashboard,
   Menu,
-  Plug,
   Plus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -12,7 +12,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
@@ -24,53 +23,61 @@ import {
 } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useUIStore } from '@/store/ui-store'
-import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { usePreferences } from '@/services/preferences'
+import {
+  useClaudeCliAuth,
+  useClaudeCliStatus,
+  useClaudeUsage,
+} from '@/services/claude-cli'
 import {
   useCodexCliAuth,
   useCodexCliStatus,
   useCodexUsage,
 } from '@/services/codex-cli'
+import {
+  useGrokCliAuth,
+  useGrokCliStatus,
+  useGrokUsage,
+} from '@/services/grok-cli'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
-import type { CliBackend } from '@/types/preferences'
+import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
+import { CodexIcon } from '@/components/icons/CodexIcon'
+import { GrokIcon } from '@/components/icons/GrokIcon'
 
 interface DockBurgerButtonProps {
-  /** Number of enabled MCP servers; shown as a badge next to the MCP item. */
-  activeMcpCount?: number
   /** Extra classes merged onto the trigger button (e.g. responsive visibility). */
   className?: string
 }
 
+function formatUsagePair(
+  session: number | null | undefined,
+  weekly: number | null | undefined
+) {
+  const sessionText = session == null ? '--' : `${Math.round(session)}`
+  const weeklyText = weekly == null ? '--' : `${Math.round(weekly)}`
+  return `${sessionText}|${weeklyText}%`
+}
+
 export function DockBurgerButton({
-  activeMcpCount = 0,
   className,
 }: DockBurgerButtonProps = {}) {
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
 
-  const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
-  const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
-  const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
-  const sessionChatModalWorktreeId = useUIStore(
-    state => state.sessionChatModalWorktreeId
-  )
-  const currentWorktreeId = sessionChatModalOpen
-    ? (sessionChatModalWorktreeId ?? activeWorktreeId ?? selectedWorktreeId)
-    : (activeWorktreeId ?? selectedWorktreeId)
-  const activeSessionId = useChatStore(state =>
-    currentWorktreeId ? state.activeSessionIds[currentWorktreeId] : undefined
-  )
-  const selectedBackend = useChatStore(state =>
-    activeSessionId ? state.selectedBackends[activeSessionId] : undefined
-  )
-
   const [menuOpen, setMenuOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
-  const activeBackend = (selectedBackend ??
-    preferences?.default_backend ??
-    'claude') as CliBackend
+  const claudeStatus = useClaudeCliStatus()
+  const claudeAuth = useClaudeCliAuth({
+    enabled: !!claudeStatus.data?.installed,
+  })
+  const claudeUsage = useClaudeUsage({
+    enabled:
+      !!claudeStatus.data?.installed &&
+      !!claudeAuth.data?.authenticated &&
+      menuOpen,
+  })
 
   const codexStatus = useCodexCliStatus()
   const codexAuth = useCodexCliAuth({
@@ -83,17 +90,59 @@ export function DockBurgerButton({
       menuOpen,
   })
 
+  const grokStatus = useGrokCliStatus()
+  const grokAuth = useGrokCliAuth({
+    enabled: !!grokStatus.data?.installed,
+  })
+  const grokUsage = useGrokUsage({
+    enabled:
+      !!grokStatus.data?.installed &&
+      !!grokAuth.data?.authenticated &&
+      menuOpen,
+  })
+
+  const claudeAvailable =
+    !!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated
   const codexAvailable =
     !!codexStatus.data?.installed && !!codexAuth.data?.authenticated
-  const showCodexUsage = activeBackend === 'codex' && codexAvailable
-  const sessionPct = codexUsage.data?.session?.usedPercent ?? null
-  const weeklyPct = codexUsage.data?.weekly?.usedPercent ?? null
-  const planText =
-    codexUsage.data?.planType && codexUsage.data.planType.trim().length > 0
-      ? codexUsage.data.planType
-      : '--'
-  const sessionText = sessionPct === null ? '--' : `${Math.round(sessionPct)}`
-  const weeklyText = weeklyPct === null ? '--' : `${Math.round(weeklyPct)}`
+  const grokAvailable =
+    !!grokStatus.data?.installed && !!grokAuth.data?.authenticated
+
+  // Only installed + authenticated backends appear in the usage menu.
+  const usageRows = [
+    {
+      id: 'claude' as const,
+      label: 'Claude',
+      Icon: ClaudeIcon,
+      available: claudeAvailable,
+      pair: formatUsagePair(
+        claudeUsage.data?.session?.usedPercent,
+        claudeUsage.data?.weekly?.usedPercent
+      ),
+    },
+    {
+      id: 'codex' as const,
+      label: 'Codex',
+      Icon: CodexIcon,
+      available: codexAvailable,
+      pair: formatUsagePair(
+        codexUsage.data?.session?.usedPercent,
+        codexUsage.data?.weekly?.usedPercent
+      ),
+    },
+    {
+      id: 'grok' as const,
+      label: 'Grok',
+      Icon: GrokIcon,
+      available: grokAvailable,
+      pair: formatUsagePair(
+        grokUsage.data?.session?.usedPercent,
+        grokUsage.data?.weekly?.usedPercent
+      ),
+    },
+  ].filter(row => row.available)
+
+  const showUsageSection = usageRows.length > 0
 
   const toggleMenu = useCallback(() => {
     setMenuOpen(prev => !prev)
@@ -180,39 +229,26 @@ export function DockBurgerButton({
           )}
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem
-          onClick={() =>
-            useUIStore.getState().openPreferencesPane('mcp-servers')
-          }
-        >
-          <Plug
-            className={
-              activeMcpCount > 0
-                ? 'mr-2 h-4 w-4 text-emerald-600 dark:text-emerald-400'
-                : 'mr-2 h-4 w-4'
-            }
-          />
-          MCP Servers
-          {activeMcpCount > 0 && (
-            <DropdownMenuShortcut>{activeMcpCount}</DropdownMenuShortcut>
-          )}
-        </DropdownMenuItem>
-
-        {!isMobile && showCodexUsage && (
+        {showUsageSection && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-              Codex usage · Plan: {planText}
-            </DropdownMenuLabel>
+            {usageRows.map(row => (
+              <DropdownMenuItem
+                key={row.id}
+                onClick={() =>
+                  useUIStore.getState().openPreferencesPane('usage')
+                }
+              >
+                <row.Icon className="mr-2 h-4 w-4 shrink-0" />
+                {row.label}
+                <DropdownMenuShortcut>{row.pair}</DropdownMenuShortcut>
+              </DropdownMenuItem>
+            ))}
             <DropdownMenuItem
               onClick={() => useUIStore.getState().openPreferencesPane('usage')}
             >
-              Session | Weekly
-              <DropdownMenuShortcut>
-                {sessionText}|{weeklyText}%
-              </DropdownMenuShortcut>
+              <BarChart3 className="mr-2 h-4 w-4" />
+              Open Usage Details
             </DropdownMenuItem>
           </>
         )}

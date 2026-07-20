@@ -27,7 +27,8 @@ vi.mock('@/lib/environment', () => ({
 }))
 
 vi.mock('@/lib/platform', () => ({
-  isMacOS: true,
+  isClientMacOS: true,
+  isMacOS: false,
   getServerPlatform: vi.fn(() => 'mac'),
   isServerWindows: vi.fn(() => false),
 }))
@@ -115,12 +116,12 @@ describe('useZoom', () => {
     })
   })
 
-  it('updates only mobile zoom from shortcuts when syncing is disabled', () => {
-    mockIsMobile = true
+  it('uses the Mac client modifier when connected to a non-Mac server', () => {
+    mockIsNativeApp = true
     mockPreferences = {
-      zoom_level: 100,
+      zoom_level: 125,
       mobile_zoom_level: 125,
-      sync_zoom_levels: false,
+      sync_zoom_levels: true,
     }
     renderHook(() => useZoom())
 
@@ -128,6 +129,23 @@ describe('useZoom', () => {
       new KeyboardEvent('keydown', { key: '+', metaKey: true, bubbles: true })
     )
 
-    expect(mockMutate).toHaveBeenCalledWith({ mobile_zoom_level: 150 })
+    expect(mockMutate).toHaveBeenCalledWith({
+      zoom_level: 150,
+      mobile_zoom_level: 150,
+    })
+  })
+
+  it('uses Control for zoom in a Mac web client', () => {
+    mockPreferences = { zoom_level: 125 }
+    renderHook(() => useZoom())
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: '+', ctrlKey: true, bubbles: true })
+    )
+
+    expect(mockMutate).toHaveBeenCalledWith({
+      zoom_level: 150,
+      mobile_zoom_level: 150,
+    })
   })
 })

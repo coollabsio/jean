@@ -183,19 +183,28 @@ export function usePlanApproval({
 
       const isCodex = sessionBackend === 'codex'
       const isPi = sessionBackend === 'pi'
+      const isGrok = sessionBackend === 'grok'
       const buildEffortOverride = overridesApply
         ? preferences?.build_effort_level
         : null
       const effortAppliesBuild =
         isCodex ||
         isPi ||
+        isGrok ||
         supportsAdaptiveThinking(model, cliStatus?.version ?? null)
+      const defaultGrokEffort = isEffortLevel(
+        preferences?.default_grok_reasoning_effort
+      )
+        ? preferences.default_grok_reasoning_effort
+        : 'high'
       const effortLevel: EffortLevel | undefined = effortAppliesBuild
         ? isEffortLevel(buildEffortOverride)
           ? buildEffortOverride
-          : isEffortLevel(preferences?.default_effort_level)
-            ? preferences?.default_effort_level
-            : undefined
+          : isGrok
+            ? defaultGrokEffort
+            : isEffortLevel(preferences?.default_effort_level)
+              ? preferences?.default_effort_level
+              : undefined
         : undefined
       const baseMsg = isCodex
         ? 'Execute the plan you created. Implement all changes described.'
@@ -387,19 +396,28 @@ export function usePlanApproval({
 
       const isCodexYolo = sessionBackend === 'codex'
       const isPiYolo = sessionBackend === 'pi'
+      const isGrokYolo = sessionBackend === 'grok'
       const yoloEffortOverride = overridesApplyYolo
         ? preferences?.yolo_effort_level
         : null
       const effortAppliesYolo =
         isCodexYolo ||
         isPiYolo ||
+        isGrokYolo ||
         supportsAdaptiveThinking(model, cliStatus?.version ?? null)
+      const defaultGrokEffortYolo = isEffortLevel(
+        preferences?.default_grok_reasoning_effort
+      )
+        ? preferences.default_grok_reasoning_effort
+        : 'high'
       const effortLevel: EffortLevel | undefined = effortAppliesYolo
         ? isEffortLevel(yoloEffortOverride)
           ? yoloEffortOverride
-          : isEffortLevel(preferences?.default_effort_level)
-            ? preferences?.default_effort_level
-            : undefined
+          : isGrokYolo
+            ? defaultGrokEffortYolo
+            : isEffortLevel(preferences?.default_effort_level)
+              ? preferences?.default_effort_level
+              : undefined
         : undefined
       const baseMsgYolo = isCodexYolo
         ? 'Execute the plan you created. Implement all changes described.'

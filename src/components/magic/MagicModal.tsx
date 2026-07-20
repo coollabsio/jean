@@ -59,6 +59,7 @@ import {
 import { usePreferences } from '@/services/preferences'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
+import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { startCommitJob } from '@/services/commit-jobs'
 import { invoke, listen } from '@/lib/transport'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -86,6 +87,9 @@ import type {
 import type { Session } from '@/types/chat'
 import {
   type CliBackend,
+  DEFAULT_FINAL_REVIEW_PROMPT,
+  DEFAULT_MAGIC_PROMPT_MODES,
+  DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_RESOLVE_CONFLICTS_PROMPT,
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
@@ -116,6 +120,7 @@ import {
   resolveCodeReviewConfigs,
   startCodeReviewsSequentially,
 } from '@/lib/code-review-configs'
+import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 
 type MagicOption =
   | 'save-context'
@@ -467,6 +472,9 @@ export function MagicModal() {
   const { data: availableGrokModels } = useAvailableGrokModels({
     enabled: installedBackends.includes('grok'),
   })
+  const { data: availableKimiModels } = useAvailableKimiModels({
+    enabled: installedBackends.includes('kimi'),
+  })
   const { data: modelCatalog } = useModelCatalog()
 
   // Build columns dynamically based on PR state
@@ -524,6 +532,15 @@ export function MagicModal() {
       : GROK_MODEL_OPTIONS
     return models
   }, [availableGrokModels])
+  const kimiModelOptions = useMemo(() => {
+    if (!availableKimiModels?.length) {
+      return [{ value: 'kimi/default', label: 'Configured default' }]
+    }
+    return availableKimiModels.map(model => ({
+      value: `kimi/${model.id}`,
+      label: model.label,
+    }))
+  }, [availableKimiModels])
 
   const claudeModelOptions = useMemo(
     () =>
@@ -551,18 +568,20 @@ export function MagicModal() {
     const model =
       preferences?.magic_prompt_models?.[modelKey] ??
       (backend === 'codex'
-        ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+        ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
         : backend === 'opencode'
-          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
           : backend === 'cursor'
             ? (preferences?.selected_cursor_model ?? 'cursor/auto')
             : backend === 'commandcode'
               ? (preferences?.selected_commandcode_model ??
                 'commandcode/default')
-              : backend === 'grok'
-                ? (preferences?.selected_grok_model ??
-                  'grok/grok-composer-2.5-fast')
-                : (preferences?.selected_model ?? 'sonnet'))
+              : backend === 'kimi'
+                ? (preferences?.selected_kimi_model ?? 'kimi/default')
+                : backend === 'grok'
+                  ? (preferences?.selected_grok_model ??
+                    'grok/grok-4.5')
+                  : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       providerKey,
@@ -583,18 +602,20 @@ export function MagicModal() {
     const model =
       preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
       (backend === 'codex'
-        ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+        ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
         : backend === 'opencode'
-          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
           : backend === 'cursor'
             ? (preferences?.selected_cursor_model ?? 'cursor/auto')
             : backend === 'commandcode'
               ? (preferences?.selected_commandcode_model ??
                 'commandcode/default')
-              : backend === 'grok'
-                ? (preferences?.selected_grok_model ??
-                  'grok/grok-composer-2.5-fast')
-                : (preferences?.selected_model ?? 'sonnet'))
+              : backend === 'kimi'
+                ? (preferences?.selected_kimi_model ?? 'kimi/default')
+                : backend === 'grok'
+                  ? (preferences?.selected_grok_model ??
+                    'grok/grok-4.5')
+                  : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       RESOLVE_CONFLICTS_PROVIDER_KEY,
@@ -650,6 +671,123 @@ export function MagicModal() {
       ? resolveDefaults.provider
       : null
 
+  const startFinalReview = useCallback(async () => {
+    if (!selectedWorktreeId || !worktree?.path) return
+
+    const defaultBackend =
+      project?.default_backend ?? preferences?.default_backend ?? 'claude'
+    const backend = (resolveMagicPromptBackend(
+      preferences?.magic_prompt_backends,
+      'final_review_backend',
+      defaultBackend
+    ) ?? defaultBackend) as CliBackend
+    const model =
+      preferences?.magic_prompt_models?.final_review_model ??
+      resolveDefaultModelForBackend(backend, preferences)
+    const provider =
+      backend === 'claude'
+        ? resolveMagicPromptProvider(
+            preferences?.magic_prompt_providers,
+            'final_review_provider',
+            preferences?.default_provider
+          )
+        : null
+    const executionMode =
+      preferences?.magic_prompt_modes?.final_review_mode ??
+      DEFAULT_MAGIC_PROMPT_MODES.final_review_mode
+    const prompt =
+      preferences?.magic_prompts?.final_review ?? DEFAULT_FINAL_REVIEW_PROMPT
+
+    try {
+      const session = await invoke<Session>('create_session', {
+        worktreeId: selectedWorktreeId,
+        worktreePath: worktree.path,
+        name: 'Final review',
+        backend: backend !== 'claude' ? backend : undefined,
+      })
+      const store = useChatStore.getState()
+
+      store.registerWorktreePath(selectedWorktreeId, worktree.path)
+      store.setSelectedBackend(session.id, backend)
+      store.setSelectedModel(session.id, model)
+      store.setSelectedProvider(session.id, provider)
+      store.setActiveSession(selectedWorktreeId, session.id)
+      store.setExecutionMode(session.id, executionMode)
+      store.setExecutingMode(session.id, executionMode)
+      store.setLastSentMessage(session.id, prompt)
+      store.setError(session.id, null)
+      store.clearInputDraft(session.id)
+
+      window.dispatchEvent(
+        new CustomEvent('open-worktree-modal', {
+          detail: {
+            worktreeId: selectedWorktreeId,
+            worktreePath: worktree.path,
+          },
+        })
+      )
+
+      await Promise.all([
+        invoke('set_session_backend', {
+          worktreeId: selectedWorktreeId,
+          worktreePath: worktree.path,
+          sessionId: session.id,
+          backend,
+        }),
+        invoke('set_session_model', {
+          worktreeId: selectedWorktreeId,
+          worktreePath: worktree.path,
+          sessionId: session.id,
+          model,
+        }),
+        invoke('set_session_provider', {
+          worktreeId: selectedWorktreeId,
+          worktreePath: worktree.path,
+          sessionId: session.id,
+          provider,
+        }),
+        invoke('update_session_state', {
+          worktreeId: selectedWorktreeId,
+          worktreePath: worktree.path,
+          sessionId: session.id,
+          selectedExecutionMode: executionMode,
+        }),
+      ])
+
+      await invoke('send_chat_message', {
+        sessionId: session.id,
+        worktreeId: selectedWorktreeId,
+        worktreePath: worktree.path,
+        message: prompt,
+        model,
+        executionMode,
+        effortLevel:
+          preferences?.magic_prompt_efforts?.final_review_effort ?? undefined,
+        parallelExecutionPrompt: preferences?.parallel_execution_prompt_enabled
+          ? (preferences.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT)
+          : undefined,
+        backend: backend !== 'claude' ? backend : undefined,
+        customProfileName:
+          provider && provider !== '__anthropic__' ? provider : undefined,
+        chromeEnabled: preferences?.chrome_enabled ?? false,
+        aiLanguage: preferences?.ai_language,
+      })
+
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(selectedWorktreeId),
+      })
+    } catch (error) {
+      toast.error(`Failed to start final review: ${error}`)
+    }
+  }, [
+    preferences,
+    project?.default_backend,
+    queryClient,
+    selectedWorktreeId,
+    worktree?.path,
+  ])
+
   const investigateClaudeModelOptions = useMemo(
     () => getClaudeModelOptionsForProvider(investigateClaudeProvider),
     [getClaudeModelOptionsForProvider, investigateClaudeProvider]
@@ -668,11 +806,18 @@ export function MagicModal() {
           return opencodeModelOptions
         case 'grok':
           return grokModelOptions
+        case 'kimi':
+          return kimiModelOptions
         default:
           return investigateClaudeModelOptions
       }
     },
-    [grokModelOptions, investigateClaudeModelOptions, opencodeModelOptions]
+    [
+      grokModelOptions,
+      investigateClaudeModelOptions,
+      kimiModelOptions,
+      opencodeModelOptions,
+    ]
   )
 
   const customInvestigateModelOptions = useMemo(
@@ -700,6 +845,8 @@ export function MagicModal() {
         return 'Cursor'
       case 'grok':
         return 'Grok'
+      case 'kimi':
+        return 'Kimi Code'
       default:
         return 'Claude'
     }
@@ -745,11 +892,18 @@ export function MagicModal() {
           return opencodeModelOptions
         case 'grok':
           return grokModelOptions
+        case 'kimi':
+          return kimiModelOptions
         default:
           return resolveClaudeModelOptions
       }
     },
-    [grokModelOptions, opencodeModelOptions, resolveClaudeModelOptions]
+    [
+      grokModelOptions,
+      kimiModelOptions,
+      opencodeModelOptions,
+      resolveClaudeModelOptions,
+    ]
   )
 
   const customResolveModelOptions = useMemo(
@@ -1243,10 +1397,10 @@ export function MagicModal() {
                   RESOLVE_CONFLICTS_MODEL_KEY
                 ] ??
                 (resolvedBackend === 'codex'
-                  ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+                  ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
                   : resolvedBackend === 'opencode'
                     ? (preferences?.selected_opencode_model ??
-                      'opencode/gpt-5.5')
+                      'opencode/gpt-5.6-sol')
                     : resolvedBackend === 'cursor'
                       ? (preferences?.selected_cursor_model ?? 'cursor/auto')
                       : (preferences?.selected_model ?? 'sonnet'))
@@ -1402,9 +1556,9 @@ ${resolveInstructions}`
               override?.model ??
               preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
               (resolvedBackend === 'codex'
-                ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+                ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
                 : resolvedBackend === 'opencode'
-                  ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+                  ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
                   : resolvedBackend === 'cursor'
                     ? (preferences?.selected_cursor_model ?? 'cursor/auto')
                     : (preferences?.selected_model ?? 'sonnet'))
@@ -2230,6 +2384,7 @@ ${resolveInstructions}`
         open={reviewMethodDialogOpen}
         onOpenChange={setReviewMethodDialogOpen}
         onAiReview={() => executeGitDirectly('review', undefined, 'ai')}
+        onFinalReview={startFinalReview}
         onCodeRabbitCliReview={() =>
           executeGitDirectly('review', undefined, 'coderabbit-cli')
         }
@@ -2513,9 +2668,13 @@ ${resolveInstructions}`
                         size="sm"
                         hideIcon={
                           installedBackends.filter(backend =>
-                            ['claude', 'codex', 'opencode', 'grok'].includes(
-                              backend
-                            )
+                            [
+                              'claude',
+                              'codex',
+                              'opencode',
+                              'grok',
+                              'kimi',
+                            ].includes(backend)
                           ).length <= 1
                         }
                         onClick={() => setInvestigateSelectionMode('custom')}
@@ -2535,6 +2694,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('grok') && (
                           <SelectItem value="grok">
                             <BackendLabel backend="grok" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('kimi') && (
+                          <SelectItem value="kimi">
+                            <BackendLabel backend="kimi" />
                           </SelectItem>
                         )}
                       </SelectContent>
@@ -2668,9 +2832,13 @@ ${resolveInstructions}`
                         size="sm"
                         hideIcon={
                           installedBackends.filter(backend =>
-                            ['claude', 'codex', 'opencode', 'grok'].includes(
-                              backend
-                            )
+                            [
+                              'claude',
+                              'codex',
+                              'opencode',
+                              'grok',
+                              'kimi',
+                            ].includes(backend)
                           ).length <= 1
                         }
                         onClick={() => setResolveSelectionMode('custom')}
@@ -2690,6 +2858,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('grok') && (
                           <SelectItem value="grok">
                             <BackendLabel backend="grok" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('kimi') && (
+                          <SelectItem value="kimi">
+                            <BackendLabel backend="kimi" />
                           </SelectItem>
                         )}
                       </SelectContent>

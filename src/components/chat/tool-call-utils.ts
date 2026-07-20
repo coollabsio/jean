@@ -1,4 +1,10 @@
-import type { ToolCall, ContentBlock, Todo, PlanToolInput, Question } from '@/types/chat'
+import type {
+  ToolCall,
+  ContentBlock,
+  Todo,
+  PlanToolInput,
+  Question,
+} from '@/types/chat'
 import {
   isTodoWrite,
   isCollabToolCall,
@@ -8,6 +14,10 @@ import {
   normalizeQuestionMultipleField,
   normalizeCodexQuestions,
 } from '@/types/chat'
+
+function isTodoWriteLike(toolCall: ToolCall): boolean {
+  return isTodoWrite(toolCall)
+}
 
 /** Check if a tool is a task/agent container (Claude CLI uses both names) */
 function isAgentTool(name: string): boolean {
@@ -54,7 +64,7 @@ export type GroupedToolCall =
 /**
  * Check if a tool call is a special tool that should not render in the timeline.
  * AskUserQuestion and ExitPlanMode have dedicated inline render paths.
- * TodoWrite and CodexTodoList are shown via dedicated todo UI.
+ * TodoWrite (incl. Grok todo_write) and CodexTodoList are shown via dedicated todo UI.
  */
 function isSpecialTool(toolCall: ToolCall): boolean {
   return (
@@ -62,7 +72,7 @@ function isSpecialTool(toolCall: ToolCall): boolean {
     toolCall.name === 'ExitPlanMode' ||
     toolCall.name === 'CodexPlan' ||
     toolCall.name === 'EnterPlanMode' ||
-    toolCall.name === 'TodoWrite' ||
+    isTodoWriteLike(toolCall) ||
     toolCall.name === 'CodexTodoList'
   )
 }
@@ -132,7 +142,13 @@ export type TimelineItem =
 
 export interface ResolvedPlanContent {
   content: string | null
-  source: 'plan' | 'plan_preview' | 'message_text' | 'explanation' | null
+  source:
+    | 'plan'
+    | 'plan_preview'
+    | 'message_text'
+    | 'steps'
+    | 'explanation'
+    | null
 }
 
 export interface SplitTextAroundPlanResult {
@@ -495,6 +511,24 @@ function getPlanPreviewField(input: PlanToolInput | undefined): string | null {
   return isNonEmptyString(input?.plan_preview) ? input.plan_preview : null
 }
 
+function formatPlanSteps(input: PlanToolInput | undefined): string | null {
+  const steps = input?.steps?.filter(step => isNonEmptyString(step.step)) ?? []
+  if (steps.length === 0) return null
+
+  const formattedSteps = steps.map(step => {
+    if (step.status === 'completed') return `- [x] ${step.step}`
+    if (step.status === 'in_progress') {
+      return `- [ ] **In progress:** ${step.step}`
+    }
+    return `- [ ] ${step.step}`
+  })
+
+  const explanation = isNonEmptyString(input?.explanation)
+    ? input.explanation.trim()
+    : null
+  return [explanation, formattedSteps.join('\n')].filter(Boolean).join('\n\n')
+}
+
 export function splitTextAroundPlan(text: string): SplitTextAroundPlanResult {
   const normalized = normalizePlanText(text)
   if (!normalized) {
@@ -588,6 +622,11 @@ export function resolvePlanContent(params: {
   )
   if (extractedFromText) {
     return { content: extractedFromText, source: 'message_text' }
+  }
+
+  const formattedSteps = formatPlanSteps(input)
+  if (formattedSteps) {
+    return { content: formattedSteps, source: 'steps' }
   }
 
   if (isNonEmptyString(input?.explanation)) {

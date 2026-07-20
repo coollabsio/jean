@@ -4,7 +4,7 @@ import {
   Check,
   ChevronRight,
   CircleDot,
-  ClipboardCopy,
+  Copy,
   ExternalLink,
   FolderOpen,
   Github,
@@ -62,6 +62,7 @@ import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
+  KIMI_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -197,6 +198,7 @@ export function MobileSettingsMenu({
 }: MobileSettingsMenuProps) {
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
+  const isKimi = selectedBackend === 'kimi'
   const singleRunScript =
     runScripts.length === 1 ? (runScripts[0] ?? null) : null
   const favoritePackageScriptSet = useMemo(
@@ -215,7 +217,7 @@ export function MobileSettingsMenu({
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
-      (useAdaptiveThinking || isCodex || isPi || isGrok))
+      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? modelReasoning.levels
@@ -223,9 +225,11 @@ export function MobileSettingsMenu({
         ? PI_EFFORT_LEVEL_OPTIONS
         : isCodex
           ? CODEX_EFFORT_LEVEL_OPTIONS
-          : isGrok
-            ? GROK_EFFORT_LEVEL_OPTIONS
-            : EFFORT_LEVEL_OPTIONS
+          : isKimi
+            ? KIMI_EFFORT_LEVEL_OPTIONS
+            : isGrok
+              ? GROK_EFFORT_LEVEL_OPTIONS
+              : EFFORT_LEVEL_OPTIONS
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
       ? modelReasoning.levels
@@ -642,7 +646,7 @@ export function MobileSettingsMenu({
             </DropdownMenuSub>
           ) : (
             <DropdownMenuItem disabled>
-              <Plug className="mr-2 h-4 w-4 text-muted-foreground" />
+              <Plug className="h-4 w-4 text-muted-foreground" />
               <span>MCP</span>
               <span className="ml-auto text-xs text-muted-foreground">
                 None
@@ -709,8 +713,8 @@ export function MobileSettingsMenu({
           )}
           {resumeCommand && (
             <DropdownMenuItem onSelect={handleCopyResumeCommand}>
-              <ClipboardCopy className="h-4 w-4" />
-              Resume Command
+              <Copy className="h-4 w-4" />
+              Native Resume Command
             </DropdownMenuItem>
           )}
           {worktreeId && (

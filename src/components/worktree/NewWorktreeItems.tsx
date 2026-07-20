@@ -328,10 +328,8 @@ export interface BranchItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
-  isStacking: boolean
   onMouseEnter: () => void
   onClick: (background: boolean) => void
-  onStack: (background: boolean) => void
 }
 
 export function BranchItem({
@@ -339,12 +337,9 @@ export function BranchItem({
   index,
   isSelected,
   isCreating,
-  isStacking,
   onMouseEnter,
   onClick,
-  onStack,
 }: BranchItemProps) {
-  const busy = isCreating || isStacking
   return (
     <div
       data-item-index={index}
@@ -353,42 +348,21 @@ export function BranchItem({
         'group w-full flex items-center gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
         'hover:bg-accent',
         isSelected && 'bg-accent',
-        busy && 'opacity-50'
+        isCreating && 'opacity-50'
       )}
     >
-      {busy ? (
+      {isCreating ? (
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (
         <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
       )}
       <button
         onClick={e => onClick(e.metaKey)}
-        disabled={busy}
+        disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
       >
         <span className="text-sm truncate">{branch}</span>
       </button>
-      <div className="shrink-0 flex items-center gap-1 self-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={e => {
-                e.stopPropagation()
-                onStack(e.metaKey || e.ctrlKey)
-              }}
-              disabled={busy}
-              className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {isStacking ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <GitBranchPlus className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>New worktree based on {branch}</TooltipContent>
-        </Tooltip>
-      </div>
     </div>
   )
 }

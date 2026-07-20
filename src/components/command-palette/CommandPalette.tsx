@@ -8,6 +8,14 @@ import { useProjectsStore } from '@/store/projects-store'
 import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
 import { getAllCommands, executeCommand } from '@/lib/commands'
 import { formatShortcutDisplay } from '@/types/keybindings'
+import { Monitor, Server } from 'lucide-react'
+import {
+  LOCAL_CONNECTION_ID,
+  getActiveConnectionId,
+  markConnectionSwitch,
+  selectConnection,
+  useRemoteConnections,
+} from '@/lib/remote-connections'
 import {
   CommandDialog,
   CommandInput,
@@ -29,11 +37,26 @@ interface ProjectCommand {
   execute: () => void
 }
 
-export function CommandPalette() {
+interface ConnectionCommand {
+  id: string
+  connectionId: string
+  label: string
+  description: string
+  local: boolean
+  keywords: string[]
+}
+
+export function CommandPalette({
+  reloadApp = () => window.location.reload(),
+}: {
+  reloadApp?: () => void
+} = {}) {
   const { commandPaletteOpen, setCommandPaletteOpen } = useUIStore()
   const { data: preferences } = usePreferences()
   const commandContext = useCommandContext(preferences)
   const [search, setSearch] = useState('')
+  const remoteConnections = useRemoteConnections()
+  const activeConnectionId = getActiveConnectionId()
 
   // Fetch projects for dynamic commands
   const { data: projects = [] } = useProjects()
@@ -44,6 +67,37 @@ export function CommandPalette() {
     state => state.projectAccessTimestamps
   )
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+
+  const connectionCommands = useMemo((): ConnectionCommand[] => {
+    const connections: ConnectionCommand[] = [
+      {
+        id: `switch-connection-${LOCAL_CONNECTION_ID}`,
+        connectionId: LOCAL_CONNECTION_ID,
+        label: 'Localhost',
+        description: 'This device',
+        local: true,
+        keywords: ['connection', 'switch', 'local', 'localhost', 'device'],
+      },
+      ...remoteConnections.map(connection => ({
+        id: `switch-connection-${connection.id}`,
+        connectionId: connection.id,
+        label: connection.name,
+        description: connection.url,
+        local: false,
+        keywords: [
+          'connection',
+          'switch',
+          'remote',
+          connection.name.toLowerCase(),
+          connection.url.toLowerCase(),
+        ],
+      })),
+    ]
+
+    return connections.filter(
+      connection => connection.connectionId !== activeConnectionId
+    )
+  }, [activeConnectionId, remoteConnections])
 
   // Create dynamic project commands (sorted by last-accessed, most recent first)
   // Current project is excluded so the previous project is first (quick CMD+K → Enter switching)
@@ -109,7 +163,17 @@ export function CommandPalette() {
       setCommandPaletteOpen(false)
       setSearch('') // Clear search when closing
 
-      // Check for dynamic project command first
+      // Check connection shortcuts before project and static commands
+      const connectionCmd = connectionCommands.find(
+        command => command.id === commandId
+      )
+      if (connectionCmd) {
+        markConnectionSwitch()
+        selectConnection(connectionCmd.connectionId)
+        reloadApp()
+        return
+      }
+
       const projectCmd = projectCommands.find(c => c.id === commandId)
       if (projectCmd) {
         projectCmd.execute()
@@ -122,7 +186,13 @@ export function CommandPalette() {
         commandContext.showToast(result.error, 'error')
       }
     },
-    [commandContext, setCommandPaletteOpen, projectCommands]
+    [
+      commandContext,
+      connectionCommands,
+      projectCommands,
+      reloadApp,
+      setCommandPaletteOpen,
+    ]
   )
 
   // Handle dialog open/close with search clearing
@@ -166,7 +236,7 @@ export function CommandPalette() {
       <CommandList className="max-h-[70dvh] sm:max-h-[300px]">
         <CommandEmpty>No results found.</CommandEmpty>
 
-        {/* Projects group first (near top) */}
+        {/* Projects stay at the top for quick switching */}
         {commandGroups.projectCommands.length > 0 && (
           <CommandGroup heading="Projects">
             {commandGroups.projectCommands.map(cmd => (
@@ -174,26 +244,54 @@ export function CommandPalette() {
                 key={cmd.id}
                 value={`${cmd.label} ${cmd.description ?? ''}`}
                 onSelect={() => handleCommandSelect(cmd.id)}
+                className="items-start"
               >
                 {cmd.avatarUrl ? (
                   <img
                     src={cmd.avatarUrl}
                     alt={cmd.label}
-                    className="mr-2 size-4 shrink-0 rounded object-cover"
+                    className="mt-0.5 size-4 shrink-0 rounded object-cover"
                   />
                 ) : (
-                  <div className="mr-2 flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
+                  <div className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
                     <span className="text-[10px] font-medium uppercase">
                       {cmd.avatarFallback}
                     </span>
                   </div>
                 )}
-                <span>{cmd.label}</span>
-                {cmd.description && (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {cmd.description}
-                  </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate leading-snug">{cmd.label}</span>
+                  {cmd.description && (
+                    <span className="text-xs leading-snug text-muted-foreground">
+                      {cmd.description}
+                    </span>
+                  )}
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {connectionCommands.length > 0 && (
+          <CommandGroup heading="Connections">
+            {connectionCommands.map(command => (
+              <CommandItem
+                key={command.id}
+                value={`${command.label} ${command.description} ${command.keywords.join(' ')}`}
+                onSelect={() => handleCommandSelect(command.id)}
+                className="items-start"
+              >
+                {command.local ? (
+                  <Monitor className="mt-0.5 size-4 shrink-0" />
+                ) : (
+                  <Server className="mt-0.5 size-4 shrink-0" />
                 )}
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate leading-snug">{command.label}</span>
+                  <span className="truncate text-xs leading-snug text-muted-foreground">
+                    {command.description}
+                  </span>
+                </div>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -208,16 +306,23 @@ export function CommandPalette() {
                   key={command.id}
                   value={`${command.id} ${command.label} ${command.description ?? ''} ${command.keywords?.join(' ') ?? ''}`}
                   onSelect={() => handleCommandSelect(command.id)}
+                  className="items-start"
                 >
-                  {command.icon && <command.icon className="mr-2 h-4 w-4" />}
-                  <span>{command.label}</span>
-                  {command.description && (
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {command.description}
-                    </span>
+                  {command.icon && (
+                    <command.icon className="mt-0.5 size-4 shrink-0" />
                   )}
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate leading-snug">
+                      {command.label}
+                    </span>
+                    {command.description && (
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        {command.description}
+                      </span>
+                    )}
+                  </div>
                   {command.shortcut && (
-                    <CommandShortcut>
+                    <CommandShortcut className="self-center">
                       {formatShortcutDisplay(command.shortcut)}
                     </CommandShortcut>
                   )}

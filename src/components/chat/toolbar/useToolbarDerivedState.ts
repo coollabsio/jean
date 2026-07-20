@@ -8,6 +8,7 @@ import {
   CURSOR_MODEL_OPTIONS,
   COMMANDCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
+  KIMI_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -29,6 +30,7 @@ interface UseToolbarDerivedStateArgs {
   piModelOptions?: { value: string; label: string }[]
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
+  kimiModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
   installedBackends?: CliBackend[]
   availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
@@ -63,6 +65,7 @@ export function buildBackendModelSections({
   piModelOptions,
   commandcodeModelOptions,
   grokModelOptions,
+  kimiModelOptions,
 }: {
   installedBackends: CliBackend[]
   claudeModelOptions: { value: string; label: string }[]
@@ -72,6 +75,7 @@ export function buildBackendModelSections({
   piModelOptions?: { value: string; label: string }[]
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
+  kimiModelOptions?: { value: string; label: string }[]
 }): BackendModelSection[] {
   const sections: BackendModelSection[] = []
 
@@ -106,6 +110,12 @@ export function buildBackendModelSections({
         label: 'Grok',
         options: grokModelOptions ?? GROK_MODEL_OPTIONS,
       })
+    } else if (backend === 'kimi') {
+      sections.push({
+        backend,
+        label: 'Kimi Code',
+        options: kimiModelOptions ?? KIMI_MODEL_OPTIONS,
+      })
     }
   }
 
@@ -122,6 +132,7 @@ export function useToolbarDerivedState({
   commandcodeModelOptions,
   customCliProfiles,
   grokModelOptions,
+  kimiModelOptions,
   installedBackends = [
     'claude',
     'codex',
@@ -130,6 +141,7 @@ export function useToolbarDerivedState({
     'pi',
     'commandcode',
     'grok',
+    'kimi',
   ],
   availableMcpServers = [],
   enabledMcpServers = [],
@@ -140,6 +152,7 @@ export function useToolbarDerivedState({
   const isPi = selectedBackend === 'pi'
   const isCommandCode = selectedBackend === 'commandcode'
   const isGrok = selectedBackend === 'grok'
+  const isKimi = selectedBackend === 'kimi'
 
   const { data: modelCatalog } = useModelCatalog()
 
@@ -218,6 +231,11 @@ export function useToolbarDerivedState({
     'grok',
     grokModelOptions ?? GROK_MODEL_OPTIONS
   )
+  const resolvedKimiModelOptions = mergeCatalogOptions(
+    modelCatalog,
+    'kimi',
+    kimiModelOptions ?? KIMI_MODEL_OPTIONS
+  )
 
   const backendModelSections = useMemo(
     () =>
@@ -230,6 +248,7 @@ export function useToolbarDerivedState({
         piModelOptions: resolvedPiModelOptions,
         commandcodeModelOptions: resolvedCommandCodeModelOptions,
         grokModelOptions: resolvedGrokModelOptions,
+        kimiModelOptions: resolvedKimiModelOptions,
       }),
     [
       claudeModelOptions,
@@ -238,6 +257,7 @@ export function useToolbarDerivedState({
       resolvedCursorModelOptions,
       resolvedCommandCodeModelOptions,
       resolvedGrokModelOptions,
+      resolvedKimiModelOptions,
       resolvedOpencodeModelOptions,
       resolvedPiModelOptions,
     ]
@@ -250,6 +270,7 @@ export function useToolbarDerivedState({
     if (isPi) return resolvedPiModelOptions
     if (isCommandCode) return resolvedCommandCodeModelOptions
     if (isGrok) return resolvedGrokModelOptions
+    if (isKimi) return resolvedKimiModelOptions
     return claudeModelOptions
   }, [
     claudeModelOptions,
@@ -259,10 +280,12 @@ export function useToolbarDerivedState({
     isPi,
     isCommandCode,
     isGrok,
+    isKimi,
     isOpencode,
     resolvedCommandCodeModelOptions,
     resolvedCursorModelOptions,
     resolvedGrokModelOptions,
+    resolvedKimiModelOptions,
     resolvedOpencodeModelOptions,
     resolvedPiModelOptions,
   ])
@@ -306,7 +329,9 @@ export function useToolbarDerivedState({
     opencodeModelOptions: resolvedOpencodeModelOptions,
     piModelOptions: resolvedPiModelOptions,
     grokModelOptions: resolvedGrokModelOptions,
+    kimiModelOptions: resolvedKimiModelOptions,
     isGrok,
+    isKimi,
     selectedModelLabel,
     selectedModelReasoning,
   }

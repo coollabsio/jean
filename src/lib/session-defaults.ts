@@ -9,6 +9,7 @@ interface BackendModelPreferences {
   selected_pi_model?: string
   selected_commandcode_model?: string
   selected_grok_model?: string
+  selected_kimi_model?: string
 }
 
 export interface ModelOption {
@@ -41,10 +42,10 @@ export function resolveDefaultModelForBackend(
   availableModels?: ModelOption[]
 ): string {
   if (backend === 'codex') {
-    return preferences?.selected_codex_model ?? 'gpt-5.5'
+    return preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   }
   if (backend === 'opencode') {
-    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.5'
+    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
   }
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
@@ -59,7 +60,10 @@ export function resolveDefaultModelForBackend(
     return preferences?.selected_commandcode_model ?? 'commandcode/default'
   }
   if (backend === 'grok') {
-    return preferences?.selected_grok_model ?? 'grok/grok-composer-2.5-fast'
+    return preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  }
+  if (backend === 'kimi') {
+    return preferences?.selected_kimi_model ?? 'kimi/default'
   }
   return preferences?.selected_model ?? DEFAULT_MODEL
 }

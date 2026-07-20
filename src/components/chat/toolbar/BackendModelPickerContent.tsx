@@ -21,6 +21,7 @@ import { useAvailableCursorModels } from '@/services/cursor-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
+import { useAvailableKimiModels } from '@/services/kimi-cli'
 import {
   getCatalogModelFastInfo,
   useModelCatalog,
@@ -40,7 +41,7 @@ import {
 } from '@/components/chat/toolbar/toolbar-utils'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { isMacOS } from '@/lib/platform'
+import { getModifierSymbol } from '@/lib/platform'
 
 interface BackendModelPickerContentProps {
   open: boolean
@@ -83,7 +84,9 @@ export function BackendModelPickerContent({
   const [highlightedValue, setHighlightedValue] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
-  const fastShortcutLabel = isMacOS ? '⌘F' : 'Ctrl F'
+  const fastModifier = getModifierSymbol()
+  const fastShortcutLabel =
+    fastModifier === 'Ctrl' ? 'Ctrl F' : `${fastModifier}F`
 
   // Sessions with messages can now switch backends because the backend gets a
   // hidden Jean-local handoff prompt on provider changes.
@@ -149,6 +152,9 @@ export function BackendModelPickerContent({
   const { data: availableGrokModels } = useAvailableGrokModels({
     enabled: installedBackends.includes('grok'),
   })
+  const { data: availableKimiModels } = useAvailableKimiModels({
+    enabled: installedBackends.includes('kimi'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -192,6 +198,14 @@ export function BackendModelPickerContent({
       })),
     [availableGrokModels]
   )
+  const kimiModelOptions = useMemo(
+    () =>
+      availableKimiModels?.map(model => ({
+        value: `kimi/${model.id}`,
+        label: model.label,
+      })),
+    [availableKimiModels]
+  )
 
   const { backendModelSections: baseBackendModelSections } =
     useToolbarDerivedState({
@@ -203,6 +217,7 @@ export function BackendModelPickerContent({
       piModelOptions,
       commandcodeModelOptions,
       grokModelOptions,
+      kimiModelOptions,
       customCliProfiles,
       installedBackends,
     })
@@ -695,7 +710,7 @@ function SidebarBackends({
   onSelect: (backend: CliBackend) => void
 }) {
   const isVertical = orientation === 'vertical'
-  const modKey = isMacOS ? '⌘' : '⌃'
+  const modKey = getModifierSymbol()
   const showHints = isVertical && backends.length > 1
 
   return (

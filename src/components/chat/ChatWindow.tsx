@@ -89,8 +89,12 @@ import type {
   CodexDynamicToolCallRequest,
   PermissionDenial,
   PendingFile,
+  Question,
+  QuestionAnswer,
 } from '@/types/chat'
 import {
+  findCodexUserInputRequest,
+  getCodexUserInputRequestId,
   isAskUserQuestion,
   isPlanToolCall,
   normalizeCodexQuestions,
@@ -112,8 +116,6 @@ import { TextFilePreview } from './TextFilePreview'
 import { SkillBadge } from './SkillBadge'
 import { FileContentModal } from './FileContentModal'
 import { FilePreview } from './FilePreview'
-import { ContextPreview } from './ContextPreview'
-import { getLinkedPrContextPreviewExclusion } from './context-preview-utils'
 import { ChatInput } from './ChatInput'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
@@ -273,7 +275,8 @@ export function ChatWindow({
       state.autoInvestigatePRWorktreeIds.has(activeWorktreeId) ||
       state.autoInvestigateSecurityAlertWorktreeIds.has(activeWorktreeId) ||
       state.autoInvestigateAdvisoryWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateLinearIssueWorktreeIds.has(activeWorktreeId)
+      state.autoInvestigateLinearIssueWorktreeIds.has(activeWorktreeId) ||
+      state.autoInvestigateSentryIssueWorktreeIds.has(activeWorktreeId)
     )
   })
 
@@ -444,14 +447,19 @@ export function ChatWindow({
     hasReviewResults,
   })
   const hasReviewPanel = hasReviewResults || isCodeReviewLoadingPanel
-  const showReviewFullWidth = hasReviewPanel && reviewSidebarVisible
+  // Full-width review replaces the entire chat (messages + input + toolbar).
+  // On mobile that blanks the only surface the user has — keep chat mounted
+  // and let findings stay reachable via inline blocks / floating buttons.
+  const showReviewFullWidth =
+    hasReviewPanel && reviewSidebarVisible && !isMobile
 
-  // Sync review sidebar panel with reviewSidebarVisible state
+  // Sync review sidebar panel with reviewSidebarVisible state (desktop only)
   useEffect(() => {
+    if (isMobile) return
     if (hasReviewPanel && !reviewSidebarVisible) {
       useChatStore.getState().setReviewSidebarVisible(true)
     }
-  }, [hasReviewPanel, reviewSidebarVisible])
+  }, [hasReviewPanel, reviewSidebarVisible, isMobile])
 
   useEffect(() => {
     const panel = reviewPanelRef.current
@@ -469,14 +477,23 @@ export function ChatWindow({
   // navigation, and any other entry that bypasses App.tsx auto-resume.
   useEffect(() => {
     if (!deferredSessionId || !session) return
-    // Skip hydration while THIS client is actively sending — live chat:chunk
-    // rebuilds streaming state incrementally. Injecting a refetched running
-    // snapshot mid-send duplicates the prior assistant bubble (see answer
-    // submission flow in handleQuestionAnswer).
-    if (useChatStore.getState().sendingSessionIds[deferredSessionId]) return
     const lastMsg = session.messages.at(-1)
     if (lastMsg?.role === 'assistant' && lastMsg.id.startsWith('running-')) {
-      hydrateRunningSnapshot(deferredSessionId, lastMsg)
+      const store = useChatStore.getState()
+      const isSending = !!store.sendingSessionIds[deferredSessionId]
+      const hasLiveStreamingState =
+        !!store.streamingContents[deferredSessionId] ||
+        (store.streamingContentBlocks[deferredSessionId]?.length ?? 0) > 0 ||
+        (store.activeToolCalls[deferredSessionId]?.length ?? 0) > 0
+
+      // A live sender already has the incremental event state. A restored web
+      // session is also marked sending, but starts without that state and must
+      // hydrate the persisted running snapshot (including prior tool calls).
+      if (isSending && hasLiveStreamingState) return
+      hydrateRunningSnapshot(deferredSessionId, lastMsg, {
+        allowWhileSending: true,
+        dedupeReplayedOutput: true,
+      })
     }
   }, [deferredSessionId, session])
 
@@ -771,6 +788,7 @@ export function ChatWindow({
       ? (installedBackends[0] as CliBackend)
       : resolvedBackend)
   const isCodexBackend = selectedBackend === 'codex'
+  const isGrokBackend = selectedBackend === 'grok'
   const isCursorBackend = selectedBackend === 'cursor'
 
   // Per-session model selection, falls back to preferences default (backend-aware)
@@ -815,7 +833,17 @@ export function ChatWindow({
           xhigh: 'xhigh',
         } as Record<string, EffortLevel>
       )[preferences?.default_codex_reasoning_effort ?? 'high'] ?? 'high')
-    : ((preferences?.default_effort_level as EffortLevel) ?? 'high')
+    : isGrokBackend
+      ? ((
+          {
+            low: 'low',
+            medium: 'medium',
+            high: 'high',
+            xhigh: 'xhigh',
+            max: 'max',
+          } as Record<string, EffortLevel>
+        )[preferences?.default_grok_reasoning_effort ?? 'high'] ?? 'high')
+      : ((preferences?.default_effort_level as EffortLevel) ?? 'high')
   const sessionEffortLevel = useChatStore(state =>
     deferredSessionId ? state.effortLevels[deferredSessionId] : undefined
   )
@@ -1050,6 +1078,18 @@ export function ChatWindow({
     }
     return undefined
   }, [session?.messages])
+
+  const activeCodexUserInputToolCallId = activeCodexUserInputRequest
+    ? getCodexUserInputRequestId(activeCodexUserInputRequest)
+    : null
+  const hasInlineCodexUserInput = Boolean(
+    activeCodexUserInputToolCallId &&
+    (isSending ? currentToolCalls : lastAssistantMessage?.tool_calls)?.some(
+      toolCall =>
+        toolCall.id === activeCodexUserInputToolCallId &&
+        isAskUserQuestion(toolCall)
+    )
+  )
 
   // Check if there are pending (unanswered) questions
   // Look at the last assistant message's tool_calls since streaming tool calls
@@ -1316,9 +1356,9 @@ export function ChatWindow({
         override?.model ??
         yoloModelRef.current ??
         (yoloBackend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+          ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
           : yoloBackend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
             : yoloBackend === 'cursor'
               ? (preferences?.selected_cursor_model ?? 'cursor/auto')
               : yoloBackend === 'pi'
@@ -1326,7 +1366,11 @@ export function ChatWindow({
                 : yoloBackend === 'commandcode'
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
-                  : selectedModelRef.current)
+                  : yoloBackend === 'grok'
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    : yoloBackend === 'kimi'
+                      ? (preferences?.selected_kimi_model ?? 'kimi/default')
+                      : selectedModelRef.current)
       const yoloOverride =
         override || yoloModelRef.current || yoloBackend
           ? [yoloBackend, yoloModel].filter(Boolean).join(' / ')
@@ -1502,9 +1546,9 @@ export function ChatWindow({
         override?.model ??
         buildModelRef.current ??
         (buildBackend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+          ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
           : buildBackend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
             : buildBackend === 'cursor'
               ? (preferences?.selected_cursor_model ?? 'cursor/auto')
               : buildBackend === 'pi'
@@ -1512,7 +1556,11 @@ export function ChatWindow({
                 : buildBackend === 'commandcode'
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
-                  : selectedModelRef.current)
+                  : buildBackend === 'grok'
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    : buildBackend === 'kimi'
+                      ? (preferences?.selected_kimi_model ?? 'kimi/default')
+                      : selectedModelRef.current)
       const buildOverride =
         override || buildModelRef.current || buildBackend
           ? [buildBackend, buildModel].filter(Boolean).join(' / ')
@@ -1771,9 +1819,9 @@ export function ChatWindow({
         override?.model ??
         modeModelRef.current ??
         (modeBackend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-5.5')
+          ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
           : modeBackend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.5')
+            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
             : modeBackend === 'cursor'
               ? (preferences?.selected_cursor_model ?? 'cursor/auto')
               : modeBackend === 'pi'
@@ -1781,7 +1829,11 @@ export function ChatWindow({
                 : modeBackend === 'commandcode'
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
-                  : selectedModelRef.current)
+                  : modeBackend === 'grok'
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    : modeBackend === 'kimi'
+                      ? (preferences?.selected_kimi_model ?? 'kimi/default')
+                      : selectedModelRef.current)
       const modeOverride =
         override || modeModelRef.current || modeBackend
           ? [modeBackend, modeModel].filter(Boolean).join(' / ')
@@ -2022,6 +2074,7 @@ export function ChatWindow({
     handleRevertLastCommit,
     handleOpenPr,
     handleReview,
+    handleFinalReview,
     handleCodeRabbitReview,
     handleCodeRabbitPrReview,
     handleMerge,
@@ -2309,6 +2362,8 @@ export function ChatWindow({
       handleInvestigate('advisory')
     } else if (uiStore.consumeAutoInvestigateLinearIssue(activeWorktreeId)) {
       handleInvestigate('linear-issue')
+    } else if (uiStore.consumeAutoInvestigateSentryIssue(activeWorktreeId)) {
+      handleInvestigate('sentry-issue')
     }
   }, [
     activeSessionId,
@@ -2373,6 +2428,58 @@ export function ChatWindow({
     pendingPlanMessage,
     projectIdRef,
   })
+
+  const handleResolvedQuestionAnswer = useCallback(
+    (toolCallId: string, answers: QuestionAnswer[], questions: Question[]) => {
+      const sessionId = activeSessionIdRef.current
+      if (
+        sessionId &&
+        useChatStore.getState().isQuestionAnswered(sessionId, toolCallId)
+      ) {
+        return
+      }
+      const pendingRequest = sessionId
+        ? findCodexUserInputRequest(
+            useChatStore.getState().pendingCodexUserInputRequests[sessionId] ??
+              [],
+            toolCallId
+          )
+        : undefined
+
+      if (pendingRequest) {
+        handleCodexUserInputAnswer(pendingRequest, answers)
+        return
+      }
+      handleQuestionAnswer(toolCallId, answers, questions)
+    },
+    [handleCodexUserInputAnswer, handleQuestionAnswer]
+  )
+
+  const handleResolvedQuestionSkip = useCallback(
+    (toolCallId: string) => {
+      const sessionId = activeSessionIdRef.current
+      if (
+        sessionId &&
+        useChatStore.getState().isQuestionAnswered(sessionId, toolCallId)
+      ) {
+        return
+      }
+      const pendingRequest = sessionId
+        ? findCodexUserInputRequest(
+            useChatStore.getState().pendingCodexUserInputRequests[sessionId] ??
+              [],
+            toolCallId
+          )
+        : undefined
+
+      if (pendingRequest) {
+        handleCodexUserInputAnswer(pendingRequest, [])
+        return
+      }
+      handleSkipQuestion(toolCallId)
+    },
+    [handleCodexUserInputAnswer, handleSkipQuestion]
+  )
 
   // Copy a sent user message to the clipboard with attachment metadata
   // When pasted back, ChatInput detects the custom format and restores attachments
@@ -2696,6 +2803,7 @@ export function ChatWindow({
           open={reviewMethodModalOpen}
           onOpenChange={setReviewMethodModalOpen}
           onAiReview={handleReview}
+          onFinalReview={handleFinalReview}
           onCodeRabbitCliReview={handleCodeRabbitReview}
           onCodeRabbitPrReview={handleCodeRabbitPrReview}
           codeRabbitPrAvailable={Boolean(worktree?.pr_number)}
@@ -2747,14 +2855,25 @@ export function ChatWindow({
             />
           </div>
         ) : (
-          <ResizablePanelGroup direction="horizontal" className="flex-1">
-            <ResizablePanel defaultSize={100} minSize={40}>
-              <ResizablePanelGroup direction="vertical" className="h-full">
+          <ResizablePanelGroup
+            direction="horizontal"
+            className="min-h-0 flex-1"
+          >
+            <ResizablePanel
+              defaultSize={100}
+              minSize={isMobile ? 0 : 40}
+              className="min-h-0"
+            >
+              <ResizablePanelGroup
+                direction="vertical"
+                className="h-full min-h-0"
+              >
                 <ResizablePanel
                   defaultSize={terminalVisible ? 70 : 100}
-                  minSize={30}
+                  minSize={isMobile || isModal ? 0 : 30}
+                  className="min-h-0"
                 >
-                  <div className="flex h-full flex-col">
+                  <div className="flex h-full min-h-0 flex-col">
                     {/* Messages area */}
                     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                       {/* Session label badge - absolute positioned to avoid covering content */}
@@ -2890,8 +3009,10 @@ export function ChatWindow({
                                         ? handleWorktreeYoloApproval
                                         : undefined
                                     }
-                                    onQuestionAnswer={handleQuestionAnswer}
-                                    onQuestionSkip={handleSkipQuestion}
+                                    onQuestionAnswer={
+                                      handleResolvedQuestionAnswer
+                                    }
+                                    onQuestionSkip={handleResolvedQuestionSkip}
                                     onFileClick={setViewingFilePath}
                                     onFixFinding={handleFixFinding}
                                     onFixAllFindings={handleFixAllFindings}
@@ -2963,8 +3084,10 @@ export function ChatWindow({
                                         ? handleWorktreeYoloApproval
                                         : undefined
                                     }
-                                    onQuestionAnswer={handleQuestionAnswer}
-                                    onQuestionSkip={handleSkipQuestion}
+                                    onQuestionAnswer={
+                                      handleResolvedQuestionAnswer
+                                    }
+                                    onQuestionSkip={handleResolvedQuestionSkip}
                                     onFileClick={setViewingFilePath}
                                     onFixFinding={handleFixFinding}
                                     onFixAllFindings={handleFixAllFindings}
@@ -3000,8 +3123,12 @@ export function ChatWindow({
                                       }
                                       toolCalls={currentToolCalls}
                                       streamingContent={streamingContent}
-                                      onQuestionAnswer={handleQuestionAnswer}
-                                      onQuestionSkip={handleSkipQuestion}
+                                      onQuestionAnswer={
+                                        handleResolvedQuestionAnswer
+                                      }
+                                      onQuestionSkip={
+                                        handleResolvedQuestionSkip
+                                      }
                                       onFileClick={setViewingFilePath}
                                       worktreePath={activeWorktreePath}
                                       isQuestionAnswered={isQuestionAnswered}
@@ -3017,8 +3144,12 @@ export function ChatWindow({
                                       }
                                       toolCalls={currentToolCalls}
                                       streamingContent={streamingContent}
-                                      onQuestionAnswer={handleQuestionAnswer}
-                                      onQuestionSkip={handleSkipQuestion}
+                                      onQuestionAnswer={
+                                        handleResolvedQuestionAnswer
+                                      }
+                                      onQuestionSkip={
+                                        handleResolvedQuestionSkip
+                                      }
                                       onFileClick={setViewingFilePath}
                                       worktreePath={activeWorktreePath}
                                       isQuestionAnswered={isQuestionAnswered}
@@ -3107,17 +3238,23 @@ export function ChatWindow({
                             )}
 
                             {activeCodexUserInputRequest &&
+                              !hasInlineCodexUserInput &&
                               activeCodexUserInputQuestions.length > 0 && (
                                 <AskUserQuestion
                                   toolCallId={
-                                    activeCodexUserInputRequest.item_id ||
-                                    `codex-user-input-${activeCodexUserInputRequest.rpc_id}`
+                                    activeCodexUserInputToolCallId as string
                                   }
                                   questions={activeCodexUserInputQuestions}
                                   onSubmit={(_toolCallId, answers) =>
                                     handleCodexUserInputAnswer(
                                       activeCodexUserInputRequest,
                                       answers
+                                    )
+                                  }
+                                  onSkip={() =>
+                                    handleCodexUserInputAnswer(
+                                      activeCodexUserInputRequest,
+                                      []
                                     )
                                   }
                                   isSkipped={false}
@@ -3236,30 +3373,6 @@ export function ChatWindow({
                                 : undefined
                             }
                           >
-                            {/* Loaded context preview (# mentions) */}
-                            <ContextPreview
-                              sessionId={activeSessionId}
-                              worktreeId={null}
-                              worktreePath={activeWorktreePath}
-                              projectId={worktree?.project_id ?? null}
-                              disabled={isSending}
-                              excludeIssueNumber={
-                                worktree?.issue_number ?? null
-                              }
-                              excludePrNumber={getLinkedPrContextPreviewExclusion(
-                                worktree
-                              )}
-                              excludeSecurityAlertNumber={
-                                worktree?.security_alert_number ?? null
-                              }
-                              excludeAdvisoryGhsaId={
-                                worktree?.advisory_ghsa_id ?? null
-                              }
-                              excludeLinearIssueIdentifier={
-                                worktree?.linear_issue_identifier ?? null
-                              }
-                            />
-
                             {/* Pending file preview (@ mentions) */}
                             <FilePreview
                               files={currentPendingFiles}

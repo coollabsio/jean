@@ -14,9 +14,9 @@ import type {
   OpencodeInstallProgress,
   OpencodeReleaseInfo,
 } from '@/types/opencode-cli'
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 
 export const opencodeCliQueryKeys = {
   all: ['opencode-cli'] as const,

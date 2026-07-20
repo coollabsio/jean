@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { eventToShortcutString } from '@/types/keybindings'
+import {
+  DEFAULT_KEYBINDINGS,
+  eventToShortcutString,
+  KEYBINDING_DEFINITIONS,
+} from '@/types/keybindings'
+
+function keyboardKey(token: string): { key: string; code: string } {
+  if (/^[a-z]$/.test(token)) {
+    return { key: token, code: `Key${token.toUpperCase()}` }
+  }
+  if (/^[0-9]$/.test(token)) return { key: token, code: `Digit${token}` }
+
+  const named: Record<string, { key: string; code: string }> = {
+    comma: { key: ',', code: 'Comma' },
+    period: { key: '.', code: 'Period' },
+    backquote: { key: '`', code: 'Backquote' },
+    enter: { key: 'Enter', code: 'Enter' },
+    backspace: { key: 'Backspace', code: 'Backspace' },
+    arrowup: { key: 'ArrowUp', code: 'ArrowUp' },
+    arrowdown: { key: 'ArrowDown', code: 'ArrowDown' },
+    arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft' },
+    arrowright: { key: 'ArrowRight', code: 'ArrowRight' },
+  }
+  const result = named[token]
+  if (!result) throw new Error(`Missing keyboard test mapping for ${token}`)
+  return result
+}
 
 describe('eventToShortcutString', () => {
   it('maps alt-modified letter keys using physical key code', () => {
@@ -56,5 +82,52 @@ describe('eventToShortcutString', () => {
     })
 
     expect(eventToShortcutString(altOnlyEvent)).toBeNull()
+  })
+
+  it('matches every default mod shortcut with either Command or Control', () => {
+    for (const shortcut of Object.values(DEFAULT_KEYBINDINGS)) {
+      const parts = shortcut.split('+')
+      if (!parts.includes('mod')) continue
+
+      const keyToken = parts.at(-1)
+      if (!keyToken) throw new Error(`Missing key in ${shortcut}`)
+      const key = keyboardKey(keyToken)
+      const modifiers = {
+        shiftKey: parts.includes('shift'),
+        altKey: parts.includes('alt'),
+      }
+
+      expect(
+        eventToShortcutString(
+          new KeyboardEvent('keydown', {
+            ...key,
+            ...modifiers,
+            metaKey: true,
+          })
+        ),
+        `Command should match ${shortcut}`
+      ).toBe(shortcut)
+      expect(
+        eventToShortcutString(
+          new KeyboardEvent('keydown', {
+            ...key,
+            ...modifiers,
+            ctrlKey: true,
+          })
+        ),
+        `Control should match ${shortcut}`
+      ).toBe(shortcut)
+    }
+  })
+
+  it('keeps the settings definitions aligned with every default shortcut', () => {
+    const definitions = new Map(
+      KEYBINDING_DEFINITIONS.map(definition => [
+        definition.action,
+        definition.default_shortcut,
+      ])
+    )
+
+    expect(Object.fromEntries(definitions)).toEqual(DEFAULT_KEYBINDINGS)
   })
 })

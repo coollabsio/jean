@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
 import { FolderOpen, FolderPlus, Globe } from 'lucide-react'
 import {
@@ -32,7 +32,9 @@ export function AddProjectDialog() {
   const isPending = addProject.isPending || initProject.isPending
 
   const handleAddExisting = useCallback(async () => {
-    if (!isNativeApp()) {
+    // Remote backends (and pure web) must browse the server filesystem via
+    // DirectoryBrowser — the native OS picker only sees the local machine.
+    if (!isLocalBackend()) {
       setBrowserMode('select')
       return
     }
@@ -83,7 +85,9 @@ export function AddProjectDialog() {
   }, [addProject, addProjectParentFolderId, setAddProjectDialogOpen])
 
   const handleInitNew = useCallback(async () => {
-    if (!isNativeApp()) {
+    // Remote backends (and pure web) must browse the server filesystem via
+    // DirectoryBrowser — the native OS picker only sees the local machine.
+    if (!isLocalBackend()) {
       setBrowserMode('save')
       return
     }

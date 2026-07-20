@@ -9,6 +9,8 @@ import {
 import type { Project } from '@/types/projects'
 import { useDeleteFolder, useMoveItem, useProjects } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useUIStore } from '@/store/ui-store'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 interface FolderContextMenuProps {
   folder: Project
@@ -22,6 +24,7 @@ export function FolderContextMenu({
   const deleteFolder = useDeleteFolder()
   const moveItem = useMoveItem()
   const { data: projects = [] } = useProjects()
+  const isMobile = useIsMobile()
   const setAddProjectDialogOpen = useProjectsStore(
     state => state.setAddProjectDialogOpen
   )
@@ -31,6 +34,9 @@ export function FolderContextMenu({
   const isNested = folder.parent_id !== undefined
 
   const handleNewProject = () => {
+    if (isMobile) {
+      useUIStore.getState().setLeftSidebarVisible(false)
+    }
     setAddProjectDialogOpen(true, folder.id)
   }
 

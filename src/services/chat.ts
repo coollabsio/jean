@@ -2797,6 +2797,19 @@ export async function steerPiTurn(
 }
 
 /**
+ * Inject a text-only user message into a running Grok ACP turn via
+ * `_x.ai/interject`. Throws when no active Grok turn/connection is available —
+ * callers fall back to queue/cancel+send.
+ */
+export async function steerGrokTurn(
+  worktreeId: string,
+  sessionId: string,
+  message: string
+): Promise<void> {
+  await invoke('steer_grok_turn', { worktreeId, sessionId, message })
+}
+
+/**
  * Re-insert a message at the FRONT of the persisted queue (sequenced enqueue +
  * move-to-front). Used when a send lost the race against another queue
  * consumer and must be retried once the active run completes.

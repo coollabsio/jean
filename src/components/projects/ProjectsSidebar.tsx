@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Plus, Folder, Archive, Briefcase } from 'lucide-react'
 import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import {
@@ -9,15 +9,25 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useProjects, useCreateFolder } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useUIStore } from '@/store/ui-store'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { ProjectTree } from './ProjectTree'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
+
+/** Close the mobile projects drawer when leaving into a dialog/modal. */
+function closeMobileSidebarIfNeeded(isMobile: boolean) {
+  if (isMobile) {
+    useUIStore.getState().setLeftSidebarVisible(false)
+  }
+}
 
 export function ProjectsSidebar() {
   const { data: projects = [], isLoading } = useProjects()
   const { setAddProjectDialogOpen } = useProjectsStore()
   const createFolder = useCreateFolder()
   const sidebarWidth = useSidebarWidth()
+  const isMobile = useIsMobile()
   const [backendCheckReady, setBackendCheckReady] = useState(false)
   useEffect(() => scheduleIdleWork(() => setBackendCheckReady(true), 1500), [])
   const { installedBackends } = useInstalledBackends({
@@ -27,6 +37,16 @@ export function ProjectsSidebar() {
 
   // Responsive layout threshold
   const isNarrow = sidebarWidth < 180
+
+  const handleNewProject = useCallback(() => {
+    closeMobileSidebarIfNeeded(isMobile)
+    setAddProjectDialogOpen(true)
+  }, [isMobile, setAddProjectDialogOpen])
+
+  const handleOpenArchived = useCallback(() => {
+    closeMobileSidebarIfNeeded(isMobile)
+    window.dispatchEvent(new CustomEvent('command:open-archived-modal'))
+  }, [isMobile])
 
   return (
     <div className="flex h-full flex-col">
@@ -47,9 +67,10 @@ export function ProjectsSidebar() {
         )}
       </div>
 
-      {/* Footer - transparent buttons with hover background */}
+      {/* Footer - transparent buttons with hover background.
+          Extra bottom padding (plus safe-area) lifts controls off the screen edge. */}
       <div
-        className={`flex gap-1 p-1.5 pb-2 ${isNarrow ? 'flex-col' : 'items-center'}`}
+        className={`flex gap-1 p-1.5 pb-[calc(var(--safe-area-bottom)+1.25rem)] ${isNarrow ? 'flex-col' : 'items-center'}`}
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -72,7 +93,7 @@ export function ProjectsSidebar() {
               Folder
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => setAddProjectDialogOpen(true)}
+              onClick={handleNewProject}
               disabled={!backendCheckReady || setupIncomplete}
             >
               <Briefcase className="mr-2 size-3.5" />
@@ -83,9 +104,7 @@ export function ProjectsSidebar() {
         <button
           type="button"
           className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg text-sm text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
-          onClick={() =>
-            window.dispatchEvent(new CustomEvent('command:open-archived-modal'))
-          }
+          onClick={handleOpenArchived}
         >
           {!isNarrow && <Archive className="size-3.5" />}
           Archived

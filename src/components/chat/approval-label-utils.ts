@@ -10,6 +10,9 @@ const BACKEND_LABELS: Record<string, string> = {
   opencode: 'OpenCode',
   cursor: 'Cursor',
   commandcode: 'CommandCode',
+  pi: 'PI',
+  grok: 'Grok',
+  kimi: 'Kimi Code',
 }
 
 function formatBackendLabel(backend: string): string {
@@ -36,6 +39,9 @@ export function resolveApprovalLabel(
         selected_opencode_model?: string | null
         selected_cursor_model?: string | null
         selected_commandcode_model?: string | null
+        selected_pi_model?: string | null
+        selected_grok_model?: string | null
+        selected_kimi_model?: string | null
         default_backend?: string | null
       }
     | undefined,
@@ -60,14 +66,21 @@ export function resolveApprovalLabel(
     backend ?? sessionBackend ?? preferences.default_backend ?? 'claude'
   const backendDefaultModel =
     resolvedBackend === 'codex'
-      ? (preferences.selected_codex_model ?? 'gpt-5.5')
+      ? (preferences.selected_codex_model ?? 'gpt-5.6-sol')
       : resolvedBackend === 'opencode'
-        ? (preferences.selected_opencode_model ?? 'opencode/gpt-5.5')
+        ? (preferences.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
         : resolvedBackend === 'cursor'
           ? (preferences.selected_cursor_model ?? 'cursor/auto')
           : resolvedBackend === 'commandcode'
             ? (preferences.selected_commandcode_model ?? 'commandcode/default')
-            : (preferences.selected_model ?? null)
+            : resolvedBackend === 'pi'
+              ? (preferences.selected_pi_model ?? 'pi/sonnet')
+              : resolvedBackend === 'grok'
+                ? (preferences.selected_grok_model ??
+                  'grok/grok-4.5')
+                : resolvedBackend === 'kimi'
+                  ? (preferences.selected_kimi_model ?? 'kimi/default')
+                  : (preferences.selected_model ?? null)
   const resolvedModel = model ?? backendDefaultModel
   if (!resolvedModel && !resolvedBackend) return null
   const modelLabel = resolvedModel ? getMessageModelLabel(resolvedModel) : null

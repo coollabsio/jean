@@ -191,6 +191,9 @@ describe('StreamingMessage', () => {
     expect(
       screen.getByText('Repo inspected. No implementation target was provided.')
     ).toBeVisible()
+    expect(screen.getByText('Clarify scope')).toBeVisible()
+    expect(screen.getByText('Implement changes')).toBeVisible()
+    expect(screen.getByText('In progress:')).toBeVisible()
   })
 
   it('parses markdown for streaming text blocks without waiting for a trailing newline', () => {

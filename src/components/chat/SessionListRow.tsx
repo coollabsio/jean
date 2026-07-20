@@ -1,6 +1,7 @@
 import { forwardRef, useCallback } from 'react'
 import {
   Archive,
+  Copy,
   Eye,
   EyeOff,
   FileText,
@@ -8,7 +9,6 @@ import {
   RefreshCw,
   Shield,
   Tag,
-  Terminal,
   Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -278,8 +278,8 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                   .catch(() => toast.error('Failed to copy resume command'))
               }}
             >
-              <Terminal className="mr-2 h-4 w-4" />
-              Copy Resume Command
+              <Copy className="mr-2 h-4 w-4" />
+              Native Resume Command
             </ContextMenuItem>
           )}
           {onReconnect && canReconnect && (

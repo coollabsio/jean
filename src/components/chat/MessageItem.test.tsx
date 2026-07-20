@@ -97,6 +97,8 @@ describe('MessageItem', () => {
     expect(
       screen.getByText('Repo inspected. Native plan had no prose body.')
     ).toBeVisible()
+    expect(screen.getByText('Clarify scope')).toBeVisible()
+    expect(screen.getByText('In progress:')).toBeVisible()
   })
 
   it('prefers final plan text over explanation-only fallback and hides duplicate text block', () => {

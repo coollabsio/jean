@@ -14,9 +14,9 @@ import type {
   CommandCodeModelInfo,
   CommandCodeReleaseInfo,
 } from '@/types/commandcode-cli'
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 
 export const commandcodeCliQueryKeys = {
   all: ['commandcode-cli'] as const,

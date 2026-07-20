@@ -8,6 +8,7 @@ import {
   cancelChatMessage,
   persistEnqueue,
   steerCodexTurn,
+  steerGrokTurn,
   steerOpencodeTurn,
   steerPiTurn,
 } from '@/services/chat'
@@ -55,6 +56,7 @@ interface UseMessageSendingParams {
         codex_auto_steer_enabled?: boolean
         opencode_auto_steer_enabled?: boolean
         pi_auto_steer_enabled?: boolean
+        grok_auto_steer_enabled?: boolean
       }
     | undefined
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -448,7 +450,8 @@ export function useMessageSending({
         useAdaptiveThinkingRef.current ||
         isCodexBackendRef.current ||
         selectedBackend === 'pi' ||
-        selectedBackend === 'grok'
+        selectedBackend === 'grok' ||
+        selectedBackend === 'kimi'
       const queuedMessage: QueuedMessage = {
         id: generateId(),
         message,
@@ -480,8 +483,11 @@ export function useMessageSending({
       )
       if (isSendingNow) {
         // Auto-steer: inject the prompt into a steer-capable running turn
-        // instead of queueing. Attachments can't be injected mid-turn; steer
-        // failures (turn ended / not started yet) fall back to the normal queue.
+        // instead of queueing. All attachment kinds (file @-mentions, skills,
+        // pasted images, pasted text files) serialize to path refs via
+        // buildMessageWithRefs, so text-only steer backends (Grok/Pi/OpenCode)
+        // can carry them. Codex additionally gets structured attachment input.
+        // Steer failures (turn ended / not started yet) fall back to queue.
         const hasAttachments =
           images.length > 0 ||
           files.length > 0 ||
@@ -493,17 +499,25 @@ export function useMessageSending({
             ? (preferences?.opencode_auto_steer_enabled ?? true)
             : backend === 'pi'
               ? (preferences?.pi_auto_steer_enabled ?? true)
-              : (preferences?.codex_auto_steer_enabled ?? true)
-        const canSteerWithAttachments = backend === 'codex'
-        if (
-          (backend === 'codex' || backend === 'opencode' || backend === 'pi') &&
-          autoSteerEnabled &&
-          (!hasAttachments || canSteerWithAttachments)
-        ) {
+              : backend === 'grok'
+                ? (preferences?.grok_auto_steer_enabled ?? true)
+                : (preferences?.codex_auto_steer_enabled ?? true)
+        const isSteerBackend =
+          backend === 'codex' ||
+          backend === 'opencode' ||
+          backend === 'pi' ||
+          backend === 'grok'
+        if (isSteerBackend && autoSteerEnabled) {
           try {
             const steerMessage = buildMessageWithRefs(queuedMessage)
             if (backend === 'pi') {
               await steerPiTurn(activeWorktreeId, activeSessionId, steerMessage)
+            } else if (backend === 'grok') {
+              await steerGrokTurn(
+                activeWorktreeId,
+                activeSessionId,
+                steerMessage
+              )
             } else if (backend === 'opencode') {
               await steerOpencodeTurn(
                 activeWorktreeId,

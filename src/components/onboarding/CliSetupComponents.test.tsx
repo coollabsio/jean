@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  AuthLoginState,
   normalizeManualCliVersionInput,
   SetupState,
 } from './CliSetupComponents'
@@ -70,5 +71,29 @@ describe('SetupState manual version check', () => {
     await screen.findByText(/Version not found/i)
     expect(onVersionChange).not.toHaveBeenCalledWith('9.9.9')
     expect(screen.getByRole('button', { name: /install/i })).toBeDisabled()
+  })
+})
+
+describe('AuthLoginState completion', () => {
+  it('only advances once when completion is clicked repeatedly', () => {
+    const onComplete = vi.fn()
+
+    render(
+      <AuthLoginState
+        cliName="Cursor CLI"
+        terminalId="cursor-login-test"
+        command="agent"
+        commandArgs={['login']}
+        onComplete={onComplete}
+      />
+    )
+
+    const completeButton = screen.getByRole('button', {
+      name: "I've Completed Login",
+    })
+    fireEvent.click(completeButton)
+    fireEvent.click(completeButton)
+
+    expect(onComplete).toHaveBeenCalledOnce()
   })
 })

@@ -12,13 +12,16 @@ import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from '@/types/keybindings'
 
 // Old default keybindings that have been changed - used for migration
 // When a default changes, add the old value here so stored prefs get updated
-const MIGRATED_KEYBINDINGS: Partial<Record<keyof KeybindingsMap, string>> = {
+const MIGRATED_KEYBINDINGS: Partial<
+  Record<keyof KeybindingsMap, string | string[]>
+> = {
   toggle_left_sidebar: 'mod+1', // Changed to 'mod+b'
   open_provider_dropdown: 'alt+p', // Changed to 'mod+shift+p' (macOS dead key fix)
   open_model_dropdown: 'alt+m', // Changed to 'mod+shift+m' (macOS dead key fix)
   open_thinking_dropdown: 'alt+e', // Changed to 'mod+shift+e' (macOS dead key fix)
   toggle_browser: 'mod+alt+b', // Changed to 'mod+shift+backquote'
-  restore_last_archived: 'mod+shift+t', // Changed to free CMD+SHIFT+T for the new-session picker
+  // Changed to free CMD+SHIFT+T, then corrected to the serializer's modifier order.
+  restore_last_archived: ['mod+shift+t', 'mod+alt+shift+t'],
 }
 
 // Migrate keybindings: if a stored value matches an old default, use the new default
@@ -29,7 +32,8 @@ function migrateKeybindings(
 
   const migrated = { ...stored }
   for (const [action, oldDefault] of Object.entries(MIGRATED_KEYBINDINGS)) {
-    if (stored[action] === oldDefault) {
+    const oldDefaults = Array.isArray(oldDefault) ? oldDefault : [oldDefault]
+    if (oldDefaults.includes(stored[action])) {
       // User had the old default, update to new default
       const newDefault = DEFAULT_KEYBINDINGS[action]
       if (newDefault) {

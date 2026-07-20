@@ -91,4 +91,59 @@ describe('Markdown', () => {
     )
   })
 
+  it('preserves spaces from Grok-style word-boundary stream deltas', () => {
+    const chunks = [
+      "I'll",
+      ' add',
+      ' SQ',
+      'Lite',
+      ' backup',
+      ' encryption',
+      ' using',
+      ' a',
+      ' key',
+      ' from',
+      ' `.',
+      'env',
+      '`',
+      ' (',
+      'Bun',
+      ' crypto',
+      ',',
+      ' no',
+      ' `',
+      'age',
+      '`',
+      ' dependency',
+      ').',
+      ' Checking',
+      ' the',
+      ' project',
+    ]
+    let acc = ''
+    for (const c of chunks) {
+      acc += c
+      const { container } = render(<Markdown streaming>{acc}</Markdown>)
+      const text = container.textContent ?? ''
+      expect(text.includes("I'lladd")).toBe(false)
+      if (acc.includes(' add')) {
+        expect(text).toMatch(/I'll\s+add/)
+      }
+    }
+    const { container } = render(<Markdown streaming>{acc}</Markdown>)
+    expect(container.textContent).toContain("I'll add SQLite backup")
+    expect(container.textContent).toContain('Bun crypto')
+    expect(container.textContent).not.toContain('Buncrypto')
+  })
+
+  it('keeps mid-string spaces after remend when content ends with a single space', () => {
+    // remend strips one trailing space for incomplete-markdown heuristics.
+    // We restore it; HTML may still collapse the visual trailing space, but
+    // mid-word spaces must remain so the next delta does not look glued on.
+    const { container } = render(
+      <Markdown streaming>{"I'll add SQLite "}</Markdown>
+    )
+    expect(container.textContent).toContain("I'll add SQLite")
+    expect(container.textContent).not.toContain("I'lladd")
+  })
 })

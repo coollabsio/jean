@@ -30,6 +30,7 @@ import { usePiCliSetup } from '@/services/pi-cli'
 import { useCodeRabbitCliSetup } from '@/services/coderabbit-cli'
 import { useCommandCodeCliSetup } from '@/services/commandcode-cli'
 import { useGrokCliSetup } from '@/services/grok-cli'
+import { useKimiCliSetup } from '@/services/kimi-cli'
 import { logger } from '@/lib/logger'
 import {
   SetupState,
@@ -112,7 +113,9 @@ function GhCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
  */
 export function GlabCliReinstallModal({ open, onOpenChange }: ModalProps) {
   if (!open) return null
-  return <GlabCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  return (
+    <GlabCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  )
 }
 
 function GlabCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
@@ -237,6 +240,25 @@ function GrokCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
   )
 }
 
+export function KimiCliReinstallModal({ open, onOpenChange }: ModalProps) {
+  if (!open) return null
+  return (
+    <KimiCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  )
+}
+
+function KimiCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+  const setup = useKimiCliSetup()
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType="kimi"
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
 export function CommandCodeCliReinstallModal({
   open,
   onOpenChange,
@@ -280,6 +302,7 @@ interface CliReinstallModalUIProps {
     | 'coderabbit'
     | 'commandcode'
     | 'grok'
+    | 'kimi'
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -305,9 +328,11 @@ function CliReinstallModalUI({
                 ? 'Command Code CLI'
                 : cliType === 'grok'
                   ? 'Grok CLI'
-                  : cliType === 'glab'
-                    ? 'GitLab CLI'
-                    : 'GitHub CLI'
+                  : cliType === 'kimi'
+                    ? 'Kimi Code CLI'
+                    : cliType === 'glab'
+                      ? 'GitLab CLI'
+                      : 'GitHub CLI'
 
   // Store setup in ref for stable callback reference
   const setupRef = useRef(setup)

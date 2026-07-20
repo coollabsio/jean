@@ -80,6 +80,12 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # Tauri build script requires bundle.resources path `../dist` to exist
+      # (see tauri.conf.json). Keep this even if dist/.gitkeep is missing.
+      # Use bash so Windows runners don't use PowerShell mkdir (fails if dist exists).
+      - name: Ensure dist exists for Tauri resources
+        shell: bash
+        run: mkdir -p dist && touch dist/.gitkeep
 
       - name: Rust clippy
         run: bun run rust:clippy

@@ -37,6 +37,7 @@ interface UseToolbarHandlersParams {
         selected_pi_model?: string
         selected_commandcode_model?: string
         selected_grok_model?: string
+        selected_kimi_model?: string
         custom_cli_profiles?: { name: string }[]
         default_execution_mode?: ExecutionMode
       }
@@ -224,6 +225,7 @@ export function useToolbarHandlers({
       preferences?.selected_cursor_model,
       preferences?.selected_commandcode_model,
       preferences?.selected_grok_model,
+      preferences?.selected_kimi_model,
       preferences?.selected_model,
       preferences?.selected_opencode_model,
       preferences?.selected_pi_model,

@@ -1,0 +1,44 @@
+[package]
+name = "jean-core"
+version = "0.1.67"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+toml_edit = "0.23"
+log = "0.4"
+base64 = "0.22"
+regex = "1.11.1"
+uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
+rand = "0.8"
+dirs = "5.0"
+once_cell = "1.20"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+sha2 = "0.10"
+ignore = "0.4"
+zip = "2.2"
+flate2 = "1.0"
+tar = "0.4"
+portable-pty = "0.8"
+which = "7"
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "compression-br", "compression-gzip"] }
+tokio = { version = "1", features = ["sync", "macros", "net", "io-util", "fs", "rt-multi-thread", "time", "signal"] }
+futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+if-addrs = "0.13"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rust-embed = { version = "8", features = ["debug-embed"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+tokio-tungstenite = "0.28"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"

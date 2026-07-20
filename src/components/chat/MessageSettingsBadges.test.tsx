@@ -48,6 +48,36 @@ describe('MessageSettingsBadges', () => {
     expect(screen.queryByText('· Megathink')).toBeNull()
   })
 
+  it('does not show Claude thinking labels for Grok models', () => {
+    render(
+      <MessageSettingsBadges
+        model="grok/grok-4.5"
+        executionMode="yolo"
+        thinkingLevel="think"
+        effortLevel={undefined}
+        isCursor={false}
+      />
+    )
+
+    expect(screen.getByText(/Grok/)).toBeVisible()
+    expect(screen.queryByText('· Think')).toBeNull()
+  })
+
+  it('shows effort labels for Grok models', () => {
+    render(
+      <MessageSettingsBadges
+        model="grok/grok-4.5"
+        executionMode="yolo"
+        thinkingLevel={undefined}
+        effortLevel="medium"
+        isCursor={false}
+      />
+    )
+
+    expect(screen.getByText('· Yolo')).toBeVisible()
+    expect(screen.getByText('· Medium')).toBeVisible()
+  })
+
   it('keeps Claude model labels working', () => {
     render(
       <MessageSettingsBadges
@@ -145,7 +175,7 @@ describe('MessageSettingsBadges', () => {
   it('formats Grok prompt model labels with backend prefix', () => {
     render(
       <MessageSettingsBadges
-        model="grok/grok-composer-2.5-fast"
+        model="grok/grok-4.5"
         executionMode="yolo"
         thinkingLevel={undefined}
         effortLevel="medium"
@@ -153,10 +183,26 @@ describe('MessageSettingsBadges', () => {
       />
     )
 
-    expect(screen.getByText('Grok · Composer 2.5 Fast')).toBeVisible()
+    expect(screen.getByText('Grok · 4.5')).toBeVisible()
     expect(screen.getByText('· Yolo')).toBeVisible()
     expect(screen.getByText('· Medium')).toBeVisible()
-    expect(screen.queryByText('Grok Composer 2.5 Fast')).toBeNull()
+    expect(screen.queryByText('Grok 4.5')).toBeNull()
+  })
+
+  it('formats Kimi Code prompt model labels with backend prefix', () => {
+    render(
+      <MessageSettingsBadges
+        model="kimi/kimi-code/kimi-for-coding"
+        executionMode="build"
+        thinkingLevel="think"
+        effortLevel="high"
+        isCursor={false}
+      />
+    )
+
+    expect(screen.getByText('Kimi Code · Kimi for Coding')).toBeVisible()
+    expect(screen.getByText('· Build')).toBeVisible()
+    expect(screen.getByText('· High')).toBeVisible()
   })
 
   it('treats PI models with codex provider names as PI models', () => {

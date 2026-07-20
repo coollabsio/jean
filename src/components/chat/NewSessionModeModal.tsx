@@ -24,6 +24,7 @@ import { useCursorCliStatus } from '@/services/cursor-cli'
 import { usePiCliStatus } from '@/services/pi-cli'
 import { useCommandCodeCliStatus } from '@/services/commandcode-cli'
 import { useGrokCliStatus } from '@/services/grok-cli'
+import { useKimiCliStatus } from '@/services/kimi-cli'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import {
@@ -46,6 +47,7 @@ const BACKEND_ORDER: CliBackend[] = [
   'pi',
   'commandcode',
   'grok',
+  'kimi',
 ]
 
 const backendCommands: Record<CliBackend, string> = {
@@ -56,6 +58,7 @@ const backendCommands: Record<CliBackend, string> = {
   pi: 'pi',
   commandcode: 'commandcode',
   grok: 'grok',
+  kimi: 'kimi',
 }
 
 const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
@@ -63,6 +66,7 @@ const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
   codex: ['--dangerously-bypass-approvals-and-sandbox'],
   cursor: ['--yolo', '--sandbox', 'disabled'],
   grok: ['--always-approve', '--sandbox', 'off'],
+  kimi: ['--yolo'],
 }
 
 export function NewSessionModeModal() {
@@ -78,6 +82,7 @@ export function NewSessionModeModal() {
     enabled: target !== null,
   })
   const grokStatus = useGrokCliStatus({ enabled: target !== null })
+  const kimiStatus = useKimiCliStatus({ enabled: target !== null })
   const { data: preferences } = usePreferences()
   const [nativePickerKind, setNativePickerKind] =
     useState<NativeCliSessionKind | null>(null)
@@ -89,47 +94,72 @@ export function NewSessionModeModal() {
   const open = target !== null
   const isMobile = useIsMobile()
 
-  const installedBackendChoices = useMemo(
-    () =>
-      BACKEND_ORDER.map((backend, index) => {
-        const status =
-          backend === 'codex'
-            ? codexStatus
-            : backend === 'claude'
-              ? claudeStatus
-              : backend === 'opencode'
-                ? opencodeStatus
-                : backend === 'cursor'
-                  ? cursorStatus
-                  : backend === 'pi'
-                    ? piStatus
-                    : backend === 'commandcode'
-                      ? commandcodeStatus
-                      : grokStatus
-        return {
-          backend,
-          shortcut: String(index + 2),
-          installed: Boolean(status.data?.installed),
-          command: status.data?.path ?? backendCommands[backend],
-        }
-      }).filter(choice => choice.installed),
-    [
-      claudeStatus.data?.installed,
-      claudeStatus.data?.path,
-      codexStatus.data?.installed,
-      codexStatus.data?.path,
-      cursorStatus.data?.installed,
-      cursorStatus.data?.path,
-      piStatus.data?.installed,
-      piStatus.data?.path,
-      commandcodeStatus.data?.installed,
-      commandcodeStatus.data?.path,
-      grokStatus.data?.installed,
-      grokStatus.data?.path,
-      opencodeStatus.data?.installed,
-      opencodeStatus.data?.path,
-    ]
-  )
+  const installedBackendChoices = useMemo(() => {
+    const statusByBackend: Record<
+      CliBackend,
+      { installed?: boolean; path?: string | null }
+    > = {
+      codex: {
+        installed: codexStatus.data?.installed,
+        path: codexStatus.data?.path,
+      },
+      claude: {
+        installed: claudeStatus.data?.installed,
+        path: claudeStatus.data?.path,
+      },
+      opencode: {
+        installed: opencodeStatus.data?.installed,
+        path: opencodeStatus.data?.path,
+      },
+      cursor: {
+        installed: cursorStatus.data?.installed,
+        path: cursorStatus.data?.path,
+      },
+      pi: {
+        installed: piStatus.data?.installed,
+        path: piStatus.data?.path,
+      },
+      commandcode: {
+        installed: commandcodeStatus.data?.installed,
+        path: commandcodeStatus.data?.path,
+      },
+      grok: {
+        installed: grokStatus.data?.installed,
+        path: grokStatus.data?.path,
+      },
+      kimi: {
+        installed: kimiStatus.data?.installed,
+        path: kimiStatus.data?.path,
+      },
+    }
+
+    return BACKEND_ORDER.map((backend, index) => {
+      const status = statusByBackend[backend]
+      return {
+        backend,
+        shortcut: String(index + 2),
+        installed: Boolean(status.installed),
+        command: status.path ?? backendCommands[backend],
+      }
+    }).filter(choice => choice.installed)
+  }, [
+    claudeStatus.data?.installed,
+    claudeStatus.data?.path,
+    codexStatus.data?.installed,
+    codexStatus.data?.path,
+    commandcodeStatus.data?.installed,
+    commandcodeStatus.data?.path,
+    cursorStatus.data?.installed,
+    cursorStatus.data?.path,
+    grokStatus.data?.installed,
+    grokStatus.data?.path,
+    kimiStatus.data?.installed,
+    kimiStatus.data?.path,
+    opencodeStatus.data?.installed,
+    opencodeStatus.data?.path,
+    piStatus.data?.installed,
+    piStatus.data?.path,
+  ])
 
   const isCheckingBackends =
     claudeStatus.isLoading ||
@@ -137,7 +167,9 @@ export function NewSessionModeModal() {
     opencodeStatus.isLoading ||
     cursorStatus.isLoading ||
     piStatus.isLoading ||
-    commandcodeStatus.isLoading
+    commandcodeStatus.isLoading ||
+    grokStatus.isLoading ||
+    kimiStatus.isLoading
 
   const nativePickerCommand = useMemo(() => {
     if (nativePickerKind === null || nativePickerKind === 'terminal') {

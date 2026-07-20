@@ -55,6 +55,8 @@ export interface MagicPrompts {
   commit_message: string | null
   /** Prompt for AI code review */
   code_review: string | null
+  /** Prompt for a final, audit-only review before merge */
+  final_review: string | null
   /** Prompt for context summarization */
   context_summary: string | null
   /** Prompt for resolving git conflicts (appended to conflict resolution messages) */
@@ -77,6 +79,8 @@ export interface MagicPrompts {
   investigate_advisory: string | null
   /** Prompt for investigating Linear issues (context embedded in prompt since Claude CLI cannot access Linear API) */
   investigate_linear_issue: string | null
+  /** Prompt for investigating Sentry issues with embedded event context */
+  investigate_sentry_issue: string | null
   /** Prompt for addressing inline PR review comments */
   review_comments: string | null
 }
@@ -287,6 +291,40 @@ Approval status:
 - approved if no blocking findings remain.
 </instructions>`
 
+/** Default prompt for the audit-only final review session */
+export const DEFAULT_FINAL_REVIEW_PROMPT = `<task>Perform a final pre-merge audit of the current branch or linked pull request.</task>
+
+<instructions>
+This is an audit only. Do not modify files, dependencies, generated artifacts, git state, commits, branches, pull requests, issues, or any other local or remote state.
+
+Inspect the complete diff against the intended base branch, including committed, staged, unstaged, and untracked changes. Read the surrounding code and repository instructions needed to verify behavior. If a pull request is linked or discoverable, inspect its title, body, commits, checks, review state, and related GitHub issues using read-only operations.
+
+Report only actionable, high-confidence concerns introduced or materially worsened by these changes. Check for:
+- correctness bugs, edge cases, data loss, race conditions, and regressions;
+- security, authorization, privacy, secret handling, and supply-chain risks;
+- API, serialization, persistence, configuration, and backward-compatibility breaks;
+- unsafe or incomplete database migrations and rollback/deployment-order risks;
+- migrations created in this unreleased change that can be consolidated (for example, creating a table and adding its new column in a later migration). Never recommend rewriting migrations that may already have been released or applied;
+- missing, misleading, flaky, or insufficient tests for changed behavior;
+- concrete performance or resource-usage regressions;
+- dependency, CI, documentation, observability, and error-handling gaps that affect merge safety;
+- accidental files, dead code, unnecessary complexity, or scope unrelated to the pull request.
+
+Search open GitHub issues for issues fully fixed by these changes. Suggest an auto-close reference only when the implementation completely satisfies the issue and the issue belongs to the repository being merged. Never suggest closing partially addressed, merely related, duplicate, or uncertain issues. Use the exact PR-body text \`Fixes #123\` (or an unambiguous cross-repository reference when required).
+
+Do not implement fixes. Do not update the pull request. Do not close issues.
+</instructions>
+
+<output_format>
+Return the audit as Markdown tables, using \`None\` rows when a table has no entries. Keep any session-required recap content in table form too.
+
+1. Merge readiness: columns \`Status | Value\` with overall verdict, confidence, and the most important required action.
+2. Findings: columns \`Severity | Area | Location | Finding | Evidence | Recommendation\`.
+3. Migration consolidation: columns \`Migrations | Opportunity | Safety condition | Recommendation\`.
+4. GitHub issues fixed: columns \`Issue | Why it is fully fixed | Confidence | Suggested PR text\`. Include clickable issue links when available and put exact text such as \`Fixes #123\` in the final column.
+5. Verification gaps: columns \`Check | Result | Evidence or command\`.
+</output_format>`
+
 /** Default prompt for context summarization */
 export const DEFAULT_CONTEXT_SUMMARY_PROMPT = `<task>Summarize the following conversation for future context loading</task>
 
@@ -492,6 +530,48 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 
 </guidelines>`
 
+/** Default prompt for investigating Sentry issues */
+export const DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT = `<task>
+
+Investigate the loaded Sentry {sentryWord} ({sentryRefs})
+
+</task>
+
+
+<sentry_issue_context>
+
+{sentryContext}
+
+</sentry_issue_context>
+
+
+<instructions>
+
+1. Read the Sentry issue context above carefully, including the latest event, exception, stack trace, tags, frequency, and affected users
+2. Analyze the failure:
+   - What operation failed and under which conditions?
+   - Which stack frames belong to this codebase?
+   - Do the event details reveal malformed input, environment differences, or a dependency failure?
+3. Explore the codebase and trace the failing code path from the relevant application frame
+4. Identify the root cause, contributing conditions, and whether this is a regression
+5. Propose a focused solution:
+   - Specific files and code paths to change
+   - Error handling or observability improvements where relevant
+   - Risks, edge cases, and tests needed to verify the fix
+
+</instructions>
+
+
+<guidelines>
+
+- Treat the embedded Sentry context as the primary evidence; do not assume every frame is application code
+- Distinguish the root cause from symptoms and repeated downstream failures
+- Be thorough but focused - investigate deeply without getting sidetracked
+- If multiple solutions exist, explain the trade-offs
+- Reference specific file paths and line numbers
+
+</guidelines>`
+
 /** Default prompt for generating release notes */
 export const DEFAULT_RELEASE_NOTES_PROMPT = `Generate release notes for changes since the \`{tag}\` release ({previous_release_name}).
 
@@ -609,9 +689,14 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
-- **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, or other external resources, include clickable links when available so users can open them directly.
+- **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, Sentry issues, or other external resources, include clickable links when available so users can open them directly.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+
+## GitHub Issue and Discussion Discovery
+- After making changes and before the final response, search the current repository's existing GitHub issues and discussions for items completely fixed by the changes, related items, and similar reports or discussions.
+- Include the results in both the main response and the \`## Recap\`, with clickable links when available, and label each item as fully fixed, related, or similar. If no matches are found or the search is unavailable, say so explicitly.
+- Do not claim an issue is fixed unless the changes fully satisfy it. Do not close or update issues or discussions unless the user explicitly asks.
 
 ## Jean Worktree Policy
 - Do NOT create git worktrees manually (\`git worktree add\`, Superpowers \`using-git-worktrees\`, or similar) unless the user explicitly asks for a new worktree.
@@ -679,6 +764,7 @@ export const DEFAULT_MAGIC_PROMPTS: MagicPrompts = {
   pr_content: null,
   commit_message: null,
   code_review: null,
+  final_review: null,
   context_summary: null,
   resolve_conflicts: null,
   investigate_workflow_run: null,
@@ -690,6 +776,7 @@ export const DEFAULT_MAGIC_PROMPTS: MagicPrompts = {
   investigate_security_alert: null,
   investigate_advisory: null,
   investigate_linear_issue: null,
+  investigate_sentry_issue: null,
   review_comments: null,
 }
 
@@ -703,6 +790,7 @@ export interface MagicPromptModels {
   pr_content_model: MagicPromptModel
   commit_message_model: MagicPromptModel
   code_review_model: MagicPromptModel
+  final_review_model: MagicPromptModel
   context_summary_model: MagicPromptModel
   resolve_conflicts_model: MagicPromptModel
   release_notes_model: MagicPromptModel
@@ -710,6 +798,7 @@ export interface MagicPromptModels {
   investigate_security_alert_model: MagicPromptModel
   investigate_advisory_model: MagicPromptModel
   investigate_linear_issue_model: MagicPromptModel
+  investigate_sentry_issue_model: MagicPromptModel
   review_comments_model: MagicPromptModel
 }
 
@@ -724,6 +813,7 @@ export interface MagicPromptReasoningEfforts {
   pr_content_effort: MagicPromptReasoningEffort
   commit_message_effort: MagicPromptReasoningEffort
   code_review_effort: MagicPromptReasoningEffort
+  final_review_effort: MagicPromptReasoningEffort
   context_summary_effort: MagicPromptReasoningEffort
   resolve_conflicts_effort: MagicPromptReasoningEffort
   release_notes_effort: MagicPromptReasoningEffort
@@ -731,6 +821,7 @@ export interface MagicPromptReasoningEfforts {
   investigate_security_alert_effort: MagicPromptReasoningEffort
   investigate_advisory_effort: MagicPromptReasoningEffort
   investigate_linear_issue_effort: MagicPromptReasoningEffort
+  investigate_sentry_issue_effort: MagicPromptReasoningEffort
   review_comments_effort: MagicPromptReasoningEffort
 }
 
@@ -742,6 +833,7 @@ export const DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels = {
   pr_content_model: 'sonnet',
   commit_message_model: 'sonnet',
   code_review_model: 'claude-opus-4-8[1m]',
+  final_review_model: 'claude-opus-4-8[1m]',
   context_summary_model: 'claude-opus-4-8[1m]',
   resolve_conflicts_model: 'claude-opus-4-8[1m]',
   release_notes_model: 'sonnet',
@@ -749,6 +841,7 @@ export const DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels = {
   investigate_security_alert_model: 'claude-opus-4-8[1m]',
   investigate_advisory_model: 'claude-opus-4-8[1m]',
   investigate_linear_issue_model: 'claude-opus-4-8[1m]',
+  investigate_sentry_issue_model: 'claude-opus-4-8[1m]',
   review_comments_model: 'claude-opus-4-8[1m]',
 }
 
@@ -762,6 +855,7 @@ function makeMagicPromptModelsPreset(
     pr_content_model: model,
     commit_message_model: model,
     code_review_model: model,
+    final_review_model: model,
     context_summary_model: model,
     resolve_conflicts_model: model,
     release_notes_model: model,
@@ -769,17 +863,18 @@ function makeMagicPromptModelsPreset(
     investigate_security_alert_model: model,
     investigate_advisory_model: model,
     investigate_linear_issue_model: model,
+    investigate_sentry_issue_model: model,
     review_comments_model: model,
   }
 }
 
-/** Codex preset: use GPT-5.5 for all magic prompts */
+/** Codex preset: use GPT-5.6 Sol for all magic prompts */
 export const CODEX_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-5.5')
+  makeMagicPromptModelsPreset('gpt-5.6-sol')
 
-/** Codex fast preset: use GPT-5.5 Fast for all magic prompts */
+/** Codex fast preset: use GPT-5.6 Sol Fast for all magic prompts */
 export const CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-5.5-fast')
+  makeMagicPromptModelsPreset('gpt-5.6-sol-fast')
 
 /** GPT-5.6 Codex presets for all magic prompts */
 export const CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
@@ -796,22 +891,8 @@ export const CODEX_56_TERRA_FAST_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels 
   makeMagicPromptModelsPreset('gpt-5.6-terra-fast')
 
 /** OpenCode preset for all magic prompts */
-export const OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels = {
-  investigate_issue_model: 'opencode/gpt-5.5',
-  investigate_pr_model: 'opencode/gpt-5.5',
-  investigate_workflow_run_model: 'opencode/gpt-5.5',
-  pr_content_model: 'opencode/gpt-5.5',
-  commit_message_model: 'opencode/gpt-5.5',
-  code_review_model: 'opencode/gpt-5.5',
-  context_summary_model: 'opencode/gpt-5.5',
-  resolve_conflicts_model: 'opencode/gpt-5.5',
-  release_notes_model: 'opencode/gpt-5.5',
-  session_naming_model: 'opencode/gpt-5.5',
-  investigate_security_alert_model: 'opencode/gpt-5.5',
-  investigate_advisory_model: 'opencode/gpt-5.5',
-  investigate_linear_issue_model: 'opencode/gpt-5.5',
-  review_comments_model: 'opencode/gpt-5.5',
-}
+export const OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
+  makeMagicPromptModelsPreset('opencode/gpt-5.6-sol')
 
 /** PI preset for all magic prompts */
 export const PI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
@@ -823,7 +904,10 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 
 /** Grok preset for all magic prompts */
 export const GROK_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('grok/grok-composer-2.5-fast')
+  makeMagicPromptModelsPreset('grok/grok-4.5')
+
+export const KIMI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
+  makeMagicPromptModelsPreset('kimi/default')
 
 /** Default reasoning efforts for Claude backend (null = use model default) */
 export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
@@ -833,6 +917,7 @@ export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   pr_content_effort: null,
   commit_message_effort: null,
   code_review_effort: null,
+  final_review_effort: null,
   context_summary_effort: null,
   resolve_conflicts_effort: null,
   release_notes_effort: null,
@@ -840,6 +925,7 @@ export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_security_alert_effort: null,
   investigate_advisory_effort: null,
   investigate_linear_issue_effort: null,
+  investigate_sentry_issue_effort: null,
   review_comments_effort: null,
 }
 
@@ -856,7 +942,9 @@ export interface MagicPromptModes {
   investigate_security_alert_mode: MagicPromptExecutionMode
   investigate_advisory_mode: MagicPromptExecutionMode
   investigate_linear_issue_mode: MagicPromptExecutionMode
+  investigate_sentry_issue_mode: MagicPromptExecutionMode
   review_comments_mode: MagicPromptExecutionMode
+  final_review_mode: MagicPromptExecutionMode
   resolve_conflicts_mode: MagicPromptExecutionMode
 }
 
@@ -868,7 +956,9 @@ export const DEFAULT_MAGIC_PROMPT_MODES: MagicPromptModes = {
   investigate_security_alert_mode: 'plan',
   investigate_advisory_mode: 'plan',
   investigate_linear_issue_mode: 'plan',
+  investigate_sentry_issue_mode: 'plan',
   review_comments_mode: 'plan',
+  final_review_mode: 'yolo',
   resolve_conflicts_mode: 'yolo',
 }
 
@@ -880,6 +970,7 @@ export const CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   pr_content_effort: 'low',
   commit_message_effort: 'low',
   code_review_effort: 'medium',
+  final_review_effort: 'medium',
   context_summary_effort: 'medium',
   resolve_conflicts_effort: 'medium',
   release_notes_effort: 'low',
@@ -887,6 +978,7 @@ export const CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_security_alert_effort: 'medium',
   investigate_advisory_effort: 'medium',
   investigate_linear_issue_effort: 'medium',
+  investigate_sentry_issue_effort: 'medium',
   review_comments_effort: 'medium',
 }
 
@@ -907,6 +999,7 @@ export interface MagicPromptProviders {
   pr_content_provider: string | null
   commit_message_provider: string | null
   code_review_provider: string | null
+  final_review_provider: string | null
   context_summary_provider: string | null
   resolve_conflicts_provider: string | null
   release_notes_provider: string | null
@@ -914,6 +1007,7 @@ export interface MagicPromptProviders {
   investigate_security_alert_provider: string | null
   investigate_advisory_provider: string | null
   investigate_linear_issue_provider: string | null
+  investigate_sentry_issue_provider: string | null
   review_comments_provider: string | null
 }
 
@@ -925,6 +1019,7 @@ export const DEFAULT_MAGIC_PROMPT_PROVIDERS: MagicPromptProviders = {
   pr_content_provider: null,
   commit_message_provider: null,
   code_review_provider: null,
+  final_review_provider: null,
   context_summary_provider: null,
   resolve_conflicts_provider: null,
   release_notes_provider: null,
@@ -932,6 +1027,7 @@ export const DEFAULT_MAGIC_PROMPT_PROVIDERS: MagicPromptProviders = {
   investigate_security_alert_provider: null,
   investigate_advisory_provider: null,
   investigate_linear_issue_provider: null,
+  investigate_sentry_issue_provider: null,
   review_comments_provider: null,
 }
 
@@ -947,6 +1043,7 @@ export interface MagicPromptBackends {
   pr_content_backend: string | null
   commit_message_backend: string | null
   code_review_backend: string | null
+  final_review_backend: string | null
   context_summary_backend: string | null
   resolve_conflicts_backend: string | null
   release_notes_backend: string | null
@@ -954,6 +1051,7 @@ export interface MagicPromptBackends {
   investigate_security_alert_backend: string | null
   investigate_advisory_backend: string | null
   investigate_linear_issue_backend: string | null
+  investigate_sentry_issue_backend: string | null
   review_comments_backend: string | null
 }
 
@@ -965,6 +1063,7 @@ export const DEFAULT_MAGIC_PROMPT_BACKENDS: MagicPromptBackends = {
   pr_content_backend: null,
   commit_message_backend: null,
   code_review_backend: null,
+  final_review_backend: null,
   context_summary_backend: null,
   resolve_conflicts_backend: null,
   release_notes_backend: null,
@@ -972,6 +1071,7 @@ export const DEFAULT_MAGIC_PROMPT_BACKENDS: MagicPromptBackends = {
   investigate_security_alert_backend: null,
   investigate_advisory_backend: null,
   investigate_linear_issue_backend: null,
+  investigate_sentry_issue_backend: null,
   review_comments_backend: null,
 }
 
@@ -983,6 +1083,7 @@ function makeBackendsPreset(backend: string): MagicPromptBackends {
     pr_content_backend: backend,
     commit_message_backend: backend,
     code_review_backend: backend,
+    final_review_backend: backend,
     context_summary_backend: backend,
     resolve_conflicts_backend: backend,
     release_notes_backend: backend,
@@ -990,6 +1091,7 @@ function makeBackendsPreset(backend: string): MagicPromptBackends {
     investigate_security_alert_backend: backend,
     investigate_advisory_backend: backend,
     investigate_linear_issue_backend: backend,
+    investigate_sentry_issue_backend: backend,
     review_comments_backend: backend,
   }
 }
@@ -1002,6 +1104,7 @@ export const PI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('pi')
 export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('commandcode')
 export const GROK_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('grok')
+export const KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('kimi')
 
 /**
  * Resolve a magic prompt provider for a given key.
@@ -1116,7 +1219,7 @@ export interface AppPreferences {
 
   confirm_session_close: boolean // Show confirmation dialog before closing sessions/worktrees
   default_execution_mode: ExecutionMode // Default execution mode for new sessions: 'plan', 'build', or 'yolo'
-  default_backend: CliBackend // Default CLI backend for new sessions: 'claude', 'codex', 'opencode', 'cursor', 'pi', or 'commandcode'
+  default_backend: CliBackend // Default CLI backend for new sessions
   default_new_session_kind: NewSessionKind // Default action for CMD+T: 'chat', 'terminal', or a CLI backend
   selected_codex_model: CodexModel // Default Codex model
   selected_opencode_model: string // Default OpenCode model (provider/model)
@@ -1124,13 +1227,17 @@ export interface AppPreferences {
   selected_pi_model: PiModel // Default PI model
   selected_commandcode_model?: string // Default Command Code model (CLI default)
   selected_grok_model: GrokModel // Default Grok model
+  selected_kimi_model?: KimiModel // Default Kimi Code model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
+  default_grok_reasoning_effort: GrokReasoningEffort // Default reasoning effort for Grok: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   codex_goal_execution_mode: CodexGoalExecutionMode // Execution mode used when starting a Codex /goal
   codex_multi_agent_enabled: boolean // Enable Codex multi-agent collaboration (experimental)
   codex_max_agent_threads: number // Max concurrent agent threads (1-8) when multi-agent is enabled
   codex_auto_steer_enabled: boolean // Steer prompts into a running Codex turn instead of queueing (default: true)
   opencode_auto_steer_enabled: boolean // Steer prompts into a running OpenCode turn instead of queueing (default: true)
   pi_auto_steer_enabled: boolean // Steer prompts into a running PI turn instead of queueing (default: true)
+  grok_auto_steer_enabled: boolean // Steer prompts into a running Grok turn instead of queueing (default: true)
+  kimi_auto_steer_enabled?: boolean // Reserved for Kimi Code steering support
   restore_last_session: boolean // Restore last session when switching projects (default: true)
   close_original_on_clear_context: boolean // Close original session when using Clear Context and yolo (default: true)
   build_model: string | null // Model override for plan approval (build mode), null = use session model
@@ -1142,11 +1249,13 @@ export interface AppPreferences {
   build_effort_level: string | null // Effort level override for build mode (Claude adaptive / Codex), null = use session effort
   yolo_effort_level: string | null // Effort level override for yolo mode (Claude adaptive / Codex), null = use session effort
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
+  sentry_auth_token?: string | null // Global Sentry auth token (inherited by all projects)
   magic_models_auto_initialized: boolean // Whether magic prompt models were auto-set based on installed backends
   claude_cli_source: 'jean' | 'path' // Claude CLI source: 'jean' (managed) or 'path' (system PATH)
   codex_cli_source: 'jean' | 'path' // Codex CLI source: 'jean' (managed) or 'path' (system PATH)
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   grok_cli_source: 'jean' | 'path' // Grok CLI source: 'jean' (managed) or 'path' (system PATH)
+  kimi_cli_source?: 'jean' | 'path' // Kimi Code CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   glab_cli_source: 'jean' | 'path' // GitLab CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1542,10 +1651,12 @@ export function normalizeCodexModel(model: string): CodexModel {
     ]
   }
 
-  return isCodexModel(model) ? model : 'gpt-5.5'
+  return isCodexModel(model) ? model : 'gpt-5.6-sol'
 }
 
 export type CodexReasoningEffort = string
+
+export type GrokReasoningEffort = string
 
 export type MagicPromptReasoningEffort = string | null
 
@@ -1557,6 +1668,7 @@ export type CursorModel = `cursor/${string}`
 export type PiModel = `pi/${string}`
 export type CommandCodeModel = `commandcode/${string}`
 export type GrokModel = `grok/${string}`
+export type KimiModel = `kimi/${string}`
 export type MagicPromptModel =
   | ClaudeModel
   | CodexModel
@@ -1565,6 +1677,7 @@ export type MagicPromptModel =
   | PiModel
   | CommandCodeModel
   | GrokModel
+  | KimiModel
 
 /** Check if a model string identifies an OpenCode model */
 export function isOpenCodeModel(model: string): model is OpenCodeModel {
@@ -1589,6 +1702,10 @@ export function isCommandCodeModel(model: string): model is CommandCodeModel {
 export function isGrokModel(model: string): model is GrokModel {
   return model.startsWith('grok/')
 }
+/** Check if a model string identifies a Kimi Code model */
+export function isKimiModel(model: string): model is KimiModel {
+  return model.startsWith('kimi/')
+}
 
 /** Check if a model string identifies a Codex model */
 export function isCodexModel(model: string): model is CodexModel {
@@ -1607,6 +1724,17 @@ export const codexReasoningOptions: {
   { value: 'xhigh', label: 'xHigh' },
 ]
 
+export const grokReasoningOptions: {
+  value: GrokReasoningEffort
+  label: string
+}[] = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'xHigh' },
+  { value: 'max', label: 'Max' },
+]
+
 // =============================================================================
 // CLI Backend
 // =============================================================================
@@ -1618,6 +1746,7 @@ export type CliBackend =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'kimi'
 
 export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'claude', label: 'Claude' },
@@ -1627,6 +1756,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'pi', label: 'Pi (Beta)' },
   { value: 'commandcode', label: 'Command Code (Beta)' },
   { value: 'grok', label: 'Grok (Beta)' },
+  { value: 'kimi', label: 'Kimi Code (Beta)' },
 ]
 
 export type TerminalApp =
@@ -1726,6 +1856,7 @@ export const newSessionKindOptions: {
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
   { value: 'grok', label: 'Grok (Beta)' },
+  { value: 'kimi', label: 'Kimi Code (Beta)' },
 ]
 
 export function getNewSessionKindLabel(
@@ -2014,19 +2145,23 @@ export const defaultPreferences: AppPreferences = {
   default_execution_mode: 'plan', // Default: plan mode
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
-  selected_codex_model: 'gpt-5.5', // Default: latest Codex model
-  selected_opencode_model: 'opencode/gpt-5.5', // Default OpenCode model
+  selected_codex_model: 'gpt-5.6-sol', // Default: latest Codex model
+  selected_opencode_model: 'opencode/gpt-5.6-sol', // Default OpenCode model
   selected_cursor_model: 'cursor/auto', // Default Cursor model
   selected_pi_model: 'pi/sonnet', // Default PI model
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
-  selected_grok_model: 'grok/grok-composer-2.5-fast', // Default Grok model
+  selected_grok_model: 'grok/grok-4.5', // Default Grok model
+  selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
   default_codex_reasoning_effort: 'high', // Default: high reasoning
+  default_grok_reasoning_effort: 'high', // Default: high reasoning
   codex_goal_execution_mode: 'build', // Default: build mode for goals
   codex_multi_agent_enabled: true, // Default: enabled to match parallel execution prompting
   codex_max_agent_threads: 3, // Default: 3 threads
   codex_auto_steer_enabled: true, // Default: steer Codex running turn instead of queueing
   opencode_auto_steer_enabled: true, // Default: steer OpenCode running turn instead of queueing
   pi_auto_steer_enabled: true, // Default: steer PI running turn instead of queueing
+  grok_auto_steer_enabled: true, // Default: steer Grok running turn instead of queueing
+  kimi_auto_steer_enabled: false,
   restore_last_session: true, // Default: enabled
   close_original_on_clear_context: true, // Default: enabled
   build_model: null, // Default: use session model
@@ -2038,11 +2173,13 @@ export const defaultPreferences: AppPreferences = {
   build_effort_level: null, // Default: use session effort level
   yolo_effort_level: null, // Default: use session effort level
   linear_api_key: null, // Default: no global Linear API key
+  sentry_auth_token: null, // Default: no global Sentry auth token
   magic_models_auto_initialized: false, // Default: not yet auto-set
   claude_cli_source: 'jean', // Default: Jean-managed
   codex_cli_source: 'jean', // Default: Jean-managed
   opencode_cli_source: 'jean', // Default: Jean-managed
   grok_cli_source: 'jean', // Default: Jean-managed
+  kimi_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   glab_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed

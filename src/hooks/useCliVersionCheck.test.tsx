@@ -16,6 +16,7 @@ const mockState = {
     pi_cli_source: 'jean',
     gh_cli_source: 'jean',
     coderabbit_cli_source: 'jean',
+    commandcode_cli_source: 'jean',
   },
   piStatus: { installed: true, version: '1.0.0', path: '/jean/bin/pi' },
   piPathInfo: {
@@ -23,6 +24,11 @@ const mockState = {
     version: null as string | null,
     path: null as string | null,
     package_manager: null as string | null,
+  },
+  commandcodeStatus: {
+    installed: false,
+    version: null as string | null,
+    path: null as string | null,
   },
 }
 
@@ -126,6 +132,18 @@ vi.mock('@/services/pi-cli', () => ({
   }),
 }))
 
+vi.mock('@/services/commandcode-cli', () => ({
+  commandcodeCliQueryKeys: { all: ['commandcode-cli'] },
+  useCommandCodeCliStatus: () => ({
+    data: mockState.commandcodeStatus,
+    isLoading: false,
+  }),
+  useAvailableCommandCodeVersions: () => ({
+    data: [{ version: '1.1.0', prerelease: false }],
+    isLoading: false,
+  }),
+}))
+
 describe('useCliVersionCheck', () => {
   let queryClient: QueryClient
 
@@ -140,6 +158,7 @@ describe('useCliVersionCheck', () => {
       pi_cli_source: 'jean',
       gh_cli_source: 'jean',
       coderabbit_cli_source: 'jean',
+      commandcode_cli_source: 'jean',
     }
     mockState.piStatus = {
       installed: true,
@@ -151,6 +170,11 @@ describe('useCliVersionCheck', () => {
       version: null,
       path: null,
       package_manager: null,
+    }
+    mockState.commandcodeStatus = {
+      installed: false,
+      version: null,
+      path: null,
     }
     queryClient = new QueryClient({
       defaultOptions: {
@@ -246,5 +270,55 @@ describe('useCliVersionCheck', () => {
       cliType: 'pi',
     })
     expect(tauriInvoke).not.toHaveBeenCalled()
+  })
+
+  it('auto-updates Jean-managed Command Code', async () => {
+    mockState.commandcodeStatus = {
+      installed: true,
+      version: '1.0.0',
+      path: '/jean/bin/cmd',
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useCliVersionCheck(), { wrapper })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    await Promise.resolve()
+
+    expect(transportInvoke).toHaveBeenCalledWith('install_commandcode_cli', {
+      version: '1.1.0',
+    })
+  })
+
+  it('updates PATH-managed Command Code through its self-update command', async () => {
+    mockState.preferences.commandcode_cli_source = 'path'
+    mockState.commandcodeStatus = {
+      installed: true,
+      version: '1.0.0',
+      path: '/opt/homebrew/bin/cmd',
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useCliVersionCheck(), { wrapper })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000)
+    })
+    await Promise.resolve()
+
+    expect(transportInvoke).toHaveBeenCalledWith('run_cli_path_update', {
+      command: '/opt/homebrew/bin/cmd',
+      args: ['update'],
+      cliType: 'commandcode',
+    })
   })
 })

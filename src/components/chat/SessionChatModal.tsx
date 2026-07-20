@@ -6,11 +6,13 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type MutableRefObject,
   type RefObject,
 } from 'react'
 import {
   Archive,
   ChevronDown,
+  Copy,
   Eye,
   EyeOff,
   GitBranchPlus,
@@ -47,6 +49,7 @@ import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
 import {
   useSessions,
+  useCreateSession,
   useRenameSession,
   useReorderSessions,
   reconnectNativeCliSession,
@@ -87,6 +90,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import {
+  buildNativeClientSessionInput,
   computeSessionCardData,
   getResumeCommand,
   statusConfig,
@@ -94,6 +98,7 @@ import {
 } from './session-card-utils'
 import {
   buildReorderedSessionIdsWithinStatus,
+  resolveModalSessionId,
   sortSessionCardsForTabs,
 } from './session-tab-order'
 import { useCanvasStoreState } from './hooks/useCanvasStoreState'
@@ -112,9 +117,15 @@ import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import {
+  closeChatTerminal,
+  isChatTerminalOpen,
+  openChatTerminal,
+} from '@/lib/terminal-gesture'
+import {
   MODAL_TERMINAL_PRIMARY_ROW_CLASS,
   MODAL_TERMINAL_SECONDARY_ROW_CLASS,
 } from './modal-terminal-layout'
+import { getStackedBaseBranch } from './worktree-branch-badge'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -183,10 +194,54 @@ export function SessionChatModal({
 }: SessionChatModalProps) {
   const isMobile = useIsMobile()
   const isTouch = useIsTouchDevice()
+  const isModalTerminalOpen = useTerminalStore(
+    state => state.modalTerminalOpen[worktreeId] ?? false
+  )
+  // Left-edge swipe right: close terminal if open, else dismiss modal
+  const swipeBackCallback = useCallback(() => {
+    if (worktreeId && isChatTerminalOpen(worktreeId, 'modal')) {
+      closeChatTerminal(worktreeId, 'modal')
+      return
+    }
+    onClose()
+  }, [worktreeId, onClose])
   const swipe = useSwipeBack({
-    onSwipeBack: onClose,
+    onSwipeBack: swipeBackCallback,
     enabled: isTouch && isOpen,
+    // Closing terminal is an overlay dismiss — no full content slide-off
+    animateToEnd: !isModalTerminalOpen,
   })
+  // Right-edge swipe left: open terminal
+  const swipeOpenTerminalCallback = useCallback(() => {
+    if (!worktreeId) return
+    openChatTerminal(worktreeId, 'modal')
+  }, [worktreeId])
+  const canSwipeOpenTerminal =
+    isTouch && isOpen && !!worktreeId && !isModalTerminalOpen
+  const swipeOpenTerminal = useSwipeBack({
+    onSwipeBack: swipeOpenTerminalCallback,
+    enabled: canSwipeOpenTerminal,
+    animateToEnd: false,
+    visualFeedback: true,
+    edge: 'right',
+  })
+  // Shared host for left-edge (back/close terminal) and right-edge (open terminal)
+  const setSwipeContainerRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      const swipeRef =
+        swipe.containerRef as MutableRefObject<HTMLDivElement | null>
+      const openTerminalRef =
+        swipeOpenTerminal.containerRef as MutableRefObject<HTMLDivElement | null>
+      if (!isTouch) {
+        swipeRef.current = null
+        openTerminalRef.current = null
+        return
+      }
+      swipeRef.current = el
+      openTerminalRef.current = el
+    },
+    [isTouch, swipe.containerRef, swipeOpenTerminal.containerRef]
+  )
   const { data: sessionsData } = useSessions(
     worktreeId || null,
     worktreePath || null
@@ -197,9 +252,6 @@ export function SessionChatModal({
   )
   const { data: preferences } = usePreferences()
   const { data: runScripts = [] } = useRunScripts(worktreePath)
-  const isModalTerminalOpen = useTerminalStore(
-    state => state.modalTerminalOpen[worktreeId] ?? false
-  )
   const modalTerminalDockMode = useTerminalStore(
     state => state.modalTerminalDockMode
   )
@@ -252,10 +304,10 @@ export function SessionChatModal({
   const activeSessionId = useChatStore(
     state => state.activeSessionIds[worktreeId]
   )
-  const currentSessionId =
-    activeSessionId && sessions.some(session => session.id === activeSessionId)
-      ? activeSessionId
-      : (sessions[0]?.id ?? null)
+  const currentSessionId = resolveModalSessionId(
+    activeSessionId,
+    sessions.map(session => session.id)
+  )
   const currentSession = sessions.find(s => s.id === currentSessionId) ?? null
   // Canonical store state shared with canvas for consistent status derivation.
   const storeState = useCanvasStoreState()
@@ -303,11 +355,15 @@ export function SessionChatModal({
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
     : null
+  const stackedBaseBranch = getStackedBaseBranch(
+    worktree?.base_branch,
+    worktree?.branch,
+    project?.default_branch
+  )
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open')
-  const stackedOnPR =
-    worktree?.base_branch && worktree.base_branch !== project?.default_branch
-      ? openPRs?.find(pr => pr.headRefName === worktree.base_branch)
-      : undefined
+  const stackedOnPR = stackedBaseBranch
+    ? openPRs?.find(pr => pr.headRefName === stackedBaseBranch)
+    : undefined
   const isBase = worktree ? isBaseSession(worktree) : false
   const { data: gitStatus } = useGitStatus(worktreeId)
   const behindCount =
@@ -358,6 +414,7 @@ export function SessionChatModal({
 
   // Rename session state
   const renameSession = useRenameSession()
+  const createSession = useCreateSession()
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
     null
   )
@@ -590,6 +647,33 @@ export function SessionChatModal({
       intent: 'picker',
     })
   }, [worktreeId, worktreePath])
+
+  const handleOpenInNativeClient = useCallback(
+    (session: Session) => {
+      const input = buildNativeClientSessionInput(
+        session,
+        worktreeId,
+        worktreePath
+      )
+      if (!input) {
+        toast.error('No native resume command is available for this session')
+        return
+      }
+
+      createSession.mutate(input, {
+        onSuccess: nativeSession => {
+          useChatStore
+            .getState()
+            .setSelectedBackend(nativeSession.id, input.backend)
+          void reconnectNativeCliSession(nativeSession, worktreeId, {
+            openModal: false,
+            showToast: false,
+          }).then(() => toast.success('Opened in native client'))
+        },
+      })
+    },
+    [createSession, worktreeId, worktreePath]
+  )
 
   useEffect(() => {
     if (!isOpen) return
@@ -879,29 +963,54 @@ export function SessionChatModal({
     <>
       <div
         key={worktreeId}
-        ref={isTouch ? swipe.containerRef : undefined}
+        ref={setSwipeContainerRef}
         className={cn(
           'absolute inset-0 z-10 flex min-w-0 overflow-hidden bg-background pt-[3px]',
           !isMobile && 'pb-2',
           hasBottomDock ? 'flex-col' : 'flex-row'
         )}
+        data-testid="session-chat-modal-swipe"
         style={
-          isMobile
+          isMobile &&
+          (swipe.isSwiping ||
+            swipe.translateX !== 0 ||
+            swipeOpenTerminal.isSwiping ||
+            swipeOpenTerminal.translateX !== 0)
             ? {
-                transform: `translateX(${swipe.translateX}px)`,
-                transition: swipe.transitionStyle || undefined,
-                willChange: swipe.isSwiping ? 'transform' : undefined,
+                transform: `translateX(${
+                  swipeOpenTerminal.isSwiping ||
+                  swipeOpenTerminal.translateX !== 0
+                    ? swipeOpenTerminal.translateX
+                    : swipe.translateX
+                }px)`,
+                transition:
+                  swipeOpenTerminal.transitionStyle ||
+                  swipe.transitionStyle ||
+                  undefined,
+                willChange:
+                  swipe.isSwiping || swipeOpenTerminal.isSwiping
+                    ? 'transform'
+                    : undefined,
               }
             : undefined
         }
       >
         {isMobile && (
-          <div
-            className={cn(
-              'absolute left-0 top-1/2 z-50 h-10 w-1 -translate-y-1/2 rounded-r-full bg-muted-foreground/20 transition-opacity duration-300',
-              swipe.isSwiping ? 'opacity-0' : 'opacity-100'
+          <>
+            <div
+              className={cn(
+                'absolute left-0 top-1/2 z-50 h-10 w-1 -translate-y-1/2 rounded-r-full bg-muted-foreground/20 transition-opacity duration-300',
+                swipe.isSwiping ? 'opacity-0' : 'opacity-100'
+              )}
+              aria-hidden
+            />
+            {canSwipeOpenTerminal && (
+              <div
+                className="pointer-events-none absolute right-0 top-1/2 z-50 h-10 w-1 -translate-y-1/2 rounded-l-full bg-muted-foreground/20"
+                aria-hidden
+              />
             )}
-          />
+          </>
         )}
         {isModalTerminalOpen && modalTerminalDockMode === 'left' && (
           <ModalTerminalDrawer
@@ -935,22 +1044,21 @@ export function SessionChatModal({
                   )}
                   {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
                 </h2>
-                {worktree?.base_branch &&
-                  worktree.base_branch !== project?.default_branch && (
-                    <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                      <GitBranchPlus className="h-2.5 w-2.5" />
-                      <span className="max-w-16 sm:max-w-40 truncate">
-                        {worktree.base_branch}
-                      </span>
-                      {stackedOnPR && (
-                        <>
-                          <span className="text-border">·</span>
-                          <GitPullRequestArrow className="h-2.5 w-2.5" />#
-                          {stackedOnPR.number}
-                        </>
-                      )}
+                {stackedBaseBranch && (
+                  <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                    <GitBranchPlus className="h-2.5 w-2.5" />
+                    <span className="max-w-16 sm:max-w-40 truncate">
+                      {stackedBaseBranch}
                     </span>
-                  )}
+                    {stackedOnPR && (
+                      <>
+                        <span className="text-border">·</span>
+                        <GitPullRequestArrow className="h-2.5 w-2.5" />#
+                        {stackedOnPR.number}
+                      </>
+                    )}
+                  </span>
+                )}
                 <GitStatusBadges
                   behindCount={behindCount}
                   unpushedCount={unpushedCount}
@@ -1161,7 +1269,7 @@ export function SessionChatModal({
                 />
               )}
               <ScrollArea
-                className="min-w-0 flex-1"
+                className="min-w-0 flex-1 sm:flex-initial"
                 viewportClassName="overflow-x-auto overflow-y-hidden overscroll-x-contain overscroll-y-none touch-pan-x scrollbar-hide [-webkit-overflow-scrolling:touch]"
                 viewportRef={modalTabScrollRef}
               >
@@ -1317,20 +1425,33 @@ export function SessionChatModal({
                             )}
                           </ContextMenuItem>
                           {resumeCommand && (
-                            <ContextMenuItem
-                              onSelect={() => {
-                                void copyToClipboard(resumeCommand)
-                                  .then(() =>
-                                    toast.success('Resume command copied')
-                                  )
-                                  .catch(() =>
-                                    toast.error('Failed to copy resume command')
-                                  )
-                              }}
-                            >
-                              <Terminal className="mr-2 h-4 w-4" />
-                              Copy Resume Command
-                            </ContextMenuItem>
+                            <>
+                              <ContextMenuItem
+                                disabled={createSession.isPending}
+                                onSelect={() =>
+                                  handleOpenInNativeClient(session)
+                                }
+                              >
+                                <Play className="mr-2 h-4 w-4" />
+                                Open in Native Client
+                              </ContextMenuItem>
+                              <ContextMenuItem
+                                onSelect={() => {
+                                  void copyToClipboard(resumeCommand)
+                                    .then(() =>
+                                      toast.success('Resume command copied')
+                                    )
+                                    .catch(() =>
+                                      toast.error(
+                                        'Failed to copy resume command'
+                                      )
+                                    )
+                                }}
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Native Resume Command
+                              </ContextMenuItem>
+                            </>
                           )}
                           {canReconnectSession(session) && (
                             <ContextMenuItem
@@ -1393,7 +1514,26 @@ export function SessionChatModal({
                   worktreePath={worktreePath}
                 />
               </div>
-            ) : null}
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {sessionsData
+                    ? 'No sessions yet. Create one to start chatting.'
+                    : 'Loading sessions…'}
+                </p>
+                {sessionsData && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCreateSession}
+                  >
+                    <Plus className="mr-2 h-3.5 w-3.5" />
+                    New session
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

@@ -17,12 +17,13 @@ describe('getProviderDisplayName', () => {
 })
 
 describe('getSessionProviderDisplayName', () => {
-  it('uses backend labels for codex and opencode sessions', () => {
+  it('uses backend-specific provider labels', () => {
     expect(getSessionProviderDisplayName('codex', null)).toBe('OpenAI')
     expect(getSessionProviderDisplayName('opencode', null)).toBe('OpenCode')
     expect(getSessionProviderDisplayName('opencode', '__anthropic__')).toBe(
       'OpenCode'
     )
+    expect(getSessionProviderDisplayName('grok', null)).toBe('xAI')
   })
 
   it('falls back to provider selection for claude sessions', () => {

@@ -4,31 +4,33 @@ User-configurable keyboard shortcut system using native DOM event listeners, int
 
 ## Quick Start
 
-### All Keybindings (19 Total)
+### Common keybindings
 
-Keybindings are user-configurable in Preferences. Below are the defaults:
+Keybindings are user-configurable in Preferences. Common defaults are listed
+below; the complete list lives in `src/types/keybindings.ts` and the Keybindings
+preferences pane.
 
-| Action                      | Default Shortcut | Description                             |
-| --------------------------- | ---------------- | --------------------------------------- |
-| `focus_chat_input`          | `Cmd+L`          | Move focus to chat textarea             |
-| `toggle_left_sidebar`       | `Cmd+B`          | Show/hide projects sidebar              |
-| `open_preferences`          | `Cmd+,`          | Open preferences dialog                 |
-| `open_commit_modal`         | `Cmd+Shift+C`    | Open git commit dialog                  |
-| `open_pull_request`         | `Cmd+Shift+P`    | Open pull request dialog                |
-| `open_git_diff`             | `Cmd+G`          | Open git diff view                      |
-| `execute_run`               | `Cmd+R`          | Start/stop workspace run script         |
-| `open_in_modal`             | `Cmd+O`          | Open worktree in editor/terminal/finder |
-| `open_magic_modal`          | `Cmd+M`          | Open magic git commands menu            |
-| `new_session`               | `Cmd+T`          | Create new chat session                 |
-| `next_session`              | `Cmd+Alt+Right`  | Switch to next session tab              |
-| `previous_session`          | `Cmd+Alt+Left`   | Switch to previous session tab          |
-| `close_session_or_worktree` | `Cmd+W`          | Close session or remove worktree        |
-| `new_worktree`              | `Cmd+N`          | Create new worktree                     |
-| `next_worktree`             | `Cmd+Alt+Down`   | Switch to next worktree                 |
-| `previous_worktree`         | `Cmd+Alt+Up`     | Switch to previous worktree             |
-| `cycle_execution_mode`      | `Shift+Tab`      | Cycle through Plan/Build/Yolo modes     |
-| `approve_plan`              | `Cmd+Enter`      | Approve plan or answer question         |
-| `restore_last_archived`     | `Cmd+Shift+T`    | Restore most recently archived item     |
+| Action                      | Default Shortcut  | Description                             |
+| --------------------------- | ----------------- | --------------------------------------- |
+| `focus_chat_input`          | `Cmd+L`           | Move focus to chat textarea             |
+| `toggle_left_sidebar`       | `Cmd+B`           | Show/hide projects sidebar              |
+| `open_preferences`          | `Cmd+,`           | Open preferences dialog                 |
+| `open_commit_modal`         | `Cmd+Shift+C`     | Open git commit dialog                  |
+| `open_pull_request`         | `Cmd+Shift+P`     | Open pull request dialog                |
+| `open_git_diff`             | `Cmd+G`           | Open git diff view                      |
+| `execute_run`               | `Cmd+R`           | Start/stop workspace run script         |
+| `open_in_modal`             | `Cmd+O`           | Open worktree in editor/terminal/finder |
+| `open_magic_modal`          | `Cmd+M`           | Open magic git commands menu            |
+| `new_session`               | `Cmd+T`           | Create new chat session                 |
+| `next_session`              | `Cmd+Alt+Right`   | Switch to next session tab              |
+| `previous_session`          | `Cmd+Alt+Left`    | Switch to previous session tab          |
+| `close_session_or_worktree` | `Cmd+W`           | Close session or remove worktree        |
+| `new_worktree`              | `Cmd+N`           | Create new worktree                     |
+| `next_worktree`             | `Cmd+Alt+Down`    | Switch to next worktree                 |
+| `previous_worktree`         | `Cmd+Alt+Up`      | Switch to previous worktree             |
+| `cycle_execution_mode`      | `Shift+Tab`       | Cycle through Plan/Build/Yolo modes     |
+| `approve_plan`              | `Cmd+Enter`       | Approve plan or answer question         |
+| `restore_last_archived`     | `Cmd+Shift+Alt+T` | Restore most recently archived item     |
 
 **Note:** `Cmd` on Mac, `Ctrl` on Windows/Linux.
 
@@ -91,7 +93,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   previous_worktree: 'mod+alt+arrowup',
   cycle_execution_mode: 'shift+tab',
   approve_plan: 'mod+enter',
-  restore_last_archived: 'mod+alt+shift+t',
+  restore_last_archived: 'mod+shift+alt+t',
 }
 ```
 
@@ -231,6 +233,11 @@ The format uses `mod` as a platform-agnostic modifier:
 - `mod+shift+key` → `Cmd+Shift+key` on Mac, `Ctrl+Shift+key` on Windows/Linux
 - `shift+tab` → No modifier, just Shift+Tab
 
+Modifier order is canonical because matching uses exact strings:
+`mod`, then `shift`, then `alt`, then the key. For example, use
+`mod+shift+alt+t`, not `mod+alt+shift+t`. The keybinding tests exercise every
+default shortcut with both Command and Control events.
+
 ### Helper Functions
 
 ```typescript
@@ -287,6 +294,18 @@ We initially tried `react-hotkeys-hook` but encountered issues in the Tauri envi
 - **Full control** over event handling
 - **Better performance** with direct DOM access
 - **Consistent behavior** across platforms
+
+### Native macOS accelerators and remote backends
+
+Some macOS shortcuts, including `Cmd+.`, can be consumed by AppKit before the
+webview receives a DOM keyboard event. Register those shortcuts as native menu
+accelerators and forward them to the frontend with a `menu-*` event.
+
+Native menu events belong to the local desktop shell. Subscribe with
+`listenLocal()` so they keep working when the application data is connected to
+a remote Jean server. Shortcut labels also use the local client platform; the
+remote server platform is only for backend capabilities and filesystem
+behavior.
 
 ## Adding New Keybindings
 

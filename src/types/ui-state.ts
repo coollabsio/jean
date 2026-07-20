@@ -4,8 +4,10 @@
 //
 // Durable session state (answered_questions, submitted_answers, fixed_findings,
 // pending_permission_denials, denied_message_context, reviewing_sessions) is
-// stored in Session files. Lightweight unsent input drafts stay here so all
-// session textareas survive a full UI reload.
+// stored in Session files. Lightweight unsent input drafts (textarea text plus
+// image / large-text paste attachment metadata) stay here so session composers
+// survive a full UI reload. Attachment file bytes live on disk; only metadata
+// is stored in UI state.
 // Review results are also stored in Session files (review_results field).
 
 import type { LabelData } from '@/types/chat'
@@ -34,6 +36,26 @@ export interface BrowserTabPersisted {
   title?: string
 }
 
+/** Persisted unsent image attachment (file already saved to disk) */
+export interface PendingImageDraft {
+  id: string
+  path: string
+  filename: string
+}
+
+/**
+ * Persisted unsent large-text paste attachment.
+ * `content` is optional so older saves / stripped payloads can rehydrate from disk.
+ */
+export interface PendingTextFileDraft {
+  id: string
+  path: string
+  filename: string
+  size: number
+  /** Optional; omitted when persisting to keep UI state small */
+  content?: string
+}
+
 export interface UIState {
   active_worktree_id: string | null
   active_worktree_path: string | null
@@ -49,6 +71,16 @@ export interface UIState {
   active_session_ids: Record<string, string>
   /** Unsent chat textarea content per session */
   input_drafts?: Record<string, string>
+  /**
+   * Unsent image attachments per session (files already on disk).
+   * Only fully-saved images are persisted — loading placeholders are omitted.
+   */
+  pending_images?: Record<string, PendingImageDraft[]>
+  /**
+   * Unsent large-text paste attachments per session (files already on disk).
+   * Content is optional in persistence; restore re-reads from disk when missing.
+   */
+  pending_text_files?: Record<string, PendingTextFileDraft[]>
   /** Whether the review sidebar is visible */
   review_sidebar_visible?: boolean
   /** Modal terminal drawer open state per worktree */
@@ -122,6 +154,8 @@ export const defaultUIState: UIState = {
   left_sidebar_visible: false,
   active_session_ids: {},
   input_drafts: {},
+  pending_images: {},
+  pending_text_files: {},
   modal_terminal_open: {},
   modal_terminal_dock_mode: 'floating',
   modal_terminal_width: 400,

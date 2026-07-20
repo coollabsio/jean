@@ -8,6 +8,7 @@ import {
   persistRemoveQueued,
   persistUpdateQueued,
   steerCodexTurn,
+  steerGrokTurn,
   steerOpencodeTurn,
   steerPiTurn,
 } from '@/services/chat'
@@ -19,6 +20,7 @@ vi.mock('@/services/chat', () => ({
   persistRemoveQueued: vi.fn(),
   persistUpdateQueued: vi.fn().mockResolvedValue(true),
   steerCodexTurn: vi.fn().mockResolvedValue(undefined),
+  steerGrokTurn: vi.fn().mockResolvedValue(undefined),
   steerOpencodeTurn: vi.fn().mockResolvedValue(undefined),
   steerPiTurn: vi.fn().mockResolvedValue(undefined),
 }))
@@ -51,6 +53,7 @@ describe('useQueuedPromptActions', () => {
     vi.mocked(persistMoveQueuedFront).mockResolvedValue(true)
     vi.mocked(persistUpdateQueued).mockResolvedValue(true)
     vi.mocked(steerCodexTurn).mockResolvedValue(undefined)
+    vi.mocked(steerGrokTurn).mockResolvedValue(undefined)
     vi.mocked(steerOpencodeTurn).mockResolvedValue(undefined)
     vi.mocked(steerPiTurn).mockResolvedValue(undefined)
     useChatStore.setState({
@@ -244,7 +247,9 @@ describe('useQueuedPromptActions', () => {
     expect(steerCodexTurn).toHaveBeenCalledWith(
       'worktree-1',
       'session-1',
-      'prompt msg-1',
+      `prompt msg-1
+
+[Image attached: /tmp/img.png - Use the Read tool to view this image]`,
       expect.objectContaining({ id: 'msg-1' })
     )
     expect(cancelChatMessage).not.toHaveBeenCalled()
@@ -270,6 +275,47 @@ describe('useQueuedPromptActions', () => {
       useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
     ).toEqual(['msg-1', 'msg-3'])
     expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('busy grok session: steers the running turn and removes the message', async () => {
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'grok' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-2')
+    })
+
+    expect(steerGrokTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      'prompt msg-2'
+    )
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-1', 'msg-3'])
+    expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('busy grok session: falls back to cancel+send when steering fails', async () => {
+    vi.mocked(steerGrokTurn).mockRejectedValue(new Error('no active turn'))
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'grok' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-2')
+    })
+
+    expect(persistMoveQueuedFront).toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-2', 'msg-1', 'msg-3'])
+    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 
   it('busy pi session: falls back to cancel+send when steering fails', async () => {
@@ -333,11 +379,12 @@ describe('useQueuedPromptActions', () => {
     expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 
-  it('busy opencode session with attachments: skips steer, cancels instead', async () => {
+  it('busy opencode session with pasted text files: steers with path refs', async () => {
     useChatStore.setState({
       messageQueues: {
         'session-1': [
           createMessage('msg-1', {
+            message: 'check paste',
             pendingTextFiles: [
               { id: 'txt-1', path: '/tmp/input.txt' },
             ] as never,
@@ -353,16 +400,29 @@ describe('useQueuedPromptActions', () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
     })
 
-    expect(steerOpencodeTurn).not.toHaveBeenCalled()
-    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
+    expect(steerOpencodeTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      '/tmp/worktree-1',
+      'session-1',
+      expect.stringContaining('[Text file attached: /tmp/input.txt')
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
   })
 
-  it('busy pi session with attachments: skips steer, cancels instead', async () => {
+  it('busy pi session with file @-mentions: steers with file path refs', async () => {
     useChatStore.setState({
       messageQueues: {
         'session-1': [
           createMessage('msg-1', {
-            pendingFiles: [{ id: 'file-1', path: '/tmp/file.txt' }] as never,
+            message: 'check @file.txt',
+            pendingFiles: [
+              {
+                id: 'file-1',
+                relativePath: 'file.txt',
+                extension: 'txt',
+                isDirectory: false,
+              },
+            ],
           }),
         ],
       },
@@ -375,8 +435,70 @@ describe('useQueuedPromptActions', () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
     })
 
-    expect(steerPiTurn).not.toHaveBeenCalled()
-    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
+    expect(steerPiTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      expect.stringContaining('[File: file.txt')
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('busy pi session with pasted text files: steers with path refs', async () => {
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [
+          createMessage('msg-1', {
+            message: 'check paste',
+            pendingTextFiles: [
+              { id: 'txt-1', path: '/tmp/paste.txt' },
+            ] as never,
+          }),
+        ],
+      },
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'pi' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-1')
+    })
+
+    expect(steerPiTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      expect.stringContaining('[Text file attached: /tmp/paste.txt')
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('busy grok session with images: steers with path refs', async () => {
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [
+          createMessage('msg-1', {
+            message: 'check image',
+            pendingImages: [
+              { id: 'img-1', path: '/tmp/a.png', filename: 'a.png' },
+            ] as never,
+          }),
+        ],
+      },
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'grok' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-1')
+    })
+
+    expect(steerGrokTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      expect.stringContaining('[Image attached: /tmp/a.png')
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
   })
 
   it('busy claude session: promotes to front and cancels the run', async () => {

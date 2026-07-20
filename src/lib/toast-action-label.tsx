@@ -1,13 +1,13 @@
 import { Kbd } from '@/components/ui/kbd'
 import { isNativeApp } from '@/lib/environment'
-import { isMacOS } from '@/lib/platform'
+import { isClientMacOS } from '@/lib/platform'
 
 export const TOAST_ACTION_SHORTCUT = {
   shortcut: 'alt+enter',
 } as const
 
 export function getToastActionShortcutLabel(): string {
-  return isMacOS ? '⌥↩' : 'Alt+Enter'
+  return isClientMacOS ? '⌥↩' : 'Alt+Enter'
 }
 
 function shouldShowToastActionShortcut(): boolean {

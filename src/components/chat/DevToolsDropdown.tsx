@@ -21,7 +21,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { normalizeCodexQuestions } from '@/types/chat'
+import {
+  getCodexUserInputRequestId,
+  normalizeCodexQuestions,
+  upsertCodexUserInputRequest,
+} from '@/types/chat'
 import { usePreferences } from '@/services/preferences'
 import { chatQueryKeys, useSendMessage } from '@/services/chat'
 import type { EffortLevel, ExecutionMode, Session } from '@/types/chat'
@@ -54,8 +58,8 @@ export function DevToolsDropdown({
       const request = buildCodexDevUserInputRequest(flow)
       const store = useChatStore.getState()
       const pending = store.getPendingCodexUserInputRequests(sessionId)
-      const next = [...pending, request]
-      const toolCallId = request.item_id || `codex-user-input-${request.rpc_id}`
+      const next = upsertCodexUserInputRequest(pending, request)
+      const toolCallId = getCodexUserInputRequestId(request)
 
       store.setPendingCodexUserInputRequests(sessionId, next)
       store.setWaitingForInput(sessionId, true)
@@ -88,7 +92,7 @@ export function DevToolsDropdown({
       const model =
         session?.selected_model ??
         preferences?.selected_codex_model ??
-        'gpt-5.5'
+        'gpt-5.6-sol'
       const executionMode = (store.executionModes[sessionId] ??
         session?.selected_execution_mode ??
         'plan') as ExecutionMode

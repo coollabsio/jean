@@ -8,6 +8,7 @@ vi.mock('@/hooks/use-mobile', () => ({
 
 vi.mock('@/lib/platform', () => ({
   getModifierSymbol: () => '⌘',
+  isClientMacOS: true,
   isMacOS: true,
 }))
 

@@ -57,6 +57,7 @@ function getStoredReviewFindingKey(
 function formatReviewBackendName(backend: string): string {
   if (backend === 'opencode') return 'OpenCode'
   if (backend === 'commandcode') return 'Command Code'
+  if (backend === 'kimi') return 'Kimi Code'
   if (backend === 'coderabbit-cli') return 'CodeRabbit CLI'
   return backend.charAt(0).toUpperCase() + backend.slice(1)
 }

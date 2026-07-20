@@ -30,7 +30,7 @@ import {
   type FileEditMode,
   type TerminalBackgroundMode,
 } from '@/types/preferences'
-import { isMacOS } from '@/lib/platform'
+import { getModifierSymbol, isClientMacOS } from '@/lib/platform'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -73,7 +73,7 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-const modKey = isMacOS ? 'Cmd' : 'Ctrl'
+const modKey = getModifierSymbol()
 
 export const AppearancePane: React.FC = () => {
   const { theme, setTheme } = useTheme()
@@ -353,7 +353,7 @@ export const AppearancePane: React.FC = () => {
             </Select>
           </InlineField>
 
-          {isMacOS && (
+          {isClientMacOS && (
             <InlineField
               label="Window transparency"
               description="Translucent window with desktop blur (uses significant GPU)"

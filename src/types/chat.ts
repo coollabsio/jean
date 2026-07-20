@@ -55,6 +55,7 @@ export type Backend =
   | 'pi'
   | 'commandcode'
   | 'grok'
+  | 'kimi'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -132,7 +133,7 @@ export interface PlanToolInput {
   plan_preview?: string
   explanation?: string
   steps?: PlanStep[]
-  source?: 'claude' | 'codex' | 'grok'
+  source?: 'claude' | 'codex' | 'grok' | 'kimi'
 }
 
 /**
@@ -214,7 +215,7 @@ export interface Session {
   messages: ChatMessage[]
   /** Message count (populated separately for efficiency when full messages not needed) */
   message_count?: number
-  /** Backend for this session (claude, codex, opencode, cursor, or grok) */
+  /** Backend used for this session. */
   backend?: Backend
   /** Claude CLI session ID for resuming conversations */
   claude_session_id?: string
@@ -232,6 +233,8 @@ export interface Session {
   commandcode_session_id?: string
   /** Grok headless session ID for resuming conversations */
   grok_session_id?: string
+  /** Kimi Code ACP session ID for resuming conversations */
+  kimi_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */
@@ -484,6 +487,12 @@ export interface DoneEvent {
   worktree_id: string // Kept for backward compatibility
   /** True when a Codex/Opencode plan-mode run completed with content */
   waiting_for_plan?: boolean
+  /**
+   * Authoritative final assistant text from the backend (e.g. Grok).
+   * When present, prefer this over streamed chunk accumulation so
+   * leading-space word fragments cannot leave a glued optimistic message.
+   */
+  content?: string | null
 }
 
 /**
@@ -698,6 +707,41 @@ export interface CodexUserInputRequestEvent {
   session_id: string
   worktree_id: string
   request: CodexUserInputRequest
+}
+
+export function getCodexUserInputRequestId(
+  request: Pick<CodexUserInputRequest, 'item_id' | 'rpc_id'>
+): string {
+  return request.item_id || `codex-user-input-${request.rpc_id}`
+}
+
+export function findCodexUserInputRequest(
+  requests: CodexUserInputRequest[],
+  toolCallId: string
+): CodexUserInputRequest | undefined {
+  return requests.find(
+    request => getCodexUserInputRequestId(request) === toolCallId
+  )
+}
+
+export function upsertCodexUserInputRequest(
+  requests: CodexUserInputRequest[],
+  request: CodexUserInputRequest
+): CodexUserInputRequest[] {
+  const existingIndex = requests.findIndex(existing =>
+    request.item_id && existing.item_id
+      ? existing.item_id === request.item_id
+      : existing.rpc_id === request.rpc_id
+  )
+
+  if (existingIndex === -1) return [...requests, request]
+  if (JSON.stringify(requests[existingIndex]) === JSON.stringify(request)) {
+    return requests
+  }
+
+  const next = [...requests]
+  next[existingIndex] = request
+  return next
 }
 
 export interface CodexMcpElicitationRequest {
@@ -965,21 +1009,118 @@ export interface Todo {
  */
 export interface TodoWriteInput {
   todos: Todo[]
+  /** Grok TodoWrite may include merge; Jean currently treats latest call as snapshot */
+  merge?: boolean
+}
+
+const TODO_WRITE_TOOL_NAMES = new Set([
+  'TodoWrite',
+  'todo_write',
+  'todowrite',
+  'Todo',
+  'Todos',
+])
+
+function isTodoStatus(value: unknown): value is Todo['status'] {
+  return (
+    value === 'pending' ||
+    value === 'in_progress' ||
+    value === 'completed' ||
+    value === 'cancelled'
+  )
 }
 
 /**
- * Type guard to check if a tool call is TodoWrite
+ * Normalize a single todo item from Claude / Grok / Codex-shaped payloads.
+ * Grok items often omit `activeForm` and may use alternate status strings.
+ */
+export function normalizeTodoItem(raw: unknown): Todo | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const item = raw as Record<string, unknown>
+  const content =
+    (typeof item.content === 'string' && item.content.trim()) ||
+    (typeof item.text === 'string' && item.text.trim()) ||
+    (typeof item.title === 'string' && item.title.trim()) ||
+    ''
+  if (!content) return null
+
+  const activeForm =
+    (typeof item.activeForm === 'string' && item.activeForm.trim()) ||
+    (typeof item.active_form === 'string' && item.active_form.trim()) ||
+    content
+
+  let status: Todo['status'] = 'pending'
+  if (typeof item.status === 'string') {
+    const s = item.status.toLowerCase().replace(/-/g, '_')
+    if (
+      s === 'completed' ||
+      s === 'complete' ||
+      s === 'done' ||
+      s === 'finished'
+    ) {
+      status = 'completed'
+    } else if (
+      s === 'in_progress' ||
+      s === 'inprogress' ||
+      s === 'running' ||
+      s === 'active'
+    ) {
+      status = 'in_progress'
+    } else if (s === 'cancelled' || s === 'canceled' || s === 'skipped') {
+      status = 'cancelled'
+    } else if (isTodoStatus(item.status)) {
+      status = item.status
+    }
+  }
+
+  return { content, activeForm, status }
+}
+
+/**
+ * Type guard to check if a tool call is TodoWrite.
+ * Accepts Claude `TodoWrite`, Grok `todo_write` / `TodoWrite` variant titles,
+ * and any tool whose input carries a todos array in the TodoWrite shape.
  */
 export function isTodoWrite(
   toolCall: ToolCall
 ): toolCall is ToolCall & { input: TodoWriteInput } {
+  if (typeof toolCall.input !== 'object' || toolCall.input === null) {
+    return false
+  }
+  const input = toolCall.input as Record<string, unknown>
+  const todos = input.todos
+  if (!Array.isArray(todos)) return false
+
+  if (TODO_WRITE_TOOL_NAMES.has(toolCall.name)) return true
+
+  // Grok ACP titles like "Updating plan" still carry variant TodoWrite in input
+  // (or after backend normalization only the todos array remains).
+  const variant = input.variant
+  if (typeof variant === 'string' && TODO_WRITE_TOOL_NAMES.has(variant)) {
+    return true
+  }
+
+  // Structural fallback: array of objects with content/status looks like todos
   return (
-    toolCall.name === 'TodoWrite' &&
-    typeof toolCall.input === 'object' &&
-    toolCall.input !== null &&
-    'todos' in toolCall.input &&
-    Array.isArray((toolCall.input as TodoWriteInput).todos)
+    todos.length > 0 &&
+    todos.every(
+      item =>
+        typeof item === 'object' &&
+        item !== null &&
+        ('content' in item || 'text' in item || 'title' in item)
+    )
   )
+}
+
+/**
+ * Extract normalized todos from a TodoWrite-shaped tool call.
+ */
+export function getTodoWriteTodos(toolCall: ToolCall): Todo[] {
+  if (!isTodoWrite(toolCall)) return []
+  const todos = (toolCall.input as TodoWriteInput).todos
+  return todos
+    .map(normalizeTodoItem)
+    .filter((todo): todo is Todo => todo !== null)
 }
 
 /**

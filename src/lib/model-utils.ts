@@ -29,6 +29,7 @@ export function getModelImpliedBackend(
   if (model.startsWith('commandcode/')) return 'commandcode'
   if (model.startsWith('cursor/')) return 'cursor'
   if (model.startsWith('grok/')) return 'grok'
+  if (model.startsWith('kimi/')) return 'kimi'
   if (model.startsWith('opencode/')) return 'opencode'
   if (model.startsWith('pi/')) return 'pi'
   if (model.startsWith('codex') || model.includes('codex')) return 'codex'

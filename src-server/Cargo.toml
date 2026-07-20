@@ -1,7 +1,8 @@
 [package]
 name = "jean-server"
-version = "0.1.66"
+version = "0.1.68"
 edition = "2021"
 
 [dependencies]
-jean_lib = { package = "jean", path = "../src-tauri" }
+jean-core = { path = "../jean-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

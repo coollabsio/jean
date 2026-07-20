@@ -11,6 +11,7 @@ import {
   DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
   DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
+  DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
   resolveMagicPromptProvider,
@@ -26,6 +27,7 @@ type InvestigationType =
   | 'security-alert'
   | 'advisory'
   | 'linear-issue'
+  | 'sentry-issue'
 
 /**
  * Headless hook for starting investigations on background-created worktrees.
@@ -55,7 +57,8 @@ export function useBackgroundInvestigation(): void {
       state.autoInvestigatePRWorktreeIds.size > 0 ||
       state.autoInvestigateSecurityAlertWorktreeIds.size > 0 ||
       state.autoInvestigateAdvisoryWorktreeIds.size > 0 ||
-      state.autoInvestigateLinearIssueWorktreeIds.size > 0
+      state.autoInvestigateLinearIssueWorktreeIds.size > 0 ||
+      state.autoInvestigateSentryIssueWorktreeIds.size > 0
   )
 
   // Re-trigger effect when new worktree paths are registered.
@@ -74,6 +77,7 @@ export function useBackgroundInvestigation(): void {
       autoInvestigateSecurityAlertWorktreeIds,
       autoInvestigateAdvisoryWorktreeIds,
       autoInvestigateLinearIssueWorktreeIds,
+      autoInvestigateSentryIssueWorktreeIds,
       autoOpenSessionWorktreeIds,
     } = useUIStore.getState()
 
@@ -110,6 +114,7 @@ export function useBackgroundInvestigation(): void {
       { ids: autoInvestigateSecurityAlertWorktreeIds, type: 'security-alert' },
       { ids: autoInvestigateAdvisoryWorktreeIds, type: 'advisory' },
       { ids: autoInvestigateLinearIssueWorktreeIds, type: 'linear-issue' },
+      { ids: autoInvestigateSentryIssueWorktreeIds, type: 'sentry-issue' },
     ]
 
     const queuedWorktreeIds = new Set<string>()
@@ -143,7 +148,9 @@ export function useBackgroundInvestigation(): void {
     for (const { worktreeId, type } of candidates) {
       processingRef.current.add(worktreeId)
 
-      // Consume the flag immediately so we don't re-process
+      // Keep the flag until the backend has durably accepted the prompt. If
+      // prompt construction or the start command fails, the retry below can
+      // try again instead of silently leaving an empty session behind.
       const uiStore = useUIStore.getState()
       const consumeByType = {
         issue: uiStore.consumeAutoInvestigate,
@@ -151,8 +158,8 @@ export function useBackgroundInvestigation(): void {
         'security-alert': uiStore.consumeAutoInvestigateSecurityAlert,
         advisory: uiStore.consumeAutoInvestigateAdvisory,
         'linear-issue': uiStore.consumeAutoInvestigateLinearIssue,
+        'sentry-issue': uiStore.consumeAutoInvestigateSentryIssue,
       } satisfies Record<InvestigationType, (worktreeId: string) => void>
-      consumeByType[type](worktreeId)
 
       processBackgroundInvestigation(
         worktreeId,
@@ -161,8 +168,17 @@ export function useBackgroundInvestigation(): void {
         null,
         queryClient
       )
+        .then(() => {
+          consumeByType[type](worktreeId)
+        })
         .catch(err => {
           logger.error('Background investigation failed', { worktreeId, err })
+          if (!retryTimerRef.current) {
+            retryTimerRef.current = setTimeout(() => {
+              retryTimerRef.current = null
+              setRetryTick(t => t + 1)
+            }, 2000)
+          }
         })
         .finally(() => {
           processingRef.current.delete(worktreeId)
@@ -267,6 +283,36 @@ async function buildPrompt(
       .replace(/\{linearContext\}/g, linearContext)
   }
 
+  if (type === 'sentry-issue') {
+    const contexts = await invoke<
+      {
+        id: string
+        shortId: string
+        title: string
+        permalink: string
+        content: string
+      }[]
+    >('get_sentry_issue_context_contents', {
+      sessionId: worktreeId,
+      worktreeId,
+      projectId: projectId ?? '',
+    })
+    const refs = contexts.map(context => context.shortId).join(', ')
+    const word = contexts.length === 1 ? 'issue' : 'issues'
+    const sentryContext = contexts
+      .map(context => context.content)
+      .join('\n\n---\n\n')
+    const customPrompt = preferences?.magic_prompts?.investigate_sentry_issue
+    const template =
+      customPrompt && customPrompt.trim()
+        ? customPrompt
+        : DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT
+    return template
+      .replace(/\{sentryWord\}/g, word)
+      .replace(/\{sentryRefs\}/g, refs)
+      .replace(/\{sentryContext\}/g, sentryContext)
+  }
+
   // advisory
   const contexts = await invoke<
     { ghsaId: string; severity: string; summary: string }[]
@@ -315,6 +361,12 @@ const investigationConfig = {
     providerKey: 'investigate_linear_issue_provider',
     effortKey: 'investigate_linear_issue_effort',
     modeKey: 'investigate_linear_issue_mode',
+  },
+  'sentry-issue': {
+    modelKey: 'investigate_sentry_issue_model',
+    providerKey: 'investigate_sentry_issue_provider',
+    effortKey: 'investigate_sentry_issue_effort',
+    modeKey: 'investigate_sentry_issue_mode',
   },
 } as const satisfies Record<
   InvestigationType,

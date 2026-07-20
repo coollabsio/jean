@@ -627,33 +627,94 @@ function formatWakeupDelay(seconds: number): string {
   return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`
 }
 
-function normalizeCommandCodeToolForDisplay(
+export function normalizeToolCallForDisplay(
   name: string,
   input: Record<string, unknown>
 ): { name: string; input: Record<string, unknown> } {
-  switch (name) {
+  const variant = typeof input.variant === 'string' ? input.variant : undefined
+  const normalizedName = (() => {
+    switch (variant) {
+      case 'ReadFile':
+      case 'CursorRead':
+        return 'Read'
+      case 'Write':
+      case 'CursorWrite':
+        return 'Write'
+      case 'SearchReplace':
+      case 'CursorStrReplace':
+        return 'Edit'
+      case 'Bash':
+      case 'CursorShell':
+        return 'Bash'
+      case 'Grep':
+      case 'CursorGrep':
+        return 'Grep'
+      case 'CursorGlob':
+        return 'Glob'
+      case 'ListDir':
+        return 'List'
+      case 'TodoWrite':
+      case 'CursorTodoWrite':
+        return 'TodoWrite'
+      case 'Task':
+        return 'Task'
+      case 'TaskOutput':
+        return 'WaitForAgents'
+      case 'WebFetch':
+      case 'WebSearch':
+      case 'EnterPlanMode':
+      case 'ExitPlanMode':
+        return variant
+      default:
+        return name
+    }
+  })()
+
+  const withoutVariant = { ...input }
+  delete withoutVariant.variant
+
+  switch (normalizedName) {
     case 'read_file':
+    case 'Read':
       return {
         name: 'Read',
         input: {
-          ...input,
+          ...withoutVariant,
           file_path:
             input.file_path ??
+            input.target_file ??
             input.absolutePath ??
             input.filePath ??
             input.path,
         },
       }
     case 'write_file':
+    case 'Write':
       return {
         name: 'Write',
         input: {
-          ...input,
+          ...withoutVariant,
           file_path:
             input.file_path ??
+            input.target_file ??
             input.filePath ??
             input.absolutePath ??
             input.path,
+          content: input.content ?? input.contents,
+        },
+      }
+    case 'Edit':
+      return {
+        name: 'Edit',
+        input: {
+          ...withoutVariant,
+          file_path:
+            input.file_path ??
+            input.target_file ??
+            input.filePath ??
+            input.path,
+          old_string: input.old_string ?? input.oldText ?? input.old_text,
+          new_string: input.new_string ?? input.newText ?? input.new_text,
         },
       }
     case 'read_multiple_files':
@@ -669,16 +730,40 @@ function normalizeCommandCodeToolForDisplay(
     case 'read_directory':
       return { name: 'List', input }
     case 'glob':
-      return { name: 'Glob', input }
+    case 'Glob':
+      return {
+        name: 'Glob',
+        input: {
+          ...withoutVariant,
+          pattern: input.pattern ?? input.glob_pattern ?? input.glob,
+          path: input.path ?? input.target_directory ?? input.targetDirectory,
+        },
+      }
     case 'grep':
       return { name: 'Grep', input }
+    case 'List':
+      return {
+        name: 'List',
+        input: {
+          ...withoutVariant,
+          path: input.path ?? input.target_directory ?? input.targetDirectory,
+        },
+      }
+    case 'WaitForAgents':
+      return {
+        name: 'WaitForAgents',
+        input: {
+          ...withoutVariant,
+          receiver_thread_ids: input.receiver_thread_ids ?? input.task_ids,
+        },
+      }
     default:
-      return { name, input }
+      return { name: normalizedName, input: withoutVariant }
   }
 }
 
 function getToolSummaryName(name: string): string {
-  return normalizeCommandCodeToolForDisplay(name, {}).name
+  return normalizeToolCallForDisplay(name, {}).name
 }
 
 /** Live-ticking remaining seconds for a pending ScheduleWakeup. */
@@ -741,7 +826,7 @@ function ScheduleWakeupCountdown({ toolCallId }: ScheduleWakeupIndicatorProps) {
 }
 
 function getToolDisplay(toolCall: ToolCall): ToolDisplay {
-  const normalized = normalizeCommandCodeToolForDisplay(
+  const normalized = normalizeToolCallForDisplay(
     toolCall.name,
     (toolCall.input ?? {}) as Record<string, unknown>
   )
@@ -950,6 +1035,64 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         label: 'Close Agent',
         detail: agentId,
         expandedContent: JSON.stringify(input, null, 2),
+      }
+    }
+
+    case 'TodoWrite':
+    case 'todo_write':
+    case 'todowrite': {
+      const todos = (Array.isArray(input.todos) ? input.todos : []) as {
+        content?: string
+        activeForm?: string
+        status?: string
+      }[]
+      const completed = todos.filter(t => t.status === 'completed').length
+      return {
+        icon: <ListTodo className="h-4 w-4 shrink-0" />,
+        label: 'Tasks',
+        detail: todos.length ? `${completed}/${todos.length} done` : undefined,
+        expandedContent: todos.length ? (
+          <div className="space-y-1">
+            {todos.map((todo, index) => {
+              const text =
+                todo.status === 'in_progress'
+                  ? (todo.activeForm ?? todo.content ?? '')
+                  : (todo.content ?? '')
+              const done = todo.status === 'completed'
+              const cancelled = todo.status === 'cancelled'
+              const active = todo.status === 'in_progress'
+              return (
+                <div
+                  key={`${text}-${index}`}
+                  className="flex items-center gap-1.5"
+                >
+                  {done ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                  ) : cancelled ? (
+                    <XCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                  ) : active ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+                  )}
+                  <span
+                    className={
+                      done
+                        ? 'line-through text-muted-foreground/60'
+                        : cancelled
+                          ? 'text-muted-foreground/60'
+                          : ''
+                    }
+                  >
+                    {text}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          'No items'
+        ),
       }
     }
 

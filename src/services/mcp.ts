@@ -56,6 +56,8 @@ export function invalidateAllMcpServers(
  * - Codex:    ~/.codex/config.toml + .codex/config.toml
  * - OpenCode: ~/.config/opencode/opencode.json + opencode.json
  * - Cursor:   ~/.cursor/mcp.json + .cursor/mcp.json
+ * - Grok:     ~/.grok/config.toml + project .grok/config.toml (+ Claude/Cursor/.mcp.json compat)
+ * - Kimi:     ~/.kimi-code/mcp.json + project .kimi-code/mcp.json
  */
 export function useMcpServers(
   worktreePath: string | null | undefined,
@@ -87,6 +89,8 @@ export function useAllBackendsMcpServers(
   const codex = useMcpServers(worktreePath, 'codex')
   const opencode = useMcpServers(worktreePath, 'opencode')
   const cursor = useMcpServers(worktreePath, 'cursor')
+  const grok = useMcpServers(worktreePath, 'grok')
+  const kimi = useMcpServers(worktreePath, 'kimi')
 
   const has = useMemo(() => new Set(installedBackends), [installedBackends])
 
@@ -96,14 +100,18 @@ export function useAllBackendsMcpServers(
     if (has.has('codex') && codex.data) result.push(...codex.data)
     if (has.has('opencode') && opencode.data) result.push(...opencode.data)
     if (has.has('cursor') && cursor.data) result.push(...cursor.data)
+    if (has.has('grok') && grok.data) result.push(...grok.data)
+    if (has.has('kimi') && kimi.data) result.push(...kimi.data)
     return result
-  }, [has, claude.data, codex.data, cursor.data, opencode.data])
+  }, [has, claude.data, codex.data, cursor.data, grok.data, kimi.data, opencode.data])
 
   const isLoading =
     (has.has('claude') && claude.isLoading) ||
     (has.has('codex') && codex.isLoading) ||
     (has.has('opencode') && opencode.isLoading) ||
-    (has.has('cursor') && cursor.isLoading)
+    (has.has('cursor') && cursor.isLoading) ||
+    (has.has('grok') && grok.isLoading) ||
+    (has.has('kimi') && kimi.isLoading)
 
   return { data: servers, isLoading }
 }
@@ -148,6 +156,7 @@ export function useAllBackendsMcpHealth(
   const opencode = useMcpHealthCheck('opencode', worktreePath)
   const cursor = useMcpHealthCheck('cursor', worktreePath)
   const grok = useMcpHealthCheck('grok', worktreePath)
+  const kimi = useMcpHealthCheck('kimi', worktreePath)
 
   const has = useMemo(() => new Set(installedBackends), [installedBackends])
 
@@ -159,6 +168,7 @@ export function useAllBackendsMcpHealth(
       ['opencode', opencode],
       ['cursor', cursor],
       ['grok', grok],
+      ['kimi', kimi],
     ]
     for (const [backend, query] of entries) {
       if (has.has(backend) && query.data?.statuses) {
@@ -168,13 +178,15 @@ export function useAllBackendsMcpHealth(
       }
     }
     return merged
-  }, [has, claude.data, codex.data, cursor.data, grok.data, opencode.data])
+  }, [has, claude.data, codex.data, cursor.data, grok.data, kimi.data, opencode.data])
 
   const isFetching =
     (has.has('claude') && claude.isFetching) ||
     (has.has('codex') && codex.isFetching) ||
     (has.has('opencode') && opencode.isFetching) ||
-    (has.has('cursor') && cursor.isFetching)
+    (has.has('cursor') && cursor.isFetching) ||
+    (has.has('grok') && grok.isFetching) ||
+    (has.has('kimi') && kimi.isFetching)
 
   const refetchAll = useMemo(
     () => () => {
@@ -182,8 +194,10 @@ export function useAllBackendsMcpHealth(
       if (has.has('codex')) codex.refetch()
       if (has.has('opencode')) opencode.refetch()
       if (has.has('cursor')) cursor.refetch()
+      if (has.has('grok')) grok.refetch()
+      if (has.has('kimi')) kimi.refetch()
     },
-    [has, claude.refetch, codex.refetch, cursor.refetch, opencode.refetch] // eslint-disable-line react-hooks/exhaustive-deps
+    [has, claude.refetch, codex.refetch, cursor.refetch, grok.refetch, kimi.refetch, opencode.refetch] // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   return { statuses, isFetching, refetchAll }
@@ -300,6 +314,7 @@ export const BACKEND_LABELS: Record<CliBackend, string> = {
   pi: 'PI',
   commandcode: 'Command Code',
   grok: 'Grok',
+  kimi: 'Kimi Code',
 }
 
 /** Group servers by their backend field */

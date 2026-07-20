@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { isNativeApp } from '@/lib/environment'
 import { ZOOM_LEVEL_DEFAULT, zoomLevelTicks } from '@/types/preferences'
-import { isMacOS } from '@/lib/platform'
+import { isClientMacOS } from '@/lib/platform'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 const tickValues = zoomLevelTicks.map(t => t.value)
@@ -61,7 +61,7 @@ export function useZoom() {
   // Keyboard shortcuts: Cmd/Ctrl + =/- for zoom, Cmd/Ctrl + 0 for reset
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const mod = isMacOS ? e.metaKey : e.ctrlKey
+      const mod = isClientMacOS && isNativeApp() ? e.metaKey : e.ctrlKey
       if (!mod || e.shiftKey || e.altKey) return
 
       const key = e.key

@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import { Loader2, Activity, Brain, ChevronRight } from 'lucide-react'
 import type { ContentBlock, ToolCall } from '@/types/chat'
-import { isPlanToolCall } from '@/types/chat'
+import { isAskUserQuestion, isPlanToolCall } from '@/types/chat'
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,6 +22,9 @@ import {
 import type { ComponentProps } from 'react'
 
 type StreamingMessageProps = ComponentProps<typeof StreamingMessage>
+type CompactStreamingTickerProps = StreamingMessageProps & {
+  showLoadingIndicator?: boolean
+}
 
 /**
  * Pulls a one-line label/detail out of the latest content block or tool call
@@ -196,7 +199,7 @@ function hasVisibleActivity(
  * multiple visible tool groups while streaming.
  */
 export const CompactStreamingTicker = memo(function CompactStreamingTicker(
-  props: StreamingMessageProps
+  props: CompactStreamingTickerProps
 ) {
   const {
     contentBlocks,
@@ -204,6 +207,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     streamingContent,
     onCopySteeredText,
     worktreePath,
+    showLoadingIndicator = true,
   } = props
   const [isOpen, setIsOpen] = useState(false)
 
@@ -261,10 +265,49 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     [orderedActivityBlocks, activityToolCalls, hasPlan]
   )
 
+  const questionToolCalls = toolCalls.filter(isAskUserQuestion)
+  if (questionToolCalls.length > 0) {
+    const questionIds = new Set(questionToolCalls.map(tool => tool.id))
+    const questionBlocks = contentBlocks.filter(
+      block => block.type === 'tool_use' && questionIds.has(block.tool_call_id)
+    )
+    const remainingBlocks = contentBlocks.filter(
+      block => block.type !== 'tool_use' || !questionIds.has(block.tool_call_id)
+    )
+    const remainingToolCalls = toolCalls.filter(
+      tool => !questionIds.has(tool.id)
+    )
+    const hasOtherActivity = hasVisibleActivity(
+      remainingBlocks,
+      remainingToolCalls,
+      streamingContent
+    )
+
+    return (
+      <div className="space-y-3">
+        {hasOtherActivity && (
+          <CompactStreamingTicker
+            {...props}
+            contentBlocks={remainingBlocks}
+            toolCalls={remainingToolCalls}
+          />
+        )}
+        <StreamingMessage
+          {...props}
+          contentBlocks={questionBlocks}
+          toolCalls={questionToolCalls}
+          streamingContent=""
+        />
+      </div>
+    )
+  }
+
   if (steeredTexts.length > 0) {
     let lastActivityIndex = -1
+    let lastSteeredIndex = -1
     steeredSegments.forEach((segment, index) => {
       if (segment.type === 'activity') lastActivityIndex = index
+      else lastSteeredIndex = index
     })
     return (
       <div className="space-y-3">
@@ -282,11 +325,12 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
               {...props}
               contentBlocks={segment.blocks}
               toolCalls={segment.toolCalls}
-              streamingContent={
-                index === lastActivityIndex && segment.blocks.length > 0
-                  ? streamingContent
-                  : ''
+              showLoadingIndicator={
+                showLoadingIndicator &&
+                index === lastActivityIndex &&
+                index > lastSteeredIndex
               }
+              streamingContent=""
             />
           )
         )}
@@ -359,7 +403,9 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                   {stepCount} step{stepCount === 1 ? '' : 's'}
                 </span>
               )}
-              <Loader2 className="h-3 w-3 animate-spin opacity-50" />
+              {showLoadingIndicator && (
+                <Loader2 className="h-3 w-3 animate-spin opacity-50" />
+              )}
               <ChevronRight
                 className={
                   'h-3.5 w-3.5 transition-transform duration-200' +

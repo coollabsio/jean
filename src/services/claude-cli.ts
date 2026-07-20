@@ -19,9 +19,9 @@ import type {
   ClaudeUsageSnapshot,
 } from '@/types/claude-cli'
 
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 const USAGE_REFRESH_MS = 1000 * 60 * 5
 
 // Query keys for Claude CLI

@@ -11,11 +11,56 @@ import {
 } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { browserBackend } from '@/hooks/useBrowserPane'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type { BrowserTab } from '@/types/browser'
-import type { UIState } from '@/types/ui-state'
+import type {
+  PendingImage,
+  PendingTextFile,
+  ReadTextResponse,
+} from '@/types/chat'
+import type {
+  PendingImageDraft,
+  PendingTextFileDraft,
+  UIState,
+} from '@/types/ui-state'
+
+/** Serialize ready (non-loading) pending images for UI-state persistence. */
+function serializePendingImages(
+  pendingImages: Record<string, PendingImage[]>
+): Record<string, PendingImageDraft[]> {
+  const out: Record<string, PendingImageDraft[]> = {}
+  for (const [sessionId, images] of Object.entries(pendingImages)) {
+    const ready = images
+      .filter(img => !img.loading && !!img.path)
+      .map(({ id, path, filename }) => ({ id, path, filename }))
+    if (ready.length > 0) {
+      out[sessionId] = ready
+    }
+  }
+  return out
+}
+
+/**
+ * Serialize pending text-file attachments without embedding full content,
+ * so large pastes do not bloat the UI-state JSON.
+ */
+function serializePendingTextFiles(
+  pendingTextFiles: Record<string, PendingTextFile[]>
+): Record<string, PendingTextFileDraft[]> {
+  const out: Record<string, PendingTextFileDraft[]> = {}
+  for (const [sessionId, textFiles] of Object.entries(pendingTextFiles)) {
+    if (textFiles.length === 0) continue
+    out[sessionId] = textFiles.map(({ id, path, filename, size }) => ({
+      id,
+      path,
+      filename,
+      size,
+    }))
+  }
+  return out
+}
 
 // Simple debounce implementation
 function debounce<T extends (...args: Parameters<T>) => void>(
@@ -73,7 +118,8 @@ export function useUIStatePersistence() {
 
   // Helper to get current UI state from stores
   // NOTE: Durable session-specific state is stored in Session files. Unsent
-  // input drafts remain lightweight UI state so they survive full UI reloads.
+  // input drafts (text + image/text-file attachments) remain lightweight UI
+  // state so they survive full UI reloads.
   const getCurrentUIState = useCallback((): UIState => {
     const {
       activeWorktreeId,
@@ -81,6 +127,8 @@ export function useUIStatePersistence() {
       lastActiveWorktreeId,
       activeSessionIds,
       inputDrafts,
+      pendingImages,
+      pendingTextFiles,
       reviewSidebarVisible,
       lastOpenedPerProject,
     } = useChatStore.getState()
@@ -110,7 +158,7 @@ export function useUIStatePersistence() {
       modalTerminalWidth,
       modalTerminalHeight,
     } = useTerminalStore.getState()
-    const shouldPersistTerminalRuntime = !isNativeApp()
+    const shouldPersistTerminalRuntime = !isLocalBackend()
     const terminalInstancesForPersist = shouldPersistTerminalRuntime
       ? Object.fromEntries(
           Object.entries(terminals)
@@ -146,6 +194,8 @@ export function useUIStatePersistence() {
       left_sidebar_visible: leftSidebarVisible,
       active_session_ids: activeSessionIds,
       input_drafts: inputDrafts,
+      pending_images: serializePendingImages(pendingImages),
+      pending_text_files: serializePendingTextFiles(pendingTextFiles),
       // Review sidebar visibility
       review_sidebar_visible: reviewSidebarVisible,
       // Modal terminal drawer state
@@ -347,6 +397,105 @@ export function useUIStatePersistence() {
       useChatStore.setState({ inputDrafts })
     }
 
+    // Restore unsent image attachments (files already on disk)
+    const pendingImagesDraft = uiState.pending_images ?? {}
+    if (Object.keys(pendingImagesDraft).length > 0) {
+      const restoredImages: Record<string, PendingImage[]> = {}
+      for (const [sessionId, images] of Object.entries(pendingImagesDraft)) {
+        const valid = images
+          .filter(img => img.id && img.path && img.filename)
+          .map(img => ({
+            id: img.id,
+            path: img.path,
+            filename: img.filename,
+          }))
+        if (valid.length > 0) restoredImages[sessionId] = valid
+      }
+      if (Object.keys(restoredImages).length > 0) {
+        logger.debug('Restoring pending images', {
+          sessions: Object.keys(restoredImages).length,
+        })
+        useChatStore.setState({ pendingImages: restoredImages })
+      }
+    }
+
+    // Restore unsent pasted-text attachments; re-read content from disk when
+    // the persisted payload omitted it (normal path to keep UI state small).
+    const pendingTextFilesDraft = uiState.pending_text_files ?? {}
+    if (Object.keys(pendingTextFilesDraft).length > 0) {
+      const restoredTextFiles: Record<string, PendingTextFile[]> = {}
+      const needsContentHydration: {
+        sessionId: string
+        id: string
+        path: string
+      }[] = []
+
+      for (const [sessionId, textFiles] of Object.entries(
+        pendingTextFilesDraft
+      )) {
+        const valid: PendingTextFile[] = []
+        for (const tf of textFiles) {
+          if (!tf.id || !tf.path || !tf.filename) continue
+          const content = tf.content ?? ''
+          valid.push({
+            id: tf.id,
+            path: tf.path,
+            filename: tf.filename,
+            size: tf.size ?? 0,
+            content,
+          })
+          if (!tf.content) {
+            needsContentHydration.push({
+              sessionId,
+              id: tf.id,
+              path: tf.path,
+            })
+          }
+        }
+        if (valid.length > 0) restoredTextFiles[sessionId] = valid
+      }
+
+      if (Object.keys(restoredTextFiles).length > 0) {
+        logger.debug('Restoring pending text files', {
+          sessions: Object.keys(restoredTextFiles).length,
+          hydrate: needsContentHydration.length,
+        })
+        useChatStore.setState({ pendingTextFiles: restoredTextFiles })
+      }
+
+      if (needsContentHydration.length > 0) {
+        void (async () => {
+          for (const item of needsContentHydration) {
+            try {
+              const result = await invoke<ReadTextResponse>(
+                'read_pasted_text',
+                {
+                  path: item.path,
+                }
+              )
+              useChatStore
+                .getState()
+                .updatePendingTextFile(
+                  item.sessionId,
+                  item.id,
+                  result.content,
+                  result.size
+                )
+            } catch (error) {
+              // File may have been cleaned up; drop the orphaned attachment.
+              logger.warn('Failed to restore pasted text content; removing', {
+                path: item.path,
+                error: String(error),
+              })
+              useChatStore
+                .getState()
+                .removePendingTextFile(item.sessionId, item.id)
+            }
+          }
+        })()
+      }
+    }
+
     // NOTE: Other session-specific state is loaded from Session files by the
     // useSessionStatePersistence hook.
 
@@ -394,7 +543,7 @@ export function useUIStatePersistence() {
     }
 
     const restoreTerminalRuntimeState = async (shouldCancel: () => boolean) => {
-      if (isNativeApp() || shouldCancel()) return
+      if (isLocalBackend() || shouldCancel()) return
 
       // PHASE 1: Always restore the *user-intent* UI flags for terminal
       // surfaces. These are independent of whether any PTYs survived the
@@ -856,6 +1005,8 @@ export function useUIStatePersistence() {
     let prevLastActiveWorktreeId = useChatStore.getState().lastActiveWorktreeId
     let prevActiveSessionIds = useChatStore.getState().activeSessionIds
     let prevInputDrafts = useChatStore.getState().inputDrafts
+    let prevPendingImages = useChatStore.getState().pendingImages
+    let prevPendingTextFiles = useChatStore.getState().pendingTextFiles
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
     let prevTerminalInstances = useTerminalStore.getState().terminals
@@ -949,8 +1100,8 @@ export function useUIStatePersistence() {
     })
 
     // Subscribe to chat-store changes (active worktree, sessions, input drafts,
-    // and worktree-scoped state). Other session-specific state is handled by
-    // useSessionStatePersistence.
+    // draft attachments, and worktree-scoped state). Other session-specific
+    // state is handled by useSessionStatePersistence.
     const unsubChat = useChatStore.subscribe(state => {
       // Check if active worktree or active sessions changed
       const worktreeChanged =
@@ -959,6 +1110,9 @@ export function useUIStatePersistence() {
         state.lastActiveWorktreeId !== prevLastActiveWorktreeId
       const sessionsChanged = state.activeSessionIds !== prevActiveSessionIds
       const inputDraftsChanged = state.inputDrafts !== prevInputDrafts
+      const pendingImagesChanged = state.pendingImages !== prevPendingImages
+      const pendingTextFilesChanged =
+        state.pendingTextFiles !== prevPendingTextFiles
       const reviewSidebarChanged =
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
@@ -968,6 +1122,8 @@ export function useUIStatePersistence() {
         worktreeChanged ||
         sessionsChanged ||
         inputDraftsChanged ||
+        pendingImagesChanged ||
+        pendingTextFilesChanged ||
         reviewSidebarChanged ||
         lastOpenedChanged
       ) {
@@ -976,6 +1132,8 @@ export function useUIStatePersistence() {
         prevLastActiveWorktreeId = state.lastActiveWorktreeId
         prevActiveSessionIds = state.activeSessionIds
         prevInputDrafts = state.inputDrafts
+        prevPendingImages = state.pendingImages
+        prevPendingTextFiles = state.pendingTextFiles
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
         const currentState = getCurrentUIState()
@@ -1051,7 +1209,7 @@ export function useUIStatePersistence() {
         bottomHeightChanged
       ) {
         // Detect tab removals — close their backing webviews
-        if (tabsChanged && isNativeApp()) {
+        if (tabsChanged && isLocalBackend()) {
           const prevIds = new Set<string>()
           for (const list of Object.values(prevBrowserTabs)) {
             for (const t of list) prevIds.add(t.id)

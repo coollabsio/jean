@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { shouldHydrateCompletedSessionFromBackend } from './completion-hydration'
+import {
+  looksLikeCollapsedStreamSpaces,
+  shouldHydrateCompletedSessionFromBackend,
+} from './completion-hydration'
 
 describe('shouldHydrateCompletedSessionFromBackend', () => {
   it('requests hydration when plain-text plan content exists without a CodexPlan tool', () => {
@@ -36,5 +39,55 @@ describe('shouldHydrateCompletedSessionFromBackend', () => {
         ]
       )
     ).toBe(true)
+  })
+
+  it('requests hydration for Grok so run-log parse can repair space-glued streams', () => {
+    expect(
+      shouldHydrateCompletedSessionFromBackend(
+        'Hello world with normal spaces',
+        [{ type: 'text', text: 'Hello world with normal spaces' }],
+        [],
+        { backend: 'grok' }
+      )
+    ).toBe(true)
+  })
+
+  it('requests hydration when content looks space-collapsed', () => {
+    expect(
+      shouldHydrateCompletedSessionFromBackend(
+        'bashbunrunprocess:invoices----v2--invoice=in_xxxxx Testfirst',
+        [],
+        []
+      )
+    ).toBe(true)
+  })
+
+  it('does not force hydrate for normal non-Grok completed text', () => {
+    expect(
+      shouldHydrateCompletedSessionFromBackend(
+        'Hello world with normal spaces',
+        [{ type: 'text', text: 'Hello world with normal spaces' }],
+        [],
+        { backend: 'claude' }
+      )
+    ).toBe(false)
+  })
+})
+
+describe('looksLikeCollapsedStreamSpaces', () => {
+  it('detects glued Grok fence + command tokens', () => {
+    expect(
+      looksLikeCollapsedStreamSpaces(
+        'bashbunrunprocess:invoices----v2--invoice=in_xxxxx'
+      )
+    ).toBe(true)
+  })
+
+  it('accepts normal spaced markdown', () => {
+    expect(
+      looksLikeCollapsedStreamSpaces(
+        '```bash\nbun run process:invoices -- --v2\n```\n\n**Test first**'
+      )
+    ).toBe(false)
   })
 })

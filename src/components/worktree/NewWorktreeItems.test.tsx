@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
-import { SecurityAlertItem } from './NewWorktreeItems'
+import { BranchItem, SecurityAlertItem } from './NewWorktreeItems'
 import type { DependabotAlert } from '@/types/github'
 
 let isMobile = false
@@ -71,5 +71,27 @@ describe('NewWorktreeItems mobile actions', () => {
       screen.getByRole('menuitem', { name: /investigate in background/i })
     )
     expect(onInvestigate).toHaveBeenLastCalledWith(true)
+  })
+})
+
+describe('BranchItem', () => {
+  it('opens the selected branch directly without offering a child branch action', async () => {
+    const user = userEvent.setup()
+    const onClick = vi.fn()
+
+    render(
+      <BranchItem
+        branch="feature/existing"
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        onMouseEnter={vi.fn()}
+        onClick={onClick}
+      />
+    )
+
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'feature/existing' }))
+    expect(onClick).toHaveBeenCalledWith(false)
   })
 })

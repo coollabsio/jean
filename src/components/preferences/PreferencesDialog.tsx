@@ -58,6 +58,7 @@ import { CursorIcon } from '@/components/icons/CursorIcon'
 import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
+import { KimiIcon } from '@/components/icons/KimiIcon'
 import type { CliBackend, MagicPrompts } from '@/types/preferences'
 import { GeneralPane } from './panes/GeneralPane'
 import { ClaudePane } from './panes/ClaudePane'
@@ -67,6 +68,7 @@ import { CursorPane } from './panes/CursorPane'
 import { PiPane } from './panes/PiPane'
 import { CommandCodePane } from './panes/CommandCodePane'
 import { GrokPane } from './panes/GrokPane'
+import { KimiPane } from './panes/KimiPane'
 import { GitHubPane } from './panes/GitHubPane'
 import { CodeRabbitPane } from './panes/CodeRabbitPane'
 import { AppearancePane } from './panes/AppearancePane'
@@ -169,6 +171,13 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
   },
   {
     type: 'item',
+    id: 'kimi',
+    name: 'Kimi Code',
+    icon: KimiIcon,
+    backend: 'kimi',
+  },
+  {
+    type: 'item',
     id: 'github',
     name: 'Git Provider',
     icon: GitBranch,
@@ -253,6 +262,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   pi: PiIcon,
   commandcode: CommandCodeIcon,
   grok: GrokIcon,
+  kimi: KimiIcon,
   github: GitBranch,
   coderabbit: Rabbit,
   opinionated: Sparkles,
@@ -707,7 +717,13 @@ export function PreferencesDialog() {
                               onClick={() => handlePaneSelect(entry.id)}
                               className="w-full"
                             >
-                              <entry.icon />
+                              <entry.icon
+                                className={
+                                  entry.id === 'kimi'
+                                    ? 'translate-x-0.5'
+                                    : undefined
+                                }
+                              />
                               {entry.backend ? (
                                 <BackendLabel backend={entry.backend} />
                               ) : (
@@ -848,6 +864,11 @@ export function PreferencesDialog() {
               {activePane === 'grok' && (
                 <div id="pref-pane-grok">
                   <GrokPane />
+                </div>
+              )}
+              {activePane === 'kimi' && (
+                <div id="pref-pane-kimi" className="min-w-0 max-w-full">
+                  <KimiPane />
                 </div>
               )}
               {activePane === 'github' && (

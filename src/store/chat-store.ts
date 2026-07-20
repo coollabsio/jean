@@ -42,7 +42,10 @@ export type { ClaudeModel, CodexModel }
 export const DEFAULT_MODEL: ClaudeModel = 'claude-opus-4-8[1m]'
 
 /** Default Codex model */
-export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-5.5'
+export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-5.6-sol'
+
+/** Default OpenCode model */
+export const DEFAULT_OPENCODE_MODEL = 'opencode/gpt-5.6-sol'
 
 /** Default thinking level */
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'off'
@@ -65,6 +68,7 @@ function compactReplayBlocks(blocks: ContentBlock[]): ContentBlock[] {
   return blocks.filter(block => {
     if (block.type === 'text') return block.text.length > 0
     if (block.type === 'thinking') return block.thinking.length > 0
+    if (block.type === 'user_input') return block.text.length > 0
     return block.type === 'tool_use'
   })
 }
@@ -431,6 +435,10 @@ interface ChatUIState {
   consumeStreamingReplayToolBlock: (
     sessionId: string,
     toolCallId: string
+  ) => boolean
+  consumeStreamingReplayUserInput: (
+    sessionId: string,
+    text: string
   ) => boolean
   clearStreamingReplayContentBlocks: (sessionId: string) => void
 
@@ -1677,13 +1685,50 @@ export const useChatStore = create<ChatUIState>()(
 
       consumeStreamingReplayText: (sessionId, text) => {
         if (!text) return text
-        const blocks = get().streamingReplayContentBlocks[sessionId]
-        const first = blocks?.[0]
+        let blocks = get().streamingReplayContentBlocks[sessionId]
+        let first = blocks?.[0]
         if (!blocks?.length || !first) return text
 
+        // Bootstrap replay is capped and may begin after the snapshot prefix.
+        // Find the retained text inside a later snapshot block before deciding
+        // that this is genuinely new live output.
         if (first.type !== 'text') {
-          get().clearStreamingReplayContentBlocks(sessionId)
-          return text
+          const matchingIndex = blocks.findIndex(
+            block => block.type === 'text' && block.text.includes(text)
+          )
+          if (matchingIndex < 0) {
+            get().clearStreamingReplayContentBlocks(sessionId)
+            return text
+          }
+          blocks = blocks.slice(matchingIndex)
+          first = blocks[0]
+        } else if (
+          !first.text.startsWith(text) &&
+          !text.startsWith(first.text)
+        ) {
+          const matchingIndex = blocks.findIndex(
+            block => block.type === 'text' && block.text.includes(text)
+          )
+          if (matchingIndex < 0) {
+            get().clearStreamingReplayContentBlocks(sessionId)
+            return text
+          }
+          blocks = blocks.slice(matchingIndex)
+          first = blocks[0]
+        }
+
+        if (!first || first.type !== 'text') return text
+
+        const matchOffset = first.text.indexOf(text)
+        if (matchOffset > 0) {
+          const remaining = first.text.slice(matchOffset + text.length)
+          get().setStreamingReplayContentBlocks(
+            sessionId,
+            remaining
+              ? [{ type: 'text', text: remaining }, ...blocks.slice(1)]
+              : blocks.slice(1)
+          )
+          return ''
         }
 
         if (first.text.startsWith(text)) {
@@ -1711,8 +1756,12 @@ export const useChatStore = create<ChatUIState>()(
         if (!blocks?.length || !first) return thinking
 
         if (first.type !== 'thinking') {
-          get().clearStreamingReplayContentBlocks(sessionId)
-          return thinking
+          // Codex persists completed agent/tool items in running snapshots but
+          // not its transient reasoning deltas. Those deltas still exist in the
+          // WebSocket replay buffer and can arrive before the first persisted
+          // text block. Drop them without abandoning the remaining snapshot
+          // dedupe, otherwise every following text/tool event renders twice.
+          return ''
         }
 
         if (first.thinking.startsWith(thinking)) {
@@ -1746,8 +1795,42 @@ export const useChatStore = create<ChatUIState>()(
           return true
         }
 
+        // HTTP bootstrap caps replay events, so the first retained event can
+        // start in the middle of the running snapshot. Resynchronize at the
+        // matching tool instead of abandoning dedupe and replaying the suffix.
+        const matchingIndex = blocks.findIndex(
+          block =>
+            block.type === 'tool_use' && block.tool_call_id === toolCallId
+        )
+        if (matchingIndex >= 0) {
+          get().setStreamingReplayContentBlocks(
+            sessionId,
+            blocks.slice(matchingIndex + 1)
+          )
+          return true
+        }
+
         get().clearStreamingReplayContentBlocks(sessionId)
         return false
+      },
+
+      consumeStreamingReplayUserInput: (sessionId, text) => {
+        const blocks = get().streamingReplayContentBlocks[sessionId]
+        if (!blocks?.length) return false
+
+        const matchingIndex = blocks.findIndex(
+          block => block.type === 'user_input' && block.text === text
+        )
+        if (matchingIndex < 0) {
+          get().clearStreamingReplayContentBlocks(sessionId)
+          return false
+        }
+
+        get().setStreamingReplayContentBlocks(
+          sessionId,
+          blocks.slice(matchingIndex + 1)
+        )
+        return true
       },
 
       clearStreamingReplayContentBlocks: sessionId =>
@@ -2814,6 +2897,7 @@ export const useChatStore = create<ChatUIState>()(
           state => {
             const current = state.pendingCodexUserInputRequests[sessionId]
             if (!current && requests.length === 0) return state
+            if (current === requests) return state
             return {
               pendingCodexUserInputRequests: {
                 ...state.pendingCodexUserInputRequests,

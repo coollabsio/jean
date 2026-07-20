@@ -32,3 +32,31 @@ export interface GrokInstallCommand {
   args: string[]
   description: string
 }
+
+export interface GrokUsageWindowSnapshot {
+  usedPercent: number
+  resetsAt: number | null
+  limitWindowSeconds: number | null
+}
+
+export interface GrokProductUsageSnapshot {
+  product: string
+  usedPercent: number
+}
+
+export interface GrokUsageSnapshot {
+  planType: string | null
+  /** Overall weekly credit usage */
+  weekly: GrokUsageWindowSnapshot | null
+  /** Grok Build product usage (primary CLI product) */
+  session: GrokUsageWindowSnapshot | null
+  products: GrokProductUsageSnapshot[]
+  frequentUsed: number | null
+  frequentLimit: number | null
+  occasionalUsed: number | null
+  occasionalLimit: number | null
+  hasGrokCodeAccess: boolean | null
+  periodStart: string | null
+  periodEnd: string | null
+  fetchedAt: number
+}

@@ -95,6 +95,12 @@ beforeEach(() => {
     custom_cli_profiles: [],
   }
 
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: 1024,
+  })
+
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: vi.fn().mockImplementation(() => ({
@@ -111,6 +117,48 @@ beforeEach(() => {
 })
 
 describe('ApprovalModelSubmenu', () => {
+  it('opens the mobile model picker as a constrained bottom sheet', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 390,
+    })
+    const user = userEvent.setup()
+    renderMenu()
+
+    await user.click(screen.getByRole('menuitem', { name: /other model/i }))
+
+    const sheet = await screen.findByRole('dialog')
+    expect(sheet).toHaveClass('h-[75svh]', 'min-h-0', 'overflow-hidden')
+    expect(
+      within(sheet).getByRole('heading', {
+        name: /select backend & model/i,
+      })
+    ).toBeInTheDocument()
+  })
+
+  it('selects a one-shot model override from the mobile sheet', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 390,
+    })
+    const user = userEvent.setup()
+    const onSelect = renderMenu()
+
+    await user.click(screen.getByRole('menuitem', { name: /other model/i }))
+    const sheet = await screen.findByRole('dialog')
+    const modelButton = within(sheet).getByText('gpt-5.4').closest('button')
+    expect(modelButton).not.toBeNull()
+    await user.click(modelButton as HTMLButtonElement)
+
+    expect(onSelect).toHaveBeenCalledWith({
+      backend: 'codex',
+      model: 'gpt-5.4',
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('renders grouped approval actions without redundant mode headings and routes callbacks yolo-first', async () => {
     const user = userEvent.setup()
     const onApprove = vi.fn()
