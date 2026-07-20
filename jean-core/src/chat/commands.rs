@@ -1725,9 +1725,6 @@ pub async fn close_session(
     // Clean up combined-context files for this session
     cleanup_combined_context_files(&app, &session_id);
 
-    // Resolve default backend for fallback session creation
-    let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
-
     // Now atomically modify the sessions file
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Find index before removal to support deterministic neighbor selection.
@@ -1748,16 +1745,19 @@ pub async fn close_session(
             };
         }
 
-        // Ensure at least one non-archived session exists
-        let non_archived_count = sessions
+        // When the last non-archived session is closed, leave the worktree empty
+        // (active_session_id = None). Frontend navigates to the project picker
+        // (issue #501) instead of auto-creating a fallback "Session 1".
+        // If non-archived sessions remain but active is unset, pick the first.
+        let first_non_archived = sessions
             .sessions
             .iter()
-            .filter(|s| s.archived_at.is_none())
-            .count();
-        if non_archived_count == 0 {
-            let default_session = Session::default_session_with_backend(fallback_backend.clone());
-            sessions.active_session_id = Some(default_session.id.clone());
-            sessions.sessions.push(default_session);
+            .find(|s| s.archived_at.is_none())
+            .map(|s| s.id.clone());
+        if first_non_archived.is_none() {
+            sessions.active_session_id = None;
+        } else if sessions.active_session_id.is_none() {
+            sessions.active_session_id = first_non_archived;
         }
 
         log::trace!(
@@ -1789,9 +1789,6 @@ pub async fn archive_session(
     // Load messages from NDJSON to check if session has content (outside lock - read-only)
     let messages = run_log::load_session_messages(&app, &session_id).unwrap_or_default();
     let should_delete = messages.is_empty();
-
-    // Resolve default backend for fallback session creation
-    let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
 
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Find the index before archiving/deleting
@@ -1865,16 +1862,19 @@ pub async fn archive_session(
         };
         sessions.active_session_id = new_active;
 
-        // Ensure at least one session exists if all are archived or deleted
-        let non_archived_count = sessions
+        // When the last non-archived session is archived/deleted, leave the worktree
+        // empty (active_session_id = None). Frontend navigates to the project picker
+        // (issue #501) instead of auto-creating a fallback "Session 1".
+        // If non-archived sessions remain but active is unset, pick the first.
+        let first_non_archived = sessions
             .sessions
             .iter()
-            .filter(|s| s.archived_at.is_none())
-            .count();
-        if non_archived_count == 0 {
-            let default_session = Session::default_session_with_backend(fallback_backend.clone());
-            sessions.active_session_id = Some(default_session.id.clone());
-            sessions.sessions.push(default_session);
+            .find(|s| s.archived_at.is_none())
+            .map(|s| s.id.clone());
+        if first_non_archived.is_none() {
+            sessions.active_session_id = None;
+        } else if sessions.active_session_id.is_none() {
+            sessions.active_session_id = first_non_archived;
         }
 
         if should_delete {

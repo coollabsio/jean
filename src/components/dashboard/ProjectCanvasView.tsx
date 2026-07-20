@@ -1684,6 +1684,10 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         !!selectedWorktreeModal,
         selectedWorktreeModal?.worktreeId ?? null
       )
+    return () => {
+      // Clear global modal flag on unmount (e.g. last session → project picker)
+      useUIStore.getState().setSessionChatModalOpen(false)
+    }
   }, [selectedWorktreeModal])
 
   // Close modal when worktree is deleted/archived (e.g. PR merged)

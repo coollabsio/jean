@@ -37,6 +37,7 @@ import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
 import type {
@@ -1087,6 +1088,12 @@ export function useCloseSession() {
         if (!currentActive || currentActive === sessionId) {
           useChatStore.getState().setActiveSession(worktreeId, newActiveId)
         }
+      } else {
+        // Last non-archived session closed — show blank project picker (issue #501)
+        logger.debug('Last session closed, navigating to project picker', {
+          worktreeId,
+        })
+        navigateToProjectPicker(worktreeId)
       }
     },
     onError: error => {
@@ -1157,6 +1164,12 @@ export function useArchiveSession() {
         if (!currentActive || currentActive === sessionId) {
           useChatStore.getState().setActiveSession(worktreeId, newActiveId)
         }
+      } else {
+        // Last non-archived session archived — show blank project picker (issue #501)
+        logger.debug('Last session archived, navigating to project picker', {
+          worktreeId,
+        })
+        navigateToProjectPicker(worktreeId)
       }
     },
     onError: error => {
@@ -1452,12 +1465,14 @@ export function useCloseSessionOrWorktreeKeybinding(
       })
     }
 
-    // Last session: navigate to project view instead of deleting the worktree
+    // Last session: show blank project picker (issue #501). Mutation onSuccess
+    // also calls navigateToProjectPicker when backend returns no active session;
+    // navigate here immediately so the UI doesn't flash an empty chat.
     if (sessionCount <= 1) {
-      logger.debug('Last session closed, navigating to project view', {
+      logger.debug('Last session closed, navigating to project picker', {
         worktreeId: activeWorktreeId,
       })
-      useChatStore.getState().clearActiveWorktree()
+      navigateToProjectPicker(activeWorktreeId)
     }
   }, [archiveSession, closeSession, queryClient])
 
