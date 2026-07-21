@@ -157,8 +157,8 @@ pub fn tool_registry() -> Value {
         {"name":"archive_worktree","description":"Archive a worktree (hide from the active project canvas). Cancels running sessions for the worktree. Base sessions cannot be archived. Prefer this over delete when work may still be needed.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"unarchive_worktree","description":"Restore an archived worktree to the active project canvas. Fails if the worktree directory no longer exists on disk.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"list_archived_worktrees","description":"List archived worktrees. Optionally filter by projectId. Active worktrees are not included (use list_worktrees for those).","inputSchema":{"type":"object","properties":{"projectId":{"type":"string","description":"Optional project id to filter archived worktrees."}},"additionalProperties":false}},
-        {"name":"delete_worktree","description":"Permanently delete an active (non-archived) worktree: removes Jean tracking, git worktree, and branch. Destructive and irreversible. Cannot delete base sessions. Prefer archive_worktree when unsure.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"permanently_delete_worktree","description":"Permanently delete an already-archived worktree (storage + git worktree/branch cleanup). Fails if the worktree is not archived — archive it first, or use delete_worktree for active worktrees.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"delete_worktree","description":"Start permanently deleting an active (non-archived) worktree in the background: removes Jean tracking, git worktree, and branch. Returns started=true when cleanup is accepted, not completion. Destructive and irreversible when cleanup succeeds. Cannot delete base sessions. Prefer archive_worktree when unsure.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"permanently_delete_worktree","description":"Start permanently deleting an already-archived worktree in the background (storage + git worktree/branch cleanup). Returns started=true when cleanup is accepted, not completion. Fails immediately if the worktree is not archived — archive it first, or use delete_worktree for active worktrees.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"update_worktree_labels","description":"Update native Jean worktree labels. Use action=add/remove/set/clear. Returns the updated worktree.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"action":{"type":"string","enum":["add","remove","set","clear"]},"label":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string","description":"Hex color like #eab308. Optional for add; ignored by remove."},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name"],"additionalProperties":false},"labels":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string"},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name","color"],"additionalProperties":false}}},"required":["worktreeId","action"],"additionalProperties":false}},
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Create a new chat session in an existing worktree. Returns the session id needed for send_chat_message.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
@@ -448,11 +448,7 @@ async fn run_tool(
             )
             .await
             .map_err(ToolError::internal)?;
-            Ok(json!({
-                "worktreeId": worktree_id,
-                "action": "delete",
-                "ok": true,
-            }))
+            Ok(deletion_started_result(&worktree_id, "delete"))
         }
         "permanently_delete_worktree" => {
             let worktree_id = require_str(&args, "worktreeId")?;
@@ -463,11 +459,10 @@ async fn run_tool(
             )
             .await
             .map_err(ToolError::internal)?;
-            Ok(json!({
-                "worktreeId": worktree_id,
-                "action": "permanently_delete",
-                "ok": true,
-            }))
+            Ok(deletion_started_result(
+                &worktree_id,
+                "permanently_delete",
+            ))
         }
         "create_worktree" => {
             let project_id = require_str(&args, "projectId")?;
@@ -851,6 +846,14 @@ async fn run_tool(
         }
         other => Err(ToolError::invalid_params(format!("Unknown tool: {other}"))),
     }
+}
+
+fn deletion_started_result(worktree_id: &str, action: &str) -> Value {
+    json!({
+        "worktreeId": worktree_id,
+        "action": action,
+        "started": true,
+    })
 }
 
 fn get_project_context(app: &AppHandle, project_id: &str) -> Result<Value, ToolError> {
@@ -1929,6 +1932,34 @@ mod tests {
             update_worktree_labels["inputSchema"]["required"],
             json!(["worktreeId", "action"])
         );
+    }
+
+    #[test]
+    fn deletion_tools_report_background_work_as_started() {
+        for action in ["delete", "permanently_delete"] {
+            let result = deletion_started_result("worktree-1", action);
+
+            assert_eq!(result["worktreeId"], "worktree-1");
+            assert_eq!(result["action"], action);
+            assert_eq!(result["started"], true);
+            assert!(result.get("ok").is_none());
+        }
+    }
+
+    #[test]
+    fn deletion_tool_descriptions_explain_background_completion() {
+        let tools = tool_registry();
+
+        for name in ["delete_worktree", "permanently_delete_worktree"] {
+            let tool = find_tool(&tools, name);
+            let description = tool["description"]
+                .as_str()
+                .expect("tool description");
+
+            assert!(description.contains("background"));
+            assert!(description.contains("started"));
+            assert!(description.contains("not completion"));
+        }
     }
 
     #[test]
