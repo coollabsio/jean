@@ -462,6 +462,17 @@ fn emit_sessions_cache_invalidation(app: &AppHandle) {
     }
 }
 
+fn finish_bulk_update<T, E>(
+    updated: bool,
+    result: Result<T, E>,
+    invalidate: impl FnOnce(),
+) -> Result<T, E> {
+    if updated {
+        invalidate();
+    }
+    result
+}
+
 // ============================================================================
 // Session Management Commands
 // ============================================================================
@@ -2323,19 +2334,19 @@ pub async fn set_sessions_last_opened_bulk(
         .as_secs();
 
     let mut updated = false;
+    let mut result = Ok(());
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
-            save_metadata(&app, &metadata)?;
+            if let Err(error) = save_metadata(&app, &metadata) {
+                result = Err(error);
+                break;
+            }
             updated = true;
         }
     }
 
-    if updated {
-        emit_sessions_cache_invalidation(&app);
-    }
-
-    Ok(())
+    finish_bulk_update(updated, result, || emit_sessions_cache_invalidation(&app))
 }
 
 // ============================================================================
@@ -10098,6 +10109,15 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let remaining = vec![s2, s3];
         let selected = find_neighbor_non_archived_session_id(&remaining, 0);
         assert_eq!(selected.as_deref(), Some("s3"));
+    }
+
+    #[test]
+    fn bulk_update_invalidates_before_returning_partial_failure() {
+        let mut invalidated = false;
+        let result = finish_bulk_update(true, Err("save failed"), || invalidated = true);
+
+        assert!(invalidated);
+        assert_eq!(result, Err("save failed"));
     }
 
     #[test]
