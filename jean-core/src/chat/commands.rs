@@ -2284,6 +2284,9 @@ pub async fn set_active_session(
 /// Update the last_opened_at timestamp on a session's metadata.
 /// View-only: never mutates waiting/review state — explicit user actions
 /// (approve/reject/answer) are the only path out of waiting.
+///
+/// Emits `cache:invalidate` for sessions so native + web clients refresh
+/// unread/finished-session state (e.g. web marks read → native bell clears).
 pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Result<(), String> {
     log::trace!("Setting last_opened_at for session: {session_id}");
 
@@ -2294,12 +2297,17 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
             .as_secs();
         metadata.last_opened_at = Some(now);
         save_metadata(&app, &metadata)?;
+        // Broadcast so other clients (native ↔ web) drop stale last_opened_at.
+        emit_sessions_cache_invalidation(&app);
     }
 
     Ok(())
 }
 
 /// Bulk-update last_opened_at for multiple sessions in a single call.
+///
+/// Emits a single `cache:invalidate` after updates so multi-client unread
+/// counts stay in sync (mark all read from web or native).
 pub async fn set_sessions_last_opened_bulk(
     app: AppHandle,
     session_ids: Vec<String>,
@@ -2314,11 +2322,17 @@ pub async fn set_sessions_last_opened_bulk(
         .unwrap_or_default()
         .as_secs();
 
+    let mut updated = false;
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
             save_metadata(&app, &metadata)?;
+            updated = true;
         }
+    }
+
+    if updated {
+        emit_sessions_cache_invalidation(&app);
     }
 
     Ok(())
