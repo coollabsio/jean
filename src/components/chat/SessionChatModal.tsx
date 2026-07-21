@@ -112,7 +112,6 @@ import {
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
 import { LabelModal } from './LabelModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
-import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
@@ -538,11 +537,9 @@ export function SessionChatModal({
     (session: Session) => {
       const activeSessions = sessions.filter(s => !s.archived_at)
       if (activeSessions.length <= 1) {
-        // Last tab: go straight to blank project picker (issue #501)
+        // The mutation navigates after success, provided navigation is unchanged.
         const action = () => {
           handleDeleteSession(session.id)
-          navigateToProjectPicker(worktreeId)
-          onClose()
         }
         const sessionIsEmpty = !session.message_count
         if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
@@ -561,8 +558,6 @@ export function SessionChatModal({
       handleDeleteSession,
       preferences?.confirm_session_close,
       selectVisualNeighbor,
-      worktreeId,
-      onClose,
     ]
   )
 
@@ -586,9 +581,6 @@ export function SessionChatModal({
           if (currentSessionId) {
             handleDeleteSession(currentSessionId)
           }
-          // Last tab: blank project picker (issue #501)
-          navigateToProjectPicker(worktreeId)
-          onClose()
         } else if (currentSessionId) {
           selectVisualNeighbor(currentSessionId)
           handleDeleteSession(currentSessionId)
@@ -614,8 +606,6 @@ export function SessionChatModal({
     isOpen,
     sessions,
     currentSessionId,
-    worktreeId,
-    onClose,
     handleDeleteSession,
     selectVisualNeighbor,
     preferences?.confirm_session_close,
