@@ -707,9 +707,16 @@ fn parse_opencode_provider_model(model: Option<&str>) -> Option<(String, String)
     if raw.is_empty() {
         return None;
     }
-    // Strip "opencode/" prefix if present (e.g. "opencode/ollama/Qwen" → "ollama/Qwen")
-    let raw = raw.strip_prefix("opencode/").unwrap_or(raw);
-    let (provider, model_id) = raw.split_once('/')?;
+    // Strip the Jean `opencode/` wrapper ONLY when the remaining string still
+    // contains a `/` — e.g. "opencode/ollama/Qwen" → "ollama/Qwen". Keep
+    // "opencode/gpt-5.5" intact (opencode is the real provider). Multi-slash
+    // custom/local model IDs (ollama/hf.co/org/model:tag) keep everything after
+    // the first slash as modelID.
+    let stripped = raw
+        .strip_prefix("opencode/")
+        .filter(|rest| rest.contains('/'))
+        .unwrap_or(raw);
+    let (provider, model_id) = stripped.split_once('/')?;
     let provider = provider.trim();
     let model_id = model_id.trim();
     if provider.is_empty() || model_id.is_empty() {
