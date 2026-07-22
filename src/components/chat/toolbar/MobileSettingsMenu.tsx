@@ -27,7 +27,6 @@ import {
   ShieldAlert,
   Sparkles,
   Star,
-  Terminal,
   Sentry,
 } from '@/components/icons/reicon'
 import { useQueryClient } from '@tanstack/react-query'
@@ -106,6 +105,8 @@ import { BackendLabel, getBackendLabel } from '@/components/ui/backend-label'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { useWorktreeTerminalStatus } from '@/hooks/useWorktreeTerminalStatus'
+import { TerminalActivityIcon } from '@/components/chat/TerminalActivityIcon'
 import { useUIStore } from '@/store/ui-store'
 import {
   usePorts,
@@ -349,6 +350,7 @@ export function MobileSettingsMenu({
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<string | null>(null)
+  const { hasActiveTerminal } = useWorktreeTerminalStatus(worktreeId ?? '')
   // Keep radio/checkbox selections from dismissing the gear menu so users can
   // chain model/effort/provider/MCP changes without reopening (issue #574).
   const keepMenuOpenOnSelect = useCallback((event: Event) => {
@@ -874,8 +876,12 @@ export function MobileSettingsMenu({
           )}
           {worktreeId && (
             <DropdownMenuItem onSelect={handleToggleTerminal}>
-              <Terminal className="h-4 w-4" />
+              <TerminalActivityIcon
+                active={hasActiveTerminal}
+                className="h-4 w-4"
+              />
               Terminal
+              {hasActiveTerminal && <span className="sr-only"> active</span>}
             </DropdownMenuItem>
           )}
           {resumeCommand && (

@@ -4,6 +4,7 @@ import { Zap } from '@/components/icons/reicon'
 import { fireEvent, render, screen, within } from '@/test/test-utils'
 import { MobileSettingsMenu } from './MobileSettingsMenu'
 import * as platform from '@/lib/platform'
+import { useTerminalStore } from '@/store/terminal-store'
 import type * as ProjectsService from '@/services/projects'
 import type * as GitHubService from '@/services/github'
 
@@ -59,6 +60,11 @@ beforeEach(() => {
       project_id: 'project-1',
       base_branch: 'main',
     },
+  })
+  useTerminalStore.setState({
+    terminals: {},
+    runningTerminals: new Set(),
+    failedTerminals: new Set(),
   })
   Object.defineProperty(window, 'innerWidth', {
     configurable: true,
@@ -123,6 +129,23 @@ const baseProps = {
 }
 
 describe('MobileSettingsMenu', () => {
+  it('badges the terminal menu item while a panel PTY is active', async () => {
+    const user = userEvent.setup()
+    const terminalId = useTerminalStore.getState().addTerminal('worktree-1')
+    useTerminalStore.getState().setTerminalRunning(terminalId, true)
+
+    render(<MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />)
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+    const terminalItem = screen
+      .getByText('Terminal')
+      .closest('[role="menuitem"]')
+    expect(terminalItem).toHaveTextContent('Terminal active')
+    expect(
+      terminalItem?.querySelector('[data-testid="terminal-active-badge"]')
+    ).not.toBeNull()
+  })
+
   it('aligns the mobile Effort label with the other setting labels', async () => {
     const user = userEvent.setup()
     const originalInnerWidth = window.innerWidth

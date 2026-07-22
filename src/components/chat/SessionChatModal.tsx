@@ -74,6 +74,8 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
 import { ModalTerminalDrawer } from './ModalTerminalDrawer'
+import { TerminalActivityIcon } from './TerminalActivityIcon'
+import { useWorktreeTerminalStatus } from '@/hooks/useWorktreeTerminalStatus'
 import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
 import { ScriptsButton } from '@/components/open-in/ScriptsButton'
@@ -179,13 +181,17 @@ function HeaderSurfaceToggle({
   isOpen,
   shortcut,
   onClick,
+  active,
 }: {
   label: string
   icon: typeof Terminal
   isOpen: boolean
   shortcut: string | undefined
   onClick: () => void
+  /** When set, the control shows a live-PTY badge and an active label. */
+  active?: boolean
 }) {
+  const activityLabel = active ? `${label} active` : label
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -196,15 +202,23 @@ function HeaderSurfaceToggle({
             'h-7 w-7 text-muted-foreground hover:text-foreground',
             isOpen && 'bg-muted text-foreground'
           )}
-          aria-label={`Toggle ${label.toLowerCase()}`}
+          aria-label={
+            active
+              ? `Toggle ${label.toLowerCase()} (active)`
+              : `Toggle ${label.toLowerCase()}`
+          }
           aria-pressed={isOpen}
           onClick={onClick}
         >
-          <Icon className="h-4 w-4" />
+          {active === undefined ? (
+            <Icon className="h-4 w-4" />
+          ) : (
+            <TerminalActivityIcon active={active} className="h-4 w-4" />
+          )}
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        {label}
+        {activityLabel}
         {isNativeApp() && (
           <kbd className="ml-1 text-[0.625rem] opacity-60">
             {formatShortcutDisplay(shortcut)}
@@ -336,6 +350,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   const hasBottomBrowser =
     isBrowserModalOpen && browserModalDockMode === 'bottom'
   const hasBottomDock = hasBottomTerminal || hasBottomBrowser
+  const { hasActiveTerminal } = useWorktreeTerminalStatus(worktreeId)
   // Horizontal scroll on session tabs
   const modalTabScrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -1177,6 +1192,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                             label="Terminal"
                             icon={Terminal}
                             isOpen={isModalTerminalOpen}
+                            active={hasActiveTerminal}
                             shortcut={
                               localPreferences?.keybindings?.toggle_terminal ??
                               DEFAULT_KEYBINDINGS.toggle_terminal

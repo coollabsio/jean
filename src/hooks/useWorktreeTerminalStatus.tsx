@@ -15,6 +15,12 @@ import {
  * Tracks running/failed run-script terminals and discovered listening ports.
  */
 export function useWorktreeTerminalStatus(worktreeId: string) {
+  const hasActiveTerminal = useTerminalStore(state => {
+    const terminals = state.terminals[worktreeId] ?? []
+    return terminals.some(
+      t => isPanelTerminal(t) && state.runningTerminals.has(t.id)
+    )
+  })
   const hasRunningTerminal = useTerminalStore(state => {
     const terminals = state.terminals[worktreeId] ?? []
     return terminals.some(
@@ -58,6 +64,7 @@ export function useWorktreeTerminalStatus(worktreeId: string) {
   }, [showTerminalIndicator, worktreeId, listeningPorts])
 
   return {
+    hasActiveTerminal,
     hasRunningTerminal,
     hasFailedTerminal,
     showTerminalIndicator,
