@@ -831,9 +831,6 @@ export const WorktreeItem = memo(function WorktreeItem({
           {/* Chat status indicator (spinner/dot) */}
           <StatusIndicator status={indicatorStatus} className="h-2 w-2" />
 
-          {/* Terminal running/failed indicator */}
-          <TerminalStatusIndicator worktreeId={worktree.id} />
-
           {/* Workspace name - editable on double-click */}
           {isEditing ? (
             <input
@@ -873,6 +870,9 @@ export const WorktreeItem = memo(function WorktreeItem({
               </button>
             </span>
           )}
+
+          {/* Worktree-level terminal activity */}
+          <TerminalStatusIndicator worktreeId={worktree.id} />
 
           {/* Sync / Pull / Push badges */}
           {showStatusBadges && (behindCount > 0 || pushCount > 0) && (

@@ -38,7 +38,9 @@ describe('useWorktreeTerminalStatus', () => {
     })
 
     await waitFor(() => expect(result.current.hasActiveTerminal).toBe(true))
+    expect(result.current.activeTerminalCount).toBe(1)
     expect(result.current.hasRunningTerminal).toBe(false)
+    expect(result.current.tooltipLines).toContain('Shell')
   })
 
   it('reports a Jean-launched script as active and running', async () => {
@@ -104,9 +106,49 @@ describe('useWorktreeTerminalStatus', () => {
       <TerminalStatusIndicator worktreeId="worktree-1" />
     )
 
-    expect(container.querySelector('svg.lucide-play')).toHaveClass(
+    expect(screen.getByLabelText('1 active terminal')).toBeInTheDocument()
+    expect(container.querySelector('svg.lucide-terminal')).toHaveClass(
       'text-amber-500'
     )
     expect(screen.queryByText('bun run dev')).toBeNull()
+  })
+
+  it('shows a compact count when multiple worktree terminals are active', () => {
+    const firstId = useTerminalStore.getState().addTerminal('worktree-1')
+    const secondId = useTerminalStore.getState().addTerminal('worktree-1')
+    useTerminalStore.getState().setTerminalRunning(firstId, true)
+    useTerminalStore.getState().setTerminalRunning(secondId, true)
+
+    render(<TerminalStatusIndicator worktreeId="worktree-1" />)
+
+    expect(screen.getByLabelText('2 active terminals')).toHaveTextContent('2')
+  })
+
+  it('renders a readable terminal summary for the worktree viewer', () => {
+    const terminalId = useTerminalStore.getState().addTerminal('worktree-1')
+    useTerminalStore.getState().setTerminalRunning(terminalId, true)
+
+    render(
+      <TerminalStatusIndicator worktreeId="worktree-1" variant="summary" />
+    )
+
+    expect(screen.getByText('1 terminal running')).toBeInTheDocument()
+  })
+
+  it('includes failures alongside running terminals in the worktree summary', () => {
+    const runningId = useTerminalStore.getState().addTerminal('worktree-1')
+    const failedId = useTerminalStore
+      .getState()
+      .addTerminal('worktree-1', 'bun run dev')
+    useTerminalStore.getState().setTerminalRunning(runningId, true)
+    useTerminalStore.getState().setTerminalFailed(failedId, true)
+
+    render(
+      <TerminalStatusIndicator worktreeId="worktree-1" variant="summary" />
+    )
+
+    expect(
+      screen.getByText('1 terminal running · 1 failed')
+    ).toBeInTheDocument()
   })
 })
