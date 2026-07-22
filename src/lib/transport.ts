@@ -11,6 +11,7 @@ import { isNativeApp, setWebAccessEnabled, setWsConnected } from './environment'
 import { generateId } from './uuid'
 import { isServerWindows } from './platform'
 import { getActiveRemoteConnection } from './remote-connections'
+import { warnRemoteVersionMismatch } from './remote-version'
 
 export function usesWebSocketBackend(): boolean {
   return !isNativeApp() || getActiveRemoteConnection() !== null
@@ -554,12 +555,13 @@ class WsTransport {
     const authUrl = token
       ? `${authBaseUrl}?token=${encodeURIComponent(token)}`
       : authBaseUrl
+    const remote = getActiveRemoteConnection()
 
     try {
       const res = await fetchBackend(authUrl)
       if (!res.ok) {
         // Invalid token — clear it and wait for the user to provide another.
-        if (!getActiveRemoteConnection()) {
+        if (!remote) {
           localStorage.removeItem('jean-http-token')
         }
         this.setAuthError(
@@ -569,8 +571,19 @@ class WsTransport {
         )
         return
       }
+
+      // Native desktop UI is bundled with the client; warn (do not block)
+      // when remote appVersion differs so users can still connect.
+      if (remote && isNativeApp()) {
+        try {
+          const body = (await res.json()) as { appVersion?: string | null }
+          warnRemoteVersionMismatch(body.appVersion)
+        } catch {
+          // Older servers or non-JSON auth bodies: allow connect.
+        }
+      }
     } catch {
-      if (getActiveRemoteConnection()) {
+      if (remote) {
         this.setAuthError(
           "Jean could not reach the server's authentication endpoint. Check that the server is running and the URL and port are correct. If the address opens in a browser, update and restart the remote Jean server so it allows desktop connections (CORS)."
         )
