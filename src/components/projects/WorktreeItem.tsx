@@ -626,9 +626,6 @@ export function WorktreeItem({
             className="h-2 w-2"
           />
 
-          {/* Terminal running/failed indicator */}
-          <TerminalStatusIndicator worktreeId={worktree.id} />
-
           {/* Workspace name - editable on double-click */}
           {isEditing ? (
             <input
@@ -676,6 +673,9 @@ export function WorktreeItem({
               })()}
             </span>
           )}
+
+          {/* Worktree-level terminal activity */}
+          <TerminalStatusIndicator worktreeId={worktree.id} />
 
           {/* Pull badge - shown when behind remote */}
           {behindCount > 0 && (
