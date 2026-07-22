@@ -2539,6 +2539,10 @@ pub async fn dispatch_command(
             let result = crate::opencode_cli::list_opencode_models(app.clone()).await?;
             to_value(result)
         }
+        "refresh_opencode_models" => {
+            let result = crate::opencode_cli::refresh_opencode_models(app.clone()).await?;
+            to_value(result)
+        }
         "check_gh_cli_installed" => {
             let result = crate::gh_cli::check_gh_cli_installed(app.clone()).await?;
             to_value(result)
