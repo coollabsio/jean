@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useUIStore } from '@/store/ui-store'
+import { QueryClient } from '@tanstack/react-query'
 import {
   addTerminalTabForShortcut,
+  applyCacheInvalidationKeys,
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
@@ -13,6 +15,8 @@ import {
   shouldLetPlanDialogHandleAction,
   switchActiveTerminalTabByIndexForShortcut,
 } from './useMainWindowEventListeners'
+import { chatQueryKeys } from '@/services/chat'
+import { projectsQueryKeys } from '@/services/projects'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 
 const { mockInvoke, mockListen, mockDisposeTerminal } = vi.hoisted(() => ({
@@ -425,5 +429,52 @@ describe('dialog overlay keybinding passthrough', () => {
         useUIStore.getState()
       )
     ).toBe(false)
+  })
+})
+
+describe('applyCacheInvalidationKeys', () => {
+  it('invalidates chat queries and all-sessions for sessions keys', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['sessions'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.all,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['all-sessions'],
+    })
+  })
+
+  it('invalidates projects queries for projects keys', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['projects'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: projectsQueryKeys.all,
+    })
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ['all-sessions'],
+    })
+  })
+
+  it('invalidates both chat and all-sessions when sessions is among multiple keys', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['preferences', 'sessions'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['preferences'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.all,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['all-sessions'],
+    })
   })
 })

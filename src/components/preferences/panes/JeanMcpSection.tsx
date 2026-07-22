@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle, Copy, Loader2, PlugZap, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -35,6 +35,8 @@ interface JeanMcpSnippet {
   claude: string | null
   cursor: string | null
   codexToml: string | null
+  grokToml: string | null
+  kimi: string | null
   opencodeJson: string | null
 }
 
@@ -50,12 +52,31 @@ interface JeanMcpInstallResult {
 
 type InstallState = 'idle' | 'installing' | 'waiting' | 'success' | 'error'
 
-const INSTALLABLE_BACKENDS: CliBackend[] = [
+/** Backends that support persistent Jean MCP config install. */
+const INSTALLABLE_BACKENDS = [
   'claude',
   'codex',
   'opencode',
   'cursor',
-]
+  'grok',
+  'kimi',
+] as const satisfies readonly CliBackend[]
+
+const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  cursor: 'Cursor',
+  grok: 'Grok',
+  kimi: 'Kimi',
+}
+
+interface SnippetTarget {
+  id: string
+  label: string
+  path: string
+  content: string | null
+}
 
 function installButtonContent(state: InstallState, message: string) {
   switch (state) {
@@ -117,8 +138,54 @@ export const JeanMcpSection: React.FC = () => {
   const checkingServer =
     enabled && !snippet && (isSnippetLoading || isSnippetFetching)
   const modeLabel = (snippet?.mode ?? 'prod') === 'dev' ? 'Dev' : 'Prod'
-  const installableBackends = installedBackends.filter(backend =>
-    INSTALLABLE_BACKENDS.includes(backend)
+  const installableBackends = installedBackends.filter(
+    (backend): backend is (typeof INSTALLABLE_BACKENDS)[number] =>
+      (INSTALLABLE_BACKENDS as readonly CliBackend[]).includes(backend)
+  )
+  const installableLabels = installableBackends
+    .map(backend => BACKEND_LABELS[backend])
+    .filter(Boolean)
+
+  const snippetTargets = useMemo<SnippetTarget[]>(
+    () => [
+      {
+        id: 'claude',
+        label: 'Claude',
+        path: '~/.claude.json',
+        content: snippet?.claude ?? null,
+      },
+      {
+        id: 'codex',
+        label: 'Codex',
+        path: '~/.codex/config.toml',
+        content: snippet?.codexToml ?? null,
+      },
+      {
+        id: 'cursor',
+        label: 'Cursor',
+        path: '~/.cursor/mcp.json',
+        content: snippet?.cursor ?? null,
+      },
+      {
+        id: 'grok',
+        label: 'Grok',
+        path: '~/.grok/config.toml',
+        content: snippet?.grokToml ?? null,
+      },
+      {
+        id: 'kimi',
+        label: 'Kimi',
+        path: '~/.kimi-code/mcp.json',
+        content: snippet?.kimi ?? null,
+      },
+      {
+        id: 'opencode',
+        label: 'OpenCode',
+        path: '~/.config/opencode/opencode.json',
+        content: snippet?.opencodeJson ?? null,
+      },
+    ],
+    [snippet]
   )
 
   const setTemporaryInstallState = useCallback(
@@ -159,7 +226,7 @@ export const JeanMcpSection: React.FC = () => {
       if (installableBackends.length === 0) {
         setTemporaryInstallState(
           'error',
-          'Install Claude, Codex, OpenCode, or Cursor first'
+          'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, or OpenCode)'
         )
         return
       }
@@ -234,24 +301,27 @@ export const JeanMcpSection: React.FC = () => {
           call back into Jean (create worktrees, list GitHub issues, send chat
           messages, etc).
         </p>
-        <div className="flex items-center gap-3 rounded-md border px-4 py-3">
-          <Switch
-            id="jean-mcp-enabled"
-            checked={enabled}
-            onCheckedChange={handleEnabledChange}
-          />
-          <Label htmlFor="jean-mcp-enabled" className="flex-1 cursor-pointer">
-            Enable Jean MCP
-          </Label>
+
+        <div className="flex flex-col gap-2 rounded-md border px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Switch
+              id="jean-mcp-enabled"
+              checked={enabled}
+              onCheckedChange={handleEnabledChange}
+            />
+            <Label htmlFor="jean-mcp-enabled" className="cursor-pointer">
+              Enable Jean MCP
+            </Label>
+          </div>
           {checkingServer && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-3.5 shrink-0 animate-spin" />
               Checking MCP socket…
             </span>
           )}
           {!checkingServer && !serverRunning && enabled && (
             <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-              <PlugZap className="size-3.5" />
+              <PlugZap className="size-3.5 shrink-0" />
               MCP socket not running
             </span>
           )}
@@ -259,7 +329,7 @@ export const JeanMcpSection: React.FC = () => {
 
         {enabled && (
           <>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="jean-mcp-max-depth" className="text-xs">
                   Max recursion depth
@@ -302,81 +372,65 @@ export const JeanMcpSection: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-2 rounded-md border px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <Label className="text-sm font-medium">
-                    One-click config install
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Safely merges Jean MCP config into the CLI user configs.
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => handleInstall()}
-                  disabled={
-                    installState === 'installing' ||
-                    installState === 'success' ||
-                    !serverRunning ||
-                    installableBackends.length === 0
-                  }
-                  className={cn(
-                    'min-w-[11rem] max-w-[18rem]',
-                    installState === 'success' &&
-                      'border-green-600 bg-green-600 text-white hover:bg-green-700'
-                  )}
-                  aria-live="polite"
-                  title={installMessage}
-                >
-                  {transientButton ?? (
-                    <span>Add current Jean MCP ({modeLabel})</span>
-                  )}
-                </Button>
+            <div className="space-y-3 rounded-md border px-4 py-3">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">
+                  One-click config install
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Safely merges Jean MCP into installed CLI user configs
+                  {installableLabels.length > 0
+                    ? `: ${installableLabels.join(', ')}.`
+                    : '. Install a supported CLI first.'}
+                </p>
               </div>
+              <Button
+                size="sm"
+                onClick={() => handleInstall()}
+                disabled={
+                  installState === 'installing' ||
+                  installState === 'success' ||
+                  !serverRunning ||
+                  installableBackends.length === 0
+                }
+                className={cn(
+                  'w-full sm:w-auto sm:min-w-[11rem] sm:max-w-[20rem]',
+                  installState === 'success' &&
+                    'border-green-600 bg-green-600 text-white hover:bg-green-700'
+                )}
+                aria-live="polite"
+                title={installMessage}
+              >
+                {transientButton ?? (
+                  <span>Add current Jean MCP ({modeLabel})</span>
+                )}
+              </Button>
             </div>
 
             <div className="space-y-2">
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">
                 Manual setup snippets
               </Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleCopy('Claude', snippet?.claude ?? null)}
-                >
-                  <Copy className="mr-2 size-3.5" />
-                  Claude (~/.claude.json)
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleCopy('Cursor', snippet?.cursor ?? null)}
-                >
-                  <Copy className="mr-2 size-3.5" />
-                  Cursor (~/.cursor/mcp.json)
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    handleCopy('Codex', snippet?.codexToml ?? null)
-                  }
-                >
-                  <Copy className="mr-2 size-3.5" />
-                  Codex (~/.codex/config.toml)
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    handleCopy('OpenCode', snippet?.opencodeJson ?? null)
-                  }
-                >
-                  <Copy className="mr-2 size-3.5" />
-                  OpenCode (~/.config/opencode/opencode.json)
-                </Button>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {snippetTargets.map(target => (
+                  <Button
+                    key={target.id}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCopy(target.label, target.content)}
+                    className="h-auto w-full justify-start gap-2 px-3 py-2.5 text-left"
+                  >
+                    <Copy className="mt-0.5 size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium leading-tight">
+                        {target.label}
+                      </span>
+                      <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                        {target.path}
+                      </span>
+                    </span>
+                  </Button>
+                ))}
               </div>
             </div>
           </>
@@ -391,8 +445,8 @@ export const JeanMcpSection: React.FC = () => {
             </AlertDialogTitle>
             <AlertDialogDescription>
               Jean MCP is enabled. Jean can add it automatically to your
-              installed CLI config files, or you can copy the manual snippets
-              below.
+              installed CLI config files (Claude, Codex, Cursor, Grok, Kimi,
+              OpenCode), or you can copy the manual snippets below.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

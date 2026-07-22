@@ -3,10 +3,17 @@ import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   DEFAULT_FINAL_REVIEW_PROMPT,
+  DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
+  DEFAULT_INVESTIGATE_ISSUE_PROMPT,
+  DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
+  DEFAULT_INVESTIGATE_PR_PROMPT,
+  DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT,
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
+  DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
   defaultPreferences,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+  GROK_DEFAULT_MAGIC_PROMPT_MODES,
   KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
   PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
@@ -65,6 +72,26 @@ describe('magic prompt preference resolvers', () => {
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model).toBe(
       'grok/grok-4.5'
     )
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_issue_mode).toBe('yolo')
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_pr_mode).toBe('yolo')
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_workflow_run_mode).toBe(
+      'yolo'
+    )
+    expect(
+      GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_security_alert_mode
+    ).toBe('yolo')
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_advisory_mode).toBe(
+      'yolo'
+    )
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_linear_issue_mode).toBe(
+      'yolo'
+    )
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_sentry_issue_mode).toBe(
+      'yolo'
+    )
+    // Non-investigation chat modes keep shared defaults
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode).toBe('plan')
+    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.final_review_mode).toBe('yolo')
     expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.5')
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
@@ -92,6 +119,18 @@ describe('magic prompt preference resolvers', () => {
     ).toBe('plan')
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryRefs}')
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryContext}')
+  })
+
+  it('tells investigation prompts to apply fixes in yolo mode', () => {
+    const yoloApply =
+      'If you are in yolo mode, also apply the fix(es)'
+    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).toContain(yoloApply)
+    expect(DEFAULT_INVESTIGATE_PR_PROMPT).toContain(yoloApply)
+    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).toContain(yoloApply)
+    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).toContain(yoloApply)
+    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).toContain(yoloApply)
+    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).toContain(yoloApply)
+    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain(yoloApply)
   })
 
   it('keeps automatic recaps on by default', () => {

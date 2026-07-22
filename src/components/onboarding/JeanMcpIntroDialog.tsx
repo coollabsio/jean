@@ -39,6 +39,8 @@ const INSTALLABLE_BACKENDS: CliBackend[] = [
   'codex',
   'opencode',
   'cursor',
+  'grok',
+  'kimi',
 ]
 
 export function JeanMcpIntroDialog() {
@@ -94,7 +96,9 @@ function JeanMcpIntroDialogContent() {
 
   const handleInstall = useCallback(async () => {
     if (installableBackends.length === 0) {
-      toast.error('Install Claude, Codex, OpenCode, or Cursor first')
+      toast.error(
+        'Install Claude, Codex, Cursor, Grok, Kimi, or OpenCode first'
+      )
       return
     }
 

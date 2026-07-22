@@ -613,6 +613,10 @@ fn generate_names_commandcode(
 }
 
 fn parse_grok_naming_output(text: &str) -> Result<NamingOutput, String> {
+    // Prefer a direct parse first — native --json-schema returns clean JSON.
+    if let Ok(parsed) = serde_json::from_str::<NamingOutput>(text.trim()) {
+        return Ok(parsed);
+    }
     let json = extract_json_object(text)
         .ok_or_else(|| "No JSON object found in Grok naming response".to_string())?;
     serde_json::from_str(json)
@@ -625,15 +629,20 @@ fn generate_names_grok(
     model: &str,
     request: &NamingRequest,
 ) -> Result<NamingOutput, String> {
-    let text = super::grok::execute_one_shot_grok(
+    log::trace!("Generating names with Grok CLI using model {model}");
+    // Use native --json-schema constrained decoding (same as other Grok magic
+    // prompts). Without a schema, headless Grok often returns prose or a CLI
+    // envelope that fails worktree/session name parsing.
+    let json_str = super::grok::execute_one_shot_grok(
         app,
         prompt,
         model,
-        None,
+        Some(NAMING_SCHEMA),
         Some(&request.worktree_path),
         request.reasoning_effort.as_deref(),
     )?;
-    parse_grok_naming_output(&text)
+    log::trace!("Grok generated naming response: {json_str}");
+    parse_grok_naming_output(&json_str)
 }
 
 fn generate_names_kimi(
@@ -1211,5 +1220,28 @@ mod tests {
 
         assert_eq!(output.session_name.as_deref(), Some("Route Grok naming"));
         assert_eq!(output.branch_name.as_deref(), Some("route-grok-naming"));
+    }
+
+    #[test]
+    fn parses_grok_naming_output_with_surrounding_text() {
+        let output = parse_grok_naming_output(
+            "Sure — here you go:\n{\"session_name\":\"Fix Grok schema\",\"branch_name\":\"fix-grok-schema\"}\n",
+        )
+        .unwrap();
+
+        assert_eq!(output.session_name.as_deref(), Some("Fix Grok schema"));
+        assert_eq!(output.branch_name.as_deref(), Some("fix-grok-schema"));
+    }
+
+    #[test]
+    fn naming_schema_requires_both_name_fields() {
+        // Grok --json-schema constrained decoding depends on this shape.
+        let schema: serde_json::Value = serde_json::from_str(NAMING_SCHEMA).unwrap();
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("required array");
+        assert!(required.iter().any(|v| v.as_str() == Some("session_name")));
+        assert!(required.iter().any(|v| v.as_str() == Some("branch_name")));
     }
 }

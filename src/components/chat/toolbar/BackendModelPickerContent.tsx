@@ -243,16 +243,19 @@ export function BackendModelPickerContent({
 
   const showSidebar = sidebarBackends.length > 1
 
-  // Sync active backend with locked selection / when picker opens
+  // Sync active backend with locked selection / when picker opens.
+  // Never leave activeBackend on an uninstalled backend (empty model list).
   useEffect(() => {
     if (!open) return
     if (isLocked) {
       setActiveBackend(selectedBackend)
-    } else {
-      setActiveBackend(prev =>
-        sidebarBackends.includes(prev) ? prev : selectedBackend
-      )
+      return
     }
+    setActiveBackend(prev => {
+      if (sidebarBackends.includes(prev)) return prev
+      if (sidebarBackends.includes(selectedBackend)) return selectedBackend
+      return sidebarBackends[0] ?? selectedBackend
+    })
   }, [open, isLocked, selectedBackend, sidebarBackends])
 
   // Reset search whenever active backend changes or picker opens

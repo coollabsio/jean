@@ -462,6 +462,17 @@ fn emit_sessions_cache_invalidation(app: &AppHandle) {
     }
 }
 
+fn finish_bulk_update<T, E>(
+    updated: bool,
+    result: Result<T, E>,
+    invalidate: impl FnOnce(),
+) -> Result<T, E> {
+    if updated {
+        invalidate();
+    }
+    result
+}
+
 // ============================================================================
 // Session Management Commands
 // ============================================================================
@@ -1725,9 +1736,6 @@ pub async fn close_session(
     // Clean up combined-context files for this session
     cleanup_combined_context_files(&app, &session_id);
 
-    // Resolve default backend for fallback session creation
-    let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
-
     // Now atomically modify the sessions file
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Find index before removal to support deterministic neighbor selection.
@@ -1748,16 +1756,19 @@ pub async fn close_session(
             };
         }
 
-        // Ensure at least one non-archived session exists
-        let non_archived_count = sessions
+        // When the last non-archived session is closed, leave the worktree empty
+        // (active_session_id = None). Frontend navigates to the project picker
+        // (issue #501) instead of auto-creating a fallback "Session 1".
+        // If non-archived sessions remain but active is unset, pick the first.
+        let first_non_archived = sessions
             .sessions
             .iter()
-            .filter(|s| s.archived_at.is_none())
-            .count();
-        if non_archived_count == 0 {
-            let default_session = Session::default_session_with_backend(fallback_backend.clone());
-            sessions.active_session_id = Some(default_session.id.clone());
-            sessions.sessions.push(default_session);
+            .find(|s| s.archived_at.is_none())
+            .map(|s| s.id.clone());
+        if first_non_archived.is_none() {
+            sessions.active_session_id = None;
+        } else if sessions.active_session_id.is_none() {
+            sessions.active_session_id = first_non_archived;
         }
 
         log::trace!(
@@ -1789,9 +1800,6 @@ pub async fn archive_session(
     // Load messages from NDJSON to check if session has content (outside lock - read-only)
     let messages = run_log::load_session_messages(&app, &session_id).unwrap_or_default();
     let should_delete = messages.is_empty();
-
-    // Resolve default backend for fallback session creation
-    let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
 
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Find the index before archiving/deleting
@@ -1865,16 +1873,19 @@ pub async fn archive_session(
         };
         sessions.active_session_id = new_active;
 
-        // Ensure at least one session exists if all are archived or deleted
-        let non_archived_count = sessions
+        // When the last non-archived session is archived/deleted, leave the worktree
+        // empty (active_session_id = None). Frontend navigates to the project picker
+        // (issue #501) instead of auto-creating a fallback "Session 1".
+        // If non-archived sessions remain but active is unset, pick the first.
+        let first_non_archived = sessions
             .sessions
             .iter()
-            .filter(|s| s.archived_at.is_none())
-            .count();
-        if non_archived_count == 0 {
-            let default_session = Session::default_session_with_backend(fallback_backend.clone());
-            sessions.active_session_id = Some(default_session.id.clone());
-            sessions.sessions.push(default_session);
+            .find(|s| s.archived_at.is_none())
+            .map(|s| s.id.clone());
+        if first_non_archived.is_none() {
+            sessions.active_session_id = None;
+        } else if sessions.active_session_id.is_none() {
+            sessions.active_session_id = first_non_archived;
         }
 
         if should_delete {
@@ -2284,6 +2295,9 @@ pub async fn set_active_session(
 /// Update the last_opened_at timestamp on a session's metadata.
 /// View-only: never mutates waiting/review state — explicit user actions
 /// (approve/reject/answer) are the only path out of waiting.
+///
+/// Emits `cache:invalidate` for sessions so native + web clients refresh
+/// unread/finished-session state (e.g. web marks read → native bell clears).
 pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Result<(), String> {
     log::trace!("Setting last_opened_at for session: {session_id}");
 
@@ -2294,12 +2308,17 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
             .as_secs();
         metadata.last_opened_at = Some(now);
         save_metadata(&app, &metadata)?;
+        // Broadcast so other clients (native ↔ web) drop stale last_opened_at.
+        emit_sessions_cache_invalidation(&app);
     }
 
     Ok(())
 }
 
 /// Bulk-update last_opened_at for multiple sessions in a single call.
+///
+/// Emits a single `cache:invalidate` after updates so multi-client unread
+/// counts stay in sync (mark all read from web or native).
 pub async fn set_sessions_last_opened_bulk(
     app: AppHandle,
     session_ids: Vec<String>,
@@ -2314,14 +2333,20 @@ pub async fn set_sessions_last_opened_bulk(
         .unwrap_or_default()
         .as_secs();
 
+    let mut updated = false;
+    let mut result = Ok(());
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
-            save_metadata(&app, &metadata)?;
+            if let Err(error) = save_metadata(&app, &metadata) {
+                result = Err(error);
+                break;
+            }
+            updated = true;
         }
     }
 
-    Ok(())
+    finish_bulk_update(updated, result, || emit_sessions_cache_invalidation(&app))
 }
 
 // ============================================================================
@@ -10084,6 +10109,16 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let remaining = vec![s2, s3];
         let selected = find_neighbor_non_archived_session_id(&remaining, 0);
         assert_eq!(selected.as_deref(), Some("s3"));
+    }
+
+    #[test]
+    fn bulk_update_invalidates_before_returning_partial_failure() {
+        let mut invalidated = false;
+        let result: Result<(), &str> =
+            finish_bulk_update(true, Err("save failed"), || invalidated = true);
+
+        assert!(invalidated);
+        assert_eq!(result, Err("save failed"));
     }
 
     #[test]

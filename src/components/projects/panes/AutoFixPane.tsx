@@ -29,7 +29,6 @@ import {
 import { useProjects, useUpdateProjectSettings } from '@/services/projects'
 import type { ProjectAutoFixSettings } from '@/types/projects'
 import {
-  backendOptions,
   codexDefaultModelOptions,
   type CliBackend,
   modelOptions,
@@ -43,15 +42,14 @@ import {
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
+import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useGitHubLabels } from '@/services/github'
 import type { GitHubLabel } from '@/types/github'
 
 export const MR_ROBOT_SETTINGS_BADGE = 'Beta'
 const BACKEND_DEFAULT_MODEL_VALUE = '__backend_default__'
-const ALL_CLI_BACKENDS = backendOptions.map(
-  option => option.value
-) as CliBackend[]
 
+/** Structural defaults. Backend values are resolved via installed CLIs. */
 const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
   enabled: false,
   interval_minutes: 30,
@@ -67,6 +65,55 @@ const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
   active_hours_enabled: false,
   active_hours_start: 20,
   active_hours_end: 8,
+}
+
+/** First installed CLI backend, or Claude only as a last-resort fallback. */
+export function firstAvailableBackend(
+  installedBackends: CliBackend[]
+): CliBackend {
+  return installedBackends[0] ?? 'claude'
+}
+
+/**
+ * Keep a configured backend when it is still installed; otherwise fall back to
+ * the first available backend (same order as useInstalledBackends).
+ */
+export function resolveAutoFixBackend(
+  backend: string | null | undefined,
+  installedBackends: CliBackend[]
+): string {
+  const trimmed = backend?.trim()
+  if (
+    trimmed &&
+    (installedBackends.length === 0 ||
+      installedBackends.includes(trimmed as CliBackend))
+  ) {
+    return trimmed
+  }
+  return firstAvailableBackend(installedBackends)
+}
+
+export function buildAutoFixSettings(
+  saved: Partial<ProjectAutoFixSettings> | null | undefined,
+  installedBackends: CliBackend[]
+): ProjectAutoFixSettings {
+  const defaultBackend = firstAvailableBackend(installedBackends)
+  if (!saved) {
+    return {
+      ...DEFAULT_AUTO_FIX_SETTINGS,
+      planning_backend: defaultBackend,
+      yolo_backend: defaultBackend,
+    }
+  }
+  return {
+    ...DEFAULT_AUTO_FIX_SETTINGS,
+    ...saved,
+    planning_backend: resolveAutoFixBackend(
+      saved.planning_backend,
+      installedBackends
+    ),
+    yolo_backend: resolveAutoFixBackend(saved.yolo_backend, installedBackends),
+  }
 }
 
 function parseLabelList(value: string): string[] {
@@ -276,6 +323,7 @@ function AutoFixBackendModelPicker({
   onChange: (backend: string, model: string | null) => void
 }) {
   const [open, setOpen] = useState(false)
+  const { installedBackends } = useInstalledBackends()
   const selectedBackend = backend as CliBackend
   const selectedModel = model ?? BACKEND_DEFAULT_MODEL_VALUE
   const modelLabel = getModelLabel(backend, model)
@@ -326,7 +374,7 @@ function AutoFixBackendModelPicker({
           selectedBackend={selectedBackend}
           selectedModel={selectedModel}
           selectedProvider={null}
-          installedBackends={ALL_CLI_BACKENDS}
+          installedBackends={installedBackends}
           customCliProfiles={[]}
           onModelChange={handleModelChange}
           onBackendModelChange={handleBackendModelChange}
@@ -345,17 +393,15 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
   const { data: projects = [] } = useProjects()
   const project = projects.find(p => p.id === projectId)
   const updateSettings = useUpdateProjectSettings()
+  const { installedBackends } = useInstalledBackends()
   const { data: githubLabels = [], isLoading: githubLabelsLoading } =
     useGitHubLabels(project?.path ?? null, {
       enabled: Boolean(project?.path && !project?.is_folder),
     })
 
   const initialSettings = useMemo(
-    () => ({
-      ...DEFAULT_AUTO_FIX_SETTINGS,
-      ...(project?.auto_fix_settings ?? {}),
-    }),
-    [project?.auto_fix_settings]
+    () => buildAutoFixSettings(project?.auto_fix_settings, installedBackends),
+    [project?.auto_fix_settings, installedBackends]
   )
   const [settings, setSettings] =
     useState<ProjectAutoFixSettings>(initialSettings)

@@ -5,7 +5,52 @@ import { fireEvent, render, screen, within } from '@/test/test-utils'
 import { MobileSettingsMenu } from './MobileSettingsMenu'
 import * as platform from '@/lib/platform'
 
+const usePortsMock = vi.fn(() => ({ data: [] as Array<{
+  port: number
+  label: string
+  host?: string | null
+}> }))
+const useWorktreeMock = vi.fn(() => ({
+  data: {
+    id: 'worktree-1',
+    path: '/repo/worktree',
+    branch: 'feature',
+    project_id: 'project-1',
+    base_branch: 'main',
+  },
+}))
+
+vi.mock('@/services/projects', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/services/projects')>()
+  return {
+    ...actual,
+    useWorktree: useWorktreeMock as unknown as typeof actual.useWorktree,
+    useProjects: () => ({
+      data: [{ id: 'project-1', path: '/repo', name: 'app', default_branch: 'main' }],
+    }),
+    usePorts: usePortsMock as unknown as typeof actual.usePorts,
+  }
+})
+
+vi.mock('@/services/github', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/services/github')>()
+  return {
+    ...actual,
+    useGitHubPRs: () => ({ data: [] }),
+  }
+})
+
 beforeEach(() => {
+  usePortsMock.mockReturnValue({ data: [] })
+  useWorktreeMock.mockReturnValue({
+    data: {
+      id: 'worktree-1',
+      path: '/repo/worktree',
+      branch: 'feature',
+      project_id: 'project-1',
+      base_branch: 'main',
+    },
+  })
   vi.stubGlobal(
     'matchMedia',
     vi.fn().mockImplementation(() => ({
@@ -362,6 +407,59 @@ describe('MobileSettingsMenu', () => {
     await user.click(screen.getByRole('button', { name: /settings/i }))
 
     expect(screen.queryByText('Linked')).not.toBeInTheDocument()
+  })
+
+  it('shows Open section with GitHub and jean.json port URLs', async () => {
+    const user = userEvent.setup()
+    const openSpy = vi
+      .spyOn(platform, 'openExternal')
+      .mockImplementation(() => {
+        return undefined as unknown as ReturnType<typeof platform.openExternal>
+      })
+    usePortsMock.mockReturnValue({
+      data: [
+        { port: 1420, label: 'App', host: 'localhost' },
+        { port: 3000, label: 'API', host: null },
+      ],
+    })
+
+    render(
+      <MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />
+    )
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+
+    expect(screen.getByText('Open')).toBeInTheDocument()
+    expect(screen.getByText('GitHub')).toBeInTheDocument()
+    expect(screen.getByText('App (localhost:1420)')).toBeInTheDocument()
+    expect(screen.getByText('API (localhost:3000)')).toBeInTheDocument()
+
+    // Open section sits after Run/Terminal actions and before Linked
+    const githubItem = screen.getByText('GitHub').closest('[role="menuitem"]')
+    const portItem = screen
+      .getByText('App (localhost:1420)')
+      .closest('[role="menuitem"]')
+    expect(githubItem?.querySelector('svg.lucide-external-link')).toBeTruthy()
+    expect(portItem?.querySelector('svg.lucide-globe')).toBeTruthy()
+    expect(portItem?.querySelector('svg.lucide-external-link')).toBeTruthy()
+
+    await user.click(screen.getByText('App (localhost:1420)'))
+    expect(openSpy).toHaveBeenCalledWith('http://localhost:1420')
+
+    openSpy.mockRestore()
+  })
+
+  it('hides Open section when no worktree and no ports', async () => {
+    const user = userEvent.setup()
+    usePortsMock.mockReturnValue({ data: [] })
+    useWorktreeMock.mockReturnValue({ data: null as never })
+
+    render(<MobileSettingsMenu {...baseProps} />)
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+
+    expect(screen.queryByText('Open')).not.toBeInTheDocument()
+    expect(screen.queryByText('GitHub')).not.toBeInTheDocument()
   })
 
   it('hides reasoning control for Command Code in mobile settings', async () => {

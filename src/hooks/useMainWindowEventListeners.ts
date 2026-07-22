@@ -50,6 +50,55 @@ export function findKeybindingAction(
   return null
 }
 
+/**
+ * Apply backend `cache:invalidate` keys to the React Query client.
+ * Shared by the debounced multi-client sync listener.
+ *
+ * `sessions` also invalidates `['all-sessions']` (finished/unread bell) which
+ * is intentionally outside `chatQueryKeys.all` (`['chat']`).
+ */
+export function applyCacheInvalidationKeys(
+  queryClient: QueryClient,
+  keys: Iterable<string>
+): void {
+  for (const key of keys) {
+    switch (key) {
+      case 'sessions':
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.all,
+        })
+        // UnreadBell / useUnreadCount read from this separate key.
+        queryClient.invalidateQueries({
+          queryKey: ['all-sessions'],
+        })
+        break
+      case 'projects':
+        queryClient.invalidateQueries({
+          queryKey: projectsQueryKeys.all,
+        })
+        break
+      case 'preferences':
+        queryClient.invalidateQueries({
+          queryKey: ['preferences'],
+        })
+        break
+      case 'ui-state':
+        queryClient.invalidateQueries({
+          queryKey: ['ui-state'],
+        })
+        break
+      case 'contexts':
+        queryClient.invalidateQueries({
+          queryKey: ['contexts'],
+        })
+        queryClient.invalidateQueries({
+          queryKey: ['saved-contexts'],
+        })
+        break
+    }
+  }
+}
+
 export function shouldAllowKeybindingThroughOpenOverlay(
   action: KeybindingAction | null,
   uiState: ReturnType<typeof useUIStore.getState>
@@ -963,38 +1012,7 @@ export function useMainWindowEventListeners() {
 
           const flushInvalidations = () => {
             flushTimer = null
-            for (const key of pendingKeys) {
-              switch (key) {
-                case 'sessions':
-                  queryClient.invalidateQueries({
-                    queryKey: chatQueryKeys.all,
-                  })
-                  break
-                case 'projects':
-                  queryClient.invalidateQueries({
-                    queryKey: projectsQueryKeys.all,
-                  })
-                  break
-                case 'preferences':
-                  queryClient.invalidateQueries({
-                    queryKey: ['preferences'],
-                  })
-                  break
-                case 'ui-state':
-                  queryClient.invalidateQueries({
-                    queryKey: ['ui-state'],
-                  })
-                  break
-                case 'contexts':
-                  queryClient.invalidateQueries({
-                    queryKey: ['contexts'],
-                  })
-                  queryClient.invalidateQueries({
-                    queryKey: ['saved-contexts'],
-                  })
-                  break
-              }
-            }
+            applyCacheInvalidationKeys(queryClient, pendingKeys)
             pendingKeys.clear()
           }
 

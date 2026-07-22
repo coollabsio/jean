@@ -2230,16 +2230,17 @@ export function usePackageScripts(worktreePath: string | null) {
 /**
  * Hook to get configured ports from jean.json for a worktree.
  * Returns PortEntry[] (empty = none configured).
+ * Works on native Tauri and web access (via backend transport).
  */
 export function usePorts(worktreePath: string | null) {
   return useQuery<PortEntry[]>({
     queryKey: ['ports', worktreePath],
     queryFn: async () => {
-      if (!isTauri() || !worktreePath) return []
+      if (!worktreePath || !hasBackendTransport()) return []
       const ports = await invoke<PortEntry[]>('get_ports', { worktreePath })
       return ports
     },
-    enabled: !!worktreePath,
+    enabled: !!worktreePath && hasBackendTransport(),
     staleTime: 30_000,
   })
 }

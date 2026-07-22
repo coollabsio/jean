@@ -93,6 +93,7 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  GROK_DEFAULT_MAGIC_PROMPT_MODES,
   KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
   CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
   CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
@@ -1530,6 +1531,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
         ),
       ],
       magic_prompt_backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
+      magic_prompt_modes: GROK_DEFAULT_MAGIC_PROMPT_MODES,
       magic_prompt_efforts: getMagicPromptReasoningDefaults(
         modelCatalog,
         'grok',

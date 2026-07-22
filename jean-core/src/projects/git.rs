@@ -98,8 +98,10 @@ pub fn get_repo_identifier(repo_path: &str) -> Result<RepoIdentifier, String> {
 /// Detect user's default shell and determine if it supports login mode.
 ///
 /// On macOS/Linux, GUI apps don't inherit the user's shell PATH. Using a login shell
-/// (`-l` flag) sources the user's shell profile (.zshrc, .bashrc, etc.) which
-/// includes PATH modifications for tools like bun, nvm, homebrew, etc.
+/// (`-l` flag) sources the user's shell profile (e.g. `.zprofile`, `.bash_profile`,
+/// `.profile`) which often includes PATH modifications for tools like bun, nvm,
+/// homebrew, etc. Jean also preloads the interactive login PATH into its own
+/// process env (`fix_macos_path` / `fix_headless_path`), which child scripts inherit.
 ///
 /// On Windows, PowerShell doesn't have a login mode concept.
 #[cfg(unix)]
@@ -1998,6 +2000,57 @@ fn validate_script_env(worktree_path: &str, root_path: &str, branch: &str) -> Re
     Ok(())
 }
 
+/// Build shell argv for jean.json setup/teardown scripts.
+///
+/// Uses a **login** shell (`-l`) so profile files can contribute PATH, but not
+/// **interactive** (`-i`). Interactive shells without a TTY emit noise like:
+/// `bash: cannot set terminal process group … Inappropriate ioctl for device`
+/// and `bash: no job control in this shell` — always true for setup scripts
+/// (spawned via `.output()`) and especially common on headless remote Jean.
+fn jean_script_shell_args(supports_login: bool, script: &str) -> Vec<String> {
+    if supports_login {
+        vec!["-l".into(), "-c".into(), script.into()]
+    } else {
+        vec!["-c".into(), script.into()]
+    }
+}
+
+/// Drop known non-fatal shell noise from captured setup/teardown output.
+///
+/// Defensive filter for residual "no TTY / no job control" messages that can
+/// still appear if a profile forces job-control or older builds used `-i`.
+fn strip_non_tty_shell_noise(output: &str) -> String {
+    output
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            if t.is_empty() {
+                return true;
+            }
+            // bash interactive-without-TTY startup messages
+            if t.starts_with("bash: cannot set terminal process group") {
+                return false;
+            }
+            if t.contains("Inappropriate ioctl for device")
+                && (t.starts_with("bash:") || t.contains("process group"))
+            {
+                return false;
+            }
+            if t == "bash: no job control in this shell" {
+                return false;
+            }
+            // zsh sometimes prints similar job-control warnings without a TTY
+            if t.starts_with("zsh: job control") || t.starts_with("zsh: can't set tty") {
+                return false;
+            }
+            true
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 /// Shared implementation for running jean.json setup/teardown scripts.
 ///
 /// Validates environment variables, then executes the script in the user's
@@ -2017,11 +2070,7 @@ fn run_jean_script(
     log::trace!("Using shell: {shell} (login mode: {supports_login})");
 
     let mut cmd = silent_command(&shell);
-    if supports_login {
-        cmd.args(["-l", "-i", "-c", script]);
-    } else {
-        cmd.args(["-c", script]);
-    }
+    cmd.args(jean_script_shell_args(supports_login, script));
 
     let output = cmd
         .current_dir(worktree_path)
@@ -2033,13 +2082,12 @@ fn run_jean_script(
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = strip_non_tty_shell_noise(&format!("{stdout}{stderr}"));
 
     if !output.status.success() {
-        let combined = format!("{stdout}{stderr}").trim().to_string();
         return Err(format!("{kind} script failed:\n{combined}"));
     }
 
-    let combined = format!("{stdout}{stderr}").trim().to_string();
     log::trace!("{kind} script completed successfully");
     Ok(combined)
 }
@@ -2638,6 +2686,36 @@ mod tests {
         assert!(supports_login("/bin/tcsh"));
         assert!(!supports_login("/bin/sh"));
         assert!(!supports_login("/bin/dash"));
+    }
+
+    #[test]
+    fn jean_script_shell_args_uses_login_without_interactive() {
+        // Interactive (-i) without a TTY causes "no job control" / ioctl noise
+        // on headless remote Jean servers — never pass -i for setup scripts.
+        assert_eq!(
+            jean_script_shell_args(true, "cp \"$JEAN_ROOT_PATH/.env\" ."),
+            vec!["-l", "-c", "cp \"$JEAN_ROOT_PATH/.env\" ."]
+        );
+        assert_eq!(
+            jean_script_shell_args(false, "echo hi"),
+            vec!["-c", "echo hi"]
+        );
+        assert!(!jean_script_shell_args(true, "true").contains(&"-i".to_string()));
+    }
+
+    #[test]
+    fn strip_non_tty_shell_noise_removes_bash_job_control_messages() {
+        let noisy = "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
+                     bash: no job control in this shell\n\
+                     copied .env";
+        assert_eq!(strip_non_tty_shell_noise(noisy), "copied .env");
+
+        let only_noise = "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
+                          bash: no job control in this shell\n";
+        assert_eq!(strip_non_tty_shell_noise(only_noise), "");
+
+        let clean = "npm install\ndone\n";
+        assert_eq!(strip_non_tty_shell_noise(clean), "npm install\ndone");
     }
 
     // ========================================================================

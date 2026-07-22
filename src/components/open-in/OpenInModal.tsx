@@ -41,7 +41,7 @@ import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { resolvePortUrl } from '@/components/browser/default-tab-url'
 
 interface ModalOption {
@@ -102,7 +102,9 @@ export function OpenInModal() {
     selectedWorktreeId
   )
 
-  const isNative = isNativeApp()
+  // Local editor/terminal/finder only work against the desktop machine's FS.
+  // Remote connections and browser/web access should only show URL-based options.
+  const canOpenLocally = isLocalBackend()
 
   const targetPath = useMemo(() => {
     if (worktree?.path) return worktree.path
@@ -158,13 +160,13 @@ export function OpenInModal() {
         : []),
     ]
 
-    return isNative
+    return canOpenLocally
       ? allOptions
       : allOptions.filter(opt => opt.id === 'github' || opt.id === 'open-pr')
   }, [
     preferences?.editor,
     preferences?.terminal,
-    isNative,
+    canOpenLocally,
     worktree?.pr_url,
     worktree?.pr_number,
   ])
@@ -273,12 +275,12 @@ export function OpenInModal() {
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open && !hasInitializedRef.current) {
-        setSelectedOption(isNative ? 'editor' : 'github')
+        setSelectedOption(canOpenLocally ? 'editor' : 'github')
         hasInitializedRef.current = true
       }
       setOpenInModalOpen(open)
     },
-    [setOpenInModalOpen, isNative]
+    [setOpenInModalOpen, canOpenLocally]
   )
 
   const portOptions: ModalOption[] = useMemo(() => {

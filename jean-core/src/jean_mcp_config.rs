@@ -175,6 +175,20 @@ impl JeanMcpEntry {
             self.mode.as_str(),
         )
     }
+
+    /// Grok uses the same `[mcp_servers.<name>]` TOML shape as Codex.
+    pub fn grok_snippet(&self) -> String {
+        self.codex_snippet()
+    }
+
+    /// Kimi Code uses Claude-style `mcpServers` JSON at `~/.kimi-code/mcp.json`.
+    pub fn kimi_server_json(&self) -> serde_json::Value {
+        self.claude_server_json()
+    }
+
+    pub fn kimi_snippet(&self) -> String {
+        self.claude_snippet()
+    }
 }
 
 #[derive(Serialize)]
@@ -257,6 +271,8 @@ pub async fn install_jean_mcp_config_impl(
             "codex".to_string(),
             "opencode".to_string(),
             "cursor".to_string(),
+            "grok".to_string(),
+            "kimi".to_string(),
         ]
     });
 
@@ -267,6 +283,8 @@ pub async fn install_jean_mcp_config_impl(
             "codex" => install_codex(&entry),
             "opencode" => install_opencode(&entry),
             "cursor" => install_cursor(&entry),
+            "grok" => install_grok(&entry),
+            "kimi" => install_kimi(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
         };
         results.push(match result {
@@ -321,6 +339,16 @@ fn install_cursor(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), St
     )
 }
 
+fn install_kimi(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
+    install_jsonc_server(
+        home.join(".kimi-code").join("mcp.json"),
+        "mcpServers",
+        entry,
+        JeanMcpEntry::kimi_server_json,
+    )
+}
+
 fn install_jsonc_server(
     path: PathBuf,
     container_key: &str,
@@ -348,7 +376,19 @@ fn install_jsonc_server(
 
 fn install_codex(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
-    let path = home.join(".codex").join("config.toml");
+    install_toml_mcp_server(home.join(".codex").join("config.toml"), entry, "Codex")
+}
+
+fn install_grok(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
+    install_toml_mcp_server(home.join(".grok").join("config.toml"), entry, "Grok")
+}
+
+fn install_toml_mcp_server(
+    path: PathBuf,
+    entry: &JeanMcpEntry,
+    label: &str,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
     with_config_lock(&path, || {
         let content = read_optional(&path)?;
         let mut doc = if content.trim().is_empty() {
@@ -356,7 +396,7 @@ fn install_codex(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), Str
         } else {
             content
                 .parse::<toml_edit::DocumentMut>()
-                .map_err(|e| format!("Failed to parse Codex TOML {}: {e}", path.display()))?
+                .map_err(|e| format!("Failed to parse {label} TOML {}: {e}", path.display()))?
         };
 
         if !doc.as_table().contains_key("mcp_servers") {
@@ -367,7 +407,7 @@ fn install_codex(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), Str
         let updated = doc.to_string();
         updated
             .parse::<toml_edit::DocumentMut>()
-            .map_err(|e| format!("Generated invalid Codex TOML: {e}"))?;
+            .map_err(|e| format!("Generated invalid {label} TOML: {e}"))?;
         let backup = write_atomic_with_backup(&path, &updated)?;
         Ok((path.clone(), backup))
     })
@@ -1097,5 +1137,54 @@ command = "npx"
         assert!(rendered.contains("[mcp_servers.jean-dev]"));
         assert!(rendered.contains("[mcp_servers.jean]"));
         rendered.parse::<toml_edit::DocumentMut>().unwrap();
+    }
+
+    #[test]
+    fn grok_snippet_matches_codex_toml_shape() {
+        let prod = test_entry(JeanMcpInstallMode::Prod);
+        let snippet = prod.grok_snippet();
+        assert!(snippet.contains("[mcp_servers.jean]"));
+        assert!(snippet.contains("command = "));
+        assert!(snippet.contains("JEAN_MCP_SOCKET"));
+        assert!(snippet.contains("enabled = true"));
+        assert_eq!(snippet, prod.codex_snippet());
+    }
+
+    #[test]
+    fn install_toml_mcp_server_writes_jean_entry() {
+        let unique = format!(
+            "jean-toml-mcp-install-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            r#"# keep me
+disabled_mcp_servers = []
+
+[cli]
+installer = "npm"
+"#,
+        )
+        .unwrap();
+
+        let prod = test_entry(JeanMcpInstallMode::Prod);
+        let (written, backup) = install_toml_mcp_server(path.clone(), &prod, "Grok").unwrap();
+        assert_eq!(written, path);
+        assert!(backup.is_some());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# keep me"));
+        assert!(content.contains("[mcp_servers.jean]"));
+        assert!(content.contains("JEAN_MCP_MODE"));
+        assert!(content.contains("enabled = true"));
+        content.parse::<toml_edit::DocumentMut>().unwrap();
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

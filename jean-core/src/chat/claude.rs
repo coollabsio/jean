@@ -1,4 +1,5 @@
 use super::coalesce::ChunkCoalescer;
+use super::run_log::tool_result_content_to_string;
 use super::types::{
     is_claude_compaction_summary_text, CompactMetadata, ContentBlock, EffortLevel,
     PermissionDenial, PermissionDeniedEvent, ThinkingLevel, ToolCall, UsageData,
@@ -1978,30 +1979,10 @@ pub fn tail_claude_output(
                                         continue;
                                     }
                                     // Content can be a string OR an array of content blocks
+                                    // (Task/Agent subagent reports use the array shape).
                                     let output = block
                                         .get("content")
-                                        .map(|v| {
-                                            if let Some(s) = v.as_str() {
-                                                s.to_string()
-                                            } else if let Some(arr) = v.as_array() {
-                                                arr.iter()
-                                                    .filter_map(|item| {
-                                                        if item.get("type").and_then(|t| t.as_str())
-                                                            == Some("text")
-                                                        {
-                                                            item.get("text")
-                                                                .and_then(|t| t.as_str())
-                                                                .map(|s| s.to_string())
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                    .join("\n")
-                                            } else {
-                                                String::new()
-                                            }
-                                        })
+                                        .map(tool_result_content_to_string)
                                         .unwrap_or_default();
 
                                     // Update matching tool call's output

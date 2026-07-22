@@ -80,6 +80,8 @@ const snippet = {
   claude: '{}',
   cursor: '{}',
   codexToml: '[mcp_servers.jean]',
+  grokToml: '[mcp_servers.jean]',
+  kimi: '{}',
   opencodeJson: '{}',
 }
 

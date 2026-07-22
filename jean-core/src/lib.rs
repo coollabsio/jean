@@ -3494,6 +3494,8 @@ pub struct JeanMcpSnippet {
     pub claude: Option<String>,
     pub cursor: Option<String>,
     pub codex_toml: Option<String>,
+    pub grok_toml: Option<String>,
+    pub kimi: Option<String>,
     pub opencode_json: Option<String>,
 }
 
@@ -3517,6 +3519,8 @@ async fn get_jean_mcp_config_snippet(app: AppHandle) -> Result<JeanMcpSnippet, S
     let claude = entry.as_ref().map(|entry| entry.claude_snippet());
     let cursor = entry.as_ref().map(|entry| entry.cursor_snippet());
     let codex_toml = entry.as_ref().map(|entry| entry.codex_snippet());
+    let grok_toml = entry.as_ref().map(|entry| entry.grok_snippet());
+    let kimi = entry.as_ref().map(|entry| entry.kimi_snippet());
     let opencode_json = entry.as_ref().map(|entry| entry.opencode_snippet());
 
     Ok(JeanMcpSnippet {
@@ -3529,6 +3533,8 @@ async fn get_jean_mcp_config_snippet(app: AppHandle) -> Result<JeanMcpSnippet, S
         claude,
         cursor,
         codex_toml,
+        grok_toml,
+        kimi,
         opencode_json,
     })
 }

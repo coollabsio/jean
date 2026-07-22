@@ -522,6 +522,33 @@ pub fn read_run_log(
     lines.map_err(|e| format!("Failed to read run log: {e}"))
 }
 
+/// Extract plain text from a tool_result `content` field.
+///
+/// Content can be a plain string (most tools) OR an array of content blocks
+/// (Task/Agent subagent reports return `[{ "type": "text", "text": "..." }]`).
+/// Shared by live streaming and history rebuild so reloaded sessions keep reports.
+pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> String {
+    if let Some(s) = content.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = content.as_array() {
+        return arr
+            .iter()
+            .filter_map(|item| {
+                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    item.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    String::new()
+}
+
 /// Parse JSONL lines and build a ChatMessage
 /// This replicates the parsing logic from execute_claude_streaming
 pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMessage, String> {
@@ -792,8 +819,12 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                     .get("tool_use_id")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
-                                let output =
-                                    block.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                // Content can be a string OR an array of content blocks
+                                // (Task/Agent subagent final reports use the array shape).
+                                let output = block
+                                    .get("content")
+                                    .map(tool_result_content_to_string)
+                                    .unwrap_or_default();
                                 let is_error = block
                                     .get("is_error")
                                     .and_then(|v| v.as_bool())
@@ -803,7 +834,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                 if is_error && !tool_id.is_empty() {
                                     errored_tool_ids.insert(tool_id.to_string());
                                     errored_tool_outputs
-                                        .insert(tool_id.to_string(), output.to_string());
+                                        .insert(tool_id.to_string(), output.clone());
                                 }
 
                                 // For armed Monitors, capture the tool_result text
@@ -820,7 +851,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                     tool_calls.iter_mut().find(|t| t.id == tool_id)
                                 {
                                     // Non-Monitor tool: normal output update
-                                    tc.output = Some(output.to_string());
+                                    tc.output = Some(output);
                                 }
                             }
                         }
@@ -1671,6 +1702,112 @@ mod tests {
             &message.content_blocks[2],
             ContentBlock::Text { text } if text == "done"
         ));
+    }
+
+    #[test]
+    fn parse_run_extracts_task_tool_result_from_content_blocks() {
+        let run = sample_run();
+        let tool_id = "toolu_task_report";
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": "Task",
+                        "input": {
+                            "description": "Explore auth",
+                            "prompt": "Find how auth works",
+                            "subagent_type": "Explore"
+                        }
+                    }]
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            { "type": "text", "text": "Findings: auth uses JWT middleware." },
+                            { "type": "text", "text": "Entry point is `src/auth.rs`." }
+                        ]
+                    }]
+                }
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].name, "Task");
+        assert_eq!(
+            msg.tool_calls[0].output.as_deref(),
+            Some("Findings: auth uses JWT middleware.\nEntry point is `src/auth.rs`.")
+        );
+    }
+
+    #[test]
+    fn parse_run_extracts_tool_result_from_string_content() {
+        let run = sample_run();
+        let tool_id = "toolu_read_file";
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": "Read",
+                        "input": { "file_path": "README.md" }
+                    }]
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": "# Hello\n\nWorld"
+                    }]
+                }
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(
+            msg.tool_calls[0].output.as_deref(),
+            Some("# Hello\n\nWorld")
+        );
+    }
+
+    #[test]
+    fn tool_result_content_to_string_handles_shapes() {
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!("plain")),
+            "plain"
+        );
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!([
+                { "type": "text", "text": "a" },
+                { "type": "image", "source": {} },
+                { "type": "text", "text": "b" }
+            ])),
+            "a\nb"
+        );
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!({ "unexpected": true })),
+            ""
+        );
     }
 
     #[test]

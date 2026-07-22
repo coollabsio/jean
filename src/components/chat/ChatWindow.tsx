@@ -173,7 +173,9 @@ import type { QueuedMessage, Session, WorktreeSessions } from '@/types/chat'
 import type { DiffRequest } from '@/types/git-diff'
 import {
   getEffectiveSessionWaiting,
+  isDedicatedEmptyCodeReviewSession,
   shouldShowCodeReviewLoadingPanel,
+  shouldShowReviewFullWidth,
 } from './session-card-utils'
 
 interface ForkSessionToWorktreeResponse {
@@ -447,19 +449,30 @@ export function ChatWindow({
     hasReviewResults,
   })
   const hasReviewPanel = hasReviewResults || isCodeReviewLoadingPanel
-  // Full-width review replaces the entire chat (messages + input + toolbar).
-  // On mobile that blanks the only surface the user has — keep chat mounted
-  // and let findings stay reachable via inline blocks / floating buttons.
-  const showReviewFullWidth =
-    hasReviewPanel && reviewSidebarVisible && !isMobile
+  // Dedicated Code Review tabs have no transcript (background job). On mobile
+  // web those used to render as empty chat + loading sidebar — full-width instead.
+  // Normal sessions on mobile keep chat mounted; findings stay via inline blocks.
+  const isDedicatedEmptyCodeReview = isDedicatedEmptyCodeReviewSession(session)
+  const showReviewFullWidth = shouldShowReviewFullWidth({
+    hasReviewPanel,
+    reviewSidebarVisible,
+    isMobile,
+    session,
+  })
 
-  // Sync review sidebar panel with reviewSidebarVisible state (desktop only)
+  // Auto-open review panel when a review is active. On mobile, only for
+  // dedicated empty Code Review sessions (full-width surface).
   useEffect(() => {
-    if (isMobile) return
+    if (isMobile && !isDedicatedEmptyCodeReview) return
     if (hasReviewPanel && !reviewSidebarVisible) {
       useChatStore.getState().setReviewSidebarVisible(true)
     }
-  }, [hasReviewPanel, reviewSidebarVisible, isMobile])
+  }, [
+    hasReviewPanel,
+    reviewSidebarVisible,
+    isMobile,
+    isDedicatedEmptyCodeReview,
+  ])
 
   useEffect(() => {
     const panel = reviewPanelRef.current
@@ -3667,8 +3680,9 @@ export function ChatWindow({
               </ResizablePanelGroup>
             </ResizablePanel>
 
-            {/* Review sidebar - shown when active session has review results */}
-            {hasReviewPanel && (
+            {/* Review sidebar — desktop split only. Mobile dedicated Code Review
+                uses full-width branch above; other mobile sessions keep chat. */}
+            {hasReviewPanel && !isMobile && (
               <>
                 <ResizableHandle withHandle />
                 <ResizablePanel

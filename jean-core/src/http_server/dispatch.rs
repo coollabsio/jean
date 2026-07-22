@@ -158,6 +158,7 @@ pub async fn dispatch_command(
             let path: String = from_field(&args, "path")?;
             let parent_id: Option<String> = field_opt(&args, "parentId", "parent_id")?;
             let result = crate::projects::add_project(app.clone(), path, parent_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "remove_project" => {
@@ -329,11 +330,13 @@ pub async fn dispatch_command(
         "archive_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::archive_worktree(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             Ok(Value::Null)
         }
         "unarchive_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let result = crate::projects::unarchive_worktree(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "rename_worktree" => {
@@ -341,6 +344,7 @@ pub async fn dispatch_command(
             let new_name: String = field(&args, "newName", "new_name")?;
             let result =
                 crate::projects::rename_worktree(app.clone(), worktree_id, new_name).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "update_worktree_label" => {
@@ -1657,6 +1661,7 @@ pub async fn dispatch_command(
             let path: String = from_field(&args, "path")?;
             let parent_id: Option<String> = field_opt(&args, "parentId", "parent_id")?;
             let result = crate::projects::init_project(app.clone(), path, parent_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "create_worktree_from_existing_branch" => {
@@ -1720,11 +1725,13 @@ pub async fn dispatch_command(
             let project_id: String = field(&args, "projectId", "project_id")?;
             let path: String = from_field(&args, "path")?;
             let result = crate::projects::import_worktree(app.clone(), project_id, path).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "permanently_delete_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::permanently_delete_worktree(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             Ok(Value::Null)
         }
         "delete_all_archives" => {

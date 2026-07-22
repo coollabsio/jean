@@ -49,7 +49,7 @@ import {
   useRepositoryAdvisories,
   useWorkflowRuns,
 } from '@/services/github'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -286,23 +286,23 @@ export function WorktreeDropdownMenu({
             </DropdownMenuItem>
           )}
 
-          {isNativeApp() && <DropdownMenuSeparator />}
+          {isLocalBackend() && <DropdownMenuSeparator />}
 
-          {isNativeApp() && (
+          {isLocalBackend() && (
             <DropdownMenuItem onClick={handleOpenInEditor}>
               <Code className="mr-2 h-4 w-4" />
               Open in {getEditorLabel(preferences?.editor)}
             </DropdownMenuItem>
           )}
 
-          {isNativeApp() && (
+          {isLocalBackend() && (
             <DropdownMenuItem onClick={handleOpenInFinder}>
               <FolderOpen className="mr-2 h-4 w-4" />
               Open in Finder
             </DropdownMenuItem>
           )}
 
-          {isNativeApp() && (
+          {isLocalBackend() && (
             <DropdownMenuItem onClick={handleOpenInTerminal}>
               <Terminal className="mr-2 h-4 w-4" />
               Open in {getTerminalLabel(preferences?.terminal)}

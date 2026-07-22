@@ -11,6 +11,7 @@ import {
   GitMerge,
   GitPullRequest,
   GitPullRequestArrow,
+  Globe,
   Paperclip,
   Play,
   Plug,
@@ -86,15 +87,17 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useUIStore } from '@/store/ui-store'
 import {
+  usePorts,
   useProjects,
   useWorktree,
   type GitHubRemote,
+  type PackageScript,
 } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
 import { chatQueryKeys } from '@/services/chat'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
-import type { PackageScript } from '@/services/projects'
+import { resolvePortUrl } from '@/components/browser/default-tab-url'
 
 interface MobileSettingsMenuProps {
   isDisabled: boolean
@@ -277,6 +280,7 @@ export function MobileSettingsMenu({
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
     : null
+  const { data: ports = [] } = usePorts(worktree?.path ?? null)
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open', {
     enabled: menuOpen && !!project?.path,
   })
@@ -284,6 +288,7 @@ export function MobileSettingsMenu({
     worktree?.base_branch && worktree.base_branch !== project?.default_branch
       ? openPRs?.find(pr => pr.headRefName === worktree.base_branch)
       : undefined
+  const hasOpenSection = !!worktreeId || ports.length > 0
 
   const openBackendModelPicker = () => {
     setMenuOpen(false)
@@ -717,16 +722,46 @@ export function MobileSettingsMenu({
               Native Resume Command
             </DropdownMenuItem>
           )}
-          {worktreeId && (
-            <DropdownMenuItem
-              onSelect={() => {
-                setMenuOpen(false)
-                handleOpenGitHub()
-              }}
-            >
-              <Github className="h-4 w-4" />
-              GitHub
-            </DropdownMenuItem>
+
+          {hasOpenSection && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Open
+              </DropdownMenuLabel>
+              {worktreeId && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setMenuOpen(false)
+                    handleOpenGitHub()
+                  }}
+                >
+                  <Github className="h-4 w-4" />
+                  GitHub
+                  <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
+                </DropdownMenuItem>
+              )}
+              {ports.map(port => {
+                const host = port.host?.trim() || 'localhost'
+                const url = resolvePortUrl(port)
+                const label = port.label?.trim()
+                  ? `${port.label} (${host}:${port.port})`
+                  : `${host}:${port.port}`
+                return (
+                  <DropdownMenuItem
+                    key={`${host}:${port.port}:${port.label}`}
+                    onSelect={() => {
+                      setMenuOpen(false)
+                      openExternal(url)
+                    }}
+                  >
+                    <Globe className="h-4 w-4" />
+                    <span className="truncate">{label}</span>
+                    <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />
+                  </DropdownMenuItem>
+                )
+              })}
+            </>
           )}
 
           {hasLinkedPr && (

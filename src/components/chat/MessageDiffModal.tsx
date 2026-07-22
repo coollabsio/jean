@@ -30,7 +30,7 @@ import { useTheme } from '@/hooks/use-theme'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
 import { invoke } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 
 function DiffBlock({
   fileName,
@@ -305,7 +305,7 @@ export function MessageDiffModal({
               </Tooltip>
             </div>
 
-            {isNativeApp() && (
+            {isLocalBackend() && (
               <button
                 type="button"
                 onClick={handleOpenExternal}

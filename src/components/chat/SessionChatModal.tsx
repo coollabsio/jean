@@ -537,6 +537,7 @@ export function SessionChatModal({
     (session: Session) => {
       const activeSessions = sessions.filter(s => !s.archived_at)
       if (activeSessions.length <= 1) {
+        // The mutation navigates after success, provided navigation is unchanged.
         const action = () => {
           handleDeleteSession(session.id)
         }
@@ -580,7 +581,6 @@ export function SessionChatModal({
           if (currentSessionId) {
             handleDeleteSession(currentSessionId)
           }
-          onClose()
         } else if (currentSessionId) {
           selectVisualNeighbor(currentSessionId)
           handleDeleteSession(currentSessionId)
@@ -606,7 +606,6 @@ export function SessionChatModal({
     isOpen,
     sessions,
     currentSessionId,
-    onClose,
     handleDeleteSession,
     selectVisualNeighbor,
     preferences?.confirm_session_close,

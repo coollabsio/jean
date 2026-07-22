@@ -163,8 +163,8 @@ By default a token is required (using `--token`, `JEAN_TOKEN`, or an auto-genera
 
 ## Health checks
 
-- `GET /healthz` — process is alive.
-- `GET /readyz` — HTTP server is initialized and WebSocket broadcaster state is ready.
+- `GET /healthz` - process is alive.
+- `GET /readyz` - HTTP server is initialized and WebSocket broadcaster state is ready.
 
 Authenticated endpoints accept either the existing `?token=...` query parameter or an HTTP bearer token:
 
@@ -264,7 +264,7 @@ jean --headless --host 100.x.y.z --port 3456 --token "$JEAN_TOKEN"
 ## Server updates (bare-metal Linux)
 
 `jean-server` can install a newer binary when you choose to from Web Access.
-Nothing is installed in the background — apply only runs after you click
+Nothing is installed in the background - apply only runs after you click
 **Update & restart**.
 
 | Piece           | Behavior                                                                                                       |
@@ -274,7 +274,7 @@ Nothing is installed in the background — apply only runs after you click
 | Apply           | User clicks **Update & restart** → `apply_server_update`                                                       |
 | Verify          | SHA-256 from the release manifest                                                                              |
 | Restart         | `systemctl restart jean-server.service` when that unit is loaded (or `JEAN_SERVER_SERVICE`), otherwise re-exec |
-| Containers      | Not supported — update the Docker/GHCR image instead                                                           |
+| Containers      | Not supported - update the Docker/GHCR image instead                                                           |
 | Active sessions | Apply is refused while chat sessions are running                                                               |
 
 ## Security recommendations

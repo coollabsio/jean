@@ -28,7 +28,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { getOpenInDefaultLabel } from '@/types/preferences'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend } from '@/lib/environment'
 import { useUIStore } from '@/store/ui-store'
 
 interface OpenInButtonProps {
@@ -88,7 +88,7 @@ export function OpenInButton({
     preferences?.terminal
   )
 
-  if (!isNativeApp()) return null
+  if (!isLocalBackend()) return null
 
   return (
     <div

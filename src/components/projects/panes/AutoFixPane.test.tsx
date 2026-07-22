@@ -4,12 +4,17 @@ import { fireEvent, render, screen, within } from '@/test/test-utils'
 import type { Project, ProjectAutoFixSettings } from '@/types/projects'
 import {
   AutoFixPane,
+  buildAutoFixSettings,
+  firstAvailableBackend,
   hasAutoFixSettingsChanges,
   MR_ROBOT_SETTINGS_BADGE,
+  resolveAutoFixBackend,
 } from './AutoFixPane'
+import type { CliBackend } from '@/types/preferences'
 
 const mutateMock = vi.fn()
 let projectsMock: Project[] = []
+let installedBackendsMock: CliBackend[] = ['claude', 'codex', 'cursor']
 
 class ResizeObserverMock {
   observe() {
@@ -52,6 +57,14 @@ vi.mock('@/services/preferences', () => ({
     },
   }),
   usePatchPreferences: () => ({ mutate: vi.fn() }),
+}))
+
+vi.mock('@/hooks/useInstalledBackends', () => ({
+  useInstalledBackends: () => ({
+    // Subset of CLI backends — uninstalled ones must not appear in the picker
+    installedBackends: installedBackendsMock,
+    isLoading: false,
+  }),
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
@@ -114,10 +127,30 @@ function getElementAt<T>(items: T[], index: number): T {
   return item
 }
 
+describe('auto-fix backend defaults', () => {
+  it('picks the first installed backend as the default', () => {
+    expect(firstAvailableBackend(['codex', 'cursor'])).toBe('codex')
+    expect(firstAvailableBackend([])).toBe('claude')
+  })
+
+  it('keeps an installed backend and remaps uninstalled ones', () => {
+    expect(resolveAutoFixBackend('cursor', ['codex', 'cursor'])).toBe('cursor')
+    expect(resolveAutoFixBackend('claude', ['codex', 'cursor'])).toBe('codex')
+    expect(resolveAutoFixBackend(null, ['pi'])).toBe('pi')
+  })
+
+  it('defaults planning and yolo to the first available backend', () => {
+    const settings = buildAutoFixSettings(null, ['codex', 'opencode'])
+    expect(settings.planning_backend).toBe('codex')
+    expect(settings.yolo_backend).toBe('codex')
+  })
+})
+
 describe('AutoFixPane', () => {
   beforeEach(() => {
     mutateMock.mockReset()
     projectsMock = [project()]
+    installedBackendsMock = ['claude', 'codex', 'cursor']
     HTMLElement.prototype.hasPointerCapture = vi.fn()
     HTMLElement.prototype.releasePointerCapture = vi.fn()
     HTMLElement.prototype.scrollIntoView = vi.fn()
@@ -350,18 +383,60 @@ describe('AutoFixPane', () => {
     ).toHaveTextContent('Backend default')
   })
 
-  it('offers every CLI backend for planning and yolo execution', async () => {
+  it('defaults to the first installed backend when Claude is not available', () => {
+    installedBackendsMock = ['codex', 'cursor']
+    projectsMock = [
+      {
+        id: 'project-id',
+        name: 'Project',
+        path: '/tmp/project',
+        default_branch: 'main',
+        added_at: 1,
+        order: 1,
+        auto_fix_settings: null,
+      },
+    ]
+    renderPane()
+
+    expect(
+      screen.getByRole('button', { name: 'Choose planning backend and model' })
+    ).toHaveTextContent('Codex')
+    expect(
+      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+    ).toHaveTextContent('Codex')
+  })
+
+  it('remaps a saved Claude backend when Claude is not installed', () => {
+    installedBackendsMock = ['codex', 'cursor']
+    projectsMock = [
+      project({
+        planning_backend: 'claude',
+        yolo_backend: 'claude',
+        auto_yolo_enabled: true,
+      }),
+    ]
+    renderPane()
+
+    expect(
+      screen.getByRole('button', { name: 'Choose planning backend and model' })
+    ).toHaveTextContent('Codex')
+    expect(
+      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+    ).toHaveTextContent('Codex')
+  })
+
+  it('only offers installed backends for planning and yolo execution', async () => {
     const user = userEvent.setup()
     projectsMock = [project({ auto_yolo_enabled: true })]
     renderPane()
 
-    const expectedBackends = [
-      'Claude',
-      'Codex',
+    const expectedBackends = ['Claude', 'Codex', 'Cursor']
+    const hiddenBackends = [
       'OpenCode',
-      'Cursor',
       'PI (Beta)',
       'Command Code (Beta)',
+      'Grok (Beta)',
+      'Kimi Code (Beta)',
     ]
 
     await user.click(
@@ -373,6 +448,11 @@ describe('AutoFixPane', () => {
         within(planningTabs).getByRole('tab', { name: backend })
       ).toBeInTheDocument()
     }
+    for (const backend of hiddenBackends) {
+      expect(
+        within(planningTabs).queryByRole('tab', { name: backend })
+      ).not.toBeInTheDocument()
+    }
     await user.keyboard('{Escape}')
 
     await user.click(
@@ -383,6 +463,11 @@ describe('AutoFixPane', () => {
       expect(
         within(yoloTabs).getByRole('tab', { name: backend })
       ).toBeInTheDocument()
+    }
+    for (const backend of hiddenBackends) {
+      expect(
+        within(yoloTabs).queryByRole('tab', { name: backend })
+      ).not.toBeInTheDocument()
     }
   })
 

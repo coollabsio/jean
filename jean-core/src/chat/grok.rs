@@ -1350,7 +1350,7 @@ fn format_grok_command(cli_path: &Path, args: &[String]) -> String {
             redact_next = false;
             continue;
         }
-        if arg == "-p" || arg == "--prompt" {
+        if arg == "-p" || arg == "--prompt" || arg == "--prompt-file" {
             redact_next = true;
         }
         parts.push(quote(arg));
@@ -2700,64 +2700,50 @@ fn is_plan_execution_mode(execution_mode: Option<&str>) -> bool {
     matches!(execution_mode, Some("plan") | None)
 }
 
-/// Whether a Grok tool name is safe to auto-approve in plan mode.
-fn is_plan_safe_tool_name(name: &str) -> bool {
+/// Whether a Grok tool name mutates the workspace / plan state (blocked in plan mode).
+fn is_plan_mutating_tool_name(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
     matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "web_fetch"
-            | "webfetch"
-            | "webfetchtool"
-            | "fetch"
-            | "web_search"
-            | "websearch"
-            | "websearchtool"
-            | "read_file"
-            | "read"
-            | "grep"
-            | "search"
-            | "list_dir"
-            | "list"
-            | "glob"
-            | "semantic_search"
-            | "open_page"
-            | "browse"
-            | "todo_write"
-            | "todowrite"
-            | "todo_read"
-            | "todoread"
+        lower.as_str(),
+        "write"
+            | "write_file"
+            | "writefile"
+            | "create_file"
+            | "search_replace"
+            | "str_replace"
+            | "strreplace"
+            | "edit"
+            | "edit_file"
+            | "editfile"
+            | "delete"
+            | "delete_file"
+            | "deletefile"
+            | "move"
+            | "rename"
+            | "apply_patch"
+            | "applypatch"
+            | "multi_edit"
+            | "multiedit"
+            | "enter_plan_mode"
+            | "enterplanmode"
+            | "exit_plan_mode"
+            | "exitplanmode"
+    ) || matches!(
+        map_grok_tool_name(name),
+        Some("Write" | "Edit" | "Delete" | "EnterPlanMode" | "ExitPlanMode")
     )
 }
 
-/// Plan mode may auto-approve read-oriented tools so research (WebFetch, Read,
-/// Grep, …) can run. Mutating kinds stay rejected; terminal/* and fs/write are
-/// still hard-blocked below regardless of permission outcome.
-fn plan_mode_permission_allowed(tool_call: Option<&Value>) -> bool {
-    let Some(tool_call) = tool_call else {
-        return false;
-    };
-
-    if let Some(kind) = tool_call.get("kind").and_then(Value::as_str) {
-        match kind {
-            "read" | "search" | "think" | "fetch" => return true,
-            "edit" | "delete" | "move" | "execute" | "switch_mode" => return false,
-            _ => {}
+fn tool_call_name_candidates(tool_call: &Value) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(meta) = tool_call.get("_meta").and_then(|m| m.get("x.ai/tool")) {
+        if let Some(name) = meta.get("name").and_then(Value::as_str) {
+            names.push(name.to_string());
+        }
+        if let Some(kind) = meta.get("kind").and_then(Value::as_str) {
+            names.push(kind.to_string());
         }
     }
-
-    // Grok attaches read_only on tool meta for safe tools (e.g. web_fetch).
-    if let Some(meta) = tool_call.get("_meta") {
-        if let Some(tool_meta) = meta.get("x.ai/tool") {
-            if tool_meta.get("read_only").and_then(Value::as_bool) == Some(true) {
-                return true;
-            }
-            if let Some(name) = tool_meta.get("name").and_then(Value::as_str) {
-                if is_plan_safe_tool_name(name) {
-                    return true;
-                }
-            }
-        }
-    }
-
     if let Some(variant) = tool_call
         .get("rawInput")
         .or_else(|| tool_call.get("raw_input"))
@@ -2768,34 +2754,63 @@ fn plan_mode_permission_allowed(tool_call: Option<&Value>) -> bool {
                 .and_then(Value::as_str)
         })
     {
-        if is_plan_safe_tool_name(variant) {
-            return true;
-        }
-        if matches!(
-            map_grok_tool_name(variant),
-            Some("WebFetch" | "WebSearch" | "Read" | "Grep" | "List" | "TodoWrite")
-        ) {
-            return true;
-        }
+        names.push(variant.to_string());
     }
-
     if let Some(title) = tool_call.get("title").and_then(Value::as_str) {
+        names.push(title.to_string());
         if let Some(inferred) = infer_name_from_title(title) {
-            return matches!(
-                inferred,
-                "WebFetch" | "WebSearch" | "Read" | "Grep" | "List" | "TodoWrite"
-            );
-        }
-        if is_plan_safe_tool_name(title) {
-            return true;
+            names.push(inferred.to_string());
         }
     }
-
-    false
+    names
 }
 
-/// Build/yolo auto-approve every tool permission. Plan mode only allows
-/// read-oriented tools (see [`plan_mode_permission_allowed`]).
+/// Plan mode auto-approves research tools (read/search/fetch/shell/tasks) so
+/// investigations can run. Mutating file tools stay rejected; `fs/write` is also
+/// hard-blocked below. Shell is allowed because Grok investigations rely on
+/// `run_terminal_command` (`gh`, `git`, `rg`, `find`); rejecting it made turns
+/// stop after "I'll investigate…".
+fn plan_mode_permission_allowed(tool_call: Option<&Value>) -> bool {
+    let Some(tool_call) = tool_call else {
+        // Missing toolCall metadata should not stall research; write path is
+        // still hard-blocked via fs/write_text_file.
+        return true;
+    };
+
+    if let Some(kind) = tool_call.get("kind").and_then(Value::as_str) {
+        match kind {
+            "edit" | "delete" | "move" | "switch_mode" => return false,
+            "read" | "search" | "think" | "fetch" | "execute" => return true,
+            _ => {}
+        }
+    }
+
+    // Explicit read_only meta always wins for allow.
+    if let Some(meta) = tool_call.get("_meta").and_then(|m| m.get("x.ai/tool")) {
+        if meta.get("read_only").and_then(Value::as_bool) == Some(true) {
+            return true;
+        }
+        if meta.get("read_only").and_then(Value::as_bool) == Some(false) {
+            if let Some(name) = meta.get("name").and_then(Value::as_str) {
+                if is_plan_mutating_tool_name(name) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    for name in tool_call_name_candidates(tool_call) {
+        if is_plan_mutating_tool_name(&name) {
+            return false;
+        }
+    }
+
+    // Default allow: Task/subagent, search_tool, shell (if kind missing), etc.
+    true
+}
+
+/// Build/yolo auto-approve every tool permission. Plan mode blocks file
+/// mutations only (see [`plan_mode_permission_allowed`]).
 fn should_allow_acp_permission(execution_mode: Option<&str>, params: &Value) -> bool {
     if !is_plan_execution_mode(execution_mode) {
         return true;
@@ -2848,9 +2863,8 @@ fn handle_acp_client_request(
             )
         }
         "terminal/create" => {
-            if is_plan_execution_mode(execution_mode) {
-                return send_acp_error(stdin, id, "Terminal execution is disabled in plan mode");
-            }
+            // Plan mode allows shell for research (gh/git/rg/find). File mutations
+            // stay blocked via permission deny-list + fs/write_text_file below.
             let Some(command) = params.get("command").and_then(Value::as_str) else {
                 return send_acp_error(stdin, id, "Missing terminal command");
             };
@@ -3042,15 +3056,18 @@ fn grok_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'sta
              for a new plan. Do not ask for confirmation before routine implementation steps. \
              Ask the user directly if a required decision is missing.",
         ),
-        // Plan mode previously injected nothing. Without an explicit contract Grok often
-        // runs a research tool batch then stops mid-turn (or waits on native plan UI).
+        // Plan mode must allow research shell: Grok investigations often start with
+        // run_terminal_command (gh/git/rg). Rejecting shell made turns stop after
+        // "I'll investigate…". File writes stay blocked; Jean owns plan approval UI.
         _ => Some(
-            "You are in PLAN MODE (read-only). Research with read/search/list/fetch tools only. \
-             Do NOT run shell/terminal commands, edit or write files, or call enter_plan_mode / \
-             exit_plan_mode — Jean owns plan approval. When research is enough, finish the turn \
-             by writing a complete structured implementation plan as markdown with a clear title \
-             (e.g. \"# … Implementation Plan\"), section headings (##), and concrete task steps \
-             (numbered or checkbox lists). Do not implement the work in this mode.",
+            "You are in PLAN MODE (research only — do not implement). Investigate with \
+             read/search/list/fetch tools and shell commands as needed (e.g. git status, \
+             gh, rg, find, cat, ls). Do NOT edit or write files, apply patches, or make \
+             irreversible changes. Do not call enter_plan_mode / exit_plan_mode — Jean \
+             owns plan approval. When research is enough, finish the turn by writing a \
+             complete structured implementation plan as markdown with a clear title \
+             (e.g. \"# … Implementation Plan\"), section headings (##), and concrete task \
+             steps (numbered or checkbox lists). Do not implement the work in this mode.",
         ),
     }
 }
@@ -3916,18 +3933,27 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
     }
 }
 
-fn extract_json_object(text: &str) -> Result<String, String> {
+/// True when stdout is the Grok CLI headless JSON envelope (`--output-format json`
+/// / `--json-schema`), not the model's payload itself.
+fn is_grok_cli_json_wrapper(value: &Value) -> bool {
+    value.get("stopReason").is_some()
+        || value.get("sessionId").is_some()
+        || value.get("requestId").is_some()
+        || value.get("structuredOutput").is_some()
+        || value.get("structuredOutputError").is_some()
+        || (value.get("text").is_some() && value.get("usage").is_some())
+}
+
+/// Scan free-form text for the first parseable JSON object.
+fn scan_json_object(text: &str) -> Result<String, String> {
     let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("No JSON object found in Grok response".to_string());
+    }
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        let is_grok_wrapper = value.get("text").and_then(Value::as_str).is_some()
-            && (value.get("stopReason").is_some()
-                || value.get("sessionId").is_some()
-                || value.get("requestId").is_some()
-                || value.get("thought").is_some());
-        if is_grok_wrapper {
-            if let Some(inner) = value.get("text").and_then(Value::as_str) {
-                return extract_json_object(inner);
-            }
+        // Avoid treating the CLI envelope as payload when nested extractors call us.
+        if is_grok_cli_json_wrapper(&value) {
+            return Err("No JSON object found in Grok response".to_string());
         }
         return Ok(trimmed.to_string());
     }
@@ -3943,14 +3969,158 @@ fn extract_json_object(text: &str) -> Result<String, String> {
     Ok(candidate.to_string())
 }
 
+fn extract_json_object(text: &str) -> Result<String, String> {
+    let trimmed = text.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        if is_grok_cli_json_wrapper(&value) {
+            // Native --json-schema path: preferred structured payload.
+            match value.get("structuredOutput") {
+                Some(Value::Object(_)) | Some(Value::Array(_)) => {
+                    return serde_json::to_string(value.get("structuredOutput").unwrap())
+                        .map_err(|e| format!("Failed to serialize Grok structuredOutput: {e}"));
+                }
+                Some(Value::String(inner)) if !inner.trim().is_empty() => {
+                    return scan_json_object(inner);
+                }
+                Some(Value::Null) | None => {}
+                Some(other) => {
+                    return Err(format!(
+                        "Unexpected structuredOutput type in Grok response: {other}"
+                    ));
+                }
+            }
+
+            // Fall back to assistant text, then thought (models sometimes only
+            // draft JSON there when structured output is cancelled mid-turn).
+            let mut last_err = "No JSON object found in Grok response".to_string();
+            for key in ["text", "thought"] {
+                if let Some(inner) = value.get(key).and_then(Value::as_str) {
+                    match scan_json_object(inner) {
+                        Ok(json) => return Ok(json),
+                        Err(err) => last_err = err,
+                    }
+                }
+            }
+
+            if let Some(err) = value
+                .get("structuredOutputError")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+            {
+                return Err(format!(
+                    "Grok structured output failed: {err} ({last_err})"
+                ));
+            }
+
+            return Err(last_err);
+        }
+        // Already a bare JSON object/array/value — return as-is.
+        return Ok(trimmed.to_string());
+    }
+    scan_json_object(trimmed)
+}
+
 fn build_one_shot_json_prompt(prompt: &str, json_schema: Option<&str>) -> String {
     match json_schema {
-        Some(schema) => format!(
-            "{prompt}\n\nReturn only a single valid JSON object. Do not wrap it in markdown. The object must match this JSON Schema exactly:\n{schema}"
+        // Schema is passed via --json-schema; only remind the model to answer as JSON.
+        Some(_) => format!(
+            "{prompt}\n\nReturn only a single valid JSON object matching the provided JSON schema. Do not wrap it in markdown or add commentary. Do not invoke skills, subagents, or tools — the full input is already in this message."
         ),
         None => {
             format!("{prompt}\n\nReturn only a single valid JSON object. Do not wrap it in markdown.")
         }
+    }
+}
+
+/// Rules injected for structured one-shot calls so Grok does not detour into
+/// interactive review skills / MCP / tool exploration (which frequently cancels
+/// constrained decoding and yields empty or missing findings).
+const ONE_SHOT_STRUCTURED_RULES: &str = "\
+Complete structured JSON output in a single turn without tools, skills, subagents, or MCP. \
+Review/answer only from content already in the user message. \
+When the task is a code review, report clear security, correctness, race, data-loss, and contract bugs with high confidence — do not approve with empty findings when the provided diff introduces obvious defects. \
+Prefer no finding only when no actionable defect is present.";
+
+/// Build argv for a headless Grok one-shot. The prompt is always referenced via
+/// `--prompt-file` (never inline `-p`) so large magic-prompt inputs (PR diffs up
+/// to ~200KB plus commits/context) do not exceed OS ARG_MAX (E2BIG / os error 7).
+fn build_one_shot_grok_cli_args(
+    prompt_file: &str,
+    cwd: &str,
+    model: &str,
+    json_schema: Option<&str>,
+    effort_level: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "--no-auto-update".to_string(),
+        "--no-memory".to_string(),
+        "--no-subagents".to_string(),
+        "--disable-web-search".to_string(),
+        "--prompt-file".to_string(),
+        prompt_file.to_string(),
+        "--cwd".to_string(),
+        cwd.to_string(),
+        "--permission-mode".to_string(),
+        "dontAsk".to_string(),
+        "--sandbox".to_string(),
+        "read-only".to_string(),
+        "--model".to_string(),
+        raw_grok_model(Some(model))
+            .unwrap_or(model)
+            .to_string(),
+    ];
+    // Prefer native constrained decoding when a schema is available. Implies
+    // --output-format json and populates structuredOutput on success.
+    //
+    // Structured one-shots must not use tools/MCP: Grok's auto skill discovery
+    // (review / caveman-review) plus MCP frequently cancels constrained decoding
+    // and returns empty findings even when the model drafted real issues.
+    if let Some(schema) = json_schema {
+        args.extend([
+            "--json-schema".to_string(),
+            schema.to_string(),
+            // Empty allowlist removes built-in tools for this headless run.
+            "--tools".to_string(),
+            String::new(),
+            "--deny".to_string(),
+            "MCPTool(*)".to_string(),
+            "--rules".to_string(),
+            ONE_SHOT_STRUCTURED_RULES.to_string(),
+            // One-shot magic prompts should finish quickly once tools are gone.
+            "--max-turns".to_string(),
+            "2".to_string(),
+        ]);
+    } else {
+        args.extend(["--output-format".to_string(), "json".to_string()]);
+    }
+    if let Some(effort) = effort_level.filter(|effort| !effort.is_empty()) {
+        args.extend(["--effort".to_string(), effort.to_string()]);
+    }
+    args
+}
+
+fn write_one_shot_prompt_file(prompt: &str) -> Result<std::path::PathBuf, String> {
+    let prompt_file = std::env::temp_dir().join(format!(
+        "jean-grok-one-shot-prompt-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::write(&prompt_file, prompt)
+        .map_err(|e| format!("Failed to write Grok one-shot prompt file: {e}"))?;
+    Ok(prompt_file)
+}
+
+/// Resolve a host-local path for the Grok CLI child. On Windows+WSL the CLI runs
+/// inside the distro, so temp paths must be converted to Unix form.
+fn resolve_cli_path_arg(path: &Path) -> String {
+    let wsl = crate::platform::get_wsl_config();
+    if cfg!(windows) && wsl.enabled {
+        crate::platform::win_to_wsl_path(&path.to_string_lossy())
+    } else {
+        path.to_string_lossy().into_owned()
     }
 }
 
@@ -3969,37 +4139,61 @@ pub fn execute_one_shot_grok(
     let dir = working_dir.unwrap_or_else(|| Path::new("."));
     let model = resolve_one_shot_grok_model(model);
     let json_prompt = build_one_shot_json_prompt(prompt, json_schema);
-    let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
-    cmd.args([
-        "--no-auto-update",
-        "-p",
-        &json_prompt,
-        "--output-format",
-        "json",
-        "--cwd",
+    let prompt_file = write_one_shot_prompt_file(&json_prompt)?;
+    let prompt_file_arg = resolve_cli_path_arg(&prompt_file);
+
+    let args = build_one_shot_grok_cli_args(
+        &prompt_file_arg,
         &dir.to_string_lossy(),
-        "--permission-mode",
-        "dontAsk",
-        "--sandbox",
-        "read-only",
-        "--model",
-        raw_grok_model(Some(model)).unwrap_or(model),
-    ]);
-    if let Some(effort) = effort_level.filter(|effort| !effort.is_empty()) {
-        cmd.args(["--effort", effort]);
-    }
+        model,
+        json_schema,
+        effort_level,
+    );
+
+    let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
+    cmd.args(&args);
     cmd.current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run Grok one-shot request: {e}"))?;
+    log::info!(
+        "[Grok one-shot] command: {}",
+        format_grok_command(&cli_path, &args)
+    );
+    log::debug!(
+        "[Grok one-shot] prompt_file={} prompt_bytes={}",
+        prompt_file.display(),
+        json_prompt.len()
+    );
+
+    let output = cmd.output().map_err(|e| {
+        let _ = std::fs::remove_file(&prompt_file);
+        format!("Failed to run Grok one-shot request: {e}")
+    })?;
+    let _ = std::fs::remove_file(&prompt_file);
+
     if !output.status.success() {
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
         return Err(format!("Grok one-shot request failed: {}", stderr.trim()));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Ok(wrapper) = serde_json::from_str::<Value>(stdout.trim()) {
+        if is_grok_cli_json_wrapper(&wrapper) {
+            let stop = wrapper
+                .get("stopReason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let has_structured = matches!(
+                wrapper.get("structuredOutput"),
+                Some(Value::Object(_)) | Some(Value::Array(_)) | Some(Value::String(_))
+            );
+            if stop.eq_ignore_ascii_case("cancelled") && !has_structured {
+                log::warn!(
+                    "Grok one-shot cancelled without structuredOutput; attempting recovery from text/thought"
+                );
+            }
+        }
+    }
     extract_json_object(&stdout)
 }
 
@@ -4009,14 +4203,80 @@ mod tests {
     use std::io::BufReader;
 
     #[test]
-    fn one_shot_json_prompt_includes_requested_schema() {
+    fn one_shot_json_prompt_reminds_schema_without_embedding_it() {
         let schema = r#"{"type":"object","required":["summary","slug"]}"#;
 
         let prompt = build_one_shot_json_prompt("Summarize this session", Some(schema));
 
         assert!(prompt.contains("Summarize this session"));
-        assert!(prompt.contains(schema));
-        assert!(prompt.contains("must match this JSON Schema exactly"));
+        // Schema is passed via --json-schema; do not bloat the prompt with a copy.
+        assert!(!prompt.contains(schema));
+        assert!(prompt.contains("matching the provided JSON schema"));
+        assert!(prompt.contains("Do not invoke skills"));
+    }
+
+    #[test]
+    fn one_shot_json_prompt_without_schema_still_requests_json() {
+        let prompt = build_one_shot_json_prompt("Name this session", None);
+        assert!(prompt.contains("Name this session"));
+        assert!(prompt.contains("Return only a single valid JSON object"));
+    }
+
+    #[test]
+    fn one_shot_cli_args_use_prompt_file_not_inline_prompt() {
+        // ARG_MAX / E2BIG: never put large PR diffs on argv via `-p`.
+        let args = build_one_shot_grok_cli_args(
+            "/tmp/jean-prompt.txt",
+            "/repo",
+            "grok-build",
+            Some(r#"{"type":"object"}"#),
+            Some("high"),
+        );
+
+        assert!(args.contains(&"--prompt-file".to_string()));
+        let prompt_file_idx = args.iter().position(|a| a == "--prompt-file").unwrap();
+        assert_eq!(args[prompt_file_idx + 1], "/tmp/jean-prompt.txt");
+        assert!(!args.iter().any(|a| a == "-p" || a == "--prompt" || a == "--single"));
+        // Prompt body must not appear as an argv entry.
+        assert!(!args.iter().any(|a| a.contains("diff --git") || a.len() > 10_000));
+        assert!(args.contains(&"--json-schema".to_string()));
+        assert!(args.contains(&"--effort".to_string()));
+        assert!(args.contains(&"high".to_string()));
+        assert!(args.contains(&"--max-turns".to_string()));
+    }
+
+    #[test]
+    fn one_shot_cli_args_without_schema_use_json_output() {
+        let args =
+            build_one_shot_grok_cli_args("/tmp/p.txt", ".", "grok-build", None, None);
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert!(!args.iter().any(|a| a == "--json-schema"));
+    }
+
+    #[test]
+    fn write_one_shot_prompt_file_round_trips_large_content() {
+        // Simulate a PR-sized payload that would blow ARG_MAX if inlined as `-p`.
+        let large = "x".repeat(250_000);
+        let path = write_one_shot_prompt_file(&large).expect("write prompt file");
+        let read = std::fs::read_to_string(&path).expect("read prompt file");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(read.len(), 250_000);
+        assert_eq!(read, large);
+    }
+
+    #[test]
+    fn format_grok_command_redacts_prompt_file_path() {
+        let args = vec![
+            "--prompt-file".to_string(),
+            "/tmp/secret-prompt.txt".to_string(),
+            "--model".to_string(),
+            "grok-build".to_string(),
+        ];
+        let rendered = format_grok_command(Path::new("grok"), &args);
+        assert!(rendered.contains("--prompt-file"));
+        assert!(rendered.contains("<REDACTED_PROMPT>"));
+        assert!(!rendered.contains("secret-prompt"));
     }
 
     #[test]
@@ -4144,18 +4404,27 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_rejects_execute_permission() {
+    fn plan_mode_allows_execute_permission_for_research_shell() {
+        // Grok investigations typically open with run_terminal_command (gh/git/rg).
+        // Rejecting execute caused turns to stop after the research preamble.
         let params = serde_json::json!({
             "sessionId": "sess-1",
             "toolCall": {
                 "toolCallId": "call-2",
-                "title": "Execute `rm -rf /tmp/x`",
+                "title": "Execute `/usr/bin/gh pr view 10538`",
                 "kind": "execute",
-                "rawInput": { "variant": "Bash", "command": "rm -rf /tmp/x" }
+                "rawInput": { "variant": "Bash", "command": "/usr/bin/gh pr view 10538" },
+                "_meta": {
+                    "x.ai/tool": {
+                        "name": "run_terminal_command",
+                        "kind": "execute",
+                        "read_only": false
+                    }
+                }
             },
             "options": permission_options(),
         });
-        assert!(!should_allow_acp_permission(Some("plan"), &params));
+        assert!(should_allow_acp_permission(Some("plan"), &params));
 
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -4169,8 +4438,74 @@ mod tests {
         let response: Value = serde_json::from_slice(&output).unwrap();
         assert_eq!(
             response["result"]["outcome"]["optionId"].as_str(),
+            Some("allow-once")
+        );
+    }
+
+    #[test]
+    fn plan_mode_rejects_edit_permission() {
+        let params = serde_json::json!({
+            "sessionId": "sess-1",
+            "toolCall": {
+                "toolCallId": "call-edit",
+                "title": "Edit `src/foo.rs`",
+                "kind": "edit",
+                "rawInput": { "variant": "SearchReplace", "file_path": "src/foo.rs" },
+                "_meta": {
+                    "x.ai/tool": {
+                        "name": "search_replace",
+                        "kind": "edit",
+                        "read_only": false
+                    }
+                }
+            },
+            "options": permission_options(),
+        });
+        assert!(!should_allow_acp_permission(Some("plan"), &params));
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "session/request_permission",
+            "params": params,
+        });
+        let mut output = Vec::new();
+        let mut terminals = HashMap::new();
+        handle_acp_client_request(&mut output, &request, &mut terminals, Some("plan")).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            response["result"]["outcome"]["optionId"].as_str(),
             Some("reject-once")
         );
+    }
+
+    #[test]
+    fn plan_mode_allows_terminal_create() {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "terminal/create",
+            "params": {
+                "command": "echo research-ok",
+                "cwd": "/tmp",
+            },
+        });
+        let mut output = Vec::new();
+        let mut terminals = HashMap::new();
+        handle_acp_client_request(&mut output, &request, &mut terminals, Some("plan")).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        assert!(
+            response.get("error").is_none(),
+            "plan mode must allow research shell: {response}"
+        );
+        assert!(response["result"]["terminalId"].as_str().is_some());
+        // Clean up spawned shell.
+        for (_, terminal) in terminals.drain() {
+            if let Ok(mut child) = terminal.child.lock() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
     }
 
     #[test]
@@ -4307,6 +4642,72 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
         assert_eq!(
             extract_json_object(stdout).unwrap(),
             r#"{"summary":"Done","slug":"done"}"#
+        );
+    }
+
+    #[test]
+    fn extract_json_object_prefers_structured_output_field() {
+        let stdout = r#"{
+  "text": "I'll produce structured output now.",
+  "stopReason": "EndTurn",
+  "sessionId": "grok-session-1",
+  "structuredOutput": {"summary":"Looks good","findings":[],"approval_status":"approved"},
+  "structuredOutputError": null
+}"#;
+
+        let json = extract_json_object(stdout).unwrap();
+        let value: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value.get("approval_status").and_then(Value::as_str),
+            Some("approved")
+        );
+        assert_eq!(
+            value.get("summary").and_then(Value::as_str),
+            Some("Looks good")
+        );
+        assert_eq!(value.get("findings").and_then(Value::as_array).map(|a| a.len()), Some(0));
+    }
+
+    #[test]
+    fn extract_json_object_surfaces_structured_output_error() {
+        let stdout = r#"{
+  "text": "Working on it...",
+  "stopReason": "Cancelled",
+  "sessionId": "grok-session-1",
+  "structuredOutput": null,
+  "structuredOutputError": "model did not produce structured output"
+}"#;
+
+        let err = extract_json_object(stdout).unwrap_err();
+        assert!(
+            err.contains("model did not produce structured output"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn extract_json_object_recovers_json_from_thought_when_structured_output_missing() {
+        let stdout = r#"{
+  "text": "",
+  "thought": "Drafting review.\n{\"summary\":\"Bug found\",\"findings\":[{\"severity\":\"critical\",\"category\":\"security\",\"confidence\":\"high\",\"blocking\":true,\"introduced_by_diff\":true,\"file\":\"a.rs\",\"line\":1,\"title\":\"auth bypass\",\"description\":\"always true\",\"failure_scenario\":\"any login\",\"suggestion\":\"check password\"}],\"approval_status\":\"changes_requested\"}",
+  "stopReason": "Cancelled",
+  "sessionId": "grok-session-1",
+  "structuredOutput": null,
+  "structuredOutputError": "model did not produce structured output"
+}"#;
+
+        let json = extract_json_object(stdout).unwrap();
+        let value: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value.get("approval_status").and_then(Value::as_str),
+            Some("changes_requested")
+        );
+        assert_eq!(
+            value
+                .get("findings")
+                .and_then(Value::as_array)
+                .map(|a| a.len()),
+            Some(1)
         );
     }
 
@@ -4792,7 +5193,9 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
     fn build_grok_message_includes_plan_mode_contract() {
         let message = build_grok_message("plan the feature", None, Some("plan"));
         assert!(message.contains("PLAN MODE"));
-        assert!(message.contains("Do NOT run shell/terminal"));
+        // Research shell is allowed; file mutations are not.
+        assert!(message.contains("shell commands") || message.contains("gh"));
+        assert!(message.contains("Do NOT edit or write files"));
         assert!(message.contains("exit_plan_mode"));
         assert!(message.contains("Implementation Plan") || message.contains("structured"));
         assert!(message.ends_with("plan the feature"));

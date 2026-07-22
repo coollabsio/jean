@@ -22,10 +22,19 @@ pub const JEAN_MCP_DEPTH_ENV: &str = "JEAN_MCP_DEPTH";
 
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const RATE_LIMITED_TOOLS: &[&str] = &[
+    "add_project",
+    "archive_worktree",
     "cancel_session_run",
+    "clone_project",
     "create_session",
-    "send_chat_message",
     "create_worktree",
+    "create_worktree_from_existing_branch",
+    "delete_worktree",
+    "import_worktree",
+    "init_project",
+    "permanently_delete_worktree",
+    "send_chat_message",
+    "unarchive_worktree",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -130,6 +139,9 @@ pub fn handle_protocol_message(
 pub fn tool_registry() -> Value {
     json!([
         {"name":"list_projects","description":"List all Jean projects (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"add_project","description":"Add an existing local git repository as a Jean project. Path must already be a git repo (use init_project for a new folder, or clone_project for a remote URL). Returns the created project (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to an existing local git repository."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
+        {"name":"clone_project","description":"Clone a remote git repository to a local path and add it as a Jean project. Returns the created project.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"Git remote URL to clone (https or ssh)."},"path":{"type":"string","description":"Absolute local path where the repo should be cloned."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["url","path"],"additionalProperties":false}},
+        {"name":"init_project","description":"Create a new git repository at path (creating the directory if needed) and add it as a Jean project. Use add_project instead when the path is already a git repo. Returns the created project.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path for the new project directory."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
         {"name":"list_worktrees","description":"List all worktrees for a project.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"get_worktree","description":"Get a single worktree by id (path, branch, status, etc.).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_project_context","description":"Get project-level context needed by orchestration agents: project settings, linked projects, default branch/backend, and worktree counts. Does not read arbitrary repo files.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
@@ -139,6 +151,14 @@ pub fn tool_registry() -> Value {
         {"name":"list_security_advisories","description":"List repository security advisories for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["draft","published","triage","closed","all"],"default":"all"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_linear_issues","description":"List Linear issues for a project using the same backend command as the UI. Pass projectId; Linear API config is resolved from project/global settings.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, or linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating the issue/PR/Linear issue with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
+        {"name":"create_worktree_from_existing_branch","description":"Create a Jean worktree from an existing local or remote-tracking branch (branch name is used as the worktree name). Does not open Jean's UI. Prefer create_worktree for new branches; use this when the branch already exists.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"branchName":{"type":"string","description":"Existing branch name to check out into a new worktree path."}},"required":["projectId","branchName"],"additionalProperties":false}},
+        {"name":"import_worktree","description":"Import an existing git worktree/directory on disk into a Jean project. Path must already exist and be a git worktree or repo. Does not create a new git worktree.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"path":{"type":"string","description":"Absolute path to an existing git worktree directory."}},"required":["projectId","path"],"additionalProperties":false}},
+        {"name":"rename_worktree","description":"Rename a worktree's display name in Jean (does not rename the git branch or folder).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"newName":{"type":"string","description":"New display name. Must be unique within the project."}},"required":["worktreeId","newName"],"additionalProperties":false}},
+        {"name":"archive_worktree","description":"Archive a worktree (hide from the active project canvas). Cancels running sessions for the worktree. Base sessions cannot be archived. Prefer this over delete when work may still be needed.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"unarchive_worktree","description":"Restore an archived worktree to the active project canvas. Fails if the worktree directory no longer exists on disk.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"list_archived_worktrees","description":"List archived worktrees. Optionally filter by projectId. Active worktrees are not included (use list_worktrees for those).","inputSchema":{"type":"object","properties":{"projectId":{"type":"string","description":"Optional project id to filter archived worktrees."}},"additionalProperties":false}},
+        {"name":"delete_worktree","description":"Start permanently deleting an active (non-archived) worktree in the background: removes Jean tracking, git worktree, and branch. Returns started=true when cleanup is accepted, not completion. Destructive and irreversible when cleanup succeeds. Cannot delete base sessions. Prefer archive_worktree when unsure.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"permanently_delete_worktree","description":"Start permanently deleting an already-archived worktree in the background (storage + git worktree/branch cleanup). Returns started=true when cleanup is accepted, not completion. Fails immediately if the worktree is not archived — archive it first, or use delete_worktree for active worktrees.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"update_worktree_labels","description":"Update native Jean worktree labels. Use action=add/remove/set/clear. Returns the updated worktree.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"action":{"type":"string","enum":["add","remove","set","clear"]},"label":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string","description":"Hex color like #eab308. Optional for add; ignored by remove."},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name"],"additionalProperties":false},"labels":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string"},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name","color"],"additionalProperties":false}}},"required":["worktreeId","action"],"additionalProperties":false}},
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Create a new chat session in an existing worktree. Returns the session id needed for send_chat_message.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
@@ -203,6 +223,47 @@ async fn run_tool(
         "list_projects" => dispatch_command(app, "list_projects", json!({}))
             .await
             .map_err(ToolError::internal),
+        "add_project" => {
+            let path = require_nonempty_str(&args, "path")?;
+            let parent_id = optional_str(&args, "parentId")
+                .or_else(|| optional_str(&args, "parent_id"));
+            let mut payload = serde_json::Map::new();
+            payload.insert("path".to_string(), Value::String(path));
+            if let Some(parent_id) = parent_id {
+                payload.insert("parentId".to_string(), Value::String(parent_id));
+            }
+            dispatch_command(app, "add_project", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
+        }
+        "clone_project" => {
+            let url = require_nonempty_str(&args, "url")?;
+            let path = require_nonempty_str(&args, "path")?;
+            let parent_id = optional_str(&args, "parentId")
+                .or_else(|| optional_str(&args, "parent_id"));
+            let mut payload = serde_json::Map::new();
+            payload.insert("url".to_string(), Value::String(url));
+            payload.insert("path".to_string(), Value::String(path));
+            if let Some(parent_id) = parent_id {
+                payload.insert("parentId".to_string(), Value::String(parent_id));
+            }
+            dispatch_command(app, "clone_project", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
+        }
+        "init_project" => {
+            let path = require_nonempty_str(&args, "path")?;
+            let parent_id = optional_str(&args, "parentId")
+                .or_else(|| optional_str(&args, "parent_id"));
+            let mut payload = serde_json::Map::new();
+            payload.insert("path".to_string(), Value::String(path));
+            if let Some(parent_id) = parent_id {
+                payload.insert("parentId".to_string(), Value::String(parent_id));
+            }
+            dispatch_command(app, "init_project", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
+        }
         "list_worktrees" => {
             let project_id = require_str(&args, "projectId")?;
             dispatch_command(app, "list_worktrees", json!({ "projectId": project_id }))
@@ -286,6 +347,122 @@ async fn run_tool(
             )
             .await
             .map_err(ToolError::internal)
+        }
+        "create_worktree_from_existing_branch" => {
+            let project_id = require_str(&args, "projectId")?;
+            let branch_name = require_nonempty_str(&args, "branchName")
+                .or_else(|_| require_nonempty_str(&args, "branch_name"))?;
+            dispatch_command(
+                app,
+                "create_worktree_from_existing_branch",
+                json!({
+                    "projectId": project_id,
+                    "branchName": branch_name,
+                    "autoOpenInJean": false,
+                }),
+            )
+            .await
+            .map_err(ToolError::internal)
+        }
+        "import_worktree" => {
+            let project_id = require_str(&args, "projectId")?;
+            let path = require_nonempty_str(&args, "path")?;
+            dispatch_command(
+                app,
+                "import_worktree",
+                json!({ "projectId": project_id, "path": path }),
+            )
+            .await
+            .map_err(ToolError::internal)
+        }
+        "rename_worktree" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            let new_name = require_nonempty_str(&args, "newName")
+                .or_else(|_| require_nonempty_str(&args, "new_name"))?;
+            dispatch_command(
+                app,
+                "rename_worktree",
+                json!({ "worktreeId": worktree_id, "newName": new_name }),
+            )
+            .await
+            .map_err(ToolError::internal)
+        }
+        "archive_worktree" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            dispatch_command(
+                app,
+                "archive_worktree",
+                json!({ "worktreeId": worktree_id }),
+            )
+            .await
+            .map_err(ToolError::internal)?;
+            Ok(json!({
+                "worktreeId": worktree_id,
+                "action": "archive",
+                "ok": true,
+            }))
+        }
+        "unarchive_worktree" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            dispatch_command(
+                app,
+                "unarchive_worktree",
+                json!({ "worktreeId": worktree_id }),
+            )
+            .await
+            .map_err(ToolError::internal)
+        }
+        "list_archived_worktrees" => {
+            let project_id = optional_str(&args, "projectId")
+                .or_else(|| optional_str(&args, "project_id"));
+            let result = dispatch_command(app, "list_archived_worktrees", json!({}))
+                .await
+                .map_err(ToolError::internal)?;
+            if let Some(project_id) = project_id {
+                let filtered = result
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter(|item| {
+                                item.get("project_id")
+                                    .or_else(|| item.get("projectId"))
+                                    .and_then(|v| v.as_str())
+                                    == Some(project_id.as_str())
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                Ok(Value::Array(filtered))
+            } else {
+                Ok(result)
+            }
+        }
+        "delete_worktree" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            dispatch_command(
+                app,
+                "delete_worktree",
+                json!({ "worktreeId": worktree_id }),
+            )
+            .await
+            .map_err(ToolError::internal)?;
+            Ok(deletion_started_result(&worktree_id, "delete"))
+        }
+        "permanently_delete_worktree" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            dispatch_command(
+                app,
+                "permanently_delete_worktree",
+                json!({ "worktreeId": worktree_id }),
+            )
+            .await
+            .map_err(ToolError::internal)?;
+            Ok(deletion_started_result(
+                &worktree_id,
+                "permanently_delete",
+            ))
         }
         "create_worktree" => {
             let project_id = require_str(&args, "projectId")?;
@@ -671,6 +848,14 @@ async fn run_tool(
     }
 }
 
+fn deletion_started_result(worktree_id: &str, action: &str) -> Value {
+    json!({
+        "worktreeId": worktree_id,
+        "action": action,
+        "started": true,
+    })
+}
+
 fn get_project_context(app: &AppHandle, project_id: &str) -> Result<Value, ToolError> {
     let data = crate::projects::storage::load_projects_data(app)
         .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
@@ -717,6 +902,25 @@ fn require_str(args: &Value, key: &str) -> Result<String, ToolError> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| ToolError::invalid_params(format!("missing or non-string '{key}'")))
+}
+
+fn require_nonempty_str(args: &Value, key: &str) -> Result<String, ToolError> {
+    let value = require_str(args, key)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ToolError::invalid_params(format!(
+            "'{key}' must be a non-empty string"
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn optional_str(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_label_arg(args: &Value) -> Result<LabelData, ToolError> {
@@ -1584,6 +1788,116 @@ mod tests {
     }
 
     #[test]
+    fn tool_registry_includes_project_lifecycle_tools() {
+        let tools = tool_registry();
+        let add_project = find_tool(&tools, "add_project");
+        let clone_project = find_tool(&tools, "clone_project");
+        let init_project = find_tool(&tools, "init_project");
+
+        assert_eq!(
+            add_project["inputSchema"]["required"],
+            json!(["path"]),
+            "add_project requires a local path"
+        );
+        assert!(
+            add_project["inputSchema"]["properties"]
+                .get("parentId")
+                .is_some(),
+            "add_project should accept optional parentId"
+        );
+        assert_eq!(
+            clone_project["inputSchema"]["required"],
+            json!(["url", "path"]),
+            "clone_project requires remote url and local path"
+        );
+        assert_eq!(
+            init_project["inputSchema"]["required"],
+            json!(["path"]),
+            "init_project requires a path for the new repo"
+        );
+        assert!(
+            RATE_LIMITED_TOOLS.contains(&"add_project")
+                && RATE_LIMITED_TOOLS.contains(&"clone_project")
+                && RATE_LIMITED_TOOLS.contains(&"init_project"),
+            "project lifecycle tools must be rate-limited"
+        );
+    }
+
+    #[test]
+    fn tool_registry_includes_worktree_lifecycle_tools() {
+        let tools = tool_registry();
+        let names: std::collections::HashSet<&str> = tools
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|item| item.get("name").and_then(|name| name.as_str()))
+            .collect();
+
+        for expected in [
+            "create_worktree_from_existing_branch",
+            "import_worktree",
+            "rename_worktree",
+            "archive_worktree",
+            "unarchive_worktree",
+            "list_archived_worktrees",
+            "delete_worktree",
+            "permanently_delete_worktree",
+        ] {
+            assert!(names.contains(expected), "missing MCP tool {expected}");
+        }
+
+        let create_from_branch = find_tool(&tools, "create_worktree_from_existing_branch");
+        assert_eq!(
+            create_from_branch["inputSchema"]["required"],
+            json!(["projectId", "branchName"])
+        );
+        assert!(
+            create_from_branch["inputSchema"]["properties"]
+                .get("autoOpenInJean")
+                .is_none(),
+            "MCP must not expose auto-open for create_worktree_from_existing_branch"
+        );
+
+        let list_archived = find_tool(&tools, "list_archived_worktrees");
+        assert!(
+            list_archived["inputSchema"]["properties"]
+                .get("projectId")
+                .is_some(),
+            "list_archived_worktrees should allow optional projectId filter"
+        );
+
+        let rename = find_tool(&tools, "rename_worktree");
+        assert_eq!(
+            rename["inputSchema"]["required"],
+            json!(["worktreeId", "newName"])
+        );
+
+        for limited in [
+            "archive_worktree",
+            "unarchive_worktree",
+            "delete_worktree",
+            "permanently_delete_worktree",
+            "import_worktree",
+            "create_worktree_from_existing_branch",
+        ] {
+            assert!(
+                RATE_LIMITED_TOOLS.contains(&limited),
+                "worktree mutation tool {limited} must be rate-limited"
+            );
+        }
+    }
+
+    #[test]
+    fn require_nonempty_str_rejects_blank_values() {
+        let err = require_nonempty_str(&json!({ "path": "   " }), "path").unwrap_err();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("path"));
+
+        let value = require_nonempty_str(&json!({ "path": " /tmp/repo " }), "path").unwrap();
+        assert_eq!(value, "/tmp/repo");
+    }
+
+    #[test]
     fn tool_registry_includes_first_release_observability_tools() {
         let tools = tool_registry();
         let names: std::collections::HashSet<&str> = tools
@@ -1618,6 +1932,34 @@ mod tests {
             update_worktree_labels["inputSchema"]["required"],
             json!(["worktreeId", "action"])
         );
+    }
+
+    #[test]
+    fn deletion_tools_report_background_work_as_started() {
+        for action in ["delete", "permanently_delete"] {
+            let result = deletion_started_result("worktree-1", action);
+
+            assert_eq!(result["worktreeId"], "worktree-1");
+            assert_eq!(result["action"], action);
+            assert_eq!(result["started"], true);
+            assert!(result.get("ok").is_none());
+        }
+    }
+
+    #[test]
+    fn deletion_tool_descriptions_explain_background_completion() {
+        let tools = tool_registry();
+
+        for name in ["delete_worktree", "permanently_delete_worktree"] {
+            let tool = find_tool(&tools, name);
+            let description = tool["description"]
+                .as_str()
+                .expect("tool description");
+
+            assert!(description.contains("background"));
+            assert!(description.contains("started"));
+            assert!(description.contains("not completion"));
+        }
     }
 
     #[test]

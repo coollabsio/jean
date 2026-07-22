@@ -1,6 +1,10 @@
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import { normalizeToolCallForDisplay, ToolCallInline } from './ToolCallInline'
+import {
+  normalizeToolCallForDisplay,
+  TaskCallInline,
+  ToolCallInline,
+} from './ToolCallInline'
 import type { ComponentProps } from 'react'
 import type * as InlineFileDiffModule from './InlineFileDiff'
 
@@ -320,5 +324,115 @@ describe('normalizeToolCallForDisplay', () => {
     expect(screen.getByText('Grep')).toBeInTheDocument()
     expect(screen.getByText('"needle" in /tmp')).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('TaskCallInline', () => {
+  it('shows the subagent final report when expanded', () => {
+    render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'task-1',
+          name: 'Task',
+          input: {
+            description: 'Explore auth',
+            prompt: 'Find how auth works',
+            subagent_type: 'Explore',
+          },
+          output:
+            'Findings: auth uses JWT middleware.\n\nEntry point is `src/auth.rs`.',
+        }}
+        subToolCalls={[
+          {
+            id: 'sub-read-1',
+            name: 'Read',
+            input: { file_path: 'src/auth.rs' },
+            parent_tool_use_id: 'task-1',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Task (Explore)')).toBeInTheDocument()
+    expect(screen.getByText('Explore auth')).toBeInTheDocument()
+    expect(screen.queryByText('Report:')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('Report:')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Findings: auth uses JWT middleware/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Find how auth works/)).toBeInTheDocument()
+  })
+
+  it('does not render a Report section when output is empty', () => {
+    render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'task-empty',
+          name: 'Task',
+          input: {
+            description: 'Still running',
+            prompt: 'Do research',
+          },
+          output: '   ',
+        }}
+        subToolCalls={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('Do research')).toBeInTheDocument()
+    expect(screen.queryByText('Report:')).not.toBeInTheDocument()
+  })
+
+  it('labels Agent tool calls as Agent and nests them', () => {
+    render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'agent-1',
+          name: 'Agent',
+          input: {
+            description: 'Nested agent',
+            prompt: 'Delegate work',
+            subagent_type: 'general-purpose',
+          },
+          output: 'Nested agent finished.',
+        }}
+        subToolCalls={[
+          {
+            id: 'agent-nested',
+            name: 'Agent',
+            input: {
+              description: 'Child agent',
+              prompt: 'Child work',
+            },
+            parent_tool_use_id: 'agent-1',
+          },
+        ]}
+        allToolCalls={[
+          {
+            id: 'agent-nested',
+            name: 'Agent',
+            input: {
+              description: 'Child agent',
+              prompt: 'Child work',
+            },
+            parent_tool_use_id: 'agent-1',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Agent (general-purpose)')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Agent (general-purpose)'))
+
+    expect(screen.getByText('Report:')).toBeInTheDocument()
+    expect(screen.getByText('Nested agent finished.')).toBeInTheDocument()
+    // Nested Agent renders as another TaskCallInline row, not a SubToolItem
+    expect(screen.getByText('Child agent')).toBeInTheDocument()
   })
 })

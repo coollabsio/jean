@@ -4,7 +4,9 @@ import {
   computeSessionCardData,
   getEffectiveSessionWaiting,
   getResumeArgs,
+  isDedicatedEmptyCodeReviewSession,
   shouldShowCodeReviewLoadingPanel,
+  shouldShowReviewFullWidth,
   statusConfig,
   type ChatStoreState,
 } from './session-card-utils'
@@ -326,6 +328,80 @@ describe('computeSessionCardData', () => {
         hasReviewResults: false,
       })
     ).toBe(true)
+  })
+
+  it('identifies dedicated empty Code Review sessions (no chat transcript)', () => {
+    expect(
+      isDedicatedEmptyCodeReviewSession(
+        createBaseSession({ name: 'Code Review · Codex · gpt-5.6-sol' })
+      )
+    ).toBe(true)
+    expect(
+      isDedicatedEmptyCodeReviewSession(
+        createBaseSession({
+          name: 'Code Review',
+          messages: [
+            {
+              id: 'm1',
+              session_id: 'session-1',
+              role: 'user',
+              content: 'hi',
+              timestamp: 1,
+              tool_calls: [],
+            },
+          ],
+        })
+      )
+    ).toBe(false)
+    expect(
+      isDedicatedEmptyCodeReviewSession(
+        createBaseSession({ name: 'Session 1' })
+      )
+    ).toBe(false)
+  })
+
+  it('uses full-width review on mobile only for dedicated empty Code Review', () => {
+    const emptyReview = createBaseSession({
+      name: 'Code Review',
+      is_reviewing: true,
+    })
+    const normalSession = createBaseSession({ name: 'Session 1' })
+
+    expect(
+      shouldShowReviewFullWidth({
+        hasReviewPanel: true,
+        reviewSidebarVisible: true,
+        isMobile: true,
+        session: emptyReview,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldShowReviewFullWidth({
+        hasReviewPanel: true,
+        reviewSidebarVisible: true,
+        isMobile: true,
+        session: normalSession,
+      })
+    ).toBe(false)
+
+    expect(
+      shouldShowReviewFullWidth({
+        hasReviewPanel: true,
+        reviewSidebarVisible: true,
+        isMobile: false,
+        session: normalSession,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldShowReviewFullWidth({
+        hasReviewPanel: true,
+        reviewSidebarVisible: false,
+        isMobile: true,
+        session: emptyReview,
+      })
+    ).toBe(false)
   })
 
   it('ignores stale persisted waiting_for_input on completed non-plan run', () => {

@@ -39,7 +39,7 @@ describe('SessionChatModal removal behavior', () => {
     )
   })
 
-  it('keeps the modal and session bar open when replacing the last session', () => {
+  it('waits for last-session removal success before leaving the modal', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
     const start = source.indexOf('const removeSessionTab = useCallback(')
     const end = source.indexOf('\n  const handleTabAuxClick', start)
@@ -48,6 +48,7 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(removeSessionTab).toContain('handleDeleteSession(session.id)')
     expect(removeSessionTab).not.toContain('onClose()')
+    expect(removeSessionTab).not.toContain('navigateToProjectPicker(')
   })
 
   it('uses terminal-like square tab styling for session header tabs', () => {

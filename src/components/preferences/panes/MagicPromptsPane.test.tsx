@@ -429,6 +429,36 @@ describe('MagicPromptsPane', () => {
     )
   })
 
+  it('applies yolo execution mode for Grok investigation defaults', async () => {
+    installedBackendsMock = ['claude', 'codex', 'grok']
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Grok Defaults' }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'grok/grok-4.5',
+        }),
+        magic_prompt_backends: expect.objectContaining({
+          investigate_issue_backend: 'grok',
+        }),
+        magic_prompt_modes: expect.objectContaining({
+          investigate_issue_mode: 'yolo',
+          investigate_pr_mode: 'yolo',
+          investigate_workflow_run_mode: 'yolo',
+          investigate_security_alert_mode: 'yolo',
+          investigate_advisory_mode: 'yolo',
+          investigate_linear_issue_mode: 'yolo',
+          investigate_sentry_issue_mode: 'yolo',
+          review_comments_mode: 'plan',
+        }),
+      })
+    )
+  })
+
   it('adds a second unique backend and model to code review', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)

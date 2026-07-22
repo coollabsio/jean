@@ -184,6 +184,17 @@ export function getEffectiveSessionWaiting(
   return storeState.waitingForInputSessionIds[session.id] ?? false
 }
 
+/** Backend-created Code Review tabs have no chat transcript (background job). */
+export function isDedicatedEmptyCodeReviewSession(
+  session: Session | null | undefined
+): boolean {
+  return (
+    !!session &&
+    session.name.startsWith('Code Review') &&
+    session.messages.length === 0
+  )
+}
+
 export function shouldShowCodeReviewLoadingPanel({
   session,
   isSessionReviewing,
@@ -194,7 +205,28 @@ export function shouldShowCodeReviewLoadingPanel({
   hasReviewResults: boolean
 }): boolean {
   if (!session || !isSessionReviewing || hasReviewResults) return false
-  return session.name.startsWith('Code Review') && session.messages.length === 0
+  return isDedicatedEmptyCodeReviewSession(session)
+}
+
+/**
+ * When true, ChatWindow replaces the chat surface with ReviewResultsPanel.
+ * Desktop: any open review panel. Mobile: only dedicated empty Code Review
+ * sessions (empty left chat + loading split is useless there).
+ */
+export function shouldShowReviewFullWidth({
+  hasReviewPanel,
+  reviewSidebarVisible,
+  isMobile,
+  session,
+}: {
+  hasReviewPanel: boolean
+  reviewSidebarVisible: boolean
+  isMobile: boolean
+  session: Session | null | undefined
+}): boolean {
+  if (!hasReviewPanel || !reviewSidebarVisible) return false
+  if (!isMobile) return true
+  return isDedicatedEmptyCodeReviewSession(session)
 }
 
 export function computeSessionCardData(
