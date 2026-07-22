@@ -2435,8 +2435,165 @@ fn normalize_item_types(item: &serde_json::Value) -> serde_json::Value {
         if let Some(agent_path) = obj.remove("agentPath") {
             obj.insert("agent_path".to_string(), agent_path);
         }
+        // image_generation fields
+        if let Some(revised) = obj.remove("revisedPrompt") {
+            obj.insert("revised_prompt".to_string(), revised);
+        }
+        if let Some(saved) = obj.remove("savedPath") {
+            obj.insert("saved_path".to_string(), saved);
+        }
     }
     item
+}
+
+/// Display name for Codex informational thread items (web search, image tools, etc.).
+fn informational_tool_name(item_type: &str) -> Option<&'static str> {
+    match item_type {
+        "web_search" => Some("CodexWebSearch"),
+        "image_generation" => Some("CodexImageGeneration"),
+        "image_view" => Some("CodexImageView"),
+        "context_compaction" => Some("CodexContextCompaction"),
+        _ => None,
+    }
+}
+
+/// Build a UI-friendly input object for Codex informational items.
+///
+/// Codex app-server items store payload fields at the top level (`query`, `path`,
+/// `action`, `results`, …) rather than under a nested `arguments` object. We
+/// strip transport metadata (`id`/`type`) so the chat UI can show useful detail
+/// instead of a blank row with output `"completed"`.
+fn informational_tool_input(item_type: &str, item: &serde_json::Value) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    match item_type {
+        "web_search" => {
+            if let Some(query) = item.get("query") {
+                map.insert("query".to_string(), query.clone());
+            }
+            if let Some(action) = item.get("action") {
+                if !action.is_null() {
+                    map.insert("action".to_string(), action.clone());
+                }
+            }
+            if let Some(results) = item.get("results") {
+                if !results.is_null() {
+                    map.insert("results".to_string(), results.clone());
+                }
+            }
+        }
+        "image_view" => {
+            if let Some(path) = item.get("path") {
+                map.insert("path".to_string(), path.clone());
+            }
+        }
+        "image_generation" => {
+            for (src, dst) in [
+                ("prompt", "prompt"),
+                ("status", "status"),
+                ("result", "result"),
+                ("revised_prompt", "revised_prompt"),
+                ("revisedPrompt", "revised_prompt"),
+                ("saved_path", "saved_path"),
+                ("savedPath", "saved_path"),
+            ] {
+                if let Some(value) = item.get(src) {
+                    if !value.is_null() {
+                        map.insert(dst.to_string(), value.clone());
+                    }
+                }
+            }
+        }
+        "context_compaction" => {
+            if let Some(summary) = item.get("summary") {
+                if !summary.is_null() {
+                    map.insert("summary".to_string(), summary.clone());
+                }
+            }
+        }
+        _ => return item.clone(),
+    }
+    serde_json::Value::Object(map)
+}
+
+/// Format a human-readable tool output for Codex informational items.
+/// Prefer structured fields (`results`, `path`, …) over the useless `"completed"`
+/// placeholder that previously leaked into the UI.
+fn informational_tool_output(item_type: &str, item: &serde_json::Value) -> String {
+    match item_type {
+        "web_search" => {
+            if let Some(results) = item.get("results") {
+                if !results.is_null() {
+                    if let Some(s) = results.as_str() {
+                        if !s.is_empty() {
+                            return s.to_string();
+                        }
+                    } else if let Ok(pretty) = serde_json::to_string_pretty(results) {
+                        if pretty != "null" && pretty != "[]" {
+                            return pretty;
+                        }
+                    }
+                }
+            }
+            // Fall back to a short action/query summary rather than "completed".
+            if let Some(action) = item.get("action").filter(|v| !v.is_null()) {
+                if let Some(url) = action.get("url").and_then(|v| v.as_str()) {
+                    if !url.is_empty() {
+                        return format!("Opened {url}");
+                    }
+                }
+                if let Some(pattern) = action.get("pattern").and_then(|v| v.as_str()) {
+                    if !pattern.is_empty() {
+                        return format!("Find in page: {pattern}");
+                    }
+                }
+            }
+            if let Some(query) = item.get("query").and_then(|v| v.as_str()) {
+                if !query.is_empty() {
+                    return format!("Searched: {query}");
+                }
+            }
+            String::new()
+        }
+        "image_view" => item
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        "image_generation" => {
+            if let Some(path) = item
+                .get("saved_path")
+                .or_else(|| item.get("savedPath"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                return path.to_string();
+            }
+            if let Some(result) = item.get("result") {
+                if let Some(s) = result.as_str() {
+                    if !s.is_empty() {
+                        return s.to_string();
+                    }
+                } else if let Ok(pretty) = serde_json::to_string_pretty(result) {
+                    if pretty != "null" {
+                        return pretty;
+                    }
+                }
+            }
+            item.get("status")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        }
+        "context_compaction" => item
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Context compacted".to_string()),
+        _ => String::new(),
+    }
 }
 
 fn sub_agent_activity_tool(item: &serde_json::Value) -> Option<(&'static str, serde_json::Value)> {
@@ -3221,19 +3378,15 @@ fn process_codex_event(
                 }
                 // Informational tool-like events — surface as tool calls in the UI
                 "web_search" | "image_generation" | "image_view" | "context_compaction" => {
-                    let tool_name = match item_type {
-                        "web_search" => "CodexWebSearch",
-                        "image_generation" => "CodexImageGeneration",
-                        "image_view" => "CodexImageView",
-                        "context_compaction" => "CodexContextCompaction",
-                        _ => unreachable!(),
-                    };
+                    let tool_name = informational_tool_name(item_type).unwrap_or("CodexTool");
                     let tool_id = if item_id.is_empty() {
                         uuid::Uuid::new_v4().to_string()
                     } else {
                         item_id.to_string()
                     };
-                    let input = item.clone();
+                    // Extract UI-facing fields (query/path/action) rather than the
+                    // raw item envelope which only has type/id until completion.
+                    let input = informational_tool_input(item_type, item);
                     tool_calls.push(ToolCall {
                         id: tool_id.clone(),
                         name: tool_name.to_string(),
@@ -3489,30 +3642,51 @@ fn process_codex_event(
                         );
                     }
                 }
-                // Informational tool-like events — populate output for UI
+                // Informational tool-like events — enrich input + meaningful output.
+                // These items put payload on the item itself (query/results/path), not
+                // under output/result — the old "completed" fallback blanked the UI.
                 "web_search" | "image_generation" | "image_view" | "context_compaction" => {
-                    let output = if item_type == "context_compaction" {
-                        item.get("summary")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Context compacted")
-                            .to_string()
-                    } else {
-                        item.get("output")
-                            .or_else(|| item.get("result"))
-                            .map(|v| {
-                                if let Some(s) = v.as_str() {
-                                    s.to_string()
-                                } else {
-                                    serde_json::to_string(v).unwrap_or_default()
-                                }
-                            })
-                            .unwrap_or_else(|| "completed".to_string())
-                    };
-                    let tool_id = pending_tool_ids.remove(item_id).unwrap_or_default();
-                    if !tool_id.is_empty() {
-                        if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
+                    let input = informational_tool_input(item_type, item);
+                    let output = informational_tool_output(item_type, item);
+                    let tool_name = informational_tool_name(item_type).unwrap_or("CodexTool");
+                    let tool_id = pending_tool_ids.remove(item_id).unwrap_or_else(|| {
+                        if item_id.is_empty() {
+                            uuid::Uuid::new_v4().to_string()
+                        } else {
+                            item_id.to_string()
+                        }
+                    });
+                    if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
+                        tc.input = input.clone();
+                        if !output.is_empty() {
                             tc.output = Some(output.clone());
                         }
+                    } else {
+                        // Completion without a prior start (recovery / missed start).
+                        tool_calls.push(ToolCall {
+                            id: tool_id.clone(),
+                            name: tool_name.to_string(),
+                            input: input.clone(),
+                            output: (!output.is_empty()).then_some(output.clone()),
+                            parent_tool_use_id: None,
+                        });
+                        content_blocks.push(ContentBlock::ToolUse {
+                            tool_call_id: tool_id.clone(),
+                        });
+                    }
+                    // Re-emit tool_use so live UI picks up enriched input (query/results).
+                    let _ = app.emit_all(
+                        "chat:tool_use",
+                        &ToolUseEvent {
+                            session_id: session_id.to_string(),
+                            worktree_id: worktree_id.to_string(),
+                            id: tool_id.clone(),
+                            name: tool_name.to_string(),
+                            input,
+                            parent_tool_use_id: None,
+                        },
+                    );
+                    if !output.is_empty() {
                         let _ = app.emit_all(
                             "chat:tool_result",
                             &ToolResultEvent {
@@ -3980,6 +4154,30 @@ pub fn parse_codex_run_to_message(
                             pending_tool_ids.insert(item_id.to_string(), tool_id);
                         }
                     }
+                    // Informational items (web search, image tools) — history path
+                    "web_search" | "image_generation" | "image_view" | "context_compaction" => {
+                        let tool_name =
+                            informational_tool_name(item_type).unwrap_or("CodexTool");
+                        let tool_id = if item_id.is_empty() {
+                            Uuid::new_v4().to_string()
+                        } else {
+                            item_id.to_string()
+                        };
+                        let input = informational_tool_input(item_type, item);
+                        tool_calls.push(ToolCall {
+                            id: tool_id.clone(),
+                            name: tool_name.to_string(),
+                            input,
+                            output: None,
+                            parent_tool_use_id: None,
+                        });
+                        content_blocks.push(ContentBlock::ToolUse {
+                            tool_call_id: tool_id.clone(),
+                        });
+                        if !item_id.is_empty() {
+                            pending_tool_ids.insert(item_id.to_string(), tool_id);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -4178,6 +4376,37 @@ pub fn parse_codex_run_to_message(
                                 name: tool_name.to_string(),
                                 input,
                                 output: Some("completed".to_string()),
+                                parent_tool_use_id: None,
+                            });
+                            content_blocks.push(ContentBlock::ToolUse {
+                                tool_call_id: tool_id,
+                            });
+                        }
+                    }
+                    // Informational items — enrich input + meaningful output (history)
+                    "web_search" | "image_generation" | "image_view" | "context_compaction" => {
+                        let input = informational_tool_input(item_type, item);
+                        let output = informational_tool_output(item_type, item);
+                        let tool_name =
+                            informational_tool_name(item_type).unwrap_or("CodexTool");
+                        let tool_id = pending_tool_ids.remove(item_id).unwrap_or_else(|| {
+                            if item_id.is_empty() {
+                                Uuid::new_v4().to_string()
+                            } else {
+                                item_id.to_string()
+                            }
+                        });
+                        if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
+                            tc.input = input;
+                            if !output.is_empty() {
+                                tc.output = Some(output);
+                            }
+                        } else {
+                            tool_calls.push(ToolCall {
+                                id: tool_id.clone(),
+                                name: tool_name.to_string(),
+                                input,
+                                output: (!output.is_empty()).then_some(output),
                                 parent_tool_use_id: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
@@ -5651,6 +5880,156 @@ mod tests {
             extract_codex_structured_output(output).unwrap(),
             r####"{"title":"Release notes","body":"### Fixes\n- Fixed session recovery."}"####
         );
+    }
+
+    #[test]
+    fn informational_tool_input_extracts_web_search_fields() {
+        let item = serde_json::json!({
+            "id": "ws-1",
+            "type": "web_search",
+            "query": "tauri v2 plugins",
+            "action": { "type": "search", "query": "tauri v2 plugins" },
+            "results": [
+                { "title": "Tauri docs", "url": "https://v2.tauri.app" }
+            ]
+        });
+        let input = informational_tool_input("web_search", &item);
+        assert_eq!(
+            input.get("query").and_then(|v| v.as_str()),
+            Some("tauri v2 plugins")
+        );
+        assert!(input.get("id").is_none());
+        assert!(input.get("type").is_none());
+        assert_eq!(
+            input
+                .get("action")
+                .and_then(|a| a.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("search")
+        );
+        assert!(input.get("results").and_then(|v| v.as_array()).is_some());
+    }
+
+    #[test]
+    fn informational_tool_output_prefers_results_over_completed() {
+        let item = serde_json::json!({
+            "id": "ws-1",
+            "type": "web_search",
+            "query": "rust serde",
+            "results": [{ "title": "serde.rs", "url": "https://serde.rs" }]
+        });
+        let output = informational_tool_output("web_search", &item);
+        assert!(output.contains("serde.rs"), "output was: {output}");
+        assert_ne!(output, "completed");
+    }
+
+    #[test]
+    fn informational_tool_output_image_view_uses_path() {
+        let item = serde_json::json!({
+            "id": "img-1",
+            "type": "image_view",
+            "path": "/tmp/screenshot.png"
+        });
+        let input = informational_tool_input("image_view", &item);
+        assert_eq!(
+            input.get("path").and_then(|v| v.as_str()),
+            Some("/tmp/screenshot.png")
+        );
+        assert_eq!(
+            informational_tool_output("image_view", &item),
+            "/tmp/screenshot.png"
+        );
+    }
+
+    #[test]
+    fn informational_tool_output_open_page_falls_back_to_url() {
+        let item = serde_json::json!({
+            "id": "ws-2",
+            "type": "web_search",
+            "query": "",
+            "action": { "type": "openPage", "url": "https://example.com/docs" }
+        });
+        let output = informational_tool_output("web_search", &item);
+        assert_eq!(output, "Opened https://example.com/docs");
+    }
+
+    #[test]
+    fn normalize_item_types_maps_web_search_and_image_fields() {
+        let raw = serde_json::json!({
+            "type": "imageGeneration",
+            "id": "ig-1",
+            "status": "completed",
+            "result": "ok",
+            "revisedPrompt": "a cat",
+            "savedPath": "/tmp/cat.png"
+        });
+        let normalized = normalize_item_types(&raw);
+        assert_eq!(
+            normalized.get("type").and_then(|v| v.as_str()),
+            Some("image_generation")
+        );
+        assert_eq!(
+            normalized.get("revised_prompt").and_then(|v| v.as_str()),
+            Some("a cat")
+        );
+        assert_eq!(
+            normalized.get("saved_path").and_then(|v| v.as_str()),
+            Some("/tmp/cat.png")
+        );
+    }
+
+    #[test]
+    fn parse_run_surfaces_web_search_query_and_results() {
+        let lines = vec![
+            r#"{"type":"item.started","item":{"id":"ws-1","type":"webSearch","query":"tauri plugins"}}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"ws-1","type":"webSearch","query":"tauri plugins","results":[{"title":"Docs","url":"https://v2.tauri.app"}]}}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"msg-1","type":"agentMessage","text":"Found docs."}}"#.to_string(),
+            r#"{"type":"turn.completed"}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-ws".to_string(),
+            user_message_id: "user-ws".to_string(),
+            user_message: "search".to_string(),
+            model: None,
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: RunStatus::Completed,
+            assistant_message_id: Some("assistant-ws".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+        };
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+        let web = message
+            .tool_calls
+            .iter()
+            .find(|tc| tc.name == "CodexWebSearch")
+            .expect("CodexWebSearch tool call");
+        assert_eq!(
+            web.input.get("query").and_then(|v| v.as_str()),
+            Some("tauri plugins")
+        );
+        assert!(
+            web.output
+                .as_deref()
+                .is_some_and(|o| o.contains("Docs") || o.contains("tauri")),
+            "output should include results, got: {:?}",
+            web.output
+        );
+        assert_ne!(web.output.as_deref(), Some("completed"));
     }
 }
 
