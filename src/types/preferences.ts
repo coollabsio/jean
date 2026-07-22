@@ -1186,7 +1186,7 @@ export interface AppPreferences {
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
   terminal_font_size?: number // Embedded terminal font size in pixels
-  editor: EditorApp // Editor app: 'zed' | 'vscode' | 'cursor' | 'xcode'
+  editor: EditorApp // Editor app: 'zed' | 'vscode' | 'vscodium' | 'cursor' | 'xcode' | 'intellij'
   open_in: OpenInDefault // Default Open In action: 'editor' | 'terminal' | 'finder' | 'github'
   auto_branch_naming: boolean // Automatically generate branch names from first message
   branch_naming_model: ClaudeModel // Model for generating branch names
@@ -1827,7 +1827,13 @@ export function getTerminalOptions(): { value: TerminalApp; label: string }[] {
 export const terminalOptions: { value: TerminalApp; label: string }[] =
   getTerminalOptions()
 
-export type EditorApp = 'zed' | 'vscode' | 'cursor' | 'xcode' | 'intellij'
+export type EditorApp =
+  | 'zed'
+  | 'vscode'
+  | 'vscodium'
+  | 'cursor'
+  | 'xcode'
+  | 'intellij'
 
 const allEditorOptions: {
   value: EditorApp
@@ -1838,6 +1844,11 @@ const allEditorOptions: {
   {
     value: 'vscode',
     label: 'VS Code',
+    platforms: ['mac', 'windows', 'linux'],
+  },
+  {
+    value: 'vscodium',
+    label: 'VSCodium',
     platforms: ['mac', 'windows', 'linux'],
   },
   {

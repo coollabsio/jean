@@ -181,6 +181,7 @@ pub async fn open_file_in_default_app(
     let editor = editor.unwrap_or_else(|| "zed".to_string());
     let binary = match editor.as_str() {
         "vscode" => "code",
+        "vscodium" => "codium",
         "cursor" => "cursor",
         "xcode" => "xed",
         "intellij" => "idea",
