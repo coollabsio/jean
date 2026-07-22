@@ -57,6 +57,7 @@ import {
   normalizeQuestionMultipleField,
 } from '@/types/chat'
 import { MessageSettingsBadges } from '@/components/chat/MessageSettingsBadges'
+import { usePreferences } from '@/services/preferences'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 
 interface MessageItemProps {
@@ -192,6 +193,9 @@ export const MessageItem = memo(function MessageItem({
   hideCancelledIndicator,
   durationMs,
 }: MessageItemProps) {
+  const { data: preferences } = usePreferences()
+  const groupToolCallsAndThinking =
+    preferences?.group_tool_calls_and_thinking ?? true
   // Only show Approve button for the last message with ExitPlanMode
   const isLatestPlanRequest = messageIndex === lastPlanMessageIndex
 
@@ -396,7 +400,8 @@ export const MessageItem = memo(function MessageItem({
               try {
                 timeline = buildTimeline(
                   message.content_blocks,
-                  message.tool_calls ?? []
+                  message.tool_calls ?? [],
+                  groupToolCallsAndThinking
                 )
               } catch (e) {
                 logger.error('Failed to build timeline for message', {

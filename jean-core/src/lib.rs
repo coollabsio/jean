@@ -379,6 +379,8 @@ pub struct AppPreferences {
     pub coderabbit_cli_source: String, // CodeRabbit CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
     pub expand_tool_calls_by_default: bool, // Expand all tool call collapsibles by default (default: false)
+    #[serde(default = "default_group_tool_calls_and_thinking")]
+    pub group_tool_calls_and_thinking: bool, // Combine consecutive thinking and tool calls into one activity block
     #[serde(default)]
     pub window_vibrancy: bool, // macOS window vibrancy effect (high GPU cost, default false)
     #[serde(default = "default_terminal_background")]
@@ -591,6 +593,10 @@ fn default_compact_chat_view_enabled() -> bool {
     true // Enabled by default
 }
 
+fn default_group_tool_calls_and_thinking() -> bool {
+    true // Enabled by default
+}
+
 fn default_auto_recaps_enabled() -> bool {
     true // Enabled by default
 }
@@ -794,6 +800,19 @@ mod tests {
 
         assert!(prefs.parallel_execution_prompt_enabled);
         assert!(prefs.codex_multi_agent_enabled);
+    }
+
+    #[test]
+    fn tool_call_and_thinking_grouping_defaults_on_for_existing_preferences() {
+        let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("group_tool_calls_and_thinking");
+
+        let prefs: AppPreferences = serde_json::from_value(value).unwrap();
+
+        assert!(prefs.group_tool_calls_and_thinking);
     }
 
     #[test]
@@ -2404,6 +2423,7 @@ impl Default for AppPreferences {
             commandcode_cli_source: default_cli_source(),
             coderabbit_cli_source: default_cli_source(),
             expand_tool_calls_by_default: false,
+            group_tool_calls_and_thinking: default_group_tool_calls_and_thinking(),
             window_vibrancy: false,
             terminal_background: default_terminal_background(),
             terminal_background_custom: None,

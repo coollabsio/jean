@@ -353,6 +353,21 @@ export const AppearancePane: React.FC = () => {
             </Select>
           </InlineField>
 
+          <InlineField
+            label="Group tool calls and thinking"
+            description="Combine consecutive thinking and tool calls into one collapsible activity block."
+          >
+            <Switch
+              checked={preferences?.group_tool_calls_and_thinking ?? true}
+              onCheckedChange={checked => {
+                patchPreferences.mutate({
+                  group_tool_calls_and_thinking: checked,
+                })
+              }}
+              disabled={patchPreferences.isPending}
+            />
+          </InlineField>
+
           {isClientMacOS && (
             <InlineField
               label="Window transparency"

@@ -251,7 +251,8 @@ export function coalesceContentBlocks(blocks: ContentBlock[]): ContentBlock[] {
 
 export function buildTimeline(
   contentBlocks: ContentBlock[],
-  toolCalls: ToolCall[]
+  toolCalls: ToolCall[],
+  groupStackables = true
 ): TimelineItem[] {
   const normalizedBlocks = coalesceContentBlocks(contentBlocks)
   const result: TimelineItem[] = []
@@ -473,8 +474,10 @@ export function buildTimeline(
     }
   }
 
-  // Merge consecutive stackable items (thinking + standalone tools) into groups
-  return mergeConsecutiveStackables(result)
+  // Merge consecutive stackable items (thinking + standalone tools) into groups.
+  // Keeping this optional lets the chat preference show the same activity as
+  // individual, chronological rows without changing the stored message data.
+  return groupStackables ? mergeConsecutiveStackables(result) : result
 }
 
 /**

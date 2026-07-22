@@ -106,7 +106,13 @@ describe('ToolCallInline', () => {
     )
 
     expect(screen.getByText('Read 20 lines')).toBeInTheDocument()
-    expect(screen.getByText('package.json')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'CODE' && element.textContent === 'package.json'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('package.json')).toHaveClass('text-amber-400')
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button'))
@@ -197,7 +203,12 @@ describe('ToolCallInline', () => {
       )
 
       expect(screen.getByText(tool.label)).toBeInTheDocument()
-      expect(screen.getByText(tool.detail)).toBeInTheDocument()
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === 'CODE' && element.textContent === tool.detail
+        )
+      ).toBeInTheDocument()
       expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
       unmount()
     }
@@ -224,7 +235,7 @@ describe('ToolCallInline', () => {
 
     fireEvent.click(screen.getByRole('button'))
 
-    expect(screen.getByText('chat-store.ts')).toBeInTheDocument()
+    expect(screen.getAllByText('chat-store.ts')).toHaveLength(2)
     expect(screen.getByText('update')).toBeInTheDocument()
     expect(inlineFileDiffProps.at(-1)).toMatchObject({
       patch: '@@ -1 +1 @@\n-old\n+new',
@@ -251,7 +262,12 @@ describe('ToolCallInline', () => {
 
     fireEvent.click(screen.getByRole('button'))
 
-    expect(screen.getAllByText('legacy.ts')).toHaveLength(2)
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'CODE' && element.textContent === 'legacy.ts'
+      )
+    ).toBeInTheDocument()
     expect(container.querySelector('diffs-container')).not.toBeNull()
     expect(screen.queryByText('Output:')).not.toBeInTheDocument()
   })
@@ -318,7 +334,9 @@ describe('normalizeToolCallForDisplay', () => {
     )
 
     expect(screen.getByText('Grep')).toBeInTheDocument()
-    expect(screen.getByText('"needle" in /tmp')).toBeInTheDocument()
+    expect(
+      screen.getByText((_, element) => element?.textContent === '"needle" in /tmp')
+    ).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
   })
 })

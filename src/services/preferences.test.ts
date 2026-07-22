@@ -103,6 +103,10 @@ describe('model option helpers', () => {
     expect(defaultPreferences.compact_chat_view_enabled).toBe(true)
   })
 
+  it('groups tool calls and thinking by default', () => {
+    expect(defaultPreferences.group_tool_calls_and_thinking).toBe(true)
+  })
+
   it('syncs desktop and mobile zoom by default', () => {
     expect(defaultPreferences.zoom_level).toBe(ZOOM_LEVEL_DEFAULT)
     expect(defaultPreferences.mobile_zoom_level).toBe(ZOOM_LEVEL_DEFAULT)

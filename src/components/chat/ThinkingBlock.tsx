@@ -23,7 +23,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   isStreaming = false,
 }: ThinkingBlockProps) {
   return (
-    <details className="group border border-border/50 rounded-md bg-muted/30">
+    <details className="group min-w-0">
       <summary
         className={cn(
           TOOL_CALL_ROW_CLASS,
@@ -32,10 +32,10 @@ export const ThinkingBlock = memo(function ThinkingBlock({
       >
         <Brain className={cn('h-3.5 w-3.5 shrink-0 text-purple-500')} />
         <span>Thinking...</span>
-        <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-open:rotate-90" />
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-open:rotate-90" />
       </summary>
-      <div className="border-t border-border/50 px-3 py-2">
-        <div className="pl-4 border-l-2 border-purple-500/30 text-sm text-muted-foreground">
+      <div className="ml-5 border-l border-purple-500/30 pl-3 py-1.5">
+        <div className="text-sm text-muted-foreground">
           <Markdown streaming={isStreaming} variant="tool-call">
             {thinking}
           </Markdown>
