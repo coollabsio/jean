@@ -4,13 +4,21 @@ import { render, screen } from '@/test/test-utils'
 import { ChatToolbar } from './ChatToolbar'
 import type { ChatToolbarProps } from './toolbar/types'
 
-vi.mock('@/store/terminal-store', () => ({
-  useTerminalStore: {
-    getState: () => ({
-      toggleModalTerminal: vi.fn(),
-    }),
-  },
-}))
+vi.mock('@/store/terminal-store', () => {
+  const state = {
+    terminals: {},
+    runningTerminals: new Set<string>(),
+    failedTerminals: new Set<string>(),
+    toggleModalTerminal: vi.fn(),
+  }
+  return {
+    isPanelTerminal: () => true,
+    useTerminalStore: Object.assign(
+      (selector: (value: typeof state) => unknown) => selector(state),
+      { getState: () => state }
+    ),
+  }
+})
 
 beforeEach(() => {
   vi.stubGlobal(

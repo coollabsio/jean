@@ -19,7 +19,6 @@ import {
   ShieldAlert,
   Sparkles,
   Star,
-  Terminal,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -84,6 +83,8 @@ import { BackendLabel } from '@/components/ui/backend-label'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { useWorktreeTerminalStatus } from '@/hooks/useWorktreeTerminalStatus'
+import { TerminalActivityIcon } from '@/components/chat/TerminalActivityIcon'
 import { useUIStore } from '@/store/ui-store'
 import {
   useProjects,
@@ -271,6 +272,7 @@ export function MobileSettingsMenu({
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<string | null>(null)
+  const { hasActiveTerminal } = useWorktreeTerminalStatus(worktreeId ?? '')
   const providerDisplayName = getProviderDisplayName(selectedProvider)
   const { data: worktree } = useWorktree(worktreeId ?? null)
   const { data: projects } = useProjects()
@@ -707,8 +709,12 @@ export function MobileSettingsMenu({
           )}
           {worktreeId && (
             <DropdownMenuItem onSelect={handleToggleTerminal}>
-              <Terminal className="h-4 w-4" />
+              <TerminalActivityIcon
+                active={hasActiveTerminal}
+                className="h-4 w-4"
+              />
               Terminal
+              {hasActiveTerminal && <span className="sr-only"> active</span>}
             </DropdownMenuItem>
           )}
           {resumeCommand && (

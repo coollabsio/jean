@@ -4,8 +4,14 @@ import { Zap } from 'lucide-react'
 import { fireEvent, render, screen, within } from '@/test/test-utils'
 import { MobileSettingsMenu } from './MobileSettingsMenu'
 import * as platform from '@/lib/platform'
+import { useTerminalStore } from '@/store/terminal-store'
 
 beforeEach(() => {
+  useTerminalStore.setState({
+    terminals: {},
+    runningTerminals: new Set(),
+    failedTerminals: new Set(),
+  })
   vi.stubGlobal(
     'matchMedia',
     vi.fn().mockImplementation(() => ({
@@ -61,6 +67,23 @@ const baseProps = {
 }
 
 describe('MobileSettingsMenu', () => {
+  it('badges the terminal menu item while a panel PTY is active', async () => {
+    const user = userEvent.setup()
+    const terminalId = useTerminalStore.getState().addTerminal('worktree-1')
+    useTerminalStore.getState().setTerminalRunning(terminalId, true)
+
+    render(<MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />)
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+    const terminalItem = screen
+      .getByText('Terminal')
+      .closest('[role="menuitem"]')
+    expect(terminalItem).toHaveTextContent('Terminal active')
+    expect(
+      terminalItem?.querySelector('[data-testid="terminal-active-badge"]')
+    ).not.toBeNull()
+  })
+
   it('aligns the mobile Effort label with the other setting labels', async () => {
     const user = userEvent.setup()
     const originalInnerWidth = window.innerWidth

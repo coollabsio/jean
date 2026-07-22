@@ -20,7 +20,6 @@ import {
   Pencil,
   RefreshCw,
   Tag,
-  Terminal,
   Globe,
   Play,
   Plus,
@@ -44,7 +43,7 @@ import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { CloseWorktreeDialog } from './CloseWorktreeDialog'
 import { useChatStore } from '@/store/chat-store'
-import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
 import {
@@ -78,6 +77,8 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
 import { ModalTerminalDrawer } from './ModalTerminalDrawer'
+import { TerminalActivityIcon } from './TerminalActivityIcon'
+import { useWorktreeTerminalStatus } from '@/hooks/useWorktreeTerminalStatus'
 import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
 import { ScriptsButton } from '@/components/open-in/ScriptsButton'
@@ -264,18 +265,8 @@ export function SessionChatModal({
   const hasBottomBrowser =
     isBrowserModalOpen && browserModalDockMode === 'bottom'
   const hasBottomDock = hasBottomTerminal || hasBottomBrowser
-  const hasRunningTerminal = useTerminalStore(state => {
-    const terminals = state.terminals[worktreeId] ?? []
-    return terminals.some(
-      t => isPanelTerminal(t) && state.runningTerminals.has(t.id)
-    )
-  })
-  const hasFailedTerminal = useTerminalStore(state => {
-    const terminals = state.terminals[worktreeId] ?? []
-    return terminals.some(
-      t => isPanelTerminal(t) && !!t.command && state.failedTerminals.has(t.id)
-    )
-  })
+  const { hasActiveTerminal, hasRunningTerminal, hasFailedTerminal } =
+    useWorktreeTerminalStatus(worktreeId)
   const terminalShortcut = formatShortcutDisplay(
     preferences?.keybindings?.toggle_terminal ??
       DEFAULT_KEYBINDINGS.toggle_terminal
@@ -1124,18 +1115,25 @@ export function SessionChatModal({
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        aria-label="Toggle terminal"
+                        aria-label={
+                          hasActiveTerminal
+                            ? 'Toggle terminal (active)'
+                            : 'Toggle terminal'
+                        }
                         onClick={() => {
                           useTerminalStore
                             .getState()
                             .toggleModalTerminal(worktreeId)
                         }}
                       >
-                        <Terminal className="h-3 w-3" />
+                        <TerminalActivityIcon
+                          active={hasActiveTerminal}
+                          className="h-3 w-3"
+                        />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      Terminal{' '}
+                      {hasActiveTerminal ? 'Terminal active' : 'Terminal'}{' '}
                       <kbd className="ml-1 text-[0.625rem] opacity-60">
                         {terminalShortcut}
                       </kbd>
