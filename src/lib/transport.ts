@@ -184,6 +184,9 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'send_native_notification',
   'read_clipboard_image',
   'write_clipboard_text',
+  // Quit confirmation must query the local process registry — remote sessions
+  // survive client exit, and the remote WS may be down while loading/switching.
+  'has_running_sessions',
   'browser_create',
   'browser_navigate',
   'browser_back',

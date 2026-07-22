@@ -17,7 +17,7 @@ import { logger } from '@/lib/logger'
  * Only shown in production mode (dev mode allows immediate quit).
  *
  * Listens for the 'quit-confirmation-requested' custom event dispatched
- * by useMainWindowEventListeners when running sessions are detected.
+ * by useNativeWindowCloseGuard / window-close when running sessions are detected.
  */
 export function QuitConfirmationDialog() {
   const [open, setOpen] = useState(false)
@@ -39,8 +39,8 @@ export function QuitConfirmationDialog() {
   const handleQuit = async () => {
     if (!isNativeApp()) return
     try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().destroy()
+      const { destroyAppWindow } = await import('@/lib/window-close')
+      await destroyAppWindow()
     } catch (error) {
       logger.error('Failed to destroy window', { error })
     }
