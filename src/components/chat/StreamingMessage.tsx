@@ -34,6 +34,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { logger } from '@/lib/logger'
+import { usePreferences } from '@/services/preferences'
 
 function WorkingVisualRow() {
   return (
@@ -101,6 +102,9 @@ export const StreamingMessage = memo(function StreamingMessage({
   areQuestionsSkipped,
   onCopySteeredText,
 }: StreamingMessageProps) {
+  const { data: preferences } = usePreferences()
+  const groupToolCallsAndThinking =
+    preferences?.group_tool_calls_and_thinking ?? true
   const resolvedPlan = useMemo(
     () =>
       resolvePlanContent({
@@ -126,7 +130,11 @@ export const StreamingMessage = memo(function StreamingMessage({
     if (contentBlocks.length === 0) return null
     let timeline: TimelineItem[]
     try {
-      timeline = buildTimeline(contentBlocks, toolCalls)
+      timeline = buildTimeline(
+        contentBlocks,
+        toolCalls,
+        groupToolCallsAndThinking
+      )
     } catch (e) {
       logger.error('Failed to build streaming timeline', {
         sessionId,
@@ -162,7 +170,7 @@ export const StreamingMessage = memo(function StreamingMessage({
       textBlockIndexByText,
       incompleteIndices,
     }
-  }, [contentBlocks, toolCalls, sessionId])
+  }, [contentBlocks, toolCalls, sessionId, groupToolCallsAndThinking])
 
   return (
     <div className="text-foreground/90">

@@ -1293,6 +1293,7 @@ export interface AppPreferences {
   wsl_distro: string // WSL distro name, e.g. "Ubuntu"
   coderabbit_cli_source?: 'jean' | 'path' // CodeRabbit CLI source: 'jean' (managed) or 'path' (system PATH)
   expand_tool_calls_by_default: boolean // Expand all tool call collapsibles by default
+  group_tool_calls_and_thinking?: boolean // Combine consecutive thinking and tool calls into one activity block
   window_vibrancy: boolean // macOS window vibrancy effect (high GPU cost, default false)
   terminal_background: TerminalBackgroundMode // Override the terminal background independently of the app theme
   terminal_background_custom: string | null // Hex color used when terminal_background === 'custom'
@@ -2216,6 +2217,7 @@ export const defaultPreferences: AppPreferences = {
   wsl_distro: '', // Default: empty
   coderabbit_cli_source: 'jean', // Default: Jean-managed
   expand_tool_calls_by_default: false, // Default: collapsed
+  group_tool_calls_and_thinking: true, // Default: grouped
   window_vibrancy: false, // Default: disabled (high GPU cost)
   terminal_background: 'auto',
   terminal_background_custom: null,

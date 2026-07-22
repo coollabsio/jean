@@ -370,4 +370,26 @@ describe('buildTimeline with fragmented text deltas', () => {
     expect(timeline[0]).toMatchObject({ text: 'intro-start' })
     expect(timeline[2]).toMatchObject({ text: 'mid-summary' })
   })
+
+  it('keeps consecutive thinking and tool calls separate when grouping is disabled', () => {
+    const tools: ToolCall[] = [
+      { id: 'read-1', name: 'Read', input: {}, output: 'ok' },
+      { id: 'bash-1', name: 'Bash', input: {}, output: 'ok' },
+    ]
+    const blocks: ContentBlock[] = [
+      { type: 'thinking', thinking: 'Inspecting the repository.' },
+      { type: 'tool_use', tool_call_id: 'read-1' },
+      { type: 'thinking', thinking: 'Checking the result.' },
+      { type: 'tool_use', tool_call_id: 'bash-1' },
+    ]
+
+    const timeline = buildTimeline(blocks, tools, false)
+
+    expect(timeline.map(item => item.type)).toEqual([
+      'thinking',
+      'standalone',
+      'thinking',
+      'standalone',
+    ])
+  })
 })

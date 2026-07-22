@@ -41,6 +41,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { InlineFileDiff } from './InlineFileDiff'
+import { ShellCommand } from './ShellCommand'
 
 function shouldRenderRawOutput(toolCall: ToolCall): boolean {
   return (
@@ -50,17 +51,103 @@ function shouldRenderRawOutput(toolCall: ToolCall): boolean {
   )
 }
 
-// Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
-// min-h ensures consistent baseline regardless of inline-content height (pill vs no-pill).
+// Single source of truth for tool call row layout. Tool activity stays visually
+// lightweight until the user expands its details.
 export const TOOL_CALL_ROW_CLASS =
-  'flex min-h-9 w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
+  'flex min-h-8 w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
 
 export const TOOL_CALL_SUB_ROW_CLASS =
   'flex min-h-7 w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
 
 // Detail pill — sits AFTER label, snug to content (no flex-1 stretch).
 export const TOOL_CALL_DETAIL_PILL_CLASS =
-  'min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-1 text-[0.6875rem] font-sans leading-none'
+  'min-w-0 max-w-[55%] sm:max-w-full truncate rounded-sm bg-muted/50 px-1.5 py-0.5 text-[0.6875rem] font-mono leading-none text-muted-foreground/80'
+
+function getFileExtensionColor(extension: string): string {
+  switch (extension.toLowerCase()) {
+    case '.ts':
+    case '.tsx':
+    case '.js':
+    case '.jsx':
+      return 'text-sky-400'
+    case '.rs':
+      return 'text-orange-400'
+    case '.json':
+    case '.yaml':
+    case '.yml':
+    case '.toml':
+      return 'text-amber-400'
+    case '.md':
+    case '.mdx':
+      return 'text-violet-400'
+    case '.css':
+    case '.scss':
+      return 'text-pink-400'
+    case '.html':
+    case '.svg':
+      return 'text-emerald-400'
+    default:
+      return 'text-foreground/90'
+  }
+}
+
+function FileName({ filePath }: { filePath: string }) {
+  const filename = getFilename(filePath)
+  const extensionIndex = filename.lastIndexOf('.')
+  const hasExtension = extensionIndex > 0
+  const extension = hasExtension ? filename.slice(extensionIndex) : ''
+
+  return (
+    <span
+      className={cn('truncate font-medium', getFileExtensionColor(extension))}
+    >
+      {filename}
+    </span>
+  )
+}
+
+function FilePath({ filePath }: { filePath: string }) {
+  const filename = getFilename(filePath)
+  const directory = filePath.slice(0, -filename.length)
+
+  return (
+    <span className="font-mono">
+      <span className="text-muted-foreground/60">{directory}</span>
+      <FileName filePath={filePath} />
+    </span>
+  )
+}
+
+function PathDetail({ path }: { path: string }) {
+  const lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : ''
+  const name = lastSlash >= 0 ? path.slice(lastSlash + 1) : path
+
+  return (
+    <>
+      <span className="text-muted-foreground/60">{directory}</span>
+      <span className="font-medium text-emerald-400">{name}</span>
+    </>
+  )
+}
+
+function CommandDetail({ command }: { command: string }) {
+  const [executable, ...arguments_] = command.split(/(\s+)/)
+
+  return (
+    <>
+      <span className="font-medium text-sky-400">{executable}</span>
+      {arguments_.map((part, index) => (
+        <span
+          key={index}
+          className={part.startsWith('-') ? 'text-violet-400' : undefined}
+        >
+          {part}
+        </span>
+      ))}
+    </>
+  )
+}
 
 interface ToolCallInlineProps {
   toolCall: ToolCall
@@ -88,7 +175,7 @@ export function ToolCallInline({
   const [isOpen, setIsOpen] = useState(
     preferences?.expand_tool_calls_by_default ?? false
   )
-  const { icon, label, detail, filePath, expandedContent } =
+  const { icon, label, detail, filePath, expandedContent, shellCommand } =
     getToolDisplay(toolCall)
 
   const handleFileClick = (e: React.MouseEvent) => {
@@ -104,12 +191,7 @@ export function ToolCallInline({
       onOpenChange={setIsOpen}
       className={cn('min-w-0', className)}
     >
-      <div
-        className={cn(
-          'rounded-md border border-border/50 bg-muted/30 min-w-0',
-          isOpen && 'bg-muted/50'
-        )}
-      >
+      <div className="min-w-0">
         <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
           {icon}
           <span className="font-medium shrink-0 flex-none whitespace-nowrap">
@@ -129,27 +211,38 @@ export function ToolCallInline({
                 'inline-flex items-center gap-1 hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
               )}
             >
-              <span className="truncate">{detail}</span>
+              <FileName filePath={filePath} />
               <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
             </code>
           ) : detail ? (
-            <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{detail}</code>
+            <code className={TOOL_CALL_DETAIL_PILL_CLASS}>
+              {filePath ? <FileName filePath={filePath} /> : detail}
+            </code>
           ) : null}
           {isStreaming && isIncomplete ? (
             <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground/50" />
           ) : (
             <ChevronRight
               className={cn(
-                'ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                'ml-0.5 h-3.5 w-3.5 shrink-0 transition-transform duration-200',
                 isOpen && 'rotate-90'
               )}
             />
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="border-t border-border/50 px-3 py-2">
+          <div className="ml-5 border-l border-border/40 pl-3 py-1.5">
             <div className="whitespace-pre-wrap text-xs text-muted-foreground">
-              {expandedContent}
+              {shellCommand ? (
+                <>
+                  {expandedContent && (
+                    <div className="mb-2">{expandedContent}</div>
+                  )}
+                  <ShellCommand command={shellCommand} />
+                </>
+              ) : (
+                expandedContent
+              )}
             </div>
             {shouldRenderRawOutput(toolCall) && (
               <>
@@ -470,7 +563,7 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
   const [isOpen, setIsOpen] = useState(
     preferences?.expand_tool_calls_by_default ?? false
   )
-  const { icon, label, detail, filePath, expandedContent } =
+  const { icon, label, detail, filePath, expandedContent, shellCommand } =
     getToolDisplay(toolCall)
 
   const handleFileClick = (e: React.MouseEvent) => {
@@ -504,12 +597,12 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
               }
               className="inline-flex min-w-0 max-w-[55%] sm:max-w-full items-center gap-0.5 truncate rounded px-0.5 text-[0.625rem] font-sans leading-none hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
             >
-              <span className="truncate">{detail}</span>
+              <FileName filePath={filePath} />
               <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-60" />
             </code>
           ) : detail ? (
             <code className="min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-0.5 text-[0.625rem] font-sans leading-none">
-              {detail}
+              {filePath ? <FileName filePath={filePath} /> : detail}
             </code>
           ) : null}
           <ChevronRight
@@ -522,7 +615,16 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
         <CollapsibleContent>
           <div className="border-t border-border/30 px-2 py-1.5">
             <div className="whitespace-pre-wrap text-[0.625rem] text-muted-foreground/70">
-              {expandedContent}
+              {shellCommand ? (
+                <>
+                  {expandedContent && (
+                    <div className="mb-1">{expandedContent}</div>
+                  )}
+                  <ShellCommand command={shellCommand} />
+                </>
+              ) : (
+                expandedContent
+              )}
             </div>
             {shouldRenderRawOutput(toolCall) && (
               <>
@@ -548,6 +650,8 @@ interface ToolDisplay {
   detail?: React.ReactNode
   /** Full file path for file-related tools (Read, Edit, Write) */
   filePath?: string
+  /** Shell command rendered with on-demand syntax highlighting when expanded. */
+  shellCommand?: string
   expandedContent: React.ReactNode
 }
 
@@ -857,8 +961,13 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         label: lineInfo ? `Read ${lineInfo}` : 'Read',
         detail: filename,
         filePath,
-        expandedContent: filePath
-          ? `Path: ${filePath}${offset ? `\nOffset: ${offset}` : ''}${limit ? `\nLimit: ${limit}` : ''}`
+        expandedContent: filePath ? (
+          <>
+            Path: <FilePath filePath={filePath} />
+            {offset ? `\nOffset: ${offset}` : ''}
+            {limit ? `\nLimit: ${limit}` : ''}
+          </>
+        )
           : 'No file path specified',
       }
     }
@@ -894,8 +1003,13 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         label: 'Write',
         detail: filename,
         filePath,
-        expandedContent: filePath
-          ? `Path: ${filePath}\n\nContent:\n${content ?? '(empty)'}`
+        expandedContent: filePath ? (
+          <>
+            Path: <FilePath filePath={filePath} />
+            {'\n\nContent:\n'}
+            {content ?? '(empty)'}
+          </>
+        )
           : 'No file path specified',
       }
     }
@@ -911,10 +1025,9 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: 'Bash',
-        detail: truncatedCommand,
-        expandedContent: description
-          ? `${description}\n\n$ ${command}`
-          : `$ ${command ?? '(no command)'}`,
+        detail: truncatedCommand ? <CommandDetail command={truncatedCommand} /> : undefined,
+        shellCommand: command ?? '(no command)',
+        expandedContent: description ?? '',
       }
     }
 
@@ -926,7 +1039,17 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         icon: <Search className="h-4 w-4 shrink-0" />,
         label: 'Grep',
         detail: pattern
-          ? `"${pattern}"${path ? ` in ${path}` : ''}`
+          ? (
+              <>
+                <span className="text-amber-400">&quot;{pattern}&quot;</span>
+                {path && (
+                  <>
+                    <span className="text-muted-foreground/60"> in </span>
+                    <PathDetail path={path} />
+                  </>
+                )}
+              </>
+            )
           : undefined,
         expandedContent: `Pattern: ${pattern ?? '(none)'}\nPath: ${path ?? '(cwd)'}\n${glob ? `Glob: ${glob}` : ''}`,
       }
