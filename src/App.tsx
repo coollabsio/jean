@@ -18,7 +18,9 @@ import { isNativeApp } from '@/lib/environment'
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
+import type { Worktree } from '@/types/projects'
 import { initializeCommandSystem } from './lib/commands'
 import { logger } from './lib/logger'
 import { toast } from 'sonner'
@@ -282,14 +284,20 @@ function App() {
       if (data.projects) {
         queryClient.setQueryData(projectsQueryKeys.list(), data.projects)
       }
-      // Seed worktrees for each project
+      // Seed worktrees for each project (preserve in-flight pending/deleting)
       if (data.worktreesByProject) {
         for (const [projectId, worktrees] of Object.entries(
           data.worktreesByProject
         )) {
+          const previous = queryClient.getQueryData<Worktree[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
           queryClient.setQueryData(
             projectsQueryKeys.worktrees(projectId),
-            worktrees
+            mergeWorktreesPreservingOptimistic(
+              worktrees as Worktree[],
+              previous
+            )
           )
         }
       }
