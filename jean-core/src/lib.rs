@@ -817,7 +817,8 @@ mod tests {
 
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
-        assert!(prompt.contains("when the current execution mode is plan: after the user answers native `request_user_input`"));
+        assert!(prompt.contains("when the current execution mode is plan: do not write plan files or code"));
+        assert!(prompt.contains("<proposed_plan>"));
         assert!(prompt.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(prompt.contains("Claude AskUserQuestion"));
         assert!(prompt.contains("OpenCode question"));
@@ -1818,10 +1819,10 @@ fn default_global_system_prompt() -> String {
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
 - Make the plan extremely concise. Sacrifice grammar for the sake of concision.
-- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
+- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
-- For Codex specifically, when the current execution mode is plan: after the user answers native `request_user_input`/open questions, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.
-- Every Codex response that contains or revises a plan while the current execution mode is plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
+- For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
+- Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete `<proposed_plan>` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
 
 ### 2. Documentation First

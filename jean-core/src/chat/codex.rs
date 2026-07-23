@@ -204,7 +204,38 @@ fn extract_text_from_turn_output(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// Extract Codex native `<proposed_plan>...</proposed_plan>` blocks (collaboration plan mode).
+/// Returns (text before first open tag, plan body).
+fn extract_proposed_plan_sections(text: &str) -> Option<(Option<String>, String)> {
+    const OPEN: &str = "<proposed_plan>";
+    const CLOSE: &str = "</proposed_plan>";
+
+    let normalized = text.trim().replace("\r\n", "\n");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let open_idx = normalized.find(OPEN)?;
+    let after_open = open_idx + OPEN.len();
+    let close_rel = normalized[after_open..].find(CLOSE)?;
+    let plan_body = normalized[after_open..after_open + close_rel].trim();
+    if plan_body.is_empty() {
+        return None;
+    }
+
+    let before = normalized[..open_idx].trim();
+    Some((
+        (!before.is_empty()).then(|| before.to_string()),
+        plan_body.to_string(),
+    ))
+}
+
 fn extract_plain_text_plan_sections(text: &str) -> Option<(Option<String>, String)> {
+    // Prefer Codex collaboration-mode proposed_plan tags when present.
+    if let Some(sections) = extract_proposed_plan_sections(text) {
+        return Some(sections);
+    }
+
     let normalized = text.trim().replace("\r\n", "\n");
     if normalized.is_empty() {
         return None;
@@ -529,6 +560,37 @@ pub fn build_thread_start_params(
     params
 }
 
+/// Map Jean execution mode to Codex app-server collaboration mode.
+///
+/// Codex's native Plan collaboration mode injects the built-in plan template
+/// (`collaboration-mode-templates/templates/plan.md`), forbids mutating tools,
+/// and teaches the model to finalize with `<proposed_plan>` blocks. Without
+/// this, Jean only sandboxes to read-only and Codex may try to write files
+/// (then hit "I can't edit") instead of producing a real plan (issue #91).
+///
+/// `developer_instructions: null` means "use the built-in instructions for the
+/// selected mode" (see `turn/start.collaborationMode` experimental API).
+fn build_collaboration_mode_params(
+    execution_mode: Option<&str>,
+    model: Option<&str>,
+) -> Option<serde_json::Value> {
+    let model = model.map(|m| split_fast_model(m).0)?;
+    let collab_mode = match execution_mode.unwrap_or("plan") {
+        "plan" => "plan",
+        // build / yolo / anything else: leave Plan collaboration mode so the
+        // model is no longer bound by plan-only developer instructions.
+        _ => "default",
+    };
+    Some(serde_json::json!({
+        "mode": collab_mode,
+        "settings": {
+            "model": model,
+            // null => built-in template for the selected mode
+            "developer_instructions": serde_json::Value::Null,
+        }
+    }))
+}
+
 /// Build JSON-RPC params for `turn/start`.
 pub fn build_turn_start_params(
     thread_id: &str,
@@ -538,6 +600,7 @@ pub fn build_turn_start_params(
     reasoning_effort: Option<&str>,
     add_dirs: &[String],
     git_writable_roots: &[String],
+    model: Option<&str>,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "threadId": thread_id,
@@ -587,6 +650,13 @@ pub fn build_turn_start_params(
             "excludeTmpdirEnvVar": false,
             "excludeSlashTmp": false,
         });
+    }
+
+    // Native Codex collaboration mode (plan template / default). Takes
+    // precedence over model + developer instructions when set. Experimental
+    // field; requires experimentalApi on initialize (already enabled).
+    if let Some(collaboration_mode) = build_collaboration_mode_params(execution_mode, model) {
+        params["collaborationMode"] = collaboration_mode;
     }
 
     // Override cwd per turn
@@ -765,6 +835,7 @@ pub fn execute_codex_via_server(
         reasoning_effort,
         add_dirs,
         &git_writable_roots,
+        model,
     );
 
     // Set up event channel for this session
@@ -5094,12 +5165,16 @@ mod tests {
             None,
             &[],
             &[],
+            Some("gpt-5.4"),
         );
         let policy = &params["sandboxPolicy"];
         assert_eq!(policy["type"], "readOnly");
         assert_eq!(policy["writableRoots"].as_array().unwrap().len(), 0);
         assert_eq!(policy["readOnlyAccess"]["type"], "fullAccess");
         assert_eq!(policy["networkAccess"], true);
+        assert_eq!(params["collaborationMode"]["mode"], "plan");
+        assert_eq!(params["collaborationMode"]["settings"]["model"], "gpt-5.4");
+        assert!(params["collaborationMode"]["settings"]["developer_instructions"].is_null());
     }
 
     #[test]
@@ -5112,6 +5187,7 @@ mod tests {
             None,
             &["/tmp/context".to_string()],
             &["/tmp/git".to_string()],
+            Some("gpt-5.4-fast"),
         );
         let policy = &params["sandboxPolicy"];
         assert_eq!(policy["type"], "workspaceWrite");
@@ -5120,6 +5196,10 @@ mod tests {
             serde_json::json!(["/tmp/worktree", "/tmp/context", "/tmp/git"])
         );
         assert_eq!(policy["readOnlyAccess"]["type"], "fullAccess");
+        // Leaving plan collaboration mode when building is required so the
+        // plan-mode developer instructions no longer constrain the model.
+        assert_eq!(params["collaborationMode"]["mode"], "default");
+        assert_eq!(params["collaborationMode"]["settings"]["model"], "gpt-5.4");
     }
 
     #[test]
@@ -5146,9 +5226,11 @@ mod tests {
             None,
             &[],
             &["/repo/.git/worktrees/worktree".to_string()],
+            Some("gpt-5.4"),
         );
 
         assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert_eq!(params["collaborationMode"]["mode"], "default");
     }
 
     #[test]
@@ -5161,9 +5243,27 @@ mod tests {
             None,
             &[],
             &[],
+            Some("gpt-5.4"),
         );
 
         assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert_eq!(params["collaborationMode"]["mode"], "default");
+    }
+
+    #[test]
+    fn plan_turn_omits_collaboration_mode_when_model_unknown() {
+        let params = build_turn_start_params(
+            "thread-1",
+            "hello",
+            std::path::Path::new("/tmp/worktree"),
+            Some("plan"),
+            None,
+            &[],
+            &[],
+            None,
+        );
+        assert!(params.get("collaborationMode").is_none());
+        assert_eq!(params["sandboxPolicy"]["type"], "readOnly");
     }
 
     #[test]
@@ -5417,6 +5517,29 @@ mod tests {
         assert!(!codex_run_log_has_visible_assistant_artifacts(
             &lines, false
         ));
+    }
+
+    #[test]
+    fn extract_proposed_plan_sections_splits_intro_from_block() {
+        assert_eq!(
+            extract_proposed_plan_sections(
+                "Repo inspected.\n\n<proposed_plan>\n# Fix login\n\n- Add test\n- Patch handler\n</proposed_plan>\n"
+            ),
+            Some((
+                Some("Repo inspected.".to_string()),
+                "# Fix login\n\n- Add test\n- Patch handler".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn extract_plain_text_plan_sections_prefers_proposed_plan_tags() {
+        let (before, plan) = extract_plain_text_plan_sections(
+            "Intro\n\n<proposed_plan>\n- Step A\n- Step B\n</proposed_plan>\n\nPlan:\n- ignored",
+        )
+        .expect("sections");
+        assert_eq!(before.as_deref(), Some("Intro"));
+        assert_eq!(plan, "- Step A\n- Step B");
     }
 
     #[test]

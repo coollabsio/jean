@@ -192,14 +192,15 @@ describe('model option helpers', () => {
     ).toEqual(new Set(['gpt-5.6-terra-fast']))
   })
 
-  it('documents Codex questions-tool answers must re-show the plan tool', () => {
+  it('documents Codex plan mode uses proposed_plan and no file writes', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'backend-native interactive question UI'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Codex request_user_input')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'when the current execution mode is plan: after the user answers native `request_user_input`'
+      'when the current execution mode is plan: do not write plan files or code'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('<proposed_plan>')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Every Codex response that contains or revises a plan while the current execution mode is plan'
     )
