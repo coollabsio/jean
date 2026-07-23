@@ -146,7 +146,10 @@ Additional systems (no dedicated docs yet):
   running its bundled React UI and routes shared backend commands and events to
   that server over authenticated HTTP/WebSocket transport. Local shell
   operations such as clipboard access, external URL opening, native menus, and
-  notifications continue to use the local Tauri runtime.
+  notifications continue to use the local Tauri runtime. When the preferred
+  editor is Zed, "Open in Editor" also stays local: Jean rewrites the remote
+  filesystem path to `ssh://[user@]host[:port]/path` and launches the local
+  `zed` CLI (SSH fields live on the remote connection profile).
 
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal
@@ -192,7 +195,7 @@ Additional systems (no dedicated docs yet):
 - **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
-- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
+- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 

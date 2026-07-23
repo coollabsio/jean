@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
 import { copyToClipboard } from '@/lib/clipboard'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import type {
   ChatMessage,
   Question,
@@ -860,7 +861,7 @@ export const MessageItem = memo(function MessageItem({
     </>
   )
 
-  return (
+  const messageRow = (
     <div
       className={cn(
         'w-full min-w-0',
@@ -923,5 +924,30 @@ export const MessageItem = memo(function MessageItem({
         </div>
       )}
     </div>
+  )
+
+  // Custom right-click menu replaces the unusable browser default on the thread.
+  if (message.role === 'user') {
+    return (
+      <MessageThreadContextMenu
+        messageText={displayContent}
+        copyMessageLabel="Copy message"
+        onCopyMessage={onCopyToInput ? handleCopyToInput : undefined}
+      >
+        {messageRow}
+      </MessageThreadContextMenu>
+    )
+  }
+
+  return (
+    <MessageThreadContextMenu
+      messageText={assistantResponse}
+      copyMessageLabel="Copy response"
+      onCopyMessage={
+        assistantResponse ? handleCopyAssistantResponse : undefined
+      }
+    >
+      {messageRow}
+    </MessageThreadContextMenu>
   )
 })

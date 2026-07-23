@@ -10,8 +10,9 @@ import { getActiveRemoteConnection } from './remote-connections'
  *
  * Service queries should guard with hasBackendTransport(); mutations that
  * must run immediately should guard with hasBackend().
- * UI should use isNativeApp() for local shell features and isLocalBackend()
- * for backend-side desktop features (Finder, external editors, etc.).
+ * UI should use isNativeApp() for local shell features, isLocalBackend() for
+ * "this machine's desktop shell", and canOpenNativeApps() for Finder/editor/
+ * terminal open actions (local desktop, WSL headless, or --allow-native-open).
  */
 
 /** Running inside the native Tauri desktop app with usable IPC.
@@ -25,6 +26,23 @@ export const isNativeApp = (): boolean =>
 /** Whether backend operations target this desktop app's local Jean core. */
 export const isLocalBackend = (): boolean =>
   isNativeApp() && getActiveRemoteConnection() === null
+
+/**
+ * Whether the connected Jean backend can open host apps (editor/finder/terminal).
+ * Set from `/api/init` (`nativeOpenAllowed`) for web/remote clients. Local
+ * desktop shells always can.
+ */
+let _nativeOpenAllowed = false
+
+export const setNativeOpenAllowed = (allowed: boolean): void => {
+  _nativeOpenAllowed = allowed
+}
+
+export const isNativeOpenAllowed = (): boolean => _nativeOpenAllowed
+
+/** Show Open in editor/finder/terminal when the backend host can launch them. */
+export const canOpenNativeApps = (): boolean =>
+  isLocalBackend() || _nativeOpenAllowed
 
 /** A backend is available (either Tauri IPC, WebSocket connection, or E2E mock). */
 export const hasBackend = (): boolean => {

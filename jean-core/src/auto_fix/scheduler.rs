@@ -215,6 +215,11 @@ pub fn is_backend_quota_or_auth_error(error: &str) -> bool {
         || lower.contains("token expired")
         || lower.contains("not authenticated")
         || lower.contains("authrequired")
+        // Claude CLI headless auth prompts (issue #387)
+        || lower.contains("not logged in")
+        || lower.contains("please run /login")
+        || lower.contains("session expired")
+        || (lower.contains("isn't available in this environment") && lower.contains("login"))
 }
 
 pub fn start_auto_fix_scheduler(app: AppHandle) {
@@ -1182,6 +1187,12 @@ mod tests {
         ));
         assert!(is_backend_quota_or_auth_error(
             "Claude usage limit reached for this plan"
+        ));
+        assert!(is_backend_quota_or_auth_error(
+            "Not logged in · Please run /login"
+        ));
+        assert!(is_backend_quota_or_auth_error(
+            "/login isn't available in this environment."
         ));
         assert!(!is_backend_quota_or_auth_error(
             "worktree path already exists"

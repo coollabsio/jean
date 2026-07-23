@@ -12,10 +12,15 @@ import { Monitor, Server } from 'lucide-react'
 import {
   LOCAL_CONNECTION_ID,
   getActiveConnectionId,
+  getRemoteConnections,
   markConnectionSwitch,
   selectConnection,
   useRemoteConnections,
 } from '@/lib/remote-connections'
+import {
+  fetchRemoteServerInfo,
+  warnRemoteVersionMismatch,
+} from '@/lib/remote-version'
 import {
   CommandDialog,
   CommandInput,
@@ -168,6 +173,25 @@ export function CommandPalette({
         command => command.id === commandId
       )
       if (connectionCmd) {
+        if (connectionCmd.connectionId !== LOCAL_CONNECTION_ID) {
+          const connection = getRemoteConnections().find(
+            item => item.id === connectionCmd.connectionId
+          )
+          if (!connection) {
+            commandContext.showToast('Remote connection not found.', 'error')
+            return
+          }
+          // Warn on mismatch but still switch; transport re-checks after load.
+          try {
+            const info = await fetchRemoteServerInfo(
+              connection.url,
+              connection.token
+            )
+            warnRemoteVersionMismatch(info.appVersion)
+          } catch {
+            // Unreachable remotes still switch so recovery UI can handle them.
+          }
+        }
         markConnectionSwitch()
         selectConnection(connectionCmd.connectionId)
         reloadApp()

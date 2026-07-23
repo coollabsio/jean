@@ -166,14 +166,20 @@ describe('useInvestigateHandlers', () => {
 
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        message:
-          'Investigate issue COOLIFY-BXB\n\n# Sentry context\n\nStack trace',
+        message: expect.stringContaining(
+          'Investigate issue COOLIFY-BXB\n\n# Sentry context\n\nStack trace'
+        ),
         model: 'gpt-5.5',
         backend: 'codex',
         executionMode: 'yolo',
       }),
       expect.any(Object)
     )
+    const sent = vi.mocked(sendMessage.mutate).mock.calls[0]?.[0] as {
+      message: string
+    }
+    expect(sent.message).toContain('<yolo_investigation_fix>')
+    expect(sent.message).toContain('After investigation, fix the issue')
   })
 
   it('uses magic prompt effort for Grok workflow run investigation', async () => {

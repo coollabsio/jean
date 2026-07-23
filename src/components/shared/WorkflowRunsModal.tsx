@@ -49,6 +49,7 @@ import { usePreferences } from '@/services/preferences'
 import { openExternal } from '@/lib/platform'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { resolveBackend } from '@/lib/model-utils'
+import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
   DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
@@ -296,12 +297,6 @@ export function WorkflowRunsModal() {
           : DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT
 
       const runId = extractRunId(run.url)
-      const prompt = template
-        .replace(/\{workflowName\}/g, run.workflowName)
-        .replace(/\{runUrl\}/g, run.url)
-        .replace(/\{runId\}/g, runId)
-        .replace(/\{branch\}/g, run.headBranch)
-        .replace(/\{displayTitle\}/g, run.displayTitle)
 
       // Fall back to the user's currently-selected model (like useInvestigateHandlers does)
       const storeState = useChatStore.getState()
@@ -315,6 +310,15 @@ export function WorkflowRunsModal() {
       const investigateMode =
         preferences?.magic_prompt_modes?.investigate_workflow_run_mode ??
         DEFAULT_MAGIC_PROMPT_MODES.investigate_workflow_run_mode
+      const prompt = applyYoloInvestigationFixDirective(
+        template
+          .replace(/\{workflowName\}/g, run.workflowName)
+          .replace(/\{runUrl\}/g, run.url)
+          .replace(/\{runId\}/g, runId)
+          .replace(/\{branch\}/g, run.headBranch)
+          .replace(/\{displayTitle\}/g, run.displayTitle),
+        investigateMode
+      )
       const investigateProvider = resolveMagicPromptProvider(
         preferences?.magic_prompt_providers,
         'investigate_workflow_run_provider',

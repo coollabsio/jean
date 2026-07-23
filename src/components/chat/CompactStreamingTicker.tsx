@@ -72,11 +72,42 @@ function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
   const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
   const description =
     typeof input.description === 'string' ? input.description : undefined
+  const query = typeof input.query === 'string' ? input.query : undefined
+  // Codex web search may nest the query under action
+  const action =
+    input.action && typeof input.action === 'object'
+      ? (input.action as Record<string, unknown>)
+      : undefined
+  const actionQuery =
+    typeof action?.query === 'string'
+      ? action.query
+      : typeof action?.url === 'string'
+        ? action.url
+        : undefined
+
+  const friendlyLabel =
+    tc.name === 'CodexWebSearch'
+      ? 'Web Search'
+      : tc.name === 'CodexImageView'
+        ? 'Image View'
+        : tc.name === 'CodexImageGeneration'
+          ? 'Image Generation'
+          : tc.name === 'CodexContextCompaction'
+            ? 'Context Compaction'
+            : tc.name
 
   const detail =
-    filePath ?? path ?? command ?? url ?? pattern ?? description ?? undefined
+    query ??
+    actionQuery ??
+    filePath ??
+    path ??
+    command ??
+    url ??
+    pattern ??
+    description ??
+    undefined
   return {
-    label: tc.name,
+    label: friendlyLabel,
     detail: detail ? truncate(detail, 80) : undefined,
   }
 }

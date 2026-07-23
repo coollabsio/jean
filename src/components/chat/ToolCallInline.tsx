@@ -42,12 +42,137 @@ import {
 } from '@/components/ui/collapsible'
 import { InlineFileDiff } from './InlineFileDiff'
 
-function shouldRenderRawOutput(toolCall: ToolCall): boolean {
+/** Placeholder outputs that add no value next to already-rendered tool details. */
+function isPlaceholderToolOutput(output: string | undefined | null): boolean {
+  if (!output) return true
+  const trimmed = output.trim().toLowerCase()
   return (
-    Boolean(toolCall.output) &&
-    toolCall.name !== 'FileChange' &&
-    toolCall.name !== 'Monitor'
+    trimmed === '' ||
+    trimmed === 'completed' ||
+    trimmed === 'ok' ||
+    trimmed === 'success' ||
+    trimmed === 'context compacted'
   )
+}
+
+function shouldRenderRawOutput(toolCall: ToolCall): boolean {
+  if (!toolCall.output?.trim()) return false
+  // These tools already surface output (results/path/etc.) in expandedContent.
+  if (
+    toolCall.name === 'FileChange' ||
+    toolCall.name === 'Monitor' ||
+    toolCall.name === 'CodexWebSearch' ||
+    toolCall.name === 'CodexImageView' ||
+    toolCall.name === 'CodexImageGeneration' ||
+    toolCall.name === 'CodexContextCompaction'
+  ) {
+    return false
+  }
+  return true
+}
+
+/** Best-effort one-line detail from common tool input fields. */
+function firstStringField(
+  input: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return undefined
+}
+
+function formatCodexWebSearchDetail(
+  input: Record<string, unknown>
+): string | undefined {
+  const query = firstStringField(input, ['query'])
+  if (query) return query
+
+  const action =
+    input.action && typeof input.action === 'object'
+      ? (input.action as Record<string, unknown>)
+      : undefined
+  if (!action) return undefined
+
+  const actionType = typeof action.type === 'string' ? action.type : undefined
+  const actionQuery = firstStringField(action, ['query'])
+  if (actionQuery) return actionQuery
+
+  if (Array.isArray(action.queries)) {
+    const queries = action.queries.filter(
+      (q): q is string => typeof q === 'string' && q.trim().length > 0
+    )
+    if (queries.length > 0) return queries.join(', ')
+  }
+
+  const url = firstStringField(action, ['url'])
+  if (url) {
+    return actionType === 'findInPage' || actionType === 'find_in_page'
+      ? firstStringField(action, ['pattern'])
+        ? `${firstStringField(action, ['pattern'])} in ${url}`
+        : url
+      : url
+  }
+
+  const pattern = firstStringField(action, ['pattern'])
+  if (pattern) return pattern
+
+  return undefined
+}
+
+function formatCodexWebSearchExpanded(
+  input: Record<string, unknown>,
+  output: string | undefined
+): string {
+  const parts: string[] = []
+  const query = firstStringField(input, ['query'])
+  if (query) parts.push(`Query: ${query}`)
+
+  const action =
+    input.action && typeof input.action === 'object'
+      ? (input.action as Record<string, unknown>)
+      : undefined
+  if (action) {
+    const actionType = typeof action.type === 'string' ? action.type : 'action'
+    const actionBits: string[] = [`Action: ${actionType}`]
+    const actionQuery = firstStringField(action, ['query'])
+    if (actionQuery) actionBits.push(`query=${actionQuery}`)
+    if (Array.isArray(action.queries) && action.queries.length > 0) {
+      actionBits.push(
+        `queries=${action.queries
+          .filter((q): q is string => typeof q === 'string')
+          .join(', ')}`
+      )
+    }
+    const url = firstStringField(action, ['url'])
+    if (url) actionBits.push(`url=${url}`)
+    const pattern = firstStringField(action, ['pattern'])
+    if (pattern) actionBits.push(`pattern=${pattern}`)
+    parts.push(actionBits.join(' · '))
+  }
+
+  if (input.results != null) {
+    const resultsText =
+      typeof input.results === 'string'
+        ? input.results
+        : JSON.stringify(input.results, null, 2)
+    if (resultsText && resultsText !== 'null' && resultsText !== '[]') {
+      parts.push(`Results:\n${resultsText}`)
+    }
+  }
+
+  if (output && !isPlaceholderToolOutput(output)) {
+    // Avoid duplicating results already shown from input.results
+    if (!parts.some(p => p.includes(output))) {
+      parts.push(output)
+    }
+  }
+
+  if (parts.length === 0) {
+    return JSON.stringify(input, null, 2)
+  }
+  return parts.join('\n\n')
 }
 
 // Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
@@ -776,7 +901,18 @@ export function normalizeToolCallForDisplay(
 }
 
 function getToolSummaryName(name: string): string {
-  return normalizeToolCallForDisplay(name, {}).name
+  switch (name) {
+    case 'CodexWebSearch':
+      return 'Web Search'
+    case 'CodexImageGeneration':
+      return 'Image Generation'
+    case 'CodexImageView':
+      return 'Image View'
+    case 'CodexContextCompaction':
+      return 'Context Compaction'
+    default:
+      return normalizeToolCallForDisplay(name, {}).name
+  }
 }
 
 /** Live-ticking remaining seconds for a pending ScheduleWakeup. */
@@ -1320,40 +1456,76 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     case 'CodexWebSearch': {
-      const query = input.query as string | undefined
+      const detail = formatCodexWebSearchDetail(input)
       return {
         icon: <Globe className="h-4 w-4 shrink-0" />,
         label: 'Web Search',
-        detail: query,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail,
+        expandedContent: formatCodexWebSearchExpanded(input, toolCall.output),
       }
     }
 
     case 'CodexImageGeneration': {
-      const prompt = input.prompt as string | undefined
+      const prompt =
+        firstStringField(input, [
+          'prompt',
+          'revised_prompt',
+          'revisedPrompt',
+        ]) ?? undefined
+      const savedPath = firstStringField(input, [
+        'saved_path',
+        'savedPath',
+        'path',
+      ])
+      const status = firstStringField(input, ['status'])
+      const detail = prompt ?? savedPath ?? status
+      const parts: string[] = []
+      if (prompt) parts.push(`Prompt: ${prompt}`)
+      if (savedPath) parts.push(`Saved: ${savedPath}`)
+      if (status) parts.push(`Status: ${status}`)
+      if (
+        toolCall.output &&
+        !isPlaceholderToolOutput(toolCall.output) &&
+        toolCall.output !== savedPath
+      ) {
+        parts.push(toolCall.output)
+      }
       return {
         icon: <ImageIcon className="h-4 w-4 shrink-0" />,
         label: 'Image Generation',
-        detail: prompt,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail,
+        expandedContent:
+          parts.length > 0 ? parts.join('\n') : JSON.stringify(input, null, 2),
       }
     }
 
     case 'CodexImageView': {
+      const path = firstStringField(input, ['path', 'file_path', 'filePath'])
+      const filename = path ? getFilename(path) : undefined
       return {
         icon: <ImageIcon className="h-4 w-4 shrink-0" />,
         label: 'Image View',
-        detail: undefined,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail: filename ?? path,
+        filePath: path,
+        expandedContent:
+          path ??
+          (toolCall.output && !isPlaceholderToolOutput(toolCall.output)
+            ? toolCall.output
+            : JSON.stringify(input, null, 2)),
       }
     }
 
     case 'CodexContextCompaction': {
+      const summary = firstStringField(input, ['summary'])
       return {
         icon: <Layers className="h-4 w-4 shrink-0" />,
         label: 'Context Compaction',
-        detail: undefined,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail: summary ? summary.slice(0, 60) : undefined,
+        expandedContent:
+          summary ??
+          (toolCall.output && !isPlaceholderToolOutput(toolCall.output)
+            ? toolCall.output
+            : 'Context compacted'),
       }
     }
 
@@ -1440,14 +1612,35 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     default: {
-      const isMcpTool = normalized.name.startsWith('mcp__')
+      const isMcpTool =
+        normalized.name.startsWith('mcp__') ||
+        normalized.name.startsWith('mcp:')
+      // Surface something useful even for tools without a dedicated renderer.
+      const detail = firstStringField(input, [
+        'query',
+        'command',
+        'path',
+        'file_path',
+        'filePath',
+        'url',
+        'pattern',
+        'description',
+        'prompt',
+        'title',
+        'name',
+      ])
+      const expanded = toolCall.output?.trim()
+        ? toolCall.output
+        : Object.keys(input).length > 0
+          ? JSON.stringify(input, null, 2)
+          : 'No details available'
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: isMcpTool
           ? normalized.name
           : `${normalized.name} (unhandled tool)`,
-        detail: undefined,
-        expandedContent: JSON.stringify(input, null, 2),
+        detail,
+        expandedContent: expanded,
       }
     }
   }

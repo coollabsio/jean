@@ -157,9 +157,19 @@ bun run install:local:server
 | `--token <token>`         | `JEAN_TOKEN`                   | saved/generated token                  |
 | `--no-token`              | `JEAN_NO_TOKEN=1`              | off                                    |
 | `--allow-unsafe-no-token` | `JEAN_ALLOW_UNSAFE_NO_TOKEN=1` | off                                    |
+| `--allow-native-open`     | `JEAN_ALLOW_NATIVE_OPEN=1`     | off (auto-on under WSL)                |
 | n/a                       | `JEAN_ALLOWED_ORIGINS`         | same-origin only                       |
 
 By default a token is required (using `--token`, `JEAN_TOKEN`, or an auto-generated one); pass `--no-token` to disable it. `--token` and `--no-token` are mutually exclusive. Jean rejects `--no-token` with `--host 0.0.0.0` or `--host ::` unless `--allow-unsafe-no-token` is also set.
+
+### Native open actions (editor / file manager / terminal)
+
+HTTP/WebSocket clients can trigger **Open in editor**, **Open worktrees folder**, and related actions only when native open is allowed:
+
+- **Auto-enabled under WSL** — headless Jean inside WSL routes folders through `explorer.exe` and editors through the Linux CLI binaries on PATH (same as #490 / #522).
+- **Opt-in elsewhere** — pass `--allow-native-open` or set `JEAN_ALLOW_NATIVE_OPEN=1` for a local headless server that should open host apps.
+- **Desktop Web Access** — automatically allowed when the desktop app hosts the HTTP server.
+- **Remote/VPS headless** — left off by default so a browser client cannot spawn GUI tools on the server.
 
 ## Health checks
 
@@ -286,13 +296,38 @@ Nothing is installed in the background - apply only runs after you click
 
 ## Connect from the native Jean app
 
-In the desktop app, click the server icon in the title bar, choose **Add
-remote**, and enter either the full Web Access URL (including `?token=...`) or
-the server URL and token separately. Selecting the remote switches the entire
-Jean backend while keeping the desktop app's bundled React UI and local native
-shell capabilities. Commands and events for the selected instance travel over
-HTTP/WebSocket. Select **Local** from the same dialog to return to the desktop
-app's local backend.
+In the desktop app, click the server icon in the title bar and choose **Add
+remote**. You can either:
+
+1. **Install via SSH** (native app only) — enter an SSH user and host/IP
+   (optional name, SSH port, Jean port). Jean connects with key-based SSH
+   (`BatchMode`, no password prompt), runs the official
+   `install-jean-server.sh` installer on the remote Linux host (system install
+   with passwordless `sudo -n` when available, otherwise `--user-install`),
+   waits until `/healthz`, `/readyz`, and `/api/auth` succeed from this client,
+   then saves the remote and switches to it.
+2. **Existing URL** — paste a full Web Access URL (including `?token=...`) or
+   enter the server URL and token separately.
+
+Selecting the remote switches the entire Jean backend while keeping the desktop
+app's bundled React UI and local native shell capabilities. Commands and events
+for the selected instance travel over HTTP/WebSocket. Select **Local** from the
+same dialog to return to the desktop app's local backend.
+
+**SSH install requirements:**
+
+- OpenSSH client on the machine running Jean
+- Key-based SSH access to `user@host` (password auth is not supported)
+- Remote host is Linux (amd64/arm64) with `curl` and `tar`
+- Port `3456` (or the Jean port you chose) reachable from this client; the
+  installer binds `0.0.0.0` so LAN/Tailscale IPs work
+- Passwordless sudo for a system install, or a working user systemd session for
+  `--user-install`
 
 Native Jean client origins are allowed automatically. HTTP and HTTPS server
 URLs are both supported; keep token authentication enabled on remote servers.
+
+The connection picker shows each remote's `appVersion` (from `/api/auth`) next
+to Local's client version. When the versions differ, Jean shows a warning toast
+and highlights the mismatch in the picker, but still allows the connection so
+you are not locked out. Prefer matching versions for the best experience.
