@@ -2885,7 +2885,24 @@ export function ChatWindow({
                         onScroll={handleScroll}
                       >
                         <div className="mx-auto max-w-7xl px-4 pt-4 pb-6 md:px-6 min-w-0 w-full">
-                          <div className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-hidden">
+                          <div
+                            className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-hidden"
+                            // Suppress browser default menu on empty thread chrome
+                            // (gaps/padding). Message rows provide a custom menu.
+                            // Leave native menus alone for form fields.
+                            onContextMenu={event => {
+                              const target = event.target
+                              if (
+                                target instanceof HTMLElement &&
+                                target.closest(
+                                  'input, textarea, select, [contenteditable="true"]'
+                                )
+                              ) {
+                                return
+                              }
+                              event.preventDefault()
+                            }}
+                          >
                             {/* Debug info (enabled via Settings → Experimental → Debug mode) */}
                             {preferences?.debug_mode_enabled &&
                               activeWorktreeId &&

@@ -947,6 +947,19 @@ export function useMainWindowEventListeners() {
         listenLocal('menu-check-updates', async () => {
           logger.debug('Check for updates menu event received')
           if (!isNativeApp()) return
+          const ui = useUIStore.getState()
+          // Package already installed this session — prompt restart, don't re-offer download
+          if (ui.updateReadyVersion) {
+            commandContext.showToast(
+              `Update ${ui.updateReadyVersion} is ready — restart to apply`,
+              'success'
+            )
+            return
+          }
+          if (ui.isUpdateInstalling) {
+            commandContext.showToast('Update download already in progress', 'info')
+            return
+          }
           try {
             const { check } = await import('@tauri-apps/plugin-updater')
             const update = await check()
@@ -1183,50 +1196,6 @@ export function useMainWindowEventListeners() {
     }
   }, [commandContext, queryClient])
 
-  // Quit confirmation for system-level close events (Alt+F4, taskbar close).
-  // The X button handles its own confirmation via window-close command,
-  // but system close events still go through onCloseRequested.
-  useEffect(() => {
-    // Skip in development mode - only block quit in production
-    if (import.meta.env.DEV) return
-    if (!isNativeApp()) return
-
-    let unlisten: (() => void) | null = null
-
-    const setup = async () => {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      getCurrentWindow()
-        .onCloseRequested(async event => {
-          try {
-            const hasRunning = await Promise.race([
-              invoke<boolean>('has_running_sessions'),
-              new Promise<boolean>((_, reject) =>
-                setTimeout(() => reject(new Error('timeout')), 2000)
-              ),
-            ])
-            if (hasRunning) {
-              event.preventDefault()
-              window.dispatchEvent(
-                new CustomEvent('quit-confirmation-requested')
-              )
-            }
-          } catch (error) {
-            logger.error('Failed to check running sessions', { error })
-            // Allow quit if we can't check (fail open)
-          }
-        })
-        .then(fn => {
-          unlisten = fn
-        })
-        .catch(error => {
-          logger.error('Failed to setup close listener', { error })
-        })
-    }
-
-    setup()
-
-    return () => {
-      unlisten?.()
-    }
-  }, [])
+  // Window close / quit confirmation is owned by useNativeWindowCloseGuard at
+  // App root so it stays active during preloading (MainWindow unmounted).
 }
