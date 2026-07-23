@@ -425,6 +425,55 @@ pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+/// Insert custom model_provider config for a Jean-managed Codex provider profile.
+/// Does not mutate the user's base ~/.codex/config.toml — per-thread/one-shot only.
+pub fn apply_codex_provider_to_config(
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    provider: &crate::CodexProviderProfile,
+) {
+    let provider_id = provider.provider_id.trim();
+    if provider_id.is_empty() {
+        return;
+    }
+
+    let mut provider_entry = serde_json::Map::new();
+    provider_entry.insert(
+        "name".to_string(),
+        serde_json::json!(if provider.name.trim().is_empty() {
+            provider_id
+        } else {
+            provider.name.trim()
+        }),
+    );
+    provider_entry.insert(
+        "base_url".to_string(),
+        serde_json::json!(provider.base_url.trim()),
+    );
+    if !provider.env_key.trim().is_empty() {
+        provider_entry.insert(
+            "env_key".to_string(),
+            serde_json::json!(provider.env_key.trim()),
+        );
+    }
+    if let Some(wire) = provider
+        .wire_api
+        .as_deref()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+    {
+        provider_entry.insert("wire_api".to_string(), serde_json::json!(wire));
+    }
+
+    config.insert(
+        "model_provider".to_string(),
+        serde_json::json!(provider_id),
+    );
+    config.insert(
+        "model_providers".to_string(),
+        serde_json::json!({ provider_id: provider_entry }),
+    );
+}
+
 /// Build JSON-RPC params for `thread/start`.
 #[allow(clippy::too_many_arguments)]
 pub fn build_thread_start_params(
@@ -435,6 +484,7 @@ pub fn build_thread_start_params(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "cwd": working_dir.to_string_lossy(),
@@ -446,8 +496,9 @@ pub fn build_thread_start_params(
     if let Some(m) = model {
         let (actual_model, is_fast) = split_fast_model(m);
         log::info!(
-            "Codex thread params: model={actual_model}, fast={is_fast}, mode={:?}",
-            execution_mode
+            "Codex thread params: model={actual_model}, fast={is_fast}, mode={:?}, provider={:?}",
+            execution_mode,
+            codex_provider.map(|p| p.provider_id.as_str())
         );
         params["model"] = serde_json::json!(actual_model);
         if is_fast {
@@ -520,6 +571,10 @@ pub fn build_thread_start_params(
             agents.insert("max_threads".to_string(), serde_json::json!(threads));
             config.insert("agents".to_string(), serde_json::Value::Object(agents));
         }
+    }
+
+    if let Some(provider) = codex_provider {
+        apply_codex_provider_to_config(&mut config, provider);
     }
 
     if !config.is_empty() {
@@ -652,6 +707,7 @@ pub fn execute_codex_via_server(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
 
@@ -659,7 +715,8 @@ pub fn execute_codex_via_server(
     let is_build_mode = execution_mode.unwrap_or("plan") == "build";
 
     log::debug!(
-        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, resume={}",
+        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, provider={:?}, resume={}",
+        codex_provider.map(|p| p.provider_id.as_str()),
         existing_thread_id.is_some()
     );
 
@@ -680,6 +737,7 @@ pub fn execute_codex_via_server(
                 base_instructions_content,
                 multi_agent_enabled,
                 max_agent_threads,
+                codex_provider,
             );
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
@@ -709,6 +767,7 @@ pub fn execute_codex_via_server(
                         base_instructions_content,
                         multi_agent_enabled,
                         max_agent_threads,
+                        codex_provider,
                     )
                 }
             }
@@ -721,6 +780,7 @@ pub fn execute_codex_via_server(
                 base_instructions_content,
                 multi_agent_enabled,
                 max_agent_threads,
+                codex_provider,
             )
         }
     })() {
@@ -1393,6 +1453,7 @@ fn start_new_thread(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
     use super::codex_server;
 
@@ -1404,6 +1465,7 @@ fn start_new_thread(
         base_instructions_content,
         multi_agent_enabled,
         max_agent_threads,
+        codex_provider,
     );
 
     let result = codex_server::send_request("thread/start", params)?;
@@ -4338,6 +4400,7 @@ pub fn execute_one_shot_codex(
         is_fast,
         &schema_arg,
         working_dir_arg.as_deref(),
+        None, // one-shot callers can opt into custom providers later via prefs
     ));
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -4513,6 +4576,7 @@ fn build_one_shot_codex_args(
     is_fast: bool,
     schema_file: &std::path::Path,
     working_dir: Option<&std::path::Path>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Vec<std::ffi::OsString> {
     let mut args = vec![
         "exec".into(),
@@ -4529,6 +4593,52 @@ fn build_one_shot_codex_args(
     if is_fast {
         args.push("-c".into());
         args.push("service_tier=\"fast\"".into());
+    }
+    if let Some(provider) = codex_provider {
+        let provider_id = provider.provider_id.trim();
+        if !provider_id.is_empty() {
+            args.push("-c".into());
+            args.push(format!("model_provider=\"{provider_id}\"").into());
+            // Nested model_providers table via dotted -c keys
+            let display_name = if provider.name.trim().is_empty() {
+                provider_id
+            } else {
+                provider.name.trim()
+            };
+            args.push("-c".into());
+            args.push(
+                format!("model_providers.{provider_id}.name=\"{display_name}\"").into(),
+            );
+            args.push("-c".into());
+            args.push(
+                format!(
+                    "model_providers.{provider_id}.base_url=\"{}\"",
+                    provider.base_url.trim()
+                )
+                .into(),
+            );
+            if !provider.env_key.trim().is_empty() {
+                args.push("-c".into());
+                args.push(
+                    format!(
+                        "model_providers.{provider_id}.env_key=\"{}\"",
+                        provider.env_key.trim()
+                    )
+                    .into(),
+                );
+            }
+            if let Some(wire) = provider
+                .wire_api
+                .as_deref()
+                .map(str::trim)
+                .filter(|w| !w.is_empty())
+            {
+                args.push("-c".into());
+                args.push(
+                    format!("model_providers.{provider_id}.wire_api=\"{wire}\"").into(),
+                );
+            }
+        }
     }
     if let Some(dir) = working_dir {
         args.push("--cd".into());
@@ -4907,6 +5017,7 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.4");
         assert_eq!(params["serviceTier"], "fast");
@@ -4921,6 +5032,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         assert_eq!(params["model"], "gpt-5.5");
@@ -4980,7 +5092,7 @@ mod tests {
         let schema_file = std::path::Path::new("/tmp/jean-codex-schema.json");
         let working_dir = std::path::Path::new("/tmp/project");
 
-        let args = build_one_shot_codex_args("gpt-5.4", false, schema_file, Some(working_dir));
+        let args = build_one_shot_codex_args("gpt-5.4", false, schema_file, Some(working_dir), None);
 
         assert!(args.windows(2).any(|window| {
             window
@@ -5013,6 +5125,7 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
 
         assert_eq!(params["config"]["model_verbosity"], "low");
@@ -5025,6 +5138,7 @@ mod tests {
             false,
             std::path::Path::new("/tmp/jean-codex-schema.json"),
             Some(std::path::Path::new("/tmp/project")),
+            None,
         );
 
         assert!(args.windows(2).any(|window| {
@@ -5046,6 +5160,7 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.3");
         assert!(params.get("serviceTier").is_none());
@@ -5060,6 +5175,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         let policy = &params["approvalPolicy"]["granular"];
@@ -5078,6 +5194,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         assert_eq!(params["approvalPolicy"], "never");
@@ -5132,8 +5249,77 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
         assert_eq!(params["approvalPolicy"], "never");
+    }
+
+    #[test]
+    fn custom_codex_provider_injects_model_provider_config() {
+        let provider = crate::CodexProviderProfile {
+            name: "OpenRouter".to_string(),
+            provider_id: "openrouter".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            env_key: "OPENROUTER_API_KEY".to_string(),
+            wire_api: Some("responses".to_string()),
+        };
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.4"),
+            Some("plan"),
+            false,
+            None,
+            false,
+            None,
+            Some(&provider),
+        );
+        assert_eq!(params["config"]["model_provider"], "openrouter");
+        assert_eq!(
+            params["config"]["model_providers"]["openrouter"]["base_url"],
+            "https://openrouter.ai/api/v1"
+        );
+        assert_eq!(
+            params["config"]["model_providers"]["openrouter"]["env_key"],
+            "OPENROUTER_API_KEY"
+        );
+        assert_eq!(
+            params["config"]["model_providers"]["openrouter"]["wire_api"],
+            "responses"
+        );
+    }
+
+    #[test]
+    fn one_shot_codex_args_include_custom_provider() {
+        let provider = crate::CodexProviderProfile {
+            name: "OpenRouter".to_string(),
+            provider_id: "openrouter".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            env_key: "OPENROUTER_API_KEY".to_string(),
+            wire_api: Some("responses".to_string()),
+        };
+        let args = build_one_shot_codex_args(
+            "gpt-5.4",
+            false,
+            std::path::Path::new("/tmp/schema.json"),
+            Some(std::path::Path::new("/tmp/project")),
+            Some(&provider),
+        );
+        assert!(args.windows(2).any(|window| {
+            window
+                == [
+                    std::ffi::OsString::from("-c"),
+                    std::ffi::OsString::from("model_provider=\"openrouter\""),
+                ]
+        }));
+        assert!(args.windows(2).any(|window| {
+            window
+                == [
+                    std::ffi::OsString::from("-c"),
+                    std::ffi::OsString::from(
+                        "model_providers.openrouter.base_url=\"https://openrouter.ai/api/v1\"",
+                    ),
+                ]
+        }));
     }
 
     #[test]

@@ -736,20 +736,16 @@ export function ChatWindow({
     ]
   )
 
-  // Per-session provider selection: persisted session → zustand → project default → global default
+  // Per-session provider selection: persisted session → zustand → backend defaults
+  // Claude: project default_provider → global default_provider
+  // Codex: global default_codex_provider
   const projectDefaultProvider = project?.default_provider ?? null
   const globalDefaultProvider = preferences?.default_provider ?? null
-  const defaultProvider = projectDefaultProvider ?? globalDefaultProvider
+  const globalDefaultCodexProvider = preferences?.default_codex_provider ?? null
   const zustandProvider = useChatStore(state =>
     deferredSessionId ? state.selectedProviders[deferredSessionId] : undefined
   )
   const sessionProvider = session?.selected_provider ?? zustandProvider
-  const selectedProvider =
-    sessionProvider !== undefined ? sessionProvider : defaultProvider
-  // __anthropic__ is the sentinel for "use default Anthropic" — treat as non-custom for feature detection
-  const isCustomProvider = Boolean(
-    selectedProvider && selectedProvider !== '__anthropic__'
-  )
 
   // Installed backends (only these should be selectable)
   const { installedBackends } = useInstalledBackends()
@@ -794,6 +790,25 @@ export function ChatWindow({
   const isCodexBackend = selectedBackend === 'codex'
   const isGrokBackend = selectedBackend === 'grok'
   const isCursorBackend = selectedBackend === 'cursor'
+
+  // Provider is backend-scoped: Claude uses custom_cli_profiles defaults;
+  // Codex uses custom_codex_providers / default_codex_provider.
+  const defaultProviderForBackend =
+    selectedBackend === 'codex'
+      ? globalDefaultCodexProvider
+      : selectedBackend === 'claude'
+        ? (projectDefaultProvider ?? globalDefaultProvider)
+        : null
+  const selectedProvider =
+    sessionProvider !== undefined
+      ? sessionProvider
+      : defaultProviderForBackend
+  // Sentinels mean "use backend default" — treat as non-custom for feature detection
+  const isCustomProvider = Boolean(
+    selectedProvider &&
+      selectedProvider !== '__anthropic__' &&
+      selectedProvider !== '__default__'
+  )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
   const defaultModel = resolveDefaultModelForBackend(
@@ -888,9 +903,10 @@ export function ChatWindow({
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
-  const activeProfile = isCustomProvider
-    ? customCliProfiles.find(p => p.name === selectedProvider)
-    : null
+  const activeProfile =
+    isCustomProvider && selectedBackend === 'claude'
+      ? customCliProfiles.find(p => p.name === selectedProvider)
+      : null
   // Fall back to predefined template's supports_thinking for profiles saved before this field existed
   const activeSupportsThinking =
     activeProfile?.supports_thinking ??
@@ -3534,6 +3550,9 @@ export function ChatWindow({
                                 onProviderChange={handleToolbarProviderChange}
                                 customCliProfiles={
                                   preferences?.custom_cli_profiles ?? []
+                                }
+                                customCodexProviders={
+                                  preferences?.custom_codex_providers ?? []
                                 }
                                 onThinkingLevelChange={
                                   handleToolbarThinkingLevelChange

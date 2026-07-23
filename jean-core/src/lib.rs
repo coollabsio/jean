@@ -278,7 +278,13 @@ pub struct AppPreferences {
     #[serde(default)]
     pub custom_cli_profiles: Vec<CustomCliProfile>, // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
     #[serde(default)]
-    pub default_provider: Option<String>, // Default provider profile name (None = Anthropic direct)
+    pub default_provider: Option<String>, // Default Claude provider profile name (None = Anthropic direct)
+    #[serde(default)]
+    pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
+    #[serde(default)]
+    pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    #[serde(default)]
+    pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
     pub favorite_models: Vec<String>, // Favourited model keys ("backend:model") shown at top of picker
     #[serde(default)]
@@ -444,6 +450,36 @@ pub struct CustomCliProfile {
     pub file_path: String,
     #[serde(default = "default_true")]
     pub supports_thinking: Option<bool>,
+}
+
+/// Codex custom model_provider profile injected via app-server config / -c overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexProviderProfile {
+    pub name: String,
+    pub provider_id: String,
+    pub base_url: String,
+    pub env_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_api: Option<String>,
+}
+
+/// PI custom provider merged into ~/.pi/agent/models.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderProfile {
+    pub name: String,
+    pub base_url: String,
+    pub api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub models: Vec<PiProviderModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 fn slugify_profile_name(name: &str) -> String {
@@ -2354,6 +2390,9 @@ impl Default for AppPreferences {
             sync_zoom_levels: default_sync_zoom_levels(),
             custom_cli_profiles: Vec::new(),
             default_provider: None,
+            custom_codex_providers: Vec::new(),
+            default_codex_provider: None,
+            custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
             fast_mode_models: Vec::new(),

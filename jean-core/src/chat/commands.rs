@@ -1099,10 +1099,14 @@ async fn queued_message_to_send_request(
     let custom_profile_name = json_string(queued, "customProfileName").or_else(|| {
         provider.filter(|provider| {
             provider != "__anthropic__"
+                && provider != "__default__"
                 && prefs.as_ref().is_some_and(|p| {
                     p.custom_cli_profiles
                         .iter()
                         .any(|profile| profile.name == *provider)
+                        || p.custom_codex_providers
+                            .iter()
+                            .any(|profile| profile.name == *provider)
                 })
         })
     });
@@ -2708,6 +2712,11 @@ pub async fn send_chat_message(
     let claude_profile_changed = effective_backend == Backend::Claude
         && claude_session_id.is_some()
         && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
+    // Custom Codex providers bind model_provider on the thread — switching
+    // mid-session requires a new thread (mirrors Claude profile resume clear).
+    let codex_profile_changed = effective_backend == Backend::Codex
+        && codex_thread_id.is_some()
+        && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
     let profile_handoff = super::handoff::should_inject_claude_profile_handoff(
         &effective_backend,
         previous_backend.as_ref(),
@@ -2755,6 +2764,14 @@ pub async fn send_chat_message(
         None
     } else {
         claude_session_id
+    };
+    let codex_thread_id = if codex_profile_changed {
+        log::info!(
+            "[SendChat] Codex provider changed session={session_id}; starting new thread"
+        );
+        None
+    } else {
+        codex_thread_id
     };
 
     // Cursor CLI doesn't support thinking/effort levels
@@ -2904,6 +2921,19 @@ pub async fn send_chat_message(
         mcp_config.clone()
     };
     let thread_custom_profile = custom_profile_name.clone();
+    let thread_codex_provider = if effective_backend == Backend::Codex {
+        let prefs_for_codex = crate::load_preferences(app.clone()).await.ok();
+        custom_profile_name.as_ref().and_then(|name| {
+            prefs_for_codex.as_ref().and_then(|p| {
+                p.custom_codex_providers
+                    .iter()
+                    .find(|profile| profile.name == *name)
+                    .cloned()
+            })
+        })
+    } else {
+        None
+    };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
     let thread_codex_search = codex_search_enabled;
@@ -3487,6 +3517,7 @@ pub async fn send_chat_message(
                     codex_base_instructions_content.as_deref(),
                     thread_codex_multi_agent,
                     thread_codex_max_threads,
+                    thread_codex_provider.as_ref(),
                 ) {
                     Ok(response) => Ok((
                         0, // No PID for app-server sessions

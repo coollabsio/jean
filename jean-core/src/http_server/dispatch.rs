@@ -3321,6 +3321,16 @@ pub async fn dispatch_command(
             crate::delete_cli_profile(name).await?;
             Ok(Value::Null)
         }
+        "upsert_pi_provider" => {
+            let profile: crate::PiProviderProfile = from_field(&args, "profile")?;
+            crate::pi_cli::upsert_pi_provider(profile).await?;
+            Ok(Value::Null)
+        }
+        "delete_pi_provider" => {
+            let name: String = from_field(&args, "name")?;
+            crate::pi_cli::delete_pi_provider(name).await?;
+            Ok(Value::Null)
+        }
 
         // =====================================================================
         // Background Tasks (additional)
