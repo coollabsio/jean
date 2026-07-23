@@ -1600,6 +1600,13 @@ pub async fn update_session_state(
                 session.enabled_mcp_servers = v;
             }
             if let Some(v) = selected_execution_mode {
+                // Keep mid-turn Codex auto-approve in sync with Jean's mode
+                // (issue #328). Approve (yolo) sets this immediately so residual
+                // "retry without sandbox?" prompts stop for the active turn.
+                super::registry::set_codex_yolo_auto_approve(
+                    &session_id,
+                    v.as_deref() == Some("yolo"),
+                );
                 session.selected_execution_mode = v;
             }
             if let Some(v) = table_checked_rows {
@@ -8182,18 +8189,31 @@ fn send_codex_response(rpc_id: u64, payload: serde_json::Value) -> Result<(), St
 
 /// Backward-compatible wrapper for legacy frontend callers.
 pub fn approve_codex_command(
-    _session_id: String,
+    session_id: String,
     rpc_id: u64,
     decision: String,
 ) -> Result<(), String> {
+    // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
+    // prompts for the rest of this session without waiting for the next turn
+    // (issue #328).
+    if decision == "acceptForSession" {
+        super::registry::set_codex_yolo_auto_approve(&session_id, true);
+    }
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
 pub fn respond_codex_command_approval(
-    _session_id: String,
+    session_id: String,
     rpc_id: u64,
     response: serde_json::Value,
 ) -> Result<(), String> {
+    let is_accept_for_session = response
+        .get("decision")
+        .and_then(|d| d.as_str())
+        .is_some_and(|d| d == "acceptForSession");
+    if is_accept_for_session {
+        super::registry::set_codex_yolo_auto_approve(&session_id, true);
+    }
     send_codex_response(rpc_id, response)
 }
 
