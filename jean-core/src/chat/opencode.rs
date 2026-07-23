@@ -547,7 +547,11 @@ fn is_shared_sse_connected(working_dir: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn wait_for_shared_sse_connection(timeout: Duration, working_dir: &str) -> bool {
+fn wait_for_shared_sse_connection(
+    timeout: Duration,
+    working_dir: &str,
+    cancelled: Option<&Arc<AtomicBool>>,
+) -> bool {
     log::info!(
         "OpenCode shared SSE: waiting for connection dir={} timeout_ms={}",
         working_dir,
@@ -555,6 +559,14 @@ fn wait_for_shared_sse_connection(timeout: Duration, working_dir: &str) -> bool 
     );
     let wait_start = Instant::now();
     while wait_start.elapsed() < timeout {
+        if cancelled.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+            log::info!(
+                "OpenCode shared SSE: wait aborted by cancel dir={} wait_ms={}",
+                working_dir,
+                wait_start.elapsed().as_millis()
+            );
+            return false;
+        }
         if is_shared_sse_connected(working_dir) {
             log::info!(
                 "OpenCode shared SSE: connection ready dir={} wait_ms={}",
@@ -2269,7 +2281,11 @@ pub fn execute_opencode_http(
         steered.clone(),
     );
 
-    let sse_connected = wait_for_shared_sse_connection(Duration::from_secs(3), &working_dir_string);
+    let sse_connected = wait_for_shared_sse_connection(
+        Duration::from_secs(3),
+        &working_dir_string,
+        Some(cancelled),
+    );
 
     if sse_connected {
         log::info!("OpenCode: shared SSE streaming active, events will stream in real-time");

@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -76,8 +77,13 @@ static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
 /// process/turn is registered, leaving a window where two concurrent sends
 /// (frontend queue processor vs backend queue drain vs another client) both
 /// pass the check and spawn duplicate runs. This claim is taken atomically at
-/// `send_chat_message` entry and held for the whole call.
-static ACTIVE_SENDS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+/// `send_chat_message` entry and held for the whole call — unless cancel
+/// releases it early so a follow-up send is not stuck (#329).
+///
+/// Values are generation tokens so an early cancel release cannot be clobbered
+/// by a later `Drop` from the cancelled claim after a new claim was acquired.
+static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
     worktree
@@ -92,33 +98,56 @@ fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
 }
 
 /// RAII claim on a session's send slot — released on drop (any return path).
-struct SendClaim(String);
+struct SendClaim {
+    session_id: String,
+    generation: u64,
+}
 
 impl SendClaim {
     fn try_acquire(session_id: &str) -> Option<Self> {
         let mut active = ACTIVE_SENDS.lock().unwrap();
-        if active.insert(session_id.to_string()) {
-            Some(Self(session_id.to_string()))
-        } else {
-            None
+        if active.contains_key(session_id) {
+            return None;
         }
+        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
+        active.insert(session_id.to_string(), generation);
+        Some(Self {
+            session_id: session_id.to_string(),
+            generation,
+        })
     }
 }
 
 impl Drop for SendClaim {
     fn drop(&mut self) {
-        ACTIVE_SENDS.lock().unwrap().remove(&self.0);
+        let mut active = ACTIVE_SENDS.lock().unwrap();
+        // Only clear if we still own the slot — cancel may have released early
+        // and a newer send may already hold a different generation.
+        if active.get(&self.session_id) == Some(&self.generation) {
+            active.remove(&self.session_id);
+        }
     }
 }
 
+/// Release the in-flight send claim for a session after cancel so a follow-up
+/// prompt is not rejected with "Session already has an active request" while
+/// the cancelled worker finishes teardown (#329).
+fn release_active_send(session_id: &str) {
+    if ACTIVE_SENDS.lock().unwrap().remove(session_id).is_some() {
+        log::info!("[SendChat] released active send claim after cancel session={session_id}");
+    }
+}
+
+fn has_active_send(session_id: &str) -> bool {
+    ACTIVE_SENDS.lock().unwrap().contains_key(session_id)
+}
+
 fn should_forward_cancel_request(session_id: &str) -> bool {
-    ACTIVE_SENDS.lock().unwrap().contains(session_id)
-        || super::registry::is_session_actively_managed(session_id)
+    has_active_send(session_id) || super::registry::is_session_actively_managed(session_id)
 }
 
 fn clear_stale_pending_cancel_before_send(session_id: &str) {
-    let has_active_send = ACTIVE_SENDS.lock().unwrap().contains(session_id);
-    if !has_active_send
+    if !has_active_send(session_id)
         && !super::registry::is_session_actively_managed(session_id)
         && super::registry::clear_pending_cancel(session_id)
     {
@@ -4426,12 +4455,18 @@ pub async fn send_chat_message(
         let _ = tx.send(result);
     });
 
-    let (_pid, unified_response) = match rx.await {
+    let (pid, unified_response) = match rx.await {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => {
-            // Thread completed with an error — clean up all registrations.
+            // Thread completed with an error — clean up registrations owned by
+            // this send. Prefer ownership-aware cleanup so a follow-up send that
+            // started after cancel is not clobbered (#329).
             log::info!("[SendChat] EXIT session={session_id} reason=thread_error error={e}");
-            super::registry::cleanup_session_registrations(&session_id);
+            super::registry::cleanup_owned_session_registrations(
+                &session_id,
+                None,
+                opencode_cancel_flag.as_ref(),
+            );
             if let Some(ref flag) = opencode_cancel_flag {
                 if !flag.load(std::sync::atomic::Ordering::SeqCst) {
                     // Mark run as crashed so it doesn't stay in Running forever
@@ -4503,7 +4538,11 @@ pub async fn send_chat_message(
         }
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
-            super::registry::cleanup_session_registrations(&session_id);
+            super::registry::cleanup_owned_session_registrations(
+                &session_id,
+                None,
+                opencode_cancel_flag.as_ref(),
+            );
             // Check if CLI completed despite thread panic (#209)
             let partial_sid = run_log::extract_session_id_from_jsonl(&app, &session_id, &run_id);
             if run_log::jsonl_has_result_line(&app, &session_id, &run_id) {
@@ -4547,8 +4586,14 @@ pub async fn send_chat_message(
         }
     };
 
-    // Clear any stale pending cancel entry and unregister OpenCode cancel flag now that we have a result.
-    super::registry::cleanup_session_registrations(&session_id);
+    // Clear registry state owned by this send. After cancel, a newer send may
+    // already own ACTIVE_SENDS / CANCEL_FLAGS / PROCESS_REGISTRY for this session,
+    // so only remove entries that still match this run (#329).
+    super::registry::cleanup_owned_session_registrations(
+        &session_id,
+        Some(pid),
+        opencode_cancel_flag.as_ref(),
+    );
 
     // PID is now persisted via pid_callback immediately after spawn (before tailing).
     // No need to set_pid here — it was already saved for crash recovery.
@@ -5343,7 +5388,13 @@ pub async fn cancel_chat_message(
         super::registry::cleanup_session_registrations(&session_id);
         return Ok(false);
     }
-    cancel_process(&app, &session_id, &worktree_id)
+    let cancelled = cancel_process(&app, &session_id, &worktree_id)?;
+    if cancelled {
+        // Free the send slot immediately so a follow-up prompt is not rejected
+        // while the cancelled worker finishes teardown (issue #329).
+        release_active_send(&session_id);
+    }
+    Ok(cancelled)
 }
 
 /// Check if any sessions have running Claude processes
@@ -9618,6 +9669,27 @@ mod tests {
             SendClaim::try_acquire("pre-register-session").expect("send claim should acquire");
 
         assert!(should_forward_cancel_request("pre-register-session"));
+    }
+
+    #[test]
+    fn release_active_send_allows_new_claim_without_drop_clobber() {
+        // Regression for #329: cancel releases the claim while the cancelled
+        // send is still alive; Drop of the old claim must not free the new one.
+        let old = SendClaim::try_acquire("race-session").expect("first claim");
+        assert!(SendClaim::try_acquire("race-session").is_none());
+
+        release_active_send("race-session");
+        let new = SendClaim::try_acquire("race-session").expect("claim after cancel release");
+        assert!(has_active_send("race-session"));
+
+        drop(old);
+        assert!(
+            has_active_send("race-session"),
+            "old claim Drop must not remove newer generation"
+        );
+
+        drop(new);
+        assert!(!has_active_send("race-session"));
     }
 
     #[test]
