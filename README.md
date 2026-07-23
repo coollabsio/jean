@@ -45,7 +45,7 @@ For more information, take a look at [jean.build](https://jean.build).
 - **Magic Commands** - Investigate issues/PRs/workflows, code review with finding tracking, AI commit messages, PR content generation, merge conflict resolution, release notes generation, customizable per-prompt model/backend/effort selection
 - **GitHub Integration** - Dashboard with Issues, PRs, Security Alerts, and Advisories tabs, Dependabot investigation, checkout PRs as worktrees, auto-archive on PR merge, workflow investigation
 - **Linear Integration** - Issue investigation, context loading, per-project API key and team configuration
-- **Developer Tools** - Multi-dock terminal (floating, left, right, bottom), command palette, open in editor (Zed, VS Code, Cursor, Xcode, IntelliJ), git operations (status, stash, revert, fetch/merge with conflict detection), diff viewer (unified & side-by-side), file tree with preview, debug panel with token usage tracking
+- **Developer Tools** - Multi-dock terminal (floating, left, right, bottom), command palette, open in editor (Zed, VS Code, VSCodium, Cursor, Xcode, IntelliJ), git operations (status, stash, revert, fetch/merge with conflict detection), diff viewer (unified & side-by-side), file tree with preview, debug panel with token usage tracking
 - **Web Access** - Every Jean instance (desktop or headless server) can expose the full UI over HTTP/WebSocket with token auth so you can use it from a browser on your network
 - **Customization** - Themes (light/dark/system), custom fonts, customizable AI prompts, configurable keybindings, mobile swipe gestures
 

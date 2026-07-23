@@ -4745,6 +4745,7 @@ fn linux_file_manager_launch_plan(worktree_path: &str, is_wsl: bool) -> LinuxFil
 fn format_open_error(app_name: &str, error: &std::io::Error) -> String {
     let display_name = match app_name {
         "vscode" => "VS Code ('code')",
+        "vscodium" => "VSCodium ('codium')",
         "cursor" => "Cursor ('cursor')",
         "zed" => "Zed ('zed')",
         "xcode" => "Xcode ('xed')",
@@ -4989,6 +4990,18 @@ pub async fn open_worktree_in_editor(
                 }
                 Err(e) => Err(e),
             },
+            "vscodium" => match std::process::Command::new("codium")
+                .arg(&worktree_path)
+                .spawn()
+            {
+                Ok(child) => Ok(child),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::process::Command::new("open")
+                        .args(["-a", "VSCodium", &worktree_path])
+                        .spawn()
+                }
+                Err(e) => Err(e),
+            },
             _ => match std::process::Command::new("code")
                 .arg(&worktree_path)
                 .spawn()
@@ -5036,6 +5049,10 @@ pub async fn open_worktree_in_editor(
             "xcode" => {
                 return Err("Xcode is only available on macOS".to_string());
             }
+            "vscodium" => std::process::Command::new("cmd")
+                .args(["/c", "codium", &worktree_path])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
             _ => {
                 // Default to VS Code
                 std::process::Command::new("cmd")
@@ -5070,6 +5087,9 @@ pub async fn open_worktree_in_editor(
             "xcode" => {
                 return Err("Xcode is only available on macOS".to_string());
             }
+            "vscodium" => std::process::Command::new("codium")
+                .arg(&worktree_path)
+                .spawn(),
             _ => {
                 // Default to VS Code
                 std::process::Command::new("code")
@@ -12948,6 +12968,18 @@ mod tests {
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn format_open_error_uses_friendly_vscodium_name() {
+        let not_found = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        assert_eq!(
+            format_open_error("vscodium", &not_found),
+            "VSCodium ('codium') not found. Make sure it is installed and available in your PATH."
+        );
+
+        let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert!(format_open_error("vscodium", &other).starts_with("Failed to open VSCodium ('codium'):"));
     }
 
     #[test]

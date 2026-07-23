@@ -64,6 +64,12 @@ mod version;
 
 pub use version::{app_version, set_app_version};
 
+// Desktop-only open helpers (native Tauri commands delegate here so editor
+// launch logic stays shared and complete: binary mapping, -g goto args,
+// macOS app fallbacks, Windows .cmd wrappers).
+pub use chat::open_file_in_default_app;
+pub use projects::open_worktree_in_editor;
+
 // Validation functions
 fn validate_filename(filename: &str) -> Result<(), String> {
     // Regex pattern: only alphanumeric, dash, underscore, dot
@@ -166,7 +172,7 @@ pub struct AppPreferences {
     #[serde(default = "default_terminal_font_size")]
     pub terminal_font_size: u32, // Embedded terminal font size in pixels (10-24)
     #[serde(default = "default_editor")]
-    pub editor: String, // Editor app: zed, vscode, cursor, xcode, intellij
+    pub editor: String, // Editor app: zed, vscode, vscodium, cursor, xcode, intellij
     #[serde(default = "default_open_in")]
     pub open_in: String, // Default Open In action: editor, terminal, finder, github
     #[serde(default = "default_auto_branch_naming")]

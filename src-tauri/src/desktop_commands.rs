@@ -178,20 +178,9 @@ pub async fn open_file_in_default_app(
     line: Option<u32>,
     column: Option<u32>,
 ) -> Result<(), String> {
-    let editor = editor.unwrap_or_else(|| "zed".to_string());
-    let binary = match editor.as_str() {
-        "vscode" => "code",
-        "cursor" => "cursor",
-        "xcode" => "xed",
-        "intellij" => "idea",
-        _ => "zed",
-    };
-    let target = match (line, column) {
-        (Some(line), Some(column)) => format!("{path}:{line}:{column}"),
-        (Some(line), None) => format!("{path}:{line}"),
-        _ => path,
-    };
-    spawn(binary, &[target])
+    // Delegate to jean-core so VS Code / VSCodium / Cursor get -g goto args,
+    // macOS `open -a` fallbacks, and Windows .cmd wrappers (code.cmd / codium.cmd).
+    jean_core::open_file_in_default_app(path, editor, line, column).await
 }
 
 #[tauri::command]
@@ -276,7 +265,9 @@ pub async fn open_worktree_in_editor(
     worktree_path: String,
     editor: Option<String>,
 ) -> Result<(), String> {
-    open_file_in_default_app(worktree_path, editor, None, None).await
+    // Use the worktree-specific launcher (jean.json template seed, editor
+    // binary mapping including vscodium/`codium`, platform fallbacks).
+    jean_core::open_worktree_in_editor(worktree_path, editor).await
 }
 
 #[tauri::command]
