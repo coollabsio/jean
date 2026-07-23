@@ -250,9 +250,13 @@ fn get_cli_model_alias(model: &str) -> &'static str {
     }
 }
 
-/// Extract text content from stream-json output
+/// Extract text content from stream-json output.
+///
+/// Also accepts StructuredOutput tool_use blocks (from --json-schema) so naming
+/// keeps working if Claude returns JSON via the tool-call path instead of text.
 fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
     let mut text_content = String::new();
+    let mut structured_json: Option<String> = None;
 
     for line in output.lines() {
         let line = line.trim();
@@ -269,9 +273,16 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
             if let Some(message) = parsed.get("message") {
                 if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
                     for block in content {
-                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        let block_type = block.get("type").and_then(|t| t.as_str());
+                        if block_type == Some("text") {
                             if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                 text_content.push_str(text);
+                            }
+                        } else if block_type == Some("tool_use")
+                            && block.get("name").and_then(|n| n.as_str()) == Some("StructuredOutput")
+                        {
+                            if let Some(input) = block.get("input") {
+                                structured_json = Some(input.to_string());
                             }
                         }
                     }
@@ -286,6 +297,10 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
                 }
             }
         }
+    }
+
+    if let Some(json) = structured_json {
+        return Ok(json);
     }
 
     if text_content.is_empty() {
@@ -1111,12 +1126,19 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
             match validate_session_name(session_name) {
                 Ok(validated_name) => match apply_session_name(app, request, &validated_name) {
                     Ok(result) => {
-                        log::trace!(
-                            "Session renamed from '{}' to '{}'",
+                        log::info!(
+                            "[Naming] Session renamed from '{}' to '{}' (session={})",
                             result.old_name,
-                            result.new_name
+                            result.new_name,
+                            result.session_id
                         );
                         let _ = app.emit_all("session-renamed", &result);
+                        // Also broadcast cache invalidation so web + native clients
+                        // refresh session lists even if they miss session-renamed.
+                        let _ = app.emit_all(
+                            "cache:invalidate",
+                            &serde_json::json!({ "keys": ["sessions"] }),
+                        );
                     }
                     Err(error) => {
                         log::warn!("Session naming storage failed: {}", error.error);
@@ -1145,12 +1167,17 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
             match validate_branch_name(branch_name) {
                 Ok(validated_name) => match apply_branch_name(app, request, &validated_name) {
                     Ok(result) => {
-                        log::trace!(
-                            "Branch renamed from '{}' to '{}'",
+                        log::info!(
+                            "[Naming] Branch renamed from '{}' to '{}' (worktree={})",
                             result.old_branch,
-                            result.new_branch
+                            result.new_branch,
+                            result.worktree_id
                         );
                         let _ = app.emit_all("branch-renamed", &result);
+                        let _ = app.emit_all(
+                            "cache:invalidate",
+                            &serde_json::json!({ "keys": ["projects"] }),
+                        );
                     }
                     Err(error) => {
                         log::warn!("Branch naming failed: {}", error.error);
@@ -1199,6 +1226,22 @@ pub fn spawn_naming_task(app: AppHandle, request: NamingRequest) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_text_prefers_structured_output_tool_call() {
+        let output = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"I'll name it"},{"type":"tool_use","id":"toolu_1","name":"StructuredOutput","input":{"session_name":"Fix auto naming","branch_name":"fix-auto-naming"}}]}}"#;
+        let text = extract_text_from_stream_json(output).unwrap();
+        let parsed: NamingOutput = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed.session_name.as_deref(), Some("Fix auto naming"));
+        assert_eq!(parsed.branch_name.as_deref(), Some("fix-auto-naming"));
+    }
+
+    #[test]
+    fn extract_text_falls_back_to_assistant_text() {
+        let output = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"{\"session_name\":\"Plain text name\"}"}]}}"#;
+        let text = extract_text_from_stream_json(output).unwrap();
+        assert!(text.contains("Plain text name"));
+    }
 
     #[test]
     fn parses_commandcode_naming_output_with_surrounding_text() {

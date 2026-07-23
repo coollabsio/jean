@@ -10,7 +10,12 @@ import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
-import type { QueuedMessage } from '@/types/chat'
+import type {
+  AllSessionsResponse,
+  QueuedMessage,
+  Session,
+  WorktreeSessions,
+} from '@/types/chat'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
@@ -97,6 +102,62 @@ export function applyCacheInvalidationKeys(
         break
     }
   }
+}
+
+/**
+ * Optimistically apply a session rename across all React Query caches that
+ * display session names (tab bar, ProjectCanvas with-counts, all-sessions bell).
+ * Used by the `session-renamed` event so web clients update immediately without
+ * waiting for a refetch race against concurrent chat:done cache writes.
+ */
+export function applySessionRenamedToCaches(
+  queryClient: QueryClient,
+  worktreeId: string,
+  sessionId: string,
+  newName: string
+): void {
+  const patchWorktreeSessions = (
+    old: WorktreeSessions | undefined
+  ): WorktreeSessions | undefined => {
+    if (!old) return old
+    let changed = false
+    const sessions = old.sessions.map(session => {
+      if (session.id !== sessionId || session.name === newName) return session
+      changed = true
+      return { ...session, name: newName }
+    })
+    return changed ? { ...old, sessions } : old
+  }
+
+  queryClient.setQueryData<WorktreeSessions>(
+    chatQueryKeys.sessions(worktreeId),
+    patchWorktreeSessions
+  )
+  // ProjectCanvasView uses the with-counts variant — update it directly so the
+  // dashboard list renames even before the invalidate refetch completes.
+  queryClient.setQueryData<WorktreeSessions>(
+    [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+    patchWorktreeSessions
+  )
+  queryClient.setQueryData<Session>(chatQueryKeys.session(sessionId), old => {
+    if (!old || old.name === newName) return old
+    return { ...old, name: newName }
+  })
+  queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
+    if (!old) return old
+    let changed = false
+    const entries = old.entries.map(entry => {
+      let entryChanged = false
+      const sessions = entry.sessions.map(session => {
+        if (session.id !== sessionId || session.name === newName) return session
+        entryChanged = true
+        changed = true
+        return { ...session, name: newName }
+      })
+      return entryChanged ? { ...entry, sessions } : entry
+    })
+    return changed ? { ...old, entries } : old
+  })
 }
 
 export function shouldAllowKeybindingThroughOpenOverlay(
@@ -962,9 +1023,20 @@ export function useMainWindowEventListeners() {
             oldName: event.payload.old_name,
             newName: event.payload.new_name,
           })
-          // Invalidate sessions query to refresh the session name in the UI
+          // Optimistically patch all caches first so the UI renames immediately
+          // (especially important for web clients and ProjectCanvas with-counts).
+          applySessionRenamedToCaches(
+            queryClient,
+            event.payload.worktree_id,
+            event.payload.session_id,
+            event.payload.new_name
+          )
+          // Then invalidate so disk is the eventual source of truth.
           queryClient.invalidateQueries({
             queryKey: chatQueryKeys.sessions(event.payload.worktree_id),
+          })
+          queryClient.invalidateQueries({
+            queryKey: ['all-sessions'],
           })
         }),
 

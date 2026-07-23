@@ -79,6 +79,26 @@ static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
 /// `send_chat_message` entry and held for the whole call.
 static ACTIVE_SENDS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
+/// Whether a session has no prior user messages for auto-naming purposes.
+///
+/// After the NDJSON migration, `Session.messages` is always empty (messages are
+/// loaded on demand from run logs). Prefer `message_count` / `total_runs` from
+/// metadata, falling back to in-memory messages for tests / legacy paths.
+pub(crate) fn session_has_no_prior_user_messages(session: &Session) -> bool {
+    if let Some(count) = session.message_count {
+        return count == 0;
+    }
+    if session.total_runs > 0 {
+        return false;
+    }
+    session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .count()
+        == 0
+}
+
 fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
     worktree
         .map(|worktree| {
@@ -2447,105 +2467,106 @@ pub async fn send_chat_message(
         sessions.sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
     );
 
-    // Check if we should trigger automatic naming (session and/or branch)
-    // Branch naming: first user message ever AND not already attempted
-    // Session naming: first user message in THIS session AND not already attempted
+    // Check if we should trigger automatic naming (session and/or branch).
+    // Branch naming: first user message ever AND not already attempted.
+    // Session naming: first user message in THIS session AND not already attempted.
+    //
+    // IMPORTANT: `Session.messages` is always empty after the NDJSON migration
+    // (messages load on demand from run logs). Use message_count / total_runs
+    // instead of scanning `messages`.
     let is_first_worktree_message = !sessions.branch_naming_completed
         && sessions
             .sessions
             .iter()
-            .flat_map(|s| &s.messages)
-            .filter(|m| m.role == MessageRole::User)
-            .count()
-            == 0;
+            .all(session_has_no_prior_user_messages);
 
     let session_for_naming = sessions.find_session(&session_id).cloned();
     let is_first_session_message = session_for_naming
         .as_ref()
-        .map(|sess| {
-            !sess.session_naming_completed
-                && sess
-                    .messages
-                    .iter()
-                    .filter(|m| m.role == MessageRole::User)
-                    .count()
-                    == 0
-        })
+        .map(|sess| !sess.session_naming_completed && session_has_no_prior_user_messages(sess))
         .unwrap_or(false);
 
     // Spawn unified naming task if either condition is met
     if is_first_worktree_message || is_first_session_message {
-        if let Ok(prefs) = crate::load_preferences(app.clone()).await {
-            // Preserve branches selected by the user, base sessions, and PR worktrees.
-            let worktree_record = load_projects_data(&app)
-                .ok()
-                .and_then(|data| data.find_worktree(&worktree_id).cloned());
-            let generate_branch = is_first_worktree_message
-                && prefs.auto_branch_naming
-                && should_auto_name_branch(worktree_record.as_ref());
-            let generate_session = is_first_session_message && prefs.auto_session_naming;
+        match crate::load_preferences(app.clone()).await {
+            Ok(prefs) => {
+                // Preserve branches selected by the user, base sessions, and PR worktrees.
+                let worktree_record = load_projects_data(&app)
+                    .ok()
+                    .and_then(|data| data.find_worktree(&worktree_id).cloned());
+                let generate_branch = is_first_worktree_message
+                    && prefs.auto_branch_naming
+                    && should_auto_name_branch(worktree_record.as_ref());
+                let generate_session = is_first_session_message && prefs.auto_session_naming;
 
-            if generate_branch || generate_session {
-                log::trace!(
-                    "Spawning naming task (session: {generate_session}, branch: {generate_branch})"
+                if generate_branch || generate_session {
+                    log::info!(
+                        "[Naming] Spawning naming task session={session_id} worktree={worktree_id} (session: {generate_session}, branch: {generate_branch})"
+                    );
+
+                    // Get existing worktree names to avoid duplicates (only needed for branch naming)
+                    let existing_names = if generate_branch {
+                        load_projects_data(&app)
+                            .map(|data| data.worktrees.iter().map(|w| w.name.clone()).collect())
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let custom_session_prompt = if generate_session {
+                        prefs.magic_prompts.session_naming.clone()
+                    } else {
+                        None
+                    };
+
+                    let request = NamingRequest {
+                        session_id: session_id.clone(),
+                        worktree_id: worktree_id.clone(),
+                        worktree_path: PathBuf::from(&worktree_path),
+                        first_message: message.clone(),
+                        model: prefs.magic_prompt_models.session_naming_model.clone(),
+                        existing_branch_names: existing_names,
+                        generate_session_name: generate_session,
+                        generate_branch_name: generate_branch,
+                        custom_session_prompt,
+                        // Keep provider semantics consistent with manual regeneration:
+                        // session_naming_provider = None means Anthropic (no custom profile),
+                        // not fallback to global default_provider.
+                        custom_profile_name: prefs
+                            .magic_prompt_providers
+                            .session_naming_provider
+                            .clone(),
+                        backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
+                        reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
+                    };
+
+                    // Spawn in background - does not block chat
+                    spawn_naming_task(app.clone(), request);
+                }
+
+                // Mark as completed only after prefs loaded successfully so a
+                // transient prefs failure does not permanently skip auto-naming.
+                with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+                    if is_first_worktree_message {
+                        sessions.branch_naming_completed = true;
+                    }
+                    if is_first_session_message {
+                        if let Some(session) = sessions.find_session_mut(&session_id) {
+                            session.session_naming_completed = true;
+                        }
+                    }
+                    Ok(())
+                })?;
+
+                // Reload sessions to get fresh state after save
+                sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
+            }
+            Err(e) => {
+                log::warn!(
+                    "[Naming] Skipping auto-naming for session={session_id}: failed to load preferences: {e}"
                 );
-
-                // Get existing worktree names to avoid duplicates (only needed for branch naming)
-                let existing_names = if generate_branch {
-                    load_projects_data(&app)
-                        .map(|data| data.worktrees.iter().map(|w| w.name.clone()).collect())
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-
-                let custom_session_prompt = if generate_session {
-                    prefs.magic_prompts.session_naming.clone()
-                } else {
-                    None
-                };
-
-                let request = NamingRequest {
-                    session_id: session_id.clone(),
-                    worktree_id: worktree_id.clone(),
-                    worktree_path: PathBuf::from(&worktree_path),
-                    first_message: message.clone(),
-                    model: prefs.magic_prompt_models.session_naming_model.clone(),
-                    existing_branch_names: existing_names,
-                    generate_session_name: generate_session,
-                    generate_branch_name: generate_branch,
-                    custom_session_prompt,
-                    // Keep provider semantics consistent with manual regeneration:
-                    // session_naming_provider = None means Anthropic (no custom profile),
-                    // not fallback to global default_provider.
-                    custom_profile_name: prefs
-                        .magic_prompt_providers
-                        .session_naming_provider
-                        .clone(),
-                    backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
-                    reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
-                };
-
-                // Spawn in background - does not block chat
-                spawn_naming_task(app.clone(), request);
             }
         }
-
-        // Mark as completed to prevent re-triggering (atomic update)
-        with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-            if is_first_worktree_message {
-                sessions.branch_naming_completed = true;
-            }
-            if is_first_session_message {
-                if let Some(session) = sessions.find_session_mut(&session_id) {
-                    session.session_naming_completed = true;
-                }
-            }
-            Ok(())
-        })?;
-
-        // Reload sessions to get fresh state after save
-        sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
     }
 
     // Notify all clients that a message is being sent (for real-time sync).
@@ -9311,6 +9332,44 @@ mod tests {
         let worktree = naming_test_worktree("random-workspace", Some("main"));
 
         assert!(should_auto_name_branch(Some(&worktree)));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_uses_message_count() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = Some(0);
+        session.messages = vec![]; // NDJSON path: messages always empty
+        assert!(session_has_no_prior_user_messages(&session));
+
+        session.message_count = Some(2);
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_falls_back_to_total_runs() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = None;
+        session.total_runs = 0;
+        assert!(session_has_no_prior_user_messages(&session));
+
+        session.total_runs = 1;
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_falls_back_to_in_memory_messages() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = None;
+        session.total_runs = 0;
+        session.messages = vec![ChatMessage {
+            id: "m1".to_string(),
+            session_id: session.id.clone(),
+            role: MessageRole::User,
+            content: "hello".to_string(),
+            timestamp: 0,
+            ..Default::default()
+        }];
+        assert!(!session_has_no_prior_user_messages(&session));
     }
 
     #[test]
