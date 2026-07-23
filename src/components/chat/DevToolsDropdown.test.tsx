@@ -27,6 +27,7 @@ vi.mock('@/services/preferences', () => ({
     data: {
       selected_codex_model: 'gpt-5.4',
       default_codex_reasoning_effort: 'high',
+      default_codex_model_verbosity: 'medium',
       default_grok_reasoning_effort: 'high',
       chrome_enabled: false,
       ai_language: 'English',

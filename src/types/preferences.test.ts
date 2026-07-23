@@ -102,6 +102,7 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.selected_opencode_model).toBe(
       'opencode/gpt-5.6-sol'
     )
+    expect(defaultPreferences.default_codex_model_verbosity).toBe('medium')
   })
 
   it('provides magic prompt defaults for Kimi Code', () => {

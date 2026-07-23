@@ -104,7 +104,31 @@ struct ErrorEvent {
 }
 
 const CODEX_PLAN_TOOL_NAME: &str = "CodexPlan";
-pub(crate) const DEFAULT_MODEL_VERBOSITY: &str = "low";
+/// Default Codex chat `model_verbosity` (Responses API). Medium matches
+/// interactive use outside Jean better than `low`, which suppresses mid-turn text.
+pub(crate) const DEFAULT_MODEL_VERBOSITY: &str = "medium";
+/// Structured one-shot / review calls stay terse for JSON schema extraction.
+pub(crate) const DEFAULT_ONESHOT_MODEL_VERBOSITY: &str = "low";
+
+/// Normalize a Codex `model_verbosity` preference to a valid API value.
+pub(crate) fn normalize_model_verbosity(value: Option<&str>) -> &'static str {
+    match value.map(str::trim).unwrap_or("") {
+        "low" => "low",
+        "high" => "high",
+        "medium" => "medium",
+        _ => DEFAULT_MODEL_VERBOSITY,
+    }
+}
+
+/// Read Codex chat model verbosity from preferences (default: medium).
+pub(crate) fn resolve_model_verbosity(app: &tauri::AppHandle) -> &'static str {
+    let prefs_value = crate::get_preferences_path(app)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|contents| serde_json::from_str::<crate::AppPreferences>(&contents).ok())
+        .map(|prefs| prefs.default_codex_model_verbosity);
+    normalize_model_verbosity(prefs_value.as_deref())
+}
 
 fn normalize_plan_status(status: &str) -> &str {
     match status {
@@ -435,6 +459,7 @@ pub fn build_thread_start_params(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    model_verbosity: Option<&str>,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "cwd": working_dir.to_string_lossy(),
@@ -501,7 +526,7 @@ pub fn build_thread_start_params(
 
     config.insert(
         "model_verbosity".to_string(),
-        serde_json::json!(DEFAULT_MODEL_VERBOSITY),
+        serde_json::json!(normalize_model_verbosity(model_verbosity)),
     );
 
     // Web search
@@ -657,9 +682,10 @@ pub fn execute_codex_via_server(
 
     let is_plan_mode = execution_mode.unwrap_or("plan") == "plan";
     let is_build_mode = execution_mode.unwrap_or("plan") == "build";
+    let model_verbosity = resolve_model_verbosity(app);
 
     log::debug!(
-        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, resume={}",
+        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, verbosity={model_verbosity}, resume={}",
         existing_thread_id.is_some()
     );
 
@@ -680,6 +706,7 @@ pub fn execute_codex_via_server(
                 base_instructions_content,
                 multi_agent_enabled,
                 max_agent_threads,
+                Some(model_verbosity),
             );
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
@@ -709,6 +736,7 @@ pub fn execute_codex_via_server(
                         base_instructions_content,
                         multi_agent_enabled,
                         max_agent_threads,
+                        Some(model_verbosity),
                     )
                 }
             }
@@ -721,6 +749,7 @@ pub fn execute_codex_via_server(
                 base_instructions_content,
                 multi_agent_enabled,
                 max_agent_threads,
+                Some(model_verbosity),
             )
         }
     })() {
@@ -1385,6 +1414,7 @@ pub fn resume_codex_after_crash(
 }
 
 /// Start a new Codex thread via app-server.
+#[allow(clippy::too_many_arguments)]
 fn start_new_thread(
     working_dir: &std::path::Path,
     model: Option<&str>,
@@ -1393,6 +1423,7 @@ fn start_new_thread(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    model_verbosity: Option<&str>,
 ) -> Result<String, String> {
     use super::codex_server;
 
@@ -1404,6 +1435,7 @@ fn start_new_thread(
         base_instructions_content,
         multi_agent_enabled,
         max_agent_threads,
+        model_verbosity,
     );
 
     let result = codex_server::send_request("thread/start", params)?;
@@ -4524,7 +4556,7 @@ fn build_one_shot_codex_args(
         "--output-schema".into(),
         schema_file.as_os_str().to_os_string(),
         "-c".into(),
-        format!("model_verbosity=\"{DEFAULT_MODEL_VERBOSITY}\"").into(),
+        format!("model_verbosity=\"{DEFAULT_ONESHOT_MODEL_VERBOSITY}\"").into(),
     ];
     if is_fast {
         args.push("-c".into());
@@ -4907,6 +4939,7 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.4");
         assert_eq!(params["serviceTier"], "fast");
@@ -4921,6 +4954,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         assert_eq!(params["model"], "gpt-5.5");
@@ -5004,7 +5038,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_thread_params_default_to_low_model_verbosity() {
+    fn codex_thread_params_default_to_medium_model_verbosity() {
         let params = build_thread_start_params(
             std::path::Path::new("/tmp"),
             Some("gpt-5.6-sol"),
@@ -5013,9 +5047,36 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
 
-        assert_eq!(params["config"]["model_verbosity"], "low");
+        assert_eq!(params["config"]["model_verbosity"], "medium");
+    }
+
+    #[test]
+    fn codex_thread_params_respect_explicit_model_verbosity() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.6-sol"),
+            Some("build"),
+            false,
+            None,
+            false,
+            None,
+            Some("high"),
+        );
+
+        assert_eq!(params["config"]["model_verbosity"], "high");
+    }
+
+    #[test]
+    fn normalize_model_verbosity_accepts_valid_values_and_falls_back() {
+        assert_eq!(normalize_model_verbosity(Some("low")), "low");
+        assert_eq!(normalize_model_verbosity(Some("medium")), "medium");
+        assert_eq!(normalize_model_verbosity(Some("high")), "high");
+        assert_eq!(normalize_model_verbosity(Some("  HIGH  ")), "medium");
+        assert_eq!(normalize_model_verbosity(Some("nope")), "medium");
+        assert_eq!(normalize_model_verbosity(None), "medium");
     }
 
     #[test]
@@ -5046,6 +5107,7 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.3");
         assert!(params.get("serviceTier").is_none());
@@ -5060,6 +5122,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         let policy = &params["approvalPolicy"]["granular"];
@@ -5078,6 +5141,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         assert_eq!(params["approvalPolicy"], "never");
@@ -5131,6 +5195,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
         );
         assert_eq!(params["approvalPolicy"], "never");

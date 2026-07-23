@@ -311,6 +311,8 @@ pub struct AppPreferences {
     pub selected_kimi_model: String, // Default Kimi Code model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
+    #[serde(default = "default_codex_model_verbosity")]
+    pub default_codex_model_verbosity: String, // Codex model verbosity: low, medium, high
     #[serde(default = "default_grok_reasoning_effort")]
     pub default_grok_reasoning_effort: String, // Grok reasoning effort: low, medium, high, xhigh, max
     #[serde(default = "default_codex_goal_execution_mode")]
@@ -690,6 +692,10 @@ fn default_codex_reasoning_effort() -> String {
     "high".to_string()
 }
 
+fn default_codex_model_verbosity() -> String {
+    "medium".to_string()
+}
+
 fn default_grok_reasoning_effort() -> String {
     "high".to_string()
 }
@@ -989,6 +995,24 @@ mod tests {
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
         assert!(prefs.web_access_sounds_enabled);
+    }
+
+    #[test]
+    fn app_preferences_default_codex_model_verbosity_for_existing_prefs() {
+        assert_eq!(
+            AppPreferences::default().default_codex_model_verbosity,
+            "medium"
+        );
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("default_codex_model_verbosity");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+
+        assert_eq!(prefs.default_codex_model_verbosity, "medium");
     }
 
     #[test]
@@ -2370,6 +2394,7 @@ impl Default for AppPreferences {
             selected_grok_model: default_grok_model(),
             selected_kimi_model: default_kimi_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
+            default_codex_model_verbosity: default_codex_model_verbosity(),
             default_grok_reasoning_effort: default_grok_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: default_codex_multi_agent_enabled(),
