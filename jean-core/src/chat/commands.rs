@@ -851,6 +851,9 @@ pub async fn create_session(
         return Err("Native session IDs are only valid for terminal sessions".to_string());
     }
 
+    // Archived worktrees must be restored before creating new sessions.
+    ensure_worktree_not_archived(&worktree_id, worktree_archived_at(&app, &worktree_id))?;
+
     let preferences = crate::load_preferences(app.clone()).await.ok();
 
     // Resolve backend: explicit param → project default → global preference → Claude
@@ -2004,6 +2007,49 @@ pub async fn unarchive_session(
     })
 }
 
+/// Reject execution against an archived session or its parent worktree.
+///
+/// Archived workspaces may have incomplete post-cleanup state (missing scripts,
+/// removed paths), so agents/UI must unarchive explicitly before running again.
+pub fn ensure_session_can_run(
+    session_id: &str,
+    session_archived_at: Option<u64>,
+    worktree_id: &str,
+    worktree_archived_at: Option<u64>,
+) -> Result<(), String> {
+    if session_archived_at.is_some() {
+        return Err(format!(
+            "Session is archived and cannot run. Unarchive the session first (sessionId: {session_id})."
+        ));
+    }
+    if worktree_archived_at.is_some() {
+        return Err(format!(
+            "Worktree is archived and cannot run sessions. Unarchive the worktree first (worktreeId: {worktree_id})."
+        ));
+    }
+    Ok(())
+}
+
+/// Reject mutations that require an active (non-archived) worktree.
+pub fn ensure_worktree_not_archived(
+    worktree_id: &str,
+    worktree_archived_at: Option<u64>,
+) -> Result<(), String> {
+    if worktree_archived_at.is_some() {
+        return Err(format!(
+            "Worktree is archived. Unarchive it first (worktreeId: {worktree_id})."
+        ));
+    }
+    Ok(())
+}
+
+/// Look up a worktree's `archived_at` timestamp (if the worktree record exists).
+pub fn worktree_archived_at(app: &AppHandle, worktree_id: &str) -> Option<u64> {
+    load_projects_data(app)
+        .ok()
+        .and_then(|data| data.find_worktree(worktree_id).and_then(|w| w.archived_at))
+}
+
 /// Response from restoring a session with base session recreation
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RestoreSessionWithBaseResponse {
@@ -2519,6 +2565,28 @@ pub async fn send_chat_message(
         "Available session IDs: {:?}",
         sessions.sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
     );
+
+    // Guard: never execute against archived sessions/worktrees (MCP, UI, queue).
+    // Check before any side effects (naming tasks, chat:sending events).
+    if let Some(session) = sessions.find_session(&session_id) {
+        if let Err(e) = ensure_session_can_run(
+            &session_id,
+            session.archived_at,
+            &worktree_id,
+            worktree_archived_at(&app, &worktree_id),
+        ) {
+            log::warn!("[SendChat] REJECTED session={session_id} — {e}");
+            let error_event = super::claude::ErrorEvent {
+                session_id: session_id.clone(),
+                worktree_id: worktree_id.clone(),
+                error: e.clone(),
+            };
+            if let Err(emit_err) = app.emit_all("chat:error", &error_event) {
+                log::error!("Failed to emit chat:error event: {emit_err}");
+            }
+            return Err(e);
+        }
+    }
 
     // Check if we should trigger automatic naming (session and/or branch).
     // Branch naming: first user message ever AND not already attempted.
@@ -10374,6 +10442,44 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let remaining = vec![s2, s3];
         let selected = find_neighbor_non_archived_session_id(&remaining, 0);
         assert_eq!(selected.as_deref(), Some("s3"));
+    }
+
+    #[test]
+    fn ensure_session_can_run_allows_active_session_and_worktree() {
+        assert!(ensure_session_can_run("sess-1", None, "wt-1", None).is_ok());
+    }
+
+    #[test]
+    fn ensure_session_can_run_rejects_archived_session() {
+        let err = ensure_session_can_run("sess-1", Some(123), "wt-1", None).unwrap_err();
+        assert!(err.contains("Session is archived"));
+        assert!(err.contains("sess-1"));
+        assert!(err.contains("Unarchive"));
+    }
+
+    #[test]
+    fn ensure_session_can_run_rejects_archived_worktree() {
+        let err = ensure_session_can_run("sess-1", None, "wt-1", Some(456)).unwrap_err();
+        assert!(err.contains("Worktree is archived"));
+        assert!(err.contains("wt-1"));
+        assert!(err.contains("Unarchive"));
+    }
+
+    #[test]
+    fn ensure_session_can_run_prefers_session_archive_error() {
+        // When both are archived, surface the session-level error first so the
+        // caller knows which unarchive tool to use.
+        let err = ensure_session_can_run("sess-1", Some(1), "wt-1", Some(2)).unwrap_err();
+        assert!(err.contains("Session is archived"));
+        assert!(!err.contains("Worktree is archived"));
+    }
+
+    #[test]
+    fn ensure_worktree_not_archived_rejects_archived() {
+        let err = ensure_worktree_not_archived("wt-1", Some(99)).unwrap_err();
+        assert!(err.contains("Worktree is archived"));
+        assert!(err.contains("wt-1"));
+        assert!(ensure_worktree_not_archived("wt-1", None).is_ok());
     }
 
     #[test]
