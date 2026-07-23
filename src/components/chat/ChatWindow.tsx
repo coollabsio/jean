@@ -270,17 +270,8 @@ export function ChatWindow({
   const storeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const activeWorktreeId = propWorktreeId ?? storeWorktreeId
   const activeWorktreePath = propWorktreePath ?? storeWorktreePath
-  const hasPendingAutoInvestigate = useUIStore(state => {
-    if (!activeWorktreeId) return false
-    return (
-      state.autoInvestigateWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigatePRWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateSecurityAlertWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateAdvisoryWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateLinearIssueWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateSentryIssueWorktreeIds.has(activeWorktreeId)
-    )
-  })
+  // Auto-investigate flags are owned by useBackgroundInvestigation (App-level)
+  // so remote/web clients still queue the prompt even when this ChatWindow mounts.
 
   // PERFORMANCE: Proper selector for activeSessionId - subscribes to changes
   // This triggers re-render when tabs are clicked (setActiveSession updates activeSessionIds)
@@ -745,20 +736,16 @@ export function ChatWindow({
     ]
   )
 
-  // Per-session provider selection: persisted session → zustand → project default → global default
+  // Per-session provider selection: persisted session → zustand → backend defaults
+  // Claude: project default_provider → global default_provider
+  // Codex: global default_codex_provider
   const projectDefaultProvider = project?.default_provider ?? null
   const globalDefaultProvider = preferences?.default_provider ?? null
-  const defaultProvider = projectDefaultProvider ?? globalDefaultProvider
+  const globalDefaultCodexProvider = preferences?.default_codex_provider ?? null
   const zustandProvider = useChatStore(state =>
     deferredSessionId ? state.selectedProviders[deferredSessionId] : undefined
   )
   const sessionProvider = session?.selected_provider ?? zustandProvider
-  const selectedProvider =
-    sessionProvider !== undefined ? sessionProvider : defaultProvider
-  // __anthropic__ is the sentinel for "use default Anthropic" — treat as non-custom for feature detection
-  const isCustomProvider = Boolean(
-    selectedProvider && selectedProvider !== '__anthropic__'
-  )
 
   // Installed backends (only these should be selectable)
   const { installedBackends } = useInstalledBackends()
@@ -803,6 +790,25 @@ export function ChatWindow({
   const isCodexBackend = selectedBackend === 'codex'
   const isGrokBackend = selectedBackend === 'grok'
   const isCursorBackend = selectedBackend === 'cursor'
+
+  // Provider is backend-scoped: Claude uses custom_cli_profiles defaults;
+  // Codex uses custom_codex_providers / default_codex_provider.
+  const defaultProviderForBackend =
+    selectedBackend === 'codex'
+      ? globalDefaultCodexProvider
+      : selectedBackend === 'claude'
+        ? (projectDefaultProvider ?? globalDefaultProvider)
+        : null
+  const selectedProvider =
+    sessionProvider !== undefined
+      ? sessionProvider
+      : defaultProviderForBackend
+  // Sentinels mean "use backend default" — treat as non-custom for feature detection
+  const isCustomProvider = Boolean(
+    selectedProvider &&
+      selectedProvider !== '__anthropic__' &&
+      selectedProvider !== '__default__'
+  )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
   const defaultModel = resolveDefaultModelForBackend(
@@ -897,9 +903,10 @@ export function ChatWindow({
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
-  const activeProfile = isCustomProvider
-    ? customCliProfiles.find(p => p.name === selectedProvider)
-    : null
+  const activeProfile =
+    isCustomProvider && selectedBackend === 'claude'
+      ? customCliProfiles.find(p => p.name === selectedProvider)
+      : null
   // Fall back to predefined template's supports_thinking for profiles saved before this field existed
   const activeSupportsThinking =
     activeProfile?.supports_thinking ??
@@ -2354,39 +2361,6 @@ export function ChatWindow({
     sessionModalOpen,
   })
 
-  // Pick up per-worktree auto-investigate flags (set by useNewWorktreeHandlers
-  // when worktree is created with auto-investigate). Uses per-worktree Sets so
-  // multiple concurrent worktree creations each get their own investigation.
-  // Guard: wait for worktree status === 'ready' to ensure the git directory
-  // exists on disk before spawning Claude CLI (which uses current_dir).
-  const worktreeStatus = worktree?.status
-  useEffect(() => {
-    if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
-    if (worktreeStatus !== 'ready') return
-    if (!hasPendingAutoInvestigate) return
-    const uiStore = useUIStore.getState()
-    if (uiStore.consumeAutoInvestigate(activeWorktreeId)) {
-      handleInvestigate('issue')
-    } else if (uiStore.consumeAutoInvestigatePR(activeWorktreeId)) {
-      handleInvestigate('pr')
-    } else if (uiStore.consumeAutoInvestigateSecurityAlert(activeWorktreeId)) {
-      handleInvestigate('security-alert')
-    } else if (uiStore.consumeAutoInvestigateAdvisory(activeWorktreeId)) {
-      handleInvestigate('advisory')
-    } else if (uiStore.consumeAutoInvestigateLinearIssue(activeWorktreeId)) {
-      handleInvestigate('linear-issue')
-    } else if (uiStore.consumeAutoInvestigateSentryIssue(activeWorktreeId)) {
-      handleInvestigate('sentry-issue')
-    }
-  }, [
-    activeSessionId,
-    activeWorktreeId,
-    activeWorktreePath,
-    worktreeStatus,
-    hasPendingAutoInvestigate,
-    handleInvestigate,
-  ])
-
   // Message handlers hook - handles questions, plan approval, permission approval, finding fixes
   const {
     handleQuestionAnswer,
@@ -3576,6 +3550,9 @@ export function ChatWindow({
                                 onProviderChange={handleToolbarProviderChange}
                                 customCliProfiles={
                                   preferences?.custom_cli_profiles ?? []
+                                }
+                                customCodexProviders={
+                                  preferences?.custom_codex_providers ?? []
                                 }
                                 onThinkingLevelChange={
                                   handleToolbarThinkingLevelChange

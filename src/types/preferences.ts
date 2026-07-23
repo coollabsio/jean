@@ -116,7 +116,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
    - Specific files to modify
    - Potential risks/trade-offs
    - Test cases to verify
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -127,7 +126,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -170,7 +168,6 @@ Investigate the loaded GitHub {prWord} ({prRefs})
    - Address reviewer feedback
    - Specific files to modify
    - Test cases to add or update
-8. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -182,7 +179,6 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -385,7 +381,6 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 3. Explore the relevant code in the codebase to understand the context
 4. Determine if this is a code issue, configuration issue, or flaky test
 5. Propose a fix with specific files and changes needed
-6. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -396,7 +391,6 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in CI config (.github/workflows), explain the fix
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -428,7 +422,6 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
    - Specific version bump or dependency change
    - Any code changes needed for compatibility
    - Test cases to verify the fix doesn't break functionality
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -439,7 +432,6 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
 - Don't just recommend "upgrade" — assess compatibility impact
 - Reference specific file paths where the affected package is used
 - If multiple alerts are loaded, address each one separately
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -473,7 +465,6 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 6. Document:
    - Summarize the vulnerability and fix for the advisory
    - Note any affected versions and migration steps
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -484,7 +475,6 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 - Check for the same vulnerability pattern across the entire codebase, not just the reported location
 - Reference specific file paths and line numbers
 - If multiple advisories are loaded, address each one separately
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -526,7 +516,6 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
    - Specific files to modify
    - Potential risks/trade-offs
    - Test cases to verify
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -538,7 +527,6 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -570,7 +558,6 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
    - Specific files and code paths to change
    - Error handling or observability improvements where relevant
    - Risks, edge cases, and tests needed to verify the fix
-6. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -582,7 +569,6 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
 - Be thorough but focused - investigate deeply without getting sidetracked
 - If multiple solutions exist, explain the trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -1241,7 +1227,13 @@ export interface AppPreferences {
   mobile_zoom_level?: number // Mobile zoom level percentage (50-200, default 90)
   sync_zoom_levels?: boolean // Keep desktop and mobile zoom levels in sync (default true)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
-  default_provider: string | null // Default provider profile name (null = Anthropic direct)
+  default_provider: string | null // Default Claude provider profile name (null = Anthropic direct)
+  /** Codex custom model_provider profiles (OpenRouter, OpenAI-compatible, etc.) */
+  custom_codex_providers: CodexProviderProfile[]
+  /** Default Codex provider profile name (null = Codex default / ChatGPT OpenAI) */
+  default_codex_provider: string | null
+  /** PI custom providers mirrored into ~/.pi/agent/models.json */
+  custom_pi_providers: PiProviderProfile[]
   favorite_models: string[] // Favourited model keys ("backend:model") shown at top of picker
   favorite_package_scripts?: string[] // Favourited package script keys ("project_id:script")
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
@@ -1320,6 +1312,58 @@ export interface CustomCliProfile {
   file_path?: string // Path to settings file on disk (e.g. ~/.claude/settings.jean.openrouter.json)
   supports_thinking?: boolean // Whether this provider supports thinking/effort levels (default: true)
 }
+
+/** Codex custom model_provider profile (injected via app-server config / -c overrides). */
+export interface CodexProviderProfile {
+  name: string // Display + session id, e.g. "OpenRouter"
+  provider_id: string // Codex model_provider slug, e.g. "openrouter"
+  base_url: string // e.g. https://openrouter.ai/api/v1
+  env_key: string // Env var holding the API key, e.g. OPENROUTER_API_KEY
+  wire_api?: 'chat' | 'responses' // Optional wire protocol
+}
+
+/** PI custom provider (merged into ~/.pi/agent/models.json providers map). */
+export interface PiProviderProfile {
+  name: string // Provider id in models.json, e.g. "openrouter-custom"
+  base_url: string
+  api:
+    | 'openai-completions'
+    | 'openai-responses'
+    | 'anthropic-messages'
+    | 'google-generative-ai'
+  /** Env var name; written to models.json as $ENV_NAME (never store secrets in prefs) */
+  api_key_env?: string
+  models: { id: string; name?: string }[]
+}
+
+export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
+  {
+    name: 'OpenRouter',
+    provider_id: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    env_key: 'OPENROUTER_API_KEY',
+    wire_api: 'responses',
+  },
+]
+
+export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
+  {
+    name: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    api: 'openai-completions',
+    api_key_env: 'OPENROUTER_API_KEY',
+    models: [
+      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
+      { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+    ],
+  },
+  {
+    name: 'ollama',
+    base_url: 'http://localhost:11434/v1',
+    api: 'openai-completions',
+    models: [{ id: 'llama3.2', name: 'Llama 3.2' }],
+  },
+]
 
 export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
   {
@@ -2166,6 +2210,9 @@ export const defaultPreferences: AppPreferences = {
   sync_zoom_levels: true,
   custom_cli_profiles: [],
   default_provider: null,
+  custom_codex_providers: [],
+  default_codex_provider: null,
+  custom_pi_providers: [],
   favorite_models: [],
   favorite_package_scripts: [],
   fast_mode_models: [],

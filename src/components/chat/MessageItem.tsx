@@ -1,7 +1,9 @@
 import { memo, useCallback } from 'react'
 import { Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Markdown } from '@/components/ui/markdown'
 import type {
   ChatMessage,
@@ -208,6 +210,14 @@ export const MessageItem = memo(function MessageItem({
     message.role === 'user' ? extractSkillPaths(message.content) : []
   const displayContent =
     message.role === 'user' ? stripAllMarkers(message.content) : message.content
+  const assistantResponse =
+    message.role === 'assistant'
+      ? message.content.trim() ||
+        (message.content_blocks ?? [])
+          .flatMap(block => (block.type === 'text' ? [block.text] : []))
+          .join('\n')
+          .trim()
+      : ''
   // Show content if it's not empty
   const showContent = displayContent.trim()
 
@@ -269,6 +279,14 @@ export const MessageItem = memo(function MessageItem({
   const handleCopyToInput = useCallback(() => {
     onCopyToInput?.(message)
   }, [onCopyToInput, message])
+
+  const handleCopyAssistantResponse = useCallback(() => {
+    if (!assistantResponse) return
+
+    void copyToClipboard(assistantResponse)
+      .then(() => toast.success('Response copied to clipboard'))
+      .catch(() => toast.error('Failed to copy response'))
+  }, [assistantResponse])
 
   const handleCopySteeredText = useCallback(
     (text: string) => {
@@ -883,8 +901,25 @@ export const MessageItem = memo(function MessageItem({
           </div>
         </div>
       ) : (
-        <div className="text-foreground/90 w-full min-w-0 break-words">
+        <div className="group relative text-foreground/90 w-full min-w-0 break-words">
           {messageBoxContent}
+          {assistantResponse && (
+            <div className="mt-1 flex justify-end">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Copy response to clipboard"
+                    onClick={handleCopyAssistantResponse}
+                    className="shrink-0 rounded p-1 text-muted-foreground/0 transition-colors [@media(pointer:coarse)]:text-muted-foreground/60 hover:bg-muted/50 hover:text-muted-foreground focus-visible:text-muted-foreground group-hover:text-muted-foreground/50"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Copy response</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
         </div>
       )}
     </div>

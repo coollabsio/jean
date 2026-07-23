@@ -39,6 +39,27 @@ describe('SessionChatModal removal behavior', () => {
     )
   })
 
+  it('confirms non-empty session tab close even when other tabs remain (issue #56)', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+    const start = source.indexOf('const removeSessionTab = useCallback(')
+    const end = source.indexOf('\n  const handleTabAuxClick', start)
+    const removeSessionTab =
+      start === -1 || end === -1 ? '' : source.slice(start, end)
+
+    expect(removeSessionTab).toContain('needsConfirm')
+    expect(removeSessionTab).toContain(
+      'preferences?.confirm_session_close !== false && !sessionIsEmpty'
+    )
+    // Confirm gate wraps the action for every non-empty tab (not only last).
+    expect(removeSessionTab).toMatch(
+      /if \(needsConfirm\) \{\s*pendingCloseAction\.current = action/
+    )
+    // Neighbor select happens inside the deferred action, not as a bypass.
+    expect(removeSessionTab).toMatch(
+      /const action = \(\) => \{[\s\S]*activeSessions\.length > 1[\s\S]*handleDeleteSession/
+    )
+  })
+
   it('waits for last-session removal success before leaving the modal', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
     const start = source.indexOf('const removeSessionTab = useCallback(')

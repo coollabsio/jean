@@ -81,6 +81,7 @@ interface DesktopToolbarControlsProps {
   sessionHasMessages?: boolean
   providerLocked?: boolean
   customCliProfiles: CustomCliProfile[]
+  customCodexProviders?: import('@/types/preferences').CodexProviderProfile[]
   isCodex: boolean
   modelReasoning?: ModelReasoningCapability | null
 
@@ -146,6 +147,7 @@ export function DesktopToolbarControls({
   sessionHasMessages,
   providerLocked,
   customCliProfiles,
+  customCodexProviders = [],
   isCodex,
   modelReasoning,
   prUrl,
@@ -257,7 +259,15 @@ export function DesktopToolbarControls({
     loadedSecurityContexts.length + loadedAdvisoryContexts.length
   const loadedLinearCount = loadedLinearContexts.length
   const loadedContextCount = attachedSavedContexts.length
-  const providerDisplayName = getProviderDisplayName(selectedProvider)
+  const providerDisplayName = getProviderDisplayName(
+    selectedProvider,
+    selectedBackend
+  )
+  const showClaudeProviders =
+    customCliProfiles.length > 0 && selectedBackend === 'claude'
+  const showCodexProviders =
+    customCodexProviders.length > 0 && selectedBackend === 'codex'
+  const showProviderDropdown = showClaudeProviders || showCodexProviders
 
   return (
     <>
@@ -574,7 +584,7 @@ export function DesktopToolbarControls({
         </>
       )}
 
-      {customCliProfiles.length > 0 && selectedBackend === 'claude' && (
+      {showProviderDropdown && (
         <>
           <div className="hidden @xl:block h-4 w-px bg-border/50" />
           <DropdownMenu
@@ -600,35 +610,59 @@ export function DesktopToolbarControls({
               onEscapeKeyDown={e => e.stopPropagation()}
               onCloseAutoFocus={focusChatInput}
             >
-              <DropdownMenuRadioGroup
-                value={selectedProvider ?? '__anthropic__'}
-                onValueChange={handleProviderChange}
-              >
-                <DropdownMenuRadioItem value="__anthropic__">
-                  Anthropic
-                  <Kbd className="ml-auto text-[10px]">1</Kbd>
-                </DropdownMenuRadioItem>
-                {customCliProfiles.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      Custom Providers
-                      <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
-                        cc
-                      </span>
-                    </DropdownMenuLabel>
-                    {customCliProfiles.map((profile, i) => (
-                      <DropdownMenuRadioItem
-                        key={profile.name}
-                        value={profile.name}
-                      >
-                        {profile.name}
-                        <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </>
-                )}
-              </DropdownMenuRadioGroup>
+              {showClaudeProviders ? (
+                <DropdownMenuRadioGroup
+                  value={selectedProvider ?? '__anthropic__'}
+                  onValueChange={handleProviderChange}
+                >
+                  <DropdownMenuRadioItem value="__anthropic__">
+                    Anthropic
+                    <Kbd className="ml-auto text-[10px]">1</Kbd>
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    Custom Providers
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
+                      cc
+                    </span>
+                  </DropdownMenuLabel>
+                  {customCliProfiles.map((profile, i) => (
+                    <DropdownMenuRadioItem
+                      key={profile.name}
+                      value={profile.name}
+                    >
+                      {profile.name}
+                      <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              ) : (
+                <DropdownMenuRadioGroup
+                  value={selectedProvider ?? '__default__'}
+                  onValueChange={handleProviderChange}
+                >
+                  <DropdownMenuRadioItem value="__default__">
+                    Default (OpenAI)
+                    <Kbd className="ml-auto text-[10px]">1</Kbd>
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    Custom Providers
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
+                      cx
+                    </span>
+                  </DropdownMenuLabel>
+                  {customCodexProviders.map((profile, i) => (
+                    <DropdownMenuRadioItem
+                      key={profile.name}
+                      value={profile.name}
+                    >
+                      {profile.name}
+                      <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </>
