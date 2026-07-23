@@ -9580,6 +9580,39 @@ mod tests {
             editor_file_args("vscodium", "/tmp/main.ts", Some(42), Some(3)),
             vec!["-g".to_string(), "/tmp/main.ts:42:3".to_string()]
         );
+        // Path-only opens omit -g for VS Code forks.
+        assert_eq!(
+            editor_file_args("vscodium", "/tmp/main.ts", None, None),
+            vec!["/tmp/main.ts".to_string()]
+        );
+    }
+
+    #[test]
+    fn macos_open_app_args_uses_vscodium_app_name_and_goto_args() {
+        assert_eq!(
+            macos_open_app_args("VSCodium", "vscodium", "/tmp/main.ts", None, None),
+            vec![
+                "-a".to_string(),
+                "VSCodium".to_string(),
+                "/tmp/main.ts".to_string()
+            ]
+        );
+        assert_eq!(
+            macos_open_app_args(
+                "VSCodium",
+                "vscodium",
+                "/tmp/main.ts",
+                Some(10),
+                Some(2)
+            ),
+            vec![
+                "-a".to_string(),
+                "VSCodium".to_string(),
+                "--args".to_string(),
+                "-g".to_string(),
+                "/tmp/main.ts:10:2".to_string()
+            ]
+        );
     }
 
     #[test]

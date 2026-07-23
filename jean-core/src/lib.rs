@@ -64,6 +64,12 @@ mod version;
 
 pub use version::{app_version, set_app_version};
 
+// Desktop-only open helpers (native Tauri commands delegate here so editor
+// launch logic stays shared and complete: binary mapping, -g goto args,
+// macOS app fallbacks, Windows .cmd wrappers).
+pub use chat::open_file_in_default_app;
+pub use projects::open_worktree_in_editor;
+
 // Validation functions
 fn validate_filename(filename: &str) -> Result<(), String> {
     // Regex pattern: only alphanumeric, dash, underscore, dot

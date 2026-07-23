@@ -12971,6 +12971,18 @@ mod tests {
     }
 
     #[test]
+    fn format_open_error_uses_friendly_vscodium_name() {
+        let not_found = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        assert_eq!(
+            format_open_error("vscodium", &not_found),
+            "VSCodium ('codium') not found. Make sure it is installed and available in your PATH."
+        );
+
+        let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert!(format_open_error("vscodium", &other).starts_with("Failed to open VSCodium ('codium'):"));
+    }
+
+    #[test]
     fn parse_open_pr_list_returns_first_matching_pr() {
         let response = parse_open_pr_list(
             br#"[{"number":42,"url":"https://github.com/acme/app/pull/42","title":"Ship it"}]"#,
