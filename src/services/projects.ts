@@ -35,6 +35,10 @@ import { hasBackend, hasBackendTransport } from '@/lib/environment'
 import { openExternal, preOpenWindow } from '@/lib/platform'
 import { shouldSuppressAutoFixConflictNotification } from './worktree-conflict-events'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
+import {
+  mergeWorktreesPreservingOptimistic,
+  removePendingWorktree,
+} from '@/lib/worktree-list-cache'
 
 // Check if a backend is available (Tauri IPC or WebSocket)
 // Kept as `isTauri` for backward compatibility across the codebase
@@ -84,6 +88,8 @@ export function useProjects() {
  * Hook to list worktrees for a specific project
  */
 export function useWorktrees(projectId: string | null) {
+  const queryClient = useQueryClient()
+
   return useQuery({
     queryKey: projectsQueryKeys.worktrees(projectId ?? ''),
     queryFn: async (): Promise<Worktree[]> => {
@@ -96,10 +102,17 @@ export function useWorktrees(projectId: string | null) {
         const worktrees = await invoke<Worktree[]>('list_worktrees', {
           projectId,
         })
+        // Pending creations are client-only until git finishes; keep them when
+        // something else invalidates this query mid-create (issue #528).
+        const previous = queryClient.getQueryData<Worktree[]>(
+          projectsQueryKeys.worktrees(projectId)
+        )
+        const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
         logger.info('Worktrees loaded successfully', {
           count: worktrees.length,
+          pendingPreserved: merged.length - worktrees.length,
         })
-        return worktrees
+        return merged
       } catch (error) {
         logger.error('Failed to load worktrees', { error, projectId })
         return preserveQueryCacheOnError(error)
@@ -915,6 +928,9 @@ export function useWorktreeEvents() {
 
     // Track pending worktree timeouts for recovery if events are missed
     const pendingTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+    const pendingTimeoutAttempts = new Map<string, number>()
+    const PENDING_TIMEOUT_MS = 120_000 // 2m — large repos / auto-pull often exceed 1m
+    const PENDING_TIMEOUT_MAX_ATTEMPTS = 10 // ~20m total recovery window
 
     const clearPendingTimeout = (worktreeId: string) => {
       const timeout = pendingTimeouts.get(worktreeId)
@@ -922,24 +938,59 @@ export function useWorktreeEvents() {
         clearTimeout(timeout)
         pendingTimeouts.delete(worktreeId)
       }
+      pendingTimeoutAttempts.delete(worktreeId)
     }
 
     const startPendingTimeout = (worktreeId: string, projectId: string) => {
-      clearPendingTimeout(worktreeId)
+      // Clear only the timer; keep attempt count across reschedules
+      const existing = pendingTimeouts.get(worktreeId)
+      if (existing) {
+        clearTimeout(existing)
+        pendingTimeouts.delete(worktreeId)
+      }
+      // Long creations (large repos, auto-pull, PR checkout) can take minutes.
+      // Refetch for recovery, and reschedule while still pending so a missed
+      // worktree:created event can still be recovered later without wiping UI.
       const timeoutId = setTimeout(() => {
         pendingTimeouts.delete(worktreeId)
+        const attempt = (pendingTimeoutAttempts.get(worktreeId) ?? 0) + 1
+        pendingTimeoutAttempts.set(worktreeId, attempt)
         logger.warn('Pending worktree timed out, forcing refetch', {
           worktreeId,
           projectId,
+          attempt,
         })
-        // Force refetch to get actual state from backend
-        queryClient.invalidateQueries({
-          queryKey: projectsQueryKeys.worktrees(projectId),
-        })
+        // Force refetch to get actual state from backend. useWorktrees merges
+        // optimistic pending rows so this no longer wipes the sidebar (#528).
+        void queryClient
+          .invalidateQueries({
+            queryKey: projectsQueryKeys.worktrees(projectId),
+          })
+          .then(() => {
+            const stillPending = queryClient
+              .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(projectId))
+              ?.some(w => w.id === worktreeId && w.status === 'pending')
+            if (stillPending && attempt < PENDING_TIMEOUT_MAX_ATTEMPTS) {
+              startPendingTimeout(worktreeId, projectId)
+            } else if (stillPending) {
+              pendingTimeoutAttempts.delete(worktreeId)
+              queryClient.setQueryData<Worktree[]>(
+                projectsQueryKeys.worktrees(projectId),
+                old => removePendingWorktree(old, worktreeId)
+              )
+              toast.dismiss(`worktree-creating-${worktreeId}`)
+              toast.error('Worktree creation could not be confirmed', {
+                description:
+                  'The pending worktree was removed after repeated recovery attempts.',
+              })
+            } else if (!stillPending) {
+              pendingTimeoutAttempts.delete(worktreeId)
+            }
+          })
         queryClient.invalidateQueries({
           queryKey: [...projectsQueryKeys.all, 'worktree', worktreeId],
         })
-      }, 60_000) // 60s timeout
+      }, PENDING_TIMEOUT_MS)
       pendingTimeouts.set(worktreeId, timeoutId)
     }
 

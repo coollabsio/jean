@@ -11,6 +11,7 @@ import { isNativeApp, setWebAccessEnabled, setWsConnected } from './environment'
 import { generateId } from './uuid'
 import { isServerWindows } from './platform'
 import { getActiveRemoteConnection } from './remote-connections'
+import { prepareRemoteEditorOpenArgs } from './remote-editor'
 
 export function usesWebSocketBackend(): boolean {
   return !isNativeApp() || getActiveRemoteConnection() !== null
@@ -159,6 +160,7 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'set_project_avatar',
   'start_http_server',
   'stop_http_server',
+  'install_remote_jean_server',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -184,6 +186,7 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'send_native_notification',
   'read_clipboard_image',
   'write_clipboard_text',
+  'install_remote_jean_server',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -221,6 +224,19 @@ export async function invoke<T>(
     if (handler) return handler(args) as T
     console.warn(`[E2E] No mock for command: ${command}`)
     return null as T
+  }
+
+  // Native app + remote Jean: open remote paths in local Zed via ssh://.
+  // Must stay on the local Tauri shell (not the remote WebSocket dispatch).
+  if (isNativeApp() && usesWebSocketBackend()) {
+    const remote = getActiveRemoteConnection()
+    if (remote) {
+      const remapped = prepareRemoteEditorOpenArgs(command, args, remote)
+      if (remapped) {
+        const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
+        return tauriInvoke<T>(command, remapped)
+      }
+    }
   }
 
   if (
@@ -306,6 +322,8 @@ export interface InitialData {
   uiState?: unknown
   appDataDir?: string
   serverPlatform?: 'mac' | 'windows' | 'linux'
+  /** Server can launch host editor/finder/terminal (WSL or --allow-native-open). */
+  nativeOpenAllowed?: boolean
   webBuildId?: string
   appVersion?: string
 }

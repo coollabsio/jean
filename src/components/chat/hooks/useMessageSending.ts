@@ -29,6 +29,10 @@ import type {
 } from '@/types/chat'
 import type { QueryClient } from '@tanstack/react-query'
 import { GIT_ALLOWED_TOOLS } from './useMessageHandlers'
+import {
+  isLoginSlashCommand,
+  openBackendLoginModal,
+} from '@/lib/cli-auth'
 
 interface UseMessageSendingParams {
   activeSessionId: string | null | undefined
@@ -48,6 +52,7 @@ interface UseMessageSendingParams {
   preferences:
     | {
         custom_cli_profiles?: { name: string }[]
+        custom_codex_providers?: { name: string }[]
         parallel_execution_prompt_enabled?: boolean
         magic_prompts?: { parallel_execution?: string | null }
         chrome_enabled?: boolean
@@ -103,20 +108,32 @@ export function useMessageSending({
   clearInputDraft,
   clearChatInputState,
 }: UseMessageSendingParams) {
-  // Helper to resolve custom CLI profile name for the active provider
+  // Helper to resolve custom CLI profile name for the active provider.
+  // Claude: custom_cli_profiles; Codex: custom_codex_providers (same wire field).
   const resolveCustomProfile = useCallback(
     (model: string, provider: string | null) => {
-      if (!provider || provider === '__anthropic__')
+      if (
+        !provider ||
+        provider === '__anthropic__' ||
+        provider === '__default__'
+      ) {
         return { model, customProfileName: undefined }
-      const profile = preferences?.custom_cli_profiles?.find(
+      }
+      const claudeProfile = preferences?.custom_cli_profiles?.find(
+        p => p.name === provider
+      )
+      if (claudeProfile) {
+        return { model, customProfileName: claudeProfile.name }
+      }
+      const codexProfile = preferences?.custom_codex_providers?.find(
         p => p.name === provider
       )
       return {
         model,
-        customProfileName: profile?.name,
+        customProfileName: codexProfile?.name,
       }
     },
-    [preferences?.custom_cli_profiles]
+    [preferences?.custom_cli_profiles, preferences?.custom_codex_providers]
   )
 
   // Helper to send a queued message immediately
@@ -301,6 +318,28 @@ export function useMessageSending({
         toast.error(
           'Session not found. Please refresh or create a new session.'
         )
+        return
+      }
+
+      // Intercept /login — interactive CLI login is not available inside Jean
+      // headless chat (issue #387). Open CliLoginModal instead.
+      if (
+        isLoginSlashCommand(textMessage) &&
+        images.length === 0 &&
+        files.length === 0 &&
+        textFiles.length === 0 &&
+        skills.length === 0
+      ) {
+        clearInputDraft(activeSessionId)
+        clearChatInputState()
+        const backend = selectedBackendRef.current
+        void openBackendLoginModal(backend).then(opened => {
+          if (opened) {
+            toast.message(
+              `Opening ${backend} login… Interactive /login is not available in Jean chat.`
+            )
+          }
+        })
         return
       }
 

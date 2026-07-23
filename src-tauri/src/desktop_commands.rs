@@ -335,3 +335,30 @@ pub async fn start_http_server(
 pub async fn stop_http_server(runtime: State<'_, CoreRuntime>) -> Result<(), String> {
     jean_core::stop_http_server(runtime.0.clone()).await
 }
+
+/// Install jean-server on a remote Linux host over SSH, verify readiness, and
+/// return connection details for the remote connections dialog.
+#[tauri::command]
+pub async fn install_remote_jean_server(
+    app: AppHandle,
+    name: Option<String>,
+    user: String,
+    host: String,
+    ssh_port: Option<u16>,
+    jean_port: Option<u16>,
+    user_install: Option<bool>,
+) -> Result<crate::remote_install::InstallRemoteResult, String> {
+    let input = crate::remote_install::InstallRemoteInput {
+        name,
+        user,
+        host,
+        ssh_port,
+        jean_port,
+        user_install,
+    };
+    tokio::task::spawn_blocking(move || {
+        crate::remote_install::install_remote_jean_server(app, input)
+    })
+    .await
+    .map_err(|error| format!("Remote install task failed: {error}"))?
+}

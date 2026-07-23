@@ -532,6 +532,7 @@ async fn init_handler(
     response["webBuildId"] = Value::String(build_info.web_build_id.clone());
     response["appVersion"] = Value::String(build_info.app_version.clone());
     response["serverPlatform"] = Value::String(crate::server_platform_name().to_string());
+    response["nativeOpenAllowed"] = Value::Bool(crate::platform::native_open_allowed());
 
     let projects = match projects_result {
         Ok(projects) => projects,

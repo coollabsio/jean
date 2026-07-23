@@ -5,6 +5,7 @@ import { useUIStore } from '@/store/ui-store'
 import { usePreferences } from '@/services/preferences'
 import { chatQueryKeys } from '@/services/chat'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
+import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_PR_PROMPT,
@@ -415,9 +416,6 @@ async function processBackgroundInvestigation(
   ])
   const projectId = cachedWorktree?.project_id
 
-  // Build the investigation prompt
-  const prompt = await buildPrompt(worktreeId, type, preferences, projectId)
-
   // Resolve model, provider, backend
   const { modelKey, providerKey, effortKey, modeKey } =
     investigationConfig[type]
@@ -452,6 +450,12 @@ async function processBackgroundInvestigation(
   const executionMode =
     preferences?.magic_prompt_modes?.[modeKey] ??
     DEFAULT_MAGIC_PROMPT_MODES[modeKey]
+
+  // Build the investigation prompt (append fix directive when mode is yolo)
+  const prompt = applyYoloInvestigationFixDirective(
+    await buildPrompt(worktreeId, type, preferences, projectId),
+    executionMode
+  )
 
   const result = await invoke<{
     sessionId: string

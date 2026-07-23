@@ -11,8 +11,10 @@ import { useBackgroundInvestigation } from './useBackgroundInvestigation'
 
 vi.mock('@/lib/transport', () => ({ invoke: vi.fn() }))
 
+let preferencesData: Record<string, unknown> = {}
+
 vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({ data: {} }),
+  usePreferences: () => ({ data: preferencesData }),
 }))
 
 vi.mock('@/lib/logger', () => ({
@@ -25,6 +27,7 @@ vi.mock('@/lib/logger', () => ({
 describe('useBackgroundInvestigation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    preferencesData = {}
     useChatStore.setState({
       activeWorktreeId: null,
       worktreePaths: { 'worktree-1': '/tmp/worktree-1' },
@@ -137,5 +140,61 @@ describe('useBackgroundInvestigation', () => {
         useUIStore.getState().autoInvestigateWorktreeIds.has('worktree-1')
       ).toBe(false)
     })
+  })
+
+  it('appends fix-after-investigation directive when mode is yolo', async () => {
+    preferencesData = {
+      magic_prompt_modes: {
+        investigate_issue_mode: 'yolo',
+      },
+    }
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData<Worktree>(
+      [...projectsQueryKeys.all, 'worktree', 'worktree-1'],
+      {
+        id: 'worktree-1',
+        project_id: 'project-1',
+        path: '/tmp/worktree-1',
+        status: 'ready',
+      } as Worktree
+    )
+
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'list_loaded_issue_contexts') return [{ number: 42 }]
+      if (command === 'start_background_investigation') {
+        return {
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          status: 'investigation_started',
+        }
+      }
+      throw new Error(`Unexpected command: ${command}`)
+    })
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useBackgroundInvestigation(), { wrapper })
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        'start_background_investigation',
+        expect.objectContaining({
+          executionMode: 'yolo',
+          message: expect.stringContaining('<yolo_investigation_fix>'),
+        })
+      )
+    })
+
+    const call = vi
+      .mocked(invoke)
+      .mock.calls.find(([command]) => command === 'start_background_investigation')
+    const args = call?.[1] as { message: string }
+    expect(args.message).toContain('After investigation, fix the issue')
+    expect(args.message).not.toMatch(/If you are in yolo mode/i)
   })
 })
