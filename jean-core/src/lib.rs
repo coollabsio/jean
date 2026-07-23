@@ -862,6 +862,7 @@ mod tests {
         assert_eq!(args.port, Some(4567));
         assert_eq!(args.token.as_deref(), Some("secret"));
         assert!(!args.no_token);
+        assert!(!args.allow_native_open);
     }
 
     #[test]
@@ -890,6 +891,30 @@ mod tests {
         assert_eq!(args.host.as_deref(), Some("100.64.0.1"));
         assert_eq!(args.port, Some(5678));
         assert_eq!(args.token.as_deref(), Some("cli-secret"));
+    }
+
+    #[test]
+    fn parse_cli_args_reads_allow_native_open_from_env_and_flag() {
+        let from_env = parse_cli_args_from(
+            ["jean", "--headless"],
+            [("JEAN_ALLOW_NATIVE_OPEN", "1")],
+        )
+        .unwrap();
+        assert!(from_env.allow_native_open);
+
+        let from_flag = parse_cli_args_from(
+            ["jean", "--headless", "--allow-native-open"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(from_flag.allow_native_open);
+
+        let off = parse_cli_args_from(
+            ["jean", "--headless"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(!off.allow_native_open);
     }
 
     #[test]
@@ -3210,6 +3235,9 @@ pub async fn start_http_server(
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
+    // Desktop-hosted Web Access can open local Finder/editor/terminal for clients.
+    platform::set_allow_native_open(true);
+
     let prefs = load_preferences(app.clone()).await?;
     let actual_port = port.unwrap_or(prefs.http_server_port);
     let bind_host = resolve_http_server_bind_host(&prefs);
@@ -3594,6 +3622,8 @@ struct CliArgs {
     token: Option<String>,
     no_token: bool,
     allow_unsafe_no_token: bool,
+    /// Allow HTTP clients to open local file managers / editors / terminals.
+    allow_native_open: bool,
 }
 
 /// CLI overrides for HTTP server configuration.
@@ -3620,12 +3650,14 @@ fn print_cli_help() {
     println!("  --no-token          Disable token authentication");
     println!("  --allow-unsafe-no-token");
     println!("                      Allow --no-token with a wildcard bind host");
+    println!("  --allow-native-open Allow Open in editor/finder/terminal over HTTP");
+    println!("                      (auto-enabled under WSL; off by default otherwise)");
     println!("  --help              Show this help message");
     println!("  --version           Show version");
     println!();
     println!("Environment:");
     println!("  JEAN_HEADLESS=1 JEAN_HOST JEAN_PORT JEAN_TOKEN JEAN_NO_TOKEN=1");
-    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1");
+    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1 JEAN_ALLOW_NATIVE_OPEN=1");
 }
 
 fn parse_cli_args() -> CliArgs {
@@ -3677,6 +3709,8 @@ where
     let mut no_token = env_truthy(env.get("JEAN_NO_TOKEN").map(String::as_str));
     let mut allow_unsafe_no_token =
         env_truthy(env.get("JEAN_ALLOW_UNSAFE_NO_TOKEN").map(String::as_str));
+    let mut allow_native_open =
+        env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
     let mut host = env
         .get("JEAN_HOST")
         .map(|h| h.trim().to_string())
@@ -3735,6 +3769,9 @@ where
             "--allow-unsafe-no-token" => {
                 allow_unsafe_no_token = true;
             }
+            "--allow-native-open" => {
+                allow_native_open = true;
+            }
             _ => {} // ignore unknown flags (Tauri/OS may pass their own)
         }
     }
@@ -3743,9 +3780,15 @@ where
         return Err("--token and --no-token are mutually exclusive".to_string());
     }
 
-    if !headless && (host.is_some() || port.is_some() || token.is_some() || no_token) {
+    if !headless
+        && (host.is_some()
+            || port.is_some()
+            || token.is_some()
+            || no_token
+            || allow_native_open)
+    {
         eprintln!(
-            "Warning: --host, --port, --token, --no-token are only effective with --headless"
+            "Warning: --host, --port, --token, --no-token, --allow-native-open are only effective with --headless"
         );
     }
 
@@ -3756,6 +3799,7 @@ where
         token,
         no_token,
         allow_unsafe_no_token,
+        allow_native_open,
     })
 }
 
@@ -3926,6 +3970,8 @@ pub async fn run_server() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
     let cli = parse_cli_args();
+    // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
+    platform::set_allow_native_open(cli.allow_native_open);
     let context = RuntimeContext::from_environment()?;
     initialize_runtime(&context)?;
 
