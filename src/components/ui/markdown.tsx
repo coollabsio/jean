@@ -40,7 +40,7 @@ interface MarkdownProps {
    */
   streaming?: boolean
   className?: string
-  /** Rendering context; tool-call markdown needs a wider ordered-list gutter. */
+  /** Rendering context for tool-call markdown content. */
   variant?: 'chat' | 'tool-call'
   /** Chat message ID — enables per-table checklist persistence when set */
   messageId?: string
@@ -428,7 +428,7 @@ const components: Components = {
   ol: ({ children, className, ...props }) => (
     <ol
       {...props}
-      className={cn('my-4 pl-6 list-decimal list-outside space-y-2', className)}
+      className={cn('my-4 pl-8 list-decimal list-outside space-y-2', className)}
     >
       {children}
     </ol>

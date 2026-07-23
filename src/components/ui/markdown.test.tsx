@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@/test/test-utils'
+import { render } from '@/test/test-utils'
 import { Markdown } from './markdown'
 
 describe('Markdown', () => {
@@ -70,37 +70,48 @@ describe('Markdown', () => {
     expect(topLevelItems).toHaveLength(3)
   })
 
-  it('keeps list marker gutters inside the markdown box', () => {
+  it('keeps unordered-list marker gutters inside the markdown box', () => {
     const { container } = render(
       <div className="overflow-x-hidden">
-        <Markdown>{'1. First\n2. Second\n\n- Bullet'}</Markdown>
+        <Markdown>{'- First\n- Second'}</Markdown>
       </div>
     )
 
-    const orderedList = container.querySelector('ol')
     const unorderedList = container.querySelector('ul')
 
-    expect(orderedList?.className).toContain('pl-6')
-    expect(orderedList?.className).not.toContain('ml-6')
     expect(unorderedList?.className).toContain('pl-6')
     expect(unorderedList?.className).not.toContain('ml-6')
   })
 
-  it('uses a wider ordered-list gutter for tool-call markdown', () => {
+  it('reserves a double-digit marker gutter in every markdown mode', () => {
+    const md = Array.from(
+      { length: 12 },
+      (_, index) => `${index + 1}. Item ${index + 1}`
+    ).join('\n')
+
     const { container } = render(
-      <Markdown variant="tool-call">
-        {
-          '1. First\n2. Second\n3. Third\n4. Fourth\n5. Fifth\n6. Sixth\n7. Seventh\n8. Eighth\n9. Ninth\n10. Tenth\n11. Eleventh'
-        }
-      </Markdown>
+      <div className="overflow-x-hidden">
+        <Markdown>{md}</Markdown>
+        <Markdown compact>{md}</Markdown>
+        <Markdown streaming>{md}</Markdown>
+        <Markdown variant="tool-call">{md}</Markdown>
+        <Markdown streaming variant="tool-call">
+          {md}
+        </Markdown>
+      </div>
     )
 
-    const orderedList = container.querySelector('ol')
+    const orderedLists = Array.from(container.querySelectorAll('ol'))
 
-    expect(orderedList?.className).toContain('pl-8')
-    expect(orderedList?.className).not.toContain('pl-6')
-    expect(screen.getByText('Tenth')).toBeInTheDocument()
-    expect(screen.getByText('Eleventh')).toBeInTheDocument()
+    expect(orderedLists).toHaveLength(5)
+    for (const orderedList of orderedLists) {
+      expect(orderedList.className).toContain('pl-8')
+      expect(orderedList.className).not.toContain('pl-6')
+      expect(orderedList.querySelectorAll(':scope > li')).toHaveLength(12)
+      expect(orderedList).toHaveTextContent('Item 10')
+      expect(orderedList).toHaveTextContent('Item 11')
+      expect(orderedList).toHaveTextContent('Item 12')
+    }
   })
 
   it('auto-completes incomplete markdown while streaming', () => {
