@@ -39,6 +39,7 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "push_worktree",
     "run_review",
     "send_chat_message",
+    "set_session_model",
     "unarchive_worktree",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
@@ -142,11 +143,14 @@ pub fn handle_protocol_message(
 }
 
 pub fn tool_registry() -> Value {
-    // Split into two json! arrays so the macro does not hit recursion_limit.
+    // Split into multiple json! arrays so the macro does not hit recursion_limit.
     let mut tools = tool_registry_core()
         .as_array()
         .cloned()
         .unwrap_or_default();
+    if let Some(session) = tool_registry_session().as_array() {
+        tools.extend(session.iter().cloned());
+    }
     if let Some(ship) = tool_registry_ship_loop().as_array() {
         tools.extend(ship.iter().cloned());
     }
@@ -176,13 +180,20 @@ fn tool_registry_core() -> Value {
         {"name":"list_archived_worktrees","description":"List archived worktrees. Optionally filter by projectId. Active worktrees are not included (use list_worktrees for those).","inputSchema":{"type":"object","properties":{"projectId":{"type":"string","description":"Optional project id to filter archived worktrees."}},"additionalProperties":false}},
         {"name":"delete_worktree","description":"Start permanently deleting an active (non-archived) worktree in the background: removes Jean tracking, git worktree, and branch. Returns started=true when cleanup is accepted, not completion. Destructive and irreversible when cleanup succeeds. Cannot delete base sessions. Prefer archive_worktree when unsure.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"permanently_delete_worktree","description":"Start permanently deleting an already-archived worktree in the background (storage + git worktree/branch cleanup). Returns started=true when cleanup is accepted, not completion. Fails immediately if the worktree is not archived — archive it first, or use delete_worktree for active worktrees.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"update_worktree_labels","description":"Update native Jean worktree labels. Use action=add/remove/set/clear. Returns the updated worktree.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"action":{"type":"string","enum":["add","remove","set","clear"]},"label":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string","description":"Hex color like #eab308. Optional for add; ignored by remove."},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name"],"additionalProperties":false},"labels":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string"},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name","color"],"additionalProperties":false}}},"required":["worktreeId","action"],"additionalProperties":false}},
+        {"name":"update_worktree_labels","description":"Update native Jean worktree labels. Use action=add/remove/set/clear. Returns the updated worktree.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"action":{"type":"string","enum":["add","remove","set","clear"]},"label":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string","description":"Hex color like #eab308. Optional for add; ignored by remove."},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name"],"additionalProperties":false},"labels":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string"},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name","color"],"additionalProperties":false}}},"required":["worktreeId","action"],"additionalProperties":false}}
+    ])
+}
+
+fn tool_registry_session() -> Value {
+    json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Create a new chat session in an existing worktree. Returns the session id needed for send_chat_message.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"send_chat_message","description":"Send a message to an existing session. Fire-and-forget: returns immediately as the session begins processing. Use this to kick off investigations.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId","message"],"additionalProperties":false}},
         {"name":"get_session_status","description":"Get whether a Jean session is idle/running/resumable/cancelled/error plus latest run metadata. Use after send_chat_message to poll fire-and-forget work.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"cancel_session_run","description":"Cancel the currently running request for a session. Returns whether Jean found an active process/turn/flag to cancel.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"read_session_messages","description":"Read recent messages from a session (most recent first). Use limit to cap returned messages.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["sessionId"],"additionalProperties":false}},
+        {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.5)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
+        {"name":"get_usage","description":"Fetch subscription/usage snapshots for Claude, Codex, and/or Grok (same data as Jean Settings → Usage). Use to decide whether to switch models when a plan is near limits. Optional backend filters to one provider; omit or pass \"all\" for every available snapshot. Per-backend failures are reported in errors without failing the whole call.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","grok","all"],"default":"all","description":"Which provider usage to fetch. Default all."}},"additionalProperties":false}},
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_current_context","description":"Return the calling session's context: sessionId, worktreeId, projectId, projectPath, projectName. Use this so the agent knows what 'this project' refers to without guessing.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
@@ -820,6 +831,66 @@ async fn run_tool(
             let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
             dispatch_command(app, "get_session", json!({ "sessionId": session_id, "worktreeId": worktree_id, "worktreePath": worktree_path, "limit": limit })).await.map_err(ToolError::internal)
         }
+        "set_session_model" => {
+            let session_id = require_str(&args, "sessionId")?;
+            let model = require_nonempty_str(&args, "model")?;
+            let backend = optional_str(&args, "backend")
+                .map(|b| normalize_backend_name(&b))
+                .transpose()?
+                .or_else(|| Some(infer_backend_from_model(&model).to_string()));
+            let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
+
+            dispatch_command(
+                app,
+                "set_session_model",
+                json!({
+                    "sessionId": session_id.clone(),
+                    "worktreeId": worktree_id.clone(),
+                    "worktreePath": worktree_path.clone(),
+                    "model": model.clone(),
+                }),
+            )
+            .await
+            .map_err(ToolError::internal)?;
+
+            if let Some(ref backend) = backend {
+                dispatch_command(
+                    app,
+                    "set_session_backend",
+                    json!({
+                        "sessionId": session_id.clone(),
+                        "worktreeId": worktree_id,
+                        "worktreePath": worktree_path,
+                        "backend": backend,
+                    }),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+
+            Ok(json!({
+                "sessionId": session_id,
+                "model": model,
+                "backend": backend,
+            }))
+        }
+        "get_usage" => {
+            let backend_filter = args
+                .get("backend")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all")
+                .trim()
+                .to_ascii_lowercase();
+            match backend_filter.as_str() {
+                "all" | "claude" | "codex" | "grok" => {}
+                other => {
+                    return Err(ToolError::invalid_params(format!(
+                        "backend must be one of claude, codex, grok, all (got '{other}')"
+                    )));
+                }
+            }
+            get_usage_snapshots(app, &backend_filter).await
+        }
         "get_worktree_changes" => {
             let worktree_id = require_str(&args, "worktreeId")?;
             let max_files = args
@@ -1393,6 +1464,106 @@ pub struct BackgroundInvestigationResult {
     pub status: String,
 }
 
+/// Marker so YOLO fix-after-investigate transforms stay idempotent when both
+/// the frontend and this backend path process the same message.
+const YOLO_INVESTIGATION_FIX_MARKER: &str = "<yolo_investigation_fix>";
+
+const YOLO_INVESTIGATION_FIX_APPEND: &str = r#"<yolo_investigation_fix>
+
+This investigation is running in YOLO mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+
+</yolo_investigation_fix>"#;
+
+/// When execution mode is yolo, strip weak/anti-fix investigation wording and
+/// append an unconditional fix-after-investigation directive.
+pub(crate) fn apply_yolo_investigation_fix_directive(
+    message: &str,
+    execution_mode: &str,
+) -> String {
+    if execution_mode != "yolo" {
+        return message.to_string();
+    }
+    if message.contains(YOLO_INVESTIGATION_FIX_MARKER) {
+        return message.to_string();
+    }
+
+    let cleaned = strip_investigation_anti_fix_lines(message);
+    format!("{}\n\n{}\n", cleaned.trim_end(), YOLO_INVESTIGATION_FIX_APPEND)
+}
+
+fn strip_investigation_anti_fix_lines(prompt: &str) -> String {
+    let mut out = String::with_capacity(prompt.len());
+    let mut prev_blank = false;
+    for line in prompt.lines() {
+        if should_strip_line_for_yolo_fix(line) {
+            continue;
+        }
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+        prev_blank = is_blank;
+    }
+    out
+}
+
+fn should_strip_line_for_yolo_fix(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let body = trimmed
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .trim_start_matches('.')
+        .trim_start()
+        .trim_start_matches(['-', '*'])
+        .trim_start();
+
+    let lower = body.to_ascii_lowercase();
+
+    if lower.starts_with("if you are in yolo mode") {
+        return true;
+    }
+    if lower.contains("do not implement") || lower.contains("don't implement") {
+        return true;
+    }
+    if lower.contains("do not apply the fix")
+        || lower.contains("do not apply fixes")
+        || lower.contains("don't apply the fix")
+        || lower.contains("don't apply fixes")
+    {
+        return true;
+    }
+    if lower.contains("do not make any changes") || lower.contains("do not make changes") {
+        return true;
+    }
+    if (lower.contains("do not edit") || lower.contains("do not write"))
+        && (lower.contains("code") || lower.contains("file"))
+    {
+        return true;
+    }
+    if lower.contains("only investigate") && !lower.contains("fix") {
+        return true;
+    }
+    if lower.contains("only propose")
+        || lower.contains("propose only")
+        || lower.contains("research only")
+        || lower.contains("investigation only")
+    {
+        return true;
+    }
+    if lower.contains("do not stop at proposing") && lower.contains("yolo") {
+        return true;
+    }
+
+    false
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_background_investigation_queue_message(
     message: String,
@@ -1516,6 +1687,10 @@ pub async fn start_background_investigation_impl(
     let execution_mode = execution_mode
         .filter(|mode| matches!(mode.as_str(), "plan" | "yolo"))
         .unwrap_or_else(|| "plan".to_string());
+    // Detect yolo and append an unconditional fix-after-investigation directive
+    // (also strips weak "if yolo" / anti-fix lines). Idempotent if the UI
+    // already applied the same transform.
+    let message = apply_yolo_investigation_fix_directive(&message, &execution_mode);
     let queued_message = build_background_investigation_queue_message(
         message,
         model,
@@ -1766,15 +1941,83 @@ fn project_default_backend(app: &AppHandle, worktree_id: Option<&str>) -> Option
 }
 
 fn infer_backend_from_model(model: &str) -> &'static str {
-    if crate::is_opencode_model(model) {
-        "opencode"
-    } else if crate::is_cursor_model(model) {
+    if crate::is_cursor_model(model) {
         "cursor"
+    } else if crate::is_pi_model(model) {
+        "pi"
+    } else if crate::is_opencode_model(model) {
+        "opencode"
+    } else if model.starts_with("commandcode/") {
+        "commandcode"
+    } else if crate::is_grok_model(model) {
+        "grok"
+    } else if crate::is_kimi_model(model) {
+        "kimi"
     } else if crate::is_codex_model(model) {
         "codex"
     } else {
         "claude"
     }
+}
+
+fn normalize_backend_name(backend: &str) -> Result<String, ToolError> {
+    let normalized = backend.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "claude" | "codex" | "cursor" | "opencode" | "pi" | "commandcode" | "grok" | "kimi" => {
+            Ok(normalized)
+        }
+        other => Err(ToolError::invalid_params(format!(
+            "backend must be one of claude, codex, cursor, opencode, pi, commandcode, grok, kimi (got '{other}')"
+        ))),
+    }
+}
+
+async fn get_usage_snapshots(app: &AppHandle, backend_filter: &str) -> Result<Value, ToolError> {
+    let want_all = backend_filter == "all";
+    let mut result = serde_json::Map::new();
+    let mut errors = serde_json::Map::new();
+
+    if want_all || backend_filter == "claude" {
+        match dispatch_command(app, "get_claude_usage", json!({})).await {
+            Ok(usage) => {
+                result.insert("claude".to_string(), usage);
+            }
+            Err(err) => {
+                result.insert("claude".to_string(), Value::Null);
+                errors.insert("claude".to_string(), Value::String(err));
+            }
+        }
+    }
+
+    if want_all || backend_filter == "codex" {
+        match dispatch_command(app, "get_codex_usage", json!({})).await {
+            Ok(usage) => {
+                result.insert("codex".to_string(), usage);
+            }
+            Err(err) => {
+                result.insert("codex".to_string(), Value::Null);
+                errors.insert("codex".to_string(), Value::String(err));
+            }
+        }
+    }
+
+    if want_all || backend_filter == "grok" {
+        match dispatch_command(app, "get_grok_usage", json!({})).await {
+            Ok(usage) => {
+                result.insert("grok".to_string(), usage);
+            }
+            Err(err) => {
+                result.insert("grok".to_string(), Value::Null);
+                errors.insert("grok".to_string(), Value::String(err));
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        result.insert("errors".to_string(), Value::Object(errors));
+    }
+
+    Ok(Value::Object(result))
 }
 
 fn require_value_str(value: &Value, key: &str) -> Result<String, ToolError> {
@@ -2117,9 +2360,71 @@ mod tests {
             "cancel_session_run",
             "get_worktree_changes",
             "get_worktree_diff",
+            "get_usage",
+            "set_session_model",
         ] {
             assert!(names.contains(expected), "missing MCP tool {expected}");
         }
+    }
+
+    #[test]
+    fn tool_registry_get_usage_and_set_session_model_schemas() {
+        let tools = tool_registry();
+
+        let get_usage = find_tool(&tools, "get_usage");
+        assert_eq!(
+            get_usage["inputSchema"]["properties"]["backend"]["enum"],
+            json!(["claude", "codex", "grok", "all"])
+        );
+        assert!(
+            !RATE_LIMITED_TOOLS.contains(&"get_usage"),
+            "get_usage is read-only and should not be rate-limited"
+        );
+
+        let set_model = find_tool(&tools, "set_session_model");
+        assert_eq!(
+            set_model["inputSchema"]["required"],
+            json!(["sessionId", "model"])
+        );
+        assert_eq!(
+            set_model["inputSchema"]["properties"]["backend"]["enum"],
+            json!([
+                "claude",
+                "codex",
+                "cursor",
+                "opencode",
+                "pi",
+                "commandcode",
+                "grok",
+                "kimi"
+            ])
+        );
+        assert!(
+            RATE_LIMITED_TOOLS.contains(&"set_session_model"),
+            "set_session_model mutates session state and should be rate-limited"
+        );
+    }
+
+    #[test]
+    fn infer_backend_from_model_covers_catalog_prefixes() {
+        assert_eq!(infer_backend_from_model("claude-sonnet-4-6[1m]"), "claude");
+        assert_eq!(infer_backend_from_model("gpt-5.6-sol"), "codex");
+        assert_eq!(infer_backend_from_model("grok/grok-4.5"), "grok");
+        assert_eq!(infer_backend_from_model("cursor/auto"), "cursor");
+        assert_eq!(infer_backend_from_model("opencode/gpt-5.2"), "opencode");
+        assert_eq!(infer_backend_from_model("pi/sonnet"), "pi");
+        assert_eq!(infer_backend_from_model("kimi/k2"), "kimi");
+        assert_eq!(
+            infer_backend_from_model("commandcode/default"),
+            "commandcode"
+        );
+    }
+
+    #[test]
+    fn normalize_backend_name_accepts_known_backends() {
+        assert_eq!(normalize_backend_name("Claude").unwrap(), "claude");
+        assert_eq!(normalize_backend_name("GROK").unwrap(), "grok");
+        assert!(normalize_backend_name("openai").is_err());
     }
 
     #[test]
@@ -2417,5 +2722,37 @@ mod tests {
         assert_eq!(queued["allowAllTools"], true);
         assert!(queued["id"].as_str().is_some_and(|id| !id.is_empty()));
         assert!(queued["queuedAt"].as_u64().is_some());
+    }
+
+    #[test]
+    fn yolo_investigation_appends_unconditional_fix_directive() {
+        let prompt = "Investigate issue #42\n6. Propose solution\n7. If you are in yolo mode, also apply the fix(es)\nDo not implement fixes.";
+        let result = apply_yolo_investigation_fix_directive(prompt, "yolo");
+        assert!(result.contains(YOLO_INVESTIGATION_FIX_MARKER));
+        assert!(result.contains("After investigation, fix the issue"));
+        assert!(!result.to_ascii_lowercase().contains("if you are in yolo mode"));
+        assert!(!result.to_ascii_lowercase().contains("do not implement fixes"));
+        assert!(result.contains("Propose solution"));
+    }
+
+    #[test]
+    fn non_yolo_investigation_prompt_is_unchanged() {
+        let prompt = "Investigate issue #42\nDo not implement fixes.";
+        assert_eq!(
+            apply_yolo_investigation_fix_directive(prompt, "plan"),
+            prompt
+        );
+        assert_eq!(
+            apply_yolo_investigation_fix_directive(prompt, "build"),
+            prompt
+        );
+    }
+
+    #[test]
+    fn yolo_investigation_fix_directive_is_idempotent() {
+        let once = apply_yolo_investigation_fix_directive("Investigate #1", "yolo");
+        let twice = apply_yolo_investigation_fix_directive(&once, "yolo");
+        assert_eq!(once, twice);
+        assert_eq!(once.matches(YOLO_INVESTIGATION_FIX_MARKER).count(), 1);
     }
 }
