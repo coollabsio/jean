@@ -17,7 +17,6 @@ import { DevModeBanner } from './DevModeBanner'
 import { SidebarWidthProvider } from './SidebarWidthContext'
 import { MainWindowContent } from './MainWindowContent'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
-import { QuitConfirmationDialog } from './QuitConfirmationDialog'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
 import { TeardownOutputDialog } from '@/components/worktree/TeardownOutputDialog'
 import { WindowResizeHandles } from './WindowResizeHandles'
@@ -707,7 +706,6 @@ export function MainWindow() {
           />
         </Suspense>
       )}
-      <QuitConfirmationDialog />
       {shouldRenderGitHubDashboardModal && (
         <Suspense fallback={null}>
           <GitHubDashboardModal />

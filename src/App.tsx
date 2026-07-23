@@ -15,6 +15,8 @@ import {
   type InitialData,
 } from '@/lib/transport'
 import { isNativeApp, setNativeOpenAllowed } from '@/lib/environment'
+import { useNativeWindowCloseGuard } from '@/hooks/useNativeWindowCloseGuard'
+import { QuitConfirmationDialog } from '@/components/layout/QuitConfirmationDialog'
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
@@ -146,6 +148,11 @@ function App() {
   const featureTourOpen = useUIStore(state => state.featureTourOpen)
   const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const hasStartedTransportRef = useRef(false)
+
+  // Keep quit working during preloading and server-switch overlays (MainWindow
+  // may be unmounted). Production-only; uses destroy() so Windows cannot
+  // silently ignore close while an async handler is registered.
+  useNativeWindowCloseGuard()
 
   const captureWebReloadState = useCallback(() => {
     const { sessionChatModalOpen, sessionChatModalWorktreeId } =
@@ -1326,9 +1333,16 @@ function App() {
     }
   }, [installAppUpdate, relaunchApp, webBackend])
 
-  // Show loading screen while preloading initial data (web view only)
+  // Show loading screen while preloading initial data (web view only).
+  // QuitConfirmationDialog stays mounted so X/quit can still confirm or
+  // destroy the native window while the overlay is up.
   if (isPreloading) {
-    return <WebLoadingScreen label="Loading Jean..." />
+    return (
+      <>
+        <WebLoadingScreen label="Loading Jean..." />
+        {isNativeApp() && <QuitConfirmationDialog />}
+      </>
+    )
   }
 
   return (
@@ -1339,6 +1353,9 @@ function App() {
           <WebLoadingScreen label="Loading Jean..." />
         )}
         {webBackend && <WsAuthErrorOverlay />}
+        {/* App-level dialog so quit confirmation wins over loading overlay
+            even if MainWindow's copy is covered / not yet mounted. */}
+        {isNativeApp() && <QuitConfirmationDialog />}
       </ThemeProvider>
     </ErrorBoundary>
   )

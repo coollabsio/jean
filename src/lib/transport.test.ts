@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
+import { FALLBACK_APP_VERSION } from './app-version'
 
 const setWsConnectedMock = vi.fn()
 
@@ -109,11 +110,16 @@ describe('transport bootstrap', () => {
     MockWebSocket.instances = []
     localStorage.clear()
     vi.stubGlobal('WebSocket', MockWebSocket)
+    // Auth responses include the local package version so native remote
+    // version checks pass unless a test intentionally mismatches.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({}),
+        json: async () => ({
+          ok: true,
+          appVersion: FALLBACK_APP_VERSION,
+        }),
       })
     )
   })
@@ -131,18 +137,21 @@ describe('transport bootstrap', () => {
     const transport = await loadRemoteNativeTransportModule()
 
     transport.connectTransport()
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
     await flushAsync()
     const ws = getWs(0)
+    expect(ws.url).toBe('wss://jean.example.com/ws?token=secret')
 
     const request = transport.invoke('list_projects')
+    await waitFor(() =>
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"command":"list_projects"')
+      )
+    )
 
     expect(fetch).toHaveBeenCalledWith(
       'https://jean.example.com/api/auth?token=secret',
       expect.objectContaining({ signal: expect.anything() })
-    )
-    expect(ws.url).toBe('wss://jean.example.com/ws?token=secret')
-    expect(ws.send).toHaveBeenCalledWith(
-      expect.stringContaining('"command":"list_projects"')
     )
     const sent = JSON.parse(String(ws.send.mock.calls.at(-1)?.[0]))
     ws.receive({ type: 'response', id: sent.id, data: [] })
@@ -192,6 +201,22 @@ describe('transport bootstrap', () => {
       )
     )
     expect(result.current).not.toContain('secret')
+  })
+
+  it('still connects native remotes when appVersion mismatches', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, appVersion: '9.9.9' }),
+    } as Response)
+
+    const transport = await loadRemoteNativeTransportModule()
+    const { result } = renderHook(() => transport.useWsAuthError())
+
+    transport.connectTransport()
+
+    // Mismatch only warns; auth error stays null and the socket still opens.
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
+    expect(result.current).toBeNull()
   })
 
   it('routes shared native commands through the jean-core dispatcher', async () => {

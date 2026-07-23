@@ -281,6 +281,9 @@ const sectionEntries: PreferenceSearchEntry[] = [
     keywords: [
       'codex model',
       'codex reasoning',
+      'model verbosity',
+      'verbosity',
+      'verbose',
       'goal execution mode',
       'multi-agent',
       'max agent threads',

@@ -104,7 +104,31 @@ struct ErrorEvent {
 }
 
 const CODEX_PLAN_TOOL_NAME: &str = "CodexPlan";
-pub(crate) const DEFAULT_MODEL_VERBOSITY: &str = "low";
+/// Default Codex chat `model_verbosity` (Responses API). Medium matches
+/// interactive use outside Jean better than `low`, which suppresses mid-turn text.
+pub(crate) const DEFAULT_MODEL_VERBOSITY: &str = "medium";
+/// Structured one-shot / review calls stay terse for JSON schema extraction.
+pub(crate) const DEFAULT_ONESHOT_MODEL_VERBOSITY: &str = "low";
+
+/// Normalize a Codex `model_verbosity` preference to a valid API value.
+pub(crate) fn normalize_model_verbosity(value: Option<&str>) -> &'static str {
+    match value.map(str::trim).unwrap_or("") {
+        "low" => "low",
+        "high" => "high",
+        "medium" => "medium",
+        _ => DEFAULT_MODEL_VERBOSITY,
+    }
+}
+
+/// Read Codex chat model verbosity from preferences (default: medium).
+pub(crate) fn resolve_model_verbosity(app: &tauri::AppHandle) -> &'static str {
+    let prefs_value = crate::get_preferences_path(app)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|contents| serde_json::from_str::<crate::AppPreferences>(&contents).ok())
+        .map(|prefs| prefs.default_codex_model_verbosity);
+    normalize_model_verbosity(prefs_value.as_deref())
+}
 
 fn normalize_plan_status(status: &str) -> &str {
     match status {
@@ -121,6 +145,222 @@ fn codex_plan_tool_id(turn_id: Option<&str>, item_id: Option<&str>) -> String {
         return format!("codex-plan-{item_id}");
     }
     "codex-plan".to_string()
+}
+
+/// Resolve a stable CodexPlan tool id, always merging into an existing plan tool
+/// when one already exists so steps/explanation and plan body stay on one tool.
+fn resolve_codex_plan_tool_id(
+    tool_calls: &[ToolCall],
+    turn_id: Option<&str>,
+    item_id: Option<&str>,
+) -> String {
+    let preferred = codex_plan_tool_id(turn_id, item_id);
+    if tool_calls
+        .iter()
+        .any(|tc| tc.name == CODEX_PLAN_TOOL_NAME && tc.id == preferred)
+    {
+        return preferred;
+    }
+
+    // Prefer turn-scoped id when present so later item events can merge.
+    if let Some(existing) = tool_calls.iter().find(|tc| tc.name == CODEX_PLAN_TOOL_NAME) {
+        // If we only have a generic/item id but a turn-scoped tool exists, use it.
+        // If preferred is turn-scoped and only an item-scoped tool exists, migrate
+        // to preferred only when no other plan tool is turn-scoped; otherwise keep
+        // the first so all events collapse into one tool.
+        return existing.id.clone();
+    }
+
+    preferred
+}
+
+fn is_status_only_plan_explanation(text: &str) -> bool {
+    let normalized = text
+        .trim()
+        .trim_end_matches(['.', '!', ' '])
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return true;
+    }
+    if normalized.len() > 80 {
+        return false;
+    }
+    normalized.contains("ready for approval")
+        || normalized.contains("awaiting approval")
+        || (normalized.contains("plan")
+            && (normalized.contains("created")
+                || normalized.contains("ready")
+                || normalized.contains("complete")
+                || normalized.contains("updated")))
+}
+
+fn plan_input_body_len(input: &serde_json::Value) -> usize {
+    input
+        .get("plan")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !is_status_only_plan_explanation(s))
+        .map(|s| s.len())
+        .unwrap_or(0)
+}
+
+fn plan_input_is_thin(input: &serde_json::Value) -> bool {
+    if plan_input_body_len(input) >= 120 {
+        return false;
+    }
+    let plan = input
+        .get("plan")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    if !plan.is_empty() && !is_status_only_plan_explanation(plan) && plan.len() >= 80 {
+        return false;
+    }
+    true
+}
+
+/// Collapse multiple CodexPlan tools (split turn/item ids) into one richest tool.
+fn collapse_codex_plan_tools(
+    tool_calls: &mut Vec<ToolCall>,
+    content_blocks: &mut Vec<ContentBlock>,
+) {
+    let plan_indices: Vec<usize> = tool_calls
+        .iter()
+        .enumerate()
+        .filter(|(_, tc)| tc.name == CODEX_PLAN_TOOL_NAME)
+        .map(|(i, _)| i)
+        .collect();
+    if plan_indices.len() <= 1 {
+        return;
+    }
+
+    let mut best_idx = plan_indices[0];
+    let mut best_score = -1isize;
+    for &idx in &plan_indices {
+        let input = &tool_calls[idx].input;
+        let body = plan_input_body_len(input) as isize;
+        let preview = input
+            .get("plan_preview")
+            .and_then(|v| v.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0) as isize;
+        let steps = input
+            .get("steps")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0) as isize;
+        let score = body * 10 + preview + steps * 5;
+        if score > best_score {
+            best_score = score;
+            best_idx = idx;
+        }
+    }
+
+    let keep_id = tool_calls[best_idx].id.clone();
+    let mut merged = tool_calls[best_idx].input.clone();
+
+    for &idx in &plan_indices {
+        if idx == best_idx {
+            continue;
+        }
+        let other = &tool_calls[idx].input;
+        let plan_text = other
+            .get("plan")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let plan_preview = other
+            .get("plan_preview")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let explanation = other
+            .get("explanation")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty() && !is_status_only_plan_explanation(s))
+            .map(|s| s.to_string());
+        let steps = other.get("steps").and_then(|v| v.as_array()).cloned();
+        // Prefer longer body when merging.
+        let existing_body = plan_input_body_len(&merged);
+        let incoming_body = plan_text.as_ref().map(|s| s.len()).unwrap_or(0);
+        let plan_to_merge = if incoming_body > existing_body {
+            plan_text
+        } else {
+            None
+        };
+        merged = merge_codex_plan_input(
+            Some(&merged),
+            plan_to_merge,
+            plan_preview,
+            explanation,
+            steps,
+        );
+    }
+
+    // Keep the best tool, drop the rest.
+    let drop_ids: Vec<String> = plan_indices
+        .iter()
+        .filter(|&&idx| idx != best_idx)
+        .map(|&idx| tool_calls[idx].id.clone())
+        .collect();
+
+    if let Some(tc) = tool_calls.iter_mut().find(|tc| tc.id == keep_id) {
+        tc.input = merged;
+    }
+    tool_calls.retain(|tc| !drop_ids.contains(&tc.id));
+    content_blocks.retain(|block| {
+        !matches!(
+            block,
+            ContentBlock::ToolUse { tool_call_id } if drop_ids.contains(tool_call_id)
+        )
+    });
+    // Ensure the kept plan tool block is present once at the end.
+    move_tool_block_to_end(content_blocks, &keep_id);
+}
+
+/// If CodexPlan only has thin explanation/steps, promote richer assistant text
+/// into the plan body for YOLO/new-worktree handoff.
+fn enrich_thin_codex_plan(
+    tool_calls: &mut Vec<ToolCall>,
+    content_blocks: &mut Vec<ContentBlock>,
+    full_content: &str,
+) {
+    collapse_codex_plan_tools(tool_calls, content_blocks);
+
+    if full_content.trim().is_empty() {
+        return;
+    }
+
+    let Some(tc) = tool_calls.iter().find(|tc| tc.name == CODEX_PLAN_TOOL_NAME) else {
+        return;
+    };
+    if !plan_input_is_thin(&tc.input) {
+        return;
+    }
+
+    let candidate = if let Some((_, plan)) = extract_plain_text_plan_sections(full_content) {
+        plan
+    } else {
+        full_content.trim().to_string()
+    };
+
+    if candidate.len() < 80 || is_status_only_plan_explanation(&candidate) {
+        return;
+    }
+    if candidate.len() <= plan_input_body_len(&tc.input) {
+        return;
+    }
+
+    let tool_id = tc.id.clone();
+    let input = merge_codex_plan_input(Some(&tc.input), Some(candidate.clone()), None, None, None);
+    upsert_codex_plan_tool_call(tool_calls, content_blocks, &tool_id, input);
+    content_blocks.retain(|block| {
+        !matches!(
+            block,
+            ContentBlock::Text { text }
+                if text.trim() == full_content.trim() || text.trim() == candidate.trim()
+        )
+    });
 }
 
 fn push_unique_text(target: &mut String, text: &str) {
@@ -515,6 +755,7 @@ pub fn build_thread_start_params(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
@@ -583,7 +824,7 @@ pub fn build_thread_start_params(
 
     config.insert(
         "model_verbosity".to_string(),
-        serde_json::json!(DEFAULT_MODEL_VERBOSITY),
+        serde_json::json!(normalize_model_verbosity(model_verbosity)),
     );
 
     // Web search
@@ -800,13 +1041,14 @@ pub fn execute_codex_via_server(
     let is_plan_mode = execution_mode.unwrap_or("plan") == "plan";
     let is_build_mode = execution_mode.unwrap_or("plan") == "build";
     let is_yolo_mode = execution_mode.unwrap_or("plan") == "yolo";
+    let model_verbosity = resolve_model_verbosity(app);
 
     // Mid-turn Approve (yolo) and pure yolo turns both auto-accept residual
     // command/permission prompts (issue #328).
     super::registry::set_codex_yolo_auto_approve(session_id, is_yolo_mode);
 
     log::debug!(
-        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, provider={:?}, resume={}",
+        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, verbosity={model_verbosity}, provider={:?}, resume={}",
         codex_provider.map(|p| p.provider_id.as_str()),
         existing_thread_id.is_some()
     );
@@ -828,6 +1070,7 @@ pub fn execute_codex_via_server(
                 base_instructions_content,
                 multi_agent_enabled,
                 max_agent_threads,
+                Some(model_verbosity),
                 codex_provider,
             );
             let mut full_params =
@@ -858,6 +1101,7 @@ pub fn execute_codex_via_server(
                         base_instructions_content,
                         multi_agent_enabled,
                         max_agent_threads,
+                        Some(model_verbosity),
                         codex_provider,
                     )
                 }
@@ -871,6 +1115,7 @@ pub fn execute_codex_via_server(
                 base_instructions_content,
                 multi_agent_enabled,
                 max_agent_threads,
+                Some(model_verbosity),
                 codex_provider,
             )
         }
@@ -1541,6 +1786,7 @@ pub fn resume_codex_after_crash(
 }
 
 /// Start a new Codex thread via app-server.
+#[allow(clippy::too_many_arguments)]
 fn start_new_thread(
     working_dir: &std::path::Path,
     model: Option<&str>,
@@ -1549,6 +1795,7 @@ fn start_new_thread(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
     use super::codex_server;
@@ -1561,6 +1808,7 @@ fn start_new_thread(
         base_instructions_content,
         multi_agent_enabled,
         max_agent_threads,
+        model_verbosity,
         codex_provider,
     );
 
@@ -1966,33 +2214,10 @@ fn process_turn_events(
             false
         };
 
-    // Fallback: if we're in plan mode with a CodexPlan tool that has steps but
-    // no plan text, inject full_content so the investigation summary renders
-    // inside PlanDisplay instead of as unformatted text.
-    // Also remove duplicate text blocks whose content matches the plan text.
-    if !cancelled && !error_emitted && is_plan_mode && !full_content.is_empty() {
-        if let Some(tc) = tool_calls.iter().find(|tc| tc.name == CODEX_PLAN_TOOL_NAME) {
-            let has_plan = tc
-                .input
-                .get("plan")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| !s.is_empty());
-            if !has_plan {
-                let tool_id = tc.id.clone();
-                let input = merge_codex_plan_input(
-                    Some(&tc.input),
-                    Some(full_content.clone()),
-                    None,
-                    None,
-                    None,
-                );
-                upsert_codex_plan_tool_call(&mut tool_calls, &mut content_blocks, &tool_id, input);
-                // Remove text blocks that duplicate the plan content
-                content_blocks.retain(|block| {
-                    !matches!(block, ContentBlock::Text { text } if text.trim() == full_content.trim())
-                });
-            }
-        }
+    // Collapse split CodexPlan tools and promote richer assistant text when the
+    // plan body is only a thin checklist / status explanation.
+    if !cancelled && !error_emitted && is_plan_mode {
+        enrich_thin_codex_plan(&mut tool_calls, &mut content_blocks, &full_content);
     }
 
     // Emit chat:done unless error was emitted
@@ -2099,13 +2324,25 @@ fn notification_to_history_line(method: &str, params: &serde_json::Value) -> Opt
         "item/started" => {
             let item = params.get("item")?;
             let normalized = normalize_item_types(item);
-            let line = serde_json::json!({ "type": "item.started", "item": normalized });
+            let mut line = serde_json::json!({ "type": "item.started", "item": normalized });
+            // Preserve turnId so plan items merge with turn.plan_updated on reload.
+            if let Some(turn_id) = params.get("turnId").cloned() {
+                if let Some(obj) = line.as_object_mut() {
+                    obj.insert("turn_id".to_string(), turn_id);
+                }
+            }
             return Some(serde_json::to_string(&line).ok()?);
         }
         "item/completed" => {
             let item = params.get("item")?;
             let normalized = normalize_item_types(item);
-            let line = serde_json::json!({ "type": "item.completed", "item": normalized });
+            let mut line = serde_json::json!({ "type": "item.completed", "item": normalized });
+            // Preserve turnId so plan items merge with turn.plan_updated on reload.
+            if let Some(turn_id) = params.get("turnId").cloned() {
+                if let Some(obj) = line.as_object_mut() {
+                    obj.insert("turn_id".to_string(), turn_id);
+                }
+            }
             return Some(serde_json::to_string(&line).ok()?);
         }
         "item/fileChange/patchUpdated" => {
@@ -2220,7 +2457,7 @@ fn process_server_notification(
             }
 
             let turn_id = params.get("turnId").and_then(|v| v.as_str());
-            let tool_id = codex_plan_tool_id(turn_id, None);
+            let tool_id = resolve_codex_plan_tool_id(tool_calls, turn_id, None);
             let explanation = params
                 .get("explanation")
                 .and_then(|v| v.as_str())
@@ -2242,7 +2479,7 @@ fn process_server_notification(
 
             let turn_id = params.get("turnId").and_then(|v| v.as_str());
             let item_id = params.get("itemId").and_then(|v| v.as_str());
-            let tool_id = codex_plan_tool_id(turn_id, item_id);
+            let tool_id = resolve_codex_plan_tool_id(tool_calls, turn_id, item_id);
             let delta = params.get("delta").and_then(|v| v.as_str()).unwrap_or("");
             let existing = tool_calls
                 .iter()
@@ -2275,7 +2512,7 @@ fn process_server_notification(
 
                 let turn_id = params.get("turnId").and_then(|v| v.as_str());
                 let item_id = event_item.get("id").and_then(|v| v.as_str());
-                let tool_id = codex_plan_tool_id(turn_id, item_id);
+                let tool_id = resolve_codex_plan_tool_id(tool_calls, turn_id, item_id);
                 let existing = tool_calls
                     .iter()
                     .find(|tc| tc.id == tool_id)
@@ -2318,7 +2555,7 @@ fn process_server_notification(
 
                 let turn_id = params.get("turnId").and_then(|v| v.as_str());
                 let item_id = event_item.get("id").and_then(|v| v.as_str());
-                let tool_id = codex_plan_tool_id(turn_id, item_id);
+                let tool_id = resolve_codex_plan_tool_id(tool_calls, turn_id, item_id);
                 let existing = tool_calls
                     .iter()
                     .find(|tc| tc.id == tool_id)
@@ -3589,7 +3826,8 @@ fn process_codex_event(
                 | "entered_review_mode"
                 | "exited_review_mode" => {}
                 "plan" => {
-                    let tool_id = codex_plan_tool_id(None, Some(item_id));
+                    let tool_id =
+                        resolve_codex_plan_tool_id(tool_calls, None, Some(item_id));
                     let existing = tool_calls
                         .iter()
                         .find(|tc| tc.id == tool_id)
@@ -3690,7 +3928,8 @@ fn process_codex_event(
                     }
                 }
                 "plan" => {
-                    let tool_id = codex_plan_tool_id(None, Some(item_id));
+                    let tool_id =
+                        resolve_codex_plan_tool_id(tool_calls, None, Some(item_id));
                     let existing = tool_calls
                         .iter()
                         .find(|tc| tc.id == tool_id)
@@ -4201,7 +4440,7 @@ pub fn parse_codex_run_to_message(
                     continue;
                 }
                 let turn_id = msg.get("turn_id").and_then(|v| v.as_str());
-                let tool_id = codex_plan_tool_id(turn_id, None);
+                let tool_id = resolve_codex_plan_tool_id(&tool_calls, turn_id, None);
                 let explanation = msg
                     .get("explanation")
                     .and_then(|v| v.as_str())
@@ -4221,7 +4460,7 @@ pub fn parse_codex_run_to_message(
                 }
                 let turn_id = msg.get("turn_id").and_then(|v| v.as_str());
                 let item_id = msg.get("item_id").and_then(|v| v.as_str());
-                let tool_id = codex_plan_tool_id(turn_id, item_id);
+                let tool_id = resolve_codex_plan_tool_id(&tool_calls, turn_id, item_id);
                 let existing = tool_calls
                     .iter()
                     .find(|tc| tc.id == tool_id)
@@ -4247,13 +4486,15 @@ pub fn parse_codex_run_to_message(
                 let item = &normalized_item;
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let turn_id = msg.get("turn_id").and_then(|v| v.as_str());
 
                 match item_type {
                     "plan" => {
                         if !is_plan_mode {
                             continue;
                         }
-                        let tool_id = codex_plan_tool_id(None, Some(item_id));
+                        let tool_id =
+                            resolve_codex_plan_tool_id(&tool_calls, turn_id, Some(item_id));
                         let existing = tool_calls
                             .iter()
                             .find(|tc| tc.id == tool_id)
@@ -4432,13 +4673,15 @@ pub fn parse_codex_run_to_message(
                 let item = &normalized_item;
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let turn_id = msg.get("turn_id").and_then(|v| v.as_str());
 
                 match item_type {
                     "plan" => {
                         if !is_plan_mode {
                             continue;
                         }
-                        let tool_id = codex_plan_tool_id(None, Some(item_id));
+                        let tool_id =
+                            resolve_codex_plan_tool_id(&tool_calls, turn_id, Some(item_id));
                         let existing = tool_calls
                             .iter()
                             .find(|tc| tc.id == tool_id)
@@ -4683,36 +4926,11 @@ pub fn parse_codex_run_to_message(
     }
 
     let has_executed_tools = tool_calls.iter().any(|tc| tc.name != CODEX_PLAN_TOOL_NAME);
-    if is_plan_mode && !has_executed_tools {
-        ensure_plain_text_codex_plan_tool(&mut tool_calls, &mut content_blocks, &content);
-
-        // Fallback: if CodexPlan exists but has no plan text, inject full content
-        if !content.is_empty() {
-            if let Some(tc) = tool_calls.iter().find(|tc| tc.name == CODEX_PLAN_TOOL_NAME) {
-                let has_plan = tc
-                    .input
-                    .get("plan")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|s| !s.is_empty());
-                if !has_plan {
-                    let tool_id = tc.id.clone();
-                    let input = merge_codex_plan_input(
-                        Some(&tc.input),
-                        Some(content.clone()),
-                        None,
-                        None,
-                        None,
-                    );
-                    if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
-                        tc.input = input;
-                    }
-                    // Remove text blocks that duplicate the plan content
-                    content_blocks.retain(|block| {
-                        !matches!(block, ContentBlock::Text { text } if text.trim() == content.trim())
-                    });
-                }
-            }
+    if is_plan_mode {
+        if !has_executed_tools {
+            ensure_plain_text_codex_plan_tool(&mut tool_calls, &mut content_blocks, &content);
         }
+        enrich_thin_codex_plan(&mut tool_calls, &mut content_blocks, &content);
     }
 
     Ok(ChatMessage {
@@ -4986,7 +5204,7 @@ fn build_one_shot_codex_args(
         "--output-schema".into(),
         schema_file.as_os_str().to_os_string(),
         "-c".into(),
-        format!("model_verbosity=\"{DEFAULT_MODEL_VERBOSITY}\"").into(),
+        format!("model_verbosity=\"{DEFAULT_ONESHOT_MODEL_VERBOSITY}\"").into(),
     ];
     if is_fast {
         args.push("-c".into());
@@ -5416,6 +5634,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.4");
         assert_eq!(params["serviceTier"], "fast");
@@ -5430,6 +5649,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
             None,
         );
@@ -5514,7 +5734,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_thread_params_default_to_low_model_verbosity() {
+    fn codex_thread_params_default_to_medium_model_verbosity() {
         let params = build_thread_start_params(
             std::path::Path::new("/tmp"),
             Some("gpt-5.6-sol"),
@@ -5524,9 +5744,37 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
 
-        assert_eq!(params["config"]["model_verbosity"], "low");
+        assert_eq!(params["config"]["model_verbosity"], "medium");
+    }
+
+    #[test]
+    fn codex_thread_params_respect_explicit_model_verbosity() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.6-sol"),
+            Some("build"),
+            false,
+            None,
+            false,
+            None,
+            Some("high"),
+            None,
+        );
+
+        assert_eq!(params["config"]["model_verbosity"], "high");
+    }
+
+    #[test]
+    fn normalize_model_verbosity_accepts_valid_values_and_falls_back() {
+        assert_eq!(normalize_model_verbosity(Some("low")), "low");
+        assert_eq!(normalize_model_verbosity(Some("medium")), "medium");
+        assert_eq!(normalize_model_verbosity(Some("high")), "high");
+        assert_eq!(normalize_model_verbosity(Some("  HIGH  ")), "medium");
+        assert_eq!(normalize_model_verbosity(Some("nope")), "medium");
+        assert_eq!(normalize_model_verbosity(None), "medium");
     }
 
     #[test]
@@ -5559,6 +5807,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.3");
         assert!(params.get("serviceTier").is_none());
@@ -5573,6 +5822,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
             None,
         );
@@ -5592,6 +5842,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
             None,
         );
@@ -5662,6 +5913,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["approvalPolicy"], "never");
     }
@@ -5682,6 +5934,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
             Some(&provider),
         );
@@ -5961,6 +6214,133 @@ mod tests {
         assert_eq!(
             plan_tool.input.get("plan").and_then(|v| v.as_str()),
             Some("Final plan")
+        );
+    }
+
+    #[test]
+    fn parse_plan_run_merges_split_plan_tools_and_enriches_thin_body() {
+        // History without turn_id on plan item used to create a second CodexPlan tool.
+        // Resolve + collapse must keep one tool with the detailed body.
+        let lines = vec![
+            r#"{"type":"turn.plan_updated","turn_id":"turn-1","explanation":"Plan created and ready for approval.","plan":[{"step":"Touch parser","status":"pending"}]}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"plan-1","type":"plan","text":"Goal: fix thin Codex plans.\n\n1. Unify tool ids.\n2. Prefer richest plan body.\n3. Require detailed plan prompts.\n4. Cover with unit tests."}}"#.to_string(),
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"Goal: fix thin Codex plans.\n\n1. Unify tool ids.\n2. Prefer richest plan body.\n3. Require detailed plan prompts.\n4. Cover with unit tests."}}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-merge-plan".to_string(),
+            user_message_id: "user-merge-plan".to_string(),
+            user_message: "prompt".to_string(),
+            model: None,
+            execution_mode: Some("plan".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: RunStatus::Completed,
+            assistant_message_id: Some("assistant-merge-plan".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+        };
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+
+        let plan_tools: Vec<_> = message
+            .tool_calls
+            .iter()
+            .filter(|tool| tool.name == CODEX_PLAN_TOOL_NAME)
+            .collect();
+        assert_eq!(plan_tools.len(), 1, "split plan tools should collapse to one");
+        let plan_tool = plan_tools[0];
+        assert_eq!(
+            plan_tool.input.get("plan").and_then(|v| v.as_str()),
+            Some(
+                "Goal: fix thin Codex plans.\n\n1. Unify tool ids.\n2. Prefer richest plan body.\n3. Require detailed plan prompts.\n4. Cover with unit tests."
+            )
+        );
+        assert!(
+            plan_tool
+                .input
+                .get("steps")
+                .and_then(|v| v.as_array())
+                .is_some_and(|steps| !steps.is_empty()),
+            "checklist steps should be preserved on the merged tool"
+        );
+    }
+
+    #[test]
+    fn parse_plan_run_enriches_status_only_plan_from_assistant_text() {
+        let lines = vec![
+            r#"{"type":"turn.plan_updated","turn_id":"turn-1","explanation":"Plan created and ready for approval.","plan":[{"step":"Implement fix","status":"pending"}]}"#.to_string(),
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"Goal: hand off a usable plan.\n\nFiles: jean-core/src/chat/codex.rs, tool-call-utils.ts.\nSteps: unify ids, pick richest body, strengthen prompt, add tests.\nVerify: unit tests + manual YOLO handoff."}}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-enrich-plan".to_string(),
+            user_message_id: "user-enrich-plan".to_string(),
+            user_message: "prompt".to_string(),
+            model: None,
+            execution_mode: Some("plan".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: RunStatus::Completed,
+            assistant_message_id: Some("assistant-enrich-plan".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+        };
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+        let plan_tool = message
+            .tool_calls
+            .iter()
+            .find(|tool| tool.name == CODEX_PLAN_TOOL_NAME)
+            .expect("plan tool");
+        let plan_body = plan_tool
+            .input
+            .get("plan")
+            .and_then(|v| v.as_str())
+            .expect("plan body");
+        assert!(plan_body.contains("hand off a usable plan"));
+        assert!(plan_body.contains("tool-call-utils.ts"));
+        assert!(!plan_body.contains("Plan created and ready for approval"));
+    }
+
+    #[test]
+    fn notification_history_preserves_turn_id_on_item_completed() {
+        let params = serde_json::json!({
+            "item": { "id": "plan-1", "type": "plan", "text": "Detailed plan body" },
+            "threadId": "thread-1",
+            "turnId": "turn-99",
+        });
+        let line = notification_to_history_line("item/completed", &params).expect("history line");
+        let parsed: serde_json::Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(parsed.get("turn_id").and_then(|v| v.as_str()), Some("turn-99"));
+        assert_eq!(
+            parsed
+                .get("item")
+                .and_then(|i| i.get("id"))
+                .and_then(|v| v.as_str()),
+            Some("plan-1")
         );
     }
 

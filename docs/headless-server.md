@@ -326,3 +326,8 @@ same dialog to return to the desktop app's local backend.
 
 Native Jean client origins are allowed automatically. HTTP and HTTPS server
 URLs are both supported; keep token authentication enabled on remote servers.
+
+The connection picker shows each remote's `appVersion` (from `/api/auth`) next
+to Local's client version. When the versions differ, Jean shows a warning toast
+and highlights the mismatch in the picker, but still allows the connection so
+you are not locked out. Prefer matching versions for the best experience.

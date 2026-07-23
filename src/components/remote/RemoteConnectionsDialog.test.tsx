@@ -5,12 +5,22 @@ import { RemoteConnectionsDialog } from './RemoteConnectionsDialog'
 const {
   addRemoteConnection,
   selectConnection,
+  fetchRemoteServerInfo,
+  getLocalJeanVersion,
+  warnRemoteVersionMismatch,
   invoke,
   isNativeApp,
   listenLocal,
 } = vi.hoisted(() => ({
   addRemoteConnection: vi.fn(() => ({ id: 'remote-1' })),
   selectConnection: vi.fn(),
+  fetchRemoteServerInfo: vi.fn(async () => ({
+    ok: true,
+    appVersion: '0.1.69',
+    webBuildId: '0.1.69-test',
+  })),
+  getLocalJeanVersion: vi.fn(() => '0.1.69'),
+  warnRemoteVersionMismatch: vi.fn(() => false),
   invoke: vi.fn(),
   isNativeApp: vi.fn(() => false),
   listenLocal: vi.fn(async () => () => {}),
@@ -22,9 +32,35 @@ vi.mock('@/lib/remote-connections', () => ({
   getActiveConnectionId: () => 'local',
   removeRemoteConnection: vi.fn(),
   markConnectionSwitch: vi.fn(),
+  parseRemoteConnectionInput: (url: string, token: string) => {
+    const parsed = new URL(url)
+    const resolvedToken =
+      token.trim() || parsed.searchParams.get('token')?.trim() || ''
+    parsed.search = ''
+    return {
+      url: parsed.toString().replace(/\/$/, ''),
+      token: resolvedToken,
+    }
+  },
   selectConnection,
   updateRemoteConnection: vi.fn(),
   useRemoteConnections: () => [],
+}))
+
+vi.mock('@/lib/remote-version', () => ({
+  checkRemoteVersionCompatibility: (remote: string | null | undefined) => ({
+    compatible: !remote || remote === '0.1.69',
+    localVersion: '0.1.69',
+    remoteVersion: remote ?? null,
+    message: remote
+      ? `This Jean app is v0.1.69, but the remote server is v${remote}.`
+      : undefined,
+  }),
+  fetchRemoteServerInfo,
+  formatJeanVersionLabel: (version: string | null | undefined) =>
+    version ? `v${version.replace(/^v/, '')}` : 'version unknown',
+  getLocalJeanVersion,
+  warnRemoteVersionMismatch,
 }))
 
 vi.mock('@/lib/environment', () => ({
@@ -39,11 +75,18 @@ vi.mock('@/lib/transport', () => ({
 describe('RemoteConnectionsDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    fetchRemoteServerInfo.mockResolvedValue({
+      ok: true,
+      appVersion: '0.1.69',
+      webBuildId: '0.1.69-test',
+    })
+    warnRemoteVersionMismatch.mockReturnValue(false)
     isNativeApp.mockReturnValue(false)
   })
 
-  it('adds and selects a remote from a complete Web Access URL', () => {
-    render(<RemoteConnectionsDialog reloadApp={vi.fn()} />)
+  it('adds and selects a remote from a complete Web Access URL', async () => {
+    const reloadApp = vi.fn()
+    render(<RemoteConnectionsDialog reloadApp={reloadApp} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Jean connections' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
@@ -55,18 +98,56 @@ describe('RemoteConnectionsDialog', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save & Connect' }))
 
-    expect(addRemoteConnection).toHaveBeenCalledWith({
-      name: 'Build server',
-      url: 'https://jean.example.com/?token=secret',
-      token: '',
-      sshUser: undefined,
-      sshHost: undefined,
-      sshPort: 22,
+    await waitFor(() => {
+      expect(fetchRemoteServerInfo).toHaveBeenCalledWith(
+        'https://jean.example.com',
+        'secret'
+      )
+      expect(addRemoteConnection).toHaveBeenCalledWith({
+        name: 'Build server',
+        url: 'https://jean.example.com/?token=secret',
+        token: '',
+        sshUser: undefined,
+        sshHost: undefined,
+        sshPort: 22,
+      })
+      expect(selectConnection).toHaveBeenCalledWith('remote-1')
+      expect(reloadApp).toHaveBeenCalled()
     })
-    expect(selectConnection).toHaveBeenCalledWith('remote-1')
   })
 
-  it('saves optional SSH fields when adding a remote URL', () => {
+  it('shows local version and still connects when remote mismatches', async () => {
+    fetchRemoteServerInfo.mockResolvedValueOnce({
+      ok: true,
+      appVersion: '0.2.0',
+      webBuildId: '0.2.0-test',
+    })
+    warnRemoteVersionMismatch.mockReturnValueOnce(true)
+
+    const reloadApp = vi.fn()
+    render(<RemoteConnectionsDialog reloadApp={reloadApp} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jean connections' }))
+    expect(
+      screen.getByText(/This app is v0\.1\.69; a warning is shown/)
+    ).toBeInTheDocument()
+    expect(screen.getByText('v0.1.69')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    fireEvent.change(screen.getByLabelText('Web Access URL'), {
+      target: { value: 'https://jean.example.com/?token=secret' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Connect' }))
+
+    await waitFor(() => {
+      expect(warnRemoteVersionMismatch).toHaveBeenCalledWith('0.2.0')
+      expect(addRemoteConnection).toHaveBeenCalled()
+      expect(selectConnection).toHaveBeenCalledWith('remote-1')
+      expect(reloadApp).toHaveBeenCalled()
+    })
+  })
+
+  it('saves optional SSH fields when adding a remote URL', async () => {
     render(<RemoteConnectionsDialog reloadApp={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Jean connections' }))
@@ -88,13 +169,15 @@ describe('RemoteConnectionsDialog', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save & Connect' }))
 
-    expect(addRemoteConnection).toHaveBeenCalledWith({
-      name: 'Build server',
-      url: 'https://jean.example.com/?token=secret',
-      token: '',
-      sshUser: 'ubuntu',
-      sshHost: '192.168.1.50',
-      sshPort: 2222,
+    await waitFor(() => {
+      expect(addRemoteConnection).toHaveBeenCalledWith({
+        name: 'Build server',
+        url: 'https://jean.example.com/?token=secret',
+        token: '',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+        sshPort: 2222,
+      })
     })
   })
 

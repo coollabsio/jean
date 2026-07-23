@@ -222,16 +222,26 @@ fn cli_launch_plan(
         };
     }
 
-    if is_windows && is_windows_batch_file(program) {
+    // Prefer a CreateProcessW-friendly sibling (.exe/.cmd/.bat) when the
+    // resolved path is an extensionless npm shim (os error 193 / issue #265).
+    let program = if is_windows {
+        crate::platform::prefer_windows_executable_sibling(std::path::PathBuf::from(program))
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        program.to_string()
+    };
+
+    if is_windows && is_windows_batch_file(&program) {
         return CliLaunchPlan {
             program: "cmd.exe".to_string(),
-            args: vec!["/C".to_string(), program.to_string()],
+            args: vec!["/C".to_string(), program],
             cwd: cwd.map(std::path::Path::to_path_buf),
         };
     }
 
     CliLaunchPlan {
-        program: program.to_string(),
+        program,
         args: Vec::new(),
         cwd: cwd.map(std::path::Path::to_path_buf),
     }

@@ -635,7 +635,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex \`<proposed_plan>\` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/\`--print\` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in \`<proposed_plan>...</proposed_plan>\` so Jean can show the approval UI. Do not use the \`update_plan\` checklist tool in plan mode.
@@ -1250,6 +1250,7 @@ export interface AppPreferences {
   selected_grok_model: GrokModel // Default Grok model
   selected_kimi_model?: KimiModel // Default Kimi Code model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
+  default_codex_model_verbosity: CodexModelVerbosity // Default model verbosity for Codex chat: 'low' | 'medium' | 'high'
   default_grok_reasoning_effort: GrokReasoningEffort // Default reasoning effort for Grok: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   codex_goal_execution_mode: CodexGoalExecutionMode // Execution mode used when starting a Codex /goal
   codex_multi_agent_enabled: boolean // Enable Codex multi-agent collaboration (experimental)
@@ -1728,6 +1729,9 @@ export function normalizeCodexModel(model: string): CodexModel {
 
 export type CodexReasoningEffort = string
 
+/** Codex Responses API model_verbosity: controls output length/detail */
+export type CodexModelVerbosity = 'low' | 'medium' | 'high'
+
 export type GrokReasoningEffort = string
 
 export type MagicPromptReasoningEffort = string | null
@@ -1794,6 +1798,28 @@ export const codexReasoningOptions: {
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'xHigh' },
+]
+
+export const codexModelVerbosityOptions: {
+  value: CodexModelVerbosity
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'low',
+    label: 'Low',
+    description: 'Terse answers; fewer mid-turn progress notes',
+  },
+  {
+    value: 'medium',
+    label: 'Medium',
+    description: 'Balanced narration between tools and final answer',
+  },
+  {
+    value: 'high',
+    label: 'High',
+    description: 'More detailed explanations and intermediate updates',
+  },
 ]
 
 export const grokReasoningOptions: {
@@ -2228,6 +2254,7 @@ export const defaultPreferences: AppPreferences = {
   selected_grok_model: 'grok/grok-4.5', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
   default_codex_reasoning_effort: 'high', // Default: high reasoning
+  default_codex_model_verbosity: 'medium', // Default: medium verbosity (not low — Jean #535)
   default_grok_reasoning_effort: 'high', // Default: high reasoning
   codex_goal_execution_mode: 'build', // Default: build mode for goals
   codex_multi_agent_enabled: true, // Default: enabled to match parallel execution prompting

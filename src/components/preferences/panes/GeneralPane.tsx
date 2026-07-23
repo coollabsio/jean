@@ -147,6 +147,7 @@ import type { AppPreferences } from '@/types/preferences'
 import {
   effortLevelOptions,
   codexReasoningOptions,
+  codexModelVerbosityOptions,
   grokReasoningOptions,
   backendOptions,
   getTerminalOptions,
@@ -161,6 +162,7 @@ import {
   type CodexModel,
   type CodexGoalExecutionMode,
   type CodexReasoningEffort,
+  type CodexModelVerbosity,
   type GrokReasoningEffort,
   type CursorModel,
   type PiModel,
@@ -1029,6 +1031,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     if (preferences) {
       patchPreferences.mutate({
         default_codex_reasoning_effort: value,
+      })
+    }
+  }
+
+  const handleCodexModelVerbosityChange = (value: CodexModelVerbosity) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        default_codex_model_verbosity: value,
       })
     }
   }
@@ -3073,6 +3083,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </SelectTrigger>
                 <SelectContent>
                   {selectedCodexReasoningOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
+              label="Model verbosity"
+              description="How much intermediate text Codex writes during chat (low is terse; high is more detailed)"
+            >
+              <Select
+                value={preferences?.default_codex_model_verbosity ?? 'medium'}
+                onValueChange={handleCodexModelVerbosityChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {codexModelVerbosityOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
