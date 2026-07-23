@@ -63,38 +63,52 @@ Incompatibility between WebKitGTK's hardware-accelerated compositing and certain
 
 ## Automatic Fixes
 
-Jean automatically applies the following environment variables on Linux to prevent these issues:
+Jean applies the following environment variables on Linux **before** the webview starts
+(`src-tauri/src/platform/linux_webkit.rs`, called from `src-tauri/src/lib.rs`):
 
-### Primary Fixes
+### Default (performance-oriented)
 
-- `WEBKIT_DISABLE_COMPOSITING_MODE=1` - Disables hardware-accelerated compositing
-- `WEBKIT_DISABLE_DMABUF_RENDERER=1` - Disables DMABUF renderer (common GBM error cause)
+- `WEBKIT_DISABLE_DMABUF_RENDERER=1` — Disables the DMABUF renderer (common GBM error cause) without forcing full software compositing
+
+User-set values are never overwritten.
+
+### Opt-in safe graphics (stability over speed)
+
+Software compositing avoids some driver bugs but is much slower on low-power CPUs
+(for example Intel N-series). It is **not** enabled by default.
+
+```bash
+export JEAN_SAFE_GRAPHICS=1
+# equivalent direct override:
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+```
 
 ### Optional X11 Backend Force
 
-If Wayland causes issues, Jean can force X11 backend (requires manual override):
+If Wayland causes issues, force X11 (non-AppImage only):
 
-- `GDK_BACKEND=x11` - Forces GTK to use X11 instead of Wayland
+```bash
+export JEAN_FORCE_X11=1
+```
 
-These fixes are applied in `src-tauri/src/lib.rs` before Tauri initialization.
+This sets `GDK_BACKEND=x11` when not already set. AppImage runs ignore `JEAN_FORCE_X11`
+because AppRun/apprun-hooks own the backend choice.
 
 ---
 
 ## Manual Overrides
 
-If automatic fixes cause performance issues (slower rendering), you can override them:
-
-### Force Wayland (if X11 fallback isn't needed)
+### Re-enable DMABUF / full GPU path (may cause GBM errors)
 
 ```bash
-export JEAN_FORCE_X11=0
+export WEBKIT_DISABLE_DMABUF_RENDERER=0
+export WEBKIT_DISABLE_COMPOSITING_MODE=0
 ```
 
-### Re-enable GPU Compositing (risky - may cause GBM errors)
+### Prefer maximum stability (software compositing)
 
 ```bash
-export WEBKIT_DISABLE_COMPOSITING_MODE=0
-export WEBKIT_DISABLE_DMABUF_RENDERER=0
+export JEAN_SAFE_GRAPHICS=1
 ```
 
 ### Alternative: NVIDIA-specific Fixes
@@ -103,6 +117,8 @@ If issues persist on NVIDIA hardware:
 
 ```bash
 export __NV_DISABLE_EXPLICIT_SYNC=1
+# or full safe mode:
+export JEAN_SAFE_GRAPHICS=1
 ```
 
 ### Software Rendering (last resort)
@@ -148,8 +164,8 @@ export GALLIUM_DRIVER=softpipe
 ### NVIDIA GPUs
 
 - **Most Affected:** Higher frequency of GBM buffer errors
-- **Known Workarounds:** `WEBKIT_DISABLE_COMPOSITING_MODE=1` is most reliable
-- **Performance Impact:** Software rendering is noticeably slower than GPU-accelerated
+- **Known Workarounds:** `JEAN_SAFE_GRAPHICS=1` (or `WEBKIT_DISABLE_COMPOSITING_MODE=1`) is most reliable
+- **Performance Impact:** Software compositing is noticeably slower than GPU-accelerated — only enable when needed
 - **Alternative:** Consider using older NVIDIA drivers or switching to X11
 
 ### AMD/Intel GPUs
@@ -157,6 +173,7 @@ export GALLIUM_DRIVER=softpipe
 - **Generally Less Affected:** Fewer reported GBM errors
 - **Compositor Support:** Better Wayland compositor compatibility
 - **Transparency:** Usually works without special configuration
+- **Performance:** Keep GPU compositing enabled (default). Full software compositing can peg low-power Intel CPUs during chat streaming (see [#129](https://github.com/coollabsio/jean/issues/129))
 
 ### Desktop Environments
 

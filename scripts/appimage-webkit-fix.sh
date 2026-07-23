@@ -78,4 +78,14 @@ fi
 export PATH="$APPDIR/usr/bin:$PATH"
 export XDG_DATA_DIRS="$APPDIR/usr/share:/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
+# WebKitGTK DMABUF is a common GBM crash path; disable unless the user overrode it.
+# Full software compositing is intentionally NOT forced here — it hurts CPU on
+# low-power machines (see issue #129). Use JEAN_SAFE_GRAPHICS=1 for that path.
+if [ -z "${WEBKIT_DISABLE_DMABUF_RENDERER:-}" ]; then
+    export WEBKIT_DISABLE_DMABUF_RENDERER=1
+fi
+if [ "${JEAN_SAFE_GRAPHICS:-}" = "1" ] || [ "${JEAN_SAFE_GRAPHICS:-}" = "true" ]; then
+    export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+fi
+
 exec "$APPDIR/usr/bin/jean" "$@"

@@ -340,6 +340,11 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     fix_macos_path();
 
+    // WebKitGTK env defaults must be applied before the webview process starts.
+    // Lost during jean-core extraction (#493); restored for Linux desktop (#129).
+    #[cfg(target_os = "linux")]
+    platform::apply_linux_webkit_env();
+
     let log_targets = vec![
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
