@@ -70,7 +70,18 @@ async function loadNativeTransportModule(
   return import('./transport')
 }
 
-async function loadRemoteNativeTransportModule() {
+async function loadRemoteNativeTransportModule(
+  remote?: {
+    id: string
+    name: string
+    url: string
+    token: string
+    sshUser?: string
+    sshHost?: string
+    sshPort?: number
+  },
+  tauriInvoke?: ReturnType<typeof vi.fn>
+) {
   vi.resetModules()
   vi.doMock('./environment', () => ({
     isNativeApp: () => true,
@@ -78,13 +89,17 @@ async function loadRemoteNativeTransportModule() {
     setWebAccessEnabled: vi.fn(),
   }))
   vi.doMock('./remote-connections', () => ({
-    getActiveRemoteConnection: () => ({
-      id: 'remote-1',
-      name: 'Server',
-      url: 'https://jean.example.com',
-      token: 'secret',
-    }),
+    getActiveRemoteConnection: () =>
+      remote ?? {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+      },
   }))
+  if (tauriInvoke) {
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: tauriInvoke }))
+  }
   return import('./transport')
 }
 
@@ -201,6 +216,55 @@ describe('transport bootstrap', () => {
       enabled: true,
     })
   })
+
+  it('opens remote worktrees in local Zed via ssh:// targets', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+      },
+      tauriInvoke
+    )
+
+    await transport.invoke('open_worktree_in_editor', {
+      worktreePath: '/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('open_worktree_in_editor', {
+      worktreePath: 'ssh://ubuntu@192.168.1.50/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+  })
+
+  it('rejects non-Zed remote editor opens with a clear error', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+      },
+      tauriInvoke
+    )
+
+    await expect(
+      transport.invoke('open_worktree_in_editor', {
+        worktreePath: '/tmp',
+        editor: 'vscode',
+      })
+    ).rejects.toThrow(/Zed/)
+    expect(tauriInvoke).not.toHaveBeenCalled()
+  })
+
   it('does not open websocket until bootstrap explicitly connects it', async () => {
     const transport = await loadTransportModule()
 

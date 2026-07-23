@@ -8,6 +8,7 @@ import type * as EnvironmentModule from '@/lib/environment'
 const envMocks = vi.hoisted(() => ({
   isNativeApp: false,
   isLocalBackend: false,
+  canOpenNativeApps: false,
   isMobile: true,
 }))
 
@@ -21,6 +22,7 @@ vi.mock('@/lib/environment', async importOriginal => ({
   ...(await importOriginal<typeof EnvironmentModule>()),
   isNativeApp: () => envMocks.isNativeApp,
   isLocalBackend: () => envMocks.isLocalBackend,
+  canOpenNativeApps: () => envMocks.canOpenNativeApps,
 }))
 
 vi.mock('@/hooks/use-mobile', () => ({
@@ -72,6 +74,7 @@ describe('WorktreeDropdownMenu', () => {
   beforeEach(() => {
     envMocks.isNativeApp = false
     envMocks.isLocalBackend = false
+    envMocks.canOpenNativeApps = false
     envMocks.isMobile = true
     actionMocks.runScripts = ['bun run dev']
     actionMocks.handleRun.mockClear()
@@ -95,10 +98,11 @@ describe('WorktreeDropdownMenu', () => {
     expect(actionMocks.handleRun).not.toHaveBeenCalled()
   })
 
-  it('hides open-in editor/terminal/finder on remote connections', async () => {
+  it('hides open-in editor/terminal/finder on remote connections without native open', async () => {
     const user = userEvent.setup()
     envMocks.isNativeApp = true
     envMocks.isLocalBackend = false
+    envMocks.canOpenNativeApps = false
     envMocks.isMobile = false
 
     render(
@@ -112,5 +116,26 @@ describe('WorktreeDropdownMenu', () => {
     await user.click(screen.getByRole('button'))
 
     expect(screen.queryByRole('menuitem', { name: /open in/i })).toBeNull()
+  })
+
+  it('shows open-in editor/terminal/finder when the remote backend allows native open', async () => {
+    const user = userEvent.setup()
+    envMocks.isNativeApp = true
+    envMocks.isLocalBackend = false
+    envMocks.canOpenNativeApps = true
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+      />
+    )
+
+    await user.click(screen.getByRole('button'))
+
+    const openItems = screen.getAllByRole('menuitem', { name: /open in/i })
+    expect(openItems.length).toBeGreaterThanOrEqual(1)
   })
 })

@@ -116,4 +116,29 @@ describe('UIStore', () => {
     unsubscribe()
     expect(notifications).toBe(1)
   })
+
+  it('tracks app update ready / installing lifecycle without no-op churn', () => {
+    const {
+      setUpdateReadyVersion,
+      setIsUpdateInstalling,
+      setPendingUpdateVersion,
+    } = useUIStore.getState()
+
+    setIsUpdateInstalling(true)
+    expect(useUIStore.getState().isUpdateInstalling).toBe(true)
+    setIsUpdateInstalling(true) // no-op guard
+    setPendingUpdateVersion('1.2.3')
+    setIsUpdateInstalling(false)
+    setUpdateReadyVersion('1.2.3')
+    setPendingUpdateVersion(null)
+
+    expect(useUIStore.getState()).toMatchObject({
+      isUpdateInstalling: false,
+      updateReadyVersion: '1.2.3',
+      pendingUpdateVersion: null,
+    })
+
+    setUpdateReadyVersion('1.2.3') // no-op guard
+    expect(useUIStore.getState().updateReadyVersion).toBe('1.2.3')
+  })
 })

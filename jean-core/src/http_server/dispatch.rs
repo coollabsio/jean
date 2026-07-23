@@ -87,6 +87,21 @@ fn parse_open_worktree_in_editor_args(args: &Value) -> Result<OpenWorktreeInEdit
     })
 }
 
+#[derive(Debug, PartialEq)]
+struct OpenWorktreeInTerminalArgs {
+    worktree_path: String,
+    terminal: Option<String>,
+}
+
+fn parse_open_worktree_in_terminal_args(
+    args: &Value,
+) -> Result<OpenWorktreeInTerminalArgs, String> {
+    Ok(OpenWorktreeInTerminalArgs {
+        worktree_path: field(args, "worktreePath", "worktree_path")?,
+        terminal: from_field_opt(args, "terminal")?,
+    })
+}
+
 /// Dispatch a command by name to the corresponding Rust handler.
 /// This mirrors Tauri's invoke system but routes through WebSocket.
 ///
@@ -1740,16 +1755,29 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "open_worktree_in_finder" => {
-            Err("Opening a file manager is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a file manager")?;
+            let parsed = parse_worktree_path_args(&args)?;
+            crate::projects::open_worktree_in_finder(parsed.worktree_path).await?;
+            Ok(Value::Null)
         }
         "open_project_worktrees_folder" => {
-            Err("Opening a file manager is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a file manager")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::open_project_worktrees_folder(app.clone(), project_id).await?;
+            Ok(Value::Null)
         }
         "open_worktree_in_terminal" => {
-            Err("Opening a terminal is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a terminal")?;
+            let parsed = parse_open_worktree_in_terminal_args(&args)?;
+            crate::projects::open_worktree_in_terminal(parsed.worktree_path, parsed.terminal)
+                .await?;
+            Ok(Value::Null)
         }
         "open_worktree_in_editor" => {
-            Err("Opening an editor is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("an editor")?;
+            let parsed = parse_open_worktree_in_editor_args(&args)?;
+            crate::projects::open_worktree_in_editor(parsed.worktree_path, parsed.editor).await?;
+            Ok(Value::Null)
         }
         "open_pull_request" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
@@ -2540,6 +2568,10 @@ pub async fn dispatch_command(
             let result = crate::opencode_cli::list_opencode_models(app.clone()).await?;
             to_value(result)
         }
+        "refresh_opencode_models" => {
+            let result = crate::opencode_cli::refresh_opencode_models(app.clone()).await?;
+            to_value(result)
+        }
         "check_gh_cli_installed" => {
             let result = crate::gh_cli::check_gh_cli_installed(app.clone()).await?;
             to_value(result)
@@ -3069,7 +3101,9 @@ pub async fn dispatch_command(
             Err("Opening a browser is only available in the desktop app".to_string())
         }
         "open_log_directory" => {
-            Err("Opening a file manager is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a file manager")?;
+            crate::projects::open_log_directory(app.clone()).await?;
+            Ok(Value::Null)
         }
         "remove_git_remote" => {
             let repo_path: String = field(&args, "repoPath", "repo_path")?;
@@ -3322,6 +3356,16 @@ pub async fn dispatch_command(
             crate::delete_cli_profile(name).await?;
             Ok(Value::Null)
         }
+        "upsert_pi_provider" => {
+            let profile: crate::PiProviderProfile = from_field(&args, "profile")?;
+            crate::pi_cli::upsert_pi_provider(profile).await?;
+            Ok(Value::Null)
+        }
+        "delete_pi_provider" => {
+            let name: String = from_field(&args, "name")?;
+            crate::pi_cli::delete_pi_provider(name).await?;
+            Ok(Value::Null)
+        }
 
         // =====================================================================
         // Background Tasks (additional)
@@ -3479,19 +3523,82 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[tokio::test]
-    async fn headless_dispatch_rejects_desktop_only_commands() {
-        let temp = tempfile::tempdir().unwrap();
-        let app = AppHandle::new(temp.path().into(), temp.path().into()).unwrap();
+    #[test]
+    fn headless_dispatch_rejects_native_open_when_not_allowed() {
+        crate::platform::with_native_open_flag_lock(|| {
+            let previous = crate::platform::allow_native_open_enabled();
+            crate::platform::set_allow_native_open(false);
 
-        for (command, args) in [
-            ("open_worktree_in_finder", json!({ "worktreePath": "/tmp" })),
-            ("open_worktree_in_editor", json!({ "worktreePath": "/tmp" })),
-            ("open_file_in_default_app", json!({ "path": "/tmp/file" })),
-        ] {
-            let error = dispatch_command(&app, command, args).await.unwrap_err();
-            assert!(error.contains("desktop app"), "{command}: {error}");
-        }
+            // When not under WSL and without the opt-in flag, native open stays blocked.
+            if crate::platform::is_running_in_wsl() {
+                crate::platform::set_allow_native_open(previous);
+                return;
+            }
+
+            let temp = tempfile::tempdir().unwrap();
+            let app = AppHandle::new(temp.path().into(), temp.path().into()).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            for (command, args) in [
+                ("open_worktree_in_finder", json!({ "worktreePath": "/tmp" })),
+                ("open_worktree_in_editor", json!({ "worktreePath": "/tmp" })),
+                ("open_worktree_in_terminal", json!({ "worktreePath": "/tmp" })),
+                ("open_file_in_default_app", json!({ "path": "/tmp/file" })),
+            ] {
+                let error = runtime
+                    .block_on(dispatch_command(&app, command, args))
+                    .unwrap_err();
+                assert!(error.contains("desktop app"), "{command}: {error}");
+            }
+
+            crate::platform::set_allow_native_open(previous);
+        });
+    }
+
+    #[test]
+    fn headless_dispatch_routes_native_open_when_allowed() {
+        crate::platform::with_native_open_flag_lock(|| {
+            let previous = crate::platform::allow_native_open_enabled();
+            crate::platform::set_allow_native_open(true);
+
+            let temp = tempfile::tempdir().unwrap();
+            let app = AppHandle::new(temp.path().into(), temp.path().into()).unwrap();
+            let worktree = temp.path().join("wt");
+            std::fs::create_dir_all(&worktree).unwrap();
+            let worktree_path = worktree.to_string_lossy().to_string();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            // Should not short-circuit with the desktop-app error. Spawn may still fail
+            // on headless CI (missing GUI tools); either success or a non-desktop error is OK.
+            for (command, args) in [
+                (
+                    "open_worktree_in_finder",
+                    json!({ "worktreePath": worktree_path }),
+                ),
+                (
+                    "open_worktree_in_editor",
+                    json!({ "worktreePath": worktree_path, "editor": "code" }),
+                ),
+            ] {
+                match runtime.block_on(dispatch_command(&app, command, args)) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        assert!(
+                            !error.contains("desktop app"),
+                            "{command} should not be blocked as desktop-only when native open is allowed: {error}"
+                        );
+                    }
+                }
+            }
+
+            crate::platform::set_allow_native_open(previous);
+        });
     }
 
     #[test]
@@ -3648,6 +3755,31 @@ mod tests {
             OpenWorktreeInEditorArgs {
                 worktree_path: "/tmp/b".to_string(),
                 editor: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_open_worktree_in_terminal_args_accepts_web_transport_fields() {
+        assert_eq!(
+            parse_open_worktree_in_terminal_args(&json!({
+                "worktreePath": "/tmp/a",
+                "terminal": "ghostty"
+            }))
+            .unwrap(),
+            OpenWorktreeInTerminalArgs {
+                worktree_path: "/tmp/a".to_string(),
+                terminal: Some("ghostty".to_string()),
+            }
+        );
+        assert_eq!(
+            parse_open_worktree_in_terminal_args(&json!({
+                "worktree_path": "/tmp/b"
+            }))
+            .unwrap(),
+            OpenWorktreeInTerminalArgs {
+                worktree_path: "/tmp/b".to_string(),
+                terminal: None,
             }
         );
     }

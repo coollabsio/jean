@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { isNativeApp } from '@/lib/environment'
+import { cn } from '@/lib/utils'
 import {
   LOCAL_CONNECTION_ID,
   addRemoteConnection,
@@ -35,7 +36,14 @@ import {
 } from '@/lib/remote-connections'
 import { invoke, listenLocal } from '@/lib/transport'
 
-const EMPTY_URL_FORM = { name: '', url: '', token: '' }
+const EMPTY_URL_FORM = {
+  name: '',
+  url: '',
+  token: '',
+  sshUser: '',
+  sshHost: '',
+  sshPort: '22',
+}
 const EMPTY_INSTALL_FORM = {
   name: '',
   user: '',
@@ -87,6 +95,9 @@ export function RemoteConnectionsDialog({
           name: connection.name,
           url: connection.url,
           token: connection.token,
+          sshUser: connection.sshUser ?? '',
+          sshHost: connection.sshHost ?? '',
+          sshPort: String(connection.sshPort ?? 22),
         })
         setError(null)
         setProgress(null)
@@ -136,10 +147,35 @@ export function RemoteConnectionsDialog({
       name: connection.name,
       url: connection.url,
       token: connection.token,
+      sshUser: connection.sshUser ?? '',
+      sshHost: connection.sshHost ?? '',
+      sshPort: String(connection.sshPort ?? 22),
     })
     setError(null)
     setProgress(null)
     setInstalling(false)
+  }
+
+  const parseOptionalSshPort = (raw: string): number | undefined => {
+    const trimmed = raw.trim()
+    if (!trimmed) return undefined
+    const port = Number(trimmed)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error('SSH port must be an integer between 1 and 65535.')
+    }
+    return port
+  }
+
+  const connectionInputFromUrlForm = () => {
+    const sshPort = parseOptionalSshPort(form.sshPort)
+    return {
+      name: form.name,
+      url: form.url,
+      token: form.token,
+      sshUser: form.sshUser.trim() || undefined,
+      sshHost: form.sshHost.trim() || undefined,
+      sshPort,
+    }
   }
 
   const switchTo = (id: string) => {
@@ -152,15 +188,16 @@ export function RemoteConnectionsDialog({
   const handleUrlSubmit = (event: FormEvent) => {
     event.preventDefault()
     try {
+      const input = connectionInputFromUrlForm()
       if (editingId === 'new') {
-        const connection = addRemoteConnection(form)
+        const connection = addRemoteConnection(input)
         markConnectionSwitch()
         selectConnection(connection.id)
         reloadApp()
         return
       }
       if (editingId) {
-        updateRemoteConnection(editingId, form)
+        updateRemoteConnection(editingId, input)
         if (editingId === activeId) {
           markConnectionSwitch()
           reloadApp()
@@ -227,6 +264,9 @@ export function RemoteConnectionsDialog({
         name: result.name,
         url: result.url,
         token: result.token,
+        sshUser: user,
+        sshHost: host,
+        sshPort,
       })
       markConnectionSwitch()
       selectConnection(connection.id)
@@ -284,7 +324,7 @@ export function RemoteConnectionsDialog({
           showInstallForm ? (
             <form className="space-y-4" onSubmit={handleInstallSubmit}>
               {native && (
-                <AddModeToggle
+                <AddModeTabs
                   mode={addMode}
                   onChange={mode => {
                     if (installing) return
@@ -423,7 +463,7 @@ export function RemoteConnectionsDialog({
           ) : (
             <form className="space-y-4" onSubmit={handleUrlSubmit}>
               {isNew && native && (
-                <AddModeToggle
+                <AddModeTabs
                   mode={addMode}
                   onChange={mode => {
                     setAddMode(mode)
@@ -475,6 +515,62 @@ export function RemoteConnectionsDialog({
                   placeholder="Optional when included in the URL"
                 />
               </div>
+              <div className="space-y-2 rounded-md border p-3">
+                <div>
+                  <p className="text-sm font-medium">SSH for editor (Zed)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Used when Open in Editor runs against this remote. Defaults
+                    host to the Web Access hostname when left blank.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="remote-ssh-user">SSH user</Label>
+                    <Input
+                      id="remote-ssh-user"
+                      value={form.sshUser}
+                      onChange={event =>
+                        setForm(current => ({
+                          ...current,
+                          sshUser: event.target.value,
+                        }))
+                      }
+                      placeholder="ubuntu"
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="remote-ssh-host">SSH host</Label>
+                    <Input
+                      id="remote-ssh-host"
+                      value={form.sshHost}
+                      onChange={event =>
+                        setForm(current => ({
+                          ...current,
+                          sshHost: event.target.value,
+                        }))
+                      }
+                      placeholder="Same as Web Access host"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="remote-ssh-port">SSH port</Label>
+                  <Input
+                    id="remote-ssh-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={form.sshPort}
+                    onChange={event =>
+                      setForm(current => ({
+                        ...current,
+                        sshPort: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <DialogFooter>
                 <Button
@@ -525,7 +621,16 @@ export function RemoteConnectionsDialog({
   )
 }
 
-function AddModeToggle({
+const ADD_MODE_TABS: {
+  id: AddMode
+  label: string
+  icon: typeof HardDriveDownload
+}[] = [
+  { id: 'install', label: 'Install via SSH', icon: HardDriveDownload },
+  { id: 'url', label: 'Existing URL', icon: Link2 },
+]
+
+function AddModeTabs({
   mode,
   onChange,
   disabled = false,
@@ -535,27 +640,35 @@ function AddModeToggle({
   disabled?: boolean
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      <Button
-        type="button"
-        variant={mode === 'install' ? 'default' : 'outline'}
-        size="sm"
-        disabled={disabled}
-        onClick={() => onChange('install')}
-      >
-        <HardDriveDownload className="mr-1.5 size-3.5" />
-        Install via SSH
-      </Button>
-      <Button
-        type="button"
-        variant={mode === 'url' ? 'default' : 'outline'}
-        size="sm"
-        disabled={disabled}
-        onClick={() => onChange('url')}
-      >
-        <Link2 className="mr-1.5 size-3.5" />
-        Existing URL
-      </Button>
+    <div
+      role="tablist"
+      aria-label="Add connection method"
+      className="flex border-b border-border"
+    >
+      {ADD_MODE_TABS.map(tab => {
+        const selected = mode === tab.id
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            disabled={disabled}
+            onClick={() => onChange(tab.id)}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
+              'border-b-2 hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'disabled:pointer-events-none disabled:opacity-50',
+              selected
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground'
+            )}
+          >
+            <tab.icon className="size-3.5" />
+            {tab.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

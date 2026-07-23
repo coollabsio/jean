@@ -121,6 +121,14 @@ struct SharedSseSubscriber {
     /// True once at least one steered prompt was injected into this run. Only
     /// steered runs wait for `session.idle`; plain runs finalize immediately.
     steered: Arc<AtomicBool>,
+    /// Upstream provider/session error observed on the SSE stream (e.g.
+    /// `session.error` or `message.updated` with `info.error`). Shared so the
+    /// blocking `/message` POST can surface the real failure instead of hanging
+    /// or looking like a user cancel.
+    upstream_error: Arc<Mutex<Option<String>>>,
+    /// Set when SSE sees a fatal upstream error. Distinct from `cancelled`
+    /// (user cancel) so the run is marked failed rather than cancelled.
+    force_abort: Arc<AtomicBool>,
     tracked_parts: HashMap<String, TrackedPartState>,
     /// Ordered list of content blocks accumulated from SSE events.
     /// Includes intermediate thinking/tool blocks that may not appear in the
@@ -366,6 +374,8 @@ impl SharedSseSubscription {
         turn_started: Arc<AtomicBool>,
         session_idle: Arc<AtomicBool>,
         steered: Arc<AtomicBool>,
+        upstream_error: Arc<Mutex<Option<String>>>,
+        force_abort: Arc<AtomicBool>,
     ) -> Self {
         ensure_shared_sse_listener(app, base_url, &working_dir);
 
@@ -378,6 +388,8 @@ impl SharedSseSubscription {
             turn_started,
             session_idle,
             steered,
+            upstream_error,
+            force_abort,
             tracked_parts: HashMap::new(),
             accumulated_blocks: Vec::new(),
             accumulated_tool_calls: Vec::new(),
@@ -1040,12 +1052,23 @@ fn bare_model_id(model: &str) -> Option<&str> {
     Some(raw.strip_prefix("opencode/").unwrap_or(raw))
 }
 
-/// Extracts a human-readable error message from an opencode message response when
-/// `info.error` is populated (status 200 OK + parts=[] + error object). Tries the
-/// upstream provider's raw error body first, then `info.error.data.message`, then
-/// `info.error.name`.
-fn extract_opencode_error_message(message: &serde_json::Value) -> Option<String> {
-    let error = message.get("info")?.get("error")?;
+/// Take (and clear) any upstream error recorded by the SSE listener.
+fn take_upstream_error(upstream_error: &Arc<Mutex<Option<String>>>) -> Option<String> {
+    let mut guard = lock_recover(upstream_error, "OPENCODE_SSE_UPSTREAM_ERROR");
+    guard.take()
+}
+
+/// Formats an OpenCode error object (`ProviderAuthError` | `APIError` |
+/// `UnknownError` | …, or a plain string) into a user-visible message.
+fn format_opencode_error_object(error: &serde_json::Value) -> Option<String> {
+    if let Some(s) = error.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+        return None;
+    }
+
     let data = error.get("data");
 
     // Provider-level error body (e.g. opencode.ai zen CreditsError message)
@@ -1061,17 +1084,143 @@ fn extract_opencode_error_message(message: &serde_json::Value) -> Option<String>
             {
                 return Some(msg.to_string());
             }
+            if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
+                return Some(msg.to_string());
+            }
+        }
+        // Non-JSON response body can still be useful (Ollama / custom providers).
+        let trimmed = body_str.trim();
+        if !trimmed.is_empty() && trimmed.len() < 500 {
+            return Some(trimmed.to_string());
         }
     }
 
     if let Some(msg) = data.and_then(|d| d.get("message")).and_then(|v| v.as_str()) {
-        return Some(msg.to_string());
+        let trimmed = msg.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    // Some AI-SDK / custom-provider errors put the message on the error root.
+    if let Some(msg) = error.get("message").and_then(|v| v.as_str()) {
+        let trimmed = msg.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
     }
 
     error
         .get("name")
         .and_then(|v| v.as_str())
         .map(|n| n.to_string())
+}
+
+/// Extracts a human-readable error message from an opencode message response when
+/// `info.error` is populated (status 200 OK + parts=[] + error object). Tries the
+/// upstream provider's raw error body first, then `info.error.data.message`, then
+/// `info.error.message` / `info.error.name`.
+fn extract_opencode_error_message(message: &serde_json::Value) -> Option<String> {
+    let error = message.get("info")?.get("error")?;
+    format_opencode_error_object(error)
+}
+
+/// Record an upstream OpenCode error observed on the SSE stream, emit
+/// `chat:error`, flag the run cancelled so the blocking `/message` POST unblocks,
+/// and abort the OpenCode session server-side.
+fn surface_opencode_sse_error(
+    app: &AppHandle,
+    subscribers: &Arc<Mutex<HashMap<String, SharedSseSubscriberEntry>>>,
+    opencode_session_id: &str,
+    error: &serde_json::Value,
+) -> bool {
+    let Some(msg) = format_opencode_error_object(error) else {
+        return false;
+    };
+
+    let (subscriber_handle, working_dir) = {
+        let subscribers = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+        match subscribers.get(opencode_session_id) {
+            Some(entry) => (entry.handle.clone(), entry.working_dir.clone()),
+            None => return false,
+        }
+    };
+
+    let (jean_session_id, worktree_id, already_set) = {
+        let subscriber = lock_recover(&subscriber_handle, "OPENCODE_SSE_SUBSCRIBER");
+        let mut guard = lock_recover(&subscriber.upstream_error, "OPENCODE_SSE_UPSTREAM_ERROR");
+        let already = guard.is_some();
+        if !already {
+            *guard = Some(msg.clone());
+        }
+        // Unblock the cancellable `/message` wait without marking the run as a
+        // user cancel — `force_abort` is distinct from `cancelled`.
+        subscriber.force_abort.store(true, Ordering::SeqCst);
+        (
+            subscriber.jean_session_id.clone(),
+            subscriber.worktree_id.clone(),
+            already,
+        )
+    };
+
+    if already_set {
+        return true;
+    }
+
+    log::warn!(
+        "OpenCode shared SSE: upstream error opencode_session={opencode_session_id} msg={msg}"
+    );
+    let _ = app.emit_all(
+        "chat:error",
+        &ErrorEvent {
+            session_id: jean_session_id,
+            worktree_id,
+            error: msg,
+        },
+    );
+    super::registry::abort_opencode_session(opencode_session_id.to_string(), Some(working_dir));
+    true
+}
+
+/// Resolve `(providerID, modelID)` for an OpenCode message.
+///
+/// Preference order:
+/// 1. Explicit `provider/model` parse (supports multi-slash model IDs like
+///    `ollama/hf.co/org/model:tag` and Jean's `opencode/` wrapper prefix)
+/// 2. Resolve a bare model id across connected providers
+/// 3. Fall back to any available model
+fn resolve_selected_model(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    query: &[(&str, String)],
+    model: Option<&str>,
+) -> Result<(String, String), String> {
+    if let Some(parsed) = parse_provider_model(model) {
+        return Ok(parsed);
+    }
+
+    let providers_url = format!("{base_url}/provider");
+    let providers_resp = client
+        .get(&providers_url)
+        .query(query)
+        .send()
+        .map_err(|e| format!("Failed to query OpenCode providers: {e}"))?;
+    if !providers_resp.status().is_success() {
+        let status = providers_resp.status();
+        let body = providers_resp.text().unwrap_or_default();
+        return Err(format!(
+            "OpenCode provider query failed: status={status}, body={body}"
+        ));
+    }
+    let providers: serde_json::Value = providers_resp
+        .json()
+        .map_err(|e| format!("Failed to parse OpenCode providers response: {e}"))?;
+
+    model
+        .and_then(bare_model_id)
+        .and_then(|bare| find_provider_for_model(&providers, bare))
+        .or_else(|| choose_model(&providers))
+        .ok_or_else(|| "No OpenCode models available. Authenticate a provider first.".to_string())
 }
 
 /// Search the provider list for a provider that owns `target_model_id`.
@@ -1944,6 +2093,51 @@ fn process_shared_sse_event(
             process_message_part_delta_event(app, &properties, &mut subscriber)
         }
         "message.created" | "session.updated" => Some(false),
+        "message.updated" => {
+            // Assistant messages may land with `info.error` set when a local /
+            // custom provider fails. Surface that immediately — the blocking
+            // `/message` POST often does not return promptly for these failures.
+            let info = properties.get("info").unwrap_or(&properties);
+            let role = info.get("role").and_then(|v| v.as_str()).unwrap_or("");
+            let Some(error) = info.get("error") else {
+                return Some(false);
+            };
+            if role != "assistant" && role != "" {
+                return Some(false);
+            }
+            let opencode_session_id = info
+                .get("sessionID")
+                .and_then(|v| v.as_str())
+                .or_else(|| properties.get("sessionID").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            if opencode_session_id.is_empty() {
+                return Some(false);
+            }
+            Some(surface_opencode_sse_error(
+                app,
+                subscribers,
+                opencode_session_id,
+                error,
+            ))
+        }
+        "session.error" => {
+            let opencode_session_id = properties
+                .get("sessionID")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let Some(error) = properties.get("error") else {
+                return Some(false);
+            };
+            if opencode_session_id.is_empty() {
+                return Some(false);
+            }
+            Some(surface_opencode_sse_error(
+                app,
+                subscribers,
+                opencode_session_id,
+                error,
+            ))
+        }
         "session.idle" => {
             // The session's whole queue (original turn + any steered prompts)
             // has drained. Flag the subscriber so a steered run can finalize.
@@ -1975,13 +2169,16 @@ fn process_shared_sse_event(
 async fn await_opencode_http_or_cancel<F, T>(
     future: F,
     cancelled: Arc<AtomicBool>,
+    force_abort: Arc<AtomicBool>,
     opencode_session_id: String,
     working_dir: String,
 ) -> Option<T>
 where
     F: Future<Output = T>,
 {
-    if cancelled.load(Ordering::SeqCst) {
+    let should_stop = || cancelled.load(Ordering::SeqCst) || force_abort.load(Ordering::SeqCst);
+
+    if should_stop() {
         super::registry::abort_opencode_session(opencode_session_id.clone(), Some(working_dir));
         return None;
     }
@@ -1991,7 +2188,7 @@ where
         tokio::select! {
             result = &mut future => return Some(result),
             _ = tokio::time::sleep(OPENCODE_HTTP_CANCEL_POLL_INTERVAL) => {
-                if cancelled.load(Ordering::SeqCst) {
+                if should_stop() {
                     super::registry::abort_opencode_session(opencode_session_id.clone(), Some(working_dir.clone()));
                     return None;
                 }
@@ -2003,12 +2200,14 @@ where
 async fn sleep_or_cancel_opencode_http(
     duration: Duration,
     cancelled: Arc<AtomicBool>,
+    force_abort: Arc<AtomicBool>,
     opencode_session_id: String,
     working_dir: String,
 ) -> bool {
     await_opencode_http_or_cancel(
         tokio::time::sleep(duration),
         cancelled,
+        force_abort,
         opencode_session_id,
         working_dir,
     )
@@ -2021,6 +2220,7 @@ fn post_opencode_message_cancellable(
     working_dir: String,
     payload: serde_json::Value,
     cancelled: Arc<AtomicBool>,
+    force_abort: Arc<AtomicBool>,
     jean_session_id: String,
     opencode_session_id: String,
 ) -> Result<Option<(reqwest::StatusCode, String)>, String> {
@@ -2046,6 +2246,7 @@ fn post_opencode_message_cancellable(
         let response = match await_opencode_http_or_cancel(
             send_once(),
             cancelled.clone(),
+            force_abort.clone(),
             opencode_session_id.clone(),
             working_dir.clone(),
         )
@@ -2057,6 +2258,7 @@ fn post_opencode_message_cancellable(
                 if sleep_or_cancel_opencode_http(
                     std::time::Duration::from_secs(2),
                     cancelled.clone(),
+                    force_abort.clone(),
                     opencode_session_id.clone(),
                     working_dir.clone(),
                 )
@@ -2068,6 +2270,7 @@ fn post_opencode_message_cancellable(
                 match await_opencode_http_or_cancel(
                     send_once(),
                     cancelled.clone(),
+                    force_abort.clone(),
                     opencode_session_id.clone(),
                     working_dir.clone(),
                 )
@@ -2092,6 +2295,7 @@ fn post_opencode_message_cancellable(
         let body = match await_opencode_http_or_cancel(
             response.text(),
             cancelled,
+            force_abort,
             opencode_session_id.clone(),
             working_dir,
         )
@@ -2209,32 +2413,7 @@ pub fn execute_opencode_http(
         session_id.to_string(),
     );
 
-    let selected_model = if let Some(pm) = parse_provider_model(model) {
-        pm
-    } else {
-        let providers_url = format!("{base_url}/provider");
-        let providers_resp = client
-            .get(&providers_url)
-            .query(&query)
-            .send()
-            .map_err(|e| format!("Failed to query OpenCode providers: {e}"))?;
-        if !providers_resp.status().is_success() {
-            let status = providers_resp.status();
-            let body = providers_resp.text().unwrap_or_default();
-            return Err(format!(
-                "OpenCode provider query failed: status={status}, body={body}"
-            ));
-        }
-        let providers: serde_json::Value = providers_resp
-            .json()
-            .map_err(|e| format!("Failed to parse OpenCode providers response: {e}"))?;
-
-        model
-            .and_then(bare_model_id)
-            .and_then(|bare| find_provider_for_model(&providers, bare))
-            .or_else(|| choose_model(&providers))
-            .ok_or("No OpenCode models available. Authenticate a provider first.")?
-    };
+    let selected_model = resolve_selected_model(&client, &base_url, &query, model)?;
     log::info!(
         "OpenCode: selected model provider='{}' model='{}'",
         selected_model.0,
@@ -2261,6 +2440,11 @@ pub fn execute_opencode_http(
     let turn_started = Arc::new(AtomicBool::new(false));
     let session_idle = Arc::new(AtomicBool::new(false));
     let steered = Arc::new(AtomicBool::new(false));
+    // Shared with the SSE listener so provider failures (session.error /
+    // message.updated) unblock the POST and surface a real error instead of a
+    // perpetual "running" state for local/custom providers.
+    let upstream_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let force_abort = Arc::new(AtomicBool::new(false));
     log::info!(
         "OpenCode: registering shared SSE subscriber jean_session={} opencode_session={}",
         session_id,
@@ -2279,6 +2463,8 @@ pub fn execute_opencode_http(
         turn_started.clone(),
         session_idle.clone(),
         steered.clone(),
+        upstream_error.clone(),
+        force_abort.clone(),
     );
 
     let sse_connected = wait_for_shared_sse_connection(
@@ -2343,10 +2529,24 @@ pub fn execute_opencode_http(
         working_dir_string.clone(),
         payload,
         cancelled.clone(),
+        force_abort.clone(),
         session_id.to_string(),
         opencode_session_id.clone(),
     )?
     else {
+        // Prefer SSE-captured provider failures over a plain cancel. Local /
+        // custom providers often emit `session.error` and never cleanly finish
+        // the blocking `/message` body — we abort to unblock and land here.
+        if let Some(error_msg) = take_upstream_error(&upstream_error) {
+            log::warn!(
+                "OpenCode: message POST unblocked by upstream error jean_session={} opencode_session={} elapsed_ms={} msg={}",
+                session_id,
+                opencode_session_id,
+                post_start.elapsed().as_millis(),
+                error_msg
+            );
+            return Err(error_msg);
+        }
         log::info!(
             "OpenCode: message POST cancelled jean_session={} opencode_session={} elapsed_ms={}",
             session_id,
@@ -2404,6 +2604,17 @@ pub fn execute_opencode_http(
             .map(|a| a.len())
             .unwrap_or(0)
     );
+
+    // Prefer any SSE-captured provider failure (already emitted as chat:error).
+    if let Some(error_msg) = take_upstream_error(&upstream_error) {
+        log::warn!(
+            "OpenCode: upstream error from SSE jean_session={} opencode_session={} msg={}",
+            session_id,
+            opencode_session_id,
+            error_msg
+        );
+        return Err(error_msg);
+    }
 
     // Surface upstream errors from `info.error` (e.g. opencode.ai zen "Insufficient balance",
     // ContextOverflowError, model-provider auth failures). These come back as 200 OK with
@@ -2798,32 +3009,9 @@ fn one_shot_opencode_blocking(
         .ok_or("OpenCode session create response missing id")?
         .to_string();
 
-    // Resolve provider/model
-    let selected_model = if let Some(pm) = parse_provider_model(Some(model)) {
-        pm
-    } else {
-        let providers_url = format!("{base_url}/provider");
-        let providers_resp = client
-            .get(&providers_url)
-            .query(&query)
-            .send()
-            .map_err(|e| format!("Failed to query OpenCode providers: {e}"))?;
-        if !providers_resp.status().is_success() {
-            let status = providers_resp.status();
-            let body = providers_resp.text().unwrap_or_default();
-            return Err(format!(
-                "OpenCode provider query failed: status={status}, body={body}"
-            ));
-        }
-        let providers: serde_json::Value = providers_resp
-            .json()
-            .map_err(|e| format!("Failed to parse OpenCode providers response: {e}"))?;
-        // Try to find the bare model ID across providers before picking any random model
-        bare_model_id(model)
-            .and_then(|bare| find_provider_for_model(&providers, bare))
-            .or_else(|| choose_model(&providers))
-            .ok_or("No OpenCode models available. Authenticate a provider first.")?
-    };
+    // Resolve provider/model (same path as interactive chat — multi-slash
+    // custom/local models like ollama/hf.co/... must survive intact).
+    let selected_model = resolve_selected_model(&client, base_url, &query, Some(model))?;
 
     // Send the prompt
     let msg_url = format!("{base_url}/session/{session_id}/message");
@@ -3074,6 +3262,52 @@ mod tests {
     }
 
     #[test]
+    fn parse_provider_model_keeps_multi_slash_ollama_hf_model_id() {
+        // Local/custom providers often expose HF-style ids with many slashes and a
+        // quant tag. The first slash is the provider; the rest is modelID.
+        assert_eq!(
+            parse_provider_model(Some(
+                "ollama/hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q5_K_M"
+            )),
+            Some((
+                "ollama".into(),
+                "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q5_K_M".into()
+            ))
+        );
+        assert_eq!(
+            parse_provider_model(Some(
+                "opencode/ollama/hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q5_K_M"
+            )),
+            Some((
+                "ollama".into(),
+                "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q5_K_M".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_provider_model_handles_openrouter_multi_segment_paths() {
+        assert_eq!(
+            parse_provider_model(Some("openrouter/anthropic/claude-3.5-haiku:free")),
+            Some((
+                "openrouter".into(),
+                "anthropic/claude-3.5-haiku:free".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn resolve_selected_model_preserves_explicit_provider_without_catalog_lookup() {
+        let client = reqwest::blocking::Client::new();
+        let query = Vec::new();
+
+        assert_eq!(
+            resolve_selected_model(&client, "http://127.0.0.1:1", &query, Some("custom/gpt-4"),),
+            Ok(("custom".to_string(), "gpt-4".to_string()))
+        );
+    }
+
+    #[test]
     fn extract_opencode_error_picks_credits_message_from_response_body() {
         let body = serde_json::json!({
             "info": {
@@ -3113,6 +3347,47 @@ mod tests {
     }
 
     #[test]
+    fn extract_opencode_error_uses_top_level_message_for_custom_providers() {
+        let body = serde_json::json!({
+            "info": {
+                "error": {
+                    "name": "UnknownError",
+                    "message": "Connection refused to http://127.0.0.1:11434"
+                }
+            },
+            "parts": []
+        });
+        assert_eq!(
+            extract_opencode_error_message(&body),
+            Some("Connection refused to http://127.0.0.1:11434".to_string())
+        );
+    }
+
+    #[test]
+    fn format_opencode_error_object_accepts_string_errors() {
+        assert_eq!(
+            format_opencode_error_object(&serde_json::json!("provider offline")),
+            Some("provider offline".to_string())
+        );
+    }
+
+    #[test]
+    fn format_opencode_error_object_uses_plain_response_body() {
+        let error = serde_json::json!({
+            "name": "APIError",
+            "data": {
+                "message": "request failed",
+                "responseBody": "model 'foo' not found",
+                "isRetryable": false
+            }
+        });
+        assert_eq!(
+            format_opencode_error_object(&error),
+            Some("model 'foo' not found".to_string())
+        );
+    }
+
+    #[test]
     fn extract_opencode_error_returns_none_when_no_error() {
         let body = serde_json::json!({
             "info": {},
@@ -3122,9 +3397,17 @@ mod tests {
     }
 
     #[test]
+    fn take_upstream_error_clears_stored_value() {
+        let err = Arc::new(Mutex::new(Some("boom".to_string())));
+        assert_eq!(take_upstream_error(&err), Some("boom".to_string()));
+        assert_eq!(take_upstream_error(&err), None);
+    }
+
+    #[test]
     fn await_opencode_http_or_cancel_returns_none_when_cancelled() {
         std::thread::spawn(|| {
             let cancelled = Arc::new(AtomicBool::new(true));
+            let force_abort = Arc::new(AtomicBool::new(false));
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -3134,6 +3417,33 @@ mod tests {
             let result = runtime.block_on(await_opencode_http_or_cancel(
                 std::future::pending::<()>(),
                 cancelled,
+                force_abort,
+                "opencode-session".to_string(),
+                "/tmp".to_string(),
+            ));
+
+            assert!(result.is_none());
+            assert!(start.elapsed() < Duration::from_millis(50));
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn await_opencode_http_or_cancel_returns_none_on_force_abort() {
+        std::thread::spawn(|| {
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let force_abort = Arc::new(AtomicBool::new(true));
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            let start = Instant::now();
+            let result = runtime.block_on(await_opencode_http_or_cancel(
+                std::future::pending::<()>(),
+                cancelled,
+                force_abort,
                 "opencode-session".to_string(),
                 "/tmp".to_string(),
             ));

@@ -26,6 +26,15 @@ describe('getSessionProviderDisplayName', () => {
     expect(getSessionProviderDisplayName('grok', null)).toBe('xAI')
   })
 
+  it('shows custom Codex provider names when selected', () => {
+    expect(getSessionProviderDisplayName('codex', 'OpenRouter')).toBe(
+      'OpenRouter'
+    )
+    expect(getSessionProviderDisplayName('codex', '__default__')).toBe(
+      'OpenAI'
+    )
+  })
+
   it('falls back to provider selection for claude sessions', () => {
     expect(getSessionProviderDisplayName('claude', null)).toBe('Anthropic')
     expect(getSessionProviderDisplayName('claude', 'openrouter')).toBe(

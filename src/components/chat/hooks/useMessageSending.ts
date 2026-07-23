@@ -52,6 +52,7 @@ interface UseMessageSendingParams {
   preferences:
     | {
         custom_cli_profiles?: { name: string }[]
+        custom_codex_providers?: { name: string }[]
         parallel_execution_prompt_enabled?: boolean
         magic_prompts?: { parallel_execution?: string | null }
         chrome_enabled?: boolean
@@ -107,20 +108,32 @@ export function useMessageSending({
   clearInputDraft,
   clearChatInputState,
 }: UseMessageSendingParams) {
-  // Helper to resolve custom CLI profile name for the active provider
+  // Helper to resolve custom CLI profile name for the active provider.
+  // Claude: custom_cli_profiles; Codex: custom_codex_providers (same wire field).
   const resolveCustomProfile = useCallback(
     (model: string, provider: string | null) => {
-      if (!provider || provider === '__anthropic__')
+      if (
+        !provider ||
+        provider === '__anthropic__' ||
+        provider === '__default__'
+      ) {
         return { model, customProfileName: undefined }
-      const profile = preferences?.custom_cli_profiles?.find(
+      }
+      const claudeProfile = preferences?.custom_cli_profiles?.find(
+        p => p.name === provider
+      )
+      if (claudeProfile) {
+        return { model, customProfileName: claudeProfile.name }
+      }
+      const codexProfile = preferences?.custom_codex_providers?.find(
         p => p.name === provider
       )
       return {
         model,
-        customProfileName: profile?.name,
+        customProfileName: codexProfile?.name,
       }
     },
-    [preferences?.custom_cli_profiles]
+    [preferences?.custom_cli_profiles, preferences?.custom_codex_providers]
   )
 
   // Helper to send a queued message immediately

@@ -7,6 +7,7 @@ import {
   addTerminalTabForShortcut,
   allowsKeybindingRepeat,
   applyCacheInvalidationKeys,
+  applySessionRenamedToCaches,
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
@@ -19,6 +20,11 @@ import {
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
+import type {
+  AllSessionsResponse,
+  Session,
+  WorktreeSessions,
+} from '@/types/chat'
 
 const { mockInvoke, mockListen, mockDisposeTerminal } = vi.hoisted(() => ({
   mockInvoke: vi.fn().mockResolvedValue(undefined),
@@ -489,6 +495,76 @@ describe('dialog overlay keybinding passthrough', () => {
         useUIStore.getState()
       )
     ).toBe(false)
+  })
+})
+
+describe('applySessionRenamedToCaches', () => {
+  const worktreeId = 'wt-1'
+  const sessionId = 'sess-1'
+
+  function seedSessionCaches(queryClient: QueryClient) {
+    const sessions: WorktreeSessions = {
+      worktree_id: worktreeId,
+      sessions: [
+        {
+          id: sessionId,
+          name: 'Session 1',
+          order: 0,
+          created_at: 0,
+          updated_at: 0,
+          messages: [],
+        } as Session,
+      ],
+      active_session_id: sessionId,
+      version: 2,
+    }
+    queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
+    queryClient.setQueryData(
+      [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+      sessions
+    )
+    queryClient.setQueryData(chatQueryKeys.session(sessionId), sessions.sessions[0])
+    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], {
+      entries: [
+        {
+          project_id: 'p1',
+          project_name: 'Project',
+          worktree_id: worktreeId,
+          worktree_name: 'main',
+          worktree_path: '/tmp/wt',
+          sessions: sessions.sessions,
+        },
+      ],
+    })
+  }
+
+  it('updates base sessions, with-counts, session detail, and all-sessions caches', () => {
+    const queryClient = new QueryClient()
+    seedSessionCaches(queryClient)
+
+    applySessionRenamedToCaches(
+      queryClient,
+      worktreeId,
+      sessionId,
+      'Fix auto naming'
+    )
+
+    const base = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions(worktreeId)
+    )
+    const withCounts = queryClient.getQueryData<WorktreeSessions>([
+      ...chatQueryKeys.sessions(worktreeId),
+      'with-counts',
+    ])
+    const detail = queryClient.getQueryData<Session>(
+      chatQueryKeys.session(sessionId)
+    )
+    const all = queryClient.getQueryData<AllSessionsResponse>(['all-sessions'])
+
+    expect(base?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(withCounts?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(detail?.name).toBe('Fix auto naming')
+    expect(all?.entries[0]?.sessions[0]?.name).toBe('Fix auto naming')
   })
 })
 

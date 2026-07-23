@@ -14,11 +14,13 @@ import {
   usesWebSocketBackend,
   type InitialData,
 } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, setNativeOpenAllowed } from '@/lib/environment'
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
+import type { Worktree } from '@/types/projects'
 import { initializeCommandSystem } from './lib/commands'
 import { logger } from './lib/logger'
 import { toast } from 'sonner'
@@ -39,6 +41,10 @@ import {
   useOpencodeCliAuth,
 } from './services/opencode-cli'
 import { useUIStore } from './store/ui-store'
+import {
+  resolveInstallPendingAction,
+  shouldOfferUpdateCheck,
+} from './lib/app-update'
 import type { AppPreferences } from './types/preferences'
 import { useChatStore } from './store/chat-store'
 import { useProjectsStore } from './store/projects-store'
@@ -198,19 +204,38 @@ function App() {
     return () => unlisten?.()
   }, [])
 
+  const relaunchApp = useCallback(async () => {
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
+  }, [])
+
   const installAppUpdate = useCallback(
     async (update: {
       version: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       downloadAndInstall: (cb: (event: any) => void) => Promise<void>
     }) => {
+      const ui = useUIStore.getState()
+
+      // Already installed this session — only relaunch is needed (#507).
+      if (ui.updateReadyVersion) {
+        await relaunchApp()
+        return
+      }
+      if (ui.isUpdateInstalling) {
+        return
+      }
+
       let totalBytes = 0
       let downloadedBytes = 0
       const toastId = toast.loading(`Downloading update ${update.version}...`)
 
-      // Clear the pending indicator since we're installing now
-      useUIStore.getState().setPendingUpdateVersion(null)
-      pendingUpdateRef.current = null
+      // Mark in-progress so auto-check cannot re-open the modal mid-download.
+      // Keep pendingUpdateRef + version badge until success so retries work and
+      // the title bar still shows progress (#507).
+      ui.setIsUpdateInstalling(true)
+      ui.setPendingUpdateVersion(update.version)
+      ui.setUpdateModalVersion(null)
 
       try {
         await update.downloadAndInstall(event => {
@@ -235,20 +260,32 @@ function App() {
           }
         })
 
+        // Package is on disk; app must relaunch. Clear the download handle and
+        // record ready state so further UI actions relaunch instead of re-downloading.
+        pendingUpdateRef.current = null
+        const store = useUIStore.getState()
+        store.setIsUpdateInstalling(false)
+        store.setUpdateReadyVersion(update.version)
+        store.setUpdateModalVersion(null)
+        store.setPendingUpdateVersion(null)
+
         toast.success(`Update ${update.version} installed!`, {
           id: toastId,
           duration: Infinity,
           action: {
             label: 'Restart',
-            onClick: async () => {
-              const { relaunch } = await import('@tauri-apps/plugin-process')
-              await relaunch()
+            onClick: () => {
+              void relaunchApp()
             },
           },
         })
       } catch (updateError) {
         const errorStr = String(updateError)
         logger.error(`Update installation failed: ${errorStr}`)
+        const store = useUIStore.getState()
+        store.setIsUpdateInstalling(false)
+        // Restore title-bar badge so the user can retry without waiting for re-check
+        store.setPendingUpdateVersion(update.version)
         if (errorStr.includes('invalid updater binary format')) {
           toast.error(
             `Auto-update not supported for this installation type. Please update manually.`,
@@ -262,7 +299,7 @@ function App() {
         }
       }
     },
-    []
+    [relaunchApp]
   )
 
   // Seed TanStack Query cache and Zustand state from bulk initial data.
@@ -275,6 +312,13 @@ function App() {
 
       if (data.serverPlatform) {
         setServerPlatform(data.serverPlatform)
+      }
+      if (typeof data.nativeOpenAllowed === 'boolean') {
+        setNativeOpenAllowed(data.nativeOpenAllowed)
+      }
+      // Force a re-render so non-reactive environment helpers (platform,
+      // canOpenNativeApps) update UI after /api/init.
+      if (data.serverPlatform || typeof data.nativeOpenAllowed === 'boolean') {
         setPlatformVersion(version => version + 1)
       }
 
@@ -282,14 +326,20 @@ function App() {
       if (data.projects) {
         queryClient.setQueryData(projectsQueryKeys.list(), data.projects)
       }
-      // Seed worktrees for each project
+      // Seed worktrees for each project (preserve in-flight pending/deleting)
       if (data.worktreesByProject) {
         for (const [projectId, worktrees] of Object.entries(
           data.worktreesByProject
         )) {
+          const previous = queryClient.getQueryData<Worktree[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
           queryClient.setQueryData(
             projectsQueryKeys.worktrees(projectId),
-            worktrees
+            mergeWorktreesPreservingOptimistic(
+              worktrees as Worktree[],
+              previous
+            )
           )
         }
       }
@@ -1003,14 +1053,40 @@ function App() {
     // Auto-updater logic - check for updates 5 seconds after app loads
     const checkForUpdates = async () => {
       if (!isNativeApp()) return
-      // Don't re-show modal if user already dismissed an update
-      if (useUIStore.getState().pendingUpdateVersion) return
+      const ui = useUIStore.getState()
+      // Don't re-offer while deferred, downloading, or already installed (#507)
+      if (
+        !shouldOfferUpdateCheck({
+          pendingUpdateVersion: ui.pendingUpdateVersion,
+          updateReadyVersion: ui.updateReadyVersion,
+          isUpdateInstalling: ui.isUpdateInstalling,
+        })
+      ) {
+        return
+      }
 
       try {
         const { check } = await import('@tauri-apps/plugin-updater')
 
         const update = await check()
         if (update) {
+          // Re-check guards after the async network call — install may have started
+          const after = useUIStore.getState()
+          if (
+            !shouldOfferUpdateCheck({
+              pendingUpdateVersion: after.pendingUpdateVersion,
+              updateReadyVersion: after.updateReadyVersion,
+              isUpdateInstalling: after.isUpdateInstalling,
+            })
+          ) {
+            try {
+              await update.close?.()
+            } catch {
+              // Resource may already be released
+            }
+            return
+          }
+
           logger.info(`Update available: ${update.version}`)
           pendingUpdateRef.current = update
           useUIStore.getState().setUpdateModalVersion(update.version)
@@ -1021,10 +1097,20 @@ function App() {
       }
     }
 
-    // Listen for install trigger from title bar indicator
+    // Listen for install trigger from title bar indicator / modal
     const handleInstallPending = () => {
-      if (pendingUpdateRef.current) {
-        installAppUpdate(pendingUpdateRef.current)
+      const ui = useUIStore.getState()
+      const action = resolveInstallPendingAction({
+        updateReadyVersion: ui.updateReadyVersion,
+        isUpdateInstalling: ui.isUpdateInstalling,
+        hasPendingUpdateObject: Boolean(pendingUpdateRef.current),
+      })
+      if (action === 'relaunch') {
+        void relaunchApp()
+        return
+      }
+      if (action === 'install' && pendingUpdateRef.current) {
+        void installAppUpdate(pendingUpdateRef.current)
       }
     }
     window.addEventListener('install-pending-update', handleInstallPending)
@@ -1238,7 +1324,7 @@ function App() {
       window.removeEventListener('install-pending-update', handleInstallPending)
       window.removeEventListener('update-available', handleUpdateAvailable)
     }
-  }, [installAppUpdate, webBackend])
+  }, [installAppUpdate, relaunchApp, webBackend])
 
   // Show loading screen while preloading initial data (web view only)
   if (isPreloading) {
