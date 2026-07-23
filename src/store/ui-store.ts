@@ -173,6 +173,13 @@ interface UIState {
   /** When non-null, shows the update available modal */
   updateModalVersion: string | null
   /**
+   * App update package installed but not applied yet — title bar shows Restart.
+   * Prevents re-download loops while the old binary is still running (#507).
+   */
+  updateReadyVersion: string | null
+  /** True while downloadAndInstall is in progress */
+  isUpdateInstalling: boolean
+  /**
    * Pending jean-server update (remote / Web Access) — sticky title-bar
    * indicator so dismissing the toast does not lose the offer.
    */
@@ -274,6 +281,8 @@ interface UIState {
   setUIStateInitialized: (initialized: boolean) => void
   setPendingUpdateVersion: (version: string | null) => void
   setUpdateModalVersion: (version: string | null) => void
+  setUpdateReadyVersion: (version: string | null) => void
+  setIsUpdateInstalling: (installing: boolean) => void
   setPendingServerUpdate: (update: PendingServerUpdate | null) => void
   setAvailableCliUpdates: (updates: PendingCliUpdate[]) => void
   dismissCliUpdateNotice: (type: PendingCliUpdate['type']) => void
@@ -351,6 +360,8 @@ export const useUIStore = create<UIState>()(
       uiStateInitialized: false,
       pendingUpdateVersion: null,
       updateModalVersion: null,
+      updateReadyVersion: null,
+      isUpdateInstalling: false,
       pendingServerUpdate: null,
       availableCliUpdates: [],
       chatSearchOpen: false,
@@ -1088,6 +1099,26 @@ export const useUIStore = create<UIState>()(
               : { updateModalVersion: version },
           undefined,
           'setUpdateModalVersion'
+        ),
+
+      setUpdateReadyVersion: (version: string | null) =>
+        set(
+          state =>
+            state.updateReadyVersion === version
+              ? state
+              : { updateReadyVersion: version },
+          undefined,
+          'setUpdateReadyVersion'
+        ),
+
+      setIsUpdateInstalling: (installing: boolean) =>
+        set(
+          state =>
+            state.isUpdateInstalling === installing
+              ? state
+              : { isUpdateInstalling: installing },
+          undefined,
+          'setIsUpdateInstalling'
         ),
 
       setPendingServerUpdate: (update: PendingServerUpdate | null) =>

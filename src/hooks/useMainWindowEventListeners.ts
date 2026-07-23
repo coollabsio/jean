@@ -947,6 +947,19 @@ export function useMainWindowEventListeners() {
         listenLocal('menu-check-updates', async () => {
           logger.debug('Check for updates menu event received')
           if (!isNativeApp()) return
+          const ui = useUIStore.getState()
+          // Package already installed this session — prompt restart, don't re-offer download
+          if (ui.updateReadyVersion) {
+            commandContext.showToast(
+              `Update ${ui.updateReadyVersion} is ready — restart to apply`,
+              'success'
+            )
+            return
+          }
+          if (ui.isUpdateInstalling) {
+            commandContext.showToast('Update download already in progress', 'info')
+            return
+          }
           try {
             const { check } = await import('@tauri-apps/plugin-updater')
             const update = await check()

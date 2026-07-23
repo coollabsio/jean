@@ -4,22 +4,34 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import useStreamingEvents from './useStreamingEvents'
 import { useChatStore } from '@/store/chat-store'
+import { preferencesQueryKeys } from '@/services/preferences'
+import type { AppPreferences } from '@/types/preferences'
 
-const { mockInvoke, mockListen, mockSaveWorktreePr, registeredListeners } =
-  vi.hoisted(() => ({
-    mockInvoke: vi.fn().mockResolvedValue(undefined),
-    mockListen: vi.fn(),
-    mockSaveWorktreePr: vi.fn(),
-    registeredListeners: new Map<
-      string,
-      (event: { payload: unknown }) => void
-    >(),
-  }))
+const {
+  mockInvoke,
+  mockListen,
+  mockSaveWorktreePr,
+  mockPlayNotificationSound,
+  registeredListeners,
+} = vi.hoisted(() => ({
+  mockInvoke: vi.fn().mockResolvedValue(undefined),
+  mockListen: vi.fn(),
+  mockSaveWorktreePr: vi.fn(),
+  mockPlayNotificationSound: vi.fn(),
+  registeredListeners: new Map<
+    string,
+    (event: { payload: unknown }) => void
+  >(),
+}))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
   listen: mockListen,
   useWsConnectionStatus: () => true,
+}))
+
+vi.mock('@/lib/sounds', () => ({
+  playNotificationSound: mockPlayNotificationSound,
 }))
 
 vi.mock('@/services/projects', () => ({
@@ -30,6 +42,17 @@ vi.mock('@/services/projects', () => ({
     list: () => ['projects'],
   },
 }))
+
+function seedWaitingSoundPrefs(
+  queryClient: QueryClient,
+  waitingSound: AppPreferences['waiting_sound'] = 'workwork'
+) {
+  queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+    waiting_sound: waitingSound,
+    web_access_sounds_enabled: true,
+    desktop_notifications_enabled: false,
+  } as AppPreferences)
+}
 
 function createQueryClient() {
   return new QueryClient({
@@ -68,6 +91,7 @@ function setupListenMock() {
 describe('useStreamingEvents Codex MCP elicitation', () => {
   beforeEach(() => {
     setupListenMock()
+    mockPlayNotificationSound.mockClear()
 
     useChatStore.setState({
       enabledMcpServers: {},
@@ -128,6 +152,7 @@ describe('useStreamingEvents Codex MCP elicitation', () => {
 
   it('queues Codex MCP elicitation when server is not enabled for the session', async () => {
     const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient)
     const wrapper = createWrapper(queryClient)
 
     renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
@@ -173,12 +198,237 @@ describe('useStreamingEvents Codex MCP elicitation', () => {
     expect(useChatStore.getState().waitingForInputSessionIds['session-1']).toBe(
       true
     )
+    expect(mockPlayNotificationSound).toHaveBeenCalledWith('workwork', {
+      webAccessSoundsEnabled: true,
+    })
+  })
+
+  it('does not play waiting sound when MCP elicitation is auto-accepted', async () => {
+    const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient)
+    const wrapper = createWrapper(queryClient)
+
+    useChatStore.setState({
+      enabledMcpServers: {
+        'session-1': ['notion'],
+      },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(
+        registeredListeners.has('chat:codex_mcp_elicitation_request')
+      ).toBe(true)
+    )
+
+    registeredListeners.get('chat:codex_mcp_elicitation_request')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          rpc_id: 42,
+          server_name: 'notion',
+          message: 'Need auth',
+          mode: 'url',
+          url: 'https://example.com',
+        },
+      },
+    })
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('respond_codex_mcp_elicitation', {
+        sessionId: 'session-1',
+        rpcId: 42,
+        action: 'accept',
+      })
+    )
+
+    expect(mockPlayNotificationSound).not.toHaveBeenCalled()
+  })
+})
+
+describe('useStreamingEvents mid-run waiting sounds', () => {
+  beforeEach(() => {
+    setupListenMock()
+    mockPlayNotificationSound.mockClear()
+
+    useChatStore.setState({
+      pendingCodexPermissionRequests: {},
+      pendingCodexCommandApprovalRequests: {},
+      pendingCodexUserInputRequests: {},
+      pendingCodexDynamicToolCallRequests: {},
+      waitingForInputSessionIds: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+    })
+  })
+
+  it('plays waiting sound on Codex permission request', async () => {
+    const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient)
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:codex_permission_request')).toBe(
+        true
+      )
+    )
+
+    registeredListeners.get('chat:codex_permission_request')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          request_id: 'perm-1',
+          permissions: ['network'],
+        },
+      },
+    })
+
+    expect(useChatStore.getState().waitingForInputSessionIds['session-1']).toBe(
+      true
+    )
+    expect(mockPlayNotificationSound).toHaveBeenCalledWith('workwork', {
+      webAccessSoundsEnabled: true,
+    })
+  })
+
+  it('plays waiting sound on Codex command approval request', async () => {
+    const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient, 'jobsdone')
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(
+        registeredListeners.has('chat:codex_command_approval_request')
+      ).toBe(true)
+    )
+
+    registeredListeners.get('chat:codex_command_approval_request')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          request_id: 'cmd-1',
+          command: 'rm -rf /',
+        },
+      },
+    })
+
+    expect(mockPlayNotificationSound).toHaveBeenCalledWith('jobsdone', {
+      webAccessSoundsEnabled: true,
+    })
+  })
+
+  it('plays waiting sound on Codex dynamic tool call request', async () => {
+    const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient)
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(
+        registeredListeners.has('chat:codex_dynamic_tool_call_request')
+      ).toBe(true)
+    )
+
+    registeredListeners.get('chat:codex_dynamic_tool_call_request')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          request_id: 'tool-1',
+          tool_name: 'custom_tool',
+        },
+      },
+    })
+
+    expect(mockPlayNotificationSound).toHaveBeenCalledWith('workwork', {
+      webAccessSoundsEnabled: true,
+    })
+  })
+
+  it('plays waiting sound once for a new Codex user input request', async () => {
+    const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient)
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:codex_user_input_request')).toBe(
+        true
+      )
+    )
+
+    const event = {
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          rpc_id: 42,
+          item_id: 'question-1',
+          questions: [
+            {
+              id: 'model',
+              question: 'How should I continue?',
+              options: [{ label: 'Wait' }, { label: 'Use Codex' }],
+            },
+          ],
+        },
+      },
+    }
+    const listener = registeredListeners.get('chat:codex_user_input_request')
+    listener?.(event)
+    listener?.(event)
+
+    expect(mockPlayNotificationSound).toHaveBeenCalledTimes(1)
+    expect(mockPlayNotificationSound).toHaveBeenCalledWith('workwork', {
+      webAccessSoundsEnabled: true,
+    })
+  })
+
+  it('does not play when waiting_sound is none', async () => {
+    const queryClient = createQueryClient()
+    seedWaitingSoundPrefs(queryClient, 'none')
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:codex_permission_request')).toBe(
+        true
+      )
+    )
+
+    registeredListeners.get('chat:codex_permission_request')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        request: {
+          request_id: 'perm-1',
+          permissions: ['network'],
+        },
+      },
+    })
+
+    expect(mockPlayNotificationSound).toHaveBeenCalledWith('none', {
+      webAccessSoundsEnabled: true,
+    })
   })
 })
 
 describe('useStreamingEvents Codex user input', () => {
   beforeEach(() => {
     setupListenMock()
+    mockPlayNotificationSound.mockClear()
 
     useChatStore.setState({
       pendingCodexUserInputRequests: {},
