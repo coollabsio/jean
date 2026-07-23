@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -16,7 +16,11 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
-import { useWorktrees, useAppDataDir } from '@/services/projects'
+import {
+  useAppDataDir,
+  useUpdateProjectSettings,
+  useWorktrees,
+} from '@/services/projects'
 import {
   useFetchWorktreesStatus,
   useGitStatus,
@@ -38,6 +42,17 @@ import { ProjectContextMenu } from './ProjectContextMenu'
 
 interface ProjectTreeItemProps {
   project: Project
+}
+
+/**
+ * Resolve the primary action for a project-row click.
+ * Projects with worktrees expand/collapse only — never clear session selection.
+ * Empty projects still open the project canvas.
+ */
+export function resolveProjectRowClickAction(hasWorktrees: boolean):
+  | 'toggle-expand'
+  | 'open-canvas' {
+  return hasWorktrees ? 'toggle-expand' : 'open-canvas'
 }
 
 export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
@@ -102,15 +117,93 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const isSelected = selectedProjectId === project.id && !activeWorktreeId
   const showStatusBadges = !isMobile && (isExpanded || isSelected)
 
+  // Inline rename (double-click), matching folder/worktree patterns
+  const [isEditing, setIsEditing] = useState(false)
+  const [editName, setEditName] = useState(project.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const editStartTimeRef = useRef<number>(0)
+  const updateSettings = useUpdateProjectSettings()
+
+  useEffect(() => {
+    if (isEditing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEditName(project.name)
+      editStartTimeRef.current = Date.now()
+    }
+  }, [isEditing, project.name])
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [isEditing])
+
   const handleClick = useCallback(() => {
+    if (isEditing) return
+
+    const action = resolveProjectRowClickAction(hasWorktrees)
+    if (action === 'toggle-expand') {
+      // Expand/collapse only — preserve selected worktree/session highlight
+      toggleProjectExpanded(project.id)
+      return
+    }
+
+    // Empty project: open project canvas
     selectProject(project.id)
-    // Clear active worktree so ChatWindow shows project canvas view
     clearActiveWorktree()
-    // Close sidebar on mobile after navigation
     if (isMobile) {
       useUIStore.getState().setLeftSidebarVisible(false)
     }
-  }, [isMobile, project.id, selectProject, clearActiveWorktree])
+  }, [
+    isEditing,
+    hasWorktrees,
+    toggleProjectExpanded,
+    project.id,
+    selectProject,
+    clearActiveWorktree,
+    isMobile,
+  ])
+
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (isEditing) return
+      setEditName(project.name)
+      setIsEditing(true)
+    },
+    [isEditing, project.name]
+  )
+
+  const handleSubmitRename = useCallback(
+    (fromBlur = false) => {
+      // Ignore blur events within 300ms of edit start (prevents re-render blur issues)
+      if (fromBlur && Date.now() - editStartTimeRef.current < 300) {
+        inputRef.current?.focus()
+        return
+      }
+
+      const trimmedName = editName.trim()
+      if (trimmedName && trimmedName !== project.name) {
+        updateSettings.mutate({ projectId: project.id, name: trimmedName })
+      }
+      setIsEditing(false)
+    },
+    [editName, project.id, project.name, updateSettings]
+  )
+
+  const handleRenameKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      e.stopPropagation()
+      if (e.key === 'Enter') {
+        handleSubmitRename(false)
+      } else if (e.key === 'Escape') {
+        setEditName(project.name)
+        setIsEditing(false)
+      }
+    },
+    [handleSubmitRename, project.name]
+  )
 
   const handleChevronClick = useCallback(
     (e: React.MouseEvent) => {
@@ -175,6 +268,8 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
               : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
           )}
           onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+          data-testid={`project-row-${project.id}`}
         >
           {/* Avatar */}
           {avatarUrl ? (
@@ -193,27 +288,44 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
 
           {/* Name + Chevron */}
-          <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
-            <span className="truncate">{project.name}</span>
-            {hasWorktrees && (
-              <button
-                className={cn(
-                  'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-accent-foreground/10',
-                  isMobile
-                    ? 'opacity-70'
-                    : 'opacity-0 group-hover:opacity-50 hover:!opacity-100'
-                )}
-                onClick={handleChevronClick}
-              >
-                <ChevronDown
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              aria-label="Project name"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              onBlur={() => handleSubmitRename(true)}
+              onKeyDown={handleRenameKeyDown}
+              className="flex-1 bg-transparent text-base outline-none ring-1 ring-primary/50 rounded px-1 md:text-sm"
+              onClick={e => e.stopPropagation()}
+              autoFocus
+            />
+          ) : (
+            <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
+              <span className="truncate">{project.name}</span>
+              {hasWorktrees && (
+                <button
+                  type="button"
+                  aria-label={isExpanded ? 'Collapse project' : 'Expand project'}
                   className={cn(
-                    'size-3 transition-transform',
-                    isExpanded && 'rotate-180'
+                    'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-accent-foreground/10',
+                    isMobile
+                      ? 'opacity-70'
+                      : 'opacity-0 group-hover:opacity-50 hover:!opacity-100'
                   )}
-                />
-              </button>
-            )}
-          </span>
+                  onClick={handleChevronClick}
+                >
+                  <ChevronDown
+                    className={cn(
+                      'size-3 transition-transform',
+                      isExpanded && 'rotate-180'
+                    )}
+                  />
+                </button>
+              )}
+            </span>
+          )}
 
           {/* Base branch pull/push indicators (when no base session) */}
           {baseBranchBehindCount > 0 && (
