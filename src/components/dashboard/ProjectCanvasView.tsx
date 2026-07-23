@@ -179,6 +179,7 @@ import {
   getCanvasFilterTabCount,
   isLabelFilterTab,
   matchesCanvasFilterTab,
+  shouldShowCanvasWorktreeSection,
   type CanvasFilterTab,
   type CanvasPredefinedFilterTab,
   type CanvasPredefinedFilterTabItem,
@@ -1219,8 +1220,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
       latestActivityByWorktreeId.set(worktree.id, latestActivityAt)
 
-      // Only include worktrees that have sessions (after filtering)
-      if (grouped.length > 0) {
+      // Keep the base branch available for starting its first session.
+      if (shouldShowCanvasWorktreeSection(worktree, grouped.length)) {
         readySections.push({ worktree, cards: grouped })
       }
     }

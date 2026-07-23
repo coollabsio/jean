@@ -116,3 +116,10 @@ export function getCanvasFilterTabCount(
   return worktrees.filter(worktree => matchesCanvasFilterTab(worktree, tab))
     .length
 }
+
+export function shouldShowCanvasWorktreeSection(
+  worktree: Worktree,
+  sessionCount: number
+): boolean {
+  return isBaseSession(worktree) || sessionCount > 0
+}
