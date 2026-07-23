@@ -295,17 +295,17 @@ pub trait EmitExt {
 
 impl EmitExt for AppHandle {
     fn emit_all<S: Serialize + Clone>(&self, event: &str, payload: &S) -> Result<(), String> {
-        // Send to Tauri frontend (native app)
-        self.emit(event, payload.clone())
-            .map_err(|e| format!("Tauri emit failed: {e}"))?;
-
-        // Broadcast to WebSocket clients (if server is running).
-        // Serializes directly from &S → JSON in one pass (no intermediate Value).
+        // Broadcast to WebSocket clients first so web-access clients still receive
+        // events even if the native Tauri emit path fails. (Previously Tauri-first
+        // short-circuited and dropped WS delivery on emit errors — broke session
+        // auto-rename UI updates for browser clients.)
         if let Some(ws) = self.try_state::<WsBroadcaster>() {
             ws.broadcast(event, payload);
         }
 
-        Ok(())
+        // Send to Tauri frontend (native app / event sink)
+        self.emit(event, payload.clone())
+            .map_err(|e| format!("Tauri emit failed: {e}"))
     }
 
     fn emit_all_owned<S: Serialize + Clone>(&self, event: &str, payload: S) -> Result<(), String> {
@@ -316,9 +316,7 @@ impl EmitExt for AppHandle {
 
         // Send to Tauri frontend — consumes payload (Tauri's emit requires Clone internally).
         self.emit(event, payload)
-            .map_err(|e| format!("Tauri emit failed: {e}"))?;
-
-        Ok(())
+            .map_err(|e| format!("Tauri emit failed: {e}"))
     }
 }
 

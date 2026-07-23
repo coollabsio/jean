@@ -1947,21 +1947,26 @@ export function useSendMessage() {
       }
 
       // Benign race: another queue consumer (backend drain / another client)
-      // started a run for this session first. A run IS active, so keep the
-      // sending state and skip the error banner/toast. The losing message is
-      // requeued: the queue processor's per-call onError handles queued
-      // messages; for direct submits we restore the input draft so the typed
-      // text isn't lost.
+      // started a run for this session first. Queued messages are requeued by
+      // the queue processor's per-call onError. Direct submits restore the
+      // draft so typed text isn't lost.
+      //
+      // After cancel, a brief residual race can still produce this error while
+      // the cancelled worker tears down (#329). Do NOT leave sending sticky —
+      // that makes the session look unrecoverable until the user cancels again.
       if (isDuplicateSendError(error)) {
         logger.warn('Duplicate send rejected — another run is active', {
           sessionId,
           fromQueue: variables.fromQueue ?? false,
         })
         if (!variables.fromQueue) {
-          const { inputDrafts, setInputDraft } = useChatStore.getState()
+          const { inputDrafts, setInputDraft, removeSendingSession, clearExecutingMode } =
+            useChatStore.getState()
           if (!inputDrafts[sessionId]?.trim()) {
             setInputDraft(sessionId, variables.message)
           }
+          removeSendingSession(sessionId)
+          clearExecutingMode(sessionId)
         }
         // Drop the optimistic user message by refetching authoritative state
         queryClient.invalidateQueries({

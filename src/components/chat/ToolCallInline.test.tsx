@@ -144,6 +144,24 @@ describe('ToolCallInline', () => {
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
   })
 
+  it('renders meaningful success output from a non-Codex tool', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-commandcode-shell-success',
+          name: 'shell_command',
+          input: { command: 'deploy' },
+          output: 'success',
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('Output:')).toBeInTheDocument()
+    expect(screen.getByText(/^success$/)).toBeInTheDocument()
+  })
+
   it('renders additional Command Code snake_case tools without the unhandled fallback', () => {
     const tools = [
       {
@@ -324,6 +342,90 @@ describe('normalizeToolCallForDisplay', () => {
     expect(screen.getByText('Grep')).toBeInTheDocument()
     expect(screen.getByText('"needle" in /tmp')).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+  })
+
+  it('renders CodexWebSearch with query detail instead of blank completed', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'ws-1',
+          name: 'CodexWebSearch',
+          input: {
+            query: 'tauri v2 plugins',
+            results: [{ title: 'Tauri docs', url: 'https://v2.tauri.app' }],
+          },
+          output: 'completed',
+        }}
+      />
+    )
+
+    expect(screen.getByText('Web Search')).toBeInTheDocument()
+    expect(screen.getByText('tauri v2 plugins')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText(/Query: tauri v2 plugins/)).toBeInTheDocument()
+    expect(screen.getByText(/Tauri docs/)).toBeInTheDocument()
+    // Placeholder "completed" must not appear as useful content
+    expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Output:')).not.toBeInTheDocument()
+  })
+
+  it('renders CodexWebSearch openPage action url as detail', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'ws-2',
+          name: 'CodexWebSearch',
+          input: {
+            query: '',
+            action: { type: 'openPage', url: 'https://example.com/docs' },
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('Web Search')).toBeInTheDocument()
+    expect(screen.getByText('https://example.com/docs')).toBeInTheDocument()
+  })
+
+  it('renders CodexImageView path instead of blank completed', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'img-1',
+          name: 'CodexImageView',
+          input: { path: '/tmp/screenshots/ui.png' },
+          output: 'completed',
+        }}
+      />
+    )
+
+    expect(screen.getByText('Image View')).toBeInTheDocument()
+    expect(screen.getByText('ui.png')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('/tmp/screenshots/ui.png')).toBeInTheDocument()
+    expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument()
+  })
+
+  it('surfaces a detail field for unhandled tools when available', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'dyn-1',
+          name: 'DynamicToolCall:lookup',
+          input: { query: 'session recovery' },
+          output: 'completed',
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText('DynamicToolCall:lookup (unhandled tool)')
+    ).toBeInTheDocument()
+    expect(screen.getByText('session recovery')).toBeInTheDocument()
   })
 })
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
+import { FALLBACK_APP_VERSION } from './app-version'
 
 const setWsConnectedMock = vi.fn()
 
@@ -70,7 +71,18 @@ async function loadNativeTransportModule(
   return import('./transport')
 }
 
-async function loadRemoteNativeTransportModule() {
+async function loadRemoteNativeTransportModule(
+  remote?: {
+    id: string
+    name: string
+    url: string
+    token: string
+    sshUser?: string
+    sshHost?: string
+    sshPort?: number
+  },
+  tauriInvoke?: ReturnType<typeof vi.fn>
+) {
   vi.resetModules()
   vi.doMock('./environment', () => ({
     isNativeApp: () => true,
@@ -78,13 +90,17 @@ async function loadRemoteNativeTransportModule() {
     setWebAccessEnabled: vi.fn(),
   }))
   vi.doMock('./remote-connections', () => ({
-    getActiveRemoteConnection: () => ({
-      id: 'remote-1',
-      name: 'Server',
-      url: 'https://jean.example.com',
-      token: 'secret',
-    }),
+    getActiveRemoteConnection: () =>
+      remote ?? {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+      },
   }))
+  if (tauriInvoke) {
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: tauriInvoke }))
+  }
   return import('./transport')
 }
 
@@ -94,11 +110,16 @@ describe('transport bootstrap', () => {
     MockWebSocket.instances = []
     localStorage.clear()
     vi.stubGlobal('WebSocket', MockWebSocket)
+    // Auth responses include the local package version so native remote
+    // version checks pass unless a test intentionally mismatches.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({}),
+        json: async () => ({
+          ok: true,
+          appVersion: FALLBACK_APP_VERSION,
+        }),
       })
     )
   })
@@ -116,18 +137,21 @@ describe('transport bootstrap', () => {
     const transport = await loadRemoteNativeTransportModule()
 
     transport.connectTransport()
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
     await flushAsync()
     const ws = getWs(0)
+    expect(ws.url).toBe('wss://jean.example.com/ws?token=secret')
 
     const request = transport.invoke('list_projects')
+    await waitFor(() =>
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"command":"list_projects"')
+      )
+    )
 
     expect(fetch).toHaveBeenCalledWith(
       'https://jean.example.com/api/auth?token=secret',
       expect.objectContaining({ signal: expect.anything() })
-    )
-    expect(ws.url).toBe('wss://jean.example.com/ws?token=secret')
-    expect(ws.send).toHaveBeenCalledWith(
-      expect.stringContaining('"command":"list_projects"')
     )
     const sent = JSON.parse(String(ws.send.mock.calls.at(-1)?.[0]))
     ws.receive({ type: 'response', id: sent.id, data: [] })
@@ -179,6 +203,22 @@ describe('transport bootstrap', () => {
     expect(result.current).not.toContain('secret')
   })
 
+  it('still connects native remotes when appVersion mismatches', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, appVersion: '9.9.9' }),
+    } as Response)
+
+    const transport = await loadRemoteNativeTransportModule()
+    const { result } = renderHook(() => transport.useWsAuthError())
+
+    transport.connectTransport()
+
+    // Mismatch only warns; auth error stays null and the socket still opens.
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
+    expect(result.current).toBeNull()
+  })
+
   it('routes shared native commands through the jean-core dispatcher', async () => {
     const tauriInvoke = vi.fn().mockResolvedValue([{ id: 'project-1' }])
     const transport = await loadNativeTransportModule(tauriInvoke)
@@ -201,6 +241,55 @@ describe('transport bootstrap', () => {
       enabled: true,
     })
   })
+
+  it('opens remote worktrees in local Zed via ssh:// targets', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+      },
+      tauriInvoke
+    )
+
+    await transport.invoke('open_worktree_in_editor', {
+      worktreePath: '/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('open_worktree_in_editor', {
+      worktreePath: 'ssh://ubuntu@192.168.1.50/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+  })
+
+  it('rejects non-Zed remote editor opens with a clear error', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+      },
+      tauriInvoke
+    )
+
+    await expect(
+      transport.invoke('open_worktree_in_editor', {
+        worktreePath: '/tmp',
+        editor: 'vscode',
+      })
+    ).rejects.toThrow(/Zed/)
+    expect(tauriInvoke).not.toHaveBeenCalled()
+  })
+
   it('does not open websocket until bootstrap explicitly connects it', async () => {
     const transport = await loadTransportModule()
 

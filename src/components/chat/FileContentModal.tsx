@@ -30,7 +30,7 @@ import { useSyntaxHighlighting } from '@/hooks/useSyntaxHighlighting'
 import { getLanguageFromPath } from '@/lib/language-detection'
 import { getFilename } from '@/lib/path-utils'
 import { useTheme } from '@/hooks/use-theme'
-import { isLocalBackend } from '@/lib/environment'
+import { canOpenInEditor } from '@/lib/environment'
 import { usePreferences } from '@/services/preferences'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
@@ -289,7 +289,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
                       </Button>
                     )}
                   </>
-                ) : isLocalBackend() ? (
+                ) : canOpenInEditor() ? (
                   <Button
                     variant="ghost"
                     size="sm"

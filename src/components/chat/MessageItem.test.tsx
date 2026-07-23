@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@/test/test-utils'
+import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
+import userEvent from '@testing-library/user-event'
 import { MessageItem } from './MessageItem'
 import type {
   ChatMessage,
@@ -484,5 +485,43 @@ describe('MessageItem', () => {
         content: 'copy this steered prompt',
       })
     )
+  })
+
+  it('shows a custom context menu on right-click instead of browser defaults', async () => {
+    const user = userEvent.setup()
+    const original = window.getSelection
+    window.getSelection = () =>
+      ({
+        toString: () => '',
+      }) as Selection
+
+    mocks.copyToClipboard.mockResolvedValue(undefined)
+
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: 'Right-click me for a custom menu.',
+          tool_calls: [],
+          content_blocks: [],
+        }}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByText('Right-click me for a custom menu.'))
+
+    const item = await screen.findByRole('menuitem', {
+      name: /copy response/i,
+    })
+    await user.click(item)
+
+    await waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(
+        'Right-click me for a custom menu.'
+      )
+    })
+
+    window.getSelection = original
   })
 })

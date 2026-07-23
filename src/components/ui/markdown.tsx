@@ -17,6 +17,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
+import { remarkFixInterruptedLists } from '@/lib/remark-fix-interrupted-lists'
 import { Copy, Check, Table, ListChecks } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -555,7 +556,9 @@ const compactComponents: Components = {
 }
 
 // Module-level plugin arrays keep references stable across renders.
-const remarkPlugins = [remarkGfm]
+// remarkFixInterruptedLists runs after GFM so task lists are already parsed,
+// then nests orphan sibling ULs under the preceding OL item (issue #200).
+const remarkPlugins = [remarkGfm, remarkFixInterruptedLists]
 // rehype-raw re-parses the full accumulated text as HTML on every render —
 // the dominant per-frame cost while streaming — so streaming mode skips it
 // and only completed (non-streaming) renders apply it.

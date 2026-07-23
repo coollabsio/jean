@@ -1,20 +1,45 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CommandPalette } from './CommandPalette'
 
 Element.prototype.scrollIntoView = vi.fn()
 
 const {
+  fetchRemoteServerInfo,
   markConnectionSwitch,
   reloadApp,
   selectConnection,
   setCommandPaletteOpen,
+  showToast,
+  warnRemoteVersionMismatch,
 } = vi.hoisted(() => ({
+  fetchRemoteServerInfo: vi.fn(async () => ({
+    ok: true,
+    appVersion: '0.1.69',
+    webBuildId: '0.1.69-test',
+  })),
   markConnectionSwitch: vi.fn(),
   reloadApp: vi.fn(),
   selectConnection: vi.fn(),
   setCommandPaletteOpen: vi.fn(),
+  showToast: vi.fn(),
+  warnRemoteVersionMismatch: vi.fn(() => false),
 }))
+
+const remoteConnections = [
+  {
+    id: 'remote-1',
+    name: 'Active server',
+    url: 'https://active.example.com',
+    token: 'active-token',
+  },
+  {
+    id: 'remote-2',
+    name: 'Build server',
+    url: 'https://build.example.com',
+    token: 'build-token',
+  },
+]
 
 vi.mock('@/store/ui-store', () => ({
   useUIStore: () => ({
@@ -24,7 +49,7 @@ vi.mock('@/store/ui-store', () => ({
 }))
 
 vi.mock('@/hooks/use-command-context', () => ({
-  useCommandContext: () => ({ showToast: vi.fn() }),
+  useCommandContext: () => ({ showToast }),
 }))
 
 vi.mock('@/services/preferences', () => ({
@@ -62,27 +87,26 @@ vi.mock('@/lib/commands', () => ({
 vi.mock('@/lib/remote-connections', () => ({
   LOCAL_CONNECTION_ID: 'local',
   getActiveConnectionId: () => 'remote-1',
+  getRemoteConnections: () => remoteConnections,
   markConnectionSwitch,
   selectConnection,
-  useRemoteConnections: () => [
-    {
-      id: 'remote-1',
-      name: 'Active server',
-      url: 'https://active.example.com',
-      token: 'active-token',
-    },
-    {
-      id: 'remote-2',
-      name: 'Build server',
-      url: 'https://build.example.com',
-      token: 'build-token',
-    },
-  ],
+  useRemoteConnections: () => remoteConnections,
+}))
+
+vi.mock('@/lib/remote-version', () => ({
+  fetchRemoteServerInfo,
+  warnRemoteVersionMismatch,
 }))
 
 describe('CommandPalette connections', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    fetchRemoteServerInfo.mockResolvedValue({
+      ok: true,
+      appVersion: '0.1.69',
+      webBuildId: '0.1.69-test',
+    })
+    warnRemoteVersionMismatch.mockReturnValue(false)
   })
 
   it('lists localhost and inactive remote connections', () => {
@@ -108,7 +132,7 @@ describe('CommandPalette connections', () => {
     ).toBeTruthy()
   })
 
-  it('switches connections through the existing reload flow', () => {
+  it('switches connections through the existing reload flow', async () => {
     render(<CommandPalette reloadApp={reloadApp} />)
 
     fireEvent.click(screen.getByText('Localhost'))
@@ -117,5 +141,30 @@ describe('CommandPalette connections', () => {
     expect(markConnectionSwitch).toHaveBeenCalledOnce()
     expect(selectConnection).toHaveBeenCalledWith('local')
     expect(reloadApp).toHaveBeenCalledOnce()
+    expect(fetchRemoteServerInfo).not.toHaveBeenCalled()
+  })
+
+  it('warns on version mismatch but still switches from the palette', async () => {
+    fetchRemoteServerInfo.mockResolvedValueOnce({
+      ok: true,
+      appVersion: '0.2.0',
+      webBuildId: '0.2.0-test',
+    })
+    warnRemoteVersionMismatch.mockReturnValueOnce(true)
+
+    render(<CommandPalette reloadApp={reloadApp} />)
+
+    fireEvent.click(screen.getByText('Build server'))
+
+    await waitFor(() => {
+      expect(fetchRemoteServerInfo).toHaveBeenCalledWith(
+        'https://build.example.com',
+        'build-token'
+      )
+      expect(warnRemoteVersionMismatch).toHaveBeenCalledWith('0.2.0')
+      expect(selectConnection).toHaveBeenCalledWith('remote-2')
+      expect(reloadApp).toHaveBeenCalledOnce()
+    })
+    expect(showToast).not.toHaveBeenCalled()
   })
 })

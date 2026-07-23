@@ -201,7 +201,7 @@ export function useWorktreeApproval({
       }
 
       // Clear waiting state on original session. Codex keeps plan tasks in its
-      // native update_plan/CodexPlan state, so preserve those tool calls.
+      // native proposed_plan / CodexPlan state, so preserve those tool calls.
       clearWorktreeApprovalUiState(sessionId, {
         preserveToolCalls: card.session.backend === 'codex',
       })

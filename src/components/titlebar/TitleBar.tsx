@@ -353,22 +353,43 @@ function ServerUpdateIndicator() {
 
 function UpdateIndicator() {
   const pendingVersion = useUIStore(state => state.pendingUpdateVersion)
-  if (!pendingVersion) return null
+  const readyVersion = useUIStore(state => state.updateReadyVersion)
+  const isInstalling = useUIStore(state => state.isUpdateInstalling)
+
+  // Ready takes priority; also show while deferred or mid-download so the user
+  // keeps a visible affordance after dismissing the modal.
+  const version = readyVersion ?? pendingVersion
+  if (!version && !isInstalling) return null
+
+  const label = readyVersion
+    ? 'Restart to update'
+    : isInstalling
+      ? 'Updating…'
+      : 'Update available'
+  const tooltip = readyVersion
+    ? `Restart to apply v${readyVersion}`
+    : isInstalling
+      ? version
+        ? `Downloading v${version}…`
+        : 'Downloading update…'
+      : `Update to v${version}`
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          onClick={() =>
+          onClick={() => {
+            if (isInstalling && !readyVersion) return
             window.dispatchEvent(new Event('install-pending-update'))
-          }
-          className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+          }}
+          disabled={isInstalling && !readyVersion}
+          className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer disabled:opacity-70 disabled:cursor-default"
         >
           <ArrowUpCircle className="size-3.5" />
-          Update available
+          {label}
         </button>
       </TooltipTrigger>
-      <TooltipContent side="bottom">Update to v{pendingVersion}</TooltipContent>
+      <TooltipContent side="bottom">{tooltip}</TooltipContent>
     </Tooltip>
   )
 }

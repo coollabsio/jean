@@ -1,20 +1,21 @@
 //! Linux WebKitGTK environment defaults for Tauri desktop runs.
 //!
-//! Restores the setup that was lost when `src-tauri` was split into `jean-core`
-//! (see issue #129 / regression from #493). Defaults prioritize *performance*
-//! on modern GPUs while keeping the DMABUF workaround that prevents common GBM
-//! crashes. Full software-compositing mode remains available via
-//! `JEAN_SAFE_GRAPHICS=1` for broken drivers.
+//! Transparent windows + hardware compositing break on many Linux setups
+//! (NVIDIA, GBM/DMABUF, some Wayland compositors). Defaults prioritize
+//! *performance* on modern GPUs while keeping the DMABUF workaround that
+//! prevents common GBM crashes. Full software-compositing mode remains
+//! available via `JEAN_SAFE_GRAPHICS=1` for broken drivers (issue #129).
+//!
+//! Related: https://github.com/coollabsio/jean/issues/100
 
 /// Whether full safe-graphics mode is requested (software compositing path).
 pub fn safe_graphics_requested() -> bool {
-    matches!(
-        std::env::var("JEAN_SAFE_GRAPHICS")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes"
-    )
+    is_truthy_env(&std::env::var("JEAN_SAFE_GRAPHICS").unwrap_or_default())
+}
+
+/// Parse common truthy env values (`1`, `true`, `yes`; case-insensitive).
+pub fn is_truthy_env(value: &str) -> bool {
+    matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes")
 }
 
 /// Apply Linux WebKitGTK / GDK environment defaults before the webview starts.
@@ -45,15 +46,22 @@ pub fn apply_linux_webkit_env() {
 
     // DMABUF is a frequent GBM-error trigger; disable unless the user overrides.
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        // Called once during process startup before the webview spawns.
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        // SAFETY: called once during process startup before the webview/runtime
+        // spawns threads that could race on the process environment.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
         log::trace!("WEBKIT_DISABLE_DMABUF_RENDERER=1");
     }
 
     // Full software compositing is opt-in: it avoids some driver bugs but can
     // peg low-power CPUs (issue #129). Users can also set the env var directly.
-    if safe_graphics_requested() && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    if safe_graphics_requested() && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none()
+    {
+        // SAFETY: same startup-only rationale as above.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
         log::trace!("WEBKIT_DISABLE_COMPOSITING_MODE=1 (JEAN_SAFE_GRAPHICS)");
     }
 
@@ -64,7 +72,10 @@ pub fn apply_linux_webkit_env() {
         );
     }
     if !is_appimage && force_x11 && std::env::var_os("GDK_BACKEND").is_none() {
-        std::env::set_var("GDK_BACKEND", "x11");
+        // SAFETY: same startup-only rationale as above.
+        unsafe {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
         log::trace!("GDK_BACKEND=x11 (forced by JEAN_FORCE_X11)");
     }
 }
@@ -74,40 +85,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn safe_graphics_requested_parses_common_truthy_values() {
-        // These tests only cover the pure parser path via isolated env when
-        // possible; avoid mutating process-wide env in parallel test runs for
-        // the apply_* path.
-        assert!(!matches!(
-            "".to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes"
-        ));
+    fn is_truthy_env_parses_common_values() {
         for value in ["1", "true", "TRUE", "yes", "Yes"] {
-            assert!(
-                matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"),
-                "expected {value} to be truthy"
-            );
+            assert!(is_truthy_env(value), "expected {value} to be truthy");
         }
-        for value in ["0", "false", "no", ""] {
-            assert!(
-                !matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"),
-                "expected {value} to be falsey"
-            );
+        for value in ["0", "false", "no", "", "maybe", "on"] {
+            assert!(!is_truthy_env(value), "expected {value} to be falsey");
         }
     }
 
     #[test]
     fn safe_graphics_helper_reads_env() {
-        // Best-effort: only assert when the variable is unset or already truthy
-        // so parallel tests that set JEAN_SAFE_GRAPHICS do not flake.
+        // Best-effort: only assert when the variable is unset or already a
+        // known truthy/falsey value so parallel tests that set JEAN_SAFE_GRAPHICS
+        // do not flake.
         match std::env::var("JEAN_SAFE_GRAPHICS") {
             Err(_) => assert!(!safe_graphics_requested()),
             Ok(v) => {
-                let expected = matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes"
-                );
-                assert_eq!(safe_graphics_requested(), expected);
+                assert_eq!(safe_graphics_requested(), is_truthy_env(&v));
             }
         }
     }

@@ -73,6 +73,10 @@ import {
   shouldThrottleStreamingFlush,
   streamingFlushDelayMs,
 } from '@/lib/streaming-flush'
+import {
+  handleCliAuthError,
+  isCliAuthError,
+} from '@/lib/cli-auth'
 
 interface UseStreamingEventsParams {
   queryClient: QueryClient
@@ -307,6 +311,18 @@ export default function useStreamingEvents({
         chatQueryKeys.session(sessionId)
       )?.name
       notifyIfBackground(title, name)
+    }
+
+    // Play the configured waiting sound (settings preview + chat:done share this).
+    // Used for mid-run Codex approvals so the user hears they need to act.
+    const playWaitingSound = (): void => {
+      const prefs = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences()
+      )
+      const waitingSound = (prefs?.waiting_sound ?? 'none') as NotificationSound
+      playNotificationSound(waitingSound, {
+        webAccessSoundsEnabled: prefs?.web_access_sounds_enabled ?? true,
+      })
     }
 
     // Hydrate ScheduleWakeup indicator store from backend so reloads do not
@@ -759,6 +775,8 @@ export default function useStreamingEvents({
       const next = [...current, request]
       setPendingCodexMcpElicitationRequests(sessionId, next)
       setWaitingForInput(sessionId, true)
+      playWaitingSound()
+      notifySession(sessionId, 'Needs your input')
       persistCodexPendingState(sessionId, worktreeId, {
         pendingCodexMcpElicitationRequests: next,
       })
@@ -776,6 +794,7 @@ export default function useStreamingEvents({
         const next = [...current, request]
         setPendingCodexPermissionRequests(session_id, next)
         setWaitingForInput(session_id, true)
+        playWaitingSound()
         notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexPermissionRequests: next,
@@ -797,6 +816,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexCommandApprovalRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          playWaitingSound()
           notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexCommandApprovalRequests: next,
@@ -833,6 +853,7 @@ export default function useStreamingEvents({
 
         if (next === current) return
 
+        playWaitingSound()
         notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexUserInputRequests: next,
@@ -880,6 +901,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexDynamicToolCallRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          playWaitingSound()
           notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexDynamicToolCallRequests: next,
@@ -1163,12 +1185,7 @@ export default function useStreamingEvents({
           }
 
           // Play waiting sound
-          const waitingSound = (preferences?.waiting_sound ??
-            'none') as NotificationSound
-          playNotificationSound(waitingSound, {
-            webAccessSoundsEnabled:
-              preferences?.web_access_sounds_enabled ?? true,
-          })
+          playWaitingSound()
           notifySession(sessionId, 'Needs your input')
         }
       } else if (event.payload.waiting_for_plan) {
@@ -1331,12 +1348,7 @@ export default function useStreamingEvents({
         }
 
         // Play waiting sound
-        const waitingSound = (preferences?.waiting_sound ??
-          'none') as NotificationSound
-        playNotificationSound(waitingSound, {
-          webAccessSoundsEnabled:
-            preferences?.web_access_sounds_enabled ?? true,
-        })
+        playWaitingSound()
         notifySession(sessionId, 'Needs your input')
       } else {
         // No blocking tools — add optimistic message FIRST, then batch-clear state.
@@ -1430,12 +1442,7 @@ export default function useStreamingEvents({
             )
           }
 
-          const waitingSound = (preferences?.waiting_sound ??
-            'none') as NotificationSound
-          playNotificationSound(waitingSound, {
-            webAccessSoundsEnabled:
-              preferences?.web_access_sounds_enabled ?? true,
-          })
+          playWaitingSound()
           notifySession(sessionId, 'Needs your input')
         } else {
           // 2. Update last_run_status + session state in caches so UI reflects immediately.
@@ -1656,8 +1663,19 @@ export default function useStreamingEvents({
           .catch(() => undefined)
       }
 
+      // Auth failures from headless CLIs (e.g. Claude "Please run /login")
+      // are not actionable inside chat — rewrite and offer Jean's Login modal.
+      let displayError = error
+      if (isCliAuthError(error)) {
+        const session = queryClient.getQueryData<Session>(
+          chatQueryKeys.session(session_id)
+        )
+        const backend = (session?.backend as CliBackend | undefined) ?? 'claude'
+        displayError = handleCliAuthError(error, backend)
+      }
+
       // Set error state for inline display
-      setError(session_id, error)
+      setError(session_id, displayError)
 
       // Check if CLI produced streaming content BEFORE clearing state.
       // If content was streamed, the CLI ran — don't remove the user message

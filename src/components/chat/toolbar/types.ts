@@ -1,6 +1,7 @@
 import type {
   ClaudeModel,
   CliBackend,
+  CodexProviderProfile,
   CustomCliProfile,
 } from '@/types/preferences'
 import type {
@@ -97,6 +98,8 @@ export interface ChatToolbarProps {
   onBackendModelChange: (backend: CliBackend, model: string) => void
   onProviderChange: (provider: string | null) => void
   customCliProfiles: CustomCliProfile[]
+  /** Codex custom model_provider profiles from Settings → Providers */
+  customCodexProviders?: CodexProviderProfile[]
   onThinkingLevelChange: (level: ThinkingLevel) => void
   onEffortLevelChange: (level: EffortLevel) => void
   onSetExecutionMode: (mode: ExecutionMode) => void

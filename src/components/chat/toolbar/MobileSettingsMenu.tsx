@@ -114,6 +114,7 @@ interface MobileSettingsMenuProps {
   isCodex: boolean
   modelReasoning?: ModelReasoningCapability | null
   customCliProfiles: CustomCliProfile[]
+  customCodexProviders?: import('@/types/preferences').CodexProviderProfile[]
 
   onOpenBackendModelPicker: () => void
   handleProviderChange: (value: string) => void
@@ -167,6 +168,7 @@ export function MobileSettingsMenu({
   isCodex,
   modelReasoning,
   customCliProfiles,
+  customCodexProviders = [],
   onOpenBackendModelPicker,
   handleProviderChange,
   handleEffortLevelChange,
@@ -274,7 +276,15 @@ export function MobileSettingsMenu({
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<string | null>(null)
-  const providerDisplayName = getProviderDisplayName(selectedProvider)
+  const providerDisplayName = getProviderDisplayName(
+    selectedProvider,
+    selectedBackend
+  )
+  const showClaudeProviders =
+    customCliProfiles.length > 0 && selectedBackend === 'claude'
+  const showCodexProviders =
+    customCodexProviders.length > 0 && selectedBackend === 'codex'
+  const showProviderMenu = showClaudeProviders || showCodexProviders
   const { data: worktree } = useWorktree(worktreeId ?? null)
   const { data: projects } = useProjects()
   const project = worktree
@@ -451,7 +461,7 @@ export function MobileSettingsMenu({
           align={isMobile ? 'end' : 'start'}
           className="w-72"
         >
-          {customCliProfiles.length > 0 && selectedBackend === 'claude' && (
+          {showProviderMenu && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Sparkles className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -461,30 +471,49 @@ export function MobileSettingsMenu({
                 </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup
-                  value={selectedProvider ?? '__anthropic__'}
-                  onValueChange={handleProviderChange}
-                >
-                  <DropdownMenuRadioItem value="__anthropic__">
-                    Anthropic
-                  </DropdownMenuRadioItem>
-                  {customCliProfiles.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel className="text-xs text-muted-foreground">
-                        Custom Providers
-                      </DropdownMenuLabel>
-                      {customCliProfiles.map(profile => (
-                        <DropdownMenuRadioItem
-                          key={profile.name}
-                          value={profile.name}
-                        >
-                          {profile.name}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </>
-                  )}
-                </DropdownMenuRadioGroup>
+                {showClaudeProviders ? (
+                  <DropdownMenuRadioGroup
+                    value={selectedProvider ?? '__anthropic__'}
+                    onValueChange={handleProviderChange}
+                  >
+                    <DropdownMenuRadioItem value="__anthropic__">
+                      Anthropic
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
+                      Custom Providers
+                    </DropdownMenuLabel>
+                    {customCliProfiles.map(profile => (
+                      <DropdownMenuRadioItem
+                        key={profile.name}
+                        value={profile.name}
+                      >
+                        {profile.name}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                ) : (
+                  <DropdownMenuRadioGroup
+                    value={selectedProvider ?? '__default__'}
+                    onValueChange={handleProviderChange}
+                  >
+                    <DropdownMenuRadioItem value="__default__">
+                      Default (OpenAI)
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
+                      Custom Providers
+                    </DropdownMenuLabel>
+                    {customCodexProviders.map(profile => (
+                      <DropdownMenuRadioItem
+                        key={profile.name}
+                        value={profile.name}
+                      >
+                        {profile.name}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           )}

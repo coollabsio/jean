@@ -8982,7 +8982,7 @@ fn build_codex_review_args(
         "-c".into(),
         format!(
             "model_verbosity=\"{}\"",
-            crate::chat::codex::DEFAULT_MODEL_VERBOSITY
+            crate::chat::codex::DEFAULT_ONESHOT_MODEL_VERBOSITY
         )
         .into(),
     ];

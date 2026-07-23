@@ -46,6 +46,10 @@ vi.mock('@/services/opencode-cli', () => ({
     data: modelMocks.opencodeModels,
     isError: modelMocks.opencodeModelsError,
   }),
+  useRefreshOpencodeModels: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }))
 
 vi.mock('@/services/cursor-cli', () => ({
