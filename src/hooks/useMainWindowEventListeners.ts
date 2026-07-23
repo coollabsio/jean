@@ -51,6 +51,27 @@ export function findKeybindingAction(
 }
 
 /**
+ * Keybindings that intentionally re-fire while a key is held (OS key-repeat).
+ * Everything else is one-shot: a held Ctrl+W must not cascade-close terminals
+ * or sessions (GitHub issue #56).
+ */
+const KEYBINDING_ACTIONS_ALLOWING_REPEAT = new Set<KeybindingAction>([
+  'scroll_chat_up',
+  'scroll_chat_down',
+  'scroll_chat_up_medium',
+  'scroll_chat_down_medium',
+  'scroll_chat_up_small',
+  'scroll_chat_down_small',
+  'next_session',
+  'previous_session',
+])
+
+/** Whether OS key-repeat should re-execute this keybinding action. */
+export function allowsKeybindingRepeat(action: KeybindingAction): boolean {
+  return KEYBINDING_ACTIONS_ALLOWING_REPEAT.has(action)
+}
+
+/**
  * Apply backend `cache:invalidate` keys to the React Query client.
  * Shared by the debounced multi-client sync listener.
  *
@@ -170,6 +191,17 @@ export function closeActiveTerminalTabForShortcut(): boolean {
   const activeTerminalId = terminalStore.activeTerminalIds[worktreeId]
 
   if (!activeTerminalId) return true
+
+  // Running PTYs need an explicit confirm (issue #56). TerminalView listens
+  // for this event and opens the same dialog as the tab close button.
+  if (terminalStore.runningTerminals.has(activeTerminalId)) {
+    window.dispatchEvent(
+      new CustomEvent('confirm-close-terminal', {
+        detail: { worktreeId, terminalId: activeTerminalId },
+      })
+    )
+    return true
+  }
 
   invoke('stop_terminal', { terminalId: activeTerminalId }).catch(() => {
     /* noop */
@@ -657,6 +689,15 @@ export function useMainWindowEventListeners() {
 
       const keybindings = keybindingsRef.current
       const matchedAction = findKeybindingAction(shortcut, keybindings)
+
+      // OS key-repeat must not re-fire one-shot actions (issue #56: holding
+      // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).
+      // Consume the event so the browser does not handle the repeated shortcut.
+      if (e.repeat && matchedAction && !allowsKeybindingRepeat(matchedAction)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
 
       // Cancel prompt should work even when modals are open
       if (matchedAction === 'cancel_prompt') {

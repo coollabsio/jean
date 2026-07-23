@@ -5,6 +5,7 @@ import { useUIStore } from '@/store/ui-store'
 import { QueryClient } from '@tanstack/react-query'
 import {
   addTerminalTabForShortcut,
+  allowsKeybindingRepeat,
   applyCacheInvalidationKeys,
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
@@ -284,6 +285,7 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       activeTerminalIds: { 'modal-worktree': 'term-1' },
       modalTerminalOpen: { 'modal-worktree': true },
       terminalVisible: true,
+      runningTerminals: new Set(),
     })
 
     expect(closeActiveTerminalTabForShortcut()).toBe(true)
@@ -296,6 +298,64 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     expect(
       useTerminalStore.getState().modalTerminalOpen['modal-worktree']
     ).toBe(false)
+  })
+
+  it('asks for confirmation instead of killing a running terminal via shortcut (issue #56)', () => {
+    focusTerminal()
+
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'modal-worktree',
+    })
+    useTerminalStore.setState({
+      terminals: {
+        'modal-worktree': [
+          {
+            id: 'term-running',
+            worktreeId: 'modal-worktree',
+            command: 'bun run dev',
+            label: 'dev',
+          },
+        ],
+      },
+      activeTerminalIds: { 'modal-worktree': 'term-running' },
+      modalTerminalOpen: { 'modal-worktree': true },
+      terminalVisible: true,
+      runningTerminals: new Set(['term-running']),
+    })
+
+    const confirmListener = vi.fn()
+    window.addEventListener('confirm-close-terminal', confirmListener)
+
+    expect(closeActiveTerminalTabForShortcut()).toBe(true)
+
+    expect(confirmListener).toHaveBeenCalledTimes(1)
+    const event = confirmListener.mock.calls[0]?.[0] as CustomEvent | undefined
+    expect(event?.detail).toEqual({
+      worktreeId: 'modal-worktree',
+      terminalId: 'term-running',
+    })
+    expect(mockInvoke).not.toHaveBeenCalledWith('stop_terminal', {
+      terminalId: 'term-running',
+    })
+    expect(mockDisposeTerminal).not.toHaveBeenCalled()
+    expect(useTerminalStore.getState().terminals['modal-worktree']).toHaveLength(
+      1
+    )
+
+    window.removeEventListener('confirm-close-terminal', confirmListener)
+  })
+
+  it('allows key-repeat only for scroll/navigation actions (issue #56)', () => {
+    expect(allowsKeybindingRepeat('scroll_chat_up')).toBe(true)
+    expect(allowsKeybindingRepeat('scroll_chat_down_small')).toBe(true)
+    expect(allowsKeybindingRepeat('next_session')).toBe(true)
+    expect(allowsKeybindingRepeat('previous_session')).toBe(true)
+
+    expect(allowsKeybindingRepeat('close_session_or_worktree')).toBe(false)
+    expect(allowsKeybindingRepeat('new_session')).toBe(false)
+    expect(allowsKeybindingRepeat('cancel_prompt')).toBe(false)
+    expect(allowsKeybindingRepeat('approve_plan')).toBe(false)
   })
 
   it('switches the active terminal tab by index for the modal worktree', () => {

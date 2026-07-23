@@ -22,18 +22,22 @@ export function decideWorktreeMiddleClose(
 export type SessionCloseDecision = 'confirm' | 'delete'
 
 /**
- * A middle-click on a conversation row deletes it, mirroring the session-tab
- * middle-click: confirm only when removing the last (non-empty) session of the
- * worktree and confirmation is enabled.
+ * Decide whether closing a session (tab X, middle-click, etc.) should prompt.
+ *
+ * When `confirm_session_close` is enabled (default), any non-empty session
+ * confirms before remove — not only the last tab. Confirming only the last tab
+ * let a held close shortcut cascade-delete chats with no recovery prompt
+ * (GitHub issue #56). Empty sessions still close immediately.
+ *
+ * `activeSessionCount` is retained for call-site compatibility / future UX.
  */
 export function decideSessionMiddleClose(params: {
   activeSessionCount: number
   sessionIsEmpty: boolean
   confirmSessionClose: boolean | undefined
 }): SessionCloseDecision {
-  const { activeSessionCount, sessionIsEmpty, confirmSessionClose } = params
-  const isLastSession = activeSessionCount <= 1
-  if (isLastSession && confirmSessionClose !== false && !sessionIsEmpty) {
+  const { sessionIsEmpty, confirmSessionClose } = params
+  if (confirmSessionClose !== false && !sessionIsEmpty) {
     return 'confirm'
   }
   return 'delete'
