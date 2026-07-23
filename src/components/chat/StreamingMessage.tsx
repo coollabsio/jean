@@ -1,5 +1,6 @@
-import { memo, useMemo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { Activity, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Markdown } from '@/components/ui/markdown'
 import type {
   ToolCall,
@@ -11,6 +12,7 @@ import {
   getAskUserQuestions,
   normalizeQuestionMultipleField,
 } from '@/types/chat'
+import { copyToClipboard } from '@/lib/clipboard'
 import { AskUserQuestion } from './AskUserQuestion'
 import {
   ToolCallInline,
@@ -34,6 +36,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { logger } from '@/lib/logger'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 
 function WorkingVisualRow() {
   return (
@@ -164,269 +167,295 @@ export const StreamingMessage = memo(function StreamingMessage({
     }
   }, [contentBlocks, toolCalls, sessionId])
 
+  const streamingResponseText = useMemo(() => {
+    const fromBlocks = contentBlocks
+      .flatMap(block => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+      .trim()
+    return fromBlocks || streamingContent.trim()
+  }, [contentBlocks, streamingContent])
+
+  const handleCopyStreamingResponse = useCallback(() => {
+    if (!streamingResponseText) return
+    void copyToClipboard(streamingResponseText)
+      .then(() => toast.success('Response copied to clipboard'))
+      .catch(() => toast.error('Failed to copy response'))
+  }, [streamingResponseText])
+
   return (
-    <div className="text-foreground/90">
-      {/* Render streaming content blocks inline if available */}
-      {timelineData ? (
-        (() => {
-          if (timelineData.error) {
-            return (
-              <div className="text-sm text-muted-foreground italic">
-                [Streaming content could not be rendered]
-              </div>
+    <MessageThreadContextMenu
+      messageText={streamingResponseText}
+      copyMessageLabel="Copy response"
+      onCopyMessage={
+        streamingResponseText ? handleCopyStreamingResponse : undefined
+      }
+    >
+      <div className="text-foreground/90">
+        {/* Render streaming content blocks inline if available */}
+        {timelineData ? (
+          (() => {
+            if (timelineData.error) {
+              return (
+                <div className="text-sm text-muted-foreground italic">
+                  [Streaming content could not be rendered]
+                </div>
+              )
+            }
+            const { timeline, textBlockIndexByText, incompleteIndices } =
+              timelineData
+            const hasRenderedTextItem = timeline.some(
+              item => item.type === 'text'
             )
-          }
-          const { timeline, textBlockIndexByText, incompleteIndices } =
-            timelineData
-          const hasRenderedTextItem = timeline.some(
-            item => item.type === 'text'
-          )
-          const fallbackStreamingIntro = !hasRenderedTextItem
-            ? (fallbackPrePlanText ??
-              (!isDuplicatePlanTextBlock(streamingContent, resolvedPlan.content)
-                ? streamingContent
-                : null))
-            : null
+            const fallbackStreamingIntro = !hasRenderedTextItem
+              ? (fallbackPrePlanText ??
+                (!isDuplicatePlanTextBlock(
+                  streamingContent,
+                  resolvedPlan.content
+                )
+                  ? streamingContent
+                  : null))
+              : null
 
-          return (
-            <>
-              {fallbackStreamingIntro && (
-                <Markdown streaming>{fallbackStreamingIntro}</Markdown>
-              )}
-              {/* Build timeline preserving order of text and tools */}
-              <div className="space-y-4">
-                {(() => {
-                  const hasRenderedPlanItem = timeline.some(
-                    item => item.type === 'exitPlanMode'
-                  )
+            return (
+              <>
+                {fallbackStreamingIntro && (
+                  <Markdown streaming>{fallbackStreamingIntro}</Markdown>
+                )}
+                {/* Build timeline preserving order of text and tools */}
+                <div className="space-y-4">
+                  {(() => {
+                    const hasRenderedPlanItem = timeline.some(
+                      item => item.type === 'exitPlanMode'
+                    )
 
-                  return (
-                    <>
-                      {timeline.map((item, index) => {
-                        const isIncomplete = incompleteIndices.has(index)
-                        return (
-                          <ErrorBoundary
-                            key={item.key}
-                            fallback={
-                              <div className="text-xs text-muted-foreground italic border rounded px-2 py-1">
-                                [Failed to render content]
-                              </div>
-                            }
-                          >
-                            {(() => {
-                              switch (item.type) {
-                                case 'thinking':
-                                  return (
-                                    <ThinkingBlock
-                                      thinking={item.thinking}
-                                      isStreaming={true}
-                                    />
-                                  )
-                                case 'text': {
-                                  const textBlockIndex =
-                                    textBlockIndexByText.get(item.text) ?? -1
-                                  if (
-                                    textBlockIndex >= 0 &&
-                                    hiddenPlanTextBlockIndices.has(
-                                      textBlockIndex
-                                    )
-                                  ) {
-                                    return null
-                                  }
-                                  if (
-                                    isDuplicatePlanTextBlock(
-                                      item.text,
-                                      resolvedPlan.content
-                                    )
-                                  ) {
-                                    return null
-                                  }
-                                  return (
-                                    <Markdown streaming>{item.text}</Markdown>
-                                  )
-                                }
-                                case 'userInput':
-                                  return (
-                                    <SteeredPromptGroup
-                                      texts={item.texts}
-                                      worktreePath={worktreePath}
-                                      onCopyText={onCopySteeredText}
-                                    />
-                                  )
-                                case 'task':
-                                  return (
-                                    <TaskCallInline
-                                      taskToolCall={item.taskTool}
-                                      subToolCalls={item.subTools}
-                                      allToolCalls={toolCalls}
-                                      onFileClick={onFileClick}
-                                      isStreaming={true}
-                                      isIncomplete={isIncomplete}
-                                    />
-                                  )
-                                case 'standalone':
-                                  return (
-                                    <ToolCallInline
-                                      toolCall={item.tool}
-                                      onFileClick={onFileClick}
-                                      isStreaming={true}
-                                      isIncomplete={isIncomplete}
-                                    />
-                                  )
-                                case 'stackedGroup':
-                                  return (
-                                    <StackedGroup
-                                      items={item.items}
-                                      onFileClick={onFileClick}
-                                      isStreaming={true}
-                                      isIncomplete={isIncomplete}
-                                    />
-                                  )
-                                case 'askUserQuestion': {
-                                  const isAnswered = isQuestionAnswered(
-                                    sessionId,
-                                    item.tool.id
-                                  )
-                                  // Normalize OpenCode's "multiple" → "multiSelect"
-                                  const normalizedQuestions =
-                                    normalizeQuestionMultipleField(
-                                      (getAskUserQuestions(item.tool.input) ??
-                                        []) as (Question & {
-                                        multiple?: boolean
-                                      })[]
-                                    )
-                                  return (
-                                    <AskUserQuestion
-                                      toolCallId={item.tool.id}
-                                      questions={normalizedQuestions}
-                                      introText={item.introText}
-                                      hasFollowUpMessage={Boolean(
-                                        item.tool.output
-                                      )}
-                                      onSubmit={(toolCallId, answers) =>
-                                        onQuestionAnswer(
-                                          toolCallId,
-                                          answers,
-                                          normalizedQuestions
-                                        )
-                                      }
-                                      onSkip={onQuestionSkip}
-                                      readOnly={isAnswered}
-                                      submittedAnswers={
-                                        isAnswered
-                                          ? getSubmittedAnswers(
-                                              sessionId,
-                                              item.tool.id
-                                            )
-                                          : undefined
-                                      }
-                                      toolOutput={item.tool.output}
-                                    />
-                                  )
-                                }
-                                case 'enterPlanMode':
-                                  return (
-                                    <ToolCallInline
-                                      toolCall={item.tool}
-                                      onFileClick={onFileClick}
-                                      isStreaming={true}
-                                      isIncomplete={false}
-                                    />
-                                  )
-                                case 'exitPlanMode': {
-                                  const inlinePlan = resolvePlanContent({
-                                    toolCalls: [item.tool],
-                                    messageContent: streamingContent,
-                                    contentBlocks,
-                                  }).content
-                                  const planFilePath = !inlinePlan
-                                    ? findPlanFilePath(toolCalls)
-                                    : null
-                                  return (
-                                    <div data-plan-display>
-                                      {inlinePlan ? (
-                                        <PlanDisplay
-                                          content={inlinePlan}
-                                          defaultCollapsed={false}
-                                        />
-                                      ) : planFilePath ? (
-                                        <PlanDisplay
-                                          filePath={planFilePath}
-                                          defaultCollapsed={false}
-                                        />
-                                      ) : null}
-                                    </div>
-                                  )
-                                }
-                                case 'unknown':
-                                  return (
-                                    <div className="text-xs text-muted-foreground border rounded px-2 py-1">
-                                      Unsupported content type: &quot;
-                                      {item.rawType}
-                                      &quot; — if you see this, please report it
-                                      as a bug
-                                    </div>
-                                  )
-                                default:
-                                  return null
+                    return (
+                      <>
+                        {timeline.map((item, index) => {
+                          const isIncomplete = incompleteIndices.has(index)
+                          return (
+                            <ErrorBoundary
+                              key={item.key}
+                              fallback={
+                                <div className="text-xs text-muted-foreground italic border rounded px-2 py-1">
+                                  [Failed to render content]
+                                </div>
                               }
-                            })()}
-                          </ErrorBoundary>
-                        )
-                      })}
-                      {timeline.at(-1)?.type === 'userInput' && (
-                        <WorkingVisualRow />
-                      )}
-                      {resolvedPlan.content && !hasRenderedPlanItem && (
-                        <div data-plan-display>
-                          <PlanDisplay
-                            content={resolvedPlan.content}
-                            defaultCollapsed={false}
-                          />
-                        </div>
-                      )}
-                    </>
-                  )
-                })()}
+                            >
+                              {(() => {
+                                switch (item.type) {
+                                  case 'thinking':
+                                    return (
+                                      <ThinkingBlock
+                                        thinking={item.thinking}
+                                        isStreaming={true}
+                                      />
+                                    )
+                                  case 'text': {
+                                    const textBlockIndex =
+                                      textBlockIndexByText.get(item.text) ?? -1
+                                    if (
+                                      textBlockIndex >= 0 &&
+                                      hiddenPlanTextBlockIndices.has(
+                                        textBlockIndex
+                                      )
+                                    ) {
+                                      return null
+                                    }
+                                    if (
+                                      isDuplicatePlanTextBlock(
+                                        item.text,
+                                        resolvedPlan.content
+                                      )
+                                    ) {
+                                      return null
+                                    }
+                                    return (
+                                      <Markdown streaming>{item.text}</Markdown>
+                                    )
+                                  }
+                                  case 'userInput':
+                                    return (
+                                      <SteeredPromptGroup
+                                        texts={item.texts}
+                                        worktreePath={worktreePath}
+                                        onCopyText={onCopySteeredText}
+                                      />
+                                    )
+                                  case 'task':
+                                    return (
+                                      <TaskCallInline
+                                        taskToolCall={item.taskTool}
+                                        subToolCalls={item.subTools}
+                                        allToolCalls={toolCalls}
+                                        onFileClick={onFileClick}
+                                        isStreaming={true}
+                                        isIncomplete={isIncomplete}
+                                      />
+                                    )
+                                  case 'standalone':
+                                    return (
+                                      <ToolCallInline
+                                        toolCall={item.tool}
+                                        onFileClick={onFileClick}
+                                        isStreaming={true}
+                                        isIncomplete={isIncomplete}
+                                      />
+                                    )
+                                  case 'stackedGroup':
+                                    return (
+                                      <StackedGroup
+                                        items={item.items}
+                                        onFileClick={onFileClick}
+                                        isStreaming={true}
+                                        isIncomplete={isIncomplete}
+                                      />
+                                    )
+                                  case 'askUserQuestion': {
+                                    const isAnswered = isQuestionAnswered(
+                                      sessionId,
+                                      item.tool.id
+                                    )
+                                    // Normalize OpenCode's "multiple" → "multiSelect"
+                                    const normalizedQuestions =
+                                      normalizeQuestionMultipleField(
+                                        (getAskUserQuestions(item.tool.input) ??
+                                          []) as (Question & {
+                                          multiple?: boolean
+                                        })[]
+                                      )
+                                    return (
+                                      <AskUserQuestion
+                                        toolCallId={item.tool.id}
+                                        questions={normalizedQuestions}
+                                        introText={item.introText}
+                                        hasFollowUpMessage={Boolean(
+                                          item.tool.output
+                                        )}
+                                        onSubmit={(toolCallId, answers) =>
+                                          onQuestionAnswer(
+                                            toolCallId,
+                                            answers,
+                                            normalizedQuestions
+                                          )
+                                        }
+                                        onSkip={onQuestionSkip}
+                                        readOnly={isAnswered}
+                                        submittedAnswers={
+                                          isAnswered
+                                            ? getSubmittedAnswers(
+                                                sessionId,
+                                                item.tool.id
+                                              )
+                                            : undefined
+                                        }
+                                        toolOutput={item.tool.output}
+                                      />
+                                    )
+                                  }
+                                  case 'enterPlanMode':
+                                    return (
+                                      <ToolCallInline
+                                        toolCall={item.tool}
+                                        onFileClick={onFileClick}
+                                        isStreaming={true}
+                                        isIncomplete={false}
+                                      />
+                                    )
+                                  case 'exitPlanMode': {
+                                    const inlinePlan = resolvePlanContent({
+                                      toolCalls: [item.tool],
+                                      messageContent: streamingContent,
+                                      contentBlocks,
+                                    }).content
+                                    const planFilePath = !inlinePlan
+                                      ? findPlanFilePath(toolCalls)
+                                      : null
+                                    return (
+                                      <div data-plan-display>
+                                        {inlinePlan ? (
+                                          <PlanDisplay
+                                            content={inlinePlan}
+                                            defaultCollapsed={false}
+                                          />
+                                        ) : planFilePath ? (
+                                          <PlanDisplay
+                                            filePath={planFilePath}
+                                            defaultCollapsed={false}
+                                          />
+                                        ) : null}
+                                      </div>
+                                    )
+                                  }
+                                  case 'unknown':
+                                    return (
+                                      <div className="text-xs text-muted-foreground border rounded px-2 py-1">
+                                        Unsupported content type: &quot;
+                                        {item.rawType}
+                                        &quot; — if you see this, please report
+                                        it as a bug
+                                      </div>
+                                    )
+                                  default:
+                                    return null
+                                }
+                              })()}
+                            </ErrorBoundary>
+                          )
+                        })}
+                        {timeline.at(-1)?.type === 'userInput' && (
+                          <WorkingVisualRow />
+                        )}
+                        {resolvedPlan.content && !hasRenderedPlanItem && (
+                          <div data-plan-display>
+                            <PlanDisplay
+                              content={resolvedPlan.content}
+                              defaultCollapsed={false}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
+                </div>
+              </>
+            )
+          })()
+        ) : (
+          <>
+            {fallbackPrePlanText && (
+              <Markdown streaming>{fallbackPrePlanText}</Markdown>
+            )}
+            {/* Fallback: Collapsible tool calls during streaming (old behavior) */}
+            <ToolCallsDisplay
+              toolCalls={toolCalls}
+              sessionId={sessionId}
+              isStreaming={true}
+              onQuestionAnswer={onQuestionAnswer}
+              onQuestionSkip={onQuestionSkip}
+              isQuestionAnswered={isQuestionAnswered}
+              getSubmittedAnswers={getSubmittedAnswers}
+              areQuestionsSkipped={areQuestionsSkipped}
+            />
+            {resolvedPlan.content && (
+              <div data-plan-display>
+                <PlanDisplay
+                  content={resolvedPlan.content}
+                  defaultCollapsed={false}
+                />
               </div>
-            </>
-          )
-        })()
-      ) : (
-        <>
-          {fallbackPrePlanText && (
-            <Markdown streaming>{fallbackPrePlanText}</Markdown>
-          )}
-          {/* Fallback: Collapsible tool calls during streaming (old behavior) */}
-          <ToolCallsDisplay
-            toolCalls={toolCalls}
-            sessionId={sessionId}
-            isStreaming={true}
-            onQuestionAnswer={onQuestionAnswer}
-            onQuestionSkip={onQuestionSkip}
-            isQuestionAnswered={isQuestionAnswered}
-            getSubmittedAnswers={getSubmittedAnswers}
-            areQuestionsSkipped={areQuestionsSkipped}
-          />
-          {resolvedPlan.content && (
-            <div data-plan-display>
-              <PlanDisplay
-                content={resolvedPlan.content}
-                defaultCollapsed={false}
-              />
-            </div>
-          )}
-          {/* Streaming content */}
-          {streamingContent &&
-            !isDuplicatePlanTextBlock(
-              streamingContent,
-              resolvedPlan.content
-            ) && <Markdown streaming>{streamingContent}</Markdown>}
-        </>
-      )}
+            )}
+            {/* Streaming content */}
+            {streamingContent &&
+              !isDuplicatePlanTextBlock(
+                streamingContent,
+                resolvedPlan.content
+              ) && <Markdown streaming>{streamingContent}</Markdown>}
+          </>
+        )}
 
-      {/* Show edited files during streaming */}
-      <EditedFilesDisplay toolCalls={toolCalls} />
-    </div>
+        {/* Show edited files during streaming */}
+        <EditedFilesDisplay toolCalls={toolCalls} />
+      </div>
+    </MessageThreadContextMenu>
   )
 })

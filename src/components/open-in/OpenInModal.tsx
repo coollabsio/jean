@@ -41,7 +41,7 @@ import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { isLocalBackend } from '@/lib/environment'
+import { canOpenNativeApps } from '@/lib/environment'
 import { resolvePortUrl } from '@/components/browser/default-tab-url'
 
 interface ModalOption {
@@ -102,9 +102,10 @@ export function OpenInModal() {
     selectedWorktreeId
   )
 
-  // Local editor/terminal/finder only work against the desktop machine's FS.
-  // Remote connections and browser/web access should only show URL-based options.
-  const canOpenLocally = isLocalBackend()
+  // Editor/terminal/finder open against the Jean backend host (local desktop,
+  // WSL headless, or --allow-native-open). Pure remote VPS without that flag
+  // only gets URL-based options.
+  const canOpenLocally = canOpenNativeApps()
 
   const targetPath = useMemo(() => {
     if (worktree?.path) return worktree.path

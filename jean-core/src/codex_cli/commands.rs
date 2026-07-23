@@ -1729,17 +1729,23 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
     emit_progress(&app, "extracting", "Extracting archive...", 45);
 
     // Extract the binary bytes in-memory so native and WSL can share the flow.
-    let binary_bytes = match asset_candidate.format {
+    // Windows zips also ship sandbox helpers next to the main binary; Codex looks
+    // for them via current_exe()'s parent directory (see codex-windows-sandbox).
+    let (binary_bytes, windows_helpers) = match asset_candidate.format {
         CodexArchiveFormat::Zip => {
-            extract_zip_binary_bytes(&archive_content, &asset_candidate.binary_target)?
+            let extracted =
+                extract_windows_codex_zip(&archive_content, &asset_candidate.binary_target)?;
+            (extracted.main_binary, extracted.helpers)
         }
-        CodexArchiveFormat::TarGz => {
-            extract_tar_gz_binary_bytes(&archive_content, &asset_candidate.binary_target)?
-        }
+        CodexArchiveFormat::TarGz => (
+            extract_tar_gz_binary_bytes(&archive_content, &asset_candidate.binary_target)?,
+            Vec::new(),
+        ),
     };
 
     if wsl.enabled {
         // WSL branch: stream the binary into the distro and make it executable.
+        // Linux sandboxing does not use the Windows helper binaries.
         let unix_path = super::config::get_wsl_cli_binary_path(&wsl.distro)?;
         emit_progress(&app, "installing", "Installing Codex CLI into WSL...", 65);
         log::trace!("Writing codex binary into WSL at {unix_path}");
@@ -1751,7 +1757,7 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
         return Ok(());
     }
 
-    let _cli_dir = ensure_cli_dir(&app)?;
+    let cli_dir = ensure_cli_dir(&app)?;
     let binary_path = get_cli_binary_path(&app)?;
 
     // On Windows, a running codex.exe holds a file lock that prevents overwriting.
@@ -1773,6 +1779,28 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
 
     crate::platform::write_binary_file(&binary_path, &binary_bytes)
         .map_err(|e| format!("Failed to write Codex CLI binary: {e}"))?;
+
+    // Windows-only: sandbox helpers live next to codex.exe. macOS/Linux use
+    // tar.gz (no helpers) and WSL returns earlier with the Linux binary only.
+    // Issue #265 — without these, sandboxed shell/apply_patch fails with
+    // "windows sandbox: spawn setup refresh".
+    #[cfg(windows)]
+    for helper in &windows_helpers {
+        let helper_path = cli_dir.join(&helper.file_name);
+        crate::platform::write_binary_file(&helper_path, &helper.bytes).map_err(|e| {
+            format!(
+                "Failed to write Codex helper '{}': {e}",
+                helper.file_name
+            )
+        })?;
+        log::info!(
+            "Installed Codex Windows helper {} ({} bytes)",
+            helper.file_name,
+            helper.bytes.len()
+        );
+    }
+    #[cfg(not(windows))]
+    let _ = (&cli_dir, &windows_helpers);
 
     // Emit progress: installing
     emit_progress(&app, "installing", "Installing Codex CLI...", 65);
@@ -1904,12 +1932,38 @@ fn extract_tar_gz_binary_bytes(archive_content: &[u8], target: &str) -> Result<V
     ))
 }
 
-/// Extract the codex binary bytes from a zip archive (Windows release).
+/// Windows helper binaries that Codex expects next to `codex.exe`.
 ///
-/// The Windows zip may contain helper binaries (codex-command-runner.exe,
-/// codex-windows-sandbox-setup.exe) bundled for WinGet. We must extract only
-/// the main codex binary matching the expected target name.
-fn extract_zip_binary_bytes(archive_content: &[u8], target: &str) -> Result<Vec<u8>, String> {
+/// Codex resolves these via `current_exe()`'s directory (or
+/// `codex-resources/`). Jean-managed installs must ship them or sandboxed
+/// `shell_command` / `apply_patch` fail with "windows sandbox: spawn setup refresh".
+const WINDOWS_CODEX_HELPER_NAMES: &[&str] = &[
+    "codex-windows-sandbox-setup.exe",
+    "codex-command-runner.exe",
+];
+
+#[derive(Debug, Clone)]
+struct WindowsHelperBinary {
+    file_name: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct WindowsCodexExtract {
+    main_binary: Vec<u8>,
+    helpers: Vec<WindowsHelperBinary>,
+}
+
+/// Extract the main Codex binary and Windows sandbox helpers from a release zip.
+///
+/// The zip contains:
+/// - `codex-{target}.exe` — main CLI (written as `codex.exe`)
+/// - `codex-windows-sandbox-setup.exe` — elevated/unelevated sandbox setup
+/// - `codex-command-runner.exe` — sandboxed command host
+fn extract_windows_codex_zip(
+    archive_content: &[u8],
+    target: &str,
+) -> Result<WindowsCodexExtract, String> {
     use std::io::{Cursor, Read};
 
     let cursor = Cursor::new(archive_content);
@@ -1917,34 +1971,154 @@ fn extract_zip_binary_bytes(archive_content: &[u8], target: &str) -> Result<Vec<
         zip::ZipArchive::new(cursor).map_err(|e| format!("Failed to open zip archive: {e}"))?;
 
     let expected_name = format!("codex-{target}.exe");
+    let mut main_binary: Option<Vec<u8>> = None;
+    let mut helpers: Vec<WindowsHelperBinary> = Vec::new();
 
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
             .map_err(|e| format!("Failed to read zip entry: {e}"))?;
 
-        if let Some(name) = file.enclosed_name().and_then(|p| {
+        let Some(name) = file.enclosed_name().and_then(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
                 .map(|s| s.to_string())
-        }) {
-            if name == expected_name {
-                let mut content = Vec::new();
-                file.read_to_end(&mut content)
-                    .map_err(|e| format!("Failed to read binary from archive: {e}"))?;
-                return Ok(content);
-            }
+        }) else {
+            continue;
+        };
+
+        let is_main = name == expected_name;
+        let is_helper = WINDOWS_CODEX_HELPER_NAMES
+            .iter()
+            .any(|helper| name.eq_ignore_ascii_case(helper));
+
+        if !is_main && !is_helper {
+            continue;
+        }
+
+        let mut content = Vec::new();
+        file.read_to_end(&mut content)
+            .map_err(|e| format!("Failed to read '{name}' from archive: {e}"))?;
+
+        if is_main {
+            main_binary = Some(content);
+        } else {
+            // Normalize helper file names so Codex's exact lookups succeed.
+            let file_name = WINDOWS_CODEX_HELPER_NAMES
+                .iter()
+                .find(|helper| name.eq_ignore_ascii_case(helper))
+                .map(|s| (*s).to_string())
+                .unwrap_or(name);
+            helpers.push(WindowsHelperBinary {
+                file_name,
+                bytes: content,
+            });
         }
     }
 
-    Err(format!(
-        "Codex binary '{expected_name}' not found in zip archive"
-    ))
+    let main_binary = main_binary
+        .ok_or_else(|| format!("Codex binary '{expected_name}' not found in zip archive"))?;
+
+    if helpers.is_empty() {
+        log::warn!(
+            "Codex Windows zip did not include sandbox helpers ({}); sandboxed tools may fail until helpers are present",
+            WINDOWS_CODEX_HELPER_NAMES.join(", ")
+        );
+    } else {
+        log::debug!(
+            "Extracted {} Windows Codex helper(s): {}",
+            helpers.len(),
+            helpers
+                .iter()
+                .map(|h| h.file_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    Ok(WindowsCodexExtract {
+        main_binary,
+        helpers,
+    })
+}
+
+/// Back-compat helper used by tests that only care about the main binary.
+#[cfg(test)]
+fn extract_zip_binary_bytes(archive_content: &[u8], target: &str) -> Result<Vec<u8>, String> {
+    Ok(extract_windows_codex_zip(archive_content, target)?.main_binary)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Cursor, Write};
+
+    fn make_test_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).expect("start zip entry");
+            zip.write_all(bytes).expect("write zip entry");
+        }
+        zip.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn extract_windows_codex_zip_includes_sandbox_helpers() {
+        let zip_bytes = make_test_zip(&[
+            ("codex-x86_64-pc-windows-msvc.exe", b"MAIN"),
+            ("codex-windows-sandbox-setup.exe", b"SETUP"),
+            ("codex-command-runner.exe", b"RUNNER"),
+            ("README.txt", b"ignore me"),
+        ]);
+
+        let extracted =
+            extract_windows_codex_zip(&zip_bytes, "x86_64-pc-windows-msvc").expect("extract");
+
+        assert_eq!(extracted.main_binary, b"MAIN");
+        let names: Vec<&str> = extracted
+            .helpers
+            .iter()
+            .map(|h| h.file_name.as_str())
+            .collect();
+        assert!(names.contains(&"codex-windows-sandbox-setup.exe"));
+        assert!(names.contains(&"codex-command-runner.exe"));
+        assert_eq!(
+            extracted
+                .helpers
+                .iter()
+                .find(|h| h.file_name == "codex-windows-sandbox-setup.exe")
+                .map(|h| h.bytes.as_slice()),
+            Some(b"SETUP".as_slice())
+        );
+        assert_eq!(
+            extracted
+                .helpers
+                .iter()
+                .find(|h| h.file_name == "codex-command-runner.exe")
+                .map(|h| h.bytes.as_slice()),
+            Some(b"RUNNER".as_slice())
+        );
+    }
+
+    #[test]
+    fn extract_windows_codex_zip_requires_main_binary() {
+        let zip_bytes = make_test_zip(&[("codex-windows-sandbox-setup.exe", b"SETUP")]);
+        let err = extract_windows_codex_zip(&zip_bytes, "x86_64-pc-windows-msvc")
+            .expect_err("missing main binary");
+        assert!(err.contains("codex-x86_64-pc-windows-msvc.exe"));
+    }
+
+    #[test]
+    fn extract_windows_codex_zip_tolerates_missing_helpers() {
+        let zip_bytes = make_test_zip(&[("codex-x86_64-pc-windows-msvc.exe", b"MAIN")]);
+        let extracted =
+            extract_windows_codex_zip(&zip_bytes, "x86_64-pc-windows-msvc").expect("extract");
+        assert_eq!(extracted.main_binary, b"MAIN");
+        assert!(extracted.helpers.is_empty());
+    }
 
     #[test]
     fn codex_auth_paths_prefer_wsl_home_when_wsl_binary_is_unix_path() {

@@ -3,6 +3,7 @@ import { render, screen } from '@/test/test-utils'
 import { OpenInModal } from './OpenInModal'
 
 const localBackendState = vi.hoisted(() => ({ value: true }))
+const nativeOpenAllowedState = vi.hoisted(() => ({ value: false }))
 
 const mocks = vi.hoisted(() => ({
   setOpenInModalOpen: vi.fn(),
@@ -78,6 +79,9 @@ vi.mock('@/services/preferences', () => ({
 vi.mock('@/lib/environment', () => ({
   isLocalBackend: () => localBackendState.value,
   isNativeApp: () => localBackendState.value,
+  canOpenNativeApps: () =>
+    localBackendState.value || nativeOpenAllowedState.value,
+  isNativeOpenAllowed: () => nativeOpenAllowedState.value,
 }))
 
 vi.mock('@/lib/platform', () => ({
@@ -159,10 +163,12 @@ describe('OpenInModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localBackendState.value = true
+    nativeOpenAllowedState.value = false
   })
 
-  it('hides Finder/editor/terminal in browser/headless mode', async () => {
+  it('hides Finder/editor/terminal in browser/headless mode without native open', async () => {
     localBackendState.value = false
+    nativeOpenAllowedState.value = false
 
     render(<OpenInModal />)
 
@@ -172,9 +178,22 @@ describe('OpenInModal', () => {
     expect(screen.queryByText('Ghostty')).not.toBeInTheDocument()
   })
 
-  it('hides Finder/editor/terminal on remote connections', async () => {
-    // Native shell with a remote Jean backend: local apps target the wrong machine.
+  it('shows Finder/editor/terminal when the backend allows native open', async () => {
+    // Browser or remote client against a WSL/--allow-native-open headless server.
     localBackendState.value = false
+    nativeOpenAllowedState.value = true
+
+    render(<OpenInModal />)
+
+    expect(await screen.findByText('Zed')).toBeInTheDocument()
+    expect(screen.getByText('Finder')).toBeInTheDocument()
+    expect(screen.getByText('Ghostty')).toBeInTheDocument()
+  })
+
+  it('hides Finder/editor/terminal on remote connections without native open', async () => {
+    // Native shell with a remote Jean backend that does not allow native open.
+    localBackendState.value = false
+    nativeOpenAllowedState.value = false
 
     render(<OpenInModal />)
 

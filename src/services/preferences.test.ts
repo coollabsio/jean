@@ -324,6 +324,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -482,6 +485,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -619,6 +625,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -749,6 +758,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -880,6 +892,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -1053,6 +1068,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -1182,6 +1200,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 

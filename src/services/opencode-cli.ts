@@ -166,6 +166,29 @@ export function useAvailableOpencodeModels(options?: { enabled?: boolean }) {
   })
 }
 
+/**
+ * Force-refresh OpenCode models from the CLI (`opencode models --refresh`).
+ * Updates the shared models query cache on success.
+ */
+export function useRefreshOpencodeModels() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (): Promise<string[]> => {
+      if (!isTauri()) return []
+      try {
+        return await invoke<string[]>('refresh_opencode_models')
+      } catch (error) {
+        logger.error('Failed to refresh OpenCode models', { error })
+        throw error
+      }
+    },
+    onSuccess: models => {
+      queryClient.setQueryData(opencodeCliQueryKeys.models(), models)
+    },
+  })
+}
+
 export function useInstallOpencodeCli() {
   const queryClient = useQueryClient()
   return useMutation({

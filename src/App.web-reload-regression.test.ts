@@ -13,8 +13,10 @@ describe('web reload recovery UI', () => {
       /captureWebReloadState\(\)[\s\S]*?window\.location\.reload\(\)/
     )
     expect(source).toContain(
-      'return <WebLoadingScreen label="Loading Jean..." />'
+      '<WebLoadingScreen label="Loading Jean..." />'
     )
+    // Preload path may also mount QuitConfirmationDialog so X/quit still works
+    expect(source).toContain('QuitConfirmationDialog')
     expect(source).not.toContain('WebReloadingOverlay')
   })
 })

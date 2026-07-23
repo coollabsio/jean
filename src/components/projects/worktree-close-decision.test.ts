@@ -59,14 +59,14 @@ describe('decideSessionMiddleClose', () => {
     ).toBe('delete')
   })
 
-  it('deletes without confirming when other sessions remain (non-empty)', () => {
+  it('confirms non-empty sessions even when other sessions remain (issue #56)', () => {
     expect(
       decideSessionMiddleClose({
         activeSessionCount: 3,
         sessionIsEmpty: false,
         confirmSessionClose: true,
       })
-    ).toBe('delete')
+    ).toBe('confirm')
   })
 
   it('deletes without confirming when other sessions remain (empty)', () => {
@@ -79,7 +79,7 @@ describe('decideSessionMiddleClose', () => {
     ).toBe('delete')
   })
 
-  it('treats an empty worktree (count 0) as the last session', () => {
+  it('confirms a non-empty session even when count is 0 (stale/empty list edge)', () => {
     expect(
       decideSessionMiddleClose({
         activeSessionCount: 0,
@@ -87,5 +87,15 @@ describe('decideSessionMiddleClose', () => {
         confirmSessionClose: true,
       })
     ).toBe('confirm')
+  })
+
+  it('deletes a non-empty non-last session when confirmation is disabled', () => {
+    expect(
+      decideSessionMiddleClose({
+        activeSessionCount: 3,
+        sessionIsEmpty: false,
+        confirmSessionClose: false,
+      })
+    ).toBe('delete')
   })
 })

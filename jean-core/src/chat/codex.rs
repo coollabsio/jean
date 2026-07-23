@@ -449,6 +449,55 @@ pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+/// Insert custom model_provider config for a Jean-managed Codex provider profile.
+/// Does not mutate the user's base ~/.codex/config.toml — per-thread/one-shot only.
+pub fn apply_codex_provider_to_config(
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    provider: &crate::CodexProviderProfile,
+) {
+    let provider_id = provider.provider_id.trim();
+    if provider_id.is_empty() {
+        return;
+    }
+
+    let mut provider_entry = serde_json::Map::new();
+    provider_entry.insert(
+        "name".to_string(),
+        serde_json::json!(if provider.name.trim().is_empty() {
+            provider_id
+        } else {
+            provider.name.trim()
+        }),
+    );
+    provider_entry.insert(
+        "base_url".to_string(),
+        serde_json::json!(provider.base_url.trim()),
+    );
+    if !provider.env_key.trim().is_empty() {
+        provider_entry.insert(
+            "env_key".to_string(),
+            serde_json::json!(provider.env_key.trim()),
+        );
+    }
+    if let Some(wire) = provider
+        .wire_api
+        .as_deref()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+    {
+        provider_entry.insert("wire_api".to_string(), serde_json::json!(wire));
+    }
+
+    config.insert(
+        "model_provider".to_string(),
+        serde_json::json!(provider_id),
+    );
+    config.insert(
+        "model_providers".to_string(),
+        serde_json::json!({ provider_id: provider_entry }),
+    );
+}
+
 /// Build JSON-RPC params for `thread/start`.
 #[allow(clippy::too_many_arguments)]
 pub fn build_thread_start_params(
@@ -460,6 +509,7 @@ pub fn build_thread_start_params(
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
     model_verbosity: Option<&str>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "cwd": working_dir.to_string_lossy(),
@@ -471,8 +521,9 @@ pub fn build_thread_start_params(
     if let Some(m) = model {
         let (actual_model, is_fast) = split_fast_model(m);
         log::info!(
-            "Codex thread params: model={actual_model}, fast={is_fast}, mode={:?}",
-            execution_mode
+            "Codex thread params: model={actual_model}, fast={is_fast}, mode={:?}, provider={:?}",
+            execution_mode,
+            codex_provider.map(|p| p.provider_id.as_str())
         );
         params["model"] = serde_json::json!(actual_model);
         if is_fast {
@@ -547,6 +598,10 @@ pub fn build_thread_start_params(
         }
     }
 
+    if let Some(provider) = codex_provider {
+        apply_codex_provider_to_config(&mut config, provider);
+    }
+
     if !config.is_empty() {
         params["config"] = serde_json::Value::Object(config);
     }
@@ -578,40 +633,56 @@ pub fn build_turn_start_params(
         params["effort"] = serde_json::json!(effort);
     }
 
-    // Sandbox policy — grant read access to add_dirs (pasted files, contexts, etc.)
-    // in ALL modes, and writable roots only in build mode.
-    // Also include git metadata dirs so worktree commits work (issue #280).
+    // Sandbox + approval policy — per-turn overrides apply to this turn and
+    // subsequent turns (Codex app-server schema). Keep these aligned with the
+    // thread-level settings from `build_thread_start_params`.
+    //
+    // Grant writable roots only in build mode (plus git metadata dirs so
+    // worktree commits work — issue #280).
     // In yolo mode, keep true danger-full-access. A per-turn sandboxPolicy
     // overrides the thread-level `sandbox`, so using workspaceWrite here would
     // accidentally re-sandbox yolo turns and break tools such as Playwright on
-    // macOS.
+    // macOS (issue #328 / PR #362).
     let mode = execution_mode.unwrap_or("plan");
-    if mode == "yolo" {
-        params["sandboxPolicy"] = serde_json::json!({
-            "type": "dangerFullAccess",
-        });
-    } else {
-        let is_writable = mode == "build";
-        let writable_roots: Vec<serde_json::Value> = if is_writable {
-            let mut roots = vec![serde_json::json!(working_dir.to_string_lossy())];
+    match mode {
+        "yolo" => {
+            params["approvalPolicy"] = serde_json::json!("never");
+            params["sandboxPolicy"] = serde_json::json!({
+                "type": "dangerFullAccess",
+            });
+        }
+        "build" => {
+            params["approvalPolicy"] = serde_json::json!({
+                "granular": {
+                    "mcp_elicitations": false,
+                    "sandbox_approval": true,
+                    "rules": true,
+                    "request_permissions": true,
+                }
+            });
+            let mut writable_roots = vec![serde_json::json!(working_dir.to_string_lossy())];
             for dir in add_dirs {
-                roots.push(serde_json::json!(dir));
+                writable_roots.push(serde_json::json!(dir));
             }
             for dir in git_writable_roots {
-                roots.push(serde_json::json!(dir));
+                writable_roots.push(serde_json::json!(dir));
             }
-            roots
-        } else {
-            vec![]
-        };
-        params["sandboxPolicy"] = serde_json::json!({
-            "type": if is_writable { "workspaceWrite" } else { "readOnly" },
-            "writableRoots": writable_roots,
-            "readOnlyAccess": { "type": "fullAccess" },
-            "networkAccess": true,
-            "excludeTmpdirEnvVar": false,
-            "excludeSlashTmp": false,
-        });
+            params["sandboxPolicy"] = serde_json::json!({
+                "type": "workspaceWrite",
+                "writableRoots": writable_roots,
+                "networkAccess": true,
+                "excludeTmpdirEnvVar": false,
+                "excludeSlashTmp": false,
+            });
+        }
+        // "plan" or default: read-only, never ask for approvals
+        _ => {
+            params["approvalPolicy"] = serde_json::json!("never");
+            params["sandboxPolicy"] = serde_json::json!({
+                "type": "readOnly",
+                "networkAccess": true,
+            });
+        }
     }
 
     // Override cwd per turn
@@ -677,15 +748,22 @@ pub fn execute_codex_via_server(
     base_instructions_content: Option<&str>,
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
 
     let is_plan_mode = execution_mode.unwrap_or("plan") == "plan";
     let is_build_mode = execution_mode.unwrap_or("plan") == "build";
+    let is_yolo_mode = execution_mode.unwrap_or("plan") == "yolo";
     let model_verbosity = resolve_model_verbosity(app);
 
+    // Mid-turn Approve (yolo) and pure yolo turns both auto-accept residual
+    // command/permission prompts (issue #328).
+    super::registry::set_codex_yolo_auto_approve(session_id, is_yolo_mode);
+
     log::debug!(
-        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, verbosity={model_verbosity}, resume={}",
+        "Codex server turn: session={session_id}, model={model:?}, mode={execution_mode:?}, effort={reasoning_effort:?}, verbosity={model_verbosity}, provider={:?}, resume={}",
+        codex_provider.map(|p| p.provider_id.as_str()),
         existing_thread_id.is_some()
     );
 
@@ -707,6 +785,7 @@ pub fn execute_codex_via_server(
                 multi_agent_enabled,
                 max_agent_threads,
                 Some(model_verbosity),
+                codex_provider,
             );
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
@@ -737,6 +816,7 @@ pub fn execute_codex_via_server(
                         multi_agent_enabled,
                         max_agent_threads,
                         Some(model_verbosity),
+                        codex_provider,
                     )
                 }
             }
@@ -750,6 +830,7 @@ pub fn execute_codex_via_server(
                 multi_agent_enabled,
                 max_agent_threads,
                 Some(model_verbosity),
+                codex_provider,
             )
         }
     })() {
@@ -828,6 +909,7 @@ pub fn execute_codex_via_server(
         output_file,
         is_plan_mode,
         is_build_mode,
+        is_yolo_mode,
         &event_rx,
         None,
         None,
@@ -1220,6 +1302,8 @@ pub fn resume_codex_after_crash(
                 });
                 let is_plan_mode = exec_mode.as_deref() == Some("plan");
                 let is_build_mode = exec_mode.as_deref() == Some("build");
+                let is_yolo_mode = exec_mode.as_deref() == Some("yolo");
+                super::registry::set_codex_yolo_auto_approve(session_id, is_yolo_mode);
 
                 super::increment_tailer_count();
                 let response = process_turn_events(
@@ -1231,6 +1315,7 @@ pub fn resume_codex_after_crash(
                     &output_file,
                     is_plan_mode,
                     is_build_mode,
+                    is_yolo_mode,
                     &event_rx,
                     Some(std::time::Duration::from_secs(15)),
                     codex_turn_id,
@@ -1424,6 +1509,7 @@ fn start_new_thread(
     multi_agent_enabled: bool,
     max_agent_threads: Option<u32>,
     model_verbosity: Option<&str>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
     use super::codex_server;
 
@@ -1436,6 +1522,7 @@ fn start_new_thread(
         multi_agent_enabled,
         max_agent_threads,
         model_verbosity,
+        codex_provider,
     );
 
     let result = codex_server::send_request("thread/start", params)?;
@@ -1516,6 +1603,7 @@ fn process_turn_events(
     output_file: &std::path::Path,
     is_plan_mode: bool,
     is_build_mode: bool,
+    is_yolo_mode: bool,
     event_rx: &std::sync::mpsc::Receiver<super::codex_server::ServerEvent>,
     status_poll_interval: Option<std::time::Duration>,
     recovery_turn_id: Option<&str>,
@@ -1763,6 +1851,7 @@ fn process_turn_events(
                     &params,
                     is_build_mode,
                     is_plan_mode,
+                    is_yolo_mode,
                 );
             }
             ServerEvent::ServerDied => {
@@ -2467,8 +2556,165 @@ fn normalize_item_types(item: &serde_json::Value) -> serde_json::Value {
         if let Some(agent_path) = obj.remove("agentPath") {
             obj.insert("agent_path".to_string(), agent_path);
         }
+        // image_generation fields
+        if let Some(revised) = obj.remove("revisedPrompt") {
+            obj.insert("revised_prompt".to_string(), revised);
+        }
+        if let Some(saved) = obj.remove("savedPath") {
+            obj.insert("saved_path".to_string(), saved);
+        }
     }
     item
+}
+
+/// Display name for Codex informational thread items (web search, image tools, etc.).
+fn informational_tool_name(item_type: &str) -> Option<&'static str> {
+    match item_type {
+        "web_search" => Some("CodexWebSearch"),
+        "image_generation" => Some("CodexImageGeneration"),
+        "image_view" => Some("CodexImageView"),
+        "context_compaction" => Some("CodexContextCompaction"),
+        _ => None,
+    }
+}
+
+/// Build a UI-friendly input object for Codex informational items.
+///
+/// Codex app-server items store payload fields at the top level (`query`, `path`,
+/// `action`, `results`, …) rather than under a nested `arguments` object. We
+/// strip transport metadata (`id`/`type`) so the chat UI can show useful detail
+/// instead of a blank row with output `"completed"`.
+fn informational_tool_input(item_type: &str, item: &serde_json::Value) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    match item_type {
+        "web_search" => {
+            if let Some(query) = item.get("query") {
+                map.insert("query".to_string(), query.clone());
+            }
+            if let Some(action) = item.get("action") {
+                if !action.is_null() {
+                    map.insert("action".to_string(), action.clone());
+                }
+            }
+            if let Some(results) = item.get("results") {
+                if !results.is_null() {
+                    map.insert("results".to_string(), results.clone());
+                }
+            }
+        }
+        "image_view" => {
+            if let Some(path) = item.get("path") {
+                map.insert("path".to_string(), path.clone());
+            }
+        }
+        "image_generation" => {
+            for (src, dst) in [
+                ("prompt", "prompt"),
+                ("status", "status"),
+                ("result", "result"),
+                ("revised_prompt", "revised_prompt"),
+                ("revisedPrompt", "revised_prompt"),
+                ("saved_path", "saved_path"),
+                ("savedPath", "saved_path"),
+            ] {
+                if let Some(value) = item.get(src) {
+                    if !value.is_null() {
+                        map.insert(dst.to_string(), value.clone());
+                    }
+                }
+            }
+        }
+        "context_compaction" => {
+            if let Some(summary) = item.get("summary") {
+                if !summary.is_null() {
+                    map.insert("summary".to_string(), summary.clone());
+                }
+            }
+        }
+        _ => return item.clone(),
+    }
+    serde_json::Value::Object(map)
+}
+
+/// Format a human-readable tool output for Codex informational items.
+/// Prefer structured fields (`results`, `path`, …) over the useless `"completed"`
+/// placeholder that previously leaked into the UI.
+fn informational_tool_output(item_type: &str, item: &serde_json::Value) -> String {
+    match item_type {
+        "web_search" => {
+            if let Some(results) = item.get("results") {
+                if !results.is_null() {
+                    if let Some(s) = results.as_str() {
+                        if !s.is_empty() {
+                            return s.to_string();
+                        }
+                    } else if let Ok(pretty) = serde_json::to_string_pretty(results) {
+                        if pretty != "null" && pretty != "[]" {
+                            return pretty;
+                        }
+                    }
+                }
+            }
+            // Fall back to a short action/query summary rather than "completed".
+            if let Some(action) = item.get("action").filter(|v| !v.is_null()) {
+                if let Some(url) = action.get("url").and_then(|v| v.as_str()) {
+                    if !url.is_empty() {
+                        return format!("Opened {url}");
+                    }
+                }
+                if let Some(pattern) = action.get("pattern").and_then(|v| v.as_str()) {
+                    if !pattern.is_empty() {
+                        return format!("Find in page: {pattern}");
+                    }
+                }
+            }
+            if let Some(query) = item.get("query").and_then(|v| v.as_str()) {
+                if !query.is_empty() {
+                    return format!("Searched: {query}");
+                }
+            }
+            String::new()
+        }
+        "image_view" => item
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        "image_generation" => {
+            if let Some(path) = item
+                .get("saved_path")
+                .or_else(|| item.get("savedPath"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                return path.to_string();
+            }
+            if let Some(result) = item.get("result") {
+                if let Some(s) = result.as_str() {
+                    if !s.is_empty() {
+                        return s.to_string();
+                    }
+                } else if let Ok(pretty) = serde_json::to_string_pretty(result) {
+                    if pretty != "null" {
+                        return pretty;
+                    }
+                }
+            }
+            item.get("status")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        }
+        "context_compaction" => item
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Context compacted".to_string()),
+        _ => String::new(),
+    }
 }
 
 fn sub_agent_activity_tool(item: &serde_json::Value) -> Option<(&'static str, serde_json::Value)> {
@@ -2507,6 +2753,34 @@ fn sub_agent_activity_tool(item: &serde_json::Value) -> Option<(&'static str, se
     Some((tool_name, input))
 }
 
+/// Whether Codex command/permission approvals should be auto-accepted for this session.
+///
+/// True when:
+/// - the current turn started in yolo mode, or
+/// - the user chose Approve (yolo) / acceptForSession mid-turn (in-memory flag), or
+/// - session metadata already reflects selected_execution_mode = yolo
+///
+/// Mid-turn mode switches cannot reconfigure the active Codex turn sandbox, so
+/// Jean must auto-accept residual prompts itself (issue #328).
+fn should_auto_approve_codex_commands(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    is_yolo_mode: bool,
+) -> bool {
+    if is_yolo_mode || super::registry::is_codex_yolo_auto_approve(session_id) {
+        return true;
+    }
+
+    match super::storage::load_metadata(app, session_id) {
+        Ok(Some(meta)) if meta.selected_execution_mode.as_deref() == Some("yolo") => {
+            // Cache for subsequent prompts in this turn.
+            super::registry::set_codex_yolo_auto_approve(session_id, true);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Handle an approval request from the app-server.
 fn handle_approval_request(
     app: &tauri::AppHandle,
@@ -2517,6 +2791,7 @@ fn handle_approval_request(
     params: &serde_json::Value,
     _is_build_mode: bool,
     is_plan_mode: bool,
+    is_yolo_mode: bool,
 ) {
     let emit_connection_error = || {
         let _ = app.emit_all(
@@ -2597,6 +2872,25 @@ fn handle_approval_request(
                 return;
             }
 
+            // Yolo / Approve (yolo): auto-accept residual sandbox/command prompts,
+            // including "command failed; retry without sandbox?" (issue #328).
+            if should_auto_approve_codex_commands(app, session_id, is_yolo_mode) {
+                log::trace!(
+                    "Auto-accepting command approval in yolo mode (rpc_id={rpc_id}): {command}"
+                );
+                if let Err(e) = super::codex_server::send_response(
+                    rpc_id,
+                    // acceptForSession caches similar prompts for the Codex thread
+                    serde_json::json!({"decision": "acceptForSession"}),
+                ) {
+                    log::error!(
+                        "Failed to auto-accept command approval in yolo mode (rpc_id={rpc_id}): {e}"
+                    );
+                    emit_connection_error();
+                }
+                return;
+            }
+
             log::trace!("Command approval requested (rpc_id={rpc_id}): {command}");
 
             let request = CodexCommandApprovalRequest {
@@ -2666,6 +2960,29 @@ fn handle_approval_request(
                 ) {
                     log::error!(
                         "Failed to deny permissions request in plan mode (rpc_id={rpc_id}): {e}"
+                    );
+                    emit_connection_error();
+                }
+                return;
+            }
+
+            if should_auto_approve_codex_commands(app, session_id, is_yolo_mode) {
+                let permissions = params
+                    .get("permissions")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                log::trace!(
+                    "Auto-granting permissions request in yolo mode (rpc_id={rpc_id})"
+                );
+                if let Err(e) = super::codex_server::send_response(
+                    rpc_id,
+                    serde_json::json!({
+                        "permissions": permissions,
+                        "scope": "session",
+                    }),
+                ) {
+                    log::error!(
+                        "Failed to auto-grant permissions in yolo mode (rpc_id={rpc_id}): {e}"
                     );
                     emit_connection_error();
                 }
@@ -3253,19 +3570,15 @@ fn process_codex_event(
                 }
                 // Informational tool-like events — surface as tool calls in the UI
                 "web_search" | "image_generation" | "image_view" | "context_compaction" => {
-                    let tool_name = match item_type {
-                        "web_search" => "CodexWebSearch",
-                        "image_generation" => "CodexImageGeneration",
-                        "image_view" => "CodexImageView",
-                        "context_compaction" => "CodexContextCompaction",
-                        _ => unreachable!(),
-                    };
+                    let tool_name = informational_tool_name(item_type).unwrap_or("CodexTool");
                     let tool_id = if item_id.is_empty() {
                         uuid::Uuid::new_v4().to_string()
                     } else {
                         item_id.to_string()
                     };
-                    let input = item.clone();
+                    // Extract UI-facing fields (query/path/action) rather than the
+                    // raw item envelope which only has type/id until completion.
+                    let input = informational_tool_input(item_type, item);
                     tool_calls.push(ToolCall {
                         id: tool_id.clone(),
                         name: tool_name.to_string(),
@@ -3521,30 +3834,51 @@ fn process_codex_event(
                         );
                     }
                 }
-                // Informational tool-like events — populate output for UI
+                // Informational tool-like events — enrich input + meaningful output.
+                // These items put payload on the item itself (query/results/path), not
+                // under output/result — the old "completed" fallback blanked the UI.
                 "web_search" | "image_generation" | "image_view" | "context_compaction" => {
-                    let output = if item_type == "context_compaction" {
-                        item.get("summary")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Context compacted")
-                            .to_string()
-                    } else {
-                        item.get("output")
-                            .or_else(|| item.get("result"))
-                            .map(|v| {
-                                if let Some(s) = v.as_str() {
-                                    s.to_string()
-                                } else {
-                                    serde_json::to_string(v).unwrap_or_default()
-                                }
-                            })
-                            .unwrap_or_else(|| "completed".to_string())
-                    };
-                    let tool_id = pending_tool_ids.remove(item_id).unwrap_or_default();
-                    if !tool_id.is_empty() {
-                        if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
+                    let input = informational_tool_input(item_type, item);
+                    let output = informational_tool_output(item_type, item);
+                    let tool_name = informational_tool_name(item_type).unwrap_or("CodexTool");
+                    let tool_id = pending_tool_ids.remove(item_id).unwrap_or_else(|| {
+                        if item_id.is_empty() {
+                            uuid::Uuid::new_v4().to_string()
+                        } else {
+                            item_id.to_string()
+                        }
+                    });
+                    if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
+                        tc.input = input.clone();
+                        if !output.is_empty() {
                             tc.output = Some(output.clone());
                         }
+                    } else {
+                        // Completion without a prior start (recovery / missed start).
+                        tool_calls.push(ToolCall {
+                            id: tool_id.clone(),
+                            name: tool_name.to_string(),
+                            input: input.clone(),
+                            output: (!output.is_empty()).then_some(output.clone()),
+                            parent_tool_use_id: None,
+                        });
+                        content_blocks.push(ContentBlock::ToolUse {
+                            tool_call_id: tool_id.clone(),
+                        });
+                    }
+                    // Re-emit tool_use so live UI picks up enriched input (query/results).
+                    let _ = app.emit_all(
+                        "chat:tool_use",
+                        &ToolUseEvent {
+                            session_id: session_id.to_string(),
+                            worktree_id: worktree_id.to_string(),
+                            id: tool_id.clone(),
+                            name: tool_name.to_string(),
+                            input,
+                            parent_tool_use_id: None,
+                        },
+                    );
+                    if !output.is_empty() {
                         let _ = app.emit_all(
                             "chat:tool_result",
                             &ToolResultEvent {
@@ -4012,6 +4346,30 @@ pub fn parse_codex_run_to_message(
                             pending_tool_ids.insert(item_id.to_string(), tool_id);
                         }
                     }
+                    // Informational items (web search, image tools) — history path
+                    "web_search" | "image_generation" | "image_view" | "context_compaction" => {
+                        let tool_name =
+                            informational_tool_name(item_type).unwrap_or("CodexTool");
+                        let tool_id = if item_id.is_empty() {
+                            Uuid::new_v4().to_string()
+                        } else {
+                            item_id.to_string()
+                        };
+                        let input = informational_tool_input(item_type, item);
+                        tool_calls.push(ToolCall {
+                            id: tool_id.clone(),
+                            name: tool_name.to_string(),
+                            input,
+                            output: None,
+                            parent_tool_use_id: None,
+                        });
+                        content_blocks.push(ContentBlock::ToolUse {
+                            tool_call_id: tool_id.clone(),
+                        });
+                        if !item_id.is_empty() {
+                            pending_tool_ids.insert(item_id.to_string(), tool_id);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -4217,6 +4575,37 @@ pub fn parse_codex_run_to_message(
                             });
                         }
                     }
+                    // Informational items — enrich input + meaningful output (history)
+                    "web_search" | "image_generation" | "image_view" | "context_compaction" => {
+                        let input = informational_tool_input(item_type, item);
+                        let output = informational_tool_output(item_type, item);
+                        let tool_name =
+                            informational_tool_name(item_type).unwrap_or("CodexTool");
+                        let tool_id = pending_tool_ids.remove(item_id).unwrap_or_else(|| {
+                            if item_id.is_empty() {
+                                Uuid::new_v4().to_string()
+                            } else {
+                                item_id.to_string()
+                            }
+                        });
+                        if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_id) {
+                            tc.input = input;
+                            if !output.is_empty() {
+                                tc.output = Some(output);
+                            }
+                        } else {
+                            tool_calls.push(ToolCall {
+                                id: tool_id.clone(),
+                                name: tool_name.to_string(),
+                                input,
+                                output: (!output.is_empty()).then_some(output),
+                                parent_tool_use_id: None,
+                            });
+                            content_blocks.push(ContentBlock::ToolUse {
+                                tool_call_id: tool_id,
+                            });
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -4370,6 +4759,7 @@ pub fn execute_one_shot_codex(
         is_fast,
         &schema_arg,
         working_dir_arg.as_deref(),
+        None, // one-shot callers can opt into custom providers later via prefs
     ));
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -4545,6 +4935,7 @@ fn build_one_shot_codex_args(
     is_fast: bool,
     schema_file: &std::path::Path,
     working_dir: Option<&std::path::Path>,
+    codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Vec<std::ffi::OsString> {
     let mut args = vec![
         "exec".into(),
@@ -4561,6 +4952,52 @@ fn build_one_shot_codex_args(
     if is_fast {
         args.push("-c".into());
         args.push("service_tier=\"fast\"".into());
+    }
+    if let Some(provider) = codex_provider {
+        let provider_id = provider.provider_id.trim();
+        if !provider_id.is_empty() {
+            args.push("-c".into());
+            args.push(format!("model_provider=\"{provider_id}\"").into());
+            // Nested model_providers table via dotted -c keys
+            let display_name = if provider.name.trim().is_empty() {
+                provider_id
+            } else {
+                provider.name.trim()
+            };
+            args.push("-c".into());
+            args.push(
+                format!("model_providers.{provider_id}.name=\"{display_name}\"").into(),
+            );
+            args.push("-c".into());
+            args.push(
+                format!(
+                    "model_providers.{provider_id}.base_url=\"{}\"",
+                    provider.base_url.trim()
+                )
+                .into(),
+            );
+            if !provider.env_key.trim().is_empty() {
+                args.push("-c".into());
+                args.push(
+                    format!(
+                        "model_providers.{provider_id}.env_key=\"{}\"",
+                        provider.env_key.trim()
+                    )
+                    .into(),
+                );
+            }
+            if let Some(wire) = provider
+                .wire_api
+                .as_deref()
+                .map(str::trim)
+                .filter(|w| !w.is_empty())
+            {
+                args.push("-c".into());
+                args.push(
+                    format!("model_providers.{provider_id}.wire_api=\"{wire}\"").into(),
+                );
+            }
+        }
     }
     if let Some(dir) = working_dir {
         args.push("--cd".into());
@@ -4940,6 +5377,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.4");
         assert_eq!(params["serviceTier"], "fast");
@@ -4954,6 +5392,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
             None,
         );
@@ -5014,7 +5453,7 @@ mod tests {
         let schema_file = std::path::Path::new("/tmp/jean-codex-schema.json");
         let working_dir = std::path::Path::new("/tmp/project");
 
-        let args = build_one_shot_codex_args("gpt-5.4", false, schema_file, Some(working_dir));
+        let args = build_one_shot_codex_args("gpt-5.4", false, schema_file, Some(working_dir), None);
 
         assert!(args.windows(2).any(|window| {
             window
@@ -5048,6 +5487,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
 
         assert_eq!(params["config"]["model_verbosity"], "medium");
@@ -5064,6 +5504,7 @@ mod tests {
             false,
             None,
             Some("high"),
+            None,
         );
 
         assert_eq!(params["config"]["model_verbosity"], "high");
@@ -5086,6 +5527,7 @@ mod tests {
             false,
             std::path::Path::new("/tmp/jean-codex-schema.json"),
             Some(std::path::Path::new("/tmp/project")),
+            None,
         );
 
         assert!(args.windows(2).any(|window| {
@@ -5108,6 +5550,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["model"], "gpt-5.3");
         assert!(params.get("serviceTier").is_none());
@@ -5122,6 +5565,7 @@ mod tests {
             false,
             None,
             false,
+            None,
             None,
             None,
         );
@@ -5143,6 +5587,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["approvalPolicy"], "never");
         assert_eq!(params["sandbox"], "read-only");
@@ -5161,9 +5606,10 @@ mod tests {
         );
         let policy = &params["sandboxPolicy"];
         assert_eq!(policy["type"], "readOnly");
-        assert_eq!(policy["writableRoots"].as_array().unwrap().len(), 0);
-        assert_eq!(policy["readOnlyAccess"]["type"], "fullAccess");
         assert_eq!(policy["networkAccess"], true);
+        assert_eq!(params["approvalPolicy"], "never");
+        assert!(policy.get("writableRoots").is_none());
+        assert!(policy.get("readOnlyAccess").is_none());
     }
 
     #[test]
@@ -5183,7 +5629,11 @@ mod tests {
             policy["writableRoots"],
             serde_json::json!(["/tmp/worktree", "/tmp/context", "/tmp/git"])
         );
-        assert_eq!(policy["readOnlyAccess"]["type"], "fullAccess");
+        assert_eq!(policy["networkAccess"], true);
+        assert!(policy.get("readOnlyAccess").is_none());
+        let approval = &params["approvalPolicy"]["granular"];
+        assert_eq!(approval["sandbox_approval"], true);
+        assert_eq!(approval["mcp_elicitations"], false);
     }
 
     #[test]
@@ -5197,8 +5647,78 @@ mod tests {
             false,
             None,
             None,
+            None,
         );
         assert_eq!(params["approvalPolicy"], "never");
+    }
+
+    #[test]
+    fn custom_codex_provider_injects_model_provider_config() {
+        let provider = crate::CodexProviderProfile {
+            name: "OpenRouter".to_string(),
+            provider_id: "openrouter".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            env_key: "OPENROUTER_API_KEY".to_string(),
+            wire_api: Some("responses".to_string()),
+        };
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.4"),
+            Some("plan"),
+            false,
+            None,
+            false,
+            None,
+            None,
+            Some(&provider),
+        );
+        assert_eq!(params["config"]["model_provider"], "openrouter");
+        assert_eq!(
+            params["config"]["model_providers"]["openrouter"]["base_url"],
+            "https://openrouter.ai/api/v1"
+        );
+        assert_eq!(
+            params["config"]["model_providers"]["openrouter"]["env_key"],
+            "OPENROUTER_API_KEY"
+        );
+        assert_eq!(
+            params["config"]["model_providers"]["openrouter"]["wire_api"],
+            "responses"
+        );
+    }
+
+    #[test]
+    fn one_shot_codex_args_include_custom_provider() {
+        let provider = crate::CodexProviderProfile {
+            name: "OpenRouter".to_string(),
+            provider_id: "openrouter".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            env_key: "OPENROUTER_API_KEY".to_string(),
+            wire_api: Some("responses".to_string()),
+        };
+        let args = build_one_shot_codex_args(
+            "gpt-5.4",
+            false,
+            std::path::Path::new("/tmp/schema.json"),
+            Some(std::path::Path::new("/tmp/project")),
+            Some(&provider),
+        );
+        assert!(args.windows(2).any(|window| {
+            window
+                == [
+                    std::ffi::OsString::from("-c"),
+                    std::ffi::OsString::from("model_provider=\"openrouter\""),
+                ]
+        }));
+        assert!(args.windows(2).any(|window| {
+            window
+                == [
+                    std::ffi::OsString::from("-c"),
+                    std::ffi::OsString::from(
+                        "model_providers.openrouter.base_url=\"https://openrouter.ai/api/v1\"",
+                    ),
+                ]
+        }));
     }
 
     #[test]
@@ -5214,6 +5734,7 @@ mod tests {
         );
 
         assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert_eq!(params["approvalPolicy"], "never");
     }
 
     #[test]
@@ -5229,6 +5750,15 @@ mod tests {
         );
 
         assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert_eq!(params["approvalPolicy"], "never");
+    }
+
+    #[test]
+    fn codex_yolo_auto_approve_flag_tracks_session() {
+        super::super::registry::set_codex_yolo_auto_approve("sess-328", true);
+        assert!(super::super::registry::is_codex_yolo_auto_approve("sess-328"));
+        super::super::registry::set_codex_yolo_auto_approve("sess-328", false);
+        assert!(!super::super::registry::is_codex_yolo_auto_approve("sess-328"));
     }
 
     #[test]
@@ -5716,6 +6246,156 @@ mod tests {
             extract_codex_structured_output(output).unwrap(),
             r####"{"title":"Release notes","body":"### Fixes\n- Fixed session recovery."}"####
         );
+    }
+
+    #[test]
+    fn informational_tool_input_extracts_web_search_fields() {
+        let item = serde_json::json!({
+            "id": "ws-1",
+            "type": "web_search",
+            "query": "tauri v2 plugins",
+            "action": { "type": "search", "query": "tauri v2 plugins" },
+            "results": [
+                { "title": "Tauri docs", "url": "https://v2.tauri.app" }
+            ]
+        });
+        let input = informational_tool_input("web_search", &item);
+        assert_eq!(
+            input.get("query").and_then(|v| v.as_str()),
+            Some("tauri v2 plugins")
+        );
+        assert!(input.get("id").is_none());
+        assert!(input.get("type").is_none());
+        assert_eq!(
+            input
+                .get("action")
+                .and_then(|a| a.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("search")
+        );
+        assert!(input.get("results").and_then(|v| v.as_array()).is_some());
+    }
+
+    #[test]
+    fn informational_tool_output_prefers_results_over_completed() {
+        let item = serde_json::json!({
+            "id": "ws-1",
+            "type": "web_search",
+            "query": "rust serde",
+            "results": [{ "title": "serde.rs", "url": "https://serde.rs" }]
+        });
+        let output = informational_tool_output("web_search", &item);
+        assert!(output.contains("serde.rs"), "output was: {output}");
+        assert_ne!(output, "completed");
+    }
+
+    #[test]
+    fn informational_tool_output_image_view_uses_path() {
+        let item = serde_json::json!({
+            "id": "img-1",
+            "type": "image_view",
+            "path": "/tmp/screenshot.png"
+        });
+        let input = informational_tool_input("image_view", &item);
+        assert_eq!(
+            input.get("path").and_then(|v| v.as_str()),
+            Some("/tmp/screenshot.png")
+        );
+        assert_eq!(
+            informational_tool_output("image_view", &item),
+            "/tmp/screenshot.png"
+        );
+    }
+
+    #[test]
+    fn informational_tool_output_open_page_falls_back_to_url() {
+        let item = serde_json::json!({
+            "id": "ws-2",
+            "type": "web_search",
+            "query": "",
+            "action": { "type": "openPage", "url": "https://example.com/docs" }
+        });
+        let output = informational_tool_output("web_search", &item);
+        assert_eq!(output, "Opened https://example.com/docs");
+    }
+
+    #[test]
+    fn normalize_item_types_maps_web_search_and_image_fields() {
+        let raw = serde_json::json!({
+            "type": "imageGeneration",
+            "id": "ig-1",
+            "status": "completed",
+            "result": "ok",
+            "revisedPrompt": "a cat",
+            "savedPath": "/tmp/cat.png"
+        });
+        let normalized = normalize_item_types(&raw);
+        assert_eq!(
+            normalized.get("type").and_then(|v| v.as_str()),
+            Some("image_generation")
+        );
+        assert_eq!(
+            normalized.get("revised_prompt").and_then(|v| v.as_str()),
+            Some("a cat")
+        );
+        assert_eq!(
+            normalized.get("saved_path").and_then(|v| v.as_str()),
+            Some("/tmp/cat.png")
+        );
+    }
+
+    #[test]
+    fn parse_run_surfaces_web_search_query_and_results() {
+        let lines = vec![
+            r#"{"type":"item.started","item":{"id":"ws-1","type":"webSearch","query":"tauri plugins"}}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"ws-1","type":"webSearch","query":"tauri plugins","results":[{"title":"Docs","url":"https://v2.tauri.app"}]}}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"msg-1","type":"agentMessage","text":"Found docs."}}"#.to_string(),
+            r#"{"type":"turn.completed"}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-ws".to_string(),
+            user_message_id: "user-ws".to_string(),
+            user_message: "search".to_string(),
+            model: None,
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            backend: None,
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: RunStatus::Completed,
+            assistant_message_id: Some("assistant-ws".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+        };
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+        let web = message
+            .tool_calls
+            .iter()
+            .find(|tc| tc.name == "CodexWebSearch")
+            .expect("CodexWebSearch tool call");
+        assert_eq!(
+            web.input.get("query").and_then(|v| v.as_str()),
+            Some("tauri plugins")
+        );
+        assert!(
+            web.output
+                .as_deref()
+                .is_some_and(|o| o.contains("Docs") || o.contains("tauri")),
+            "output should include results, got: {:?}",
+            web.output
+        );
+        assert_ne!(web.output.as_deref(), Some("completed"));
     }
 }
 

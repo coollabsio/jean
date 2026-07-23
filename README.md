@@ -180,7 +180,8 @@ any IP/hostname to bind only that interface. Docker images are also published
 as `ghcr.io/coollabsio/jean-server`.
 
 See [docs/headless-server.md](docs/headless-server.md) for systemd details,
-reverse proxies, updates, native remote connections, and security notes.
+reverse proxies, updates, native remote connections (including Install via SSH
+from user + IP), and security notes.
 
 ## Contributing
 
