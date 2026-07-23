@@ -864,6 +864,8 @@ mod tests {
         assert!(prompt.contains("Claude AskUserQuestion"));
         assert!(prompt.contains("OpenCode question"));
         assert!(prompt.contains("Use a plain-text Unresolved Questions section only"));
+        assert!(prompt.contains("zero-context handoff"));
+        assert!(!prompt.contains("Make the plan extremely concise"));
         assert!(prompt.contains("Jean Worktree Policy"));
         assert!(prompt.contains("Do NOT create git worktrees manually"));
         assert!(prompt.contains("Jean MCP/tools"));
@@ -1902,7 +1904,7 @@ fn default_global_system_prompt() -> String {
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
 - For Codex specifically, when the current execution mode is plan: after the user answers native `request_user_input`/open questions, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.

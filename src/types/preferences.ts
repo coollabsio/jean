@@ -635,7 +635,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/\`--print\` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
 - For Codex specifically, when the current execution mode is plan: after the user answers native \`request_user_input\`/open questions, immediately call \`update_plan\`/emit \`CodexPlan\` again with the revised plan before any implementation.

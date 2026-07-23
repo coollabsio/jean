@@ -151,6 +151,58 @@ describe('resolvePlanContent', () => {
       source: 'steps',
     })
   })
+
+  it('prefers the richest body when multiple CodexPlan tools exist', () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'codex-plan-turn-1',
+        name: 'CodexPlan',
+        input: {
+          explanation: 'Plan created and ready for approval.',
+          steps: [{ step: 'Touch files', status: 'pending' }],
+        },
+      },
+      {
+        id: 'codex-plan-plan-1',
+        name: 'CodexPlan',
+        input: {
+          plan: 'Plan:\n- Rewrite the parser in codex.rs\n- Add merge tests for split plan tools\n- Verify YOLO handoff content',
+        },
+      },
+    ]
+
+    expect(resolvePlanContent({ toolCalls })).toEqual({
+      content:
+        'Plan:\n- Rewrite the parser in codex.rs\n- Add merge tests for split plan tools\n- Verify YOLO handoff content',
+      source: 'plan',
+    })
+  })
+
+  it('does not treat status-only explanation as authoritative plan content when assistant text is richer', () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'plan-1',
+        name: 'CodexPlan',
+        input: {
+          explanation: 'Plan created and ready for approval.',
+          steps: [{ step: 'Do the thing', status: 'pending' }],
+        },
+      },
+    ]
+
+    const detailed =
+      'Goal: rewrite plan extraction.\n\n1. Unify CodexPlan tool ids across live and history paths.\n2. Prefer richest plan body when tools split.\n3. Require handoff-quality plan prompts for Codex.\n4. Cover with unit tests for multi-tool resolution.'
+
+    expect(
+      resolvePlanContent({
+        toolCalls,
+        messageContent: detailed,
+      })
+    ).toEqual({
+      content: detailed,
+      source: 'message_text',
+    })
+  })
 })
 
 describe('isDuplicatePlanTextBlock', () => {

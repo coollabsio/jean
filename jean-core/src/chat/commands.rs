@@ -54,8 +54,18 @@ const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 - You are in PLAN MODE. Do not implement yet.
 - Inspect the project as needed, then present the plan with the native Codex plan tool (`update_plan` / `CodexPlan`) so Jean can show the approval UI.
 - Every plan-mode response that contains or revises a plan must use `update_plan` / `CodexPlan`; do not provide a plain-text-only plan.
-- If questions block the plan, prefer Codex `request_user_input`; after the user answers, call `update_plan` / `CodexPlan` again with the revised plan.
-- Do not call implementation tools or make file changes until the user approves the plan.";
+- If questions block the plan, prefer Codex `request_user_input`; after the user answers, call `update_plan` / `CodexPlan` again with the **full revised plan**, not only short step titles.
+- Do not call implementation tools or make file changes until the user approves the plan.
+
+### Plan quality (required for YOLO/Build handoff)
+
+Jean may hand this plan to a zero-context agent in a new worktree. Status lines like \"Plan created and ready for approval.\" are not a plan.
+
+- `update_plan` step titles are a short checklist only (a few words each is fine).
+- The authoritative plan body must be detailed enough to implement without re-scanning the repo or re-asking answered questions.
+- Include: goal/outcome, key decisions from the interview, concrete files/areas to touch, ordered implementation steps with enough approach detail, risks/edge cases, and how to verify.
+- Prefer a structured body (headings/bullets). Concise writing is good; incomplete handoff plans are not.
+- After answering questions, re-emit the full detailed body with `update_plan` / plan item text — never end on explanation-only or checklist-only content.";
 const DEFAULT_PARALLEL_EXECUTION_PROMPT: &str = r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
@@ -9824,6 +9834,10 @@ mod tests {
         assert!(plan_prompt.contains("update_plan"));
         assert!(plan_prompt.contains("CodexPlan"));
         assert!(plan_prompt.contains("approval UI"));
+        assert!(plan_prompt.contains("Plan quality"));
+        assert!(plan_prompt.contains("zero-context"));
+        assert!(plan_prompt.contains("Plan created and ready for approval"));
+        assert!(plan_prompt.contains("full revised plan"));
         assert!(!plan_prompt.contains("## Not Plan Mode"));
 
         let build_prompt = codex_default_global_system_prompt(Some("build"));
