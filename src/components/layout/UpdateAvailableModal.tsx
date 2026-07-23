@@ -8,13 +8,21 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/store/ui-store'
+import { isNativeApp } from '@/lib/environment'
 
 export function UpdateAvailableModal() {
   const version = useUIStore(state => state.updateModalVersion)
   const isOpen = version !== null
+  const native = isNativeApp()
 
   const handleUpdate = () => {
+    const targetVersion = version
     useUIStore.getState().setUpdateModalVersion(null)
+    // Keep sticky version so web/host apply can read it if the native
+    // pendingUpdateRef is empty.
+    if (targetVersion) {
+      useUIStore.getState().setPendingUpdateVersion(targetVersion)
+    }
     window.dispatchEvent(new Event('install-pending-update'))
   }
 
@@ -37,7 +45,9 @@ export function UpdateAvailableModal() {
             Update Available
           </DialogTitle>
           <DialogDescription>
-            Version {version} is ready to install.
+            {native
+              ? `Version ${version} is ready to install.`
+              : `Version ${version} is ready on the host Jean app. Updating will download and install there, then restart the host.`}
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-end gap-2 pt-2">

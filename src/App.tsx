@@ -14,7 +14,7 @@ import {
   usesWebSocketBackend,
   type InitialData,
 } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend, isNativeApp } from '@/lib/environment'
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
@@ -210,6 +210,7 @@ function App() {
 
       // Clear the pending indicator since we're installing now
       useUIStore.getState().setPendingUpdateVersion(null)
+      useUIStore.getState().setUpdateModalVersion(null)
       pendingUpdateRef.current = null
 
       try {
@@ -264,6 +265,30 @@ function App() {
     },
     []
   )
+
+  /** Native shell: run Tauri updater when a web client requests desktop install. */
+  const runNativeDesktopUpdateInstall = useCallback(async () => {
+    if (!isNativeApp()) return
+    try {
+      if (pendingUpdateRef.current) {
+        await installAppUpdate(pendingUpdateRef.current)
+        return
+      }
+      const { check } = await import('@tauri-apps/plugin-updater')
+      const update = await check()
+      if (!update) {
+        toast.success('You are running the latest version')
+        useUIStore.getState().setPendingUpdateVersion(null)
+        useUIStore.getState().setUpdateModalVersion(null)
+        return
+      }
+      pendingUpdateRef.current = update
+      await installAppUpdate(update)
+    } catch (error) {
+      logger.error('Host-requested desktop update failed', { error })
+      toast.error(`Update failed: ${String(error)}`, { duration: 8000 })
+    }
+  }, [installAppUpdate])
 
   // Seed TanStack Query cache and Zustand state from bulk initial data.
   const seedCache = useCallback(
@@ -1001,6 +1026,7 @@ function App() {
     })
 
     // Auto-updater logic - check for updates 5 seconds after app loads
+    // (native shell only; web clients use useServerUpdateCheck → host check)
     const checkForUpdates = async () => {
       if (!isNativeApp()) return
       // Don't re-show modal if user already dismissed an update
@@ -1021,11 +1047,23 @@ function App() {
       }
     }
 
-    // Listen for install trigger from title bar indicator
+    // Listen for install trigger from title bar indicator / modal
     const handleInstallPending = () => {
       if (pendingUpdateRef.current) {
-        installAppUpdate(pendingUpdateRef.current)
+        void installAppUpdate(pendingUpdateRef.current)
+        return
       }
+      // Web / remote: ask the host to install (desktop event or jean-server binary)
+      const version =
+        useUIStore.getState().pendingUpdateVersion ||
+        useUIStore.getState().updateModalVersion
+      if (!version) {
+        logger.warn('install-pending-update fired with no version or update object')
+        return
+      }
+      void import('@/hooks/useServerUpdateCheck').then(({ applyServerUpdate }) =>
+        applyServerUpdate(version)
+      )
     }
     window.addEventListener('install-pending-update', handleInstallPending)
 
@@ -1239,6 +1277,21 @@ function App() {
       window.removeEventListener('update-available', handleUpdateAvailable)
     }
   }, [installAppUpdate, webBackend])
+
+  // Web clients request desktop install via apply_server_update → this event.
+  // Only the *host* native shell should run Tauri's updater (not a remote client
+  // that happens to receive the same event over the WebSocket).
+  useEffect(() => {
+    if (!isNativeApp()) return
+    let unlisten: (() => void) | undefined
+    listen<{ version?: string }>('host:install-desktop-update', () => {
+      if (!isLocalBackend()) return
+      void runNativeDesktopUpdateInstall()
+    }).then(fn => {
+      unlisten = fn
+    })
+    return () => unlisten?.()
+  }, [runNativeDesktopUpdateInstall])
 
   // Show loading screen while preloading initial data (web view only)
   if (isPreloading) {
