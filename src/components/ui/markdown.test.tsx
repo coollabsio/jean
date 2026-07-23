@@ -80,10 +80,34 @@ describe('Markdown', () => {
     const orderedList = container.querySelector('ol')
     const unorderedList = container.querySelector('ul')
 
-    expect(orderedList?.className).toContain('pl-6')
+    // Ordered lists need pl-8 so two-digit markers ("10.") are not clipped by
+    // overflow-x-hidden ancestors (issue #542). Unordered bullets stay pl-6.
+    expect(orderedList?.className).toContain('pl-8')
     expect(orderedList?.className).not.toContain('ml-6')
+    expect(orderedList?.className).not.toMatch(/(?:^|\s)pl-6(?:\s|$)/)
     expect(unorderedList?.className).toContain('pl-6')
     expect(unorderedList?.className).not.toContain('ml-6')
+  })
+
+  it('uses a wide enough ordered-list gutter for double-digit markers (issue #542)', () => {
+    const md = Array.from(
+      { length: 12 },
+      (_, i) => `${i + 1}. Item ${i + 1}`
+    ).join('\n')
+
+    const { container } = render(
+      <div className="overflow-x-hidden">
+        <Markdown>{md}</Markdown>
+      </div>
+    )
+
+    const orderedList = container.querySelector('ol')
+
+    expect(orderedList?.className).toContain('pl-8')
+    expect(orderedList?.className).not.toMatch(/(?:^|\s)pl-6(?:\s|$)/)
+    expect(screen.getByText('Item 10')).toBeInTheDocument()
+    expect(screen.getByText('Item 11')).toBeInTheDocument()
+    expect(screen.getByText('Item 12')).toBeInTheDocument()
   })
 
   it('uses a wider ordered-list gutter for tool-call markdown', () => {
@@ -98,7 +122,7 @@ describe('Markdown', () => {
     const orderedList = container.querySelector('ol')
 
     expect(orderedList?.className).toContain('pl-8')
-    expect(orderedList?.className).not.toContain('pl-6')
+    expect(orderedList?.className).not.toMatch(/(?:^|\s)pl-6(?:\s|$)/)
     expect(screen.getByText('Tenth')).toBeInTheDocument()
     expect(screen.getByText('Eleventh')).toBeInTheDocument()
   })

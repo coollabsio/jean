@@ -40,7 +40,7 @@ interface MarkdownProps {
    */
   streaming?: boolean
   className?: string
-  /** Rendering context; tool-call markdown needs a wider ordered-list gutter. */
+  /** Rendering context (tool-call keeps the same ordered-list gutter as chat). */
   variant?: 'chat' | 'tool-call'
   /** Chat message ID — enables per-table checklist persistence when set */
   messageId?: string
@@ -425,10 +425,14 @@ const components: Components = {
       {children}
     </ul>
   ),
+  // pl-8 (not pl-6): double-digit markers ("10.") need extra gutter width when
+  // list-outside paints into padding; chat parents use overflow-x-hidden and
+  // otherwise clip the tens digit to ".0", ".1" (issue #542). tool-call keeps
+  // the same width for consistency.
   ol: ({ children, className, ...props }) => (
     <ol
       {...props}
-      className={cn('my-4 pl-6 list-decimal list-outside space-y-2', className)}
+      className={cn('my-4 pl-8 list-decimal list-outside space-y-2', className)}
     >
       {children}
     </ol>
