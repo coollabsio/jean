@@ -29,6 +29,10 @@ import type {
 } from '@/types/chat'
 import type { QueryClient } from '@tanstack/react-query'
 import { GIT_ALLOWED_TOOLS } from './useMessageHandlers'
+import {
+  isLoginSlashCommand,
+  openBackendLoginModal,
+} from '@/lib/cli-auth'
 
 interface UseMessageSendingParams {
   activeSessionId: string | null | undefined
@@ -301,6 +305,28 @@ export function useMessageSending({
         toast.error(
           'Session not found. Please refresh or create a new session.'
         )
+        return
+      }
+
+      // Intercept /login — interactive CLI login is not available inside Jean
+      // headless chat (issue #387). Open CliLoginModal instead.
+      if (
+        isLoginSlashCommand(textMessage) &&
+        images.length === 0 &&
+        files.length === 0 &&
+        textFiles.length === 0 &&
+        skills.length === 0
+      ) {
+        clearInputDraft(activeSessionId)
+        clearChatInputState()
+        const backend = selectedBackendRef.current
+        void openBackendLoginModal(backend).then(opened => {
+          if (opened) {
+            toast.message(
+              `Opening ${backend} login… Interactive /login is not available in Jean chat.`
+            )
+          }
+        })
         return
       }
 
