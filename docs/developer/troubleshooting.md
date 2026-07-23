@@ -17,10 +17,14 @@ GStreamer element autoaudiosink not found. Please install it
 **Root Cause:**
 The AppImage bundles GLib 2.72 (from the Ubuntu 22.04 build host), but Ubuntu 24.04 has GLib 2.80. When the bundled old GLib is loaded, system GIO modules that require `g_task_set_static_name` (added in GLib 2.76) fail. This cascading failure crashes WebKitWebProcess, resulting in a white/blank screen.
 
-Additionally, the AppImage bundles `libgstreamer` but no GStreamer plugins, so audio element initialization fails.
+Additionally, older AppImages bundled `libgstreamer` without GStreamer plugins, so WebKit could not create `appsrc` / `appsink` / `autoaudiosink` and the renderer process died.
 
-**Fix:**
-This is handled by the custom AppRun script (`scripts/appimage-webkit-fix.sh`) which prefers system libraries when system WebKitGTK is available. If you have an AppImage that doesn't include this fix, you can work around it by extracting and running with system libs:
+**Fix (current releases):**
+1. Custom AppRun (`scripts/appimage-webkit-fix.sh`) prefers system libraries when system WebKitGTK is available, and sets `GST_PLUGIN_PATH` to bundled/system plugin dirs.
+2. AppImage packaging enables `bundleMediaFramework` so required GStreamer plugins ship inside the AppImage.
+3. Jean sets `WEBKIT_DISABLE_COMPOSITING_MODE=1` and `WEBKIT_DISABLE_DMABUF_RENDERER=1` on Linux before creating the webview.
+
+If you have an older AppImage without these fixes, work around by extracting and running with system libs:
 
 ```bash
 # Extract
@@ -33,6 +37,36 @@ GIO_MODULE_DIR=/dev/null LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:squashfs-roo
 Alternatively, install the `.deb` package which uses system libraries directly.
 
 **Related Issues:** [#54](https://github.com/coollabsio/jean/issues/54), [#100](https://github.com/coollabsio/jean/issues/100)
+
+---
+
+### Required Linux Dependencies (dev / .deb / system WebKit path)
+
+WebKitGTK needs GStreamer plugins at runtime. Without them, the WebKit renderer can crash with a blank screen even outside AppImage.
+
+**Debian/Ubuntu/Linux Mint:**
+
+```bash
+sudo apt install gstreamer1.0-plugins-good
+```
+
+**Arch/Manjaro:**
+
+```bash
+sudo pacman -S gst-plugins-good
+```
+
+**Fedora:**
+
+```bash
+sudo dnf install gstreamer1-plugins-good
+```
+
+**Symptoms of missing GStreamer plugins:**
+
+- Blank/gray window with no content
+- `GStreamer element autoaudiosink not found` in terminal
+- `GLib-GObject-CRITICAL: invalid (NULL) pointer instance` errors
 
 ---
 

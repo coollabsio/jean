@@ -321,6 +321,64 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+/// Apply WebKitGTK / GPU workarounds before the webview is created.
+///
+/// Transparent windows + hardware compositing break on many Linux setups
+/// (NVIDIA, GBM/DMABUF, some Wayland compositors). Users can override:
+/// - `WEBKIT_DISABLE_COMPOSITING_MODE=0` to re-enable GPU compositing (risky)
+/// - `WEBKIT_DISABLE_DMABUF_RENDERER=0` similarly
+/// - `JEAN_FORCE_X11=1` to force GDK X11 backend outside AppImage
+///
+/// Related: https://github.com/coollabsio/jean/issues/100
+#[cfg(target_os = "linux")]
+fn apply_linux_webkit_env_fixes() {
+    log::trace!("Setting WebKit compatibility fixes for Linux");
+
+    let is_appimage =
+        std::env::var_os("APPIMAGE").is_some() || std::env::var_os("APPDIR").is_some();
+    if is_appimage {
+        log::trace!("Running inside AppImage");
+    }
+
+    let wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+    let xdg_session_type = std::env::var("XDG_SESSION_TYPE")
+        .unwrap_or_default()
+        .to_lowercase();
+    let is_wayland = wayland_display.is_some() || xdg_session_type == "wayland";
+    let compositor = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    log::trace!(
+        "Display: wayland={is_wayland}, compositor={compositor}, session={xdg_session_type}"
+    );
+
+    if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+        // SAFETY: called once at process start before the webview/runtime spawns threads.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+        log::trace!("WEBKIT_DISABLE_COMPOSITING_MODE=1");
+    }
+
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        log::trace!("WEBKIT_DISABLE_DMABUF_RENDERER=1");
+    }
+
+    let force_x11 = std::env::var("JEAN_FORCE_X11").unwrap_or_else(|_| "0".to_string()) == "1";
+    if force_x11 && is_appimage {
+        log::trace!(
+            "JEAN_FORCE_X11 requested but ignored in AppImage (AppRun/apprun-hooks control backend)"
+        );
+    }
+    if !is_appimage && force_x11 && std::env::var_os("GDK_BACKEND").is_none() {
+        unsafe {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+        log::trace!("GDK_BACKEND=x11 (forced by JEAN_FORCE_X11)");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Product version must be the desktop package, not jean-core's library version.
@@ -340,6 +398,10 @@ pub fn run() {
 
     #[cfg(target_os = "macos")]
     fix_macos_path();
+
+    // Must run before tauri::Builder creates the WebKitGTK webview.
+    #[cfg(target_os = "linux")]
+    apply_linux_webkit_env_fixes();
 
     let log_targets = vec![
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),

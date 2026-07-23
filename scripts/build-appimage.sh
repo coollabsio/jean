@@ -3,8 +3,10 @@
 #
 # The default AppImage bundles libraries from Ubuntu 22.04 which conflict
 # with newer system libraries on Arch Linux, Fedora 40+, etc. This script:
-# 1. Builds the AppImage normally via Tauri
+# 1. Builds the AppImage normally via Tauri (bundleMediaFramework ships
+#    GStreamer plugins WebKit needs — see issue #100)
 # 2. Replaces AppRun with a custom script that prefers system WebKitGTK
+#    and wires GST_PLUGIN_PATH to bundled/system plugins
 # 3. Repackages the AppImage
 #
 # Usage: bash scripts/build-appimage.sh
@@ -13,6 +15,7 @@
 # - https://github.com/coollabsio/jean/issues/52
 # - https://github.com/coollabsio/jean/issues/55
 # - https://github.com/coollabsio/jean/issues/71
+# - https://github.com/coollabsio/jean/issues/100
 
 set -euo pipefail
 
