@@ -1,5 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Check, Pencil, Plus, Server, Trash2 } from 'lucide-react'
+import {
+  Check,
+  HardDriveDownload,
+  Link2,
+  Pencil,
+  Plus,
+  Server,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,6 +20,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Spinner } from '@/components/ui/spinner'
+import { isNativeApp } from '@/lib/environment'
 import {
   LOCAL_CONNECTION_ID,
   addRemoteConnection,
@@ -23,8 +33,29 @@ import {
   useRemoteConnections,
   type RemoteConnection,
 } from '@/lib/remote-connections'
+import { invoke, listenLocal } from '@/lib/transport'
 
-const EMPTY_FORM = { name: '', url: '', token: '' }
+const EMPTY_URL_FORM = { name: '', url: '', token: '' }
+const EMPTY_INSTALL_FORM = {
+  name: '',
+  user: '',
+  host: '',
+  sshPort: '22',
+  jeanPort: '3456',
+}
+
+type AddMode = 'url' | 'install'
+type EditorMode = null | 'new' | string
+
+export interface InstallRemoteResult {
+  name: string
+  url: string
+  token: string
+  alreadyInstalled: boolean
+  installMode: string
+  ready: boolean
+  log: string
+}
 
 export function RemoteConnectionsDialog({
   reloadApp = () => window.location.reload(),
@@ -34,10 +65,15 @@ export function RemoteConnectionsDialog({
   const connections = useRemoteConnections()
   const activeId = getActiveConnectionId()
   const remoteActive = activeId !== LOCAL_CONNECTION_ID
+  const native = isNativeApp()
   const [open, setOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [editingId, setEditingId] = useState<EditorMode>(null)
+  const [addMode, setAddMode] = useState<AddMode>('url')
+  const [form, setForm] = useState(EMPTY_URL_FORM)
+  const [installForm, setInstallForm] = useState(EMPTY_INSTALL_FORM)
   const [error, setError] = useState<string | null>(null)
+  const [installing, setInstalling] = useState(false)
+  const [progress, setProgress] = useState<string | null>(null)
 
   useEffect(() => {
     const handleOpen = (event: Event) => {
@@ -46,12 +82,15 @@ export function RemoteConnectionsDialog({
       const connection = connections.find(item => item.id === id)
       if (connection) {
         setEditingId(connection.id)
+        setAddMode('url')
         setForm({
           name: connection.name,
           url: connection.url,
           token: connection.token,
         })
         setError(null)
+        setProgress(null)
+        setInstalling(false)
       }
     }
     window.addEventListener('open-remote-connections', handleOpen)
@@ -59,20 +98,48 @@ export function RemoteConnectionsDialog({
       window.removeEventListener('open-remote-connections', handleOpen)
   }, [connections])
 
+  useEffect(() => {
+    if (!open || !installing || !native) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+
+    void listenLocal<{ step: string; message: string }>(
+      'remote-install:progress',
+      event => {
+        if (!disposed) setProgress(event.payload.message)
+      }
+    ).then(fn => {
+      if (disposed) fn()
+      else unlisten = fn
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [open, installing, native])
+
   const beginAdd = () => {
     setEditingId('new')
-    setForm(EMPTY_FORM)
+    setAddMode(native ? 'install' : 'url')
+    setForm(EMPTY_URL_FORM)
+    setInstallForm(EMPTY_INSTALL_FORM)
     setError(null)
+    setProgress(null)
+    setInstalling(false)
   }
 
   const beginEdit = (connection: RemoteConnection) => {
     setEditingId(connection.id)
+    setAddMode('url')
     setForm({
       name: connection.name,
       url: connection.url,
       token: connection.token,
     })
     setError(null)
+    setProgress(null)
+    setInstalling(false)
   }
 
   const switchTo = (id: string) => {
@@ -82,7 +149,7 @@ export function RemoteConnectionsDialog({
     reloadApp()
   }
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleUrlSubmit = (event: FormEvent) => {
     event.preventDefault()
     try {
       if (editingId === 'new') {
@@ -107,6 +174,74 @@ export function RemoteConnectionsDialog({
     }
   }
 
+  const handleInstallSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!native) {
+      setError('Remote install is only available in the native Jean app.')
+      return
+    }
+
+    const user = installForm.user.trim()
+    const host = installForm.host.trim()
+    if (!user || !host) {
+      setError('SSH user and host/IP are required.')
+      return
+    }
+
+    const sshPort = Number(installForm.sshPort || '22')
+    const jeanPort = Number(installForm.jeanPort || '3456')
+    if (
+      !Number.isInteger(sshPort) ||
+      sshPort < 1 ||
+      sshPort > 65535 ||
+      !Number.isInteger(jeanPort) ||
+      jeanPort < 1 ||
+      jeanPort > 65535
+    ) {
+      setError('SSH and Jean ports must be integers between 1 and 65535.')
+      return
+    }
+
+    setError(null)
+    setInstalling(true)
+    setProgress('Starting remote install…')
+
+    try {
+      const result = await invoke<InstallRemoteResult>(
+        'install_remote_jean_server',
+        {
+          name: installForm.name.trim() || null,
+          user,
+          host,
+          sshPort,
+          jeanPort,
+          userInstall: null,
+        }
+      )
+
+      if (!result.ready) {
+        throw new Error('Remote jean-server did not report ready.')
+      }
+
+      const connection = addRemoteConnection({
+        name: result.name,
+        url: result.url,
+        token: result.token,
+      })
+      markConnectionSwitch()
+      selectConnection(connection.id)
+      reloadApp()
+    } catch (installError) {
+      setError(
+        installError instanceof Error
+          ? installError.message
+          : String(installError)
+      )
+      setInstalling(false)
+      setProgress(null)
+    }
+  }
+
   const handleDelete = (id: string) => {
     const wasActive = id === activeId
     removeRemoteConnection(id)
@@ -115,6 +250,9 @@ export function RemoteConnectionsDialog({
       reloadApp()
     }
   }
+
+  const isNew = editingId === 'new'
+  const showInstallForm = isNew && addMode === 'install'
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -137,64 +275,221 @@ export function RemoteConnectionsDialog({
           <DialogTitle>Jean connections</DialogTitle>
           <DialogDescription>
             Switch this client between Local and a remote Jean Web Access
-            server.
+            server. Install jean-server on a Linux host with SSH user + IP, or
+            paste an existing Web Access URL.
           </DialogDescription>
         </DialogHeader>
 
         {editingId ? (
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            <div className="space-y-1.5">
-              <Label htmlFor="remote-name">Name</Label>
-              <Input
-                id="remote-name"
-                value={form.name}
-                onChange={event =>
-                  setForm(current => ({ ...current, name: event.target.value }))
-                }
-                placeholder="Build server"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="remote-url">Web Access URL</Label>
-              <Input
-                id="remote-url"
-                value={form.url}
-                onChange={event =>
-                  setForm(current => ({ ...current, url: event.target.value }))
-                }
-                placeholder="https://jean.example.com/?token=..."
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="remote-token">Access token</Label>
-              <Input
-                id="remote-token"
-                type="password"
-                value={form.token}
-                onChange={event =>
-                  setForm(current => ({
-                    ...current,
-                    token: event.target.value,
-                  }))
-                }
-                placeholder="Optional when included in the URL"
-              />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditingId(null)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit">
-                {editingId === 'new' ? 'Save & Connect' : 'Save'}
-              </Button>
-            </DialogFooter>
-          </form>
+          showInstallForm ? (
+            <form className="space-y-4" onSubmit={handleInstallSubmit}>
+              {native && (
+                <AddModeToggle
+                  mode={addMode}
+                  onChange={mode => {
+                    if (installing) return
+                    setAddMode(mode)
+                    setError(null)
+                  }}
+                  disabled={installing}
+                />
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="remote-install-name">Name</Label>
+                <Input
+                  id="remote-install-name"
+                  value={installForm.name}
+                  onChange={event =>
+                    setInstallForm(current => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Build server"
+                  disabled={installing}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="remote-install-user">SSH user</Label>
+                  <Input
+                    id="remote-install-user"
+                    value={installForm.user}
+                    onChange={event =>
+                      setInstallForm(current => ({
+                        ...current,
+                        user: event.target.value,
+                      }))
+                    }
+                    placeholder="ubuntu"
+                    required
+                    disabled={installing}
+                    autoComplete="username"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="remote-install-host">Host / IP</Label>
+                  <Input
+                    id="remote-install-host"
+                    value={installForm.host}
+                    onChange={event =>
+                      setInstallForm(current => ({
+                        ...current,
+                        host: event.target.value,
+                      }))
+                    }
+                    placeholder="192.168.1.50"
+                    required
+                    disabled={installing}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="remote-install-ssh-port">SSH port</Label>
+                  <Input
+                    id="remote-install-ssh-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={installForm.sshPort}
+                    onChange={event =>
+                      setInstallForm(current => ({
+                        ...current,
+                        sshPort: event.target.value,
+                      }))
+                    }
+                    disabled={installing}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="remote-install-jean-port">Jean port</Label>
+                  <Input
+                    id="remote-install-jean-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={installForm.jeanPort}
+                    onChange={event =>
+                      setInstallForm(current => ({
+                        ...current,
+                        jeanPort: event.target.value,
+                      }))
+                    }
+                    disabled={installing}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Requires SSH key auth to the host (no password prompt). Jean
+                installs via the official installer, checks health/ready/auth,
+                then adds the connection when everything is green.
+              </p>
+              {progress && (
+                <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <Spinner className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{progress}</span>
+                </div>
+              )}
+              {error && (
+                <p className="whitespace-pre-wrap text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingId(null)}
+                  disabled={installing}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={installing}>
+                  {installing ? (
+                    <>
+                      <Spinner className="mr-2 size-4" />
+                      Installing…
+                    </>
+                  ) : (
+                    <>
+                      <HardDriveDownload className="mr-2 size-4" />
+                      Install & Connect
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : (
+            <form className="space-y-4" onSubmit={handleUrlSubmit}>
+              {isNew && native && (
+                <AddModeToggle
+                  mode={addMode}
+                  onChange={mode => {
+                    setAddMode(mode)
+                    setError(null)
+                  }}
+                />
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="remote-name">Name</Label>
+                <Input
+                  id="remote-name"
+                  value={form.name}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Build server"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="remote-url">Web Access URL</Label>
+                <Input
+                  id="remote-url"
+                  value={form.url}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      url: event.target.value,
+                    }))
+                  }
+                  placeholder="https://jean.example.com/?token=..."
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="remote-token">Access token</Label>
+                <Input
+                  id="remote-token"
+                  type="password"
+                  value={form.token}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      token: event.target.value,
+                    }))
+                  }
+                  placeholder="Optional when included in the URL"
+                />
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingId(null)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  {isNew ? 'Save & Connect' : 'Save'}
+                </Button>
+              </DialogFooter>
+            </form>
+          )
         ) : (
           <div className="space-y-2">
             <ConnectionRow
@@ -227,6 +522,41 @@ export function RemoteConnectionsDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+function AddModeToggle({
+  mode,
+  onChange,
+  disabled = false,
+}: {
+  mode: AddMode
+  onChange: (mode: AddMode) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <Button
+        type="button"
+        variant={mode === 'install' ? 'default' : 'outline'}
+        size="sm"
+        disabled={disabled}
+        onClick={() => onChange('install')}
+      >
+        <HardDriveDownload className="mr-1.5 size-3.5" />
+        Install via SSH
+      </Button>
+      <Button
+        type="button"
+        variant={mode === 'url' ? 'default' : 'outline'}
+        size="sm"
+        disabled={disabled}
+        onClick={() => onChange('url')}
+      >
+        <Link2 className="mr-1.5 size-3.5" />
+        Existing URL
+      </Button>
+    </div>
   )
 }
 

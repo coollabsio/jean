@@ -357,6 +357,63 @@ pub fn cleanup_session_registrations(session_id: &str) {
     }
 }
 
+/// Ownership-aware cleanup used when a cancelled send may already have released
+/// its claim and a newer send may own registry state for the same session (#329).
+///
+/// - `pid`: remove process entry only when it still matches this run (`None` =
+///   remove any process entry; `Some(0)` skips process cleanup — OpenCode sentinel)
+/// - `cancel_flag`: remove OpenCode cancel entry only when the Arc still matches
+pub fn cleanup_owned_session_registrations(
+    session_id: &str,
+    pid: Option<u32>,
+    cancel_flag: Option<&Arc<AtomicBool>>,
+) {
+    let removed_pid = match pid {
+        Some(0) => None, // OpenCode / no process
+        Some(expected) => {
+            let mut registry = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY");
+            match registry.get(session_id).copied() {
+                Some(current) if current == expected => registry.remove(session_id),
+                _ => None,
+            }
+        }
+        None => lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").remove(session_id),
+    };
+    if removed_pid.is_some() {
+        lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
+    }
+
+    let removed_flag = match cancel_flag {
+        Some(flag) => {
+            let mut flags = lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS");
+            match flags.get(session_id) {
+                Some(entry) if Arc::ptr_eq(&entry.flag, flag) => flags.remove(session_id).is_some(),
+                _ => false,
+            }
+        }
+        None => lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS")
+            .remove(session_id)
+            .is_some(),
+    };
+
+    // Only clear pre-registration cancel when nothing else is actively managed.
+    // A newer send may already be mid-registration.
+    let removed_pending = if !is_session_actively_managed(session_id) {
+        lock_recover(&PENDING_CANCELS, "PENDING_CANCELS").remove(session_id)
+    } else {
+        false
+    };
+
+    // Codex turns are unregistered by the Codex path itself; do not remove a
+    // turn that may belong to a newer concurrent send after cancel-release.
+
+    if removed_pid.is_some() || removed_pending || removed_flag {
+        log::info!(
+            "[Registry] cleaned owned state for session={session_id} pid={removed_pid:?} pending={removed_pending} cancel_flag={removed_flag}"
+        );
+    }
+}
+
 /// Clear only a queued pre-registration cancel for an otherwise idle session.
 /// Used before starting a fresh send so stale pending cancel state from a
 /// previous idle-cancel race cannot poison the next run.
@@ -531,6 +588,72 @@ mod tests {
     }
 
     #[test]
+    fn opencode_cancel_flag_free_allows_immediate_resend() {
+        // Regression for #329: after cancel, CANCEL_FLAGS must not keep the
+        // session "actively managed" while the HTTP worker unwinds.
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        let flag = Arc::new(AtomicBool::new(false));
+        assert!(register_cancel_flag(
+            "opencode-session".to_string(),
+            flag.clone()
+        ));
+        assert!(is_session_actively_managed("opencode-session"));
+
+        // Mirror cancel_process OpenCode path: signal + free registry slot.
+        flag.store(true, Ordering::SeqCst);
+        lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").remove("opencode-session");
+
+        assert!(flag.load(Ordering::SeqCst), "worker still sees cancel");
+        assert!(
+            !is_session_actively_managed("opencode-session"),
+            "session must accept a new send immediately after cancel"
+        );
+
+        // A new run can register a fresh cancel flag right away.
+        let new_flag = Arc::new(AtomicBool::new(false));
+        assert!(register_cancel_flag(
+            "opencode-session".to_string(),
+            new_flag.clone()
+        ));
+        assert!(is_session_actively_managed("opencode-session"));
+
+        // Owned cleanup for the OLD flag must not clobber the new registration.
+        cleanup_owned_session_registrations("opencode-session", Some(0), Some(&flag));
+        assert!(is_session_actively_managed("opencode-session"));
+        assert!(!new_flag.load(Ordering::SeqCst));
+
+        // Owned cleanup for the NEW flag clears it.
+        cleanup_owned_session_registrations("opencode-session", Some(0), Some(&new_flag));
+        assert!(!is_session_actively_managed("opencode-session"));
+
+        clear_registries();
+    }
+
+    #[test]
+    fn cleanup_owned_process_only_removes_matching_pid() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        assert!(register_process("session".to_string(), 111));
+        // Old cancelled run tries to clean pid 111 after a new run registered 222.
+        assert!(register_process("session".to_string(), 222));
+
+        cleanup_owned_session_registrations("session", Some(111), None);
+        assert!(is_session_actively_managed("session"));
+        assert_eq!(
+            lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").get("session"),
+            Some(&222)
+        );
+
+        cleanup_owned_session_registrations("session", Some(222), None);
+        assert!(!is_session_actively_managed("session"));
+
+        clear_registries();
+    }
+
+    #[test]
     fn clear_pending_cancel_leaves_active_registrations_intact() {
         let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
         clear_registries();
@@ -660,6 +783,18 @@ pub fn cancel_process(
             abort_opencode_session(oc_sid, entry.working_dir.clone());
         }
 
+        // Free actively-managed state immediately so a follow-up send is not
+        // rejected while the cancelled HTTP worker unwinds (#329 / #375).
+        // The Arc flag remains alive in the worker, which observes cancel and exits.
+        let removed = lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS")
+            .remove(session_id)
+            .is_some();
+        if removed {
+            log::info!(
+                "[Registry] freed OpenCode cancel flag after cancel session={session_id}"
+            );
+        }
+
         // Mark run as cancelled immediately (before HTTP call returns)
         if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
             log::warn!("Failed to mark run as cancelled in manifest: {e}");
@@ -776,6 +911,9 @@ pub fn cancel_process_if_running(
         if let Some(oc_sid) = entry.opencode_session_id {
             abort_opencode_session(oc_sid, entry.working_dir.clone());
         }
+
+        // Free actively-managed state immediately (same as cancel_process).
+        lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").remove(session_id);
 
         if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
             log::warn!("Failed to mark run as cancelled in manifest: {e}");

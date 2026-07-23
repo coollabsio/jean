@@ -69,6 +69,10 @@ import {
   hasMeaningfulAssistantPayload,
   shouldHydrateCompletedSessionFromBackend,
 } from '@/components/chat/hooks/completion-hydration'
+import {
+  handleCliAuthError,
+  isCliAuthError,
+} from '@/lib/cli-auth'
 
 interface UseStreamingEventsParams {
   queryClient: QueryClient
@@ -1560,8 +1564,19 @@ export default function useStreamingEvents({
           .catch(() => undefined)
       }
 
+      // Auth failures from headless CLIs (e.g. Claude "Please run /login")
+      // are not actionable inside chat — rewrite and offer Jean's Login modal.
+      let displayError = error
+      if (isCliAuthError(error)) {
+        const session = queryClient.getQueryData<Session>(
+          chatQueryKeys.session(session_id)
+        )
+        const backend = (session?.backend as CliBackend | undefined) ?? 'claude'
+        displayError = handleCliAuthError(error, backend)
+      }
+
       // Set error state for inline display
-      setError(session_id, error)
+      setError(session_id, displayError)
 
       // Check if CLI produced streaming content BEFORE clearing state.
       // If content was streamed, the CLI ran — don't remove the user message

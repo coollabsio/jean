@@ -286,13 +286,33 @@ Nothing is installed in the background - apply only runs after you click
 
 ## Connect from the native Jean app
 
-In the desktop app, click the server icon in the title bar, choose **Add
-remote**, and enter either the full Web Access URL (including `?token=...`) or
-the server URL and token separately. Selecting the remote switches the entire
-Jean backend while keeping the desktop app's bundled React UI and local native
-shell capabilities. Commands and events for the selected instance travel over
-HTTP/WebSocket. Select **Local** from the same dialog to return to the desktop
-app's local backend.
+In the desktop app, click the server icon in the title bar and choose **Add
+remote**. You can either:
+
+1. **Install via SSH** (native app only) — enter an SSH user and host/IP
+   (optional name, SSH port, Jean port). Jean connects with key-based SSH
+   (`BatchMode`, no password prompt), runs the official
+   `install-jean-server.sh` installer on the remote Linux host (system install
+   with passwordless `sudo -n` when available, otherwise `--user-install`),
+   waits until `/healthz`, `/readyz`, and `/api/auth` succeed from this client,
+   then saves the remote and switches to it.
+2. **Existing URL** — paste a full Web Access URL (including `?token=...`) or
+   enter the server URL and token separately.
+
+Selecting the remote switches the entire Jean backend while keeping the desktop
+app's bundled React UI and local native shell capabilities. Commands and events
+for the selected instance travel over HTTP/WebSocket. Select **Local** from the
+same dialog to return to the desktop app's local backend.
+
+**SSH install requirements:**
+
+- OpenSSH client on the machine running Jean
+- Key-based SSH access to `user@host` (password auth is not supported)
+- Remote host is Linux (amd64/arm64) with `curl` and `tar`
+- Port `3456` (or the Jean port you chose) reachable from this client; the
+  installer binds `0.0.0.0` so LAN/Tailscale IPs work
+- Passwordless sudo for a system install, or a working user systemd session for
+  `--user-install`
 
 Native Jean client origins are allowed automatically. HTTP and HTTPS server
 URLs are both supported; keep token authentication enabled on remote servers.

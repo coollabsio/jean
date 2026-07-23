@@ -522,9 +522,58 @@ describe('useGitOperations conflict resolution', () => {
       'Review running for Project/feature...',
       expect.objectContaining({
         cancel: expect.objectContaining({ label: 'Cancel' }),
-        duration: 5000,
       })
     )
+  })
+
+  it('auto-dismisses the running review toast after 5 seconds', async () => {
+    vi.useFakeTimers()
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'start_review_job') {
+        return Promise.resolve({
+          job: {
+            id: 'job-1',
+            reviewRunId: 'run-1',
+            worktreeId: 'wt-1',
+            worktreePath: '/repo/worktree',
+            sessionId: 'review-session',
+            source: 'ai',
+            status: 'running',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        })
+      }
+      if (command === 'get_review_job') {
+        return Promise.resolve({
+          id: 'job-1',
+          reviewRunId: 'run-1',
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          sessionId: 'review-session',
+          source: 'ai',
+          status: 'running',
+          createdAt: 1,
+          updatedAt: 1,
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const { result } = renderGitOperations()
+
+    await act(async () => {
+      await result.current.handleReview()
+    })
+
+    expect(mocks.toastDismiss).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+
+    expect(mocks.toastDismiss).toHaveBeenCalledWith('toast-1')
+    vi.useRealTimers()
   })
 
   it('passes the code review magic prompt backend to review jobs', async () => {

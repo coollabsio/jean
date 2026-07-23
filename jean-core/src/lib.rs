@@ -645,6 +645,49 @@ fn maybe_auto_select_system_coderabbit(
     false
 }
 
+/// When Jean-managed Claude/Codex/OpenCode is missing but a system PATH install
+/// exists, switch the preference to `"path"` so Settings UI, auth, and status
+/// checks agree with the binary actually used (issue #387).
+///
+/// Runtime `resolve_cli_binary` also falls back to PATH when Jean-managed is
+/// missing; this persists the source so the UI does not show a misleading
+/// "Jean" selection.
+fn maybe_auto_select_system_cli_sources(
+    app: &AppHandle,
+    preferences: &mut AppPreferences,
+) -> bool {
+    let mut changed = false;
+
+    if preferences.claude_cli_source == "jean" && claude_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting Claude CLI source=path (Jean-managed missing, system found)");
+        preferences.claude_cli_source = "path".to_string();
+        changed = true;
+    }
+    if preferences.codex_cli_source == "jean" && codex_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting Codex CLI source=path (Jean-managed missing, system found)");
+        preferences.codex_cli_source = "path".to_string();
+        changed = true;
+    }
+    if preferences.opencode_cli_source == "jean" && opencode_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting OpenCode CLI source=path (Jean-managed missing, system found)");
+        preferences.opencode_cli_source = "path".to_string();
+        changed = true;
+    }
+
+    changed
+}
+
+/// Apply all PATH auto-selection migrations. Returns true if any preference changed.
+fn maybe_auto_select_system_cli_preferences(
+    app: &AppHandle,
+    preferences: &mut AppPreferences,
+    raw_preferences: Option<&Value>,
+) -> bool {
+    let mut changed = maybe_auto_select_system_coderabbit(app, preferences, raw_preferences);
+    changed |= maybe_auto_select_system_cli_sources(app, preferences);
+    changed
+}
+
 fn normalize_parallel_execution_preferences(preferences: &mut AppPreferences) -> bool {
     if preferences.parallel_execution_prompt_enabled && !preferences.codex_multi_agent_enabled {
         preferences.codex_multi_agent_enabled = true;
@@ -2711,7 +2754,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let prefs_path = get_preferences_path(app)?;
     if !prefs_path.exists() {
         let mut preferences = AppPreferences::default();
-        maybe_auto_select_system_coderabbit(app, &mut preferences, None);
+        maybe_auto_select_system_cli_preferences(app, &mut preferences, None);
         return Ok(preferences);
     }
     let contents = std::fs::read_to_string(&prefs_path)
@@ -2722,7 +2765,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
     normalize_parallel_execution_preferences(&mut preferences);
-    maybe_auto_select_system_coderabbit(app, &mut preferences, Some(&raw_preferences));
+    maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
 }
 
@@ -2733,10 +2776,10 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     if !prefs_path.exists() {
         log::trace!("Preferences file not found, using defaults");
         let mut preferences = AppPreferences::default();
-        if maybe_auto_select_system_coderabbit(&app, &mut preferences, None) {
+        if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None) {
             if let Ok(json) = serde_json::to_string_pretty(&preferences) {
                 let _ = std::fs::write(&prefs_path, json);
-                log::trace!("Saved preferences after CodeRabbit PATH auto-detection");
+                log::trace!("Saved preferences after CLI PATH auto-detection");
             }
         }
         return Ok(preferences);
@@ -2777,7 +2820,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.branch_naming_model = default_branch_naming_model();
         needs_resave = true;
     }
-    if maybe_auto_select_system_coderabbit(&app, &mut preferences, Some(&raw_preferences)) {
+    if maybe_auto_select_system_cli_preferences(&app, &mut preferences, Some(&raw_preferences)) {
         needs_resave = true;
     }
     if preferences.session_naming_model == "haiku" {

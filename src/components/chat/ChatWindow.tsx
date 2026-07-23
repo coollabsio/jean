@@ -270,17 +270,8 @@ export function ChatWindow({
   const storeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const activeWorktreeId = propWorktreeId ?? storeWorktreeId
   const activeWorktreePath = propWorktreePath ?? storeWorktreePath
-  const hasPendingAutoInvestigate = useUIStore(state => {
-    if (!activeWorktreeId) return false
-    return (
-      state.autoInvestigateWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigatePRWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateSecurityAlertWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateAdvisoryWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateLinearIssueWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateSentryIssueWorktreeIds.has(activeWorktreeId)
-    )
-  })
+  // Auto-investigate flags are owned by useBackgroundInvestigation (App-level)
+  // so remote/web clients still queue the prompt even when this ChatWindow mounts.
 
   // PERFORMANCE: Proper selector for activeSessionId - subscribes to changes
   // This triggers re-render when tabs are clicked (setActiveSession updates activeSessionIds)
@@ -2353,39 +2344,6 @@ export function ChatWindow({
     isModal,
     sessionModalOpen,
   })
-
-  // Pick up per-worktree auto-investigate flags (set by useNewWorktreeHandlers
-  // when worktree is created with auto-investigate). Uses per-worktree Sets so
-  // multiple concurrent worktree creations each get their own investigation.
-  // Guard: wait for worktree status === 'ready' to ensure the git directory
-  // exists on disk before spawning Claude CLI (which uses current_dir).
-  const worktreeStatus = worktree?.status
-  useEffect(() => {
-    if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
-    if (worktreeStatus !== 'ready') return
-    if (!hasPendingAutoInvestigate) return
-    const uiStore = useUIStore.getState()
-    if (uiStore.consumeAutoInvestigate(activeWorktreeId)) {
-      handleInvestigate('issue')
-    } else if (uiStore.consumeAutoInvestigatePR(activeWorktreeId)) {
-      handleInvestigate('pr')
-    } else if (uiStore.consumeAutoInvestigateSecurityAlert(activeWorktreeId)) {
-      handleInvestigate('security-alert')
-    } else if (uiStore.consumeAutoInvestigateAdvisory(activeWorktreeId)) {
-      handleInvestigate('advisory')
-    } else if (uiStore.consumeAutoInvestigateLinearIssue(activeWorktreeId)) {
-      handleInvestigate('linear-issue')
-    } else if (uiStore.consumeAutoInvestigateSentryIssue(activeWorktreeId)) {
-      handleInvestigate('sentry-issue')
-    }
-  }, [
-    activeSessionId,
-    activeWorktreeId,
-    activeWorktreePath,
-    worktreeStatus,
-    hasPendingAutoInvestigate,
-    handleInvestigate,
-  ])
 
   // Message handlers hook - handles questions, plan approval, permission approval, finding fixes
   const {

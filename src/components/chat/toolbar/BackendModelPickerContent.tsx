@@ -16,7 +16,10 @@ import { Kbd } from '@/components/ui/kbd'
 import { toast } from 'sonner'
 import type { CliBackend, CustomCliProfile } from '@/types/preferences'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
-import { useAvailableOpencodeModels } from '@/services/opencode-cli'
+import {
+  useAvailableOpencodeModels,
+  useRefreshOpencodeModels,
+} from '@/services/opencode-cli'
 import { useAvailableCursorModels } from '@/services/cursor-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
@@ -95,6 +98,7 @@ export function BackendModelPickerContent({
   const { data: prefs } = usePreferences()
   const { data: modelCatalog } = useModelCatalog()
   const refreshModelCatalog = useRefreshModelCatalog()
+  const refreshOpencodeModels = useRefreshOpencodeModels()
   const patchPreferences = usePatchPreferences()
   const favoriteModels = useMemo(
     () => prefs?.favorite_models ?? [],
@@ -382,16 +386,20 @@ export function BackendModelPickerContent({
     [isLocked, selectedBackend]
   )
 
-  const handleRefreshModelCatalog = useCallback(async () => {
+  const handleRefreshModels = useCallback(async () => {
     const toastId = toast.loading('Refreshing model list...')
 
     try {
-      await refreshModelCatalog.mutateAsync()
+      if (activeBackend === 'opencode') {
+        await refreshOpencodeModels.mutateAsync()
+      } else {
+        await refreshModelCatalog.mutateAsync()
+      }
       toast.success('Model list refreshed', { id: toastId })
     } catch (error) {
       toast.error(`Failed to refresh model list: ${error}`, { id: toastId })
     }
-  }, [refreshModelCatalog])
+  }, [activeBackend, refreshModelCatalog, refreshOpencodeModels])
 
   const handleUseHighlightedFastMode = useCallback(() => {
     if (!highlightedOption) return false
@@ -464,8 +472,15 @@ export function BackendModelPickerContent({
     searchPlaceholder ??
     `Search ${getBackendPlainLabel(activeBackend)} models...`
 
-  const canRefreshModelCatalog =
-    activeBackend === 'claude' || activeBackend === 'codex'
+  // Claude/Codex use the CDN model catalog; OpenCode refreshes via CLI.
+  const canRefreshModels =
+    activeBackend === 'claude' ||
+    activeBackend === 'codex' ||
+    activeBackend === 'opencode'
+  const isRefreshingModels =
+    activeBackend === 'opencode'
+      ? refreshOpencodeModels.isPending
+      : refreshModelCatalog.isPending
 
   const sidebar = showSidebar ? (
     <SidebarBackends
@@ -504,22 +519,22 @@ export function BackendModelPickerContent({
               placeholder={placeholder}
               className="h-9 text-base md:text-sm"
             />
-            {canRefreshModelCatalog && (
+            {canRefreshModels && (
               <button
                 type="button"
                 aria-label="Refresh model list"
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                disabled={refreshModelCatalog.isPending}
+                disabled={isRefreshingModels}
                 onClick={event => {
                   event.preventDefault()
                   event.stopPropagation()
-                  void handleRefreshModelCatalog()
+                  void handleRefreshModels()
                 }}
               >
                 <RefreshCw
                   className={cn(
                     'h-4 w-4',
-                    refreshModelCatalog.isPending && 'animate-spin'
+                    isRefreshingModels && 'animate-spin'
                   )}
                 />
               </button>

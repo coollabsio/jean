@@ -1853,9 +1853,9 @@ ${resolveInstructions}`
                   })
                 }
 
+                // Sonner ignores `duration` for loading toasts — dismiss explicitly.
                 toast.loading(`${reviewLabel} running for ${reviewTarget}...`, {
                   id: toastId,
-                  duration: 5000,
                   cancel: {
                     label: 'Cancel',
                     onClick: () => {
@@ -1869,6 +1869,9 @@ ${resolveInstructions}`
                     },
                   },
                 })
+                const autoDismissTimer = window.setTimeout(() => {
+                  toast.dismiss(toastId)
+                }, 5000)
 
                 let unlistenReviewJob: (() => void) | null = null
                 let handledTerminalReviewJob = false
@@ -1878,6 +1881,7 @@ ${resolveInstructions}`
                   if (handledTerminalReviewJob) return
 
                   handledTerminalReviewJob = true
+                  window.clearTimeout(autoDismissTimer)
                   unlistenReviewJob?.()
                   if (reviewJob.status === 'completed') {
                     const completedSessionId = reviewJob.sessionId

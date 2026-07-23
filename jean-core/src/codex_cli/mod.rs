@@ -7,4 +7,4 @@ mod config;
 pub mod mcp;
 
 pub use commands::*;
-pub use config::{get_cli_binary_path, resolve_cli_binary};
+pub use config::{get_cli_binary_path, resolve_cli_binary, should_auto_use_system};

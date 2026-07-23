@@ -121,16 +121,26 @@ describe('magic prompt preference resolvers', () => {
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryContext}')
   })
 
-  it('tells investigation prompts to apply fixes in yolo mode', () => {
-    const yoloApply =
-      'If you are in yolo mode, also apply the fix(es)'
-    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_PR_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain(yoloApply)
+  it('keeps investigation default prompts free of weak yolo conditionals', () => {
+    // YOLO fix-after-investigate is applied programmatically when mode is yolo
+    // (see applyYoloInvestigationFixDirective) — do not embed unreliable
+    // "if you are in yolo mode" wording in the default templates.
+    const yoloConditional = 'If you are in yolo mode'
+    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_PR_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).not.toContain(
+      yoloConditional
+    )
   })
 
   it('keeps automatic recaps on by default', () => {

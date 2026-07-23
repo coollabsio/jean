@@ -1369,6 +1369,7 @@ pub async fn dispatch_command(
                 model,
             )
             .await?;
+            emit_cache_invalidation(app, &["session", "sessions"]);
             Ok(Value::Null)
         }
         "set_session_thinking_level" => {
@@ -2537,6 +2538,10 @@ pub async fn dispatch_command(
         }
         "list_opencode_models" => {
             let result = crate::opencode_cli::list_opencode_models(app.clone()).await?;
+            to_value(result)
+        }
+        "refresh_opencode_models" => {
+            let result = crate::opencode_cli::refresh_opencode_models(app.clone()).await?;
             to_value(result)
         }
         "check_gh_cli_installed" => {

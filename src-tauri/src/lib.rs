@@ -8,6 +8,7 @@ mod browser;
 mod desktop_commands;
 mod http_server;
 mod platform;
+mod remote_install;
 
 pub(crate) struct CoreRuntime(pub jean_core::RuntimeContext);
 
@@ -386,6 +387,7 @@ pub fn run() {
             desktop_commands::set_project_avatar,
             desktop_commands::start_http_server,
             desktop_commands::stop_http_server,
+            desktop_commands::install_remote_jean_server,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,

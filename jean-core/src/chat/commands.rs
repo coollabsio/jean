@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -76,8 +77,33 @@ static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
 /// process/turn is registered, leaving a window where two concurrent sends
 /// (frontend queue processor vs backend queue drain vs another client) both
 /// pass the check and spawn duplicate runs. This claim is taken atomically at
-/// `send_chat_message` entry and held for the whole call.
-static ACTIVE_SENDS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+/// `send_chat_message` entry and held for the whole call — unless cancel
+/// releases it early so a follow-up send is not stuck (#329).
+///
+/// Values are generation tokens so an early cancel release cannot be clobbered
+/// by a later `Drop` from the cancelled claim after a new claim was acquired.
+static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Whether a session has no prior user messages for auto-naming purposes.
+///
+/// After the NDJSON migration, `Session.messages` is always empty (messages are
+/// loaded on demand from run logs). Prefer `message_count` / `total_runs` from
+/// metadata, falling back to in-memory messages for tests / legacy paths.
+pub(crate) fn session_has_no_prior_user_messages(session: &Session) -> bool {
+    if let Some(count) = session.message_count {
+        return count == 0;
+    }
+    if session.total_runs > 0 {
+        return false;
+    }
+    session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .count()
+        == 0
+}
 
 fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
     worktree
@@ -92,33 +118,56 @@ fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
 }
 
 /// RAII claim on a session's send slot — released on drop (any return path).
-struct SendClaim(String);
+struct SendClaim {
+    session_id: String,
+    generation: u64,
+}
 
 impl SendClaim {
     fn try_acquire(session_id: &str) -> Option<Self> {
         let mut active = ACTIVE_SENDS.lock().unwrap();
-        if active.insert(session_id.to_string()) {
-            Some(Self(session_id.to_string()))
-        } else {
-            None
+        if active.contains_key(session_id) {
+            return None;
         }
+        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
+        active.insert(session_id.to_string(), generation);
+        Some(Self {
+            session_id: session_id.to_string(),
+            generation,
+        })
     }
 }
 
 impl Drop for SendClaim {
     fn drop(&mut self) {
-        ACTIVE_SENDS.lock().unwrap().remove(&self.0);
+        let mut active = ACTIVE_SENDS.lock().unwrap();
+        // Only clear if we still own the slot — cancel may have released early
+        // and a newer send may already hold a different generation.
+        if active.get(&self.session_id) == Some(&self.generation) {
+            active.remove(&self.session_id);
+        }
     }
 }
 
+/// Release the in-flight send claim for a session after cancel so a follow-up
+/// prompt is not rejected with "Session already has an active request" while
+/// the cancelled worker finishes teardown (#329).
+fn release_active_send(session_id: &str) {
+    if ACTIVE_SENDS.lock().unwrap().remove(session_id).is_some() {
+        log::info!("[SendChat] released active send claim after cancel session={session_id}");
+    }
+}
+
+fn has_active_send(session_id: &str) -> bool {
+    ACTIVE_SENDS.lock().unwrap().contains_key(session_id)
+}
+
 fn should_forward_cancel_request(session_id: &str) -> bool {
-    ACTIVE_SENDS.lock().unwrap().contains(session_id)
-        || super::registry::is_session_actively_managed(session_id)
+    has_active_send(session_id) || super::registry::is_session_actively_managed(session_id)
 }
 
 fn clear_stale_pending_cancel_before_send(session_id: &str) {
-    let has_active_send = ACTIVE_SENDS.lock().unwrap().contains(session_id);
-    if !has_active_send
+    if !has_active_send(session_id)
         && !super::registry::is_session_actively_managed(session_id)
         && super::registry::clear_pending_cancel(session_id)
     {
@@ -2447,105 +2496,106 @@ pub async fn send_chat_message(
         sessions.sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
     );
 
-    // Check if we should trigger automatic naming (session and/or branch)
-    // Branch naming: first user message ever AND not already attempted
-    // Session naming: first user message in THIS session AND not already attempted
+    // Check if we should trigger automatic naming (session and/or branch).
+    // Branch naming: first user message ever AND not already attempted.
+    // Session naming: first user message in THIS session AND not already attempted.
+    //
+    // IMPORTANT: `Session.messages` is always empty after the NDJSON migration
+    // (messages load on demand from run logs). Use message_count / total_runs
+    // instead of scanning `messages`.
     let is_first_worktree_message = !sessions.branch_naming_completed
         && sessions
             .sessions
             .iter()
-            .flat_map(|s| &s.messages)
-            .filter(|m| m.role == MessageRole::User)
-            .count()
-            == 0;
+            .all(session_has_no_prior_user_messages);
 
     let session_for_naming = sessions.find_session(&session_id).cloned();
     let is_first_session_message = session_for_naming
         .as_ref()
-        .map(|sess| {
-            !sess.session_naming_completed
-                && sess
-                    .messages
-                    .iter()
-                    .filter(|m| m.role == MessageRole::User)
-                    .count()
-                    == 0
-        })
+        .map(|sess| !sess.session_naming_completed && session_has_no_prior_user_messages(sess))
         .unwrap_or(false);
 
     // Spawn unified naming task if either condition is met
     if is_first_worktree_message || is_first_session_message {
-        if let Ok(prefs) = crate::load_preferences(app.clone()).await {
-            // Preserve branches selected by the user, base sessions, and PR worktrees.
-            let worktree_record = load_projects_data(&app)
-                .ok()
-                .and_then(|data| data.find_worktree(&worktree_id).cloned());
-            let generate_branch = is_first_worktree_message
-                && prefs.auto_branch_naming
-                && should_auto_name_branch(worktree_record.as_ref());
-            let generate_session = is_first_session_message && prefs.auto_session_naming;
+        match crate::load_preferences(app.clone()).await {
+            Ok(prefs) => {
+                // Preserve branches selected by the user, base sessions, and PR worktrees.
+                let worktree_record = load_projects_data(&app)
+                    .ok()
+                    .and_then(|data| data.find_worktree(&worktree_id).cloned());
+                let generate_branch = is_first_worktree_message
+                    && prefs.auto_branch_naming
+                    && should_auto_name_branch(worktree_record.as_ref());
+                let generate_session = is_first_session_message && prefs.auto_session_naming;
 
-            if generate_branch || generate_session {
-                log::trace!(
-                    "Spawning naming task (session: {generate_session}, branch: {generate_branch})"
+                if generate_branch || generate_session {
+                    log::info!(
+                        "[Naming] Spawning naming task session={session_id} worktree={worktree_id} (session: {generate_session}, branch: {generate_branch})"
+                    );
+
+                    // Get existing worktree names to avoid duplicates (only needed for branch naming)
+                    let existing_names = if generate_branch {
+                        load_projects_data(&app)
+                            .map(|data| data.worktrees.iter().map(|w| w.name.clone()).collect())
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let custom_session_prompt = if generate_session {
+                        prefs.magic_prompts.session_naming.clone()
+                    } else {
+                        None
+                    };
+
+                    let request = NamingRequest {
+                        session_id: session_id.clone(),
+                        worktree_id: worktree_id.clone(),
+                        worktree_path: PathBuf::from(&worktree_path),
+                        first_message: message.clone(),
+                        model: prefs.magic_prompt_models.session_naming_model.clone(),
+                        existing_branch_names: existing_names,
+                        generate_session_name: generate_session,
+                        generate_branch_name: generate_branch,
+                        custom_session_prompt,
+                        // Keep provider semantics consistent with manual regeneration:
+                        // session_naming_provider = None means Anthropic (no custom profile),
+                        // not fallback to global default_provider.
+                        custom_profile_name: prefs
+                            .magic_prompt_providers
+                            .session_naming_provider
+                            .clone(),
+                        backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
+                        reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
+                    };
+
+                    // Spawn in background - does not block chat
+                    spawn_naming_task(app.clone(), request);
+                }
+
+                // Mark as completed only after prefs loaded successfully so a
+                // transient prefs failure does not permanently skip auto-naming.
+                with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+                    if is_first_worktree_message {
+                        sessions.branch_naming_completed = true;
+                    }
+                    if is_first_session_message {
+                        if let Some(session) = sessions.find_session_mut(&session_id) {
+                            session.session_naming_completed = true;
+                        }
+                    }
+                    Ok(())
+                })?;
+
+                // Reload sessions to get fresh state after save
+                sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
+            }
+            Err(e) => {
+                log::warn!(
+                    "[Naming] Skipping auto-naming for session={session_id}: failed to load preferences: {e}"
                 );
-
-                // Get existing worktree names to avoid duplicates (only needed for branch naming)
-                let existing_names = if generate_branch {
-                    load_projects_data(&app)
-                        .map(|data| data.worktrees.iter().map(|w| w.name.clone()).collect())
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-
-                let custom_session_prompt = if generate_session {
-                    prefs.magic_prompts.session_naming.clone()
-                } else {
-                    None
-                };
-
-                let request = NamingRequest {
-                    session_id: session_id.clone(),
-                    worktree_id: worktree_id.clone(),
-                    worktree_path: PathBuf::from(&worktree_path),
-                    first_message: message.clone(),
-                    model: prefs.magic_prompt_models.session_naming_model.clone(),
-                    existing_branch_names: existing_names,
-                    generate_session_name: generate_session,
-                    generate_branch_name: generate_branch,
-                    custom_session_prompt,
-                    // Keep provider semantics consistent with manual regeneration:
-                    // session_naming_provider = None means Anthropic (no custom profile),
-                    // not fallback to global default_provider.
-                    custom_profile_name: prefs
-                        .magic_prompt_providers
-                        .session_naming_provider
-                        .clone(),
-                    backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
-                    reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
-                };
-
-                // Spawn in background - does not block chat
-                spawn_naming_task(app.clone(), request);
             }
         }
-
-        // Mark as completed to prevent re-triggering (atomic update)
-        with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-            if is_first_worktree_message {
-                sessions.branch_naming_completed = true;
-            }
-            if is_first_session_message {
-                if let Some(session) = sessions.find_session_mut(&session_id) {
-                    session.session_naming_completed = true;
-                }
-            }
-            Ok(())
-        })?;
-
-        // Reload sessions to get fresh state after save
-        sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
     }
 
     // Notify all clients that a message is being sent (for real-time sync).
@@ -4426,12 +4476,18 @@ pub async fn send_chat_message(
         let _ = tx.send(result);
     });
 
-    let (_pid, unified_response) = match rx.await {
+    let (pid, unified_response) = match rx.await {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => {
-            // Thread completed with an error — clean up all registrations.
+            // Thread completed with an error — clean up registrations owned by
+            // this send. Prefer ownership-aware cleanup so a follow-up send that
+            // started after cancel is not clobbered (#329).
             log::info!("[SendChat] EXIT session={session_id} reason=thread_error error={e}");
-            super::registry::cleanup_session_registrations(&session_id);
+            super::registry::cleanup_owned_session_registrations(
+                &session_id,
+                None,
+                opencode_cancel_flag.as_ref(),
+            );
             if let Some(ref flag) = opencode_cancel_flag {
                 if !flag.load(std::sync::atomic::Ordering::SeqCst) {
                     // Mark run as crashed so it doesn't stay in Running forever
@@ -4503,7 +4559,11 @@ pub async fn send_chat_message(
         }
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
-            super::registry::cleanup_session_registrations(&session_id);
+            super::registry::cleanup_owned_session_registrations(
+                &session_id,
+                None,
+                opencode_cancel_flag.as_ref(),
+            );
             // Check if CLI completed despite thread panic (#209)
             let partial_sid = run_log::extract_session_id_from_jsonl(&app, &session_id, &run_id);
             if run_log::jsonl_has_result_line(&app, &session_id, &run_id) {
@@ -4547,8 +4607,14 @@ pub async fn send_chat_message(
         }
     };
 
-    // Clear any stale pending cancel entry and unregister OpenCode cancel flag now that we have a result.
-    super::registry::cleanup_session_registrations(&session_id);
+    // Clear registry state owned by this send. After cancel, a newer send may
+    // already own ACTIVE_SENDS / CANCEL_FLAGS / PROCESS_REGISTRY for this session,
+    // so only remove entries that still match this run (#329).
+    super::registry::cleanup_owned_session_registrations(
+        &session_id,
+        Some(pid),
+        opencode_cancel_flag.as_ref(),
+    );
 
     // PID is now persisted via pid_callback immediately after spawn (before tailing).
     // No need to set_pid here — it was already saved for crash recovery.
@@ -5343,7 +5409,13 @@ pub async fn cancel_chat_message(
         super::registry::cleanup_session_registrations(&session_id);
         return Ok(false);
     }
-    cancel_process(&app, &session_id, &worktree_id)
+    let cancelled = cancel_process(&app, &session_id, &worktree_id)?;
+    if cancelled {
+        // Free the send slot immediately so a follow-up prompt is not rejected
+        // while the cancelled worker finishes teardown (issue #329).
+        release_active_send(&session_id);
+    }
+    Ok(cancelled)
 }
 
 /// Check if any sessions have running Claude processes
@@ -9314,6 +9386,44 @@ mod tests {
     }
 
     #[test]
+    fn session_has_no_prior_user_messages_uses_message_count() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = Some(0);
+        session.messages = vec![]; // NDJSON path: messages always empty
+        assert!(session_has_no_prior_user_messages(&session));
+
+        session.message_count = Some(2);
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_falls_back_to_total_runs() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = None;
+        session.total_runs = 0;
+        assert!(session_has_no_prior_user_messages(&session));
+
+        session.total_runs = 1;
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_falls_back_to_in_memory_messages() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = None;
+        session.total_runs = 0;
+        session.messages = vec![ChatMessage {
+            id: "m1".to_string(),
+            session_id: session.id.clone(),
+            role: MessageRole::User,
+            content: "hello".to_string(),
+            timestamp: 0,
+            ..Default::default()
+        }];
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
     fn codex_reasoning_effort_preserves_new_model_levels() {
         assert_eq!(
             codex_reasoning_effort(&EffortLevel::Max, Some("gpt-5.6-sol")),
@@ -9618,6 +9728,27 @@ mod tests {
             SendClaim::try_acquire("pre-register-session").expect("send claim should acquire");
 
         assert!(should_forward_cancel_request("pre-register-session"));
+    }
+
+    #[test]
+    fn release_active_send_allows_new_claim_without_drop_clobber() {
+        // Regression for #329: cancel releases the claim while the cancelled
+        // send is still alive; Drop of the old claim must not free the new one.
+        let old = SendClaim::try_acquire("race-session").expect("first claim");
+        assert!(SendClaim::try_acquire("race-session").is_none());
+
+        release_active_send("race-session");
+        let new = SendClaim::try_acquire("race-session").expect("claim after cancel release");
+        assert!(has_active_send("race-session"));
+
+        drop(old);
+        assert!(
+            has_active_send("race-session"),
+            "old claim Drop must not remove newer generation"
+        );
+
+        drop(new);
+        assert!(!has_active_send("race-session"));
     }
 
     #[test]

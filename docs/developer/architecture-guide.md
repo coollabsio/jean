@@ -192,7 +192,7 @@ Additional systems (no dedicated docs yet):
 - **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
-- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`)
+- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 

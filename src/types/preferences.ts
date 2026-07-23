@@ -116,7 +116,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
    - Specific files to modify
    - Potential risks/trade-offs
    - Test cases to verify
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -127,7 +126,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -170,7 +168,6 @@ Investigate the loaded GitHub {prWord} ({prRefs})
    - Address reviewer feedback
    - Specific files to modify
    - Test cases to add or update
-8. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -182,7 +179,6 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -385,7 +381,6 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 3. Explore the relevant code in the codebase to understand the context
 4. Determine if this is a code issue, configuration issue, or flaky test
 5. Propose a fix with specific files and changes needed
-6. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -396,7 +391,6 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in CI config (.github/workflows), explain the fix
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -428,7 +422,6 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
    - Specific version bump or dependency change
    - Any code changes needed for compatibility
    - Test cases to verify the fix doesn't break functionality
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -439,7 +432,6 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
 - Don't just recommend "upgrade" — assess compatibility impact
 - Reference specific file paths where the affected package is used
 - If multiple alerts are loaded, address each one separately
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -473,7 +465,6 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 6. Document:
    - Summarize the vulnerability and fix for the advisory
    - Note any affected versions and migration steps
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -484,7 +475,6 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 - Check for the same vulnerability pattern across the entire codebase, not just the reported location
 - Reference specific file paths and line numbers
 - If multiple advisories are loaded, address each one separately
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -526,7 +516,6 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
    - Specific files to modify
    - Potential risks/trade-offs
    - Test cases to verify
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -538,7 +527,6 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -570,7 +558,6 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
    - Specific files and code paths to change
    - Error handling or observability improvements where relevant
    - Risks, edge cases, and tests needed to verify the fix
-6. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -582,7 +569,6 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
 - Be thorough but focused - investigate deeply without getting sidetracked
 - If multiple solutions exist, explain the trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
