@@ -14,7 +14,7 @@ import {
   usesWebSocketBackend,
   type InitialData,
 } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import { isNativeApp, setNativeOpenAllowed } from '@/lib/environment'
 import { useNativeWindowCloseGuard } from '@/hooks/useNativeWindowCloseGuard'
 import { QuitConfirmationDialog } from '@/components/layout/QuitConfirmationDialog'
 import { setServerPlatform } from '@/lib/platform'
@@ -284,6 +284,13 @@ function App() {
 
       if (data.serverPlatform) {
         setServerPlatform(data.serverPlatform)
+      }
+      if (typeof data.nativeOpenAllowed === 'boolean') {
+        setNativeOpenAllowed(data.nativeOpenAllowed)
+      }
+      // Force a re-render so non-reactive environment helpers (platform,
+      // canOpenNativeApps) update UI after /api/init.
+      if (data.serverPlatform || typeof data.nativeOpenAllowed === 'boolean') {
         setPlatformVersion(version => version + 1)
       }
 

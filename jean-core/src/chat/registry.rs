@@ -38,6 +38,16 @@ static CANCEL_FLAGS: Lazy<Mutex<HashMap<String, OpenCodeCancelEntry>>> =
 static CODEX_TURN_REGISTRY: Lazy<Mutex<HashMap<String, (String, String)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Jean sessions where Codex command/permission approvals should be auto-accepted.
+/// Set when a turn starts in yolo mode or the user chooses Approve (yolo) /
+/// acceptForSession mid-turn. Cleared when the session leaves yolo mode.
+///
+/// This is the mid-turn bridge for issue #328: switching Jean's execution mode
+/// to yolo does not reconfigure the already-started Codex turn, so Jean must
+/// stop surfacing further sandbox/command prompts itself.
+static CODEX_YOLO_AUTO_APPROVE: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
 /// Sessions in PROCESS_REGISTRY whose process is fully detached (survives Jean
 /// quitting). Claude CLI and host-backed Pi/Grok/Kimi runs are detached.
 static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
@@ -338,6 +348,21 @@ pub fn get_codex_turn(session_id: &str) -> Option<(String, String)> {
         .cloned()
 }
 
+/// Enable or disable automatic Codex command/permission approvals for a Jean session.
+pub fn set_codex_yolo_auto_approve(session_id: &str, enabled: bool) {
+    let mut set = lock_recover(&CODEX_YOLO_AUTO_APPROVE, "CODEX_YOLO_AUTO_APPROVE");
+    if enabled {
+        set.insert(session_id.to_string());
+    } else {
+        set.remove(session_id);
+    }
+}
+
+/// Whether Jean should auto-accept Codex command/permission approvals for this session.
+pub fn is_codex_yolo_auto_approve(session_id: &str) -> bool {
+    lock_recover(&CODEX_YOLO_AUTO_APPROVE, "CODEX_YOLO_AUTO_APPROVE").contains(session_id)
+}
+
 /// Remove all registry state for a session after a backend crash or thread panic.
 pub fn cleanup_session_registrations(session_id: &str) {
     let removed_pid = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").remove(session_id);
@@ -349,6 +374,7 @@ pub fn cleanup_session_registrations(session_id: &str) {
     let removed_turn = lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY")
         .remove(session_id)
         .is_some();
+    lock_recover(&CODEX_YOLO_AUTO_APPROVE, "CODEX_YOLO_AUTO_APPROVE").remove(session_id);
 
     if removed_pid.is_some() || removed_pending || removed_flag || removed_turn {
         log::warn!(

@@ -1227,7 +1227,13 @@ export interface AppPreferences {
   mobile_zoom_level?: number // Mobile zoom level percentage (50-200, default 90)
   sync_zoom_levels?: boolean // Keep desktop and mobile zoom levels in sync (default true)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
-  default_provider: string | null // Default provider profile name (null = Anthropic direct)
+  default_provider: string | null // Default Claude provider profile name (null = Anthropic direct)
+  /** Codex custom model_provider profiles (OpenRouter, OpenAI-compatible, etc.) */
+  custom_codex_providers: CodexProviderProfile[]
+  /** Default Codex provider profile name (null = Codex default / ChatGPT OpenAI) */
+  default_codex_provider: string | null
+  /** PI custom providers mirrored into ~/.pi/agent/models.json */
+  custom_pi_providers: PiProviderProfile[]
   favorite_models: string[] // Favourited model keys ("backend:model") shown at top of picker
   favorite_package_scripts?: string[] // Favourited package script keys ("project_id:script")
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
@@ -1306,6 +1312,58 @@ export interface CustomCliProfile {
   file_path?: string // Path to settings file on disk (e.g. ~/.claude/settings.jean.openrouter.json)
   supports_thinking?: boolean // Whether this provider supports thinking/effort levels (default: true)
 }
+
+/** Codex custom model_provider profile (injected via app-server config / -c overrides). */
+export interface CodexProviderProfile {
+  name: string // Display + session id, e.g. "OpenRouter"
+  provider_id: string // Codex model_provider slug, e.g. "openrouter"
+  base_url: string // e.g. https://openrouter.ai/api/v1
+  env_key: string // Env var holding the API key, e.g. OPENROUTER_API_KEY
+  wire_api?: 'chat' | 'responses' // Optional wire protocol
+}
+
+/** PI custom provider (merged into ~/.pi/agent/models.json providers map). */
+export interface PiProviderProfile {
+  name: string // Provider id in models.json, e.g. "openrouter-custom"
+  base_url: string
+  api:
+    | 'openai-completions'
+    | 'openai-responses'
+    | 'anthropic-messages'
+    | 'google-generative-ai'
+  /** Env var name; written to models.json as $ENV_NAME (never store secrets in prefs) */
+  api_key_env?: string
+  models: { id: string; name?: string }[]
+}
+
+export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
+  {
+    name: 'OpenRouter',
+    provider_id: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    env_key: 'OPENROUTER_API_KEY',
+    wire_api: 'responses',
+  },
+]
+
+export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
+  {
+    name: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    api: 'openai-completions',
+    api_key_env: 'OPENROUTER_API_KEY',
+    models: [
+      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
+      { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+    ],
+  },
+  {
+    name: 'ollama',
+    base_url: 'http://localhost:11434/v1',
+    api: 'openai-completions',
+    models: [{ id: 'llama3.2', name: 'Llama 3.2' }],
+  },
+]
 
 export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
   {
@@ -2152,6 +2210,9 @@ export const defaultPreferences: AppPreferences = {
   sync_zoom_levels: true,
   custom_cli_profiles: [],
   default_provider: null,
+  custom_codex_providers: [],
+  default_codex_provider: null,
+  custom_pi_providers: [],
   favorite_models: [],
   favorite_package_scripts: [],
   fast_mode_models: [],

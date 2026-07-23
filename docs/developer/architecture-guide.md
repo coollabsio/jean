@@ -146,7 +146,10 @@ Additional systems (no dedicated docs yet):
   running its bundled React UI and routes shared backend commands and events to
   that server over authenticated HTTP/WebSocket transport. Local shell
   operations such as clipboard access, external URL opening, native menus, and
-  notifications continue to use the local Tauri runtime.
+  notifications continue to use the local Tauri runtime. When the preferred
+  editor is Zed, "Open in Editor" also stays local: Jean rewrites the remote
+  filesystem path to `ssh://[user@]host[:port]/path` and launches the local
+  `zed` CLI (SSH fields live on the remote connection profile).
 
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal

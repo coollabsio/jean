@@ -278,7 +278,13 @@ pub struct AppPreferences {
     #[serde(default)]
     pub custom_cli_profiles: Vec<CustomCliProfile>, // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
     #[serde(default)]
-    pub default_provider: Option<String>, // Default provider profile name (None = Anthropic direct)
+    pub default_provider: Option<String>, // Default Claude provider profile name (None = Anthropic direct)
+    #[serde(default)]
+    pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
+    #[serde(default)]
+    pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    #[serde(default)]
+    pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
     pub favorite_models: Vec<String>, // Favourited model keys ("backend:model") shown at top of picker
     #[serde(default)]
@@ -444,6 +450,36 @@ pub struct CustomCliProfile {
     pub file_path: String,
     #[serde(default = "default_true")]
     pub supports_thinking: Option<bool>,
+}
+
+/// Codex custom model_provider profile injected via app-server config / -c overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexProviderProfile {
+    pub name: String,
+    pub provider_id: String,
+    pub base_url: String,
+    pub env_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_api: Option<String>,
+}
+
+/// PI custom provider merged into ~/.pi/agent/models.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderProfile {
+    pub name: String,
+    pub base_url: String,
+    pub api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub models: Vec<PiProviderModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 fn slugify_profile_name(name: &str) -> String {
@@ -905,6 +941,7 @@ mod tests {
         assert_eq!(args.port, Some(4567));
         assert_eq!(args.token.as_deref(), Some("secret"));
         assert!(!args.no_token);
+        assert!(!args.allow_native_open);
     }
 
     #[test]
@@ -933,6 +970,30 @@ mod tests {
         assert_eq!(args.host.as_deref(), Some("100.64.0.1"));
         assert_eq!(args.port, Some(5678));
         assert_eq!(args.token.as_deref(), Some("cli-secret"));
+    }
+
+    #[test]
+    fn parse_cli_args_reads_allow_native_open_from_env_and_flag() {
+        let from_env = parse_cli_args_from(
+            ["jean", "--headless"],
+            [("JEAN_ALLOW_NATIVE_OPEN", "1")],
+        )
+        .unwrap();
+        assert!(from_env.allow_native_open);
+
+        let from_flag = parse_cli_args_from(
+            ["jean", "--headless", "--allow-native-open"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(from_flag.allow_native_open);
+
+        let off = parse_cli_args_from(
+            ["jean", "--headless"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(!off.allow_native_open);
     }
 
     #[test]
@@ -2397,6 +2458,9 @@ impl Default for AppPreferences {
             sync_zoom_levels: default_sync_zoom_levels(),
             custom_cli_profiles: Vec::new(),
             default_provider: None,
+            custom_codex_providers: Vec::new(),
+            default_codex_provider: None,
+            custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
             fast_mode_models: Vec::new(),
@@ -3253,6 +3317,9 @@ pub async fn start_http_server(
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
+    // Desktop-hosted Web Access can open local Finder/editor/terminal for clients.
+    platform::set_allow_native_open(true);
+
     let prefs = load_preferences(app.clone()).await?;
     let actual_port = port.unwrap_or(prefs.http_server_port);
     let bind_host = resolve_http_server_bind_host(&prefs);
@@ -3637,6 +3704,8 @@ struct CliArgs {
     token: Option<String>,
     no_token: bool,
     allow_unsafe_no_token: bool,
+    /// Allow HTTP clients to open local file managers / editors / terminals.
+    allow_native_open: bool,
 }
 
 /// CLI overrides for HTTP server configuration.
@@ -3663,12 +3732,14 @@ fn print_cli_help() {
     println!("  --no-token          Disable token authentication");
     println!("  --allow-unsafe-no-token");
     println!("                      Allow --no-token with a wildcard bind host");
+    println!("  --allow-native-open Allow Open in editor/finder/terminal over HTTP");
+    println!("                      (auto-enabled under WSL; off by default otherwise)");
     println!("  --help              Show this help message");
     println!("  --version           Show version");
     println!();
     println!("Environment:");
     println!("  JEAN_HEADLESS=1 JEAN_HOST JEAN_PORT JEAN_TOKEN JEAN_NO_TOKEN=1");
-    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1");
+    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1 JEAN_ALLOW_NATIVE_OPEN=1");
 }
 
 fn parse_cli_args() -> CliArgs {
@@ -3720,6 +3791,8 @@ where
     let mut no_token = env_truthy(env.get("JEAN_NO_TOKEN").map(String::as_str));
     let mut allow_unsafe_no_token =
         env_truthy(env.get("JEAN_ALLOW_UNSAFE_NO_TOKEN").map(String::as_str));
+    let mut allow_native_open =
+        env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
     let mut host = env
         .get("JEAN_HOST")
         .map(|h| h.trim().to_string())
@@ -3778,6 +3851,9 @@ where
             "--allow-unsafe-no-token" => {
                 allow_unsafe_no_token = true;
             }
+            "--allow-native-open" => {
+                allow_native_open = true;
+            }
             _ => {} // ignore unknown flags (Tauri/OS may pass their own)
         }
     }
@@ -3786,9 +3862,15 @@ where
         return Err("--token and --no-token are mutually exclusive".to_string());
     }
 
-    if !headless && (host.is_some() || port.is_some() || token.is_some() || no_token) {
+    if !headless
+        && (host.is_some()
+            || port.is_some()
+            || token.is_some()
+            || no_token
+            || allow_native_open)
+    {
         eprintln!(
-            "Warning: --host, --port, --token, --no-token are only effective with --headless"
+            "Warning: --host, --port, --token, --no-token, --allow-native-open are only effective with --headless"
         );
     }
 
@@ -3799,6 +3881,7 @@ where
         token,
         no_token,
         allow_unsafe_no_token,
+        allow_native_open,
     })
 }
 
@@ -3969,6 +4052,8 @@ pub async fn run_server() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
     let cli = parse_cli_args();
+    // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
+    platform::set_allow_native_open(cli.allow_native_open);
     let context = RuntimeContext::from_environment()?;
     initialize_runtime(&context)?;
 

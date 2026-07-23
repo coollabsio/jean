@@ -1148,10 +1148,14 @@ async fn queued_message_to_send_request(
     let custom_profile_name = json_string(queued, "customProfileName").or_else(|| {
         provider.filter(|provider| {
             provider != "__anthropic__"
+                && provider != "__default__"
                 && prefs.as_ref().is_some_and(|p| {
                     p.custom_cli_profiles
                         .iter()
                         .any(|profile| profile.name == *provider)
+                        || p.custom_codex_providers
+                            .iter()
+                            .any(|profile| profile.name == *provider)
                 })
         })
     });
@@ -1649,6 +1653,13 @@ pub async fn update_session_state(
                 session.enabled_mcp_servers = v;
             }
             if let Some(v) = selected_execution_mode {
+                // Keep mid-turn Codex auto-approve in sync with Jean's mode
+                // (issue #328). Approve (yolo) sets this immediately so residual
+                // "retry without sandbox?" prompts stop for the active turn.
+                super::registry::set_codex_yolo_auto_approve(
+                    &session_id,
+                    v.as_deref() == Some("yolo"),
+                );
                 session.selected_execution_mode = v;
             }
             if let Some(v) = table_checked_rows {
@@ -2758,6 +2769,11 @@ pub async fn send_chat_message(
     let claude_profile_changed = effective_backend == Backend::Claude
         && claude_session_id.is_some()
         && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
+    // Custom Codex providers bind model_provider on the thread — switching
+    // mid-session requires a new thread (mirrors Claude profile resume clear).
+    let codex_profile_changed = effective_backend == Backend::Codex
+        && codex_thread_id.is_some()
+        && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
     let profile_handoff = super::handoff::should_inject_claude_profile_handoff(
         &effective_backend,
         previous_backend.as_ref(),
@@ -2805,6 +2821,14 @@ pub async fn send_chat_message(
         None
     } else {
         claude_session_id
+    };
+    let codex_thread_id = if codex_profile_changed {
+        log::info!(
+            "[SendChat] Codex provider changed session={session_id}; starting new thread"
+        );
+        None
+    } else {
+        codex_thread_id
     };
 
     // Cursor CLI doesn't support thinking/effort levels
@@ -2954,6 +2978,19 @@ pub async fn send_chat_message(
         mcp_config.clone()
     };
     let thread_custom_profile = custom_profile_name.clone();
+    let thread_codex_provider = if effective_backend == Backend::Codex {
+        let prefs_for_codex = crate::load_preferences(app.clone()).await.ok();
+        custom_profile_name.as_ref().and_then(|name| {
+            prefs_for_codex.as_ref().and_then(|p| {
+                p.custom_codex_providers
+                    .iter()
+                    .find(|profile| profile.name == *name)
+                    .cloned()
+            })
+        })
+    } else {
+        None
+    };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
     let thread_codex_search = codex_search_enabled;
@@ -3537,6 +3574,7 @@ pub async fn send_chat_message(
                     codex_base_instructions_content.as_deref(),
                     thread_codex_multi_agent,
                     thread_codex_max_threads,
+                    thread_codex_provider.as_ref(),
                 ) {
                     Ok(response) => Ok((
                         0, // No PID for app-server sessions
@@ -8254,18 +8292,31 @@ fn send_codex_response(rpc_id: u64, payload: serde_json::Value) -> Result<(), St
 
 /// Backward-compatible wrapper for legacy frontend callers.
 pub fn approve_codex_command(
-    _session_id: String,
+    session_id: String,
     rpc_id: u64,
     decision: String,
 ) -> Result<(), String> {
+    // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
+    // prompts for the rest of this session without waiting for the next turn
+    // (issue #328).
+    if decision == "acceptForSession" {
+        super::registry::set_codex_yolo_auto_approve(&session_id, true);
+    }
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
 pub fn respond_codex_command_approval(
-    _session_id: String,
+    session_id: String,
     rpc_id: u64,
     response: serde_json::Value,
 ) -> Result<(), String> {
+    let is_accept_for_session = response
+        .get("decision")
+        .and_then(|d| d.as_str())
+        .is_some_and(|d| d == "acceptForSession");
+    if is_accept_for_session {
+        super::registry::set_codex_yolo_auto_approve(&session_id, true);
+    }
     send_codex_response(rpc_id, response)
 }
 
