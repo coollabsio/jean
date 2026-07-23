@@ -498,17 +498,125 @@ function normalizePlanText(content: string): string {
   return content.trim().replace(/\r\n/g, '\n')
 }
 
-function getPlanToolInput(toolCalls: ToolCall[]): PlanToolInput | undefined {
-  const planTool = toolCalls.find(isPlanToolCall)
-  return planTool?.input as PlanToolInput | undefined
-}
-
 function getPlanField(input: PlanToolInput | undefined): string | null {
   return isNonEmptyString(input?.plan) ? input.plan : null
 }
 
 function getPlanPreviewField(input: PlanToolInput | undefined): string | null {
   return isNonEmptyString(input?.plan_preview) ? input.plan_preview : null
+}
+
+/** Status-only explanations are not handoff-quality plan bodies. */
+function isStatusOnlyPlanExplanation(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/[.!]+$/g, '')
+  if (!normalized) return true
+  if (normalized.length > 80) return false
+  return (
+    /plan (created|ready|complete|completed|updated)/.test(normalized) ||
+    /ready for approval/.test(normalized) ||
+    /awaiting approval/.test(normalized)
+  )
+}
+
+/**
+ * Prefer the richest Codex/ExitPlanMode tool input when multiple plan tools
+ * exist (e.g. split turn-id vs item-id after history reload).
+ */
+function getPlanToolInput(toolCalls: ToolCall[]): PlanToolInput | undefined {
+  const planTools = toolCalls.filter(isPlanToolCall)
+  if (planTools.length === 0) return undefined
+  if (planTools.length === 1) {
+    return planTools[0]?.input as PlanToolInput | undefined
+  }
+
+  let best: PlanToolInput | undefined
+  let bestScore = -1
+  for (const tool of planTools) {
+    const input = tool.input as PlanToolInput
+    const plan = getPlanField(input)
+    const preview = getPlanPreviewField(input)
+    const steps =
+      input?.steps?.filter(step => isNonEmptyString(step.step)).length ?? 0
+    const explanation = isNonEmptyString(input?.explanation)
+      ? input.explanation.trim()
+      : ''
+    let score = 0
+    if (plan && !looksLikeFormattedSteps(plan)) {
+      score += 1000 + plan.trim().length
+    }
+    if (preview) score += 500 + preview.trim().length
+    if (steps > 0) score += 100 + steps * 10
+    if (explanation && !isStatusOnlyPlanExplanation(explanation)) {
+      score += 50 + explanation.length
+    } else if (explanation) {
+      score += 1
+    }
+    if (score > bestScore) {
+      bestScore = score
+      best = input
+    }
+  }
+  return best
+}
+
+/**
+ * Merge plan fields from all plan tools so a thin explanation tool and a
+ * rich plan-body tool still produce one complete handoff document.
+ */
+function getMergedPlanToolInput(
+  toolCalls: ToolCall[]
+): PlanToolInput | undefined {
+  const planTools = toolCalls.filter(isPlanToolCall)
+  if (planTools.length === 0) return undefined
+  if (planTools.length === 1) {
+    return planTools[0]?.input as PlanToolInput | undefined
+  }
+
+  const merged: PlanToolInput = { source: 'codex' }
+  let bestPlan: string | null = null
+  let bestPreview: string | null = null
+  let bestSteps: PlanToolInput['steps']
+  let bestExplanation: string | null = null
+
+  for (const tool of planTools) {
+    const input = tool.input as PlanToolInput
+    const plan = getPlanField(input)
+    if (
+      plan &&
+      !looksLikeFormattedSteps(plan) &&
+      (!bestPlan || plan.trim().length > bestPlan.trim().length)
+    ) {
+      bestPlan = plan
+    }
+    const preview = getPlanPreviewField(input)
+    if (
+      preview &&
+      (!bestPreview || preview.trim().length > bestPreview.trim().length)
+    ) {
+      bestPreview = preview
+    }
+    const steps = input?.steps?.filter(step => isNonEmptyString(step.step))
+    if (steps && steps.length > (bestSteps?.length ?? 0)) {
+      bestSteps = steps
+    }
+    if (isNonEmptyString(input?.explanation)) {
+      const explanation = input.explanation.trim()
+      if (
+        !isStatusOnlyPlanExplanation(explanation) &&
+        (!bestExplanation || explanation.length > bestExplanation.length)
+      ) {
+        bestExplanation = explanation
+      } else if (!bestExplanation) {
+        bestExplanation = explanation
+      }
+    }
+  }
+
+  if (bestPlan) merged.plan = bestPlan
+  if (bestPreview) merged.plan_preview = bestPreview
+  if (bestSteps) merged.steps = bestSteps
+  if (bestExplanation) merged.explanation = bestExplanation
+  return merged
 }
 
 function formatPlanSteps(input: PlanToolInput | undefined): string | null {
@@ -526,7 +634,12 @@ function formatPlanSteps(input: PlanToolInput | undefined): string | null {
   const explanation = isNonEmptyString(input?.explanation)
     ? input.explanation.trim()
     : null
-  return [explanation, formattedSteps.join('\n')].filter(Boolean).join('\n\n')
+  // Don't promote status-only explanations as plan intro text
+  const intro =
+    explanation && !isStatusOnlyPlanExplanation(explanation)
+      ? explanation
+      : null
+  return [intro, formattedSteps.join('\n')].filter(Boolean).join('\n\n')
 }
 
 export function splitTextAroundPlan(text: string): SplitTextAroundPlanResult {
@@ -605,7 +718,11 @@ export function resolvePlanContent(params: {
   messageContent?: string | null
   contentBlocks?: ContentBlock[]
 }): ResolvedPlanContent {
-  const input = getPlanToolInput(params.toolCalls)
+  // Merge across split CodexPlan tools (turn-id vs item-id) so the richest
+  // body/steps win instead of whichever tool was inserted first.
+  const input =
+    getMergedPlanToolInput(params.toolCalls) ??
+    getPlanToolInput(params.toolCalls)
   const plan = getPlanField(input)
   const planPreview = getPlanPreviewField(input)
 
@@ -624,13 +741,39 @@ export function resolvePlanContent(params: {
     return { content: extractedFromText, source: 'message_text' }
   }
 
+  // Prefer full assistant text over thin checklist/status when no structured
+  // plan body was persisted — YOLO/new-worktree handoff needs the prose.
+  const fullAssistantText = collectPlanTextCandidates(params)
+    .map(text => text.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)[0]
   const formattedSteps = formatPlanSteps(input)
+  if (
+    fullAssistantText &&
+    fullAssistantText.length >= 120 &&
+    (!formattedSteps || fullAssistantText.length > formattedSteps.length * 2)
+  ) {
+    return { content: fullAssistantText, source: 'message_text' }
+  }
+
   if (formattedSteps) {
     return { content: formattedSteps, source: 'steps' }
   }
 
+  if (
+    isNonEmptyString(input?.explanation) &&
+    !isStatusOnlyPlanExplanation(input.explanation)
+  ) {
+    return { content: input.explanation, source: 'explanation' }
+  }
+
+  // Last resort: status-only explanation (still better than empty for UI)
   if (isNonEmptyString(input?.explanation)) {
     return { content: input.explanation, source: 'explanation' }
+  }
+
+  if (fullAssistantText) {
+    return { content: fullAssistantText, source: 'message_text' }
   }
 
   return { content: null, source: null }

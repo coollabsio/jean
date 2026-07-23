@@ -41,7 +41,7 @@ import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { isLocalBackend } from '@/lib/environment'
+import { canOpenInEditor, canOpenNativeApps } from '@/lib/environment'
 import { resolvePortUrl } from '@/components/browser/default-tab-url'
 
 interface ModalOption {
@@ -102,9 +102,11 @@ export function OpenInModal() {
     selectedWorktreeId
   )
 
-  // Local editor/terminal/finder only work against the desktop machine's FS.
-  // Remote connections and browser/web access should only show URL-based options.
-  const canOpenLocally = isLocalBackend()
+  // Finder/terminal: backend host can launch apps (local desktop, WSL headless,
+  // or --allow-native-open). Editor also works from the native shell against a
+  // remote Jean via local Zed + ssh://.
+  const canOpenLocally = canOpenNativeApps()
+  const canOpenEditor = canOpenInEditor()
 
   const targetPath = useMemo(() => {
     if (worktree?.path) return worktree.path
@@ -160,13 +162,16 @@ export function OpenInModal() {
         : []),
     ]
 
-    return canOpenLocally
-      ? allOptions
-      : allOptions.filter(opt => opt.id === 'github' || opt.id === 'open-pr')
+    return allOptions.filter(opt => {
+      if (opt.id === 'editor') return canOpenEditor
+      if (opt.id === 'terminal' || opt.id === 'finder') return canOpenLocally
+      return true
+    })
   }, [
     preferences?.editor,
     preferences?.terminal,
     canOpenLocally,
+    canOpenEditor,
     worktree?.pr_url,
     worktree?.pr_number,
   ])
@@ -275,12 +280,12 @@ export function OpenInModal() {
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open && !hasInitializedRef.current) {
-        setSelectedOption(canOpenLocally ? 'editor' : 'github')
+        setSelectedOption(canOpenEditor ? 'editor' : 'github')
         hasInitializedRef.current = true
       }
       setOpenInModalOpen(open)
     },
-    [setOpenInModalOpen, canOpenLocally]
+    [setOpenInModalOpen, canOpenEditor]
   )
 
   const portOptions: ModalOption[] = useMemo(() => {

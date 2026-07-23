@@ -69,4 +69,38 @@ describe('remote connections', () => {
     clearConnectionSwitch()
     expect(isConnectionSwitchPending()).toBe(false)
   })
+
+  it('persists optional SSH fields for remote editor open', () => {
+    const remote = addRemoteConnection({
+      name: 'Build server',
+      url: 'https://jean.example.com?token=first',
+      token: '',
+      sshUser: 'ubuntu',
+      sshHost: '192.168.1.50',
+      sshPort: 2222,
+    })
+
+    expect(remote).toMatchObject({
+      sshUser: 'ubuntu',
+      sshHost: '192.168.1.50',
+      sshPort: 2222,
+    })
+    expect(getRemoteConnections()[0]).toMatchObject({
+      sshUser: 'ubuntu',
+      sshHost: '192.168.1.50',
+      sshPort: 2222,
+    })
+
+    const updated = updateRemoteConnection(remote.id, {
+      name: remote.name,
+      url: remote.url,
+      token: 'second',
+      sshUser: 'deploy',
+      sshHost: '192.168.1.50',
+      sshPort: 22,
+    })
+    expect(updated.sshUser).toBe('deploy')
+    // Default SSH port is not stored.
+    expect(updated.sshPort).toBeUndefined()
+  })
 })

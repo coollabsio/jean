@@ -868,7 +868,7 @@ fn request_debug_summary(method: &str, params: &Value) -> Option<Value> {
             "approvalPolicy",
             "config",
         ],
-        "turn/start" => &["threadId", "effort", "cwd", "sandboxPolicy"],
+        "turn/start" => &["threadId", "effort", "cwd", "sandboxPolicy", "approvalPolicy"],
         _ => return None,
     };
 

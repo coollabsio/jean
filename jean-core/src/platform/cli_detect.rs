@@ -121,7 +121,10 @@ pub fn find_cli_in_host_path(tool: &str, jean_managed: Option<&Path>) -> Option<
 ///
 /// Windows npm installs often produce several shims for one command. The
 /// extensionless shim (for Unix shells) can appear before `*.cmd`, but it is
-/// not directly executable by Windows `CreateProcessW`.
+/// not directly executable by Windows `CreateProcessW` (os error 193).
+///
+/// When the best candidate is still extensionless, also try a same-directory
+/// sibling with a Windows executable extension (`.exe` / `.cmd` / `.bat`).
 pub fn select_cli_candidate(
     output: &str,
     prefer_windows_executable: bool,
@@ -139,7 +142,33 @@ pub fn select_cli_candidate(
         candidates.sort_by_key(|path| windows_cli_candidate_rank(path));
     }
 
-    candidates.into_iter().next()
+    let selected = candidates.into_iter().next()?;
+    if prefer_windows_executable {
+        Some(prefer_windows_executable_sibling(selected))
+    } else {
+        Some(selected)
+    }
+}
+
+/// If `path` is extensionless, prefer a Windows-native sibling that
+/// CreateProcessW can launch (issue #265 / #415).
+pub fn prefer_windows_executable_sibling(path: PathBuf) -> PathBuf {
+    let has_extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| !ext.is_empty());
+    if has_extension {
+        return path;
+    }
+
+    for ext in ["exe", "cmd", "bat"] {
+        let candidate = path.with_extension(ext);
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+
+    path
 }
 
 fn is_jean_managed_candidate(path: &Path, jean_managed: Option<&Path>) -> bool {
@@ -189,6 +218,23 @@ C:\Users\u\AppData\Roaming\npm\opencode.ps1";
                 r"C:\Users\u\AppData\Roaming\npm\opencode.cmd"
             ))
         );
+    }
+
+    #[test]
+    fn prefer_windows_executable_sibling_resolves_cmd_when_extensionless_is_selected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let extensionless = dir.path().join("codex");
+        let cmd = dir.path().join("codex.cmd");
+        std::fs::write(&extensionless, b"#!/usr/bin/env node\n").unwrap();
+        std::fs::write(&cmd, b"@echo off\n").unwrap();
+
+        assert_eq!(super::prefer_windows_executable_sibling(extensionless), cmd);
+    }
+
+    #[test]
+    fn prefer_windows_executable_sibling_keeps_existing_extension() {
+        let path = PathBuf::from(r"C:\tools\codex.exe");
+        assert_eq!(super::prefer_windows_executable_sibling(path.clone()), path);
     }
 
     #[test]

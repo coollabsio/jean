@@ -147,6 +147,7 @@ import type { AppPreferences } from '@/types/preferences'
 import {
   effortLevelOptions,
   codexReasoningOptions,
+  codexModelVerbosityOptions,
   grokReasoningOptions,
   backendOptions,
   getTerminalOptions,
@@ -161,6 +162,7 @@ import {
   type CodexModel,
   type CodexGoalExecutionMode,
   type CodexReasoningEffort,
+  type CodexModelVerbosity,
   type GrokReasoningEffort,
   type CursorModel,
   type PiModel,
@@ -203,6 +205,7 @@ import {
 } from '@/services/git-status'
 import { getPathUpdateAction } from '@/lib/cli-update'
 import { BackendPaneHeader, SettingsSection } from '../SettingsSection'
+import { AiLanguageField } from './AiLanguageField'
 import {
   resolveDefaultModelForBackend,
   resolvePiDefaultModel,
@@ -1032,6 +1035,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handleCodexModelVerbosityChange = (value: CodexModelVerbosity) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        default_codex_model_verbosity: value,
+      })
+    }
+  }
+
   const handleCodexGoalExecutionModeChange = (
     value: CodexGoalExecutionMode
   ) => {
@@ -1120,8 +1131,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedCursorModelLabel =
     cursorModelOptions.find(option => option.value === selectedCursorModel)
       ?.label ?? formatCursorModelLabel(selectedCursorModel)
-  const selectedGrokModel =
-    preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
   const grokModelOptions: { value: GrokModel; label: string }[] = (
     availableGrokModels?.length
       ? availableGrokModels.map(model => ({
@@ -3082,6 +3092,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
+              label="Model verbosity"
+              description="How much intermediate text Codex writes during chat (low is terse; high is more detailed)"
+            >
+              <Select
+                value={preferences?.default_codex_model_verbosity ?? 'medium'}
+                onValueChange={handleCodexModelVerbosityChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {codexModelVerbosityOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
               label="Goal execution mode"
               description="Mode used when starting a Codex /goal"
             >
@@ -4356,10 +4387,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </div>
             </InlineField>
 
-            <AiLanguageField
-              preferences={preferences}
-              patchPreferences={patchPreferences}
-            />
+            <AiLanguageField preferences={preferences} />
 
             <InlineField
               label="Allow web tools in plan mode"
@@ -5032,46 +5060,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-const AiLanguageField: FC<{
-  preferences: AppPreferences | undefined
-  patchPreferences: ReturnType<typeof usePatchPreferences>
-}> = ({ preferences, patchPreferences }) => {
-  const [localValue, setLocalValue] = useState(preferences?.ai_language ?? '')
-
-  const hasChanges = localValue !== (preferences?.ai_language ?? '')
-
-  const handleSave = useCallback(() => {
-    if (!preferences) return
-    patchPreferences.mutate({ ai_language: localValue })
-  }, [preferences, patchPreferences, localValue])
-
-  return (
-    <InlineField
-      label="AI Language"
-      description="Language for AI responses (e.g. French, 日本語)"
-    >
-      <div className="flex items-center gap-2">
-        <Input
-          className="w-full sm:w-40"
-          placeholder="Default"
-          value={localValue}
-          onChange={e => setLocalValue(e.target.value)}
-        />
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!hasChanges || patchPreferences.isPending}
-        >
-          {patchPreferences.isPending && (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          )}
-          Save
-        </Button>
-      </div>
-    </InlineField>
   )
 }
 

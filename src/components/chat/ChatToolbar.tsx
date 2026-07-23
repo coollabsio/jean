@@ -127,6 +127,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   onBackendModelChange,
   onProviderChange,
   customCliProfiles,
+  customCodexProviders = [],
   onThinkingLevelChange,
   onEffortLevelChange,
   onSetExecutionMode,
@@ -297,9 +298,14 @@ export const ChatToolbar = memo(function ChatToolbar({
 
   const handleProviderChange = useCallback(
     (value: string) => {
-      const provider = value === 'default' ? null : value
+      const provider =
+        value === 'default' ||
+        value === '__anthropic__' ||
+        value === '__default__'
+          ? null
+          : value
       onProviderChange(provider)
-      if (provider && provider !== '__anthropic__') {
+      if (provider) {
         if (selectedModel === 'claude-opus-4-8[1m]') {
           onModelChange('claude-opus-4-8' as ClaudeModel)
         } else if (selectedModel === 'claude-opus-4-7[1m]') {
@@ -462,6 +468,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             isCodex={isCodex}
             modelReasoning={selectedModelReasoning}
             customCliProfiles={customCliProfiles}
+            customCodexProviders={customCodexProviders}
             onOpenBackendModelPicker={() =>
               setMobileBackendModelPickerOpen(true)
             }
@@ -537,6 +544,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             sessionHasMessages={sessionHasMessages}
             providerLocked={providerLocked}
             customCliProfiles={customCliProfiles}
+            customCodexProviders={customCodexProviders}
             isCodex={isCodex}
             modelReasoning={selectedModelReasoning}
             prUrl={prUrl}

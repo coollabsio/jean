@@ -42,12 +42,61 @@ pub fn get_cli_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(get_cli_dir(app)?.join(CLI_BINARY_NAME))
 }
 
+/// Whether the Jean-managed OpenCode binary is present and executable.
+pub fn jean_managed_installed(app: &AppHandle) -> bool {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return get_wsl_cli_binary_path(&wsl.distro)
+            .map(|path| crate::platform::wsl_file_executable(&wsl.distro, &path))
+            .unwrap_or(false);
+    }
+    get_cli_binary_path(app)
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+/// Find OpenCode on the system PATH (excluding the Jean-managed binary).
+pub fn find_system_binary(app: &AppHandle) -> Option<PathBuf> {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return crate::platform::wsl_which(
+            &wsl.distro,
+            "opencode",
+            get_wsl_cli_binary_path(&wsl.distro).ok().as_deref(),
+        )
+        .map(PathBuf::from);
+    }
+
+    let jean_managed = get_cli_binary_path(app)
+        .ok()
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    crate::platform::find_cli_in_host_path("opencode", jean_managed.as_deref())
+}
+
+/// True when Jean-managed OpenCode is missing but a system PATH install exists.
+pub fn should_auto_use_system(app: &AppHandle) -> bool {
+    !jean_managed_installed(app) && find_system_binary(app).is_some()
+}
+
+fn jean_managed_path(app: &AppHandle) -> PathBuf {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return get_wsl_cli_binary_path(&wsl.distro)
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(CLI_BINARY_NAME_UNIX));
+    }
+    get_cli_binary_path(app).unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME))
+}
+
 /// Resolve OpenCode binary path based on the user's preference.
 ///
-/// If `opencode_cli_source` preference is `"path"`, look up `opencode` in system PATH.
-/// Otherwise (default `"jean"`), use the Jean-managed binary.
+/// If `opencode_cli_source` is `"path"`, look up `opencode` in system PATH.
+/// If `"jean"` (default) and the Jean-managed binary exists, use it.
+/// Otherwise fall back to a system PATH install when present so installs under
+/// `~/.opencode/bin` (and similar) work without an explicit source switch
+/// (issue #387).
 pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
-    let use_path = match crate::get_preferences_path(app) {
+    let prefer_path = match crate::get_preferences_path(app) {
         Ok(prefs_path) => {
             if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
                 if let Ok(prefs) = serde_json::from_str::<crate::AppPreferences>(&contents) {
@@ -62,30 +111,29 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
         Err(_) => false,
     };
 
-    if use_path {
-        let wsl = get_wsl_config();
-        if wsl.enabled {
-            if let Some(unix_path) = crate::platform::wsl_which(
-                &wsl.distro,
-                "opencode",
-                get_wsl_cli_binary_path(&wsl.distro).ok().as_deref(),
-            ) {
-                return PathBuf::from(unix_path);
-            }
-        } else if let Some(path) = crate::platform::find_cli_in_host_path("opencode", None) {
+    if prefer_path {
+        if let Some(path) = find_system_binary(app) {
             return path;
         }
-        log::warn!("opencode_cli_source is 'path' but could not find opencode in PATH, falling back to Jean-managed binary");
+        log::warn!(
+            "opencode_cli_source is 'path' but could not find opencode in PATH, falling back to Jean-managed binary"
+        );
+        return jean_managed_path(app);
     }
 
-    let wsl = get_wsl_config();
-    if wsl.enabled {
-        return get_wsl_cli_binary_path(&wsl.distro)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(CLI_BINARY_NAME_UNIX));
+    if jean_managed_installed(app) {
+        return jean_managed_path(app);
     }
 
-    get_cli_binary_path(app).unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME))
+    if let Some(path) = find_system_binary(app) {
+        log::info!(
+            "Jean-managed OpenCode CLI not installed; using system PATH binary at {}",
+            path.display()
+        );
+        return path;
+    }
+
+    jean_managed_path(app)
 }
 
 /// Ensure the CLI directory exists.

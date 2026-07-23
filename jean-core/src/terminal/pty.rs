@@ -157,15 +157,27 @@ pub fn spawn_terminal(
                     return Err(format!("Binary not found: {run_command}"));
                 }
 
-                let mut c = if is_windows_batch_file(run_command) {
+                // Extensionless npm shims (e.g. C:\Program Files\nodejs\codex) are
+                // not valid Win32 images (os error 193). Prefer a sibling .cmd/.exe.
+                let resolved = crate::platform::prefer_windows_executable_sibling(
+                    std::path::PathBuf::from(run_command),
+                );
+                let resolved_command = resolved.to_string_lossy().to_string();
+                if resolved_command != *run_command {
+                    log::info!(
+                        "Terminal {terminal_id}: resolved Windows CLI '{run_command}' -> '{resolved_command}'"
+                    );
+                }
+
+                let mut c = if is_windows_batch_file(&resolved_command) {
                     let mut c = CommandBuilder::new("cmd.exe");
                     c.arg("/C");
-                    c.arg(run_command);
+                    c.arg(&resolved_command);
                     c
                 } else {
                     // Direct binary invocation — CommandBuilder handles spaces in
                     // paths natively without PowerShell parsing the arguments.
-                    CommandBuilder::new(run_command)
+                    CommandBuilder::new(&resolved_command)
                 };
                 for arg in args {
                     c.arg(arg);

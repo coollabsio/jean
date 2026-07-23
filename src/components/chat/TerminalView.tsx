@@ -14,6 +14,16 @@ import {
   disposeTerminal,
   disposePanelWorktreeTerminals,
 } from '@/lib/terminal-instances'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Kbd } from '@/components/ui/kbd'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
@@ -200,6 +210,10 @@ export function TerminalView({
   const [draggedTerminalId, setDraggedTerminalId] = useState<string | null>(
     null
   )
+  // Pending close when the tab still has a live PTY (issue #56: no silent kill).
+  const [pendingClose, setPendingClose] = useState<
+    { type: 'one'; terminalId: string } | { type: 'all' } | null
+  >(null)
 
   // Auto-create a default shell when this worktree has no panel terminals AND
   // UI state hydration has finished. Waiting on `uiStateInitialized` is
@@ -224,9 +238,8 @@ export function TerminalView({
     addTerminal(worktreeId)
   }, [worktreeId, addTerminal])
 
-  const handleCloseTerminal = useCallback(
-    async (e: React.MouseEvent, terminalId: string) => {
-      e.stopPropagation()
+  const closeTerminalById = useCallback(
+    async (terminalId: string) => {
       // Stop the PTY process
       try {
         await invoke('stop_terminal', { terminalId })
@@ -247,6 +260,20 @@ export function TerminalView({
       }
     },
     [worktreeId, removeTerminal, setTerminalPanelOpen, setTerminalVisible]
+  )
+
+  const handleCloseTerminal = useCallback(
+    (e: React.MouseEvent, terminalId: string) => {
+      e.stopPropagation()
+      // Running PTYs need an explicit confirm so a held/mis-clicked close
+      // cannot silently kill work in progress (issue #56).
+      if (useTerminalStore.getState().runningTerminals.has(terminalId)) {
+        setPendingClose({ type: 'one', terminalId })
+        return
+      }
+      void closeTerminalById(terminalId)
+    },
+    [closeTerminalById]
   )
 
   const handleSelectTerminal = useCallback(
@@ -299,47 +326,123 @@ export function TerminalView({
   }, [setTerminalVisible])
 
   const handleCloseAll = useCallback(() => {
+    const panelTerminals = (
+      useTerminalStore.getState().terminals[worktreeId] ?? []
+    ).filter(isPanelTerminal)
+    const hasRunning = panelTerminals.some(t =>
+      useTerminalStore.getState().runningTerminals.has(t.id)
+    )
+    if (hasRunning) {
+      setPendingClose({ type: 'all' })
+      return
+    }
     // Dispose side/drawer terminal tabs only; session terminals are independent.
     disposePanelWorktreeTerminals(worktreeId)
   }, [worktreeId])
 
+  const confirmPendingClose = useCallback(() => {
+    if (!pendingClose) return
+    if (pendingClose.type === 'all') {
+      disposePanelWorktreeTerminals(worktreeId)
+    } else {
+      void closeTerminalById(pendingClose.terminalId)
+    }
+    setPendingClose(null)
+  }, [pendingClose, worktreeId, closeTerminalById])
+
+  // Keyboard close path (Ctrl/Cmd+W) dispatches this when the active tab is
+  // still running so we can show the same confirm dialog as the tab X button.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ worktreeId: string; terminalId: string }>)
+        .detail
+      if (!detail || detail.worktreeId !== worktreeId) return
+      setPendingClose({ type: 'one', terminalId: detail.terminalId })
+    }
+    window.addEventListener('confirm-close-terminal', handler)
+    return () => window.removeEventListener('confirm-close-terminal', handler)
+  }, [worktreeId])
+
+  const closeConfirmDialog = (
+    <AlertDialog
+      open={pendingClose !== null}
+      onOpenChange={open => {
+        if (!open) setPendingClose(null)
+      }}
+    >
+      <AlertDialogContent
+        onEscapeKeyDown={e => e.stopPropagation()}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            e.stopPropagation()
+            confirmPendingClose()
+          }
+        }}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {pendingClose?.type === 'all'
+              ? 'Close all terminals?'
+              : 'Close running terminal?'}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingClose?.type === 'all'
+              ? 'One or more terminals still have a running process. Closing them will terminate those processes.'
+              : 'This terminal still has a running process. Closing it will terminate that process.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmPendingClose}>
+            Close
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+
   // When collapsed, show collapsed bar but keep terminals mounted (hidden) to preserve state
   if (isCollapsed) {
     return (
-      <div className="flex h-full flex-col bg-background">
-        {/* Collapsed bar */}
-        <button
-          type="button"
-          onClick={onExpand}
-          className="flex h-full w-full items-center gap-2 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-        >
-          <Terminal className="h-3.5 w-3.5" />
-          <span>Terminal</span>
-          {hasRunningPanelTerminal && (
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-          )}
-          <div className="flex-1" />
-          <ChevronUp className="h-3.5 w-3.5" />
-        </button>
-        {/* Keep terminals mounted but hidden to preserve state */}
-        <div className="hidden">
-          {terminals.map(terminal => (
-            <TerminalTabContent
-              key={terminal.id}
-              terminal={terminal}
-              worktreeId={worktreeId}
-              worktreePath={worktreePath}
-              isActive={terminal.id === activeTerminalId}
-              isCollapsed
-              isWorktreeActive={isWorktreeActive}
-            />
-          ))}
+      <>
+        <div className="flex h-full flex-col bg-background">
+          {/* Collapsed bar */}
+          <button
+            type="button"
+            onClick={onExpand}
+            className="flex h-full w-full items-center gap-2 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            <span>Terminal</span>
+            {hasRunningPanelTerminal && (
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            )}
+            <div className="flex-1" />
+            <ChevronUp className="h-3.5 w-3.5" />
+          </button>
+          {/* Keep terminals mounted but hidden to preserve state */}
+          <div className="hidden">
+            {terminals.map(terminal => (
+              <TerminalTabContent
+                key={terminal.id}
+                terminal={terminal}
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                isActive={terminal.id === activeTerminalId}
+                isCollapsed
+                isWorktreeActive={isWorktreeActive}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+        {closeConfirmDialog}
+      </>
     )
   }
 
   return (
+    <>
     <div className="flex h-full flex-col bg-background">
       {/* Tab bar - fixed height for consistency */}
       <div
@@ -468,5 +571,7 @@ export function TerminalView({
         ))}
       </div>
     </div>
+    {closeConfirmDialog}
+    </>
   )
 }
