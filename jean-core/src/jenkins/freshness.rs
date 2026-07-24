@@ -13,7 +13,8 @@
 //! [`parse_version_sha`] accepts both. We compare that deployed SHA to the PR
 //! head (`headRefOid` from GitHub) and get four actionable states:
 //!
-//! - **UP_TO_DATE** — preview reachable and serving the PR head commit.
+//! - **UP_TO_DATE** — preview reachable and containing the PR head commit
+//!   (either directly or through GitHub's generated merge commit).
 //! - **STALE** — preview reachable but serving an older commit (périmée).
 //! - **DOWN** — preview unreachable (env down / not deployed).
 //! - **UNKNOWN** — reachable but we couldn't resolve a SHA to compare.
@@ -36,7 +37,7 @@ use serde::Serialize;
 
 use crate::platform::silent_command;
 
-/// Preview is reachable and serving the current PR head commit.
+/// Preview is reachable and contains the current PR head commit.
 pub const FRESH_UP_TO_DATE: &str = "UP_TO_DATE";
 /// Preview is reachable but serving an older commit than the PR head.
 pub const FRESH_STALE: &str = "STALE";
@@ -132,7 +133,10 @@ pub fn classify(
     let source = preview_sha.and(sha_source).map(str::to_string);
 
     match (preview_sha, pr_head_sha) {
-        (Some(p), Some(h)) if sha_matches(p, h) => PreviewFreshness {
+        // GitHub may deploy refs/pull/<n>/merge. Its SHA differs from the PR
+        // head, but an ahead count of zero means no PR commit is missing from
+        // the deployed merge commit.
+        (Some(p), Some(h)) if sha_matches(p, h) || behind_by == Some(0) => PreviewFreshness {
             status: FRESH_UP_TO_DATE.to_string(),
             preview_sha: preview,
             sha_source: source,
@@ -357,6 +361,22 @@ mod tests {
             None,
         );
         assert_eq!(f.status, FRESH_UP_TO_DATE);
+    }
+
+    #[test]
+    fn up_to_date_when_preview_merge_contains_pr_head() {
+        // GitHub previews may serve refs/pull/<n>/merge rather than the PR head
+        // itself. A compare result of zero means the PR has no commit missing
+        // from that deployed merge commit.
+        let f = classify(
+            true,
+            Some(SHA_A),
+            Some(SHA_SOURCE_PREVIEW),
+            Some(SHA_B),
+            Some(0),
+        );
+        assert_eq!(f.status, FRESH_UP_TO_DATE);
+        assert_eq!(f.behind_by, Some(0));
     }
 
     #[test]

@@ -43,11 +43,14 @@ pub struct PreviewFreshness {        // camelCase
   `classify(reachable, preview_sha, pr_head_sha, behind_by)` :
   - injoignable → **DOWN** ;
   - SHA preview == HEAD (prefix-insensitive) → **UP_TO_DATE** (`behind_by = 0`) ;
-  - SHA preview != HEAD → **STALE** (périmée ; `behind_by` si dispo) ;
+  - SHA preview != HEAD mais aucun commit de la PR ne manque à la preview
+    (`behind_by = 0`, notamment pour `refs/pull/<n>/merge`) → **UP_TO_DATE** ;
+  - SHA preview != HEAD avec des commits manquants ou un compare indisponible → **STALE**
+    (périmée ; `behind_by` si dispo) ;
   - un SHA manquant → **UNKNOWN**.
 - **I/O** : `probe_preview(pr_id)` via `reqwest` (timeout 4 s, `Range: bytes=0-127`, certs
   internes tolérés) ; HEAD PR via `gh pr view <n> --json headRefOid` ; retard via
-  `gh api repos/{owner}/{repo}/compare/<base>...<head>` (seulement si STALE). Les appels `gh`
+  `gh api repos/{owner}/{repo}/compare/<base>...<head>` (si les SHA diffèrent). Les appels `gh`
   (bloquants) tournent en `spawn_blocking` ; réutilise `resolve_gh_binary(&app)`.
 
 ## 2. Intégration (pas de nouvelle commande Tauri)
@@ -78,7 +81,7 @@ Types TS : interface `PreviewFreshness`, `previewFreshness` sur `JenkinsWorktree
 ## 4. Tests
 
 - `freshness.rs` : `parse_version_sha` (dump réel, rejets) + tous les états de `classify`
-  (up / stale / down / unknown, tolérance SHA court).
+  (up / stale / down / unknown, tolérance SHA court et merge contenant le HEAD de PR).
 - `bun run check:all`.
 
 ## Hors scope v1
