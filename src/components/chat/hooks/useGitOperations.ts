@@ -659,7 +659,9 @@ export function useGitOperations({
     ]
   )
 
-  // Handle Pull - pulls changes from remote
+  // Handle Pull - merges the worktree's base branch into HEAD.
+  // Prefer the remote/branch the worktree was started from so a session
+  // branched off fork/main does not pull origin/main by default.
   const handlePull = useCallback(
     async (remote?: string) => {
       if (!activeWorktreePath || !activeWorktreeId) return
@@ -667,9 +669,10 @@ export function useGitOperations({
       await performGitPull({
         worktreeId: activeWorktreeId,
         worktreePath: activeWorktreePath,
-        baseBranch: project?.default_branch ?? 'main',
+        baseBranch:
+          worktree?.base_branch ?? project?.default_branch ?? 'main',
         branchLabel: worktree?.branch,
-        remote,
+        remote: remote ?? worktree?.base_remote,
         onMergeConflict: () => {
           window.dispatchEvent(
             new CustomEvent('magic-command', {
@@ -683,6 +686,8 @@ export function useGitOperations({
       activeWorktreeId,
       activeWorktreePath,
       worktree?.branch,
+      worktree?.base_branch,
+      worktree?.base_remote,
       project?.default_branch,
     ]
   )
@@ -1000,11 +1005,11 @@ export function useGitOperations({
           })
         }
 
+        // Sonner ignores `duration` for loading toasts — dismiss explicitly.
         toast.loading(
           `${reviewLabel} running for ${projectName}/${worktreeName}...`,
           {
             id: toastId,
-            duration: 5000,
             cancel: {
               label: 'Cancel',
               onClick: () => {
@@ -1019,6 +1024,9 @@ export function useGitOperations({
             },
           }
         )
+        const autoDismissTimer = window.setTimeout(() => {
+          toast.dismiss(toastId)
+        }, 5000)
 
         let unlistenReviewJob: (() => void) | null = null
         let handledTerminalReviewJob = false
@@ -1028,6 +1036,7 @@ export function useGitOperations({
           if (handledTerminalReviewJob) return
 
           handledTerminalReviewJob = true
+          window.clearTimeout(autoDismissTimer)
           unlistenReviewJob?.()
           if (reviewJob.status === 'completed') {
             const completedSessionId = reviewJob.sessionId
@@ -1280,12 +1289,14 @@ export function useGitOperations({
           const diffSection = prResult.conflict_diff
             ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
             : ''
-          const baseBranch = project?.default_branch || 'main'
+          const baseBranch =
+            worktree.base_branch || project?.default_branch || 'main'
+          const baseRemote = worktree.base_remote || 'origin'
           const resolveInstructions =
             preferences?.magic_prompts?.resolve_conflicts ??
             DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-          const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+          const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}
@@ -1467,12 +1478,14 @@ ${resolveInstructions}`
           ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
           : ''
 
-        const baseBranch = project?.default_branch || 'main'
+        const baseBranch =
+          worktree.base_branch || project?.default_branch || 'main'
+        const baseRemote = worktree.base_remote || 'origin'
         const resolveInstructions =
           preferences?.magic_prompts?.resolve_conflicts ??
           DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-        const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+        const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}

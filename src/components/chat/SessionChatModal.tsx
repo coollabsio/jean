@@ -125,7 +125,10 @@ import {
   MODAL_TERMINAL_PRIMARY_ROW_CLASS,
   MODAL_TERMINAL_SECONDARY_ROW_CLASS,
 } from './modal-terminal-layout'
-import { getStackedBaseBranch } from './worktree-branch-badge'
+import {
+  getStackedBaseBranch,
+  resolveStackedOnPr,
+} from './worktree-branch-badge'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -358,12 +361,15 @@ export function SessionChatModal({
   const stackedBaseBranch = getStackedBaseBranch(
     worktree?.base_branch,
     worktree?.branch,
-    project?.default_branch
+    project?.default_branch,
+    worktree?.base_remote
   )
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open')
-  const stackedOnPR = stackedBaseBranch
-    ? openPRs?.find(pr => pr.headRefName === stackedBaseBranch)
-    : undefined
+  const stackedOnPR = resolveStackedOnPr(
+    stackedBaseBranch,
+    openPRs,
+    project?.default_branch
+  )
   const isBase = worktree ? isBaseSession(worktree) : false
   const { data: gitStatus } = useGitStatus(worktreeId)
   const behindCount =
@@ -536,21 +542,26 @@ export function SessionChatModal({
   const removeSessionTab = useCallback(
     (session: Session) => {
       const activeSessions = sessions.filter(s => !s.archived_at)
-      if (activeSessions.length <= 1) {
-        // The mutation navigates after success, provided navigation is unchanged.
-        const action = () => {
-          handleDeleteSession(session.id)
+      const sessionIsEmpty = !session.message_count
+      // Confirm any non-empty session when preference is on (default). Only
+      // confirming the last tab allowed held/cascade closes to wipe chats
+      // without a prompt (issue #56). Empty sessions close immediately.
+      const needsConfirm =
+        preferences?.confirm_session_close !== false && !sessionIsEmpty
+
+      const action = () => {
+        if (activeSessions.length > 1) {
+          selectVisualNeighbor(session.id)
         }
-        const sessionIsEmpty = !session.message_count
-        if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
-          pendingCloseAction.current = action
-          setCloseConfirmOpen(true)
-        } else {
-          action()
-        }
-      } else {
-        selectVisualNeighbor(session.id)
+        // The mutation navigates after success when this was the last session.
         handleDeleteSession(session.id)
+      }
+
+      if (needsConfirm) {
+        pendingCloseAction.current = action
+        setCloseConfirmOpen(true)
+      } else {
+        action()
       }
     },
     [
@@ -833,11 +844,19 @@ export function SessionChatModal({
       await performGitPull({
         worktreeId,
         worktreePath,
-        baseBranch: defaultBranch,
+        baseBranch: worktree?.base_branch ?? defaultBranch,
         projectId: project?.id,
+        remote: worktree?.base_remote,
       })
     },
-    [worktreeId, worktreePath, defaultBranch, project?.id]
+    [
+      worktreeId,
+      worktreePath,
+      worktree?.base_branch,
+      worktree?.base_remote,
+      defaultBranch,
+      project?.id,
+    ]
   )
 
   const pickRemoteOrRun = useRemotePicker(worktreePath)

@@ -553,17 +553,43 @@ describe('ChatStore', () => {
       expect(blocks[1]).toEqual({ type: 'tool_use', tool_call_id: 'tool-1' })
     })
 
-    it('re-appends existing tool block to preserve latest chronology', () => {
+    it('keeps non-plan tools stable so messages stay between tool calls', () => {
       const { addTextBlock, addToolBlock, getStreamingContentBlocks } =
         useChatStore.getState()
 
+      addToolBlock('session-1', 'bash-1')
+      addTextBlock('session-1', 'status update between tools')
+      // tool_call_update re-emits the same tool id — must not jump past the text
+      addToolBlock('session-1', 'bash-1')
+
+      const blocks = getStreamingContentBlocks('session-1')
+      expect(blocks).toEqual([
+        { type: 'tool_use', tool_call_id: 'bash-1' },
+        { type: 'text', text: 'status update between tools' },
+      ])
+    })
+
+    it('re-appends plan tool blocks so the plan always trails research', () => {
+      const {
+        addToolCall,
+        addTextBlock,
+        addToolBlock,
+        getStreamingContentBlocks,
+      } = useChatStore.getState()
+
+      addToolCall('session-1', {
+        id: 'plan-1',
+        name: 'ExitPlanMode',
+        input: { plan: '# Plan\n\n- step one' },
+      })
       addToolBlock('session-1', 'plan-1')
-      addTextBlock('session-1', 'after')
+      addTextBlock('session-1', 'after research')
+      // Enriched plan re-emit moves plan tool to end (richest body last)
       addToolBlock('session-1', 'plan-1')
 
       const blocks = getStreamingContentBlocks('session-1')
       expect(blocks).toEqual([
-        { type: 'text', text: 'after' },
+        { type: 'text', text: 'after research' },
         { type: 'tool_use', tool_call_id: 'plan-1' },
       ])
     })

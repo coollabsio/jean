@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
+  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
+  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
@@ -102,6 +104,7 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.selected_opencode_model).toBe(
       'opencode/gpt-5.6-sol'
     )
+    expect(defaultPreferences.default_codex_model_verbosity).toBe('medium')
   })
 
   it('provides magic prompt defaults for Kimi Code', () => {
@@ -121,16 +124,53 @@ describe('magic prompt preference resolvers', () => {
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryContext}')
   })
 
-  it('tells investigation prompts to apply fixes in yolo mode', () => {
-    const yoloApply =
-      'If you are in yolo mode, also apply the fix(es)'
-    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_PR_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain(yoloApply)
+  it('provides automation magic prompts for GitHub bugs and security advisories', () => {
+    expect(
+      defaultPreferences.magic_prompt_modes.automate_github_bugs_mode
+    ).toBe('yolo')
+    expect(
+      defaultPreferences.magic_prompt_modes.automate_security_advisories_mode
+    ).toBe('yolo')
+    expect(
+      defaultPreferences.magic_prompt_models.automate_github_bugs_model
+    ).toBe('claude-opus-4-8[1m]')
+    expect(
+      defaultPreferences.magic_prompt_models.automate_security_advisories_model
+    ).toBe('claude-opus-4-8[1m]')
+    expect(DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT).toContain('list_github_issues')
+    expect(DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT).toContain(
+      'start_autoinvestigating'
+    )
+    expect(DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT).toContain('{projectId}')
+    expect(DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT).toContain(
+      'list_security_advisories'
+    )
+    expect(DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT).toContain('ghsaId')
+    expect(DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT).toContain(
+      'start_autoinvestigating'
+    )
+  })
+
+  it('keeps investigation default prompts free of weak yolo conditionals', () => {
+    // YOLO fix-after-investigate is applied programmatically when mode is yolo
+    // (see applyYoloInvestigationFixDirective) — do not embed unreliable
+    // "if you are in yolo mode" wording in the default templates.
+    const yoloConditional = 'If you are in yolo mode'
+    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_PR_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).not.toContain(
+      yoloConditional
+    )
   })
 
   it('keeps automatic recaps on by default', () => {

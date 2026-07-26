@@ -66,6 +66,27 @@ describe('SendCancelButton', () => {
       screen.getByRole('button', { name: /skip to next/i })
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /^steer$/i })
+    ).not.toBeInTheDocument()
     expect(container.querySelector('svg')).toBeNull()
+  })
+
+  it('renders Steer instead of Queue when auto-steer is enabled', () => {
+    render(
+      <SendCancelButton
+        isSending
+        canSend
+        willSteer
+        queuedMessageCount={0}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^steer$/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /^queue$/i })
+    ).not.toBeInTheDocument()
   })
 })

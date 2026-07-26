@@ -145,12 +145,16 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
   )
 
   const handleCreateWorktree = useCallback(
-    (customName?: string) => {
+    (customName?: string, baseBranch?: string) => {
       if (!selectedProjectId) {
         toast.error('No project selected')
         return
       }
-      createWorktree.mutate({ projectId: selectedProjectId, customName })
+      createWorktree.mutate({
+        projectId: selectedProjectId,
+        customName,
+        baseBranch,
+      })
       handleOpenChange(false)
     },
     [selectedProjectId, createWorktree, handleOpenChange]

@@ -1561,37 +1561,53 @@ export const useChatStore = create<ChatUIState>()(
         set(
           state => {
             const blocks = state.streamingContentBlocks[sessionId] ?? []
-            const nextBlocks = [
-              ...blocks.filter(
-                block =>
-                  !(
-                    block.type === 'tool_use' &&
-                    block.tool_call_id === toolCallId
-                  )
-              ),
-              { type: 'tool_use' as const, tool_call_id: toolCallId },
-            ]
+            const existingIndex = blocks.findIndex(
+              block =>
+                block.type === 'tool_use' && block.tool_call_id === toolCallId
+            )
 
-            const unchanged =
-              nextBlocks.length === blocks.length &&
-              nextBlocks.every((block, index) => {
-                const existing = blocks[index]
-                if (!existing || existing.type !== block.type) return false
-                if (block.type === 'tool_use') {
-                  return (
-                    existing.type === 'tool_use' &&
-                    existing.tool_call_id === block.tool_call_id
-                  )
-                }
-                return false
-              })
-
-            if (unchanged) return state
+            // Older stable chronology: once a tool owns a timeline slot, keep it.
+            // Later assistant/user text is inserted *between* tools instead of
+            // tools jumping past that text on every tool_call_update.
+            // Plan tools are the exception — re-append to the end so the plan
+            // tool call always trails research with the richest body.
+            if (existingIndex !== -1) {
+              const tool = (state.activeToolCalls[sessionId] ?? []).find(
+                tc => tc.id === toolCallId
+              )
+              const isPlan = tool ? isPlanToolCall(tool) : false
+              if (!isPlan) {
+                return state
+              }
+              // Already last — no-op (also prevents unnecessary subscribers)
+              if (existingIndex === blocks.length - 1) {
+                return state
+              }
+              const nextBlocks = [
+                ...blocks.filter(
+                  block =>
+                    !(
+                      block.type === 'tool_use' &&
+                      block.tool_call_id === toolCallId
+                    )
+                ),
+                { type: 'tool_use' as const, tool_call_id: toolCallId },
+              ]
+              return {
+                streamingContentBlocks: {
+                  ...state.streamingContentBlocks,
+                  [sessionId]: nextBlocks,
+                },
+              }
+            }
 
             return {
               streamingContentBlocks: {
                 ...state.streamingContentBlocks,
-                [sessionId]: nextBlocks,
+                [sessionId]: [
+                  ...blocks,
+                  { type: 'tool_use' as const, tool_call_id: toolCallId },
+                ],
               },
             }
           },

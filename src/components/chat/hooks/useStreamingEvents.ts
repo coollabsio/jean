@@ -69,6 +69,14 @@ import {
   hasMeaningfulAssistantPayload,
   shouldHydrateCompletedSessionFromBackend,
 } from '@/components/chat/hooks/completion-hydration'
+import {
+  shouldThrottleStreamingFlush,
+  streamingFlushDelayMs,
+} from '@/lib/streaming-flush'
+import {
+  handleCliAuthError,
+  isCliAuthError,
+} from '@/lib/cli-auth'
 
 interface UseStreamingEventsParams {
   queryClient: QueryClient
@@ -305,6 +313,18 @@ export default function useStreamingEvents({
       notifyIfBackground(title, name)
     }
 
+    // Play the configured waiting sound (settings preview + chat:done share this).
+    // Used for mid-run Codex approvals so the user hears they need to act.
+    const playWaitingSound = (): void => {
+      const prefs = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences()
+      )
+      const waitingSound = (prefs?.waiting_sound ?? 'none') as NotificationSound
+      playNotificationSound(waitingSound, {
+        webAccessSoundsEnabled: prefs?.web_access_sounds_enabled ?? true,
+      })
+    }
+
     // Hydrate ScheduleWakeup indicator store from backend so reloads do not
     // show historical tool_use blocks stuck in the "pending" spinner state.
     invoke<PendingWakeupEntry[]>('list_pending_wakeups')
@@ -405,11 +425,27 @@ export default function useStreamingEvents({
     // Buffer chunks and flush on animation frames to avoid per-chunk re-renders.
     // Codex app-server sends very frequent deltas; without batching, each delta
     // triggers 2 store mutations + full StreamingMessage re-render.
+    // Once a session's streamed text is long, cap flushes (~30Hz) so WebKitGTK
+    // does not re-parse markdown + repaint at full token rate (issue #129).
     let chunkBuffer: Record<string, string> = {}
     let chunkRafId: number | null = null
+    let chunkTimeoutId: ReturnType<typeof setTimeout> | null = null
+    let lastChunkFlushAt = 0
+
+    function clearChunkFlushSchedule() {
+      if (chunkRafId !== null) {
+        cancelAnimationFrame(chunkRafId)
+        chunkRafId = null
+      }
+      if (chunkTimeoutId !== null) {
+        clearTimeout(chunkTimeoutId)
+        chunkTimeoutId = null
+      }
+    }
 
     function flushChunkBuffer() {
-      chunkRafId = null
+      clearChunkFlushSchedule()
+      lastChunkFlushAt = performance.now()
       for (const [sid, buffered] of Object.entries(chunkBuffer)) {
         // Single atomic set() updates both streamingContents (string fallback,
         // load-bearing for resume/dedupe/error paths) and streamingContentBlocks
@@ -417,6 +453,32 @@ export default function useStreamingEvents({
         appendStreamingChunk(sid, buffered)
       }
       chunkBuffer = {}
+    }
+
+    function scheduleChunkFlush() {
+      if (chunkRafId !== null || chunkTimeoutId !== null) return
+
+      const store = useChatStore.getState()
+      const needsThrottle = Object.entries(chunkBuffer).some(
+        ([sid, buffered]) =>
+          shouldThrottleStreamingFlush(
+            store.streamingContents[sid]?.length ?? 0,
+            buffered.length
+          )
+      )
+
+      if (needsThrottle) {
+        const delay = streamingFlushDelayMs(lastChunkFlushAt, performance.now())
+        if (delay > 0) {
+          chunkTimeoutId = setTimeout(() => {
+            chunkTimeoutId = null
+            flushChunkBuffer()
+          }, delay)
+          return
+        }
+      }
+
+      chunkRafId = requestAnimationFrame(flushChunkBuffer)
     }
 
     const unlistenChunk = listen<ChunkEvent>('chat:chunk', event => {
@@ -448,10 +510,8 @@ export default function useStreamingEvents({
       // Accumulate into buffer
       chunkBuffer[session_id] =
         (chunkBuffer[session_id] ?? '') + replayFilteredContent
-      // Schedule flush on next animation frame (coalesces all chunks in this frame)
-      if (chunkRafId === null) {
-        chunkRafId = requestAnimationFrame(flushChunkBuffer)
-      }
+      // Schedule flush (rAF for short streams; capped interval when long)
+      scheduleChunkFlush()
     })
 
     const unlistenToolUse = listen<ToolUseEvent>('chat:tool_use', event => {
@@ -490,16 +550,64 @@ export default function useStreamingEvents({
 
     // Buffer thinking deltas and flush on animation frames (same pattern as chunks).
     // OpenCode/Codex stream thinking as frequent small deltas; without batching,
-    // each delta triggers a store mutation + re-render.
+    // each delta triggers a store mutation + re-render. Long thinking streams
+    // use the same ~30Hz cap as text chunks (issue #129).
     let thinkingBuffer: Record<string, string> = {}
     let thinkingRafId: number | null = null
+    let thinkingTimeoutId: ReturnType<typeof setTimeout> | null = null
+    let lastThinkingFlushAt = 0
+
+    function clearThinkingFlushSchedule() {
+      if (thinkingRafId !== null) {
+        cancelAnimationFrame(thinkingRafId)
+        thinkingRafId = null
+      }
+      if (thinkingTimeoutId !== null) {
+        clearTimeout(thinkingTimeoutId)
+        thinkingTimeoutId = null
+      }
+    }
 
     function flushThinkingBuffer() {
-      thinkingRafId = null
+      clearThinkingFlushSchedule()
+      lastThinkingFlushAt = performance.now()
       for (const [sid, buffered] of Object.entries(thinkingBuffer)) {
         addThinkingBlock(sid, buffered)
       }
       thinkingBuffer = {}
+    }
+
+    function scheduleThinkingFlush() {
+      if (thinkingRafId !== null || thinkingTimeoutId !== null) return
+
+      const store = useChatStore.getState()
+      const needsThrottle = Object.entries(thinkingBuffer).some(
+        ([sid, buffered]) => {
+          const existing = (store.streamingContentBlocks[sid] ?? [])
+            .filter(
+              (block): block is { type: 'thinking'; thinking: string } =>
+                block.type === 'thinking'
+            )
+            .reduce((sum, block) => sum + block.thinking.length, 0)
+          return shouldThrottleStreamingFlush(existing, buffered.length)
+        }
+      )
+
+      if (needsThrottle) {
+        const delay = streamingFlushDelayMs(
+          lastThinkingFlushAt,
+          performance.now()
+        )
+        if (delay > 0) {
+          thinkingTimeoutId = setTimeout(() => {
+            thinkingTimeoutId = null
+            flushThinkingBuffer()
+          }, delay)
+          return
+        }
+      }
+
+      thinkingRafId = requestAnimationFrame(flushThinkingBuffer)
     }
 
     const unlistenThinking = listen<ThinkingEvent>('chat:thinking', event => {
@@ -511,9 +619,7 @@ export default function useStreamingEvents({
       if (!replayFilteredContent) return
       thinkingBuffer[session_id] =
         (thinkingBuffer[session_id] ?? '') + replayFilteredContent
-      if (thinkingRafId === null) {
-        thinkingRafId = requestAnimationFrame(flushThinkingBuffer)
-      }
+      scheduleThinkingFlush()
     })
 
     // User text injected into a running turn (Codex turn/steer) — render
@@ -669,6 +775,8 @@ export default function useStreamingEvents({
       const next = [...current, request]
       setPendingCodexMcpElicitationRequests(sessionId, next)
       setWaitingForInput(sessionId, true)
+      playWaitingSound()
+      notifySession(sessionId, 'Needs your input')
       persistCodexPendingState(sessionId, worktreeId, {
         pendingCodexMcpElicitationRequests: next,
       })
@@ -686,6 +794,7 @@ export default function useStreamingEvents({
         const next = [...current, request]
         setPendingCodexPermissionRequests(session_id, next)
         setWaitingForInput(session_id, true)
+        playWaitingSound()
         notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexPermissionRequests: next,
@@ -707,6 +816,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexCommandApprovalRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          playWaitingSound()
           notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexCommandApprovalRequests: next,
@@ -743,6 +853,7 @@ export default function useStreamingEvents({
 
         if (next === current) return
 
+        playWaitingSound()
         notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexUserInputRequests: next,
@@ -790,6 +901,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexDynamicToolCallRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          playWaitingSound()
           notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexDynamicToolCallRequests: next,
@@ -811,12 +923,18 @@ export default function useStreamingEvents({
       const worktreeId = event.payload.worktree_id
 
       // Flush any buffered chunks/thinking so streaming state is up to date
-      if (chunkRafId !== null) {
-        cancelAnimationFrame(chunkRafId)
+      if (
+        chunkRafId !== null ||
+        chunkTimeoutId !== null ||
+        Object.keys(chunkBuffer).length > 0
+      ) {
         flushChunkBuffer()
       }
-      if (thinkingRafId !== null) {
-        cancelAnimationFrame(thinkingRafId)
+      if (
+        thinkingRafId !== null ||
+        thinkingTimeoutId !== null ||
+        Object.keys(thinkingBuffer).length > 0
+      ) {
         flushThinkingBuffer()
       }
 
@@ -1067,12 +1185,7 @@ export default function useStreamingEvents({
           }
 
           // Play waiting sound
-          const waitingSound = (preferences?.waiting_sound ??
-            'none') as NotificationSound
-          playNotificationSound(waitingSound, {
-            webAccessSoundsEnabled:
-              preferences?.web_access_sounds_enabled ?? true,
-          })
+          playWaitingSound()
           notifySession(sessionId, 'Needs your input')
         }
       } else if (event.payload.waiting_for_plan) {
@@ -1235,12 +1348,7 @@ export default function useStreamingEvents({
         }
 
         // Play waiting sound
-        const waitingSound = (preferences?.waiting_sound ??
-          'none') as NotificationSound
-        playNotificationSound(waitingSound, {
-          webAccessSoundsEnabled:
-            preferences?.web_access_sounds_enabled ?? true,
-        })
+        playWaitingSound()
         notifySession(sessionId, 'Needs your input')
       } else {
         // No blocking tools — add optimistic message FIRST, then batch-clear state.
@@ -1334,12 +1442,7 @@ export default function useStreamingEvents({
             )
           }
 
-          const waitingSound = (preferences?.waiting_sound ??
-            'none') as NotificationSound
-          playNotificationSound(waitingSound, {
-            webAccessSoundsEnabled:
-              preferences?.web_access_sounds_enabled ?? true,
-          })
+          playWaitingSound()
           notifySession(sessionId, 'Needs your input')
         } else {
           // 2. Update last_run_status + session state in caches so UI reflects immediately.
@@ -1560,8 +1663,19 @@ export default function useStreamingEvents({
           .catch(() => undefined)
       }
 
+      // Auth failures from headless CLIs (e.g. Claude "Please run /login")
+      // are not actionable inside chat — rewrite and offer Jean's Login modal.
+      let displayError = error
+      if (isCliAuthError(error)) {
+        const session = queryClient.getQueryData<Session>(
+          chatQueryKeys.session(session_id)
+        )
+        const backend = (session?.backend as CliBackend | undefined) ?? 'claude'
+        displayError = handleCliAuthError(error, backend)
+      }
+
       // Set error state for inline display
-      setError(session_id, error)
+      setError(session_id, displayError)
 
       // Check if CLI produced streaming content BEFORE clearing state.
       // If content was streamed, the CLI ran — don't remove the user message
@@ -1655,12 +1769,18 @@ export default function useStreamingEvents({
         } = event.payload
 
         // Flush any buffered chunks/thinking so streaming state is up to date
-        if (chunkRafId !== null) {
-          cancelAnimationFrame(chunkRafId)
+        if (
+          chunkRafId !== null ||
+          chunkTimeoutId !== null ||
+          Object.keys(chunkBuffer).length > 0
+        ) {
           flushChunkBuffer()
         }
-        if (thinkingRafId !== null) {
-          cancelAnimationFrame(thinkingRafId)
+        if (
+          thinkingRafId !== null ||
+          thinkingTimeoutId !== null ||
+          Object.keys(thinkingBuffer).length > 0
+        ) {
           flushThinkingBuffer()
         }
 
@@ -2144,12 +2264,18 @@ export default function useStreamingEvents({
 
     return () => {
       // Flush any buffered chunks/thinking before tearing down
-      if (chunkRafId !== null) {
-        cancelAnimationFrame(chunkRafId)
+      if (
+        chunkRafId !== null ||
+        chunkTimeoutId !== null ||
+        Object.keys(chunkBuffer).length > 0
+      ) {
         flushChunkBuffer()
       }
-      if (thinkingRafId !== null) {
-        cancelAnimationFrame(thinkingRafId)
+      if (
+        thinkingRafId !== null ||
+        thinkingTimeoutId !== null ||
+        Object.keys(thinkingBuffer).length > 0
+      ) {
         flushThinkingBuffer()
       }
       unlistenSending.then(f => f())

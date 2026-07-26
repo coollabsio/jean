@@ -184,6 +184,56 @@ describe('MobileToolbarMenu', () => {
     dispatchSpy.mockRestore()
   })
 
+  it('shows Automation section and dispatches automation magic commands', async () => {
+    const user = userEvent.setup()
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasPrContexts={false}
+        onSaveContext={vi.fn()}
+        onLoadContext={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+
+    expect(screen.getByText('Automation')).toBeInTheDocument()
+    expect(screen.getByText('GitHub Bugs')).toBeInTheDocument()
+    expect(screen.getByText('Security Advisories')).toBeInTheDocument()
+
+    await user.click(screen.getByText('GitHub Bugs'))
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'automate-github-bugs' },
+      })
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+    await user.click(screen.getByText('Security Advisories'))
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'automate-security-advisories' },
+      })
+    )
+
+    dispatchSpy.mockRestore()
+  })
+
   it('shows revert commit in the commit section and invokes its handler', async () => {
     const user = userEvent.setup()
     const onRevertLastCommit = vi.fn()

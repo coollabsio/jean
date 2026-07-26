@@ -376,18 +376,32 @@ fn install_jsonc_server(
 
 fn install_codex(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
-    install_toml_mcp_server(home.join(".codex").join("config.toml"), entry, "Codex")
+    install_toml_mcp_server(
+        home.join(".codex").join("config.toml"),
+        entry,
+        "Codex",
+        false,
+    )
 }
 
 fn install_grok(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
-    install_toml_mcp_server(home.join(".grok").join("config.toml"), entry, "Grok")
+    // Grok also gates servers via top-level `disabled_mcp_servers`. Jean rewrites
+    // that list during turns; clear our name on install so Grok TUI + discovery
+    // don't keep Jean MCP hidden after a prior session disabled it.
+    install_toml_mcp_server(
+        home.join(".grok").join("config.toml"),
+        entry,
+        "Grok",
+        true,
+    )
 }
 
 fn install_toml_mcp_server(
     path: PathBuf,
     entry: &JeanMcpEntry,
     label: &str,
+    clear_disabled_list: bool,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
     with_config_lock(&path, || {
         let content = read_optional(&path)?;
@@ -404,6 +418,10 @@ fn install_toml_mcp_server(
         }
         doc["mcp_servers"][&entry.server_name] = entry.codex_table_item();
 
+        if clear_disabled_list {
+            remove_name_from_disabled_mcp_servers(&mut doc, &entry.server_name);
+        }
+
         let updated = doc.to_string();
         updated
             .parse::<toml_edit::DocumentMut>()
@@ -411,6 +429,28 @@ fn install_toml_mcp_server(
         let backup = write_atomic_with_backup(&path, &updated)?;
         Ok((path.clone(), backup))
     })
+}
+
+/// Remove `name` from top-level `disabled_mcp_servers` if present (Grok).
+fn remove_name_from_disabled_mcp_servers(doc: &mut toml_edit::DocumentMut, name: &str) {
+    let Some(item) = doc.get_mut("disabled_mcp_servers") else {
+        return;
+    };
+    let Some(arr) = item.as_array_mut() else {
+        return;
+    };
+    let mut i = 0;
+    while i < arr.len() {
+        let is_match = arr
+            .get(i)
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s == name);
+        if is_match {
+            arr.remove(i);
+        } else {
+            i += 1;
+        }
+    }
 }
 
 fn find_opencode_config_path(home: &Path) -> Option<PathBuf> {
@@ -1165,7 +1205,7 @@ command = "npx"
         std::fs::write(
             &path,
             r#"# keep me
-disabled_mcp_servers = []
+disabled_mcp_servers = ["jean", "other"]
 
 [cli]
 installer = "npm"
@@ -1174,7 +1214,8 @@ installer = "npm"
         .unwrap();
 
         let prod = test_entry(JeanMcpInstallMode::Prod);
-        let (written, backup) = install_toml_mcp_server(path.clone(), &prod, "Grok").unwrap();
+        let (written, backup) =
+            install_toml_mcp_server(path.clone(), &prod, "Grok", true).unwrap();
         assert_eq!(written, path);
         assert!(backup.is_some());
 
@@ -1183,8 +1224,23 @@ installer = "npm"
         assert!(content.contains("[mcp_servers.jean]"));
         assert!(content.contains("JEAN_MCP_MODE"));
         assert!(content.contains("enabled = true"));
+        // Jean install clears our name from disabled_mcp_servers, keeps others.
+        assert!(!content.contains("\"jean\""));
+        assert!(content.contains("\"other\"") || content.contains("other"));
         content.parse::<toml_edit::DocumentMut>().unwrap();
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn remove_name_from_disabled_mcp_servers_filters_array() {
+        let mut doc = r#"disabled_mcp_servers = ["jean", "other", "jean"]
+"#
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+        remove_name_from_disabled_mcp_servers(&mut doc, "jean");
+        let arr = doc["disabled_mcp_servers"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr.get(0).and_then(|v| v.as_str()), Some("other"));
     }
 }

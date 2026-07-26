@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     gitPush: vi.fn(),
     openExternal: vi.fn(),
     activeWorktreePath: null as string | null,
+    worktreePaths: {} as Record<string, string>,
     worktree,
   }
 })
@@ -105,6 +106,7 @@ vi.mock('@/store/projects-store', () => ({
 }))
 
 vi.mock('@/store/chat-store', () => ({
+  DEFAULT_MODEL: 'claude-opus-4-8[1m]',
   useChatStore: Object.assign(
     (selector?: (state: ChatState) => unknown) => {
       const state: ChatState = {
@@ -118,11 +120,14 @@ vi.mock('@/store/chat-store', () => ({
       getState: () => ({
         activeWorktreePath: mocks.activeWorktreePath,
         activeSessionIds: {},
+        worktreePaths: mocks.worktreePaths as Record<string, string>,
         setWorktreeLoading: vi.fn(),
         clearWorktreeLoading: vi.fn(),
         setActiveWorktree: vi.fn(),
         setPendingMagicCommand: vi.fn(),
         registerWorktreePath: mocks.registerWorktreePath,
+        getWorktreePath: (worktreeId: string) =>
+          mocks.worktreePaths[worktreeId],
         setActiveSession: mocks.setActiveSession,
         setSelectedBackend: mocks.setSelectedBackend,
         setSelectedModel: mocks.setSelectedModel,
@@ -177,10 +182,23 @@ vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
     data: {
       default_backend: 'claude',
+      selected_model: 'claude-opus-4-8[1m]',
       selected_codex_model: 'gpt-5.5',
-      magic_prompt_models: { final_review_model: 'gpt-5.5' },
-      magic_prompt_efforts: { final_review_effort: 'high' },
-      magic_prompt_modes: { final_review_mode: 'plan' },
+      magic_prompt_models: {
+        final_review_model: 'gpt-5.5',
+        automate_github_bugs_model: 'claude-opus-4-8[1m]',
+        automate_security_advisories_model: 'claude-opus-4-8[1m]',
+      },
+      magic_prompt_efforts: {
+        final_review_effort: 'high',
+        automate_github_bugs_effort: null,
+        automate_security_advisories_effort: null,
+      },
+      magic_prompt_modes: {
+        final_review_mode: 'plan',
+        automate_github_bugs_mode: 'yolo',
+        automate_security_advisories_mode: 'yolo',
+      },
       magic_prompts: {
         resolve_conflicts: 'Resolve and finish.',
         final_review: 'Run the custom final audit and return tables.',
@@ -188,6 +206,8 @@ vi.mock('@/services/preferences', () => ({
       magic_prompt_backends: {
         resolve_conflicts_backend: 'codex',
         final_review_backend: 'codex',
+        automate_github_bugs_backend: null,
+        automate_security_advisories_backend: null,
       },
     },
   }),
@@ -460,6 +480,190 @@ describe('MagicModal manual PR link', () => {
       'final-review-session',
       'plan'
     )
+  })
+
+  it('shows Automation section with GitHub Bugs and Security Advisories', async () => {
+    render(<MagicModal />)
+
+    expect(screen.getByText('Automation')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /github bugs/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /security advisories/i })
+    ).toBeInTheDocument()
+  })
+
+  it('starts GitHub bugs automation as a new session with injected projectId', async () => {
+    const user = userEvent.setup()
+    const openSessionModal = vi.fn()
+    window.addEventListener('open-session-modal', openSessionModal)
+
+    mocks.invokeMock.mockImplementation((command: string) => {
+      if (command === 'create_session') {
+        return Promise.resolve({
+          id: 'automation-bugs-session',
+          name: 'Automate GitHub bugs',
+          order: 1,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          backend: 'claude',
+        })
+      }
+      if (command === 'send_chat_message') {
+        return Promise.resolve({ id: 'message-1' })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /github bugs/i }))
+
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith(
+        'create_session',
+        expect.objectContaining({
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          name: 'Automate GitHub bugs',
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith(
+        'send_chat_message',
+        expect.objectContaining({
+          sessionId: 'automation-bugs-session',
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          executionMode: 'yolo',
+        })
+      )
+    })
+    const sendCall = mocks.invokeMock.mock.calls.find(
+      call => call[0] === 'send_chat_message'
+    )
+    expect(sendCall?.[1].message).toContain('project-1')
+    expect(sendCall?.[1].message).toContain('list_github_issues')
+    expect(sendCall?.[1].message).toContain('start_autoinvestigating')
+    expect(mocks.setActiveSession).toHaveBeenCalledWith(
+      'wt-1',
+      'automation-bugs-session'
+    )
+    await waitFor(() => {
+      expect(openSessionModal).toHaveBeenCalled()
+    })
+    const openDetail = (
+      openSessionModal.mock.calls[0]?.[0] as CustomEvent
+    )?.detail
+    expect(openDetail).toEqual(
+      expect.objectContaining({
+        sessionId: 'automation-bugs-session',
+        worktreeId: 'wt-1',
+        worktreePath: '/repo/worktree',
+      })
+    )
+    expect(mocks.toastLoading).toHaveBeenCalled()
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      'Automate GitHub bugs started',
+      expect.objectContaining({ id: 'toast-1' })
+    )
+
+    window.removeEventListener('open-session-modal', openSessionModal)
+  })
+
+  it('starts GitHub bugs automation using chat-store path when useWorktree is not ready', async () => {
+    const user = userEvent.setup()
+    const originalPath = mocks.worktree.path
+    mocks.worktree.path = null as unknown as string
+    mocks.worktreePaths['wt-1'] = '/repo/from-store'
+
+    mocks.invokeMock.mockImplementation((command: string) => {
+      if (command === 'create_session') {
+        return Promise.resolve({
+          id: 'automation-bugs-from-store',
+          name: 'Automate GitHub bugs',
+          order: 1,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          backend: 'claude',
+        })
+      }
+      if (command === 'send_chat_message') {
+        return Promise.resolve({ id: 'message-1' })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /github bugs/i }))
+
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith(
+        'create_session',
+        expect.objectContaining({
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/from-store',
+          name: 'Automate GitHub bugs',
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith(
+        'send_chat_message',
+        expect.objectContaining({
+          sessionId: 'automation-bugs-from-store',
+          worktreePath: '/repo/from-store',
+        })
+      )
+    })
+
+    mocks.worktree.path = originalPath
+    delete mocks.worktreePaths['wt-1']
+  })
+
+  it('starts security advisories automation from keyboard shortcut', async () => {
+    const user = userEvent.setup()
+    mocks.invokeMock.mockImplementation((command: string) => {
+      if (command === 'create_session') {
+        return Promise.resolve({
+          id: 'automation-advisories-session',
+          name: 'Automate security advisories',
+          order: 1,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          backend: 'claude',
+        })
+      }
+      if (command === 'send_chat_message') {
+        return Promise.resolve({ id: 'message-1' })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    render(<MagicModal />)
+
+    await user.keyboard('x')
+
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith(
+        'send_chat_message',
+        expect.objectContaining({
+          sessionId: 'automation-advisories-session',
+          executionMode: 'yolo',
+        })
+      )
+    })
+    const sendCall = mocks.invokeMock.mock.calls.find(
+      call => call[0] === 'send_chat_message'
+    )
+    expect(sendCall?.[1].message).toContain('list_security_advisories')
+    expect(sendCall?.[1].message).toContain('ghsaId')
   })
 
   it('sends resolve conflicts immediately in yolo from the keyboard shortcut', async () => {

@@ -65,6 +65,12 @@ mod version;
 
 pub use version::{app_version, set_app_version};
 
+// Desktop-only open helpers (native Tauri commands delegate here so editor
+// launch logic stays shared and complete: binary mapping, -g goto args,
+// macOS app fallbacks, Windows .cmd wrappers).
+pub use chat::open_file_in_default_app;
+pub use projects::open_worktree_in_editor;
+
 // Validation functions
 fn validate_filename(filename: &str) -> Result<(), String> {
     // Regex pattern: only alphanumeric, dash, underscore, dot
@@ -167,7 +173,7 @@ pub struct AppPreferences {
     #[serde(default = "default_terminal_font_size")]
     pub terminal_font_size: u32, // Embedded terminal font size in pixels (10-24)
     #[serde(default = "default_editor")]
-    pub editor: String, // Editor app: zed, vscode, cursor, xcode, intellij
+    pub editor: String, // Editor app: zed, vscode, vscodium, cursor, xcode, intellij
     #[serde(default = "default_open_in")]
     pub open_in: String, // Default Open In action: editor, terminal, finder, github
     #[serde(default = "default_auto_branch_naming")]
@@ -279,11 +285,19 @@ pub struct AppPreferences {
     #[serde(default)]
     pub custom_cli_profiles: Vec<CustomCliProfile>, // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
     #[serde(default)]
-    pub default_provider: Option<String>, // Default provider profile name (None = Anthropic direct)
+    pub default_provider: Option<String>, // Default Claude provider profile name (None = Anthropic direct)
+    #[serde(default)]
+    pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
+    #[serde(default)]
+    pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    #[serde(default)]
+    pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
     pub favorite_models: Vec<String>, // Favourited model keys ("backend:model") shown at top of picker
     #[serde(default)]
     pub favorite_package_scripts: Vec<String>, // Favourited package script keys ("project_id:script")
+    #[serde(default)]
+    pub favorite_base_branches: Vec<String>, // Starred base branches ("project_id:branch") for new worktree picker
     #[serde(default)]
     pub fast_mode_models: Vec<String>, // Model keys ("backend:baseModel") with fast tier last enabled
     #[serde(default = "default_canvas_layout")]
@@ -312,6 +326,8 @@ pub struct AppPreferences {
     pub selected_kimi_model: String, // Default Kimi Code model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
+    #[serde(default = "default_codex_model_verbosity")]
+    pub default_codex_model_verbosity: String, // Codex model verbosity: low, medium, high
     #[serde(default = "default_grok_reasoning_effort")]
     pub default_grok_reasoning_effort: String, // Grok reasoning effort: low, medium, high, xhigh, max
     #[serde(default = "default_codex_goal_execution_mode")]
@@ -447,6 +463,36 @@ pub struct CustomCliProfile {
     pub file_path: String,
     #[serde(default = "default_true")]
     pub supports_thinking: Option<bool>,
+}
+
+/// Codex custom model_provider profile injected via app-server config / -c overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexProviderProfile {
+    pub name: String,
+    pub provider_id: String,
+    pub base_url: String,
+    pub env_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_api: Option<String>,
+}
+
+/// PI custom provider merged into ~/.pi/agent/models.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderProfile {
+    pub name: String,
+    pub base_url: String,
+    pub api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub models: Vec<PiProviderModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 fn slugify_profile_name(name: &str) -> String {
@@ -648,6 +694,49 @@ fn maybe_auto_select_system_coderabbit(
     false
 }
 
+/// When Jean-managed Claude/Codex/OpenCode is missing but a system PATH install
+/// exists, switch the preference to `"path"` so Settings UI, auth, and status
+/// checks agree with the binary actually used (issue #387).
+///
+/// Runtime `resolve_cli_binary` also falls back to PATH when Jean-managed is
+/// missing; this persists the source so the UI does not show a misleading
+/// "Jean" selection.
+fn maybe_auto_select_system_cli_sources(
+    app: &AppHandle,
+    preferences: &mut AppPreferences,
+) -> bool {
+    let mut changed = false;
+
+    if preferences.claude_cli_source == "jean" && claude_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting Claude CLI source=path (Jean-managed missing, system found)");
+        preferences.claude_cli_source = "path".to_string();
+        changed = true;
+    }
+    if preferences.codex_cli_source == "jean" && codex_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting Codex CLI source=path (Jean-managed missing, system found)");
+        preferences.codex_cli_source = "path".to_string();
+        changed = true;
+    }
+    if preferences.opencode_cli_source == "jean" && opencode_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting OpenCode CLI source=path (Jean-managed missing, system found)");
+        preferences.opencode_cli_source = "path".to_string();
+        changed = true;
+    }
+
+    changed
+}
+
+/// Apply all PATH auto-selection migrations. Returns true if any preference changed.
+fn maybe_auto_select_system_cli_preferences(
+    app: &AppHandle,
+    preferences: &mut AppPreferences,
+    raw_preferences: Option<&Value>,
+) -> bool {
+    let mut changed = maybe_auto_select_system_coderabbit(app, preferences, raw_preferences);
+    changed |= maybe_auto_select_system_cli_sources(app, preferences);
+    changed
+}
+
 fn normalize_parallel_execution_preferences(preferences: &mut AppPreferences) -> bool {
     if preferences.parallel_execution_prompt_enabled && !preferences.codex_multi_agent_enabled {
         preferences.codex_multi_agent_enabled = true;
@@ -691,6 +780,10 @@ fn default_grok_cli_source() -> String {
 
 fn default_codex_reasoning_effort() -> String {
     "high".to_string()
+}
+
+fn default_codex_model_verbosity() -> String {
+    "medium".to_string()
 }
 
 fn default_grok_reasoning_effort() -> String {
@@ -777,11 +870,14 @@ mod tests {
 
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
-        assert!(prompt.contains("when the current execution mode is plan: after the user answers native `request_user_input`"));
+        assert!(prompt.contains("when the current execution mode is plan: do not write plan files or code"));
+        assert!(prompt.contains("<proposed_plan>"));
         assert!(prompt.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(prompt.contains("Claude AskUserQuestion"));
         assert!(prompt.contains("OpenCode question"));
         assert!(prompt.contains("Use a plain-text Unresolved Questions section only"));
+        assert!(prompt.contains("zero-context handoff"));
+        assert!(!prompt.contains("Make the plan extremely concise"));
         assert!(prompt.contains("Jean Worktree Policy"));
         assert!(prompt.contains("Do NOT create git worktrees manually"));
         assert!(prompt.contains("Jean MCP/tools"));
@@ -865,6 +961,7 @@ mod tests {
         assert_eq!(args.port, Some(4567));
         assert_eq!(args.token.as_deref(), Some("secret"));
         assert!(!args.no_token);
+        assert!(!args.allow_native_open);
     }
 
     #[test]
@@ -893,6 +990,30 @@ mod tests {
         assert_eq!(args.host.as_deref(), Some("100.64.0.1"));
         assert_eq!(args.port, Some(5678));
         assert_eq!(args.token.as_deref(), Some("cli-secret"));
+    }
+
+    #[test]
+    fn parse_cli_args_reads_allow_native_open_from_env_and_flag() {
+        let from_env = parse_cli_args_from(
+            ["jean", "--headless"],
+            [("JEAN_ALLOW_NATIVE_OPEN", "1")],
+        )
+        .unwrap();
+        assert!(from_env.allow_native_open);
+
+        let from_flag = parse_cli_args_from(
+            ["jean", "--headless", "--allow-native-open"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(from_flag.allow_native_open);
+
+        let off = parse_cli_args_from(
+            ["jean", "--headless"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(!off.allow_native_open);
     }
 
     #[test]
@@ -992,6 +1113,24 @@ mod tests {
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
         assert!(prefs.web_access_sounds_enabled);
+    }
+
+    #[test]
+    fn app_preferences_default_codex_model_verbosity_for_existing_prefs() {
+        assert_eq!(
+            AppPreferences::default().default_codex_model_verbosity,
+            "medium"
+        );
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("default_codex_model_verbosity");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+
+        assert_eq!(prefs.default_codex_model_verbosity, "medium");
     }
 
     #[test]
@@ -1204,6 +1343,10 @@ pub struct MagicPrompts {
     pub investigate_sentry_issue: Option<String>,
     #[serde(default)]
     pub review_comments: Option<String>,
+    #[serde(default)]
+    pub automate_github_bugs: Option<String>,
+    #[serde(default)]
+    pub automate_security_advisories: Option<String>,
 }
 
 pub(crate) fn default_investigate_issue_prompt() -> String {
@@ -1523,7 +1666,7 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
         .to_string()
 }
 
-fn default_investigate_advisory_prompt() -> String {
+pub(crate) fn default_investigate_advisory_prompt() -> String {
     r#"<task>
 
 Investigate the loaded security {advisoryWord} ({advisoryRefs})
@@ -1760,6 +1903,136 @@ Address the following review comments from PR #{prNumber}
         .to_string()
 }
 
+pub(crate) fn default_automate_github_bugs_prompt() -> String {
+    r#"<task>
+
+Automate triage of the latest open GitHub bug/fix issues for this project using Jean's MCP tools, then start autoinvestigation for each valid issue in its own worktree.
+
+</task>
+
+
+<context>
+
+- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
+- Scope: bugs and fixes only — not feature requests, enhancements, or pure DX chores
+- You are the orchestrator in this session. Do not implement fixes here.
+
+</context>
+
+
+<instructions>
+
+1. Resolve context
+   - Prefer projectId from context above
+   - If missing or uncertain, call Jean MCP get_current_context
+   - Optionally call list_worktrees with projectId so you can detect issues that already have worktrees
+
+2. Fetch candidates
+   - Call list_github_issues with projectId and state="open"
+   - Sort by newest first and inspect enough issues to select up to 5 bug/fix candidates
+   - Prefer labels such as bug, fix, defect, regression, crash
+   - Exclude clear feature/enhancement requests (labels like feature, enhancement, or titles/bodies that only request new capabilities)
+   - If labels are missing, use title + body to decide
+
+3. Validate each candidate before acting
+   - Still open/valid (not closed, not obsolete)
+   - Not an obvious duplicate of another open issue (or of an issue you are already starting)
+   - No existing Jean worktree already linked to this issue number (check list_worktrees / worktree metadata)
+   - Skip anything already under active investigation
+
+4. Act on each remaining valid issue (up to 5 total)
+   - Call create_worktree with:
+     - projectId
+     - issueNumber
+     - action="start_autoinvestigating"
+   - Create a separate worktree per issue
+   - Do not open/switch Jean UI unless the tool requires it
+
+5. Report results in this session
+   - Table of started issues (number, title, worktree/session if returned)
+   - Table of skipped issues with reasons (not a bug, duplicate, already has worktree, invalid, etc.)
+   - Any MCP/tool errors
+
+</instructions>
+
+
+<guidelines>
+
+- Be systematic and stop at 5 autoinvestigations maximum
+- Prefer high-confidence bug/fix issues over ambiguous ones
+- If fewer than 5 valid bugs exist, process only the valid ones
+- Do not implement code changes in this orchestration session
+
+</guidelines>"#
+        .to_string()
+}
+
+pub(crate) fn default_automate_security_advisories_prompt() -> String {
+    r#"<task>
+
+Automate triage of the latest repository security advisories for this project using Jean's MCP tools, then start autoinvestigation for each valid advisory in its own worktree.
+
+</task>
+
+
+<context>
+
+- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
+- Scope: repository security advisories (GHSA), not Dependabot dependency alerts unless they clearly map to a repo advisory
+- You are the orchestrator in this session. Do not implement fixes here.
+
+</context>
+
+
+<instructions>
+
+1. Resolve context
+   - Prefer projectId from context above
+   - If missing or uncertain, call Jean MCP get_current_context
+   - Optionally call list_worktrees with projectId so you can detect advisories that already have worktrees
+
+2. Fetch candidates
+   - Call list_security_advisories with projectId and state="all"
+   - Sort by newest first and inspect enough advisories to select up to 5 candidates that still need investigation
+   - Prefer advisories that are actively open for work
+   - Skip advisories already closed when they no longer need investigation
+
+3. Validate each candidate before acting
+   - Still valid (not obsolete / not already resolved)
+   - Not a duplicate of another advisory (same GHSA family / clearly same vulnerability already covered)
+   - Carefully check state: draft, triage, published/released, closed
+     - Skip if already released/published and no longer needs investigation, or if draft/triage work is already covered by an existing investigation/worktree
+     - Prefer ones that still need investigation and do not already have an in-progress worktree
+   - No existing Jean worktree already linked to this GHSA id
+   - No duplicated open GitHub issue that already tracks the same advisory investigation
+
+4. Act on each remaining valid advisory (up to 5 total)
+   - Call create_worktree with:
+     - projectId
+     - ghsaId (e.g. "GHSA-xxxx-xxxx-xxxx")
+     - action="start_autoinvestigating"
+   - Create a separate worktree per advisory
+   - Do not open/switch Jean UI unless the tool requires it
+
+5. Report results in this session
+   - Table of started advisories (GHSA id, title/severity, state, worktree/session if returned)
+   - Table of skipped advisories with reasons (state, duplicate, already has worktree, invalid, etc.)
+   - Any MCP/tool errors
+
+</instructions>
+
+
+<guidelines>
+
+- Be systematic and stop at 5 autoinvestigations maximum
+- Prefer high-confidence, still-actionable advisories
+- If fewer than 5 valid advisories exist, process only the valid ones
+- Do not implement code changes in this orchestration session
+
+</guidelines>"#
+        .to_string()
+}
+
 pub(crate) fn default_parallel_execution_prompt() -> String {
     r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
@@ -1777,11 +2050,11 @@ fn default_global_system_prompt() -> String {
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
-- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
+- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
-- For Codex specifically, when the current execution mode is plan: after the user answers native `request_user_input`/open questions, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.
-- Every Codex response that contains or revises a plan while the current execution mode is plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
+- For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
+- Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete `<proposed_plan>` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
 
 ### 2. Documentation First
@@ -1897,6 +2170,10 @@ pub struct MagicPromptModels {
     pub investigate_sentry_issue_model: String,
     #[serde(default = "default_model")]
     pub review_comments_model: String,
+    #[serde(default = "default_model")]
+    pub automate_github_bugs_model: String,
+    #[serde(default = "default_model")]
+    pub automate_security_advisories_model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1930,6 +2207,8 @@ impl Default for MagicPromptModels {
             investigate_linear_issue_model: default_model(),
             investigate_sentry_issue_model: default_model(),
             review_comments_model: default_model(),
+            automate_github_bugs_model: default_model(),
+            automate_security_advisories_model: default_model(),
         }
     }
 }
@@ -1940,7 +2219,7 @@ impl MagicPromptModels {
     /// default models are untouched. Returns true if any field changed.
     fn migrate_legacy_defaults(&mut self) -> bool {
         let new_opus = default_model();
-        let opus_fields: [&mut String; 12] = [
+        let opus_fields: [&mut String; 14] = [
             &mut self.investigate_issue_model,
             &mut self.investigate_pr_model,
             &mut self.investigate_workflow_run_model,
@@ -1953,6 +2232,8 @@ impl MagicPromptModels {
             &mut self.investigate_linear_issue_model,
             &mut self.investigate_sentry_issue_model,
             &mut self.review_comments_model,
+            &mut self.automate_github_bugs_model,
+            &mut self.automate_security_advisories_model,
         ];
         let mut changed = false;
         for field in opus_fields {
@@ -2038,6 +2319,10 @@ pub struct MagicPromptProviders {
     pub investigate_sentry_issue_provider: Option<String>,
     #[serde(default)]
     pub review_comments_provider: Option<String>,
+    #[serde(default)]
+    pub automate_github_bugs_provider: Option<String>,
+    #[serde(default)]
+    pub automate_security_advisories_provider: Option<String>,
 }
 
 /// Per-prompt backend overrides for magic prompts (None = use project/global default_backend)
@@ -2075,6 +2360,10 @@ pub struct MagicPromptBackends {
     pub investigate_sentry_issue_backend: Option<String>,
     #[serde(default)]
     pub review_comments_backend: Option<String>,
+    #[serde(default)]
+    pub automate_github_bugs_backend: Option<String>,
+    #[serde(default)]
+    pub automate_security_advisories_backend: Option<String>,
 }
 
 /// Per-prompt reasoning effort overrides for magic prompts (None = use model default)
@@ -2112,6 +2401,10 @@ pub struct MagicPromptReasoningEfforts {
     pub investigate_sentry_issue_effort: Option<String>,
     #[serde(default)]
     pub review_comments_effort: Option<String>,
+    #[serde(default)]
+    pub automate_github_bugs_effort: Option<String>,
+    #[serde(default)]
+    pub automate_security_advisories_effort: Option<String>,
 }
 
 fn default_magic_prompt_plan_mode() -> String {
@@ -2145,6 +2438,10 @@ pub struct MagicPromptModes {
     pub final_review_mode: String,
     #[serde(default = "default_magic_prompt_yolo_mode")]
     pub resolve_conflicts_mode: String,
+    #[serde(default = "default_magic_prompt_yolo_mode")]
+    pub automate_github_bugs_mode: String,
+    #[serde(default = "default_magic_prompt_yolo_mode")]
+    pub automate_security_advisories_mode: String,
 }
 
 impl Default for MagicPromptModes {
@@ -2160,7 +2457,44 @@ impl Default for MagicPromptModes {
             review_comments_mode: default_magic_prompt_plan_mode(),
             final_review_mode: default_magic_prompt_yolo_mode(),
             resolve_conflicts_mode: default_magic_prompt_yolo_mode(),
+            automate_github_bugs_mode: default_magic_prompt_yolo_mode(),
+            automate_security_advisories_mode: default_magic_prompt_yolo_mode(),
         }
+    }
+}
+
+fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
+    match backend {
+        "codex" => is_codex_model(model),
+        "opencode" => is_opencode_model(model),
+        "cursor" => is_cursor_model(model),
+        "pi" => is_pi_model(model),
+        "commandcode" => model.starts_with("commandcode/"),
+        "grok" => is_grok_model(model),
+        "kimi" => is_kimi_model(model),
+        "claude" => {
+            !is_codex_model(model)
+                && !is_opencode_model(model)
+                && !is_cursor_model(model)
+                && !is_pi_model(model)
+                && !is_grok_model(model)
+                && !is_kimi_model(model)
+                && !model.starts_with("commandcode/")
+        }
+        _ => true,
+    }
+}
+
+fn selected_model_for_backend(preferences: &AppPreferences, backend: &str) -> String {
+    match backend {
+        "codex" => preferences.selected_codex_model.clone(),
+        "opencode" => preferences.selected_opencode_model.clone(),
+        "cursor" => preferences.selected_cursor_model.clone(),
+        "pi" => preferences.selected_pi_model.clone(),
+        "commandcode" => preferences.selected_commandcode_model.clone(),
+        "grok" => preferences.selected_grok_model.clone(),
+        "kimi" => preferences.selected_kimi_model.clone(),
+        _ => preferences.selected_model.clone(),
     }
 }
 
@@ -2177,44 +2511,165 @@ fn migrate_final_review_preferences(
         .final_review_backend
         .as_deref()
         .unwrap_or(&preferences.default_backend);
-    let model_matches_backend = match backend {
-        "codex" => is_codex_model(&preferences.magic_prompt_models.final_review_model),
-        "opencode" => is_opencode_model(&preferences.magic_prompt_models.final_review_model),
-        "cursor" => is_cursor_model(&preferences.magic_prompt_models.final_review_model),
-        "pi" => is_pi_model(&preferences.magic_prompt_models.final_review_model),
-        "commandcode" => preferences
-            .magic_prompt_models
-            .final_review_model
-            .starts_with("commandcode/"),
-        "grok" => is_grok_model(&preferences.magic_prompt_models.final_review_model),
-        "kimi" => is_kimi_model(&preferences.magic_prompt_models.final_review_model),
-        "claude" => {
-            let model = &preferences.magic_prompt_models.final_review_model;
-            !is_codex_model(model)
-                && !is_opencode_model(model)
-                && !is_cursor_model(model)
-                && !is_pi_model(model)
-                && !is_grok_model(model)
-                && !is_kimi_model(model)
-                && !model.starts_with("commandcode/")
-        }
-        _ => true,
-    };
+    let model_matches_backend = magic_prompt_model_matches_backend(
+        &preferences.magic_prompt_models.final_review_model,
+        backend,
+    );
     if !model_missing && model_matches_backend {
         return false;
     }
 
-    preferences.magic_prompt_models.final_review_model = match backend {
-        "codex" => preferences.selected_codex_model.clone(),
-        "opencode" => preferences.selected_opencode_model.clone(),
-        "cursor" => preferences.selected_cursor_model.clone(),
-        "pi" => preferences.selected_pi_model.clone(),
-        "commandcode" => preferences.selected_commandcode_model.clone(),
-        "grok" => preferences.selected_grok_model.clone(),
-        "kimi" => preferences.selected_kimi_model.clone(),
-        _ => preferences.selected_model.clone(),
-    };
+    preferences.magic_prompt_models.final_review_model =
+        selected_model_for_backend(preferences, backend);
     true
+}
+
+/// Align newly-added automation magic-prompt fields with investigation defaults.
+/// Existing installs often have Grok/Codex investigation models while new automation
+/// fields deserialize to Claude Opus defaults — fix the Grok+Opus mismatch.
+fn migrate_automation_magic_prompt_preferences(
+    preferences: &mut AppPreferences,
+    raw_preferences: &Value,
+) -> bool {
+    let models_raw = raw_preferences
+        .get("magic_prompt_models")
+        .and_then(Value::as_object);
+    let backends_raw = raw_preferences
+        .get("magic_prompt_backends")
+        .and_then(Value::as_object);
+    let providers_raw = raw_preferences
+        .get("magic_prompt_providers")
+        .and_then(Value::as_object);
+    let efforts_raw = raw_preferences
+        .get("magic_prompt_efforts")
+        .and_then(Value::as_object);
+    let modes_raw = raw_preferences
+        .get("magic_prompt_modes")
+        .and_then(Value::as_object);
+
+    let mut changed = false;
+
+    // GitHub bugs automation mirrors investigate_issue
+    {
+        let backend_missing = backends_raw.is_none_or(|b| !b.contains_key("automate_github_bugs_backend"));
+        if backend_missing {
+            preferences.magic_prompt_backends.automate_github_bugs_backend =
+                preferences
+                    .magic_prompt_backends
+                    .investigate_issue_backend
+                    .clone();
+            changed = true;
+        }
+        let provider_missing =
+            providers_raw.is_none_or(|p| !p.contains_key("automate_github_bugs_provider"));
+        if provider_missing {
+            preferences.magic_prompt_providers.automate_github_bugs_provider =
+                preferences
+                    .magic_prompt_providers
+                    .investigate_issue_provider
+                    .clone();
+            changed = true;
+        }
+        let effort_missing =
+            efforts_raw.is_none_or(|e| !e.contains_key("automate_github_bugs_effort"));
+        if effort_missing {
+            preferences.magic_prompt_efforts.automate_github_bugs_effort = preferences
+                .magic_prompt_efforts
+                .investigate_issue_effort
+                .clone();
+            changed = true;
+        }
+        // Mode stays at default yolo for orchestration (not investigation plan mode).
+        let _mode_missing_bugs =
+            modes_raw.is_none_or(|m| !m.contains_key("automate_github_bugs_mode"));
+
+        let model_missing =
+            models_raw.is_none_or(|m| !m.contains_key("automate_github_bugs_model"));
+        let backend = preferences
+            .magic_prompt_backends
+            .automate_github_bugs_backend
+            .as_deref()
+            .unwrap_or(&preferences.default_backend);
+        let investigate_model = &preferences.magic_prompt_models.investigate_issue_model;
+        let model_matches = magic_prompt_model_matches_backend(
+            &preferences.magic_prompt_models.automate_github_bugs_model,
+            backend,
+        );
+        if model_missing || !model_matches {
+            preferences.magic_prompt_models.automate_github_bugs_model =
+                if magic_prompt_model_matches_backend(investigate_model, backend) {
+                    investigate_model.clone()
+                } else {
+                    selected_model_for_backend(preferences, backend)
+                };
+            changed = true;
+        }
+    }
+
+    // Security advisories automation mirrors investigate_advisory
+    {
+        let backend_missing =
+            backends_raw.is_none_or(|b| !b.contains_key("automate_security_advisories_backend"));
+        if backend_missing {
+            preferences
+                .magic_prompt_backends
+                .automate_security_advisories_backend = preferences
+                .magic_prompt_backends
+                .investigate_advisory_backend
+                .clone();
+            changed = true;
+        }
+        let provider_missing = providers_raw
+            .is_none_or(|p| !p.contains_key("automate_security_advisories_provider"));
+        if provider_missing {
+            preferences
+                .magic_prompt_providers
+                .automate_security_advisories_provider = preferences
+                .magic_prompt_providers
+                .investigate_advisory_provider
+                .clone();
+            changed = true;
+        }
+        let effort_missing =
+            efforts_raw.is_none_or(|e| !e.contains_key("automate_security_advisories_effort"));
+        if effort_missing {
+            preferences
+                .magic_prompt_efforts
+                .automate_security_advisories_effort = preferences
+                .magic_prompt_efforts
+                .investigate_advisory_effort
+                .clone();
+            changed = true;
+        }
+        let _mode_missing =
+            modes_raw.is_none_or(|m| !m.contains_key("automate_security_advisories_mode"));
+
+        let model_missing =
+            models_raw.is_none_or(|m| !m.contains_key("automate_security_advisories_model"));
+        let backend = preferences
+            .magic_prompt_backends
+            .automate_security_advisories_backend
+            .as_deref()
+            .unwrap_or(&preferences.default_backend);
+        let investigate_model = &preferences.magic_prompt_models.investigate_advisory_model;
+        let model_matches = magic_prompt_model_matches_backend(
+            &preferences.magic_prompt_models.automate_security_advisories_model,
+            backend,
+        );
+        if model_missing || !model_matches {
+            preferences
+                .magic_prompt_models
+                .automate_security_advisories_model =
+                if magic_prompt_model_matches_backend(investigate_model, backend) {
+                    investigate_model.clone()
+                } else {
+                    selected_model_for_backend(preferences, backend)
+                };
+            changed = true;
+        }
+    }
+
+    changed
 }
 
 impl MagicPrompts {
@@ -2222,7 +2677,7 @@ impl MagicPrompts {
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 18] = [
+        let defaults: [DefaultEntry; 20] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -2268,6 +2723,14 @@ impl MagicPrompts {
                 &mut self.investigate_sentry_issue,
             ),
             (default_review_comments_prompt, &mut self.review_comments),
+            (
+                default_automate_github_bugs_prompt,
+                &mut self.automate_github_bugs,
+            ),
+            (
+                default_automate_security_advisories_prompt,
+                &mut self.automate_security_advisories,
+            ),
         ];
 
         for (default_fn, field) in defaults {
@@ -2357,8 +2820,12 @@ impl Default for AppPreferences {
             sync_zoom_levels: default_sync_zoom_levels(),
             custom_cli_profiles: Vec::new(),
             default_provider: None,
+            custom_codex_providers: Vec::new(),
+            default_codex_provider: None,
+            custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
+            favorite_base_branches: Vec::new(),
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
@@ -2373,6 +2840,7 @@ impl Default for AppPreferences {
             selected_grok_model: default_grok_model(),
             selected_kimi_model: default_kimi_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
+            default_codex_model_verbosity: default_codex_model_verbosity(),
             default_grok_reasoning_effort: default_grok_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: default_codex_multi_agent_enabled(),
@@ -2715,7 +3183,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let prefs_path = get_preferences_path(app)?;
     if !prefs_path.exists() {
         let mut preferences = AppPreferences::default();
-        maybe_auto_select_system_coderabbit(app, &mut preferences, None);
+        maybe_auto_select_system_cli_preferences(app, &mut preferences, None);
         return Ok(preferences);
     }
     let contents = std::fs::read_to_string(&prefs_path)
@@ -2725,8 +3193,9 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let mut preferences: AppPreferences = serde_json::from_value(raw_preferences.clone())
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
+    migrate_automation_magic_prompt_preferences(&mut preferences, &raw_preferences);
     normalize_parallel_execution_preferences(&mut preferences);
-    maybe_auto_select_system_coderabbit(app, &mut preferences, Some(&raw_preferences));
+    maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
 }
 
@@ -2737,10 +3206,10 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     if !prefs_path.exists() {
         log::trace!("Preferences file not found, using defaults");
         let mut preferences = AppPreferences::default();
-        if maybe_auto_select_system_coderabbit(&app, &mut preferences, None) {
+        if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None) {
             if let Ok(json) = serde_json::to_string_pretty(&preferences) {
                 let _ = std::fs::write(&prefs_path, json);
-                log::trace!("Saved preferences after CodeRabbit PATH auto-detection");
+                log::trace!("Saved preferences after CLI PATH auto-detection");
             }
         }
         return Ok(preferences);
@@ -2768,6 +3237,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     // Migrate legacy default Claude model names to the 1M variants where
     // available so hidden non-1M defaults do not render blank in settings.
     let mut needs_resave = migrate_final_review_preferences(&mut preferences, &raw_preferences);
+    needs_resave |= migrate_automation_magic_prompt_preferences(&mut preferences, &raw_preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
@@ -2781,7 +3251,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.branch_naming_model = default_branch_naming_model();
         needs_resave = true;
     }
-    if maybe_auto_select_system_coderabbit(&app, &mut preferences, Some(&raw_preferences)) {
+    if maybe_auto_select_system_cli_preferences(&app, &mut preferences, Some(&raw_preferences)) {
         needs_resave = true;
     }
     if preferences.session_naming_model == "haiku" {
@@ -3214,6 +3684,9 @@ pub async fn start_http_server(
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
+    // Desktop-hosted Web Access can open local Finder/editor/terminal for clients.
+    platform::set_allow_native_open(true);
+
     let prefs = load_preferences(app.clone()).await?;
     let actual_port = port.unwrap_or(prefs.http_server_port);
     let bind_host = resolve_http_server_bind_host(&prefs);
@@ -3598,6 +4071,8 @@ struct CliArgs {
     token: Option<String>,
     no_token: bool,
     allow_unsafe_no_token: bool,
+    /// Allow HTTP clients to open local file managers / editors / terminals.
+    allow_native_open: bool,
 }
 
 /// CLI overrides for HTTP server configuration.
@@ -3624,12 +4099,14 @@ fn print_cli_help() {
     println!("  --no-token          Disable token authentication");
     println!("  --allow-unsafe-no-token");
     println!("                      Allow --no-token with a wildcard bind host");
+    println!("  --allow-native-open Allow Open in editor/finder/terminal over HTTP");
+    println!("                      (auto-enabled under WSL; off by default otherwise)");
     println!("  --help              Show this help message");
     println!("  --version           Show version");
     println!();
     println!("Environment:");
     println!("  JEAN_HEADLESS=1 JEAN_HOST JEAN_PORT JEAN_TOKEN JEAN_NO_TOKEN=1");
-    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1");
+    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1 JEAN_ALLOW_NATIVE_OPEN=1");
 }
 
 fn parse_cli_args() -> CliArgs {
@@ -3681,6 +4158,8 @@ where
     let mut no_token = env_truthy(env.get("JEAN_NO_TOKEN").map(String::as_str));
     let mut allow_unsafe_no_token =
         env_truthy(env.get("JEAN_ALLOW_UNSAFE_NO_TOKEN").map(String::as_str));
+    let mut allow_native_open =
+        env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
     let mut host = env
         .get("JEAN_HOST")
         .map(|h| h.trim().to_string())
@@ -3739,6 +4218,9 @@ where
             "--allow-unsafe-no-token" => {
                 allow_unsafe_no_token = true;
             }
+            "--allow-native-open" => {
+                allow_native_open = true;
+            }
             _ => {} // ignore unknown flags (Tauri/OS may pass their own)
         }
     }
@@ -3747,9 +4229,15 @@ where
         return Err("--token and --no-token are mutually exclusive".to_string());
     }
 
-    if !headless && (host.is_some() || port.is_some() || token.is_some() || no_token) {
+    if !headless
+        && (host.is_some()
+            || port.is_some()
+            || token.is_some()
+            || no_token
+            || allow_native_open)
+    {
         eprintln!(
-            "Warning: --host, --port, --token, --no-token are only effective with --headless"
+            "Warning: --host, --port, --token, --no-token, --allow-native-open are only effective with --headless"
         );
     }
 
@@ -3760,6 +4248,7 @@ where
         token,
         no_token,
         allow_unsafe_no_token,
+        allow_native_open,
     })
 }
 
@@ -3930,6 +4419,8 @@ pub async fn run_server() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
     let cli = parse_cli_args();
+    // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
+    platform::set_allow_native_open(cli.allow_native_open);
     let context = RuntimeContext::from_environment()?;
     initialize_runtime(&context)?;
 

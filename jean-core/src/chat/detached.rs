@@ -4,7 +4,7 @@
 //! survives Jean quitting. The process writes directly to a JSONL file,
 //! which Jean tails for real-time updates.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 #[cfg(unix)]
@@ -15,6 +15,27 @@ pub use crate::platform::is_process_alive;
 #[cfg(unix)]
 use crate::platform::shell_escape;
 use crate::platform::silent_command;
+
+pub(crate) fn current_executable_for_detached_host() -> Result<PathBuf, String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("Failed to get Jean executable: {error}"))?;
+    resolve_detached_host_executable(executable)
+}
+
+fn resolve_detached_host_executable(executable: PathBuf) -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    {
+        const DELETED_SUFFIX: &str = " (deleted)";
+        let path = executable.to_string_lossy();
+        if let Some(replacement) = path.strip_suffix(DELETED_SUFFIX) {
+            let replacement = PathBuf::from(replacement);
+            if replacement.is_file() {
+                return Ok(replacement);
+            }
+        }
+    }
+    Ok(executable)
+}
 
 #[cfg(any(windows, test))]
 fn wsl_shell_quote(value: &str) -> String {
@@ -445,6 +466,20 @@ pub fn spawn_detached_claude(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn detached_host_uses_replacement_path_after_self_update() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let executable = tmp.path().join("jean-server");
+        std::fs::write(&executable, b"replacement").expect("write replacement");
+        let deleted_path = std::path::PathBuf::from(format!("{} (deleted)", executable.display()));
+
+        assert_eq!(
+            resolve_detached_host_executable(deleted_path).expect("resolve executable"),
+            executable
+        );
+    }
 
     #[test]
     #[cfg(unix)]

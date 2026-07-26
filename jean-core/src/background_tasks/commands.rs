@@ -12,27 +12,47 @@ use crate::projects::git_status::ActiveWorktreeInfo;
 use crate::projects::storage::load_projects_data;
 use serde::Deserialize;
 
-/// Look up persisted pr_push_remote/pr_push_branch for a worktree. Returns (None, None)
-/// if the worktree isn't found or projects data can't be loaded.
-fn lookup_pr_push_target(app: &AppHandle, worktree_id: &str) -> (Option<String>, Option<String>) {
+/// Persisted bits of a worktree needed to compute its git status. Falls back to
+/// defaults when the worktree isn't found or projects data can't be loaded.
+#[derive(Clone, Default)]
+struct WorktreeStatusContext {
+    pr_push_remote: Option<String>,
+    pr_push_branch: Option<String>,
+    base_remote: Option<String>,
+}
+
+fn lookup_status_context(app: &AppHandle, worktree_id: &str) -> WorktreeStatusContext {
     match load_projects_data(app) {
         Ok(data) => data
             .worktrees
             .iter()
             .find(|w| w.id == worktree_id)
-            .map(|w| (w.pr_push_remote.clone(), w.pr_push_branch.clone()))
-            .unwrap_or((None, None)),
-        Err(_) => (None, None),
+            .map(|w| WorktreeStatusContext {
+                pr_push_remote: w.pr_push_remote.clone(),
+                pr_push_branch: w.pr_push_branch.clone(),
+                base_remote: w.base_remote.clone(),
+            })
+            .unwrap_or_default(),
+        Err(_) => WorktreeStatusContext::default(),
     }
 }
 
-/// Build a map of worktree_id → (pr_push_remote, pr_push_branch) from persisted data.
-fn load_pr_push_targets(app: &AppHandle) -> HashMap<String, (Option<String>, Option<String>)> {
+/// Build a map of worktree_id → status context from persisted data.
+fn load_status_contexts(app: &AppHandle) -> HashMap<String, WorktreeStatusContext> {
     match load_projects_data(app) {
         Ok(data) => data
             .worktrees
             .into_iter()
-            .map(|w| (w.id, (w.pr_push_remote, w.pr_push_branch)))
+            .map(|w| {
+                (
+                    w.id,
+                    WorktreeStatusContext {
+                        pr_push_remote: w.pr_push_remote,
+                        pr_push_branch: w.pr_push_branch,
+                        base_remote: w.base_remote,
+                    },
+                )
+            })
             .collect(),
         Err(_) => HashMap::new(),
     }
@@ -64,15 +84,16 @@ pub fn set_active_worktree_for_polling(
 ) -> Result<(), String> {
     let info = match (worktree_id, worktree_path, base_branch) {
         (Some(id), Some(path), Some(branch)) => {
-            let (pr_push_remote, pr_push_branch) = lookup_pr_push_target(&app, &id);
+            let context = lookup_status_context(&app, &id);
             Some(ActiveWorktreeInfo {
                 worktree_id: id,
                 worktree_path: path,
                 base_branch: branch,
+                base_remote: context.base_remote,
                 pr_number,
                 pr_url,
-                pr_push_remote,
-                pr_push_branch,
+                pr_push_remote: context.pr_push_remote,
+                pr_push_branch: context.pr_push_branch,
             })
         }
         _ => None,
@@ -167,22 +188,20 @@ pub fn set_pr_worktrees_for_polling(
     state: State<'_, BackgroundTaskManager>,
     worktrees: Vec<PrWorktreeInfo>,
 ) -> Result<(), String> {
-    let push_targets = load_pr_push_targets(&app);
+    let contexts = load_status_contexts(&app);
     let infos: Vec<ActiveWorktreeInfo> = worktrees
         .into_iter()
         .map(|w| {
-            let (pr_push_remote, pr_push_branch) = push_targets
-                .get(&w.worktree_id)
-                .cloned()
-                .unwrap_or((None, None));
+            let context = contexts.get(&w.worktree_id).cloned().unwrap_or_default();
             ActiveWorktreeInfo {
                 worktree_id: w.worktree_id,
                 worktree_path: w.worktree_path,
                 base_branch: w.base_branch,
+                base_remote: context.base_remote,
                 pr_number: Some(w.pr_number),
                 pr_url: Some(w.pr_url),
-                pr_push_remote,
-                pr_push_branch,
+                pr_push_remote: context.pr_push_remote,
+                pr_push_branch: context.pr_push_branch,
             }
         })
         .collect();
@@ -208,22 +227,20 @@ pub fn set_all_worktrees_for_polling(
     state: State<'_, BackgroundTaskManager>,
     worktrees: Vec<AllWorktreeInfo>,
 ) -> Result<(), String> {
-    let push_targets = load_pr_push_targets(&app);
+    let contexts = load_status_contexts(&app);
     let infos: Vec<ActiveWorktreeInfo> = worktrees
         .into_iter()
         .map(|w| {
-            let (pr_push_remote, pr_push_branch) = push_targets
-                .get(&w.worktree_id)
-                .cloned()
-                .unwrap_or((None, None));
+            let context = contexts.get(&w.worktree_id).cloned().unwrap_or_default();
             ActiveWorktreeInfo {
                 worktree_id: w.worktree_id,
                 worktree_path: w.worktree_path,
                 base_branch: w.base_branch,
+                base_remote: context.base_remote,
                 pr_number: None,
                 pr_url: None,
-                pr_push_remote,
-                pr_push_branch,
+                pr_push_remote: context.pr_push_remote,
+                pr_push_branch: context.pr_push_branch,
             }
         })
         .collect();

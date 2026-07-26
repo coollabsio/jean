@@ -140,6 +140,7 @@ import { ChatErrorFallback } from './ChatErrorFallback'
 import { logger } from '@/lib/logger'
 import { saveCrashState } from '@/lib/recovery'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
+import { isBackendAutoSteerEnabled } from '@/lib/backend-auto-steer'
 import { ErrorBanner } from './ErrorBanner'
 import {
   VirtualizedMessageList,
@@ -270,17 +271,8 @@ export function ChatWindow({
   const storeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const activeWorktreeId = propWorktreeId ?? storeWorktreeId
   const activeWorktreePath = propWorktreePath ?? storeWorktreePath
-  const hasPendingAutoInvestigate = useUIStore(state => {
-    if (!activeWorktreeId) return false
-    return (
-      state.autoInvestigateWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigatePRWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateSecurityAlertWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateAdvisoryWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateLinearIssueWorktreeIds.has(activeWorktreeId) ||
-      state.autoInvestigateSentryIssueWorktreeIds.has(activeWorktreeId)
-    )
-  })
+  // Auto-investigate flags are owned by useBackgroundInvestigation (App-level)
+  // so remote/web clients still queue the prompt even when this ChatWindow mounts.
 
   // PERFORMANCE: Proper selector for activeSessionId - subscribes to changes
   // This triggers re-render when tabs are clicked (setActiveSession updates activeSessionIds)
@@ -745,20 +737,16 @@ export function ChatWindow({
     ]
   )
 
-  // Per-session provider selection: persisted session → zustand → project default → global default
+  // Per-session provider selection: persisted session → zustand → backend defaults
+  // Claude: project default_provider → global default_provider
+  // Codex: global default_codex_provider
   const projectDefaultProvider = project?.default_provider ?? null
   const globalDefaultProvider = preferences?.default_provider ?? null
-  const defaultProvider = projectDefaultProvider ?? globalDefaultProvider
+  const globalDefaultCodexProvider = preferences?.default_codex_provider ?? null
   const zustandProvider = useChatStore(state =>
     deferredSessionId ? state.selectedProviders[deferredSessionId] : undefined
   )
   const sessionProvider = session?.selected_provider ?? zustandProvider
-  const selectedProvider =
-    sessionProvider !== undefined ? sessionProvider : defaultProvider
-  // __anthropic__ is the sentinel for "use default Anthropic" — treat as non-custom for feature detection
-  const isCustomProvider = Boolean(
-    selectedProvider && selectedProvider !== '__anthropic__'
-  )
 
   // Installed backends (only these should be selectable)
   const { installedBackends } = useInstalledBackends()
@@ -793,16 +781,36 @@ export function ChatWindow({
   const modelImpliedBackend: CliBackend | null = getModelImpliedBackend(
     session?.selected_model
   )
-  // Clamp to installed backends — prevents showing "Claude" when only Codex is installed
+  // Clamp to installed+authenticated backends — no model for backends the user
+  // isn't logged into (and no uninstalled ones either).
+  const preferredBackend: CliBackend = modelImpliedBackend ?? resolvedBackend
   const selectedBackend: CliBackend =
-    modelImpliedBackend ??
-    (installedBackends.length > 0 &&
-    !installedBackends.includes(resolvedBackend)
+    installedBackends.length > 0 &&
+    !installedBackends.includes(preferredBackend)
       ? (installedBackends[0] as CliBackend)
-      : resolvedBackend)
+      : preferredBackend
   const isCodexBackend = selectedBackend === 'codex'
   const isGrokBackend = selectedBackend === 'grok'
   const isCursorBackend = selectedBackend === 'cursor'
+
+  // Provider is backend-scoped: Claude uses custom_cli_profiles defaults;
+  // Codex uses custom_codex_providers / default_codex_provider.
+  const defaultProviderForBackend =
+    selectedBackend === 'codex'
+      ? globalDefaultCodexProvider
+      : selectedBackend === 'claude'
+        ? (projectDefaultProvider ?? globalDefaultProvider)
+        : null
+  const selectedProvider =
+    sessionProvider !== undefined
+      ? sessionProvider
+      : defaultProviderForBackend
+  // Sentinels mean "use backend default" — treat as non-custom for feature detection
+  const isCustomProvider = Boolean(
+    selectedProvider &&
+      selectedProvider !== '__anthropic__' &&
+      selectedProvider !== '__default__'
+  )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
   const defaultModel = resolveDefaultModelForBackend(
@@ -897,9 +905,10 @@ export function ChatWindow({
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
-  const activeProfile = isCustomProvider
-    ? customCliProfiles.find(p => p.name === selectedProvider)
-    : null
+  const activeProfile =
+    isCustomProvider && selectedBackend === 'claude'
+      ? customCliProfiles.find(p => p.name === selectedProvider)
+      : null
   // Fall back to predefined template's supports_thinking for profiles saved before this field existed
   const activeSupportsThinking =
     activeProfile?.supports_thinking ??
@@ -1976,10 +1985,21 @@ export function ChatWindow({
     [handlePlanDialogWorktreeApprove]
   )
 
-  // Opens a new session and sends the review fix message there
+  // Opens new session(s) and sends review fix message(s) there.
+  // Pass a string for one combined fix, or string[] to send each finding separately.
   const handleReviewFix = useCallback(
-    async (message: string, executionMode: 'plan' | 'yolo') => {
+    async (
+      messageOrMessages: string | string[],
+      executionMode: 'plan' | 'yolo'
+    ) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+
+      const messages = (
+        Array.isArray(messageOrMessages)
+          ? messageOrMessages
+          : [messageOrMessages]
+      ).filter(message => message.trim().length > 0)
+      if (messages.length === 0) return
 
       // Mark the current session as no longer reviewing
       const store = useChatStore.getState()
@@ -1990,43 +2010,48 @@ export function ChatWindow({
         'code_review_backend',
         preferences?.default_backend
       )
-
-      // Create new session
-      let newSession: Session
-      try {
-        newSession = await createSession.mutateAsync({
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          backend: backend ?? undefined,
-        })
-      } catch (err) {
-        toast.error(`Failed to create session: ${err}`)
-        return
-      }
-
       const model =
         preferences?.magic_prompt_models?.code_review_model ??
         selectedModelRef.current
-      store.setExecutionMode(newSession.id, executionMode)
-      store.setLastSentMessage(newSession.id, message)
-      store.setError(newSession.id, null)
-      store.addSendingSession(newSession.id)
-      store.setSelectedModel(newSession.id, model)
-      if (backend) {
-        store.setSelectedBackend(newSession.id, backend)
-      }
-      store.setExecutingMode(newSession.id, executionMode)
 
-      sendMessage.mutate({
-        sessionId: newSession.id,
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        message,
-        model,
-        backend: backend ?? undefined,
-        executionMode,
-        thinkingLevel: selectedThinkingLevelRef.current,
-      })
+      // Create one session per message. Use mutateAsync in a loop so each
+      // session is fully created before the next (TanStack Query per-call
+      // onSuccess is unreliable across consecutive mutate() calls).
+      for (const message of messages) {
+        let newSession: Session
+        try {
+          newSession = await createSession.mutateAsync({
+            worktreeId: activeWorktreeId,
+            worktreePath: activeWorktreePath,
+            backend: backend ?? undefined,
+          })
+        } catch (err) {
+          toast.error(`Failed to create session: ${err}`)
+          continue
+        }
+
+        const nextStore = useChatStore.getState()
+        nextStore.setExecutionMode(newSession.id, executionMode)
+        nextStore.setLastSentMessage(newSession.id, message)
+        nextStore.setError(newSession.id, null)
+        nextStore.addSendingSession(newSession.id)
+        nextStore.setSelectedModel(newSession.id, model)
+        if (backend) {
+          nextStore.setSelectedBackend(newSession.id, backend)
+        }
+        nextStore.setExecutingMode(newSession.id, executionMode)
+
+        sendMessage.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          message,
+          model,
+          backend: backend ?? undefined,
+          executionMode,
+          thinkingLevel: selectedThinkingLevelRef.current,
+        })
+      }
     },
     [
       activeSessionId,
@@ -2353,39 +2378,6 @@ export function ChatWindow({
     isModal,
     sessionModalOpen,
   })
-
-  // Pick up per-worktree auto-investigate flags (set by useNewWorktreeHandlers
-  // when worktree is created with auto-investigate). Uses per-worktree Sets so
-  // multiple concurrent worktree creations each get their own investigation.
-  // Guard: wait for worktree status === 'ready' to ensure the git directory
-  // exists on disk before spawning Claude CLI (which uses current_dir).
-  const worktreeStatus = worktree?.status
-  useEffect(() => {
-    if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
-    if (worktreeStatus !== 'ready') return
-    if (!hasPendingAutoInvestigate) return
-    const uiStore = useUIStore.getState()
-    if (uiStore.consumeAutoInvestigate(activeWorktreeId)) {
-      handleInvestigate('issue')
-    } else if (uiStore.consumeAutoInvestigatePR(activeWorktreeId)) {
-      handleInvestigate('pr')
-    } else if (uiStore.consumeAutoInvestigateSecurityAlert(activeWorktreeId)) {
-      handleInvestigate('security-alert')
-    } else if (uiStore.consumeAutoInvestigateAdvisory(activeWorktreeId)) {
-      handleInvestigate('advisory')
-    } else if (uiStore.consumeAutoInvestigateLinearIssue(activeWorktreeId)) {
-      handleInvestigate('linear-issue')
-    } else if (uiStore.consumeAutoInvestigateSentryIssue(activeWorktreeId)) {
-      handleInvestigate('sentry-issue')
-    }
-  }, [
-    activeSessionId,
-    activeWorktreeId,
-    activeWorktreePath,
-    worktreeStatus,
-    hasPendingAutoInvestigate,
-    handleInvestigate,
-  ])
 
   // Message handlers hook - handles questions, plan approval, permission approval, finding fixes
   const {
@@ -2911,7 +2903,24 @@ export function ChatWindow({
                         onScroll={handleScroll}
                       >
                         <div className="mx-auto max-w-7xl px-4 pt-4 pb-6 md:px-6 min-w-0 w-full">
-                          <div className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-hidden">
+                          <div
+                            className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-hidden"
+                            // Suppress browser default menu on empty thread chrome
+                            // (gaps/padding). Message rows provide a custom menu.
+                            // Leave native menus alone for form fields.
+                            onContextMenu={event => {
+                              const target = event.target
+                              if (
+                                target instanceof HTMLElement &&
+                                target.closest(
+                                  'input, textarea, select, [contenteditable="true"]'
+                                )
+                              ) {
+                                return
+                              }
+                              event.preventDefault()
+                            }}
+                          >
                             {/* Debug info (enabled via Settings → Experimental → Debug mode) */}
                             {preferences?.debug_mode_enabled &&
                               activeWorktreeId &&
@@ -3526,7 +3535,14 @@ export function ChatWindow({
                                 selectedEffortLevel={selectedEffortLevel}
                                 useAdaptiveThinking={useAdaptiveThinkingFlag}
                                 hideThinkingLevel={hideThinkingLevel}
-                                baseBranch={gitStatus?.base_branch ?? 'main'}
+                                baseBranch={
+                                  gitStatus?.base_branch ??
+                                  worktree?.base_branch ??
+                                  'main'
+                                }
+                                baseRemote={
+                                  gitStatus?.base_remote ?? worktree?.base_remote
+                                }
                                 uncommittedAdded={uncommittedAdded}
                                 uncommittedRemoved={uncommittedRemoved}
                                 branchDiffAdded={branchDiffAdded}
@@ -3577,6 +3593,9 @@ export function ChatWindow({
                                 customCliProfiles={
                                   preferences?.custom_cli_profiles ?? []
                                 }
+                                customCodexProviders={
+                                  preferences?.custom_codex_providers ?? []
+                                }
                                 onThinkingLevelChange={
                                   handleToolbarThinkingLevelChange
                                 }
@@ -3590,6 +3609,10 @@ export function ChatWindow({
                                   triggerChatAttachRef.current?.()
                                 }
                                 onCancel={handleCancel}
+                                willSteer={isBackendAutoSteerEnabled(
+                                  selectedBackend,
+                                  preferences
+                                )}
                                 queuedMessageCount={
                                   currentQueuedMessages.length
                                 }

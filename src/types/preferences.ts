@@ -83,6 +83,10 @@ export interface MagicPrompts {
   investigate_sentry_issue: string | null
   /** Prompt for addressing inline PR review comments */
   review_comments: string | null
+  /** Prompt for automating triage of GitHub bug issues (not features) */
+  automate_github_bugs: string | null
+  /** Prompt for automating triage of repository security advisories */
+  automate_security_advisories: string | null
 }
 
 /** Default prompt for investigating GitHub issues */
@@ -116,7 +120,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
    - Specific files to modify
    - Potential risks/trade-offs
    - Test cases to verify
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -127,7 +130,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -170,7 +172,6 @@ Investigate the loaded GitHub {prWord} ({prRefs})
    - Address reviewer feedback
    - Specific files to modify
    - Test cases to add or update
-8. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -182,7 +183,6 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -295,6 +295,132 @@ Approval status:
 - approved if no blocking findings remain.
 </instructions>`
 
+/** Default prompt for automating GitHub bug issue triage + autoinvestigation */
+export const DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT = `<task>
+
+Automate triage of the latest open GitHub bug/fix issues for this project using Jean's MCP tools, then start autoinvestigation for each valid issue in its own worktree.
+
+</task>
+
+
+<context>
+
+- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
+- Scope: bugs and fixes only — not feature requests, enhancements, or pure DX chores
+- You are the orchestrator in this session. Do not implement fixes here.
+
+</context>
+
+
+<instructions>
+
+1. Resolve context
+   - Prefer projectId from context above
+   - If missing or uncertain, call Jean MCP get_current_context
+   - Optionally call list_worktrees with projectId so you can detect issues that already have worktrees
+
+2. Fetch candidates
+   - Call list_github_issues with projectId and state="open"
+   - Sort by newest first and inspect enough issues to select up to 5 bug/fix candidates
+   - Prefer labels such as bug, fix, defect, regression, crash
+   - Exclude clear feature/enhancement requests (labels like feature, enhancement, or titles/bodies that only request new capabilities)
+   - If labels are missing, use title + body to decide
+
+3. Validate each candidate before acting
+   - Still open/valid (not closed, not obsolete)
+   - Not an obvious duplicate of another open issue (or of an issue you are already starting)
+   - No existing Jean worktree already linked to this issue number (check list_worktrees / worktree metadata)
+   - Skip anything already under active investigation
+
+4. Act on each remaining valid issue (up to 5 total)
+   - Call create_worktree with:
+     - projectId
+     - issueNumber
+     - action="start_autoinvestigating"
+   - Create a separate worktree per issue
+   - Do not open/switch Jean UI unless the tool requires it
+
+5. Report results in this session
+   - Table of started issues (number, title, worktree/session if returned)
+   - Table of skipped issues with reasons (not a bug, duplicate, already has worktree, invalid, etc.)
+   - Any MCP/tool errors
+
+</instructions>
+
+
+<guidelines>
+
+- Be systematic and stop at 5 autoinvestigations maximum
+- Prefer high-confidence bug/fix issues over ambiguous ones
+- If fewer than 5 valid bugs exist, process only the valid ones
+- Do not implement code changes in this orchestration session
+
+</guidelines>`
+
+/** Default prompt for automating security advisory triage + autoinvestigation */
+export const DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT = `<task>
+
+Automate triage of the latest repository security advisories for this project using Jean's MCP tools, then start autoinvestigation for each valid advisory in its own worktree.
+
+</task>
+
+
+<context>
+
+- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
+- Scope: repository security advisories (GHSA), not Dependabot dependency alerts unless they clearly map to a repo advisory
+- You are the orchestrator in this session. Do not implement fixes here.
+
+</context>
+
+
+<instructions>
+
+1. Resolve context
+   - Prefer projectId from context above
+   - If missing or uncertain, call Jean MCP get_current_context
+   - Optionally call list_worktrees with projectId so you can detect advisories that already have worktrees
+
+2. Fetch candidates
+   - Call list_security_advisories with projectId and state="all"
+   - Sort by newest first and inspect enough advisories to select up to 5 candidates that still need investigation
+   - Prefer advisories that are actively open for work
+   - Skip advisories already closed when they no longer need investigation
+
+3. Validate each candidate before acting
+   - Still valid (not obsolete / not already resolved)
+   - Not a duplicate of another advisory (same GHSA family / clearly same vulnerability already covered)
+   - Carefully check state: draft, triage, published/released, closed
+     - Skip if already released/published and no longer needs investigation, or if draft/triage work is already covered by an existing investigation/worktree
+     - Prefer ones that still need investigation and do not already have an in-progress worktree
+   - No existing Jean worktree already linked to this GHSA id
+   - No duplicated open GitHub issue that already tracks the same advisory investigation
+
+4. Act on each remaining valid advisory (up to 5 total)
+   - Call create_worktree with:
+     - projectId
+     - ghsaId (e.g. "GHSA-xxxx-xxxx-xxxx")
+     - action="start_autoinvestigating"
+   - Create a separate worktree per advisory
+   - Do not open/switch Jean UI unless the tool requires it
+
+5. Report results in this session
+   - Table of started advisories (GHSA id, title/severity, state, worktree/session if returned)
+   - Table of skipped advisories with reasons (state, duplicate, already has worktree, invalid, etc.)
+   - Any MCP/tool errors
+
+</instructions>
+
+
+<guidelines>
+
+- Be systematic and stop at 5 autoinvestigations maximum
+- Prefer high-confidence, still-actionable advisories
+- If fewer than 5 valid advisories exist, process only the valid ones
+- Do not implement code changes in this orchestration session
+
+</guidelines>`
+
 /** Default prompt for the audit-only final review session */
 export const DEFAULT_FINAL_REVIEW_PROMPT = `<task>Perform a final pre-merge audit of the current branch or linked pull request.</task>
 
@@ -385,7 +511,6 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 3. Explore the relevant code in the codebase to understand the context
 4. Determine if this is a code issue, configuration issue, or flaky test
 5. Propose a fix with specific files and changes needed
-6. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -396,7 +521,6 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in CI config (.github/workflows), explain the fix
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -428,7 +552,6 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
    - Specific version bump or dependency change
    - Any code changes needed for compatibility
    - Test cases to verify the fix doesn't break functionality
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -439,7 +562,6 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
 - Don't just recommend "upgrade" — assess compatibility impact
 - Reference specific file paths where the affected package is used
 - If multiple alerts are loaded, address each one separately
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -473,7 +595,6 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 6. Document:
    - Summarize the vulnerability and fix for the advisory
    - Note any affected versions and migration steps
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -484,7 +605,6 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 - Check for the same vulnerability pattern across the entire codebase, not just the reported location
 - Reference specific file paths and line numbers
 - If multiple advisories are loaded, address each one separately
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -526,7 +646,6 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
    - Specific files to modify
    - Potential risks/trade-offs
    - Test cases to verify
-7. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -538,7 +657,6 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -570,7 +688,6 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
    - Specific files and code paths to change
    - Error handling or observability improvements where relevant
    - Risks, edge cases, and tests needed to verify the fix
-6. If you are in yolo mode, also apply the fix(es) — implement the changes, do not stop at proposing them
 
 </instructions>
 
@@ -582,7 +699,6 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
 - Be thorough but focused - investigate deeply without getting sidetracked
 - If multiple solutions exist, explain the trade-offs
 - Reference specific file paths and line numbers
-- If you are in yolo mode, also apply the fix(es) after investigation
 
 </guidelines>`
 
@@ -649,11 +765,11 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
-- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
+- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex \`<proposed_plan>\` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/\`--print\` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
-- For Codex specifically, when the current execution mode is plan: after the user answers native \`request_user_input\`/open questions, immediately call \`update_plan\`/emit \`CodexPlan\` again with the revised plan before any implementation.
-- Every Codex response that contains or revises a plan while the current execution mode is plan must use \`update_plan\`/\`CodexPlan\`; do not provide plain-text-only plans.
+- For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in \`<proposed_plan>...</proposed_plan>\` so Jean can show the approval UI. Do not use the \`update_plan\` checklist tool in plan mode.
+- Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete \`<proposed_plan>\` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
 
 ### 2. Documentation First
@@ -792,6 +908,8 @@ export const DEFAULT_MAGIC_PROMPTS: MagicPrompts = {
   investigate_linear_issue: null,
   investigate_sentry_issue: null,
   review_comments: null,
+  automate_github_bugs: null,
+  automate_security_advisories: null,
 }
 
 /**
@@ -814,6 +932,8 @@ export interface MagicPromptModels {
   investigate_linear_issue_model: MagicPromptModel
   investigate_sentry_issue_model: MagicPromptModel
   review_comments_model: MagicPromptModel
+  automate_github_bugs_model: MagicPromptModel
+  automate_security_advisories_model: MagicPromptModel
 }
 
 /**
@@ -837,6 +957,8 @@ export interface MagicPromptReasoningEfforts {
   investigate_linear_issue_effort: MagicPromptReasoningEffort
   investigate_sentry_issue_effort: MagicPromptReasoningEffort
   review_comments_effort: MagicPromptReasoningEffort
+  automate_github_bugs_effort: MagicPromptReasoningEffort
+  automate_security_advisories_effort: MagicPromptReasoningEffort
 }
 
 /** Default models for each magic prompt */
@@ -857,6 +979,8 @@ export const DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels = {
   investigate_linear_issue_model: 'claude-opus-4-8[1m]',
   investigate_sentry_issue_model: 'claude-opus-4-8[1m]',
   review_comments_model: 'claude-opus-4-8[1m]',
+  automate_github_bugs_model: 'claude-opus-4-8[1m]',
+  automate_security_advisories_model: 'claude-opus-4-8[1m]',
 }
 
 function makeMagicPromptModelsPreset(
@@ -879,6 +1003,8 @@ function makeMagicPromptModelsPreset(
     investigate_linear_issue_model: model,
     investigate_sentry_issue_model: model,
     review_comments_model: model,
+    automate_github_bugs_model: model,
+    automate_security_advisories_model: model,
   }
 }
 
@@ -941,6 +1067,8 @@ export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_linear_issue_effort: null,
   investigate_sentry_issue_effort: null,
   review_comments_effort: null,
+  automate_github_bugs_effort: null,
+  automate_security_advisories_effort: null,
 }
 
 export type MagicPromptExecutionMode = Extract<ExecutionMode, 'plan' | 'yolo'>
@@ -960,6 +1088,8 @@ export interface MagicPromptModes {
   review_comments_mode: MagicPromptExecutionMode
   final_review_mode: MagicPromptExecutionMode
   resolve_conflicts_mode: MagicPromptExecutionMode
+  automate_github_bugs_mode: MagicPromptExecutionMode
+  automate_security_advisories_mode: MagicPromptExecutionMode
 }
 
 /** Default execution modes for chat-style magic prompts */
@@ -974,6 +1104,8 @@ export const DEFAULT_MAGIC_PROMPT_MODES: MagicPromptModes = {
   review_comments_mode: 'plan',
   final_review_mode: 'yolo',
   resolve_conflicts_mode: 'yolo',
+  automate_github_bugs_mode: 'yolo',
+  automate_security_advisories_mode: 'yolo',
 }
 
 /**
@@ -989,6 +1121,8 @@ export const GROK_DEFAULT_MAGIC_PROMPT_MODES: MagicPromptModes = {
   investigate_advisory_mode: 'yolo',
   investigate_linear_issue_mode: 'yolo',
   investigate_sentry_issue_mode: 'yolo',
+  automate_github_bugs_mode: 'yolo',
+  automate_security_advisories_mode: 'yolo',
 }
 
 /** Codex preset: heavier reasoning for investigations, lighter for simple generation */
@@ -1009,6 +1143,8 @@ export const CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_linear_issue_effort: 'medium',
   investigate_sentry_issue_effort: 'medium',
   review_comments_effort: 'medium',
+  automate_github_bugs_effort: 'medium',
+  automate_security_advisories_effort: 'medium',
 }
 
 /** OpenCode preset: same as Codex */
@@ -1038,6 +1174,8 @@ export interface MagicPromptProviders {
   investigate_linear_issue_provider: string | null
   investigate_sentry_issue_provider: string | null
   review_comments_provider: string | null
+  automate_github_bugs_provider: string | null
+  automate_security_advisories_provider: string | null
 }
 
 /** Default providers for each magic prompt (null = use global default_provider) */
@@ -1058,6 +1196,8 @@ export const DEFAULT_MAGIC_PROMPT_PROVIDERS: MagicPromptProviders = {
   investigate_linear_issue_provider: null,
   investigate_sentry_issue_provider: null,
   review_comments_provider: null,
+  automate_github_bugs_provider: null,
+  automate_security_advisories_provider: null,
 }
 
 /**
@@ -1082,6 +1222,8 @@ export interface MagicPromptBackends {
   investigate_linear_issue_backend: string | null
   investigate_sentry_issue_backend: string | null
   review_comments_backend: string | null
+  automate_github_bugs_backend: string | null
+  automate_security_advisories_backend: string | null
 }
 
 /** Default backends for each magic prompt (null = use project/global default_backend) */
@@ -1102,6 +1244,8 @@ export const DEFAULT_MAGIC_PROMPT_BACKENDS: MagicPromptBackends = {
   investigate_linear_issue_backend: null,
   investigate_sentry_issue_backend: null,
   review_comments_backend: null,
+  automate_github_bugs_backend: null,
+  automate_security_advisories_backend: null,
 }
 
 function makeBackendsPreset(backend: string): MagicPromptBackends {
@@ -1122,6 +1266,8 @@ function makeBackendsPreset(backend: string): MagicPromptBackends {
     investigate_linear_issue_backend: backend,
     investigate_sentry_issue_backend: backend,
     review_comments_backend: backend,
+    automate_github_bugs_backend: backend,
+    automate_security_advisories_backend: backend,
   }
 }
 
@@ -1186,7 +1332,7 @@ export interface AppPreferences {
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
   terminal_font_size?: number // Embedded terminal font size in pixels
-  editor: EditorApp // Editor app: 'zed' | 'vscode' | 'cursor' | 'xcode'
+  editor: EditorApp // Editor app: 'zed' | 'vscode' | 'vscodium' | 'cursor' | 'xcode' | 'intellij'
   open_in: OpenInDefault // Default Open In action: 'editor' | 'terminal' | 'finder' | 'github'
   auto_branch_naming: boolean // Automatically generate branch names from first message
   branch_naming_model: ClaudeModel // Model for generating branch names
@@ -1241,9 +1387,17 @@ export interface AppPreferences {
   mobile_zoom_level?: number // Mobile zoom level percentage (50-200, default 90)
   sync_zoom_levels?: boolean // Keep desktop and mobile zoom levels in sync (default true)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
-  default_provider: string | null // Default provider profile name (null = Anthropic direct)
+  default_provider: string | null // Default Claude provider profile name (null = Anthropic direct)
+  /** Codex custom model_provider profiles (OpenRouter, OpenAI-compatible, etc.) */
+  custom_codex_providers: CodexProviderProfile[]
+  /** Default Codex provider profile name (null = Codex default / ChatGPT OpenAI) */
+  default_codex_provider: string | null
+  /** PI custom providers mirrored into ~/.pi/agent/models.json */
+  custom_pi_providers: PiProviderProfile[]
   favorite_models: string[] // Favourited model keys ("backend:model") shown at top of picker
   favorite_package_scripts?: string[] // Favourited package script keys ("project_id:script")
+  /** Starred base branches for new worktrees ("project_id:branch"), shown at top of picker */
+  favorite_base_branches?: string[]
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
 
   confirm_session_close: boolean // Show confirmation dialog before closing sessions/worktrees
@@ -1258,6 +1412,7 @@ export interface AppPreferences {
   selected_grok_model: GrokModel // Default Grok model
   selected_kimi_model?: KimiModel // Default Kimi Code model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
+  default_codex_model_verbosity: CodexModelVerbosity // Default model verbosity for Codex chat: 'low' | 'medium' | 'high'
   default_grok_reasoning_effort: GrokReasoningEffort // Default reasoning effort for Grok: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   codex_goal_execution_mode: CodexGoalExecutionMode // Execution mode used when starting a Codex /goal
   codex_multi_agent_enabled: boolean // Enable Codex multi-agent collaboration (experimental)
@@ -1321,6 +1476,58 @@ export interface CustomCliProfile {
   file_path?: string // Path to settings file on disk (e.g. ~/.claude/settings.jean.openrouter.json)
   supports_thinking?: boolean // Whether this provider supports thinking/effort levels (default: true)
 }
+
+/** Codex custom model_provider profile (injected via app-server config / -c overrides). */
+export interface CodexProviderProfile {
+  name: string // Display + session id, e.g. "OpenRouter"
+  provider_id: string // Codex model_provider slug, e.g. "openrouter"
+  base_url: string // e.g. https://openrouter.ai/api/v1
+  env_key: string // Env var holding the API key, e.g. OPENROUTER_API_KEY
+  wire_api?: 'chat' | 'responses' // Optional wire protocol
+}
+
+/** PI custom provider (merged into ~/.pi/agent/models.json providers map). */
+export interface PiProviderProfile {
+  name: string // Provider id in models.json, e.g. "openrouter-custom"
+  base_url: string
+  api:
+    | 'openai-completions'
+    | 'openai-responses'
+    | 'anthropic-messages'
+    | 'google-generative-ai'
+  /** Env var name; written to models.json as $ENV_NAME (never store secrets in prefs) */
+  api_key_env?: string
+  models: { id: string; name?: string }[]
+}
+
+export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
+  {
+    name: 'OpenRouter',
+    provider_id: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    env_key: 'OPENROUTER_API_KEY',
+    wire_api: 'responses',
+  },
+]
+
+export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
+  {
+    name: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    api: 'openai-completions',
+    api_key_env: 'OPENROUTER_API_KEY',
+    models: [
+      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
+      { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+    ],
+  },
+  {
+    name: 'ollama',
+    base_url: 'http://localhost:11434/v1',
+    api: 'openai-completions',
+    models: [{ id: 'llama3.2', name: 'Llama 3.2' }],
+  },
+]
 
 export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
   {
@@ -1405,6 +1612,7 @@ export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
 
 export type ClaudeModel =
   | 'claude-fable-5'
+  | 'claude-opus-5'
   | 'claude-sonnet-5'
   | 'claude-opus-4-8'
   | 'claude-opus-4-8[1m]'
@@ -1425,6 +1633,7 @@ export type ClaudeModel =
 
 export const modelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'claude-fable-5', label: 'Claude Fable 5' },
+  { value: 'claude-opus-5', label: 'Claude Opus 5' },
   { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
   { value: 'claude-opus-4-8[1m]', label: 'Claude Opus 4.8 (1M)' },
   { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
@@ -1685,6 +1894,9 @@ export function normalizeCodexModel(model: string): CodexModel {
 
 export type CodexReasoningEffort = string
 
+/** Codex Responses API model_verbosity: controls output length/detail */
+export type CodexModelVerbosity = 'low' | 'medium' | 'high'
+
 export type GrokReasoningEffort = string
 
 export type MagicPromptReasoningEffort = string | null
@@ -1751,6 +1963,28 @@ export const codexReasoningOptions: {
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'xHigh' },
+]
+
+export const codexModelVerbosityOptions: {
+  value: CodexModelVerbosity
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'low',
+    label: 'Low',
+    description: 'Terse answers; fewer mid-turn progress notes',
+  },
+  {
+    value: 'medium',
+    label: 'Medium',
+    description: 'Balanced narration between tools and final answer',
+  },
+  {
+    value: 'high',
+    label: 'High',
+    description: 'More detailed explanations and intermediate updates',
+  },
 ]
 
 export const grokReasoningOptions: {
@@ -1828,7 +2062,13 @@ export function getTerminalOptions(): { value: TerminalApp; label: string }[] {
 export const terminalOptions: { value: TerminalApp; label: string }[] =
   getTerminalOptions()
 
-export type EditorApp = 'zed' | 'vscode' | 'cursor' | 'xcode' | 'intellij'
+export type EditorApp =
+  | 'zed'
+  | 'vscode'
+  | 'vscodium'
+  | 'cursor'
+  | 'xcode'
+  | 'intellij'
 
 const allEditorOptions: {
   value: EditorApp
@@ -1839,6 +2079,11 @@ const allEditorOptions: {
   {
     value: 'vscode',
     label: 'VS Code',
+    platforms: ['mac', 'windows', 'linux'],
+  },
+  {
+    value: 'vscodium',
+    label: 'VSCodium',
     platforms: ['mac', 'windows', 'linux'],
   },
   {
@@ -2167,8 +2412,12 @@ export const defaultPreferences: AppPreferences = {
   sync_zoom_levels: true,
   custom_cli_profiles: [],
   default_provider: null,
+  custom_codex_providers: [],
+  default_codex_provider: null,
+  custom_pi_providers: [],
   favorite_models: [],
   favorite_package_scripts: [],
+  favorite_base_branches: [],
   fast_mode_models: [],
   confirm_session_close: true, // Default: enabled (show confirmation)
   default_execution_mode: 'plan', // Default: plan mode
@@ -2182,6 +2431,7 @@ export const defaultPreferences: AppPreferences = {
   selected_grok_model: 'grok/grok-4.5', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
   default_codex_reasoning_effort: 'high', // Default: high reasoning
+  default_codex_model_verbosity: 'medium', // Default: medium verbosity (not low — Jean #535)
   default_grok_reasoning_effort: 'high', // Default: high reasoning
   codex_goal_execution_mode: 'build', // Default: build mode for goals
   codex_multi_agent_enabled: true, // Default: enabled to match parallel execution prompting

@@ -35,6 +35,8 @@ export interface GitStatusEvent {
   worktree_id: string
   current_branch: string
   base_branch: string
+  /** Remote the base branch was compared against, when not origin */
+  base_remote?: string
   behind_count: number
   ahead_count: number
   has_updates: boolean
@@ -476,11 +478,13 @@ export async function triggerImmediateRemotePoll(): Promise<void> {
  * @param worktreePath - Path to the worktree/repository
  * @param diffType - "uncommitted" for working directory changes, "branch" for changes vs base branch
  * @param baseBranch - Base branch name (used for "branch" diff type)
+ * @param baseRemote - Remote the base branch lives on (defaults to origin)
  */
 export async function getGitDiff(
   worktreePath: string,
   diffType: 'uncommitted' | 'branch',
-  baseBranch?: string
+  baseBranch?: string,
+  baseRemote?: string
 ): Promise<GitDiff> {
   if (!isTauri()) {
     throw new Error('Git diff only available in Tauri')
@@ -489,6 +493,7 @@ export async function getGitDiff(
     worktreePath,
     diffType,
     baseBranch,
+    baseRemote,
   })
 }
 

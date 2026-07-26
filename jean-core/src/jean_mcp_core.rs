@@ -23,17 +23,25 @@ pub const JEAN_MCP_DEPTH_ENV: &str = "JEAN_MCP_DEPTH";
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 const RATE_LIMITED_TOOLS: &[&str] = &[
     "add_project",
+    "archive_session",
     "archive_worktree",
     "cancel_session_run",
     "clone_project",
+    "create_commit",
+    "create_pull_request",
     "create_session",
     "create_worktree",
     "create_worktree_from_existing_branch",
     "delete_worktree",
     "import_worktree",
     "init_project",
+    "merge_pull_request",
     "permanently_delete_worktree",
+    "push_worktree",
+    "run_review",
     "send_chat_message",
+    "set_session_model",
+    "unarchive_session",
     "unarchive_worktree",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
@@ -137,6 +145,21 @@ pub fn handle_protocol_message(
 }
 
 pub fn tool_registry() -> Value {
+    // Split into multiple json! arrays so the macro does not hit recursion_limit.
+    let mut tools = tool_registry_core()
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(session) = tool_registry_session().as_array() {
+        tools.extend(session.iter().cloned());
+    }
+    if let Some(ship) = tool_registry_ship_loop().as_array() {
+        tools.extend(ship.iter().cloned());
+    }
+    Value::Array(tools)
+}
+
+fn tool_registry_core() -> Value {
     json!([
         {"name":"list_projects","description":"List all Jean projects (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"add_project","description":"Add an existing local git repository as a Jean project. Path must already be a git repo (use init_project for a new folder, or clone_project for a remote URL). Returns the created project (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to an existing local git repository."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
@@ -150,7 +173,7 @@ pub fn tool_registry() -> Value {
         {"name":"list_security_issues","description":"List Dependabot security alerts for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["open","dismissed","fixed","auto_dismissed","all"],"default":"open"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_security_advisories","description":"List repository security advisories for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["draft","published","triage","closed","all"],"default":"all"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_linear_issues","description":"List Linear issues for a project using the same backend command as the UI. Pass projectId; Linear API config is resolved from project/global settings.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
-        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, or linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating the issue/PR/Linear issue with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
+        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
         {"name":"create_worktree_from_existing_branch","description":"Create a Jean worktree from an existing local or remote-tracking branch (branch name is used as the worktree name). Does not open Jean's UI. Prefer create_worktree for new branches; use this when the branch already exists.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"branchName":{"type":"string","description":"Existing branch name to check out into a new worktree path."}},"required":["projectId","branchName"],"additionalProperties":false}},
         {"name":"import_worktree","description":"Import an existing git worktree/directory on disk into a Jean project. Path must already exist and be a git worktree or repo. Does not create a new git worktree.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"path":{"type":"string","description":"Absolute path to an existing git worktree directory."}},"required":["projectId","path"],"additionalProperties":false}},
         {"name":"rename_worktree","description":"Rename a worktree's display name in Jean (does not rename the git branch or folder).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"newName":{"type":"string","description":"New display name. Must be unique within the project."}},"required":["worktreeId","newName"],"additionalProperties":false}},
@@ -159,16 +182,36 @@ pub fn tool_registry() -> Value {
         {"name":"list_archived_worktrees","description":"List archived worktrees. Optionally filter by projectId. Active worktrees are not included (use list_worktrees for those).","inputSchema":{"type":"object","properties":{"projectId":{"type":"string","description":"Optional project id to filter archived worktrees."}},"additionalProperties":false}},
         {"name":"delete_worktree","description":"Start permanently deleting an active (non-archived) worktree in the background: removes Jean tracking, git worktree, and branch. Returns started=true when cleanup is accepted, not completion. Destructive and irreversible when cleanup succeeds. Cannot delete base sessions. Prefer archive_worktree when unsure.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"permanently_delete_worktree","description":"Start permanently deleting an already-archived worktree in the background (storage + git worktree/branch cleanup). Returns started=true when cleanup is accepted, not completion. Fails immediately if the worktree is not archived — archive it first, or use delete_worktree for active worktrees.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"update_worktree_labels","description":"Update native Jean worktree labels. Use action=add/remove/set/clear. Returns the updated worktree.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"action":{"type":"string","enum":["add","remove","set","clear"]},"label":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string","description":"Hex color like #eab308. Optional for add; ignored by remove."},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name"],"additionalProperties":false},"labels":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string"},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name","color"],"additionalProperties":false}}},"required":["worktreeId","action"],"additionalProperties":false}},
+        {"name":"update_worktree_labels","description":"Update native Jean worktree labels. Use action=add/remove/set/clear. Returns the updated worktree.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"action":{"type":"string","enum":["add","remove","set","clear"]},"label":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string","description":"Hex color like #eab308. Optional for add; ignored by remove."},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name"],"additionalProperties":false},"labels":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"color":{"type":"string"},"pinned":{"type":"boolean","description":"Show this label as a project-view filter tab for the current project."}},"required":["name","color"],"additionalProperties":false}}},"required":["worktreeId","action"],"additionalProperties":false}}
+    ])
+}
+
+fn tool_registry_session() -> Value {
+    json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"create_session","description":"Create a new chat session in an existing worktree. Returns the session id needed for send_chat_message.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"send_chat_message","description":"Send a message to an existing session. Fire-and-forget: returns immediately as the session begins processing. Use this to kick off investigations.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"create_session","description":"Create a new chat session in an existing non-archived worktree. Returns the session id needed for send_chat_message. Fails if the worktree is archived — call unarchive_worktree first.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing. Fails immediately if the session or its worktree is archived — call unarchive_session / unarchive_worktree first. Use this to kick off investigations.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"archive_session","description":"Archive a chat session (hide it from the active session list). Prefer this over delete when history may still be useful. Cannot run send_chat_message on an archived session until unarchive_session is called.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
+        {"name":"unarchive_session","description":"Restore an archived chat session so it can run again. Also unarchives the parent worktree when it is archived. Call this before send_chat_message if a previous attempt failed because the session was archived.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"get_session_status","description":"Get whether a Jean session is idle/running/resumable/cancelled/error plus latest run metadata. Use after send_chat_message to poll fire-and-forget work.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"cancel_session_run","description":"Cancel the currently running request for a session. Returns whether Jean found an active process/turn/flag to cancel.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"read_session_messages","description":"Read recent messages from a session (most recent first). Use limit to cap returned messages.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["sessionId"],"additionalProperties":false}},
+        {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.5)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
+        {"name":"get_usage","description":"Fetch subscription/usage snapshots for Claude, Codex, and/or Grok (same data as Jean Settings → Usage). Use to decide whether to switch models when a plan is near limits. Optional backend filters to one provider; omit or pass \"all\" for every available snapshot. Per-backend failures are reported in errors without failing the whole call.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","grok","all"],"default":"all","description":"Which provider usage to fetch. Default all."}},"additionalProperties":false}},
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_current_context","description":"Return the calling session's context: sessionId, worktreeId, projectId, projectPath, projectName. Use this so the agent knows what 'this project' refers to without guessing.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
+    ])
+}
+
+fn tool_registry_ship_loop() -> Value {
+    json!([
+        {"name":"create_commit","description":"Stage changes and create a git commit with an AI-generated message (same path as Jean UI Commit). Optional push after commit. Use specificFiles to stage only some paths; omit to stage all. Returns commitHash, message, pushed flags.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"push":{"type":"boolean","default":false,"description":"Push after a successful commit (or push existing unpushed commits when there is nothing new to commit)."},"remote":{"type":"string","description":"Optional git remote name for push."},"prNumber":{"type":"integer","minimum":1,"description":"Optional linked PR number for PR-aware push (fork remotes / force-with-lease)."},"specificFiles":{"type":"array","items":{"type":"string"},"description":"Optional list of paths to stage instead of staging everything."},"customPrompt":{"type":"string","description":"Optional override for the commit-message magic prompt."},"model":{"type":"string"},"reasoningEffort":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"push_worktree","description":"Push the current branch for a worktree (same path as Jean UI push). Optionally pass prNumber for PR-aware push.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"remote":{"type":"string","description":"Optional git remote name."},"prNumber":{"type":"integer","minimum":1,"description":"Optional PR number for PR-aware push."}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"detect_open_pr","description":"Detect whether the worktree's current branch already has an open GitHub PR. Returns the PR (number, url, title) or null when none exists. Call before create_pull_request to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"create_pull_request","description":"Create a GitHub PR for the worktree with AI-generated title/body (same path as Jean UI Open PR). Stages and commits uncommitted changes when needed, pushes the branch, and opens the PR against the project default branch. Returns prNumber, prUrl, title, existing. Prefer detect_open_pr first when unsure.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"sessionId":{"type":"string","description":"Optional Jean session id for context when generating PR content."},"customPrompt":{"type":"string","description":"Optional override for the PR-content magic prompt."},"model":{"type":"string"},"reasoningEffort":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"merge_pull_request","description":"Merge the open GitHub PR for the worktree's current branch using gh (same path as Jean UI merge). Uses the repo-allowed merge method (prefers squash). Fails if there is no open mergeable PR.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"run_review","description":"Run Jean's AI code review on the worktree branch (same path as Jean UI Review). Returns summary, findings, and approvalStatus. Does not commit or open a PR.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"customPrompt":{"type":"string","description":"Optional override for the review magic prompt."},"model":{"type":"string"},"backend":{"type":"string","description":"Optional magic-prompt backend override (e.g. claude, codex)."},"reasoningEffort":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}}
     ])
 }
 
@@ -484,10 +527,18 @@ async fn run_tool(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string);
+            let ghsa_id = args
+                .get("ghsaId")
+                .or_else(|| args.get("ghsa_id"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
             validate_create_worktree_inputs(
                 issue_number.is_some(),
                 pr_number.is_some(),
                 linear_identifier.is_some(),
+                ghsa_id.is_some(),
                 action,
             )?;
 
@@ -505,7 +556,8 @@ async fn run_tool(
             // causes the normal UI path to create its default session in addition to
             // the autoinvestigation session, so keep MCP-created worktrees background-only.
             payload.insert("autoOpenInJean".to_string(), Value::Bool(false));
-            let project_path = if issue_number.is_some() || pr_number.is_some() {
+            let project_path = if issue_number.is_some() || pr_number.is_some() || ghsa_id.is_some()
+            {
                 Some(resolve_project_path(app, &project_id)?)
             } else {
                 None
@@ -639,6 +691,48 @@ async fn run_tool(
                     }),
                 );
             }
+            if let Some(ref ghsa_id) = ghsa_id {
+                let project_path = project_path.clone().ok_or_else(|| {
+                    ToolError::internal("missing project_path for advisory fetch")
+                })?;
+                let detail = dispatch_command(
+                    app,
+                    "get_repository_advisory",
+                    json!({ "projectPath": project_path, "ghsaId": ghsa_id }),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+                if !has_custom_name {
+                    let summary = detail.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+                    let advisory_branch =
+                        crate::projects::generate_branch_name_from_advisory(ghsa_id, summary);
+                    let resolved =
+                        resolve_non_conflicting_worktree_name(app, &project_id, &advisory_branch)?;
+                    if resolved != advisory_branch {
+                        payload.insert("customName".to_string(), Value::String(resolved.clone()));
+                    }
+                }
+                // Map vulnerabilities into the AdvisoryContext shape expected by create_worktree.
+                let vulnerabilities = detail
+                    .get("vulnerabilities")
+                    .cloned()
+                    .unwrap_or_else(|| json!([]));
+                payload.insert(
+                    "advisoryContext".to_string(),
+                    json!({
+                        "ghsaId": detail
+                            .get("ghsaId")
+                            .cloned()
+                            .unwrap_or_else(|| json!(ghsa_id)),
+                        "severity": detail.get("severity").cloned().unwrap_or(json!("unknown")),
+                        "summary": detail.get("summary").cloned().unwrap_or(Value::Null),
+                        "description": detail.get("description").cloned().unwrap_or(json!("")),
+                        "cveId": detail.get("cveId").cloned().unwrap_or(Value::Null),
+                        "vulnerabilities": vulnerabilities,
+                        "htmlUrl": detail.get("htmlUrl").cloned().unwrap_or(Value::Null),
+                    }),
+                );
+            }
             let worktree = dispatch_command(app, "create_worktree", Value::Object(payload))
                 .await
                 .map_err(ToolError::internal)?;
@@ -647,6 +741,8 @@ async fn run_tool(
                     InvestigationKind::Issue
                 } else if linear_identifier.is_some() {
                     InvestigationKind::Linear
+                } else if ghsa_id.is_some() {
+                    InvestigationKind::Advisory
                 } else {
                     InvestigationKind::Pr
                 };
@@ -715,6 +811,8 @@ async fn run_tool(
         }
         "create_session" => {
             let worktree_id = require_str(&args, "worktreeId")?;
+            // Fail fast when the worktree is archived (also enforced in create_session).
+            ensure_mcp_worktree_not_archived(app, &worktree_id)?;
             let worktree_path = resolve_worktree_path(app, &worktree_id)?;
             let mut payload = serde_json::Map::new();
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
@@ -733,6 +831,9 @@ async fn run_tool(
             let session_id = require_str(&args, "sessionId")?;
             let message = require_str(&args, "message")?;
             let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
+            // Validate archive status before fire-and-forget so agents get an
+            // immediate error instead of a silent log-only failure after "started".
+            ensure_mcp_session_can_run(app, &session_id, &worktree_id)?;
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
@@ -755,6 +856,94 @@ async fn run_tool(
                 }
             });
             Ok(json!({ "sessionId": session_id, "status": "started" }))
+        }
+        "archive_session" => {
+            let session_id = require_str(&args, "sessionId")?;
+            let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
+            dispatch_command(
+                app,
+                "archive_session",
+                json!({
+                    "sessionId": session_id.clone(),
+                    "worktreeId": worktree_id,
+                    "worktreePath": worktree_path,
+                }),
+            )
+            .await
+            .map_err(ToolError::internal)?;
+            Ok(json!({
+                "sessionId": session_id,
+                "action": "archive",
+                "ok": true,
+            }))
+        }
+        "unarchive_session" => {
+            let session_id = require_str(&args, "sessionId")?;
+            let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
+            let mut unarchived_worktree = false;
+            let mut unarchived_session = false;
+
+            // If the parent worktree is archived, restore it first so the
+            // session becomes runnable (not just un-flagged inside a hidden wt).
+            if crate::chat::worktree_archived_at(app, &worktree_id).is_some() {
+                dispatch_command(
+                    app,
+                    "unarchive_worktree",
+                    json!({ "worktreeId": worktree_id.clone() }),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+                unarchived_worktree = true;
+            }
+
+            let session_is_archived = crate::chat::storage::load_metadata(app, &session_id)
+                .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
+                .map(|m| m.archived_at.is_some())
+                .unwrap_or(false);
+
+            let session = if session_is_archived {
+                let restored = dispatch_command(
+                    app,
+                    "unarchive_session",
+                    json!({
+                        "sessionId": session_id.clone(),
+                        "worktreeId": worktree_id.clone(),
+                        "worktreePath": worktree_path.clone(),
+                    }),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+                unarchived_session = true;
+                restored
+            } else if !unarchived_worktree {
+                return Err(ToolError::invalid_params(
+                    "Session is not archived (and parent worktree is not archived either)",
+                ));
+            } else {
+                // Worktree was archived but the session itself was not — return
+                // current session payload so callers get a consistent shape.
+                dispatch_command(
+                    app,
+                    "get_session",
+                    json!({
+                        "sessionId": session_id.clone(),
+                        "worktreeId": worktree_id.clone(),
+                        "worktreePath": worktree_path,
+                    }),
+                )
+                .await
+                .map_err(ToolError::internal)?
+            };
+
+            Ok(json!({
+                "sessionId": session_id,
+                "worktreeId": worktree_id,
+                "action": "unarchive",
+                "ok": true,
+                "unarchivedWorktree": unarchived_worktree,
+                "unarchivedSession": unarchived_session,
+                "session": session,
+            }))
         }
         "get_session_status" => {
             let session_id = require_str(&args, "sessionId")?;
@@ -791,6 +980,66 @@ async fn run_tool(
                 .min(200) as usize;
             let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
             dispatch_command(app, "get_session", json!({ "sessionId": session_id, "worktreeId": worktree_id, "worktreePath": worktree_path, "limit": limit })).await.map_err(ToolError::internal)
+        }
+        "set_session_model" => {
+            let session_id = require_str(&args, "sessionId")?;
+            let model = require_nonempty_str(&args, "model")?;
+            let backend = optional_str(&args, "backend")
+                .map(|b| normalize_backend_name(&b))
+                .transpose()?
+                .or_else(|| Some(infer_backend_from_model(&model).to_string()));
+            let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
+
+            dispatch_command(
+                app,
+                "set_session_model",
+                json!({
+                    "sessionId": session_id.clone(),
+                    "worktreeId": worktree_id.clone(),
+                    "worktreePath": worktree_path.clone(),
+                    "model": model.clone(),
+                }),
+            )
+            .await
+            .map_err(ToolError::internal)?;
+
+            if let Some(ref backend) = backend {
+                dispatch_command(
+                    app,
+                    "set_session_backend",
+                    json!({
+                        "sessionId": session_id.clone(),
+                        "worktreeId": worktree_id,
+                        "worktreePath": worktree_path,
+                        "backend": backend,
+                    }),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+
+            Ok(json!({
+                "sessionId": session_id,
+                "model": model,
+                "backend": backend,
+            }))
+        }
+        "get_usage" => {
+            let backend_filter = args
+                .get("backend")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all")
+                .trim()
+                .to_ascii_lowercase();
+            match backend_filter.as_str() {
+                "all" | "claude" | "codex" | "grok" => {}
+                other => {
+                    return Err(ToolError::invalid_params(format!(
+                        "backend must be one of claude, codex, grok, all (got '{other}')"
+                    )));
+                }
+            }
+            get_usage_snapshots(app, &backend_filter).await
         }
         "get_worktree_changes" => {
             let worktree_id = require_str(&args, "worktreeId")?;
@@ -831,6 +1080,160 @@ async fn run_tool(
             )
             .await
             .map_err(ToolError::internal)
+        }
+        "create_commit" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            ensure_mcp_worktree_not_archived(app, &worktree_id)?;
+            let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+            let push = args.get("push").and_then(|v| v.as_bool()).unwrap_or(false);
+            let remote = optional_str(&args, "remote");
+            let pr_number = args
+                .get("prNumber")
+                .or_else(|| args.get("pr_number"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32);
+            let specific_files = args
+                .get("specificFiles")
+                .or_else(|| args.get("specific_files"))
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|files| !files.is_empty());
+            let custom_prompt = optional_str(&args, "customPrompt")
+                .or_else(|| optional_str(&args, "custom_prompt"));
+            let model = optional_str(&args, "model");
+            let reasoning_effort = optional_str(&args, "reasoningEffort")
+                .or_else(|| optional_str(&args, "reasoning_effort"));
+            let mut payload = serde_json::Map::new();
+            payload.insert("worktreePath".to_string(), Value::String(worktree_path));
+            payload.insert("push".to_string(), Value::Bool(push));
+            if let Some(remote) = remote {
+                payload.insert("remote".to_string(), Value::String(remote));
+            }
+            if let Some(pr_number) = pr_number {
+                payload.insert("prNumber".to_string(), json!(pr_number));
+            }
+            if let Some(files) = specific_files {
+                payload.insert("specificFiles".to_string(), json!(files));
+            }
+            if let Some(prompt) = custom_prompt {
+                payload.insert("customPrompt".to_string(), Value::String(prompt));
+            }
+            if let Some(model) = model {
+                payload.insert("model".to_string(), Value::String(model));
+            }
+            if let Some(effort) = reasoning_effort {
+                payload.insert("reasoningEffort".to_string(), Value::String(effort));
+            }
+            dispatch_command(app, "create_commit_with_ai", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
+        }
+        "push_worktree" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            ensure_mcp_worktree_not_archived(app, &worktree_id)?;
+            let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+            let remote = optional_str(&args, "remote");
+            let pr_number = args
+                .get("prNumber")
+                .or_else(|| args.get("pr_number"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32);
+            let mut payload = serde_json::Map::new();
+            payload.insert("worktreePath".to_string(), Value::String(worktree_path));
+            if let Some(remote) = remote {
+                payload.insert("remote".to_string(), Value::String(remote));
+            }
+            if let Some(pr_number) = pr_number {
+                payload.insert("prNumber".to_string(), json!(pr_number));
+            }
+            dispatch_command(app, "git_push", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
+        }
+        "detect_open_pr" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+            dispatch_command(
+                app,
+                "detect_open_pr_for_branch",
+                json!({ "worktreePath": worktree_path }),
+            )
+            .await
+            .map_err(ToolError::internal)
+        }
+        "create_pull_request" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            ensure_mcp_worktree_not_archived(app, &worktree_id)?;
+            let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+            let session_id = optional_str(&args, "sessionId")
+                .or_else(|| optional_str(&args, "session_id"));
+            let custom_prompt = optional_str(&args, "customPrompt")
+                .or_else(|| optional_str(&args, "custom_prompt"));
+            let model = optional_str(&args, "model");
+            let reasoning_effort = optional_str(&args, "reasoningEffort")
+                .or_else(|| optional_str(&args, "reasoning_effort"));
+            let mut payload = serde_json::Map::new();
+            payload.insert("worktreePath".to_string(), Value::String(worktree_path));
+            if let Some(session_id) = session_id {
+                payload.insert("sessionId".to_string(), Value::String(session_id));
+            }
+            if let Some(prompt) = custom_prompt {
+                payload.insert("customPrompt".to_string(), Value::String(prompt));
+            }
+            if let Some(model) = model {
+                payload.insert("model".to_string(), Value::String(model));
+            }
+            if let Some(effort) = reasoning_effort {
+                payload.insert("reasoningEffort".to_string(), Value::String(effort));
+            }
+            dispatch_command(app, "create_pr_with_ai_content", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
+        }
+        "merge_pull_request" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            ensure_mcp_worktree_not_archived(app, &worktree_id)?;
+            let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+            dispatch_command(
+                app,
+                "merge_github_pr",
+                json!({ "worktreePath": worktree_path }),
+            )
+            .await
+            .map_err(ToolError::internal)
+        }
+        "run_review" => {
+            let worktree_id = require_str(&args, "worktreeId")?;
+            ensure_mcp_worktree_not_archived(app, &worktree_id)?;
+            let worktree_path = resolve_worktree_path(app, &worktree_id)?;
+            let custom_prompt = optional_str(&args, "customPrompt")
+                .or_else(|| optional_str(&args, "custom_prompt"));
+            let model = optional_str(&args, "model");
+            let backend = optional_str(&args, "backend");
+            let reasoning_effort = optional_str(&args, "reasoningEffort")
+                .or_else(|| optional_str(&args, "reasoning_effort"));
+            let mut payload = serde_json::Map::new();
+            payload.insert("worktreePath".to_string(), Value::String(worktree_path));
+            if let Some(prompt) = custom_prompt {
+                payload.insert("customPrompt".to_string(), Value::String(prompt));
+            }
+            if let Some(model) = model {
+                payload.insert("model".to_string(), Value::String(model));
+            }
+            if let Some(backend) = backend {
+                payload.insert("backend".to_string(), Value::String(backend));
+            }
+            if let Some(effort) = reasoning_effort {
+                payload.insert("reasoningEffort".to_string(), Value::String(effort));
+            }
+            dispatch_command(app, "run_review_with_ai", Value::Object(payload))
+                .await
+                .map_err(ToolError::internal)
         }
         "get_current_context" => {
             if source == "anon" {
@@ -1094,12 +1497,13 @@ fn resolve_non_conflicting_worktree_name(
 }
 
 /// Validate the mutually-exclusive context inputs for create_worktree.
-/// GitHub `issueNumber`/`prNumber` and Linear `linearIssueIdentifier` are mutually
-/// exclusive, and `action=start_autoinvestigating` needs one of them.
+/// GitHub `issueNumber`/`prNumber`, Linear `linearIssueIdentifier`, and advisory
+/// `ghsaId` are mutually exclusive, and `action=start_autoinvestigating` needs one of them.
 fn validate_create_worktree_inputs(
     has_issue: bool,
     has_pr: bool,
     has_linear: bool,
+    has_advisory: bool,
     action: Option<&str>,
 ) -> Result<(), ToolError> {
     if has_issue && has_pr {
@@ -1112,9 +1516,19 @@ fn validate_create_worktree_inputs(
             "Pass a GitHub issueNumber/prNumber or a linearIssueIdentifier, not both",
         ));
     }
-    if action == Some("start_autoinvestigating") && !has_issue && !has_pr && !has_linear {
+    if has_advisory && (has_issue || has_pr || has_linear) {
         return Err(ToolError::invalid_params(
-            "action=start_autoinvestigating requires issueNumber, prNumber, or linearIssueIdentifier",
+            "Pass a GitHub issueNumber/prNumber, linearIssueIdentifier, or ghsaId, not both",
+        ));
+    }
+    if action == Some("start_autoinvestigating")
+        && !has_issue
+        && !has_pr
+        && !has_linear
+        && !has_advisory
+    {
+        return Err(ToolError::invalid_params(
+            "action=start_autoinvestigating requires issueNumber, prNumber, linearIssueIdentifier, or ghsaId",
         ));
     }
     Ok(())
@@ -1136,6 +1550,7 @@ pub(crate) enum InvestigationKind {
     Issue,
     Pr,
     Linear,
+    Advisory,
 }
 
 #[derive(Debug)]
@@ -1216,6 +1631,106 @@ pub struct BackgroundInvestigationResult {
     pub status: String,
 }
 
+/// Marker so YOLO fix-after-investigate transforms stay idempotent when both
+/// the frontend and this backend path process the same message.
+const YOLO_INVESTIGATION_FIX_MARKER: &str = "<yolo_investigation_fix>";
+
+const YOLO_INVESTIGATION_FIX_APPEND: &str = r#"<yolo_investigation_fix>
+
+This investigation is running in YOLO mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+
+</yolo_investigation_fix>"#;
+
+/// When execution mode is yolo, strip weak/anti-fix investigation wording and
+/// append an unconditional fix-after-investigation directive.
+pub(crate) fn apply_yolo_investigation_fix_directive(
+    message: &str,
+    execution_mode: &str,
+) -> String {
+    if execution_mode != "yolo" {
+        return message.to_string();
+    }
+    if message.contains(YOLO_INVESTIGATION_FIX_MARKER) {
+        return message.to_string();
+    }
+
+    let cleaned = strip_investigation_anti_fix_lines(message);
+    format!("{}\n\n{}\n", cleaned.trim_end(), YOLO_INVESTIGATION_FIX_APPEND)
+}
+
+fn strip_investigation_anti_fix_lines(prompt: &str) -> String {
+    let mut out = String::with_capacity(prompt.len());
+    let mut prev_blank = false;
+    for line in prompt.lines() {
+        if should_strip_line_for_yolo_fix(line) {
+            continue;
+        }
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+        prev_blank = is_blank;
+    }
+    out
+}
+
+fn should_strip_line_for_yolo_fix(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let body = trimmed
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .trim_start_matches('.')
+        .trim_start()
+        .trim_start_matches(['-', '*'])
+        .trim_start();
+
+    let lower = body.to_ascii_lowercase();
+
+    if lower.starts_with("if you are in yolo mode") {
+        return true;
+    }
+    if lower.contains("do not implement") || lower.contains("don't implement") {
+        return true;
+    }
+    if lower.contains("do not apply the fix")
+        || lower.contains("do not apply fixes")
+        || lower.contains("don't apply the fix")
+        || lower.contains("don't apply fixes")
+    {
+        return true;
+    }
+    if lower.contains("do not make any changes") || lower.contains("do not make changes") {
+        return true;
+    }
+    if (lower.contains("do not edit") || lower.contains("do not write"))
+        && (lower.contains("code") || lower.contains("file"))
+    {
+        return true;
+    }
+    if lower.contains("only investigate") && !lower.contains("fix") {
+        return true;
+    }
+    if lower.contains("only propose")
+        || lower.contains("propose only")
+        || lower.contains("research only")
+        || lower.contains("investigation only")
+    {
+        return true;
+    }
+    if lower.contains("do not stop at proposing") && lower.contains("yolo") {
+        return true;
+    }
+
+    false
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_background_investigation_queue_message(
     message: String,
@@ -1279,13 +1794,36 @@ pub async fn start_background_investigation_impl(
         Some(false),
     )
     .await?;
-    let session_id = sessions
+    // Prefer the active/first session; create one if the worktree has none yet
+    // (e.g. programmatically empty index before the UI opens a tab).
+    let session_id = match sessions
         .active_session_id
         .clone()
         .or_else(|| sessions.sessions.first().map(|session| session.id.clone()))
-        .ok_or_else(|| {
-            format!("Background investigation: no session found for worktree {worktree_id}")
-        })?;
+    {
+        Some(id) => id,
+        None => {
+            let created = crate::chat::create_session(
+                app.clone(),
+                worktree_id.clone(),
+                worktree_path.clone(),
+                None,
+                Some(backend.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(|err| {
+                format!(
+                    "Background investigation: failed to create session for worktree {worktree_id}: {err}"
+                )
+            })?;
+            created.id
+        }
+    };
 
     crate::chat::set_session_model(
         app.clone(),
@@ -1316,6 +1854,10 @@ pub async fn start_background_investigation_impl(
     let execution_mode = execution_mode
         .filter(|mode| matches!(mode.as_str(), "plan" | "yolo"))
         .unwrap_or_else(|| "plan".to_string());
+    // Detect yolo and append an unconditional fix-after-investigation directive
+    // (also strips weak "if yolo" / anti-fix lines). Idempotent if the UI
+    // already applied the same transform.
+    let message = apply_yolo_investigation_fix_directive(&message, &execution_mode);
     let queued_message = build_background_investigation_queue_message(
         message,
         model,
@@ -1332,6 +1874,9 @@ pub async fn start_background_investigation_impl(
     // Persist before returning so a transient send race or app reload cannot
     // leave the newly-created session without its investigation prompt. The
     // backend queue drain starts immediately and requeues lost send races.
+    // set_session_* above goes through with_sessions_mut, which materializes
+    // session metadata so enqueue_message's with_existing_metadata_mut succeeds
+    // even for brand-new default "Session 1" index entries.
     crate::chat::enqueue_message(
         app.clone(),
         worktree_id.clone(),
@@ -1417,6 +1962,7 @@ fn resolve_investigation_selection(
             .magic_prompt_models
             .investigate_linear_issue_model
             .clone(),
+        InvestigationKind::Advisory => prefs.magic_prompt_models.investigate_advisory_model.clone(),
     };
     let magic_backend = match kind {
         InvestigationKind::Issue => prefs
@@ -1430,6 +1976,10 @@ fn resolve_investigation_selection(
         InvestigationKind::Linear => prefs
             .magic_prompt_backends
             .investigate_linear_issue_backend
+            .as_deref(),
+        InvestigationKind::Advisory => prefs
+            .magic_prompt_backends
+            .investigate_advisory_backend
             .as_deref(),
     };
     let provider = match kind {
@@ -1448,6 +1998,11 @@ fn resolve_investigation_selection(
             .investigate_linear_issue_provider
             .clone()
             .or_else(|| prefs.default_provider.clone()),
+        InvestigationKind::Advisory => prefs
+            .magic_prompt_providers
+            .investigate_advisory_provider
+            .clone()
+            .or_else(|| prefs.default_provider.clone()),
     };
     let effort = match kind {
         InvestigationKind::Issue => prefs.magic_prompt_efforts.investigate_issue_effort.clone(),
@@ -1455,6 +2010,10 @@ fn resolve_investigation_selection(
         InvestigationKind::Linear => prefs
             .magic_prompt_efforts
             .investigate_linear_issue_effort
+            .clone(),
+        InvestigationKind::Advisory => prefs
+            .magic_prompt_efforts
+            .investigate_advisory_effort
             .clone(),
     }
     .or_else(|| Some(prefs.default_codex_reasoning_effort.clone()));
@@ -1465,6 +2024,7 @@ fn resolve_investigation_selection(
             .magic_prompt_modes
             .investigate_linear_issue_mode
             .clone(),
+        InvestigationKind::Advisory => prefs.magic_prompt_modes.investigate_advisory_mode.clone(),
     };
 
     let worktree_id = worktree.get("id").and_then(|v| v.as_str());
@@ -1551,6 +2111,25 @@ pub(crate) fn build_investigation_prompt(
                 .replace("{linearRefs}", &identifier)
                 .replace("{linearContext}", "")
         }
+        InvestigationKind::Advisory => {
+            let ghsa_id = worktree
+                .get("advisory_ghsa_id")
+                .or_else(|| worktree.get("advisoryGhsaId"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "the loaded security advisory".to_string());
+            let template = prefs
+                .magic_prompts
+                .investigate_advisory
+                .clone()
+                .filter(|p| !p.trim().is_empty())
+                .unwrap_or_else(crate::default_investigate_advisory_prompt);
+            // Full advisory context is written to a session context file during
+            // worktree creation, so the prompt only needs the GHSA id reference.
+            template
+                .replace("{advisoryWord}", "advisory")
+                .replace("{advisoryRefs}", &ghsa_id)
+        }
     }
 }
 
@@ -1563,15 +2142,83 @@ fn project_default_backend(app: &AppHandle, worktree_id: Option<&str>) -> Option
 }
 
 fn infer_backend_from_model(model: &str) -> &'static str {
-    if crate::is_opencode_model(model) {
-        "opencode"
-    } else if crate::is_cursor_model(model) {
+    if crate::is_cursor_model(model) {
         "cursor"
+    } else if crate::is_pi_model(model) {
+        "pi"
+    } else if crate::is_opencode_model(model) {
+        "opencode"
+    } else if model.starts_with("commandcode/") {
+        "commandcode"
+    } else if crate::is_grok_model(model) {
+        "grok"
+    } else if crate::is_kimi_model(model) {
+        "kimi"
     } else if crate::is_codex_model(model) {
         "codex"
     } else {
         "claude"
     }
+}
+
+fn normalize_backend_name(backend: &str) -> Result<String, ToolError> {
+    let normalized = backend.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "claude" | "codex" | "cursor" | "opencode" | "pi" | "commandcode" | "grok" | "kimi" => {
+            Ok(normalized)
+        }
+        other => Err(ToolError::invalid_params(format!(
+            "backend must be one of claude, codex, cursor, opencode, pi, commandcode, grok, kimi (got '{other}')"
+        ))),
+    }
+}
+
+async fn get_usage_snapshots(app: &AppHandle, backend_filter: &str) -> Result<Value, ToolError> {
+    let want_all = backend_filter == "all";
+    let mut result = serde_json::Map::new();
+    let mut errors = serde_json::Map::new();
+
+    if want_all || backend_filter == "claude" {
+        match dispatch_command(app, "get_claude_usage", json!({})).await {
+            Ok(usage) => {
+                result.insert("claude".to_string(), usage);
+            }
+            Err(err) => {
+                result.insert("claude".to_string(), Value::Null);
+                errors.insert("claude".to_string(), Value::String(err));
+            }
+        }
+    }
+
+    if want_all || backend_filter == "codex" {
+        match dispatch_command(app, "get_codex_usage", json!({})).await {
+            Ok(usage) => {
+                result.insert("codex".to_string(), usage);
+            }
+            Err(err) => {
+                result.insert("codex".to_string(), Value::Null);
+                errors.insert("codex".to_string(), Value::String(err));
+            }
+        }
+    }
+
+    if want_all || backend_filter == "grok" {
+        match dispatch_command(app, "get_grok_usage", json!({})).await {
+            Ok(usage) => {
+                result.insert("grok".to_string(), usage);
+            }
+            Err(err) => {
+                result.insert("grok".to_string(), Value::Null);
+                errors.insert("grok".to_string(), Value::String(err));
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        result.insert("errors".to_string(), Value::Object(errors));
+    }
+
+    Ok(Value::Object(result))
 }
 
 fn require_value_str(value: &Value, key: &str) -> Result<String, ToolError> {
@@ -1626,6 +2273,33 @@ fn resolve_session_worktree(
         .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
     let worktree_path = resolve_worktree_path(app, &metadata.worktree_id)?;
     Ok((metadata.worktree_id, worktree_path))
+}
+
+/// Reject MCP mutations/runs when the worktree is archived.
+fn ensure_mcp_worktree_not_archived(app: &AppHandle, worktree_id: &str) -> Result<(), ToolError> {
+    crate::chat::ensure_worktree_not_archived(
+        worktree_id,
+        crate::chat::worktree_archived_at(app, worktree_id),
+    )
+    .map_err(ToolError::invalid_params)
+}
+
+/// Reject MCP send_chat_message when the session or its worktree is archived.
+fn ensure_mcp_session_can_run(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+) -> Result<(), ToolError> {
+    let metadata = crate::chat::storage::load_metadata(app, session_id)
+        .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
+        .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
+    crate::chat::ensure_session_can_run(
+        session_id,
+        metadata.archived_at,
+        worktree_id,
+        crate::chat::worktree_archived_at(app, worktree_id),
+    )
+    .map_err(ToolError::invalid_params)
 }
 
 fn rate_check(source: &str, tool: &str, limit_per_minute: u32) -> bool {
@@ -1715,6 +2389,26 @@ mod tests {
     }
 
     #[test]
+    fn create_worktree_schema_exposes_ghsa_id() {
+        let tools = tool_registry();
+        let create_worktree = find_tool(&tools, "create_worktree");
+        assert_eq!(
+            create_worktree["inputSchema"]["properties"]["ghsaId"]["type"],
+            "string",
+            "create_worktree must expose a ghsaId input for security advisories"
+        );
+        let description = create_worktree["description"].as_str().unwrap_or_default();
+        assert!(
+            description.contains("ghsaId"),
+            "create_worktree description must document ghsaId"
+        );
+        assert!(
+            description.contains("security advisory") || description.contains("security advisories"),
+            "create_worktree description must mention security advisories"
+        );
+    }
+
+    #[test]
     fn parse_linear_issue_number_extracts_trailing_number() {
         assert_eq!(parse_linear_issue_number("PLA-215"), Some(215));
         assert_eq!(parse_linear_issue_number("eng-12"), Some(12));
@@ -1733,17 +2427,28 @@ mod tests {
     #[test]
     fn validate_inputs_rejects_github_and_linear_together() {
         // issueNumber + linearIssueIdentifier
-        let err = validate_create_worktree_inputs(true, false, true, None).unwrap_err();
+        let err = validate_create_worktree_inputs(true, false, true, false, None).unwrap_err();
         assert_eq!(err.code, -32602);
         assert!(err.message.contains("linearIssueIdentifier"));
         // prNumber + linearIssueIdentifier
-        let err = validate_create_worktree_inputs(false, true, true, None).unwrap_err();
+        let err = validate_create_worktree_inputs(false, true, true, false, None).unwrap_err();
         assert_eq!(err.code, -32602);
     }
 
     #[test]
     fn validate_inputs_rejects_issue_and_pr_together() {
-        let err = validate_create_worktree_inputs(true, true, false, None).unwrap_err();
+        let err = validate_create_worktree_inputs(true, true, false, false, None).unwrap_err();
+        assert_eq!(err.code, -32602);
+    }
+
+    #[test]
+    fn validate_inputs_rejects_advisory_with_other_context() {
+        let err = validate_create_worktree_inputs(true, false, false, true, None).unwrap_err();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("ghsaId"));
+        let err = validate_create_worktree_inputs(false, true, false, true, None).unwrap_err();
+        assert_eq!(err.code, -32602);
+        let err = validate_create_worktree_inputs(false, false, true, true, None).unwrap_err();
         assert_eq!(err.code, -32602);
     }
 
@@ -1754,11 +2459,13 @@ mod tests {
             false,
             false,
             true,
+            false,
             Some("start_autoinvestigating")
         )
         .is_ok());
         // No context at all fails the autoinvestigate guard.
         assert!(validate_create_worktree_inputs(
+            false,
             false,
             false,
             false,
@@ -1768,11 +2475,42 @@ mod tests {
     }
 
     #[test]
+    fn validate_inputs_allows_advisory_only_autoinvestigate() {
+        assert!(validate_create_worktree_inputs(
+            false,
+            false,
+            false,
+            true,
+            Some("start_autoinvestigating")
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn validate_inputs_allows_single_context() {
-        assert!(validate_create_worktree_inputs(true, false, false, None).is_ok());
-        assert!(validate_create_worktree_inputs(false, true, false, None).is_ok());
-        assert!(validate_create_worktree_inputs(false, false, true, None).is_ok());
-        assert!(validate_create_worktree_inputs(false, false, false, None).is_ok());
+        assert!(validate_create_worktree_inputs(true, false, false, false, None).is_ok());
+        assert!(validate_create_worktree_inputs(false, true, false, false, None).is_ok());
+        assert!(validate_create_worktree_inputs(false, false, true, false, None).is_ok());
+        assert!(validate_create_worktree_inputs(false, false, false, true, None).is_ok());
+        assert!(validate_create_worktree_inputs(false, false, false, false, None).is_ok());
+    }
+
+    #[test]
+    fn build_investigation_prompt_for_advisory_uses_ghsa_id() {
+        let prefs = crate::AppPreferences::default();
+        let worktree = json!({
+            "advisory_ghsa_id": "GHSA-xxxx-yyyy-zzzz",
+        });
+        let prompt =
+            build_investigation_prompt(&prefs, &worktree, InvestigationKind::Advisory);
+        assert!(
+            prompt.contains("GHSA-xxxx-yyyy-zzzz"),
+            "advisory investigation prompt should include the GHSA id"
+        );
+        assert!(
+            prompt.contains("advisory"),
+            "advisory investigation prompt should use advisory wording"
+        );
     }
 
     #[test]
@@ -1914,9 +2652,158 @@ mod tests {
             "cancel_session_run",
             "get_worktree_changes",
             "get_worktree_diff",
+            "get_usage",
+            "set_session_model",
+            "archive_session",
+            "unarchive_session",
         ] {
             assert!(names.contains(expected), "missing MCP tool {expected}");
         }
+
+        for limited in ["archive_session", "unarchive_session"] {
+            assert!(
+                RATE_LIMITED_TOOLS.contains(&limited),
+                "session archive tool {limited} must be rate-limited"
+            );
+        }
+
+        let archive = find_tool(&tools, "archive_session");
+        assert_eq!(
+            archive["inputSchema"]["required"],
+            json!(["sessionId"])
+        );
+        let unarchive = find_tool(&tools, "unarchive_session");
+        assert_eq!(
+            unarchive["inputSchema"]["required"],
+            json!(["sessionId"])
+        );
+        assert!(
+            find_tool(&tools, "send_chat_message")["description"]
+                .as_str()
+                .unwrap_or("")
+                .contains("archived"),
+            "send_chat_message description should mention archive rejection"
+        );
+    }
+
+    #[test]
+    fn tool_registry_get_usage_and_set_session_model_schemas() {
+        let tools = tool_registry();
+
+        let get_usage = find_tool(&tools, "get_usage");
+        assert_eq!(
+            get_usage["inputSchema"]["properties"]["backend"]["enum"],
+            json!(["claude", "codex", "grok", "all"])
+        );
+        assert!(
+            !RATE_LIMITED_TOOLS.contains(&"get_usage"),
+            "get_usage is read-only and should not be rate-limited"
+        );
+
+        let set_model = find_tool(&tools, "set_session_model");
+        assert_eq!(
+            set_model["inputSchema"]["required"],
+            json!(["sessionId", "model"])
+        );
+        assert_eq!(
+            set_model["inputSchema"]["properties"]["backend"]["enum"],
+            json!([
+                "claude",
+                "codex",
+                "cursor",
+                "opencode",
+                "pi",
+                "commandcode",
+                "grok",
+                "kimi"
+            ])
+        );
+        assert!(
+            RATE_LIMITED_TOOLS.contains(&"set_session_model"),
+            "set_session_model mutates session state and should be rate-limited"
+        );
+    }
+
+    #[test]
+    fn infer_backend_from_model_covers_catalog_prefixes() {
+        assert_eq!(infer_backend_from_model("claude-sonnet-4-6[1m]"), "claude");
+        assert_eq!(infer_backend_from_model("gpt-5.6-sol"), "codex");
+        assert_eq!(infer_backend_from_model("grok/grok-4.5"), "grok");
+        assert_eq!(infer_backend_from_model("cursor/auto"), "cursor");
+        assert_eq!(infer_backend_from_model("opencode/gpt-5.2"), "opencode");
+        assert_eq!(infer_backend_from_model("pi/sonnet"), "pi");
+        assert_eq!(infer_backend_from_model("kimi/k2"), "kimi");
+        assert_eq!(
+            infer_backend_from_model("commandcode/default"),
+            "commandcode"
+        );
+    }
+
+    #[test]
+    fn normalize_backend_name_accepts_known_backends() {
+        assert_eq!(normalize_backend_name("Claude").unwrap(), "claude");
+        assert_eq!(normalize_backend_name("GROK").unwrap(), "grok");
+        assert!(normalize_backend_name("openai").is_err());
+    }
+
+    #[test]
+    fn tool_registry_includes_ship_loop_tools() {
+        let tools = tool_registry();
+        let names: std::collections::HashSet<&str> = tools
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|item| item.get("name").and_then(|name| name.as_str()))
+            .collect();
+
+        for expected in [
+            "create_commit",
+            "push_worktree",
+            "detect_open_pr",
+            "create_pull_request",
+            "merge_pull_request",
+            "run_review",
+        ] {
+            assert!(names.contains(expected), "missing MCP tool {expected}");
+        }
+
+        let create_commit = find_tool(&tools, "create_commit");
+        assert_eq!(
+            create_commit["inputSchema"]["required"],
+            json!(["worktreeId"])
+        );
+        assert_eq!(
+            create_commit["inputSchema"]["properties"]["push"]["type"],
+            "boolean"
+        );
+
+        let create_pr = find_tool(&tools, "create_pull_request");
+        assert_eq!(
+            create_pr["inputSchema"]["required"],
+            json!(["worktreeId"])
+        );
+        assert!(
+            create_pr["inputSchema"]["properties"]
+                .get("sessionId")
+                .is_some()
+        );
+
+        for limited in [
+            "create_commit",
+            "create_pull_request",
+            "merge_pull_request",
+            "push_worktree",
+            "run_review",
+        ] {
+            assert!(
+                RATE_LIMITED_TOOLS.contains(&limited),
+                "ship-loop mutation tool {limited} must be rate-limited"
+            );
+        }
+        assert!(
+            !RATE_LIMITED_TOOLS.contains(&"detect_open_pr"),
+            "detect_open_pr is read-only and should not be rate-limited"
+        );
     }
 
     #[test]
@@ -2154,5 +3041,37 @@ mod tests {
         assert_eq!(queued["allowAllTools"], true);
         assert!(queued["id"].as_str().is_some_and(|id| !id.is_empty()));
         assert!(queued["queuedAt"].as_u64().is_some());
+    }
+
+    #[test]
+    fn yolo_investigation_appends_unconditional_fix_directive() {
+        let prompt = "Investigate issue #42\n6. Propose solution\n7. If you are in yolo mode, also apply the fix(es)\nDo not implement fixes.";
+        let result = apply_yolo_investigation_fix_directive(prompt, "yolo");
+        assert!(result.contains(YOLO_INVESTIGATION_FIX_MARKER));
+        assert!(result.contains("After investigation, fix the issue"));
+        assert!(!result.to_ascii_lowercase().contains("if you are in yolo mode"));
+        assert!(!result.to_ascii_lowercase().contains("do not implement fixes"));
+        assert!(result.contains("Propose solution"));
+    }
+
+    #[test]
+    fn non_yolo_investigation_prompt_is_unchanged() {
+        let prompt = "Investigate issue #42\nDo not implement fixes.";
+        assert_eq!(
+            apply_yolo_investigation_fix_directive(prompt, "plan"),
+            prompt
+        );
+        assert_eq!(
+            apply_yolo_investigation_fix_directive(prompt, "build"),
+            prompt
+        );
+    }
+
+    #[test]
+    fn yolo_investigation_fix_directive_is_idempotent() {
+        let once = apply_yolo_investigation_fix_directive("Investigate #1", "yolo");
+        let twice = apply_yolo_investigation_fix_directive(&once, "yolo");
+        assert_eq!(once, twice);
+        assert_eq!(once.matches(YOLO_INVESTIGATION_FIX_MARKER).count(), 1);
     }
 }

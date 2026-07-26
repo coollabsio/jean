@@ -36,6 +36,10 @@ import { hasBackend, hasBackendTransport } from '@/lib/environment'
 import { openExternal, preOpenWindow } from '@/lib/platform'
 import { shouldSuppressAutoFixConflictNotification } from './worktree-conflict-events'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
+import {
+  mergeWorktreesPreservingOptimistic,
+  removePendingWorktree,
+} from '@/lib/worktree-list-cache'
 
 // Check if a backend is available (Tauri IPC or WebSocket)
 // Kept as `isTauri` for backward compatibility across the codebase
@@ -85,6 +89,8 @@ export function useProjects() {
  * Hook to list worktrees for a specific project
  */
 export function useWorktrees(projectId: string | null) {
+  const queryClient = useQueryClient()
+
   return useQuery({
     queryKey: projectsQueryKeys.worktrees(projectId ?? ''),
     queryFn: async (): Promise<Worktree[]> => {
@@ -97,10 +103,17 @@ export function useWorktrees(projectId: string | null) {
         const worktrees = await invoke<Worktree[]>('list_worktrees', {
           projectId,
         })
+        // Pending creations are client-only until git finishes; keep them when
+        // something else invalidates this query mid-create (issue #528).
+        const previous = queryClient.getQueryData<Worktree[]>(
+          projectsQueryKeys.worktrees(projectId)
+        )
+        const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
         logger.info('Worktrees loaded successfully', {
           count: worktrees.length,
+          pendingPreserved: merged.length - worktrees.length,
         })
-        return worktrees
+        return merged
       } catch (error) {
         logger.error('Failed to load worktrees', { error, projectId })
         return preserveQueryCacheOnError(error)
@@ -141,7 +154,15 @@ export function useWorktree(worktreeId: string | null) {
           worktreeId,
         })
         logger.info('Worktree loaded successfully', { id: worktree.id })
-        return worktree
+        // `status` is client-only (pending/ready/error). Backend payloads omit
+        // it; preserve the previous client status so remote refetches do not
+        // clear `ready` and block auto-investigation / setup UI.
+        const previous = queryClient.getQueryData<Worktree>(queryKey)
+        const preservedStatus =
+          previous?.status === 'pending'
+            ? 'pending'
+            : (previous?.status ?? 'ready')
+        return { ...worktree, status: preservedStatus }
       } catch (error) {
         logger.error('Failed to load worktree', { error, worktreeId })
         return preserveQueryCacheOnError(error)
@@ -553,6 +574,8 @@ export function useCreateWorktree() {
         advisoryGhsaId: advisoryContext?.ghsaId,
         customName,
       })
+      // Pass autoOpenInJean to the backend so remote/web clients honor CMD+Click
+      // background creates without relying only on the in-memory pending counter.
       const worktree = await invoke<Worktree>('create_worktree', {
         projectId,
         baseBranch,
@@ -564,6 +587,7 @@ export function useCreateWorktree() {
         sentryContext,
         customName,
         origin,
+        autoOpenInJean: !_background,
       })
       return worktree
     },
@@ -845,8 +869,10 @@ function handleWorktreeReady(
   const { setActiveWorktree, registerWorktreePath } = useChatStore.getState()
   registerWorktreePath(worktree.id, worktree.path)
 
-  // Fire-and-forget: detect and link PR if not already linked
-  if (!worktree.pr_url) {
+  // Fire-and-forget: detect and link PR if not already linked.
+  // Check pr_number (not only pr_url): PR checkouts set the number before the
+  // URL is filled, and re-running detection by branch can attach the wrong fork PR.
+  if (!worktree.pr_number && !worktree.pr_url) {
     invoke<DetectPrResponse | null>('detect_and_link_pr', {
       worktreeId: worktree.id,
       worktreePath: worktree.path,
@@ -891,8 +917,8 @@ function handleWorktreeReady(
       setActiveWorktree(worktree.id, worktree.path)
     }
   }
-  // Background worktrees with auto-investigate flags are handled
-  // headlessly by useBackgroundInvestigation hook (no modal needed).
+  // Auto-investigate flags (background or opened) are handled headlessly by
+  // useBackgroundInvestigation via start_background_investigation.
 }
 
 /**
@@ -913,6 +939,9 @@ export function useWorktreeEvents() {
 
     // Track pending worktree timeouts for recovery if events are missed
     const pendingTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+    const pendingTimeoutAttempts = new Map<string, number>()
+    const PENDING_TIMEOUT_MS = 120_000 // 2m — large repos / auto-pull often exceed 1m
+    const PENDING_TIMEOUT_MAX_ATTEMPTS = 10 // ~20m total recovery window
 
     const clearPendingTimeout = (worktreeId: string) => {
       const timeout = pendingTimeouts.get(worktreeId)
@@ -920,24 +949,68 @@ export function useWorktreeEvents() {
         clearTimeout(timeout)
         pendingTimeouts.delete(worktreeId)
       }
+      pendingTimeoutAttempts.delete(worktreeId)
     }
 
     const startPendingTimeout = (worktreeId: string, projectId: string) => {
-      clearPendingTimeout(worktreeId)
+      // Clear only the timer; keep attempt count across reschedules
+      const existing = pendingTimeouts.get(worktreeId)
+      if (existing) {
+        clearTimeout(existing)
+        pendingTimeouts.delete(worktreeId)
+      }
+      // Long creations (large repos, auto-pull, PR checkout) can take minutes.
+      // Refetch for recovery, and reschedule while still pending so a missed
+      // worktree:created event can still be recovered later without wiping UI.
       const timeoutId = setTimeout(() => {
         pendingTimeouts.delete(worktreeId)
+        const attempt = (pendingTimeoutAttempts.get(worktreeId) ?? 0) + 1
+        pendingTimeoutAttempts.set(worktreeId, attempt)
         logger.warn('Pending worktree timed out, forcing refetch', {
           worktreeId,
           projectId,
+          attempt,
         })
-        // Force refetch to get actual state from backend
-        queryClient.invalidateQueries({
-          queryKey: projectsQueryKeys.worktrees(projectId),
-        })
+        // Force refetch to get actual state from backend. useWorktrees merges
+        // optimistic pending rows so this no longer wipes the sidebar (#528).
+        void queryClient
+          .invalidateQueries({
+            queryKey: projectsQueryKeys.worktrees(projectId),
+          })
+          .then(() => {
+            const stillPending = queryClient
+              .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(projectId))
+              ?.some(w => w.id === worktreeId && w.status === 'pending')
+            if (stillPending && attempt < PENDING_TIMEOUT_MAX_ATTEMPTS) {
+              startPendingTimeout(worktreeId, projectId)
+            } else if (stillPending) {
+              pendingTimeoutAttempts.delete(worktreeId)
+              queryClient.setQueryData<Worktree[]>(
+                projectsQueryKeys.worktrees(projectId),
+                old => removePendingWorktree(old, worktreeId)
+              )
+              toast.dismiss(`worktree-creating-${worktreeId}`)
+              toast.error('Worktree creation could not be confirmed', {
+                description:
+                  'The pending worktree was removed after repeated recovery attempts.',
+              })
+            } else if (!stillPending) {
+              pendingTimeoutAttempts.delete(worktreeId)
+              // Missed worktree:created (common on remote WS reconnects): the
+              // worktree is now on the server. Promote single-worktree cache
+              // and register the path so auto-investigate can start.
+              const serverWorktree = queryClient
+                .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(projectId))
+                ?.find(w => w.id === worktreeId && w.status !== 'pending')
+              if (serverWorktree) {
+                handleWorktreeReady(serverWorktree, queryClient, false)
+              }
+            }
+          })
         queryClient.invalidateQueries({
           queryKey: [...projectsQueryKeys.all, 'worktree', worktreeId],
         })
-      }, 60_000) // 60s timeout
+      }, PENDING_TIMEOUT_MS)
       pendingTimeouts.set(worktreeId, timeoutId)
     }
 
@@ -1978,6 +2051,63 @@ export function useGitHubRemotes(repoPath: string | null, enabled: boolean) {
       return invoke<GitHubRemote[]>('get_github_remotes', { repoPath })
     },
     enabled: enabled && repoPath !== null,
+    staleTime: 30_000,
+  })
+}
+
+export interface ProjectRemote {
+  name: string
+  /** `owner/repo` when the remote points at GitHub, undefined otherwise */
+  repo?: string
+}
+
+/** Extract `owner/repo` from a normalized GitHub remote URL. */
+function githubRepoFromUrl(url: string): string | undefined {
+  const match = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/)
+  return match?.[1]
+}
+
+/**
+ * Hook to fetch the git remotes that can serve as a start point for `branch`
+ * (origin first), enriched with `owner/repo` for remotes pointing at GitHub.
+ *
+ * Remotes without that branch fetched locally are left out, so the New Worktree
+ * modal never offers a start point that cannot resolve.
+ */
+export function useProjectRemotes(
+  repoPath: string | null | undefined,
+  branch: string | null | undefined
+) {
+  return useQuery({
+    queryKey: ['project-remotes', repoPath ?? null, branch ?? null] as const,
+    queryFn: async (): Promise<ProjectRemote[]> => {
+      if (!repoPath || !branch) return []
+
+      const [names, githubRemotes] = await Promise.all([
+        invoke<string[]>('list_remotes_with_branch', { repoPath, branch }),
+        invoke<GitHubRemote[]>('get_github_remotes', { repoPath }).catch(
+          () => [] as GitHubRemote[]
+        ),
+      ])
+
+      const repoByRemote = new Map(
+        githubRemotes.map(remote => [
+          remote.name,
+          githubRepoFromUrl(remote.url),
+        ])
+      )
+      const remotes = names.map(name => ({
+        name,
+        repo: repoByRemote.get(name),
+      }))
+
+      // origin first, then the other remotes in git's own order
+      const origin = remotes.find(remote => remote.name === 'origin')
+      return origin
+        ? [origin, ...remotes.filter(remote => remote.name !== 'origin')]
+        : remotes
+    },
+    enabled: isTauri() && !!repoPath && !!branch,
     staleTime: 30_000,
   })
 }

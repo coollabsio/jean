@@ -8,6 +8,7 @@ import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
+import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_PR_PROMPT,
@@ -424,6 +425,10 @@ export function useInvestigateHandlers({
           .replace(/\{advisoryRefs\}/g, refs)
       }
 
+      // When magic-prompt mode is yolo, append an unconditional fix directive
+      // and strip any anti-fix wording from the template/custom prompt.
+      prompt = applyYoloInvestigationFixDirective(prompt, investigateMode)
+
       const {
         addSendingSession,
         setLastSentMessage,
@@ -591,19 +596,21 @@ export function useInvestigateHandlers({
           ? customPrompt
           : DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT
 
-      const prompt = template
-        .replace(/\{workflowName\}/g, detail.workflowName)
-        .replace(/\{runUrl\}/g, detail.runUrl)
-        .replace(/\{runId\}/g, detail.runId)
-        .replace(/\{branch\}/g, detail.branch)
-        .replace(/\{displayTitle\}/g, detail.displayTitle)
-
       const investigateModel =
         preferences?.magic_prompt_models?.investigate_workflow_run_model ??
         selectedModelRef.current
       const investigateMode =
         preferences?.magic_prompt_modes?.investigate_workflow_run_mode ??
         DEFAULT_MAGIC_PROMPT_MODES.investigate_workflow_run_mode
+      const prompt = applyYoloInvestigationFixDirective(
+        template
+          .replace(/\{workflowName\}/g, detail.workflowName)
+          .replace(/\{runUrl\}/g, detail.runUrl)
+          .replace(/\{runId\}/g, detail.runId)
+          .replace(/\{branch\}/g, detail.branch)
+          .replace(/\{displayTitle\}/g, detail.displayTitle),
+        investigateMode
+      )
       const investigateProvider = resolveMagicPromptProvider(
         preferences?.magic_prompt_providers,
         'investigate_workflow_run_provider',

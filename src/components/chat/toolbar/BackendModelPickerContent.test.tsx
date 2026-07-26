@@ -20,9 +20,15 @@ vi.stubGlobal('ResizeObserver', ResizeObserverMock)
 HTMLCanvasElement.prototype.getContext = vi.fn(() => null)
 Element.prototype.scrollIntoView = vi.fn()
 
+const refreshOpencodeModelsMutateAsync = vi.fn()
+
 vi.mock('@/services/opencode-cli', () => ({
   useAvailableOpencodeModels: () => ({
     data: ['openai/gpt-5.4', 'groq/compound-mini'],
+  }),
+  useRefreshOpencodeModels: () => ({
+    mutateAsync: refreshOpencodeModelsMutateAsync,
+    isPending: false,
   }),
 }))
 
@@ -60,6 +66,8 @@ beforeEach(() => {
   mockFastModeModels = []
   mockCursorModels = [{ id: 'auto', label: 'Auto' }]
   patchPreferencesMutate.mockClear()
+  refreshOpencodeModelsMutateAsync.mockReset()
+  refreshOpencodeModelsMutateAsync.mockResolvedValue(['openai/gpt-5.4'])
   vi.stubGlobal(
     'matchMedia',
     vi.fn().mockImplementation(() => ({
@@ -99,6 +107,52 @@ describe('BackendModelPickerContent', () => {
     expect(
       screen.getByRole('button', { name: /refresh model list/i })
     ).toBeInTheDocument()
+  })
+
+  it('shows a manual refresh button for OpenCode CLI model lists', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <BackendModelPickerContent
+        open
+        selectedBackend="opencode"
+        selectedModel="openai/gpt-5.4"
+        selectedProvider={null}
+        installedBackends={['claude', 'codex', 'opencode']}
+        customCliProfiles={[]}
+        onModelChange={vi.fn()}
+        onBackendModelChange={vi.fn()}
+        onRequestClose={vi.fn()}
+      />
+    )
+
+    const refreshButton = screen.getByRole('button', {
+      name: /refresh model list/i,
+    })
+    expect(refreshButton).toBeInTheDocument()
+
+    await user.click(refreshButton)
+    expect(refreshOpencodeModelsMutateAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not show a refresh button for Cursor model lists', () => {
+    render(
+      <BackendModelPickerContent
+        open
+        selectedBackend="cursor"
+        selectedModel="cursor/auto"
+        selectedProvider={null}
+        installedBackends={['cursor']}
+        customCliProfiles={[]}
+        onModelChange={vi.fn()}
+        onBackendModelChange={vi.fn()}
+        onRequestClose={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.queryByRole('button', { name: /refresh model list/i })
+    ).not.toBeInTheDocument()
   })
   it('keeps Claude 1M variants plus standard models', () => {
     render(

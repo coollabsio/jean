@@ -5,7 +5,9 @@ import { useUIStore } from '@/store/ui-store'
 import { QueryClient } from '@tanstack/react-query'
 import {
   addTerminalTabForShortcut,
+  allowsKeybindingRepeat,
   applyCacheInvalidationKeys,
+  applySessionRenamedToCaches,
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
@@ -18,6 +20,11 @@ import {
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
+import type {
+  AllSessionsResponse,
+  Session,
+  WorktreeSessions,
+} from '@/types/chat'
 
 const { mockInvoke, mockListen, mockDisposeTerminal } = vi.hoisted(() => ({
   mockInvoke: vi.fn().mockResolvedValue(undefined),
@@ -284,6 +291,7 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       activeTerminalIds: { 'modal-worktree': 'term-1' },
       modalTerminalOpen: { 'modal-worktree': true },
       terminalVisible: true,
+      runningTerminals: new Set(),
     })
 
     expect(closeActiveTerminalTabForShortcut()).toBe(true)
@@ -296,6 +304,64 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     expect(
       useTerminalStore.getState().modalTerminalOpen['modal-worktree']
     ).toBe(false)
+  })
+
+  it('asks for confirmation instead of killing a running terminal via shortcut (issue #56)', () => {
+    focusTerminal()
+
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'modal-worktree',
+    })
+    useTerminalStore.setState({
+      terminals: {
+        'modal-worktree': [
+          {
+            id: 'term-running',
+            worktreeId: 'modal-worktree',
+            command: 'bun run dev',
+            label: 'dev',
+          },
+        ],
+      },
+      activeTerminalIds: { 'modal-worktree': 'term-running' },
+      modalTerminalOpen: { 'modal-worktree': true },
+      terminalVisible: true,
+      runningTerminals: new Set(['term-running']),
+    })
+
+    const confirmListener = vi.fn()
+    window.addEventListener('confirm-close-terminal', confirmListener)
+
+    expect(closeActiveTerminalTabForShortcut()).toBe(true)
+
+    expect(confirmListener).toHaveBeenCalledTimes(1)
+    const event = confirmListener.mock.calls[0]?.[0] as CustomEvent | undefined
+    expect(event?.detail).toEqual({
+      worktreeId: 'modal-worktree',
+      terminalId: 'term-running',
+    })
+    expect(mockInvoke).not.toHaveBeenCalledWith('stop_terminal', {
+      terminalId: 'term-running',
+    })
+    expect(mockDisposeTerminal).not.toHaveBeenCalled()
+    expect(useTerminalStore.getState().terminals['modal-worktree']).toHaveLength(
+      1
+    )
+
+    window.removeEventListener('confirm-close-terminal', confirmListener)
+  })
+
+  it('allows key-repeat only for scroll/navigation actions (issue #56)', () => {
+    expect(allowsKeybindingRepeat('scroll_chat_up')).toBe(true)
+    expect(allowsKeybindingRepeat('scroll_chat_down_small')).toBe(true)
+    expect(allowsKeybindingRepeat('next_session')).toBe(true)
+    expect(allowsKeybindingRepeat('previous_session')).toBe(true)
+
+    expect(allowsKeybindingRepeat('close_session_or_worktree')).toBe(false)
+    expect(allowsKeybindingRepeat('new_session')).toBe(false)
+    expect(allowsKeybindingRepeat('cancel_prompt')).toBe(false)
+    expect(allowsKeybindingRepeat('approve_plan')).toBe(false)
   })
 
   it('switches the active terminal tab by index for the modal worktree', () => {
@@ -429,6 +495,76 @@ describe('dialog overlay keybinding passthrough', () => {
         useUIStore.getState()
       )
     ).toBe(false)
+  })
+})
+
+describe('applySessionRenamedToCaches', () => {
+  const worktreeId = 'wt-1'
+  const sessionId = 'sess-1'
+
+  function seedSessionCaches(queryClient: QueryClient) {
+    const sessions: WorktreeSessions = {
+      worktree_id: worktreeId,
+      sessions: [
+        {
+          id: sessionId,
+          name: 'Session 1',
+          order: 0,
+          created_at: 0,
+          updated_at: 0,
+          messages: [],
+        } as Session,
+      ],
+      active_session_id: sessionId,
+      version: 2,
+    }
+    queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
+    queryClient.setQueryData(
+      [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+      sessions
+    )
+    queryClient.setQueryData(chatQueryKeys.session(sessionId), sessions.sessions[0])
+    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], {
+      entries: [
+        {
+          project_id: 'p1',
+          project_name: 'Project',
+          worktree_id: worktreeId,
+          worktree_name: 'main',
+          worktree_path: '/tmp/wt',
+          sessions: sessions.sessions,
+        },
+      ],
+    })
+  }
+
+  it('updates base sessions, with-counts, session detail, and all-sessions caches', () => {
+    const queryClient = new QueryClient()
+    seedSessionCaches(queryClient)
+
+    applySessionRenamedToCaches(
+      queryClient,
+      worktreeId,
+      sessionId,
+      'Fix auto naming'
+    )
+
+    const base = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions(worktreeId)
+    )
+    const withCounts = queryClient.getQueryData<WorktreeSessions>([
+      ...chatQueryKeys.sessions(worktreeId),
+      'with-counts',
+    ])
+    const detail = queryClient.getQueryData<Session>(
+      chatQueryKeys.session(sessionId)
+    )
+    const all = queryClient.getQueryData<AllSessionsResponse>(['all-sessions'])
+
+    expect(base?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(withCounts?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(detail?.name).toBe('Fix auto naming')
+    expect(all?.entries[0]?.sessions[0]?.name).toBe('Fix auto naming')
   })
 })
 

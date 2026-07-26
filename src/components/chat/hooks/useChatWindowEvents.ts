@@ -22,7 +22,7 @@ interface UseChatWindowEventsParams {
   setIsPlanDialogOpen: (open: boolean) => void
   session: Session | null | undefined
   // Git diff
-  gitStatus: { base_branch?: string } | null | undefined
+  gitStatus: { base_branch?: string; base_remote?: string } | null | undefined
   setDiffRequest: (
     req:
       | {
@@ -258,6 +258,7 @@ export function useChatWindowEvents({
     const handler = (e: Event) => {
       if (!activeWorktreePath) return
       const baseBranch = gitStatus?.base_branch ?? 'main'
+      const baseRemote = gitStatus?.base_remote
       const requestedType = (e as CustomEvent).detail?.type as
         | 'uncommitted'
         | 'branch'
@@ -270,6 +271,7 @@ export function useChatWindowEvents({
             type: requestedType,
             worktreePath: activeWorktreePath,
             baseBranch,
+            baseRemote,
           }
         }
         if (prev) {
@@ -283,12 +285,18 @@ export function useChatWindowEvents({
           type: 'uncommitted',
           worktreePath: activeWorktreePath,
           baseBranch,
+          baseRemote,
         }
       })
     }
     window.addEventListener('open-git-diff', handler)
     return () => window.removeEventListener('open-git-diff', handler)
-  }, [activeWorktreePath, gitStatus?.base_branch, setDiffRequest])
+  }, [
+    activeWorktreePath,
+    gitStatus?.base_branch,
+    gitStatus?.base_remote,
+    setDiffRequest,
+  ])
 
   // ESC: Cancel prompt
   const cancelContextRef = useRef({ activeWorktreeId, activeSessionId })
@@ -415,7 +423,9 @@ export function useChatWindowEvents({
 
   // Save external context as a pending pasted-text attachment (browser Grab).
   useEffect(() => {
-    const handler = (e: CustomEvent<{ content: string; filename?: string }>) => {
+    const handler = (
+      e: CustomEvent<{ content: string; filename?: string }>
+    ) => {
       const { content, filename } = e.detail
       const sessionId = activeSessionId
       if (!sessionId || !content) return

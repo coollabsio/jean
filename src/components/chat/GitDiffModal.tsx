@@ -323,7 +323,8 @@ export function GitDiffModal({
         const result = await getGitDiff(
           request.worktreePath,
           request.type,
-          request.baseBranch
+          request.baseBranch,
+          request.baseRemote
         )
         setDiff(result)
       } catch (err) {
@@ -994,7 +995,11 @@ export function GitDiffModal({
   const title =
     activeDiffType === 'uncommitted'
       ? 'Uncommitted Changes'
-      : `Changes vs ${diffRequest?.baseBranch ?? 'main'}`
+      : `Changes vs ${
+          diffRequest?.baseRemote
+            ? `${diffRequest.baseRemote}/${diffRequest.baseBranch}`
+            : (diffRequest?.baseBranch ?? 'main')
+        }`
   const selectedFileCount = gitDiffSelectedFiles.size
   const commitButtonLabel = isCommitting
     ? 'Committing…'

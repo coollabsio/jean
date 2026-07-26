@@ -22,6 +22,8 @@ export const OPENCODE_MODEL_OPTIONS: { value: string; label: string }[] = [
 
 export const COMMANDCODE_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'commandcode/default', label: 'CLI default (no --model)' },
+  { value: 'commandcode/claude-opus-5', label: 'Claude Opus 5' },
+  { value: 'commandcode/claude-sonnet-5', label: 'Claude Sonnet 5' },
   { value: 'commandcode/claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { value: 'commandcode/claude-opus-4-8', label: 'Claude Opus 4.8' },
   { value: 'commandcode/claude-opus-4-7', label: 'Claude Opus 4.7' },

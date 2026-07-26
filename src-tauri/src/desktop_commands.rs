@@ -178,20 +178,9 @@ pub async fn open_file_in_default_app(
     line: Option<u32>,
     column: Option<u32>,
 ) -> Result<(), String> {
-    let editor = editor.unwrap_or_else(|| "zed".to_string());
-    let binary = match editor.as_str() {
-        "vscode" => "code",
-        "cursor" => "cursor",
-        "xcode" => "xed",
-        "intellij" => "idea",
-        _ => "zed",
-    };
-    let target = match (line, column) {
-        (Some(line), Some(column)) => format!("{path}:{line}:{column}"),
-        (Some(line), None) => format!("{path}:{line}"),
-        _ => path,
-    };
-    spawn(binary, &[target])
+    // Delegate to jean-core so VS Code / VSCodium / Cursor get -g goto args,
+    // macOS `open -a` fallbacks, and Windows .cmd wrappers (code.cmd / codium.cmd).
+    jean_core::open_file_in_default_app(path, editor, line, column).await
 }
 
 #[tauri::command]
@@ -276,7 +265,9 @@ pub async fn open_worktree_in_editor(
     worktree_path: String,
     editor: Option<String>,
 ) -> Result<(), String> {
-    open_file_in_default_app(worktree_path, editor, None, None).await
+    // Use the worktree-specific launcher (jean.json template seed, editor
+    // binary mapping including vscodium/`codium`, platform fallbacks).
+    jean_core::open_worktree_in_editor(worktree_path, editor).await
 }
 
 #[tauri::command]
@@ -334,4 +325,31 @@ pub async fn start_http_server(
 #[tauri::command]
 pub async fn stop_http_server(runtime: State<'_, CoreRuntime>) -> Result<(), String> {
     jean_core::stop_http_server(runtime.0.clone()).await
+}
+
+/// Install jean-server on a remote Linux host over SSH, verify readiness, and
+/// return connection details for the remote connections dialog.
+#[tauri::command]
+pub async fn install_remote_jean_server(
+    app: AppHandle,
+    name: Option<String>,
+    user: String,
+    host: String,
+    ssh_port: Option<u16>,
+    jean_port: Option<u16>,
+    user_install: Option<bool>,
+) -> Result<crate::remote_install::InstallRemoteResult, String> {
+    let input = crate::remote_install::InstallRemoteInput {
+        name,
+        user,
+        host,
+        ssh_port,
+        jean_port,
+        user_install,
+    };
+    tokio::task::spawn_blocking(move || {
+        crate::remote_install::install_remote_jean_server(app, input)
+    })
+    .await
+    .map_err(|error| format!("Remote install task failed: {error}"))?
 }

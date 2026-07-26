@@ -155,6 +155,7 @@ import type { AppPreferences } from '@/types/preferences'
 import {
   effortLevelOptions,
   codexReasoningOptions,
+  codexModelVerbosityOptions,
   grokReasoningOptions,
   backendOptions,
   getTerminalOptions,
@@ -169,6 +170,7 @@ import {
   type CodexModel,
   type CodexGoalExecutionMode,
   type CodexReasoningEffort,
+  type CodexModelVerbosity,
   type GrokReasoningEffort,
   type CursorModel,
   type PiModel,
@@ -211,6 +213,7 @@ import {
 } from '@/services/git-status'
 import { getPathUpdateAction } from '@/lib/cli-update'
 import { BackendPaneHeader, SettingsSection } from '../SettingsSection'
+import { AiLanguageField } from './AiLanguageField'
 import {
   resolveDefaultModelForBackend,
   resolvePiDefaultModel,
@@ -999,73 +1002,75 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
-  // If stored default_backend isn't installed, fall back to the first installed one
+  // Default backend: only installed AND authenticated backends are selectable.
   const stored = preferences?.default_backend ?? 'claude'
-  const claudeInstalled = cliStatus?.installed
-  const codexInstalled = codexStatus?.installed
-  const opencodeInstalled = opencodeStatus?.installed
-  const cursorInstalled = cursorStatus?.installed
-  const piInstalled = piStatus?.installed
-  const commandcodeInstalled = commandcodeStatus?.installed
-  const grokInstalled = grokStatus?.installed
-  const kimiInstalled = kimiStatus?.installed
+  const claudeUsable = !!cliStatus?.installed && !!claudeAuth?.authenticated
+  const codexUsable = !!codexStatus?.installed && !!codexAuth?.authenticated
+  const opencodeUsable =
+    !!opencodeStatus?.installed && !!opencodeAuth?.authenticated
+  const cursorUsable = !!cursorStatus?.installed && !!cursorAuth?.authenticated
+  const piUsable = !!piStatus?.installed && !!piAuth?.authenticated
+  const commandcodeUsable =
+    !!commandcodeStatus?.installed && !!commandcodeAuth?.authenticated
+  const grokUsable = !!grokStatus?.installed && !!grokAuth?.authenticated
+  const kimiUsable = !!kimiStatus?.installed && !!kimiAuth?.authenticated
   const installedBackendOptions = useMemo(
     () =>
       backendOptions.filter(option =>
         option.value === 'claude'
-          ? cliStatus?.installed
+          ? claudeUsable
           : option.value === 'codex'
-            ? codexStatus?.installed
+            ? codexUsable
             : option.value === 'opencode'
-              ? opencodeStatus?.installed
+              ? opencodeUsable
               : option.value === 'cursor'
-                ? cursorStatus?.installed
+                ? cursorUsable
                 : option.value === 'pi'
-                  ? piStatus?.installed
+                  ? piUsable
                   : option.value === 'commandcode'
-                    ? commandcodeStatus?.installed
+                    ? commandcodeUsable
                     : option.value === 'grok'
-                      ? grokStatus?.installed
+                      ? grokUsable
                       : option.value === 'kimi'
-                        ? kimiStatus?.installed
+                        ? kimiUsable
                         : false
       ),
     [
-      cliStatus?.installed,
-      codexStatus?.installed,
-      opencodeStatus?.installed,
-      cursorStatus?.installed,
-      piStatus?.installed,
-      commandcodeStatus?.installed,
-      grokStatus?.installed,
-      kimiStatus?.installed,
+      claudeUsable,
+      codexUsable,
+      opencodeUsable,
+      cursorUsable,
+      piUsable,
+      commandcodeUsable,
+      grokUsable,
+      kimiUsable,
     ]
   )
 
   const effectiveBackend = useMemo(() => {
-    const installed: Record<string, boolean | undefined> = {
-      claude: claudeInstalled,
-      codex: codexInstalled,
-      opencode: opencodeInstalled,
-      cursor: cursorInstalled,
-      pi: piInstalled,
-      commandcode: commandcodeInstalled,
-      grok: grokInstalled,
-      kimi: kimiInstalled,
+    const usable: Record<string, boolean | undefined> = {
+      claude: claudeUsable,
+      codex: codexUsable,
+      opencode: opencodeUsable,
+      cursor: cursorUsable,
+      pi: piUsable,
+      commandcode: commandcodeUsable,
+      grok: grokUsable,
+      kimi: kimiUsable,
     }
-    if (installed[stored]) return stored
+    if (usable[stored]) return stored
     const first = installedBackendOptions[0]
     return first?.value ?? stored
   }, [
     stored,
-    claudeInstalled,
-    codexInstalled,
-    opencodeInstalled,
-    cursorInstalled,
-    piInstalled,
-    commandcodeInstalled,
-    grokInstalled,
-    kimiInstalled,
+    claudeUsable,
+    codexUsable,
+    opencodeUsable,
+    cursorUsable,
+    piUsable,
+    commandcodeUsable,
+    grokUsable,
+    kimiUsable,
     installedBackendOptions,
   ])
 
@@ -1079,6 +1084,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     if (preferences) {
       patchPreferences.mutate({
         default_codex_reasoning_effort: value,
+      })
+    }
+  }
+
+  const handleCodexModelVerbosityChange = (value: CodexModelVerbosity) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        default_codex_model_verbosity: value,
       })
     }
   }
@@ -3312,6 +3325,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
+              label="Model verbosity"
+              description="How much intermediate text Codex writes during chat (low is terse; high is more detailed)"
+            >
+              <Select
+                value={preferences?.default_codex_model_verbosity ?? 'medium'}
+                onValueChange={handleCodexModelVerbosityChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {codexModelVerbosityOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
               label="Goal execution mode"
               description="Mode used when starting a Codex /goal"
             >
@@ -4586,10 +4620,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </div>
             </InlineField>
 
-            <AiLanguageField
-              preferences={preferences}
-              patchPreferences={patchPreferences}
-            />
+            <AiLanguageField preferences={preferences} />
 
             <InlineField
               label="Allow web tools in plan mode"
@@ -5262,46 +5293,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-const AiLanguageField: FC<{
-  preferences: AppPreferences | undefined
-  patchPreferences: ReturnType<typeof usePatchPreferences>
-}> = ({ preferences, patchPreferences }) => {
-  const [localValue, setLocalValue] = useState(preferences?.ai_language ?? '')
-
-  const hasChanges = localValue !== (preferences?.ai_language ?? '')
-
-  const handleSave = useCallback(() => {
-    if (!preferences) return
-    patchPreferences.mutate({ ai_language: localValue })
-  }, [preferences, patchPreferences, localValue])
-
-  return (
-    <InlineField
-      label="AI Language"
-      description="Language for AI responses (e.g. French, 日本語)"
-    >
-      <div className="flex items-center gap-2">
-        <Input
-          className="w-full sm:w-40"
-          placeholder="Default"
-          value={localValue}
-          onChange={e => setLocalValue(e.target.value)}
-        />
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!hasChanges || patchPreferences.isPending}
-        >
-          {patchPreferences.isPending && (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          )}
-          Save
-        </Button>
-      </div>
-    </InlineField>
   )
 }
 

@@ -38,7 +38,11 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { CustomCliProfile, CliBackend } from '@/types/preferences'
+import type {
+  CliBackend,
+  CodexProviderProfile,
+  CustomCliProfile,
+} from '@/types/preferences'
 import type {
   EffortLevel,
   McpServerInfo,
@@ -94,6 +98,7 @@ import {
   type PackageScript,
 } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
+import { resolveStackedOnPr } from '@/components/chat/worktree-branch-badge'
 import { chatQueryKeys } from '@/services/chat'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
@@ -114,6 +119,7 @@ interface MobileSettingsMenuProps {
   isCodex: boolean
   modelReasoning?: ModelReasoningCapability | null
   customCliProfiles: CustomCliProfile[]
+  customCodexProviders?: CodexProviderProfile[]
 
   onOpenBackendModelPicker: () => void
   handleProviderChange: (value: string) => void
@@ -167,6 +173,7 @@ export function MobileSettingsMenu({
   isCodex,
   modelReasoning,
   customCliProfiles,
+  customCodexProviders = [],
   onOpenBackendModelPicker,
   handleProviderChange,
   handleEffortLevelChange,
@@ -274,7 +281,15 @@ export function MobileSettingsMenu({
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<string | null>(null)
-  const providerDisplayName = getProviderDisplayName(selectedProvider)
+  const providerDisplayName = getProviderDisplayName(
+    selectedProvider,
+    selectedBackend
+  )
+  const showClaudeProviders =
+    customCliProfiles.length > 0 && selectedBackend === 'claude'
+  const showCodexProviders =
+    customCodexProviders.length > 0 && selectedBackend === 'codex'
+  const showProviderMenu = showClaudeProviders || showCodexProviders
   const { data: worktree } = useWorktree(worktreeId ?? null)
   const { data: projects } = useProjects()
   const project = worktree
@@ -284,10 +299,13 @@ export function MobileSettingsMenu({
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open', {
     enabled: menuOpen && !!project?.path,
   })
-  const stackedOnPR =
+  const stackedOnPR = resolveStackedOnPr(
     worktree?.base_branch && worktree.base_branch !== project?.default_branch
-      ? openPRs?.find(pr => pr.headRefName === worktree.base_branch)
-      : undefined
+      ? worktree.base_branch
+      : null,
+    openPRs,
+    project?.default_branch
+  )
   const hasOpenSection = !!worktreeId || ports.length > 0
 
   const openBackendModelPicker = () => {
@@ -451,7 +469,7 @@ export function MobileSettingsMenu({
           align={isMobile ? 'end' : 'start'}
           className="w-72"
         >
-          {customCliProfiles.length > 0 && selectedBackend === 'claude' && (
+          {showProviderMenu && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Sparkles className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -461,30 +479,49 @@ export function MobileSettingsMenu({
                 </span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup
-                  value={selectedProvider ?? '__anthropic__'}
-                  onValueChange={handleProviderChange}
-                >
-                  <DropdownMenuRadioItem value="__anthropic__">
-                    Anthropic
-                  </DropdownMenuRadioItem>
-                  {customCliProfiles.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel className="text-xs text-muted-foreground">
-                        Custom Providers
-                      </DropdownMenuLabel>
-                      {customCliProfiles.map(profile => (
-                        <DropdownMenuRadioItem
-                          key={profile.name}
-                          value={profile.name}
-                        >
-                          {profile.name}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </>
-                  )}
-                </DropdownMenuRadioGroup>
+                {showClaudeProviders ? (
+                  <DropdownMenuRadioGroup
+                    value={selectedProvider ?? '__anthropic__'}
+                    onValueChange={handleProviderChange}
+                  >
+                    <DropdownMenuRadioItem value="__anthropic__">
+                      Anthropic
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
+                      Custom Providers
+                    </DropdownMenuLabel>
+                    {customCliProfiles.map(profile => (
+                      <DropdownMenuRadioItem
+                        key={profile.name}
+                        value={profile.name}
+                      >
+                        {profile.name}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                ) : (
+                  <DropdownMenuRadioGroup
+                    value={selectedProvider ?? '__default__'}
+                    onValueChange={handleProviderChange}
+                  >
+                    <DropdownMenuRadioItem value="__default__">
+                      Default (OpenAI)
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
+                      Custom Providers
+                    </DropdownMenuLabel>
+                    {customCodexProviders.map(profile => (
+                      <DropdownMenuRadioItem
+                        key={profile.name}
+                        value={profile.name}
+                      >
+                        {profile.name}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           )}
@@ -807,7 +844,8 @@ export function MobileSettingsMenu({
                 >
                   <GitPullRequestArrow className="h-4 w-4 text-muted-foreground" />
                   <span className="truncate">
-                    Stacked on #{stackedOnPR.number} {stackedOnPR.title}
+                    Stacked on #{stackedOnPR.number}
+                    {stackedOnPR.title ? ` ${stackedOnPR.title}` : ''}
                   </span>
                 </DropdownMenuItem>
               )}

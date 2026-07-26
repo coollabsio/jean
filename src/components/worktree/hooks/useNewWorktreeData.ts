@@ -33,6 +33,7 @@ import {
   useProjectBranches,
   useCreateWorktreeFromExistingBranch,
   useJeanConfig,
+  useProjectRemotes,
 } from '@/services/projects'
 import { isBaseSession } from '@/types/projects'
 
@@ -155,6 +156,13 @@ export function useNewWorktreeData(
     return filtered.filter(b => b.toLowerCase().includes(q))
   }, [branches, searchQuery, selectedProject?.default_branch])
 
+  // Git remotes that have the default branch (drives the per-remote quick
+  // actions when a project tracks more than one, e.g. upstream plus a fork)
+  const { data: remotes } = useProjectRemotes(
+    selectedProject?.path,
+    selectedProject?.default_branch
+  )
+
   // Security alerts (Dependabot)
   const securityState = includeClosed ? 'all' : ('open' as const)
   const {
@@ -265,7 +273,11 @@ export function useNewWorktreeData(
     prsError,
     refetchPRs,
 
+    // Remotes
+    remotes,
+
     // Branches
+    branches: branches ?? [],
     filteredBranches,
     isLoadingBranches,
     isRefetchingBranches,

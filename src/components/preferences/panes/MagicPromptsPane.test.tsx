@@ -61,6 +61,7 @@ vi.mock('@/services/model-catalog', () => ({
     backend === 'claude'
       ? [
           { value: 'claude-fable-5', label: 'Claude Fable 5' },
+          { value: 'claude-opus-5', label: 'Claude Opus 5' },
           { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
         ]
       : [],

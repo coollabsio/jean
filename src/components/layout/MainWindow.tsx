@@ -17,7 +17,6 @@ import { DevModeBanner } from './DevModeBanner'
 import { SidebarWidthProvider } from './SidebarWidthContext'
 import { MainWindowContent } from './MainWindowContent'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
-import { QuitConfirmationDialog } from './QuitConfirmationDialog'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
 import { TeardownOutputDialog } from '@/components/worktree/TeardownOutputDialog'
 import { WindowResizeHandles } from './WindowResizeHandles'
@@ -226,7 +225,6 @@ export function MainWindow() {
   const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const openInModalOpen = useUIStore(state => state.openInModalOpen)
   const remotePickerOpen = useUIStore(state => state.remotePickerOpen)
-  const magicModalOpen = useUIStore(state => state.magicModalOpen)
   const resolveConflictsDialogOpen = useUIStore(
     state => state.resolveConflictsDialogOpen
   )
@@ -298,13 +296,16 @@ export function MainWindow() {
     return `${project.name} › ${worktree.name}${branchSuffix}`
   }, [project, worktree, isMobile])
 
-  // Compute polling info - null if no worktree or data not loaded
+  // Compute polling info - null if no worktree or data not loaded.
+  // Must use the worktree's own base_branch (e.g. v4.x), not the project
+  // default (next/main), or status shows false behind counts and huge diffs.
   const pollingInfo: WorktreePollingInfo | null = useMemo(() => {
     if (!worktree || !project) return null
     return {
       worktreeId: worktree.id,
       worktreePath: worktree.path,
-      baseBranch: project.default_branch ?? 'main',
+      baseBranch:
+        worktree.base_branch ?? project.default_branch ?? 'main',
       prNumber: worktree.pr_number,
       prUrl: worktree.pr_url,
     }
@@ -448,7 +449,9 @@ export function MainWindow() {
     reviewCommentsModalOpen
   )
   const shouldRenderWorkflowRunsModal = useRetainedMount(workflowRunsModalOpen)
-  const shouldRenderMagicModal = useRetainedMount(magicModalOpen)
+  // Always mount MagicModal so automation event listeners (mobile toolbar
+  // magic-command dispatches) work even when the dialog has never been opened.
+  const shouldRenderMagicModal = true
   const shouldRenderResolveConflictsDialog = useRetainedMount(
     resolveConflictsDialogOpen
   )
@@ -707,7 +710,6 @@ export function MainWindow() {
           />
         </Suspense>
       )}
-      <QuitConfirmationDialog />
       {shouldRenderGitHubDashboardModal && (
         <Suspense fallback={null}>
           <GitHubDashboardModal />

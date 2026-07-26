@@ -1095,6 +1095,7 @@ pub async fn get_worktree_changes(
             worktree_id: worktree.id.clone(),
             worktree_path: worktree.path.clone(),
             base_branch: base_branch.clone(),
+            base_remote: worktree.base_remote.clone(),
             pr_number: worktree.pr_number,
             pr_url: worktree.pr_url.clone(),
             pr_push_remote: worktree.pr_push_remote.clone(),
@@ -1140,6 +1141,7 @@ pub async fn get_worktree_diff(
         .clamp(1, MAX_DIFF_BYTES);
     let (worktree, project_default_branch) =
         resolve_worktree_and_project_default(&app, &worktree_id)?;
+    let base_remote = worktree.base_remote.clone();
     let base_branch = worktree.base_branch.unwrap_or(project_default_branch);
     let has_head = git_has_head(&worktree.path);
     let mut args = match diff_type.as_str() {
@@ -1158,7 +1160,10 @@ pub async fn get_worktree_diff(
         "branch" => vec![
             "diff".to_string(),
             "--unified=3".to_string(),
-            format!("origin/{base_branch}...HEAD"),
+            format!(
+                "{}...HEAD",
+                super::git_status::base_ref(base_remote.as_deref(), &base_branch)
+            ),
         ],
         other => {
             return Err(format!(
@@ -1509,9 +1514,42 @@ pub async fn create_worktree(
         .ok_or_else(|| format!("Project not found: {project_id}"))?
         .clone();
 
-    // Use provided base branch or project's default branch, with validation
-    let preferred_base = base_branch.unwrap_or_else(|| project.default_branch.clone());
-    let base = git::get_valid_base_branch(&project.path, &preferred_base)?;
+    // Use provided base branch, the PR's target branch when opening a PR, or the
+    // project's default. A base may be remote-qualified ("fork/main") to start
+    // from another remote than origin. The git start point uses the qualified
+    // ref; the worktree stores the short branch name plus base_remote so
+    // status/diff/pull compare against the same remote later.
+    //
+    // PR worktrees must record the PR's baseRefName (e.g. v4.x), not the project
+    // default (main). Otherwise status shows huge behind/ahead counts against
+    // main and the wrong "stacked on" PR can appear for long-lived bases.
+    let preferred_base = base_branch.unwrap_or_else(|| {
+        pr_context
+            .as_ref()
+            .map(|ctx| ctx.base_ref_name.clone())
+            .filter(|b| !b.is_empty())
+            .unwrap_or_else(|| project.default_branch.clone())
+    });
+    let (base_remote, preferred_base) =
+        match git::split_remote_qualified_base(&project.path, &preferred_base) {
+            Some((remote, branch)) => {
+                if !git::remote_tracking_branch_exists(&project.path, &remote, &branch) {
+                    return Err(format!(
+                        "Base branch '{remote}/{branch}' not found locally. Fetch '{remote}' first."
+                    ));
+                }
+                (Some(remote), branch)
+            }
+            None => (None, preferred_base),
+        };
+    // Remote-qualified bases were already verified via remote-tracking refs.
+    // Do not run get_valid_base_branch — it only checks local/origin and would
+    // silently fall back to main when the branch exists only on e.g. fork.
+    let base = if base_remote.is_some() {
+        preferred_base
+    } else {
+        git::get_valid_base_branch(&project.path, &preferred_base)?
+    };
 
     // Resolve auto-pull preference now (async), but defer the actual pull to background thread
     let should_auto_pull = if pr_context.is_none() {
@@ -1666,6 +1704,7 @@ pub async fn create_worktree(
         path: worktree_path_str.clone(),
         branch: name.clone(),
         base_branch: Some(base.clone()),
+        base_remote: base_remote.clone(),
         created_at,
         setup_output: None,
         setup_script: None,
@@ -1716,6 +1755,7 @@ pub async fn create_worktree(
     let name_clone = name.clone();
     let worktree_path_clone = worktree_path_str.clone();
     let base_clone = base.clone();
+    let base_remote_clone = base_remote.clone();
     let issue_context_clone = issue_context.clone();
     let pr_context_clone = pr_context.clone();
     let security_context_clone = security_context.clone();
@@ -1740,7 +1780,14 @@ pub async fn create_worktree(
             // If the base is only available as a remote-tracking branch (e.g. stacking on a
             // PR head that wasn't fetched locally), also use the origin/<base> ref.
             let has_local_branch = git::branch_exists(&project_path, &base_clone);
-            let effective_base = if should_auto_pull {
+            let effective_base = if let Some(remote) = base_remote_clone.as_deref() {
+                // Explicitly remote-qualified base: always start from that remote's
+                // ref, refreshing it first so "from <remote>/<base>" is up to date.
+                if let Err(e) = git::git_fetch(&project_path, &base_clone, Some(remote)) {
+                    log::warn!("Failed to fetch {remote}/{base_clone}: {e}");
+                }
+                format!("{remote}/{base_clone}")
+            } else if should_auto_pull {
                 log::trace!("Fetching base branch {base_clone} before worktree creation");
                 match git::git_fetch(&project_path, &base_clone, None) {
                     Ok(_) => {
@@ -1748,14 +1795,23 @@ pub async fn create_worktree(
                         format!("origin/{base_clone}")
                     }
                     Err(e) => {
+                        // Prefer the remote-tracking tip over a stale local branch even
+                        // when the network fetch fails — local main/v4.x is often days
+                        // behind origin and would leave the new worktree missing commits.
                         log::warn!("Failed to fetch base branch {base_clone}: {e}");
-                        if has_local_branch {
+                        if git::remote_branch_exists(&project_path, &base_clone) {
+                            format!("origin/{base_clone}")
+                        } else if has_local_branch {
                             base_clone.clone()
                         } else {
                             format!("origin/{base_clone}")
                         }
                     }
                 }
+            } else if git::remote_branch_exists(&project_path, &base_clone) {
+                // auto_pull off: still prefer origin/<base> when we already have it
+                // so a stale local checkout of e.g. v4.x is not used as the start point.
+                format!("origin/{base_clone}")
             } else if has_local_branch {
                 base_clone.clone()
             } else {
@@ -2299,6 +2355,7 @@ pub async fn create_worktree(
                     path: worktree_path_clone.clone(),
                     branch: final_branch.clone(),
                     base_branch: Some(base_clone.clone()),
+                    base_remote: base_remote_clone.clone(),
                     created_at,
                     setup_output: None,
                     setup_script: pending_setup_script.clone(),
@@ -2540,6 +2597,7 @@ pub async fn fork_session_to_worktree(
             .base_branch
             .clone()
             .or(Some(project.default_branch.clone())),
+        base_remote: source_worktree.base_remote.clone(),
         created_at,
         setup_output: None,
         setup_script: None,
@@ -2716,6 +2774,7 @@ pub async fn create_worktree_from_existing_branch(
         path: worktree_path_str.clone(),
         branch: name.clone(),
         base_branch: Some(branch_name.clone()),
+        base_remote: None,
         created_at,
         setup_output: None,
         setup_script: None,
@@ -3119,6 +3178,7 @@ pub async fn create_worktree_from_existing_branch(
                     path: worktree_path_clone.clone(),
                     branch: branch_name_clone.clone(),
                     base_branch: Some(branch_name_clone),
+                    base_remote: None,
                     created_at,
                     setup_output,
                     setup_script,
@@ -3259,8 +3319,14 @@ pub async fn checkout_pr(
     // Fetch PR details from GitHub (for context and worktree naming)
     let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number).await?;
 
-    // Get valid base branch for creating the worktree
-    let base_branch = git::get_valid_base_branch(&project.path, &project.default_branch)?;
+    // Prefer the PR's target branch so status/diff compare against the same base
+    // GitHub uses (e.g. v4.x), not always the project default (main).
+    let preferred_pr_base = if pr_detail.base_ref_name.is_empty() {
+        project.default_branch.clone()
+    } else {
+        pr_detail.base_ref_name.clone()
+    };
+    let base_branch = git::get_valid_base_branch(&project.path, &preferred_pr_base)?;
 
     // Generate worktree name from PR (for the directory/worktree name, not the branch).
     // Fork PRs often use generic heads like "main"; scope by PR number to avoid
@@ -3367,7 +3433,8 @@ pub async fn checkout_pr(
         name: final_worktree_name.clone(),
         path: worktree_path_str.clone(),
         branch: pr_detail.head_ref_name.clone(), // Use PR's actual branch name
-        base_branch: None,
+        base_branch: Some(base_branch.clone()),
+        base_remote: None,
         created_at,
         setup_output: None,
         setup_script: None,
@@ -3692,7 +3759,8 @@ pub async fn checkout_pr(
                     name: worktree_name_clone.clone(),
                     path: worktree_path_clone.clone(),
                     branch: actual_branch.clone(),
-                    base_branch: None,
+                    base_branch: Some(base_branch_clone.clone()),
+                    base_remote: None,
                     created_at,
                     setup_output,
                     setup_script,
@@ -4030,6 +4098,7 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
         path: project.path.clone(), // Uses project's base directory directly
         branch: project.default_branch.clone(),
         base_branch: None,
+        base_remote: None,
         created_at: now(),
         setup_output: None,
         setup_script: None,
@@ -4438,6 +4507,7 @@ pub async fn import_worktree(
         path: path.clone(),
         branch,
         base_branch: None,
+        base_remote: None,
         created_at: now(),
         setup_output: None,
         setup_script: None,
@@ -4746,6 +4816,7 @@ fn linux_file_manager_launch_plan(worktree_path: &str, is_wsl: bool) -> LinuxFil
 fn format_open_error(app_name: &str, error: &std::io::Error) -> String {
     let display_name = match app_name {
         "vscode" => "VS Code ('code')",
+        "vscodium" => "VSCodium ('codium')",
         "cursor" => "Cursor ('cursor')",
         "zed" => "Zed ('zed')",
         "xcode" => "Xcode ('xed')",
@@ -4990,6 +5061,18 @@ pub async fn open_worktree_in_editor(
                 }
                 Err(e) => Err(e),
             },
+            "vscodium" => match std::process::Command::new("codium")
+                .arg(&worktree_path)
+                .spawn()
+            {
+                Ok(child) => Ok(child),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::process::Command::new("open")
+                        .args(["-a", "VSCodium", &worktree_path])
+                        .spawn()
+                }
+                Err(e) => Err(e),
+            },
             _ => match std::process::Command::new("code")
                 .arg(&worktree_path)
                 .spawn()
@@ -5037,6 +5120,10 @@ pub async fn open_worktree_in_editor(
             "xcode" => {
                 return Err("Xcode is only available on macOS".to_string());
             }
+            "vscodium" => std::process::Command::new("cmd")
+                .args(["/c", "codium", &worktree_path])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
             _ => {
                 // Default to VS Code
                 std::process::Command::new("cmd")
@@ -5071,6 +5158,9 @@ pub async fn open_worktree_in_editor(
             "xcode" => {
                 return Err("Xcode is only available on macOS".to_string());
             }
+            "vscodium" => std::process::Command::new("codium")
+                .arg(&worktree_path)
+                .spawn(),
             _ => {
                 // Default to VS Code
                 std::process::Command::new("code")
@@ -5102,6 +5192,15 @@ pub async fn remove_git_remote(repo_path: String, remote_name: String) -> Result
 pub async fn get_git_remotes(repo_path: String) -> Result<Vec<git::GitRemote>, String> {
     log::trace!("Getting git remotes for: {repo_path}");
     git::get_git_remotes(&repo_path)
+}
+
+/// Get the remotes that have a given branch fetched locally
+pub async fn list_remotes_with_branch(
+    repo_path: String,
+    branch: String,
+) -> Result<Vec<String>, String> {
+    log::trace!("Listing remotes with branch '{branch}' for: {repo_path}");
+    git::remotes_with_branch(&repo_path, &branch)
 }
 
 /// Get all GitHub remotes for a repository
@@ -5690,8 +5789,8 @@ pub async fn update_project_settings(
 ///
 /// This command:
 /// 1. Commits any uncommitted changes (if commit_message provided)
-/// 2. Fetches from origin
-/// 3. Rebases onto origin/{base_branch}
+/// 2. Fetches from the worktree's base remote (or origin)
+/// 3. Rebases onto {remote}/{base_branch}
 /// 4. Force pushes with lease
 pub async fn rebase_worktree(
     app: AppHandle,
@@ -5710,10 +5809,17 @@ pub async fn rebase_worktree(
         .find_project(&worktree.project_id)
         .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
 
+    let base_branch = worktree
+        .base_branch
+        .clone()
+        .unwrap_or_else(|| project.default_branch.clone());
+    let base_remote = worktree.base_remote.clone();
+
     let result = git::rebase_onto_base(
         &worktree.path,
-        &project.default_branch,
+        &base_branch,
         commit_message.as_deref(),
+        base_remote.as_deref(),
     )?;
 
     log::trace!("Successfully rebased worktree: {}", worktree.name);
@@ -6271,7 +6377,41 @@ pub async fn detect_and_link_pr(
 ) -> Result<Option<DetectPrResponse>, String> {
     log::trace!("Detecting PR for worktree {worktree_id} at {worktree_path}");
 
+    // Preserve an intentional link (opened from a PR, or already fully linked).
+    // Branch-name detection is best-effort and can match the wrong fork PR when
+    // several PRs share a head name, or clear a correct link after a temp-branch
+    // checkout renames the local head.
+    let (existing_pr_number, existing_pr_url) = match load_projects_data(&app) {
+        Ok(data) => data
+            .worktrees
+            .iter()
+            .find(|w| w.id == worktree_id)
+            .map(|w| (w.pr_number, w.pr_url.clone()))
+            .unwrap_or((None, None)),
+        Err(_) => (None, None),
+    };
+    if existing_pr_number.is_some() && existing_pr_url.is_some() {
+        log::trace!(
+            "Worktree {worktree_id} already linked to PR #{:?}, skipping detect",
+            existing_pr_number
+        );
+        return Ok(None);
+    }
+
     if let Some(response) = find_open_pr_for_branch(&app, &worktree_path)? {
+        // If the worktree was created from a specific PR but URL is still missing,
+        // only accept a branch match for that same number — never overwrite with
+        // a different PR that happens to share the head branch name.
+        if let Some(expected) = existing_pr_number {
+            if response.pr_number != expected {
+                log::warn!(
+                    "Branch PR detection found #{} but worktree {worktree_id} is linked to #{expected}; keeping linked PR",
+                    response.pr_number
+                );
+                return Ok(None);
+            }
+        }
+
         log::trace!(
             "Found existing PR #{} for worktree {worktree_id}",
             response.pr_number
@@ -6290,18 +6430,16 @@ pub async fn detect_and_link_pr(
 
     log::trace!("No PR found for worktree {worktree_id}");
 
-    // Clear stale PR info if worktree previously had a PR linked
-    // (e.g., user switched away from a PR branch via `git switch`)
-    if let Ok(mut data) = load_projects_data(&app) {
-        if let Some(wt) = data.worktrees.iter_mut().find(|w| w.id == worktree_id) {
-            if wt.pr_number.is_some() {
-                wt.pr_number = None;
-                wt.pr_url = None;
-                wt.pr_push_remote = None;
-                wt.pr_push_branch = None;
-                let _ = save_projects_data(&app, &data);
-            }
-        }
+    // Only clear a previously linked PR when it was branch-detected (we still
+    // have a number but no intentional pr_context link to preserve). Never clear
+    // when the worktree was opened from a known PR number — detection can miss
+    // after gh checks out under an alternate local branch name.
+    if existing_pr_number.is_some() {
+        log::trace!(
+            "Keeping existing PR #{:?} on worktree {worktree_id} despite no branch match",
+            existing_pr_number
+        );
+        return Ok(None);
     }
 
     Ok(None)
@@ -6529,10 +6667,16 @@ pub async fn get_git_diff(
     worktree_path: String,
     diff_type: String,
     base_branch: Option<String>,
+    base_remote: Option<String>,
 ) -> Result<super::git_status::GitDiff, String> {
     log::trace!("Getting {diff_type} diff for {worktree_path}");
 
-    super::git_status::get_git_diff(&worktree_path, &diff_type, base_branch.as_deref())
+    super::git_status::get_git_diff(
+        &worktree_path,
+        &diff_type,
+        base_branch.as_deref(),
+        base_remote.as_deref(),
+    )
 }
 
 /// Get paginated commit history for a branch
@@ -9079,7 +9223,7 @@ fn build_codex_review_args(
         "-c".into(),
         format!(
             "model_verbosity=\"{}\"",
-            crate::chat::codex::DEFAULT_MODEL_VERBOSITY
+            crate::chat::codex::DEFAULT_ONESHOT_MODEL_VERBOSITY
         )
         .into(),
     ];
@@ -11345,6 +11489,9 @@ pub async fn get_merge_conflicts(
 /// Used when a PR has merge conflicts on GitHub. This creates the conflict
 /// state locally so the user can resolve conflicts with AI assistance.
 /// If the merge is clean (no conflicts), the merge commit is kept.
+///
+/// Uses the worktree's stored base branch/remote when present so a session
+/// started from e.g. `fork/main` merges that ref, not a hardcoded origin/main.
 pub async fn fetch_and_merge_base(
     app: AppHandle,
     worktree_id: String,
@@ -11359,23 +11506,28 @@ pub async fn fetch_and_merge_base(
         .find_project(&worktree.project_id)
         .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
 
-    let base_branch = &project.default_branch;
+    let base_branch = worktree
+        .base_branch
+        .as_deref()
+        .unwrap_or(project.default_branch.as_str());
+    let remote = worktree.base_remote.as_deref().unwrap_or("origin");
     let worktree_path = &worktree.path;
+    let qualified_base = super::git_status::base_ref(Some(remote), base_branch);
 
-    // Fetch the latest base branch from origin
+    // Fetch the latest base branch from the remote it belongs to
     let fetch_output = wsl_aware_command("git", Some(Path::new(worktree_path)))
-        .args(["fetch", "origin", base_branch])
+        .args(["fetch", remote, base_branch])
         .output()
-        .map_err(|e| format!("Failed to fetch origin: {e}"))?;
+        .map_err(|e| format!("Failed to fetch {remote}: {e}"))?;
 
     if !fetch_output.status.success() {
         let stderr = String::from_utf8_lossy(&fetch_output.stderr);
-        return Err(format!("Failed to fetch origin/{base_branch}: {stderr}"));
+        return Err(format!("Failed to fetch {qualified_base}: {stderr}"));
     }
 
-    // Merge origin/<base_branch> into current branch
+    // Merge <remote>/<base_branch> into current branch
     let merge_output = wsl_aware_command("git", Some(Path::new(worktree_path)))
-        .args(["merge", &format!("origin/{base_branch}")])
+        .args(["merge", &qualified_base])
         .output()
         .map_err(|e| format!("Failed to merge: {e}"))?;
 
@@ -12067,6 +12219,21 @@ pub async fn reorder_items(
     Ok(())
 }
 
+/// Resolve which branch git status should compare a worktree against.
+///
+/// Prefers the worktree's stored base (e.g. `v4.x`) over the project default
+/// (`next`/`main`). Using only the project default makes a clean worktree based
+/// on a release branch report false behind counts and huge diffs.
+pub(crate) fn resolve_worktree_status_base(worktree: &Worktree, project_default: &str) -> String {
+    worktree
+        .base_branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .unwrap_or(project_default)
+        .to_string()
+}
+
 /// Fetch git status for all worktrees in a project
 ///
 /// This is used to populate status indicators in the sidebar without requiring
@@ -12113,7 +12280,7 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
     // worktree unbounded would, with 100+ worktrees, exhaust the process fd table
     // (EMFILE) and silently break both git status and coinciding claude CLI spawns.
     // Cap concurrency so fd usage stays flat regardless of worktree count.
-    let base_branch = project.default_branch.clone();
+    let project_default_branch = project.default_branch.clone();
     let worker_count = worktrees.len().clamp(1, 8);
 
     // Shared job queue: workers pull worktrees until the receiver is drained.
@@ -12128,7 +12295,7 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
 
     for _ in 0..worker_count {
         let app_clone = app.clone();
-        let base_branch_clone = base_branch.clone();
+        let project_default_branch = project_default_branch.clone();
         let rx = std::sync::Arc::clone(&rx);
 
         thread::spawn(move || loop {
@@ -12144,10 +12311,14 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
                 }
             };
 
+            let base_branch =
+                resolve_worktree_status_base(&worktree, &project_default_branch);
+
             let info = ActiveWorktreeInfo {
                 worktree_id: worktree.id.clone(),
                 worktree_path: worktree.path.clone(),
-                base_branch: base_branch_clone.clone(),
+                base_branch,
+                base_remote: worktree.base_remote.clone(),
                 pr_number: worktree.pr_number,
                 pr_url: worktree.pr_url.clone(),
                 pr_push_remote: worktree.pr_push_remote.clone(),
@@ -13045,6 +13216,18 @@ mod tests {
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn format_open_error_uses_friendly_vscodium_name() {
+        let not_found = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        assert_eq!(
+            format_open_error("vscodium", &not_found),
+            "VSCodium ('codium') not found. Make sure it is installed and available in your PATH."
+        );
+
+        let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert!(format_open_error("vscodium", &other).starts_with("Failed to open VSCodium ('codium'):"));
     }
 
     #[test]
@@ -14019,5 +14202,28 @@ Body
         assert!(was_truncated);
         assert!(truncated.starts_with('å'));
         assert!(truncated.contains("diff truncated"));
+    }
+
+    #[test]
+    fn resolve_worktree_status_base_prefers_worktree_base_over_project_default() {
+        // Deserializing avoids brittle full-struct construction as Worktree grows.
+        let mut wt: Worktree = serde_json::from_value(serde_json::json!({
+            "id": "wt-1",
+            "project_id": "p-1",
+            "name": "rapid-mink",
+            "path": "/tmp/rapid-mink",
+            "branch": "rapid-mink",
+            "base_branch": "v4.x",
+            "created_at": 0,
+        }))
+        .expect("worktree fixture");
+
+        assert_eq!(resolve_worktree_status_base(&wt, "next"), "v4.x");
+
+        wt.base_branch = None;
+        assert_eq!(resolve_worktree_status_base(&wt, "next"), "next");
+
+        wt.base_branch = Some("  ".into());
+        assert_eq!(resolve_worktree_status_base(&wt, "next"), "next");
     }
 }

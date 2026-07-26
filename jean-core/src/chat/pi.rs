@@ -695,7 +695,7 @@ fn spawn_pi_rpc_host(
     std::fs::create_dir_all(&log_dir)
         .map_err(|e| format!("Failed to create PI RPC host log dir: {e}"))?;
     let log_file = log_dir.join(format!("{session_id}-{run_id}.log"));
-    let exe = std::env::current_exe().map_err(|e| format!("Failed to get Jean executable: {e}"))?;
+    let exe = super::detached::current_executable_for_detached_host()?;
 
     let mut args = vec![
         PI_RPC_HOST_ARG.to_string(),

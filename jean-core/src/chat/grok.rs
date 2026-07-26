@@ -1260,7 +1260,7 @@ where
 /// Grok plan-mode turns often start with "I'll draft a plan…" then tool research.
 /// If those tools fail or the turn ends early, that preamble must NOT become an
 /// ExitPlanMode approval gate — only real plan structure should.
-fn looks_like_plan_content(content: &str) -> bool {
+pub(crate) fn looks_like_plan_content(content: &str) -> bool {
     let trimmed = content.trim();
     if trimmed.chars().count() < 280 {
         return false;
@@ -1304,31 +1304,72 @@ fn looks_like_plan_content(content: &str) -> bool {
     structured_lines >= 4
 }
 
-fn inject_synthetic_plan(response: &mut GrokResponse) -> bool {
-    if response.content.trim().is_empty()
-        || response
-            .tool_calls
-            .iter()
-            .any(|tool| tool.name == GROK_SYNTHETIC_PLAN_TOOL_NAME)
-        || !looks_like_plan_content(&response.content)
-    {
-        return false;
+/// Ensure plan-mode turns always expose a plan tool call with full plan body.
+///
+/// Returns the synthetic/enriched plan tool id when the response should wait
+/// for plan approval. Mid-turn text/tool chronology is preserved — only the
+/// plan tool is appended (or re-appended) at the end with the richest body.
+fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
+    if response.content.trim().is_empty() || !looks_like_plan_content(&response.content) {
+        return None;
     }
+
+    let plan_body = response.content.clone();
+    let existing = response
+        .tool_calls
+        .iter()
+        .find(|tool| tool.name == GROK_SYNTHETIC_PLAN_TOOL_NAME);
+
+    if let Some(existing) = existing {
+        let id = existing.id.clone();
+        let existing_plan = existing
+            .input
+            .get("plan")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        // Enrich thin/empty plan bodies with full assistant plan text.
+        if existing_plan.len() < plan_body.trim().len() {
+            if let Some(tool) = response
+                .tool_calls
+                .iter_mut()
+                .find(|tool| tool.id == id)
+            {
+                tool.input = serde_json::json!({
+                    "source": "grok",
+                    "plan": plan_body,
+                });
+            }
+        }
+        // Keep a single plan tool_use block at the end of content_blocks.
+        response.content_blocks.retain(|block| {
+            !matches!(
+                block,
+                ContentBlock::ToolUse { tool_call_id } if tool_call_id == &id
+            )
+        });
+        response
+            .content_blocks
+            .push(ContentBlock::ToolUse { tool_call_id: id.clone() });
+        return Some(id);
+    }
+
     let id = "grok-plan".to_string();
     response.tool_calls.push(ToolCall {
         id: id.clone(),
         name: GROK_SYNTHETIC_PLAN_TOOL_NAME.to_string(),
         input: serde_json::json!({
             "source": "grok",
-            "plan": response.content,
+            "plan": plan_body,
         }),
         output: None,
         parent_tool_use_id: None,
     });
     response
         .content_blocks
-        .push(ContentBlock::ToolUse { tool_call_id: id });
-    true
+        .push(ContentBlock::ToolUse { tool_call_id: id.clone() });
+    Some(id)
 }
 
 /// Render the resolved Grok CLI invocation as a copy-pasteable shell command for debug logs.
@@ -1754,7 +1795,7 @@ fn spawn_grok_acp_host(
         serde_json::to_string(mcp_servers).unwrap_or_else(|_| "[]".to_string()),
     )
     .map_err(|e| format!("Failed to write Grok MCP servers file: {e}"))?;
-    let exe = std::env::current_exe().map_err(|e| format!("Failed to get Jean executable: {e}"))?;
+    let exe = super::detached::current_executable_for_detached_host()?;
 
     let mut args = vec![
         GROK_ACP_HOST_ARG.to_string(),
@@ -3779,8 +3820,30 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
             response.session_id = existing_grok_session_id.unwrap_or_default().to_string();
         }
 
-        let waiting_for_plan =
-            execution_mode == Some("plan") && inject_synthetic_plan(&mut response);
+        let plan_tool_id = if execution_mode == Some("plan") {
+            inject_synthetic_plan(&mut response)
+        } else {
+            None
+        };
+        let waiting_for_plan = plan_tool_id.is_some();
+        // Emit the plan tool live so the streaming timeline always has a plan
+        // tool call (with full details) — not only after message persistence.
+        if !response.cancelled {
+            if let Some(plan_id) = plan_tool_id.as_deref() {
+                if let Some(tool) = response.tool_calls.iter().find(|tc| tc.id == plan_id) {
+                    emit_tool_use(
+                        app,
+                        jean_session_id,
+                        worktree_id,
+                        &ParsedToolCall {
+                            id: tool.id.clone(),
+                            name: tool.name.clone(),
+                            input: tool.input.clone(),
+                        },
+                    );
+                }
+            }
+        }
         // tail_grok_output already emitted chat:done when not cancelled; re-emit
         // only when plan-mode waiting state differs from the generic done event.
         if !response.cancelled && waiting_for_plan {
@@ -3901,9 +3964,27 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
             log::warn!("[Grok ACP] stderr: {}", strip_ansi(&stderr).trim());
         }
 
-        let waiting_for_plan =
-            execution_mode == Some("plan") && inject_synthetic_plan(&mut response);
+        let plan_tool_id = if execution_mode == Some("plan") {
+            inject_synthetic_plan(&mut response)
+        } else {
+            None
+        };
+        let waiting_for_plan = plan_tool_id.is_some();
         if !response.cancelled {
+            if let Some(plan_id) = plan_tool_id.as_deref() {
+                if let Some(tool) = response.tool_calls.iter().find(|tc| tc.id == plan_id) {
+                    emit_tool_use(
+                        app,
+                        jean_session_id,
+                        worktree_id,
+                        &ParsedToolCall {
+                            id: tool.id.clone(),
+                            name: tool.name.clone(),
+                            input: tool.input.clone(),
+                        },
+                    );
+                }
+            }
             response.content = response.content.trim().to_string();
             let final_content = (!response.content.is_empty()).then_some(response.content.as_str());
             emit_done(
@@ -4532,7 +4613,7 @@ mod tests {
             cancelled: false,
             usage: None,
         };
-        assert!(!inject_synthetic_plan(&mut response));
+        assert!(inject_synthetic_plan(&mut response).is_none());
         assert!(response.tool_calls.is_empty());
     }
 
@@ -4561,9 +4642,69 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             cancelled: false,
             usage: None,
         };
-        assert!(inject_synthetic_plan(&mut response));
+        let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
+        assert_eq!(plan_id, "grok-plan");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(
+            response.tool_calls[0].input.get("plan").and_then(|v| v.as_str()),
+            Some(plan)
+        );
+    }
+
+    #[test]
+    fn inject_synthetic_plan_enriches_thin_existing_plan_tool() {
+        let plan = r#"# Full Plan
+
+## Overview
+Ship the feature end-to-end with tests and clear handoff notes for YOLO.
+
+## Tasks
+1. Inspect existing server ports and free anything still bound to :8000
+2. Start instance a on :8001 with a clean multi-instance config
+3. Start instance b on :8002 with a clean multi-instance config
+4. Verify transfer between instances stays healthy under load
+
+### Testing
+- [ ] Smoke both instances
+- [ ] Run transfer integration test
+"#;
+        let mut response = GrokResponse {
+            content: plan.to_string(),
+            session_id: "s1".into(),
+            tool_calls: vec![ToolCall {
+                id: "existing-plan".into(),
+                name: "ExitPlanMode".into(),
+                input: serde_json::json!({ "source": "grok", "plan": "thin" }),
+                output: None,
+                parent_tool_use_id: None,
+            }],
+            content_blocks: vec![
+                ContentBlock::Text {
+                    text: "research done".into(),
+                },
+                ContentBlock::ToolUse {
+                    tool_call_id: "existing-plan".into(),
+                },
+                ContentBlock::Text {
+                    text: plan.to_string(),
+                },
+            ],
+            cancelled: false,
+            usage: None,
+        };
+        let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
+        assert_eq!(plan_id, "existing-plan");
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(
+            response.tool_calls[0].input.get("plan").and_then(|v| v.as_str()),
+            Some(plan)
+        );
+        // Plan tool_use is last so mid-turn text stays between research tools and plan.
+        assert!(matches!(
+            response.content_blocks.last(),
+            Some(ContentBlock::ToolUse { tool_call_id }) if tool_call_id == "existing-plan"
+        ));
     }
 
     #[test]

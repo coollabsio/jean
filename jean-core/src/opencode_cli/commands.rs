@@ -78,8 +78,27 @@ enum ArchiveFormat {
 
 /// List available OpenCode models by refreshing from the OpenCode CLI cache source.
 pub async fn list_opencode_models(app: AppHandle) -> Result<Vec<String>, String> {
+    let binary_str = checked_opencode_binary(&app)?;
+
+    match run_opencode_models_command(&binary_str, true) {
+        Ok(models) => Ok(models),
+        Err(refresh_error) => run_opencode_models_command(&binary_str, false).map_err(|cached_error| {
+            format!(
+                "OpenCode models refresh failed: {refresh_error}; cached model listing failed: {cached_error}"
+            )
+        }),
+    }
+}
+
+/// Force-refresh available OpenCode models without falling back to cached output.
+pub async fn refresh_opencode_models(app: AppHandle) -> Result<Vec<String>, String> {
+    let binary_str = checked_opencode_binary(&app)?;
+    run_opencode_models_command(&binary_str, true)
+}
+
+fn checked_opencode_binary(app: &AppHandle) -> Result<String, String> {
     let wsl = crate::platform::get_wsl_config();
-    let binary_path = resolve_cli_binary(&app);
+    let binary_path = resolve_cli_binary(app);
     let binary_str = binary_path.to_string_lossy().to_string();
     if !wsl.enabled && !binary_path.exists() {
         return Err(format!(
@@ -98,14 +117,7 @@ pub async fn list_opencode_models(app: AppHandle) -> Result<Vec<String>, String>
         }
     }
 
-    match run_opencode_models_command(&binary_str, true) {
-        Ok(models) => Ok(models),
-        Err(refresh_error) => run_opencode_models_command(&binary_str, false).map_err(|cached_error| {
-            format!(
-                "OpenCode models refresh failed: {refresh_error}; cached model listing failed: {cached_error}"
-            )
-        }),
-    }
+    Ok(binary_str)
 }
 
 fn opencode_models_args(refresh: bool) -> Vec<&'static str> {

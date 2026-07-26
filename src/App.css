@@ -46,6 +46,9 @@
 }
 
 :root {
+  /* Prefer light native form controls (number spinners, etc.) */
+  color-scheme: light;
+
   /* Font families */
   --font-family-sans: 'Inter', -apple-system, 'Segoe UI', 'Roboto', sans-serif;
   --font-family-mono:
@@ -103,6 +106,9 @@
 }
 
 .dark {
+  /* Prefer dark native form controls so spin buttons/chevrons are light */
+  color-scheme: dark;
+
   /* Coolify-inspired coolgray color scheme */
   --background: #101010; /* base */
   --foreground: #fafafa; /* light text */
@@ -588,10 +594,10 @@ body:not(.native-app) kbd {
   border-radius: calc(var(--radius) - 2px);
 }
 
-/* Number input spinner — invert arrows in dark mode so they're visible */
-.dark input[type='number']::-webkit-inner-spin-button,
-.dark input[type='number']::-webkit-outer-spin-button {
-  filter: invert(1);
+/* Number input spinners inherit color-scheme from .dark (light arrows).
+   Keep an explicit rule so nested light color-scheme overrides can't darken them. */
+.dark input[type='number'] {
+  color-scheme: dark;
 }
 
 /* Chat search highlights (CSS Custom Highlight API) */

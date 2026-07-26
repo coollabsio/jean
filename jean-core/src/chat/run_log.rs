@@ -1074,6 +1074,11 @@ fn should_inject_synthetic_exit_plan(
 
     match backend {
         Backend::Opencode | Backend::Pi | Backend::Commandcode | Backend::Kimi => base_match,
+        // Grok owns live injection in grok.rs; recover plan tool on history reload
+        // only when assistant text looks like a real plan (not research preamble).
+        Backend::Grok => {
+            base_match && crate::chat::grok::looks_like_plan_content(&assistant_msg.content)
+        }
         Backend::Cursor => false, // Plan approval only on real createPlanToolCall / interaction_query
         _ => false,
     }
@@ -1112,6 +1117,14 @@ fn inject_synthetic_exit_plan(backend: &Backend, run_id: &str, assistant_msg: &m
             serde_json::json!({
                 "plan": assistant_msg.content,
                 "source": "kimi",
+            }),
+        )
+    } else if matches!(backend, Backend::Grok) {
+        (
+            "ExitPlanMode",
+            serde_json::json!({
+                "plan": assistant_msg.content,
+                "source": "grok",
             }),
         )
     } else {
@@ -1532,6 +1545,56 @@ mod tests {
         assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
         assert_eq!(msg.tool_calls[0].input["source"], "kimi");
         assert_eq!(msg.tool_calls[0].input["plan"], "Here is the plan");
+    }
+
+    #[test]
+    fn injects_synthetic_exit_plan_for_recovered_grok_plan_runs() {
+        let run = sample_run();
+        let plan = r#"# Server Migration Plan
+
+## Overview
+Move services between instances without downtime.
+
+## Tasks
+1. Start instance a on a free port
+2. Start instance b on a free port
+3. Run transfer and verify both stay healthy
+
+### Testing
+- [ ] Smoke both instances
+- [ ] Confirm transfer logs are clean
+"#;
+        let mut msg = ChatMessage {
+            content: plan.to_string(),
+            ..sample_assistant_message()
+        };
+
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Grok,
+            &run,
+            &msg
+        ));
+
+        inject_synthetic_exit_plan(&Backend::Grok, &run.run_id, &mut msg);
+
+        assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(msg.tool_calls[0].input["source"], "grok");
+        assert_eq!(msg.tool_calls[0].input["plan"], plan);
+    }
+
+    #[test]
+    fn does_not_inject_grok_plan_for_research_preamble() {
+        let run = sample_run();
+        let msg = ChatMessage {
+            content: "I'll draft a full Hermes integration plan with Hermes profiles as a first-class requirement. Gathering Jean's backend patterns first.".to_string(),
+            ..sample_assistant_message()
+        };
+
+        assert!(!should_inject_synthetic_exit_plan(
+            &Backend::Grok,
+            &run,
+            &msg
+        ));
     }
 
     #[test]

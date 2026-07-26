@@ -48,6 +48,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { BackendLabel } from '@/components/ui/backend-label'
+import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import type { CliBackend } from '@/types/preferences'
 
 const SettingsSection: React.FC<{
   title: string
@@ -93,6 +95,8 @@ export function GeneralPane({
 
   const { data: preferences } = usePreferences()
   const profiles = preferences?.custom_cli_profiles ?? []
+  // Only show backends the user is logged into (installed + authenticated).
+  const { installedBackends } = useInstalledBackends()
 
   const updateSettings = useUpdateProjectSettings()
   const { data: appDataDir = '' } = useAppDataDir()
@@ -419,12 +423,36 @@ export function GeneralPane({
                 <SelectItem value="global-default">
                   Use global default
                 </SelectItem>
-                <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="codex">Codex</SelectItem>
-                <SelectItem value="opencode">OpenCode</SelectItem>
-                <SelectItem value="cursor">
-                  <BackendLabel backend="cursor" />
-                </SelectItem>
+                {(
+                  [
+                    'claude',
+                    'codex',
+                    'opencode',
+                    'cursor',
+                    'pi',
+                    'commandcode',
+                    'grok',
+                    'kimi',
+                  ] as CliBackend[]
+                )
+                  .filter(backend => installedBackends.includes(backend))
+                  .map(backend => (
+                    <SelectItem key={backend} value={backend}>
+                      {backend === 'cursor' ||
+                      backend === 'pi' ||
+                      backend === 'commandcode' ||
+                      backend === 'grok' ||
+                      backend === 'kimi' ? (
+                        <BackendLabel backend={backend} />
+                      ) : backend === 'claude' ? (
+                        'Claude'
+                      ) : backend === 'codex' ? (
+                        'Codex'
+                      ) : (
+                        'OpenCode'
+                      )}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </InlineField>

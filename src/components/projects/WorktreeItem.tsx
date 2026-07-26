@@ -552,8 +552,9 @@ export function WorktreeItem({
       await performGitPull({
         worktreeId: worktree.id,
         worktreePath: worktree.path,
-        baseBranch: defaultBranch,
+        baseBranch: worktree.base_branch ?? defaultBranch,
         projectId,
+        remote: worktree.base_remote,
         onMergeConflict: () => {
           selectWorktree(worktree.id)
           setTimeout(() => {
@@ -566,7 +567,15 @@ export function WorktreeItem({
         },
       })
     },
-    [worktree.id, worktree.path, defaultBranch, projectId, selectWorktree]
+    [
+      worktree.id,
+      worktree.path,
+      worktree.base_branch,
+      worktree.base_remote,
+      defaultBranch,
+      projectId,
+      selectWorktree,
+    ]
   )
 
   const handlePush = useCallback(

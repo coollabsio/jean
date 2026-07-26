@@ -4,12 +4,16 @@ import { Zap } from 'lucide-react'
 import { fireEvent, render, screen, within } from '@/test/test-utils'
 import { MobileSettingsMenu } from './MobileSettingsMenu'
 import * as platform from '@/lib/platform'
+import type * as ProjectsService from '@/services/projects'
+import type * as GitHubService from '@/services/github'
 
-const usePortsMock = vi.fn(() => ({ data: [] as Array<{
+interface PortInfo {
   port: number
   label: string
   host?: string | null
-}> }))
+}
+
+const usePortsMock = vi.fn(() => ({ data: [] as PortInfo[] }))
 const useWorktreeMock = vi.fn(() => ({
   data: {
     id: 'worktree-1',
@@ -21,7 +25,7 @@ const useWorktreeMock = vi.fn(() => ({
 }))
 
 vi.mock('@/services/projects', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/services/projects')>()
+  const actual = await importOriginal<typeof ProjectsService>()
   return {
     ...actual,
     useWorktree: useWorktreeMock as unknown as typeof actual.useWorktree,
@@ -33,7 +37,7 @@ vi.mock('@/services/projects', async importOriginal => {
 })
 
 vi.mock('@/services/github', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/services/github')>()
+  const actual = await importOriginal<typeof GitHubService>()
   return {
     ...actual,
     useGitHubPRs: () => ({ data: [] }),

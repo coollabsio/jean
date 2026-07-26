@@ -11,6 +11,8 @@ import { useIsMobile } from '@/hooks/use-mobile'
 interface SendCancelButtonProps {
   isSending: boolean
   canSend: boolean
+  /** When true, the secondary action steers into the running turn instead of queueing. */
+  willSteer?: boolean
   queuedMessageCount?: number
   onCancel: () => void
 }
@@ -18,6 +20,7 @@ interface SendCancelButtonProps {
 export function SendCancelButton({
   isSending,
   canSend,
+  willSteer = false,
   queuedMessageCount,
   onCancel,
 }: SendCancelButtonProps) {
@@ -51,6 +54,15 @@ export function SendCancelButton({
     )
 
     if (canSend) {
+      const actionLabel = willSteer ? 'Steer' : 'Queue'
+      const actionTooltip = willSteer
+        ? isMobile
+          ? 'Steer into running turn'
+          : 'Steer into running turn (Enter)'
+        : isMobile
+          ? 'Queue message'
+          : 'Queue message (Enter)'
+
       return (
         <div className="flex items-center">
           {cancelButton}
@@ -61,12 +73,10 @@ export function SendCancelButton({
                 type="submit"
                 className="flex h-8 items-center justify-center px-2.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               >
-                <span>Queue</span>
+                <span>{actionLabel}</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent>
-              {isMobile ? 'Queue message' : 'Queue message (Enter)'}
-            </TooltipContent>
+            <TooltipContent>{actionTooltip}</TooltipContent>
           </Tooltip>
         </div>
       )

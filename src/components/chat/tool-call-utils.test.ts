@@ -151,6 +151,96 @@ describe('resolvePlanContent', () => {
       source: 'steps',
     })
   })
+
+  it('prefers the richest body when multiple CodexPlan tools exist', () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'codex-plan-turn-1',
+        name: 'CodexPlan',
+        input: {
+          explanation: 'Plan created and ready for approval.',
+          steps: [{ step: 'Touch files', status: 'pending' }],
+        },
+      },
+      {
+        id: 'codex-plan-plan-1',
+        name: 'CodexPlan',
+        input: {
+          plan: 'Plan:\n- Rewrite the parser in codex.rs\n- Add merge tests for split plan tools\n- Verify YOLO handoff content',
+        },
+      },
+    ]
+
+    expect(resolvePlanContent({ toolCalls })).toEqual({
+      content:
+        'Plan:\n- Rewrite the parser in codex.rs\n- Add merge tests for split plan tools\n- Verify YOLO handoff content',
+      source: 'plan',
+    })
+  })
+
+  it('does not treat status-only explanation as authoritative plan content when assistant text is richer', () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'plan-1',
+        name: 'CodexPlan',
+        input: {
+          explanation: 'Plan created and ready for approval.',
+          steps: [{ step: 'Do the thing', status: 'pending' }],
+        },
+      },
+    ]
+
+    const detailed =
+      'Goal: rewrite plan extraction.\n\n1. Unify CodexPlan tool ids across live and history paths.\n2. Prefer richest plan body when tools split.\n3. Require handoff-quality plan prompts for Codex.\n4. Cover with unit tests for multi-tool resolution.'
+
+    expect(
+      resolvePlanContent({
+        toolCalls,
+        messageContent: detailed,
+      })
+    ).toEqual({
+      content: detailed,
+      source: 'message_text',
+    })
+  })
+
+  it('does not promote ordinary YOLO narration into a Plan card without a plan tool', () => {
+    const narration =
+      "I'll find the mobile search/type filter layout and make the search full-width with the type selector stacked below it. Using Tailwind to stack the search and category filter on mobile. Checking existing tests, then applying the layout change."
+
+    expect(
+      resolvePlanContent({
+        toolCalls: [
+          {
+            id: 'bash-1',
+            name: 'Bash',
+            input: { command: 'rg mobile search' },
+          },
+          {
+            id: 'grep-1',
+            name: 'Grep',
+            input: { pattern: 'input-sticky' },
+          },
+        ],
+        messageContent: narration,
+        contentBlocks: [
+          { type: 'tool_use', tool_call_id: 'bash-1' },
+          { type: 'text', text: narration },
+          { type: 'tool_use', tool_call_id: 'grep-1' },
+        ],
+      })
+    ).toEqual({ content: null, source: null })
+  })
+
+  it('returns null for empty tool lists even when assistant text looks plan-like', () => {
+    expect(
+      resolvePlanContent({
+        toolCalls: [],
+        messageContent:
+          'Plan:\n- Do the thing\n- Add tests\n- Verify handoff quality for YOLO',
+      })
+    ).toEqual({ content: null, source: null })
+  })
 })
 
 describe('isDuplicatePlanTextBlock', () => {

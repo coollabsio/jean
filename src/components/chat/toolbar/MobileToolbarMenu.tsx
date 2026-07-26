@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpToLine,
   BookmarkPlus,
+  Bot,
   Bug,
   Eye,
   FileText,
@@ -15,6 +16,7 @@ import {
   Link2,
   MessageSquare,
   RefreshCw,
+  Shield,
   Undo2,
   Wand2,
 } from 'lucide-react'
@@ -80,7 +82,10 @@ export function MobileToolbarMenu({
           <Wand2 className="h-4 w-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={isMobile ? 'end' : 'start'} className="w-56">
+      <DropdownMenuContent
+        align={isMobile ? 'end' : 'start'}
+        className="w-56 max-h-[min(80vh,640px)] overflow-y-auto"
+      >
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Context
         </div>
@@ -145,6 +150,54 @@ export function MobileToolbarMenu({
             )}
           >
             W
+          </span>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Automation
+        </div>
+        <DropdownMenuItem
+          onClick={() => {
+            setMenuOpen(false)
+            window.dispatchEvent(
+              new CustomEvent('magic-command', {
+                detail: { command: 'automate-github-bugs' },
+              })
+            )
+          }}
+        >
+          <Bot className="h-4 w-4" />
+          GitHub Bugs
+          <span
+            className={cn(
+              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+              isMobile && 'hidden'
+            )}
+          >
+            H
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            setMenuOpen(false)
+            window.dispatchEvent(
+              new CustomEvent('magic-command', {
+                detail: { command: 'automate-security-advisories' },
+              })
+            )
+          }}
+        >
+          <Shield className="h-4 w-4" />
+          Security Advisories
+          <span
+            className={cn(
+              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+              isMobile && 'hidden'
+            )}
+          >
+            X
           </span>
         </DropdownMenuItem>
 

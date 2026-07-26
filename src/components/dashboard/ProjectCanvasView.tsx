@@ -20,7 +20,7 @@ import {
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
-import { isLocalBackend } from '@/lib/environment'
+import { canOpenInEditor, canOpenNativeApps } from '@/lib/environment'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import {
   Search,
@@ -119,6 +119,7 @@ import { PlanDialog } from '@/components/chat/PlanDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
 import {
   getStackedBaseBranch,
+  resolveStackedOnPr,
   shouldShowWorktreeBranchBadge,
 } from '@/components/chat/worktree-branch-badge'
 
@@ -179,6 +180,7 @@ import {
   getCanvasFilterTabCount,
   isLabelFilterTab,
   matchesCanvasFilterTab,
+  shouldShowCanvasWorktreeSection,
   type CanvasFilterTab,
   type CanvasPredefinedFilterTab,
   type CanvasPredefinedFilterTabItem,
@@ -223,6 +225,7 @@ import {
   type WorktreeReorderDragState,
 } from '@/lib/drag-and-drop/worktree-reorder-ux'
 import { openCanvasConflictResolution } from './conflict-resolution-navigation'
+import { getCanvasDiffRequest } from './canvas-diff-request'
 
 interface ProjectCanvasViewProps {
   projectId: string
@@ -462,11 +465,7 @@ function WorktreeSectionHeader({
   isSelected?: boolean
   shortcutNumber?: number
   onRowClick?: () => void
-  onDiffClick?: (
-    worktreePath: string,
-    baseBranch: string,
-    type: 'uncommitted' | 'branch'
-  ) => void
+  onDiffClick?: (request: DiffRequest) => void
   onSetLabels?: () => void
   onResolveConflicts?: (worktree: Worktree) => void
   disableTextSelection?: boolean
@@ -474,11 +473,14 @@ function WorktreeSectionHeader({
   const stackedBaseBranch = getStackedBaseBranch(
     worktree.base_branch,
     worktree.branch,
+    defaultBranch,
+    worktree.base_remote
+  )
+  const stackedOnPR = resolveStackedOnPr(
+    stackedBaseBranch,
+    openPRs,
     defaultBranch
   )
-  const stackedOnPR = stackedBaseBranch
-    ? openPRs?.find(pr => pr.headRefName === stackedBaseBranch)
-    : undefined
   const isBase = isBaseSession(worktree)
   const { data: gitStatus } = useGitStatus(worktree.id)
 
@@ -511,19 +513,13 @@ function WorktreeSectionHeader({
       await performGitPull({
         worktreeId: worktree.id,
         worktreePath: worktree.path,
-        baseBranch: defaultBranch,
+        baseBranch: worktree.base_branch ?? defaultBranch,
         projectId,
+        remote: worktree.base_remote,
         onMergeConflict: () => onResolveConflicts?.(worktree),
       })
     },
-    [
-      worktree,
-      worktree.id,
-      worktree.path,
-      defaultBranch,
-      projectId,
-      onResolveConflicts,
-    ]
+    [worktree, defaultBranch, projectId, onResolveConflicts]
   )
 
   const handlePush = useCallback(
@@ -563,11 +559,13 @@ function WorktreeSectionHeader({
 
   const handleDiffClick = useCallback(() => {
     onDiffClick?.(
-      worktree.path,
-      defaultBranch,
-      isBase ? 'uncommitted' : 'branch'
+      getCanvasDiffRequest(
+        worktree,
+        defaultBranch,
+        isBase ? 'uncommitted' : 'branch'
+      )
     )
-  }, [onDiffClick, isBase, worktree.path, defaultBranch])
+  }, [onDiffClick, isBase, worktree, defaultBranch])
 
   const sessionMetrics = useMemo(
     () => (cards && cards.length > 0 ? getSessionMetrics(cards) : null),
@@ -875,7 +873,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilterTab, setActiveFilterTab] = useState<CanvasFilterTab>('all')
   const isMobile = useIsMobile()
-  const canOpenLocally = isLocalBackend()
+  const canOpenLocally = canOpenNativeApps()
+  const canOpenEditor = canOpenInEditor()
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
   const showWorktreeLabelContextMenu = shouldShowWorktreeLabelContextMenu({
     isMobile,
@@ -1218,8 +1217,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
       latestActivityByWorktreeId.set(worktree.id, latestActivityAt)
 
-      // Only include worktrees that have sessions (after filtering)
-      if (grouped.length > 0) {
+      // Keep the base branch available for starting its first session.
+      if (shouldShowCanvasWorktreeSection(worktree, grouped.length)) {
         readySections.push({ worktree, cards: grouped })
       }
     }
@@ -2357,15 +2356,15 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       if (!section) return
 
       const isBase = isBaseSession(section.worktree)
-      const baseBranch = project?.default_branch ?? 'main'
+      const defaultBranch = project?.default_branch ?? 'main'
 
       setCanvasDiffRequest(prev => {
         if (requestedType) {
-          return {
-            type: requestedType,
-            worktreePath: section.worktree.path,
-            baseBranch,
-          }
+          return getCanvasDiffRequest(
+            section.worktree,
+            defaultBranch,
+            requestedType
+          )
         }
         if (prev) {
           return {
@@ -2373,11 +2372,11 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
             type: prev.type === 'uncommitted' ? 'branch' : 'uncommitted',
           }
         }
-        return {
-          type: isBase ? 'uncommitted' : 'branch',
-          worktreePath: section.worktree.path,
-          baseBranch,
-        }
+        return getCanvasDiffRequest(
+          section.worktree,
+          defaultBranch,
+          isBase ? 'uncommitted' : 'branch'
+        )
       })
     }
 
@@ -3067,53 +3066,67 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                       </>
                     )}
 
-                    {canOpenLocally && (
+                    {(canOpenEditor || canOpenLocally) && (
                       <>
                         <DropdownMenuSeparator />
 
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            openInEditor.mutate({
-                              worktreePath: project.path,
-                              editor: preferences?.editor,
-                            })
-                          }
-                        >
-                          <Code className="h-4 w-4" />
-                          Open in {getEditorLabel(preferences?.editor)}
-                        </DropdownMenuItem>
+                        {canOpenEditor && (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              openInEditor.mutate({
+                                worktreePath: project.path,
+                                editor: preferences?.editor,
+                              })
+                            }
+                          >
+                            <Code className="h-4 w-4" />
+                            Open in {getEditorLabel(preferences?.editor)}
+                          </DropdownMenuItem>
+                        )}
 
-                        <DropdownMenuItem
-                          onSelect={() => openInFinder.mutate(project.path)}
-                        >
-                          <FolderOpen className="h-4 w-4" />
-                          Open in Finder
-                        </DropdownMenuItem>
+                        {canOpenLocally && (
+                          <DropdownMenuItem
+                            onSelect={() => openInFinder.mutate(project.path)}
+                          >
+                            <FolderOpen className="h-4 w-4" />
+                            Open in Finder
+                          </DropdownMenuItem>
+                        )}
 
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            openInTerminal.mutate({
-                              worktreePath: project.path,
-                              terminal: preferences?.terminal,
-                            })
-                          }
-                        >
-                          <Terminal className="h-4 w-4" />
-                          Open in {getTerminalLabel(preferences?.terminal)}
-                        </DropdownMenuItem>
+                        {canOpenLocally && (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              openInTerminal.mutate({
+                                worktreePath: project.path,
+                                terminal: preferences?.terminal,
+                              })
+                            }
+                          >
+                            <Terminal className="h-4 w-4" />
+                            Open in {getTerminalLabel(preferences?.terminal)}
+                          </DropdownMenuItem>
+                        )}
 
-                        <DropdownMenuSeparator />
+                        {canOpenLocally && (
+                          <>
+                            <DropdownMenuSeparator />
 
-                        <DropdownMenuItem
-                          onSelect={() => openWorktreesFolder.mutate(projectId)}
-                        >
-                          <Folder className="h-4 w-4" />
-                          Open Worktrees Folder
-                        </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                openWorktreesFolder.mutate(projectId)
+                              }
+                            >
+                              <Folder className="h-4 w-4" />
+                              Open Worktrees Folder
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </>
                     )}
 
-                    {!canOpenLocally && <DropdownMenuSeparator />}
+                    {!canOpenEditor && !canOpenLocally && (
+                      <DropdownMenuSeparator />
+                    )}
 
                     <DropdownMenuItem
                       onSelect={() => openOnGitHub.mutate(projectId)}
@@ -3528,13 +3541,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                               section.worktree.path
                             )
                           }}
-                          onDiffClick={(worktreePath, baseBranch, type) => {
-                            setCanvasDiffRequest({
-                              type,
-                              worktreePath,
-                              baseBranch,
-                            })
-                          }}
+                          onDiffClick={setCanvasDiffRequest}
                           onSetLabels={
                             showWorktreeLabelContextMenu
                               ? () => openWorktreeLabelModal(section.worktree)

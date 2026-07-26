@@ -96,4 +96,6 @@ export interface DiffRequest {
   type: 'uncommitted' | 'branch'
   worktreePath: string
   baseBranch: string
+  /** Remote the base branch lives on, when it isn't origin */
+  baseRemote?: string
 }

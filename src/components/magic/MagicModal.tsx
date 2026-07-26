@@ -19,6 +19,8 @@ import {
   Link2,
   ShieldAlert,
   Loader2,
+  Bot,
+  Shield,
 } from 'lucide-react'
 import {
   Dialog,
@@ -87,6 +89,8 @@ import type {
 import type { Session } from '@/types/chat'
 import {
   type CliBackend,
+  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
+  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
@@ -141,6 +145,8 @@ type MagicOption =
   | 'investigate-issue'
   | 'investigate-pr'
   | 'investigate-advisory'
+  | 'automate-github-bugs'
+  | 'automate-security-advisories'
   | 'merge-pr'
   | 'review-comments'
   | 'revert-last-commit'
@@ -168,6 +174,8 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge-pr',
   'resolve-conflicts',
   'linked-projects',
+  'automate-github-bugs',
+  'automate-security-advisories',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
@@ -259,6 +267,23 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           label: 'Fork Session',
           icon: GitBranchPlus,
           key: 'W',
+        },
+      ],
+    },
+    {
+      header: 'Automation',
+      options: [
+        {
+          id: 'automate-github-bugs',
+          label: 'GitHub Bugs',
+          icon: Bot,
+          key: 'H',
+        },
+        {
+          id: 'automate-security-advisories',
+          label: 'Security Advisories',
+          icon: Shield,
+          key: 'X',
         },
       ],
     },
@@ -388,6 +413,8 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   i: 'investigate-issue',
   a: 'investigate-pr',
   y: 'investigate-advisory',
+  h: 'automate-github-bugs',
+  x: 'automate-security-advisories',
   n: 'merge-pr',
   z: 'revert-last-commit',
 }
@@ -671,122 +698,357 @@ export function MagicModal() {
       ? resolveDefaults.provider
       : null
 
-  const startFinalReview = useCallback(async () => {
-    if (!selectedWorktreeId || !worktree?.path) return
+  /**
+   * Resolve the worktree to run a new prompt-session in.
+   * Prefer store snapshots over React Query so automation still works when
+   * useWorktree() has not loaded yet (common right after opening Magic).
+   */
+  const resolvePromptSessionWorktree = useCallback(async (): Promise<{
+    worktreeId: string
+    worktreePath: string
+    projectId: string | null
+  } | null> => {
+    const projectsState = useProjectsStore.getState()
+    const chatState = useChatStore.getState()
+    const uiState = useUIStore.getState()
 
-    const defaultBackend =
-      project?.default_backend ?? preferences?.default_backend ?? 'claude'
-    const backend = (resolveMagicPromptBackend(
-      preferences?.magic_prompt_backends,
-      'final_review_backend',
-      defaultBackend
-    ) ?? defaultBackend) as CliBackend
-    const model =
-      preferences?.magic_prompt_models?.final_review_model ??
-      resolveDefaultModelForBackend(backend, preferences)
-    const provider =
-      backend === 'claude'
-        ? resolveMagicPromptProvider(
-            preferences?.magic_prompt_providers,
-            'final_review_provider',
-            preferences?.default_provider
-          )
-        : null
-    const executionMode =
-      preferences?.magic_prompt_modes?.final_review_mode ??
-      DEFAULT_MAGIC_PROMPT_MODES.final_review_mode
+    const worktreeId =
+      selectedWorktreeId ??
+      projectsState.selectedWorktreeId ??
+      chatState.activeWorktreeId ??
+      uiState.sessionChatModalWorktreeId
+
+    if (!worktreeId) return null
+
+    let worktreePath: string | null | undefined =
+      (worktree?.id === worktreeId ? worktree.path : null) ??
+      chatState.getWorktreePath(worktreeId) ??
+      (chatState.activeWorktreeId === worktreeId
+        ? chatState.activeWorktreePath
+        : null)
+
+    let projectId: string | null =
+      (worktree?.id === worktreeId ? worktree.project_id : null) ??
+      projectsState.selectedProjectId ??
+      selectedProjectId ??
+      null
+
+    if (!worktreePath) {
+      try {
+        const fetched = await invoke<{
+          id: string
+          path: string
+          project_id?: string
+        } | null>('get_worktree', { worktreeId })
+        if (fetched?.path) {
+          worktreePath = fetched.path
+          projectId = fetched.project_id ?? projectId
+          chatState.registerWorktreePath(worktreeId, fetched.path)
+        }
+      } catch {
+        // Fall through to null — caller shows a clear error toast
+      }
+    }
+
+    if (!worktreePath) return null
+
+    return { worktreeId, worktreePath, projectId }
+  }, [selectedProjectId, selectedWorktreeId, worktree])
+
+  const startPromptSession = useCallback(
+    async ({
+      sessionName,
+      backendKey,
+      modelKey,
+      providerKey,
+      modeKey,
+      effortKey,
+      prompt,
+      errorLabel,
+    }: {
+      sessionName: string
+      backendKey:
+        | 'final_review_backend'
+        | 'automate_github_bugs_backend'
+        | 'automate_security_advisories_backend'
+      modelKey:
+        | 'final_review_model'
+        | 'automate_github_bugs_model'
+        | 'automate_security_advisories_model'
+      providerKey:
+        | 'final_review_provider'
+        | 'automate_github_bugs_provider'
+        | 'automate_security_advisories_provider'
+      modeKey:
+        | 'final_review_mode'
+        | 'automate_github_bugs_mode'
+        | 'automate_security_advisories_mode'
+      effortKey:
+        | 'final_review_effort'
+        | 'automate_github_bugs_effort'
+        | 'automate_security_advisories_effort'
+      prompt: string
+      errorLabel: string
+    }) => {
+      const resolved = await resolvePromptSessionWorktree()
+      if (!resolved) {
+        toast.error(`Failed to start ${errorLabel}: No worktree selected`)
+        notify('No worktree selected', undefined, { type: 'error' })
+        return
+      }
+
+      const { worktreeId, worktreePath } = resolved
+
+      const defaultBackend =
+        project?.default_backend ?? preferences?.default_backend ?? 'claude'
+      const backend = (resolveMagicPromptBackend(
+        preferences?.magic_prompt_backends,
+        backendKey,
+        defaultBackend
+      ) ?? defaultBackend) as CliBackend
+      const backendDefaultModel = resolveDefaultModelForBackend(
+        backend,
+        preferences
+      )
+      const configuredModel = preferences?.magic_prompt_models?.[modelKey]
+      // Avoid mismatched pairs like Grok backend + Claude Opus model (common for
+      // newly-added magic prompts before prefs migration runs).
+      const model = (() => {
+        if (!configuredModel) return backendDefaultModel
+        const matchesBackend =
+          backend === 'claude'
+            ? !configuredModel.includes('/') &&
+              !configuredModel.startsWith('gpt-')
+            : backend === 'codex'
+              ? configuredModel.includes('codex') ||
+                configuredModel.startsWith('gpt-')
+              : backend === 'opencode'
+                ? configuredModel.startsWith('opencode/')
+                : backend === 'cursor'
+                  ? configuredModel.startsWith('cursor/')
+                  : backend === 'pi'
+                    ? configuredModel.startsWith('pi/')
+                    : backend === 'commandcode'
+                      ? configuredModel.startsWith('commandcode/')
+                      : backend === 'grok'
+                        ? configuredModel.startsWith('grok/')
+                        : backend === 'kimi'
+                          ? configuredModel.startsWith('kimi/')
+                          : true
+        return matchesBackend ? configuredModel : backendDefaultModel
+      })()
+      const provider =
+        backend === 'claude'
+          ? resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              providerKey,
+              preferences?.default_provider
+            )
+          : null
+      const executionMode =
+        preferences?.magic_prompt_modes?.[modeKey] ??
+        DEFAULT_MAGIC_PROMPT_MODES[modeKey]
+
+      const loadingToastId = toast.loading(`Starting ${errorLabel}...`)
+
+      try {
+        const session = await invoke<Session>('create_session', {
+          worktreeId,
+          worktreePath,
+          name: sessionName,
+          backend: backend !== 'claude' ? backend : undefined,
+        })
+        const store = useChatStore.getState()
+
+        store.registerWorktreePath(worktreeId, worktreePath)
+        store.setSelectedBackend(session.id, backend)
+        store.setSelectedModel(session.id, model)
+        store.setSelectedProvider(session.id, provider)
+        store.setActiveSession(worktreeId, session.id)
+        store.setExecutionMode(session.id, executionMode)
+        store.setExecutingMode(session.id, executionMode)
+        store.setLastSentMessage(session.id, prompt)
+        store.setError(session.id, null)
+        store.clearInputDraft(session.id)
+
+        // Prefer open-session-modal so the new session tab is selected even
+        // when a worktree chat modal is already open.
+        window.dispatchEvent(
+          new CustomEvent('open-session-modal', {
+            detail: {
+              sessionId: session.id,
+              worktreeId,
+              worktreePath,
+            },
+          })
+        )
+        window.dispatchEvent(
+          new CustomEvent('open-worktree-modal', {
+            detail: {
+              worktreeId,
+              worktreePath,
+            },
+          })
+        )
+
+        await Promise.all([
+          invoke('set_session_backend', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            backend,
+          }),
+          invoke('set_session_model', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            model,
+          }),
+          invoke('set_session_provider', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            provider,
+          }),
+          invoke('update_session_state', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            selectedExecutionMode: executionMode,
+          }),
+        ])
+
+        await invoke('send_chat_message', {
+          sessionId: session.id,
+          worktreeId,
+          worktreePath,
+          message: prompt,
+          model,
+          executionMode,
+          effortLevel:
+            preferences?.magic_prompt_efforts?.[effortKey] ?? undefined,
+          parallelExecutionPrompt:
+            preferences?.parallel_execution_prompt_enabled
+              ? (preferences.magic_prompts?.parallel_execution ??
+                DEFAULT_PARALLEL_EXECUTION_PROMPT)
+              : undefined,
+          backend: backend !== 'claude' ? backend : undefined,
+          customProfileName:
+            provider && provider !== '__anthropic__' ? provider : undefined,
+          chromeEnabled: preferences?.chrome_enabled ?? false,
+          aiLanguage: preferences?.ai_language,
+        })
+
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        toast.success(`${sessionName} started`, { id: loadingToastId })
+      } catch (error) {
+        toast.error(`Failed to start ${errorLabel}: ${error}`, {
+          id: loadingToastId,
+        })
+      }
+    },
+    [
+      preferences,
+      project?.default_backend,
+      queryClient,
+      resolvePromptSessionWorktree,
+    ]
+  )
+
+  const startFinalReview = useCallback(async () => {
     const prompt =
       preferences?.magic_prompts?.final_review ?? DEFAULT_FINAL_REVIEW_PROMPT
+    await startPromptSession({
+      sessionName: 'Final review',
+      backendKey: 'final_review_backend',
+      modelKey: 'final_review_model',
+      providerKey: 'final_review_provider',
+      modeKey: 'final_review_mode',
+      effortKey: 'final_review_effort',
+      prompt,
+      errorLabel: 'final review',
+    })
+  }, [preferences?.magic_prompts?.final_review, startPromptSession])
 
-    try {
-      const session = await invoke<Session>('create_session', {
-        worktreeId: selectedWorktreeId,
-        worktreePath: worktree.path,
-        name: 'Final review',
-        backend: backend !== 'claude' ? backend : undefined,
+  const startAutomation = useCallback(
+    async (kind: 'github-bugs' | 'security-advisories') => {
+      const resolved = await resolvePromptSessionWorktree()
+      if (!resolved) {
+        toast.error('No worktree selected')
+        notify('No worktree selected', undefined, { type: 'error' })
+        return
+      }
+
+      const projectId =
+        resolved.projectId ??
+        worktree?.project_id ??
+        selectedProjectId ??
+        '{projectId}'
+      const isBugs = kind === 'github-bugs'
+      const promptTemplate = isBugs
+        ? (preferences?.magic_prompts?.automate_github_bugs ??
+          DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT)
+        : (preferences?.magic_prompts?.automate_security_advisories ??
+          DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT)
+      const prompt = promptTemplate.replaceAll('{projectId}', projectId)
+
+      await startPromptSession({
+        sessionName: isBugs
+          ? 'Automate GitHub bugs'
+          : 'Automate security advisories',
+        backendKey: isBugs
+          ? 'automate_github_bugs_backend'
+          : 'automate_security_advisories_backend',
+        modelKey: isBugs
+          ? 'automate_github_bugs_model'
+          : 'automate_security_advisories_model',
+        providerKey: isBugs
+          ? 'automate_github_bugs_provider'
+          : 'automate_security_advisories_provider',
+        modeKey: isBugs
+          ? 'automate_github_bugs_mode'
+          : 'automate_security_advisories_mode',
+        effortKey: isBugs
+          ? 'automate_github_bugs_effort'
+          : 'automate_security_advisories_effort',
+        prompt,
+        errorLabel: isBugs
+          ? 'GitHub bugs automation'
+          : 'security advisories automation',
       })
-      const store = useChatStore.getState()
+    },
+    [
+      preferences?.magic_prompts?.automate_github_bugs,
+      preferences?.magic_prompts?.automate_security_advisories,
+      resolvePromptSessionWorktree,
+      selectedProjectId,
+      startPromptSession,
+      worktree?.project_id,
+    ]
+  )
 
-      store.registerWorktreePath(selectedWorktreeId, worktree.path)
-      store.setSelectedBackend(session.id, backend)
-      store.setSelectedModel(session.id, model)
-      store.setSelectedProvider(session.id, provider)
-      store.setActiveSession(selectedWorktreeId, session.id)
-      store.setExecutionMode(session.id, executionMode)
-      store.setExecutingMode(session.id, executionMode)
-      store.setLastSentMessage(session.id, prompt)
-      store.setError(session.id, null)
-      store.clearInputDraft(session.id)
-
-      window.dispatchEvent(
-        new CustomEvent('open-worktree-modal', {
-          detail: {
-            worktreeId: selectedWorktreeId,
-            worktreePath: worktree.path,
-          },
-        })
-      )
-
-      await Promise.all([
-        invoke('set_session_backend', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          backend,
-        }),
-        invoke('set_session_model', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          model,
-        }),
-        invoke('set_session_provider', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          provider,
-        }),
-        invoke('update_session_state', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          selectedExecutionMode: executionMode,
-        }),
-      ])
-
-      await invoke('send_chat_message', {
-        sessionId: session.id,
-        worktreeId: selectedWorktreeId,
-        worktreePath: worktree.path,
-        message: prompt,
-        model,
-        executionMode,
-        effortLevel:
-          preferences?.magic_prompt_efforts?.final_review_effort ?? undefined,
-        parallelExecutionPrompt: preferences?.parallel_execution_prompt_enabled
-          ? (preferences.magic_prompts?.parallel_execution ??
-            DEFAULT_PARALLEL_EXECUTION_PROMPT)
-          : undefined,
-        backend: backend !== 'claude' ? backend : undefined,
-        customProfileName:
-          provider && provider !== '__anthropic__' ? provider : undefined,
-        chromeEnabled: preferences?.chrome_enabled ?? false,
-        aiLanguage: preferences?.ai_language,
-      })
-
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(selectedWorktreeId),
-      })
-    } catch (error) {
-      toast.error(`Failed to start final review: ${error}`)
+  // Mobile toolbar (and other surfaces) dispatch automation via magic-command
+  // while MagicModal stays closed — still handle them from the always-mounted modal.
+  useEffect(() => {
+    const handleAutomationCommand = (
+      e: Event
+    ) => {
+      const detail = (e as CustomEvent<{ command?: string }>).detail
+      const command = detail?.command
+      if (command === 'automate-github-bugs') {
+        void startAutomation('github-bugs')
+      } else if (command === 'automate-security-advisories') {
+        void startAutomation('security-advisories')
+      }
     }
-  }, [
-    preferences,
-    project?.default_backend,
-    queryClient,
-    selectedWorktreeId,
-    worktree?.path,
-  ])
+
+    window.addEventListener('magic-command', handleAutomationCommand)
+    return () => {
+      window.removeEventListener('magic-command', handleAutomationCommand)
+    }
+  }, [startAutomation])
 
   const investigateClaudeModelOptions = useMemo(
     () => getClaudeModelOptionsForProvider(investigateClaudeProvider),
@@ -1164,10 +1426,11 @@ export function MagicModal() {
             await performGitPull({
               worktreeId: selectedWorktreeId,
               worktreePath: worktree.path,
-              baseBranch: project?.default_branch ?? 'main',
+              baseBranch:
+                worktree.base_branch ?? project?.default_branch ?? 'main',
               branchLabel: worktree.branch,
               projectId: worktree.project_id ?? undefined,
-              remote,
+              remote: remote ?? worktree.base_remote,
               onMergeConflict: () => executeGitDirectly('resolve-conflicts'),
             })
           })
@@ -1453,12 +1716,14 @@ export function MagicModal() {
               const diffSection = prResult.conflict_diff
                 ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
                 : ''
-              const baseBranch = project?.default_branch || 'main'
+              const baseBranch =
+                worktree.base_branch || project?.default_branch || 'main'
+              const baseRemote = worktree.base_remote || 'origin'
               const resolveInstructions =
                 preferences?.magic_prompts?.resolve_conflicts ??
                 DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-              const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+              const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}
@@ -1853,9 +2118,9 @@ ${resolveInstructions}`
                   })
                 }
 
+                // Sonner ignores `duration` for loading toasts — dismiss explicitly.
                 toast.loading(`${reviewLabel} running for ${reviewTarget}...`, {
                   id: toastId,
-                  duration: 5000,
                   cancel: {
                     label: 'Cancel',
                     onClick: () => {
@@ -1869,6 +2134,9 @@ ${resolveInstructions}`
                     },
                   },
                 })
+                const autoDismissTimer = window.setTimeout(() => {
+                  toast.dismiss(toastId)
+                }, 5000)
 
                 let unlistenReviewJob: (() => void) | null = null
                 let handledTerminalReviewJob = false
@@ -1878,6 +2146,7 @@ ${resolveInstructions}`
                   if (handledTerminalReviewJob) return
 
                   handledTerminalReviewJob = true
+                  window.clearTimeout(autoDismissTimer)
                   unlistenReviewJob?.()
                   if (reviewJob.status === 'completed') {
                     const completedSessionId = reviewJob.sessionId
@@ -2190,6 +2459,22 @@ ${resolveInstructions}`
         return
       }
 
+      // Automation: create a new session in the current worktree and run the orchestration prompt
+      if (
+        option === 'automate-github-bugs' ||
+        option === 'automate-security-advisories'
+      ) {
+        setMagicModalOpen(false)
+        // Resolve worktree inside startAutomation (store path / get_worktree fallback)
+        // so a slow useWorktree() query does not block the click.
+        void startAutomation(
+          option === 'automate-github-bugs'
+            ? 'github-bugs'
+            : 'security-advisories'
+        )
+        return
+      }
+
       // Investigate options: guard against missing contexts
       if (
         option === 'investigate-issue' ||
@@ -2323,6 +2608,7 @@ ${resolveInstructions}`
       worktree?.path,
       worktree?.pr_number,
       detectLinkPrForCurrentBranch,
+      startAutomation,
     ]
   )
 
@@ -2418,7 +2704,7 @@ ${resolveInstructions}`
         <DialogContent
           ref={contentRef}
           tabIndex={-1}
-          className="sm:max-w-[560px] p-0 outline-none"
+          className="sm:max-w-[560px] max-h-[min(90vh,760px)] overflow-y-auto p-0 outline-none"
           onOpenAutoFocus={e => {
             e.preventDefault()
             contentRef.current?.focus()
@@ -2437,6 +2723,9 @@ ${resolveInstructions}`
               (columnSections, colIndex) => (
                 <div
                   key={colIndex}
+                  data-testid={
+                    colIndex === 0 ? 'magic-column-left' : 'magic-column-right'
+                  }
                   className={cn(colIndex === 0 && 'border-r border-border')}
                 >
                   {columnSections.map((section, sectionIndex) => (

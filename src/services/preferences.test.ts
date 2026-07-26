@@ -112,6 +112,7 @@ describe('model option helpers', () => {
   it('offers Claude 1M variants alongside standard context models', () => {
     expect(modelOptions.map(option => option.value)).toEqual([
       'claude-fable-5',
+      'claude-opus-5',
       'claude-sonnet-5',
       'claude-opus-4-8[1m]',
       'claude-opus-4-8',
@@ -126,6 +127,7 @@ describe('model option helpers', () => {
     ])
     expect(normalizeClaudeModel('sonnet')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-fable-5')).toBe('claude-fable-5')
+    expect(normalizeClaudeModel('claude-opus-5')).toBe('claude-opus-5')
     expect(normalizeClaudeModel('claude-sonnet-5')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8')
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
@@ -192,14 +194,15 @@ describe('model option helpers', () => {
     ).toEqual(new Set(['gpt-5.6-terra-fast']))
   })
 
-  it('documents Codex questions-tool answers must re-show the plan tool', () => {
+  it('documents Codex plan mode uses proposed_plan and no file writes', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'backend-native interactive question UI'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Codex request_user_input')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'when the current execution mode is plan: after the user answers native `request_user_input`'
+      'when the current execution mode is plan: do not write plan files or code'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('<proposed_plan>')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Every Codex response that contains or revises a plan while the current execution mode is plan'
     )
@@ -324,6 +327,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -339,6 +345,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -482,6 +489,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -497,6 +507,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -619,6 +630,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -635,6 +649,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -749,6 +764,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -764,6 +782,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -880,6 +899,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -895,6 +917,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -1053,6 +1076,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -1068,6 +1094,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -1182,6 +1209,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -1197,6 +1227,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
