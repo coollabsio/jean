@@ -37,6 +37,10 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.web_access_sounds_enabled).toBe(true)
   })
 
+  it('opens the collapsed sidebar from the screen edge by default', () => {
+    expect(defaultPreferences.sidebar_hover_open_enabled).toBe(true)
+  })
+
   it('uses Jean-managed Command Code CLI by default', () => {
     expect(defaultPreferences.commandcode_cli_source).toBe('jean')
   })

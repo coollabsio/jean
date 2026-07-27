@@ -588,6 +588,23 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-pane-appearance',
   },
   {
+    id: 'appearance-sidebar',
+    pane: 'appearance',
+    paneTitle: 'Appearance',
+    type: 'section',
+    title: 'Sidebar',
+    sectionTitle: 'Appearance',
+    keywords: [
+      'sidebar',
+      'screen edge',
+      'hover',
+      'collapsed sidebar',
+      'open from screen edge',
+    ],
+    anchorId: 'pref-appearance-section-sidebar',
+    fallbackAnchorId: 'pref-pane-appearance',
+  },
+  {
     id: 'appearance-file-viewer',
     pane: 'appearance',
     paneTitle: 'Appearance',

@@ -69,7 +69,7 @@ export const mockPreferences = {
   keybindings: {},
   sidebar_width: 240,
   session_sort: 'manual',
-  zoom_level: 1.0,
+  zoom_level: 90,
   auto_pull_base_branch: false,
   auto_investigate: true,
   auto_archive_on_merge: false,

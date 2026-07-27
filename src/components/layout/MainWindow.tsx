@@ -15,6 +15,7 @@ import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { useSwipeDown } from '@/hooks/useSwipeDown'
 import { DevModeBanner } from './DevModeBanner'
 import { SidebarWidthProvider } from './SidebarWidthContext'
+import { SidebarHoverPreview } from './SidebarHoverPreview'
 import { MainWindowContent } from './MainWindowContent'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
@@ -208,6 +209,7 @@ import {
 } from '@/services/projects'
 import { isNativeApp } from '@/lib/environment'
 import { isLinux, isWindows } from '@/lib/platform'
+import { usePreferences } from '@/services/preferences'
 
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
@@ -268,6 +270,7 @@ export function MainWindow() {
   const githubDashboardOpen = useUIStore(state => state.githubDashboardOpen)
   const newSessionModeTarget = useUIStore(state => state.newSessionModeTarget)
   const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
+  const { data: preferences } = usePreferences()
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const addProjectDialogOpen = useProjectsStore(
@@ -328,8 +331,7 @@ export function MainWindow() {
     return {
       worktreeId: worktree.id,
       worktreePath: worktree.path,
-      baseBranch:
-        worktree.base_branch ?? project.default_branch ?? 'main',
+      baseBranch: worktree.base_branch ?? project.default_branch ?? 'main',
       prNumber: worktree.pr_number,
       prUrl: worktree.pr_url,
     }
@@ -563,6 +565,22 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden pt-8">
+        <SidebarHoverPreview
+          enabled={
+            !isMobile &&
+            isInitialized &&
+            !leftSidebarVisible &&
+            (preferences?.sidebar_hover_open_enabled ?? true)
+          }
+          width={leftSidebarSize}
+        >
+          <SidebarWidthProvider value={leftSidebarSize}>
+            <Suspense fallback={null}>
+              <LeftSideBar />
+            </Suspense>
+          </SidebarWidthProvider>
+        </SidebarHoverPreview>
+
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>

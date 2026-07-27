@@ -98,4 +98,12 @@ describe('preferences search index', () => {
 
     expect(results.some(entry => entry.id === 'appearance-fonts')).toBe(true)
   })
+
+  it('finds the collapsed sidebar edge setting', () => {
+    setTauriInternals(false)
+
+    expect(searchPreferenceEntries('screen edge')[0]?.id).toBe(
+      'appearance-sidebar'
+    )
+  })
 })
