@@ -505,6 +505,31 @@ describe('ChatStore', () => {
       expect(toolCalls?.[0]?.output).toBe('file contents')
     })
 
+    it('keeps tool_result when it arrives before tool_use (issue #572)', () => {
+      const { addToolCall, updateToolCallOutput } = useChatStore.getState()
+
+      // Result first (out-of-order) — must not drop stdout
+      updateToolCallOutput('session-1', 'tool-bash-1', 'exit: 0\nhello\n')
+
+      let toolCalls = useChatStore.getState().activeToolCalls['session-1']
+      expect(toolCalls).toHaveLength(1)
+      expect(toolCalls?.[0]?.id).toBe('tool-bash-1')
+      expect(toolCalls?.[0]?.output).toBe('exit: 0\nhello\n')
+
+      // Later tool_use enriches name/input without wiping output
+      addToolCall('session-1', {
+        id: 'tool-bash-1',
+        name: 'Bash',
+        input: { command: 'echo hello' },
+      })
+
+      toolCalls = useChatStore.getState().activeToolCalls['session-1']
+      expect(toolCalls).toHaveLength(1)
+      expect(toolCalls?.[0]?.name).toBe('Bash')
+      expect(toolCalls?.[0]?.input).toEqual({ command: 'echo hello' })
+      expect(toolCalls?.[0]?.output).toBe('exit: 0\nhello\n')
+    })
+
     it('clears tool calls', () => {
       const { addToolCall, clearToolCalls } = useChatStore.getState()
 

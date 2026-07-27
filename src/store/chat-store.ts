@@ -1401,8 +1401,9 @@ export const useChatStore = create<ChatUIState>()(
               tc => tc.id === toolCall.id
             )
             if (existingIndex !== -1) {
-              // Already exists — update input if the new one has richer or newer data
-              // (e.g., enriched question data or streaming Codex plan deltas)
+              // Already exists — update name/input if the new one has richer or newer data
+              // (e.g., enriched question data, streaming Codex plan deltas, or a real
+              // tool_use arriving after an early tool_result stub — see updateToolCallOutput).
               const old = existing[existingIndex]
               if (!old) return state
               const oldEmpty =
@@ -1416,11 +1417,25 @@ export const useChatStore = create<ChatUIState>()(
               const inputChanged =
                 JSON.stringify(old.input ?? null) !==
                 JSON.stringify(toolCall.input ?? null)
-              if ((oldEmpty && newHasData) || (newHasData && inputChanged)) {
+              const nameChanged =
+                Boolean(toolCall.name) &&
+                toolCall.name !== old.name &&
+                // Prefer real tool names over the generic stub created for early results
+                (old.name === 'Tool' || old.name === 'Unknown' || !old.name)
+              if (
+                (oldEmpty && newHasData) ||
+                (newHasData && inputChanged) ||
+                nameChanged
+              ) {
                 const updated = [...existing]
                 updated[existingIndex] = {
                   ...old,
-                  input: toolCall.input,
+                  // Preserve any output already attached by a prior tool_result
+                  name: nameChanged ? toolCall.name : old.name,
+                  input:
+                    (oldEmpty && newHasData) || (newHasData && inputChanged)
+                      ? toolCall.input
+                      : old.input,
                 }
                 return {
                   activeToolCalls: {
@@ -1447,14 +1462,33 @@ export const useChatStore = create<ChatUIState>()(
           state => {
             const toolCalls = state.activeToolCalls[sessionId] ?? []
             const existing = toolCalls.find(tc => tc.id === toolUseId)
-            if (!existing || existing.output === output) return state
-            const updatedToolCalls = toolCalls.map(tc =>
-              tc.id === toolUseId ? { ...tc, output } : tc
-            )
+            if (existing) {
+              if (existing.output === output) return state
+              const updatedToolCalls = toolCalls.map(tc =>
+                tc.id === toolUseId ? { ...tc, output } : tc
+              )
+              return {
+                activeToolCalls: {
+                  ...state.activeToolCalls,
+                  [sessionId]: updatedToolCalls,
+                },
+              }
+            }
+            // tool_result can arrive before tool_use (out-of-order events / race).
+            // Keep the output on a stub so chat:done and the optimistic message
+            // still surface bash/shell stdout instead of only the command.
             return {
               activeToolCalls: {
                 ...state.activeToolCalls,
-                [sessionId]: updatedToolCalls,
+                [sessionId]: [
+                  ...toolCalls,
+                  {
+                    id: toolUseId,
+                    name: 'Tool',
+                    input: {},
+                    output,
+                  },
+                ],
               },
             }
           },

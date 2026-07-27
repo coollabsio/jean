@@ -14,6 +14,27 @@ describe('ToolCallsDisplay', () => {
     getSubmittedAnswers: () => undefined,
   }
 
+  it('shows bash tool stdout when expanded (issue #572)', () => {
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'bash-1',
+        name: 'Bash',
+        input: { command: 'cd /blah; command; command2' },
+        output: 'hello from bash\nline 2\n',
+      },
+    ]
+
+    render(<ToolCallsDisplay {...baseProps} toolCalls={toolCalls} />)
+
+    // Collapsed by default — expand the tools list
+    fireEvent.click(screen.getByRole('button', { name: /1 tool used/i }))
+
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+    expect(screen.getByText('Output:')).toBeInTheDocument()
+    expect(screen.getByText(/hello from bash/)).toBeInTheDocument()
+    expect(screen.getByText(/line 2/)).toBeInTheDocument()
+  })
+
   it('renders native Codex request_user_input as an interactive question card', () => {
     const onQuestionAnswer =
       vi.fn<

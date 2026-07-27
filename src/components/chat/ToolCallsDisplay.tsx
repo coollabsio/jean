@@ -143,6 +143,18 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
                       </pre>
                     </div>
                   )}
+                  {/* Show tool stdout/result (bash and others) — was missing before #572 */}
+                  {typeof tool.output === 'string' &&
+                    tool.output.trim() !== '' && (
+                      <div className="mt-1 overflow-x-auto">
+                        <div className="text-[0.625rem] text-muted-foreground/50 mb-0.5">
+                          Output:
+                        </div>
+                        <pre className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-1.5 text-[0.625rem] font-mono leading-tight text-foreground/80">
+                          {tool.output}
+                        </pre>
+                      </div>
+                    )}
                 </div>
               ))}
             </div>
