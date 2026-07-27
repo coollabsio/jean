@@ -1358,6 +1358,7 @@ export interface AppPreferences {
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
   parallel_execution_prompt_enabled: boolean // Add system prompt to encourage parallel sub-agent execution
   compact_chat_view_enabled: boolean // Collapse intermediate tool calls/replies into a single ticker line, only showing the latest activity
+  sidebar_hover_open_enabled?: boolean // Temporarily reveal the collapsed desktop sidebar from the left screen edge
   auto_recaps_enabled?: boolean // Ask agents to end multi-step/tool turns with a recap
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
   magic_prompt_models: MagicPromptModels // Per-prompt model overrides
@@ -2381,6 +2382,7 @@ export const defaultPreferences: AppPreferences = {
   syntax_theme_light: 'github-light',
   parallel_execution_prompt_enabled: true, // Default: enabled
   compact_chat_view_enabled: true, // Default: enabled
+  sidebar_hover_open_enabled: true, // Default: enabled
   auto_recaps_enabled: true, // Default: enabled
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
   magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,

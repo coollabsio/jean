@@ -1360,7 +1360,9 @@ describe('preferences service', () => {
         )
       )
 
-      const switchEl = await screen.findByRole('switch')
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Window transparency',
+      })
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
 
       await user.click(switchEl)
@@ -1381,6 +1383,37 @@ describe('preferences service', () => {
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
       expect(toast.error).toHaveBeenCalledWith('Failed to save preferences', {
         description: 'Save failed',
+      })
+    })
+
+    it('persists the collapsed sidebar edge hover setting', async () => {
+      const { invoke } = await import('@/lib/transport')
+      vi.mocked(invoke).mockImplementation(async command => {
+        if (command === 'load_preferences') return defaultPreferences
+        if (command === 'patch_preferences') return undefined
+        throw new Error(`Unexpected command ${command}`)
+      })
+
+      const user = userEvent.setup()
+      render(
+        createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          createElement(AppearancePane)
+        )
+      )
+
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Open sidebar from screen edge',
+      })
+      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+
+      await user.click(switchEl)
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
+          patch: { sidebar_hover_open_enabled: false },
+        })
       })
     })
   })
