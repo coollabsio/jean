@@ -151,6 +151,7 @@ describe('PreferencesDialog', () => {
       'Command CodeBeta',
       'GrokBeta',
       'Kimi CodeBeta',
+      'DevinBeta',
       'GitHub CLI',
       'CodeRabbit CLI',
       'Terminal',
@@ -167,7 +168,7 @@ describe('PreferencesDialog', () => {
       navigationMenu.querySelectorAll('[data-sidebar="separator"]')
     ).toHaveLength(5)
 
-    for (const label of ['PI', 'Command Code']) {
+    for (const label of ['PI', 'Command Code', 'Devin']) {
       const button = within(navigationMenu).getByText(label).closest('button')
       if (!button) {
         throw new Error(`Expected ${label} navigation button to be rendered`)
@@ -195,6 +196,15 @@ describe('PreferencesDialog', () => {
     expect(within(kimiButton).getByLabelText('Kimi Code')).toHaveClass(
       'translate-x-0.5'
     )
+
+    const devinButton = within(navigationMenu)
+      .getByText('Devin')
+      .closest('button')
+    if (!devinButton) {
+      throw new Error('Expected Devin navigation button to be rendered')
+    }
+
+    expect(within(devinButton).getByLabelText('Devin')).toBeInTheDocument()
   })
 
   it('keeps the dialog open when Escape clears the desktop search', async () => {

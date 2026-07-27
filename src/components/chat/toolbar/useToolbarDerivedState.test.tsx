@@ -128,6 +128,32 @@ describe('useToolbarDerivedState', () => {
     expect(result.current.selectedModelLabel).toBe('Configured default')
   })
 
+  it('exposes Devin as an installed backend with its configured default', () => {
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'devin',
+        selectedProvider: null,
+        selectedModel: 'devin/default',
+        customCliProfiles: [],
+        installedBackends: ['devin'],
+        devinModelOptions: [
+          { value: 'devin/default', label: 'Configured default' },
+        ],
+      })
+    )
+
+    expect(result.current.backendModelSections).toEqual([
+      {
+        backend: 'devin',
+        label: 'Devin',
+        options: [{ value: 'devin/default', label: 'Configured default' }],
+      },
+    ])
+    expect(result.current.selectedModelLabel).toBe('Configured default')
+    expect(result.current.isDevin).toBe(true)
+  })
+
+
   it('counts enabled MCP servers identified by backend-prefixed keys', () => {
     const { result } = renderHook(() =>
       useToolbarDerivedState({

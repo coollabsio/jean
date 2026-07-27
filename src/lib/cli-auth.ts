@@ -32,7 +32,8 @@ export function isCliAuthError(error: string): boolean {
     lower.includes('to login again') ||
     lower.includes('run `claude`') ||
     lower.includes('run `codex`') ||
-    lower.includes('run `opencode`')
+    lower.includes('run `opencode`') ||
+    lower.includes('run `devin`')
   ) {
     return true
   }
@@ -77,6 +78,8 @@ export function loginArgsForBackend(
       return ['login']
     case 'kimi':
       return ['login']
+    case 'devin':
+      return ['auth', 'login']
     default:
       return ['login']
   }
@@ -93,6 +96,7 @@ const STATUS_COMMANDS: Partial<
   commandcode: { command: 'check_commandcode_cli_installed' },
   grok: { command: 'check_grok_cli_installed' },
   kimi: { command: 'check_kimi_cli_installed' },
+  devin: { command: 'check_devin_cli_installed' },
 }
 
 /**
@@ -132,14 +136,15 @@ export async function openBackendLoginModal(
       backend === 'pi' ||
       backend === 'commandcode' ||
       backend === 'grok' ||
-      backend === 'kimi'
+      backend === 'kimi' ||
+      backend === 'devin'
         ? backend
         : null
     if (!loginType) {
       toast.error(`Login is not supported for ${backend}`)
       return false
     }
-    useUIStore.getState().openCliLoginModal(loginType, path, args, 'login')
+    useUIStore.getState().openCliLoginModal(loginType as never, path, args, 'login')
     return true
   } catch (err) {
     toast.error(`Failed to start login: ${err}`)

@@ -91,7 +91,7 @@ pub struct UsageData {
 // Message Types
 // ============================================================================
 
-/// Backend for a chat session (Claude CLI, Codex CLI, OpenCode, Cursor, PI, or Command Code)
+/// Backend for a chat session (Claude CLI, Codex CLI, OpenCode, Cursor, PI, Command Code, or Devin)
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
@@ -104,6 +104,7 @@ pub enum Backend {
     Commandcode,
     Grok,
     Kimi,
+    Devin,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -125,6 +126,7 @@ impl<'de> Deserialize<'de> for Backend {
             "commandcode" => Backend::Commandcode,
             "grok" => Backend::Grok,
             "kimi" => Backend::Kimi,
+            "devin" => Backend::Devin,
             "claude" | "" => Backend::Claude,
             other => {
                 log::warn!("Unknown chat backend '{other}', falling back to claude");
@@ -149,6 +151,12 @@ mod backend_tests {
     fn backend_deserializes_kimi() {
         let backend: Backend = serde_json::from_str("\"kimi\"").unwrap();
         assert_eq!(backend, Backend::Kimi);
+    }
+
+    #[test]
+    fn backend_deserializes_devin() {
+        let backend: Backend = serde_json::from_str("\"devin\"").unwrap();
+        assert_eq!(backend, Backend::Devin);
     }
 }
 
@@ -676,6 +684,9 @@ pub struct Session {
     /// Kimi Code ACP session ID for resuming conversations
     #[serde(default)]
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID for resuming conversations
+    #[serde(default)]
+    pub devin_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -881,6 +892,7 @@ impl Session {
             commandcode_session_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -1098,6 +1110,7 @@ impl SessionMetadata {
             commandcode_session_id: self.commandcode_session_id.clone(),
             grok_session_id: self.grok_session_id.clone(),
             kimi_session_id: self.kimi_session_id.clone(),
+            devin_session_id: self.devin_session_id.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
@@ -1162,6 +1175,7 @@ impl SessionMetadata {
         self.commandcode_session_id = session.commandcode_session_id.clone();
         self.grok_session_id = session.grok_session_id.clone();
         self.kimi_session_id = session.kimi_session_id.clone();
+        self.devin_session_id = session.devin_session_id.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
@@ -1437,6 +1451,9 @@ pub struct RunEntry {
     /// Kimi Code ACP session ID — persisted per-run for conversation continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID — persisted per-run for conversation continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devin_session_id: Option<String>,
 }
 
 impl RunEntry {
@@ -1518,6 +1535,9 @@ pub struct SessionMetadata {
     /// Kimi Code ACP session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID for resuming conversations
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devin_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
@@ -1689,6 +1709,8 @@ pub struct SessionDebugInfo {
     pub grok_session_id: Option<String>,
     /// Kimi Code ACP session ID (if any)
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID (if any)
+    pub devin_session_id: Option<String>,
     /// Path to Claude CLI's JSONL file (in ~/.claude/projects/)
     pub claude_jsonl_file: Option<String>,
     /// List of JSONL run log files for this session
@@ -1720,6 +1742,7 @@ impl SessionMetadata {
             commandcode_session_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -2192,6 +2215,25 @@ mod tests {
     }
 
     #[test]
+    fn test_devin_session_id_roundtrip_via_update_from_session() {
+        let mut session = Session::new("Devin ACP support".to_string(), 0, Backend::Devin);
+        session.devin_session_id = Some("devin-acp-1".to_string());
+
+        let mut metadata = SessionMetadata::new(
+            session.id.clone(),
+            "wt-devin".to_string(),
+            session.name.clone(),
+            session.order,
+        );
+        metadata.update_from_session(&session);
+
+        assert_eq!(metadata.devin_session_id.as_deref(), Some("devin-acp-1"));
+        let restored = metadata.to_session();
+        assert_eq!(restored.devin_session_id.as_deref(), Some("devin-acp-1"));
+        assert_eq!(restored.backend, Backend::Devin);
+    }
+
+    #[test]
     fn test_session_metadata_to_session_recovers_pending_plan_waiting_state() {
         let mut metadata = SessionMetadata::new(
             "sess-plan".to_string(),
@@ -2228,6 +2270,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         let restored = metadata.to_session();
@@ -2270,6 +2313,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         assert!(metadata.find_run("run-1").is_some());
@@ -2302,6 +2346,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         };
 
         // Cancelled-with-content now renders user + partial assistant (incl tool calls).
@@ -2355,6 +2400,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-completed".to_string(),
@@ -2380,6 +2426,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         // Cancelled partial turn (user + assistant) + completed turn (user + assistant) = 4.
@@ -2423,6 +2470,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         assert!(metadata.latest_claude_session_id().is_none());
@@ -2452,6 +2500,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         assert_eq!(metadata.latest_claude_session_id(), Some("claude-sess-abc"));

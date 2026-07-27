@@ -11,6 +11,7 @@ const nativeOnlyEntryIds = [
   'cursor-cli',
   'pi-cli',
   'kimi-cli',
+  'devin-cli',
   'github-cli',
   'coderabbit-cli',
   'general-troubleshooting',
@@ -77,6 +78,7 @@ describe('preferences search index', () => {
     expect(searchPreferenceEntries('cursor model')[0]?.pane).toBe('cursor')
     expect(searchPreferenceEntries('pi model')[0]?.pane).toBe('pi')
     expect(searchPreferenceEntries('kimi model')[0]?.pane).toBe('kimi')
+    expect(searchPreferenceEntries('devin login')[0]?.pane).toBe('devin')
     expect(searchPreferenceEntries('github login')[0]?.pane).toBe('github')
     expect(searchPreferenceEntries('coderabbit login')[0]?.pane).toBe(
       'coderabbit'

@@ -17,6 +17,8 @@ import {
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
   GROK_DEFAULT_MAGIC_PROMPT_MODES,
   KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  DEVIN_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  DEVIN_DEFAULT_MAGIC_PROMPT_MODELS,
   PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   resolveMagicPromptBackend,
@@ -54,6 +56,10 @@ describe('magic prompt preference resolvers', () => {
 
   it('uses Jean-managed Kimi Code CLI by default', () => {
     expect(defaultPreferences.kimi_cli_source).toBe('jean')
+  })
+
+  it('uses the official PATH Devin CLI by default', () => {
+    expect(defaultPreferences.devin_cli_source).toBe('path')
   })
 
   it('provides magic prompt defaults for Pi', () => {
@@ -118,6 +124,16 @@ describe('magic prompt preference resolvers', () => {
     expect(KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend).toBe(
       'kimi'
     )
+  })
+
+  it('provides magic prompt defaults for Devin', () => {
+    expect(DEVIN_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend).toBe(
+      'devin'
+    )
+    expect(DEVIN_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model).toBe(
+      'devin/default'
+    )
+    expect(defaultPreferences.selected_devin_model).toBe('devin/default')
   })
 
   it('provides dedicated defaults for Sentry investigations', () => {

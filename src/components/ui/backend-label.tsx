@@ -10,6 +10,7 @@ import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
 import { KimiIcon } from '@/components/icons/KimiIcon'
+import { DevinIcon } from '@/components/icons/DevinIcon'
 import type { CliBackend } from '@/types/preferences'
 
 export type BackendIconComponent = ForwardRefExoticComponent<
@@ -34,6 +35,10 @@ export function getBackendIcon(backend: CliBackend): BackendIconComponent {
       return GrokIcon
     case 'kimi':
       return KimiIcon
+    case 'devin':
+      return DevinIcon
+    default:
+      return CodexIcon
   }
 }
 
@@ -55,6 +60,10 @@ export function getBackendLabel(backend: CliBackend): string {
       return 'Grok'
     case 'kimi':
       return 'Kimi Code'
+    case 'devin':
+      return 'Devin'
+    default:
+      return String(backend)
   }
 }
 
@@ -63,7 +72,8 @@ export function isBetaBackend(backend: CliBackend): boolean {
     backend === 'pi' ||
     backend === 'commandcode' ||
     backend === 'grok' ||
-    backend === 'kimi'
+    backend === 'kimi' ||
+    backend === 'devin'
   )
 }
 

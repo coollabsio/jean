@@ -10,6 +10,7 @@ interface BackendModelPreferences {
   selected_commandcode_model?: string
   selected_grok_model?: string
   selected_kimi_model?: string
+  selected_devin_model?: string
 }
 
 export interface ModelOption {
@@ -64,6 +65,9 @@ export function resolveDefaultModelForBackend(
   }
   if (backend === 'kimi') {
     return preferences?.selected_kimi_model ?? 'kimi/default'
+  }
+  if (backend === 'devin') {
+    return preferences?.selected_devin_model ?? 'devin/default'
   }
   return preferences?.selected_model ?? DEFAULT_MODEL
 }

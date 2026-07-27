@@ -15,6 +15,7 @@ const BACKENDS: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'devin',
 ]
 
 const status = Object.fromEntries(
@@ -71,6 +72,10 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiCliStatus: () => statusQuery('kimi'),
   useKimiCliAuth: () => authQuery('kimi'),
 }))
+vi.mock('@/services/devin-cli', () => ({
+  useDevinCliStatus: () => statusQuery('devin'),
+  useDevinCliAuth: () => authQuery('devin'),
+}))
 
 describe('isBackendUsable', () => {
   it('requires installed; excludes only when auth is known false', () => {
@@ -108,12 +113,18 @@ describe('useInstalledBackends', () => {
     auth.claude.authenticated = true
     status.opencode.installed = true
     auth.opencode.authenticated = true
+    status.devin.installed = true
+    auth.devin.authenticated = true
     status.cursor.installed = true
     // cursor not authenticated
 
     const { result } = renderHook(() => useInstalledBackends())
 
-    expect(result.current.installedBackends).toEqual(['claude', 'opencode'])
+    expect(result.current.installedBackends).toEqual([
+      'claude',
+      'opencode',
+      'devin',
+    ])
   })
 
   it('returns empty when nothing is ready', () => {

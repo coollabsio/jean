@@ -30,6 +30,7 @@ fn backend_label(backend: &Backend) -> &'static str {
         Backend::Commandcode => "commandcode",
         Backend::Grok => "grok",
         Backend::Kimi => "kimi",
+        Backend::Devin => "devin",
     }
 }
 
@@ -573,6 +574,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         assert_eq!(latest_completed_backend(&metadata), Some(Backend::Claude));
@@ -632,6 +634,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-2".to_string(),
@@ -657,6 +660,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
         });
 
         assert_eq!(

@@ -25,6 +25,7 @@ import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
+import { useAvailableDevinModels } from '@/services/devin-cli'
 import {
   getCatalogModelFastInfo,
   useModelCatalog,
@@ -159,6 +160,9 @@ export function BackendModelPickerContent({
   const { data: availableKimiModels } = useAvailableKimiModels({
     enabled: installedBackends.includes('kimi'),
   })
+  const { data: availableDevinModels } = useAvailableDevinModels({
+    enabled: installedBackends.includes('devin'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -210,6 +214,14 @@ export function BackendModelPickerContent({
       })),
     [availableKimiModels]
   )
+  const devinModelOptions = useMemo(
+    () =>
+      availableDevinModels?.map(model => ({
+        value: `devin/${model.id}`,
+        label: model.label,
+      })),
+    [availableDevinModels]
+  )
 
   const { backendModelSections: baseBackendModelSections } =
     useToolbarDerivedState({
@@ -222,6 +234,7 @@ export function BackendModelPickerContent({
       commandcodeModelOptions,
       grokModelOptions,
       kimiModelOptions,
+      devinModelOptions,
       customCliProfiles,
       installedBackends,
     })

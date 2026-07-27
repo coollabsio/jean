@@ -19,6 +19,11 @@ describe('getModelImpliedBackend', () => {
   it('treats raw GPT model ids as Codex', () => {
     expect(getModelImpliedBackend('gpt-5.5')).toBe('codex')
   })
+
+  it('treats Devin model ids as Devin', () => {
+    expect(getModelImpliedBackend('devin/default')).toBe('devin')
+    expect(resolveBackend('devin/default')).toBe('devin')
+  })
 })
 
 describe('supportsAdaptiveThinking', () => {
