@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  extractJeanMcpBareToolName,
+  formatJeanMcpToolLabel,
+  isJeanMcpToolName,
   normalizeToolCallForDisplay,
   TaskCallInline,
   ToolCallInline,
@@ -426,6 +429,169 @@ describe('normalizeToolCallForDisplay', () => {
       screen.getByText('DynamicToolCall:lookup (unhandled tool)')
     ).toBeInTheDocument()
     expect(screen.getByText('session recovery')).toBeInTheDocument()
+  })
+
+  it('renders Jean MCP tools via use_tool wrapper without unhandled fallback', () => {
+    // Matches issue #573 screenshot: use_tool({ tool_name, tool_input })
+    const cases = [
+      {
+        id: 'jean-ctx',
+        tool_name: 'jean_get_current_context',
+        tool_input: {},
+        label: 'Jean: Get Current Context',
+      },
+      {
+        id: 'jean-projects',
+        tool_name: 'jean_list_projects',
+        tool_input: {},
+        label: 'Jean: List Projects',
+      },
+      {
+        id: 'jean-worktrees',
+        tool_name: 'jean_list_worktrees',
+        tool_input: { projectId: 'b11f5add-ad7a-487c-b236-356ca6b4f18e' },
+        label: 'Jean: List Worktrees',
+        detail: 'project b11f5add',
+      },
+      {
+        id: 'jean-session',
+        tool_name: 'jean_create_session',
+        tool_input: {
+          backend: 'codex',
+          name: 'pg-moderation-verify',
+          worktreeId: '77a6074b-8035-4bdc-a477-06653f5af4d8',
+        },
+        label: 'Jean: Create Session',
+        detail: 'codex · pg-moderation-verify',
+      },
+    ]
+
+    for (const tc of cases) {
+      const { unmount } = render(
+        <ToolCallInline
+          toolCall={{
+            id: tc.id,
+            name: 'use_tool',
+            input: {
+              tool_name: tc.tool_name,
+              tool_input: tc.tool_input,
+            },
+          }}
+        />
+      )
+
+      expect(screen.getByText(tc.label)).toBeInTheDocument()
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^use_tool$/)).not.toBeInTheDocument()
+      if (tc.detail) {
+        expect(screen.getByText(tc.detail)).toBeInTheDocument()
+      }
+      unmount()
+    }
+  })
+
+  it('renders bare and mcp-prefixed Jean tools without unhandled fallback', () => {
+    const names = [
+      'get_current_context',
+      'list_projects',
+      'mcp:jean:list_worktrees',
+      'mcp__jean__create_session',
+      'mcp__jean-dev__get_current_context',
+      'jean_list_sessions',
+    ]
+
+    for (const name of names) {
+      const { unmount } = render(
+        <ToolCallInline
+          toolCall={{
+            id: `tool-${name}`,
+            name,
+            input: {},
+          }}
+        />
+      )
+
+      expect(screen.getByText(/^Jean:/)).toBeInTheDocument()
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('still labels true unknowns as unhandled', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'mystery-1',
+          name: 'SomeFutureTool',
+          input: { foo: 'bar' },
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText('SomeFutureTool (unhandled tool)')
+    ).toBeInTheDocument()
+  })
+})
+
+describe('Jean MCP tool helpers', () => {
+  it('extracts bare names from prefixed forms', () => {
+    expect(extractJeanMcpBareToolName('jean_get_current_context')).toBe(
+      'get_current_context'
+    )
+    expect(extractJeanMcpBareToolName('jean-dev_list_projects')).toBe(
+      'list_projects'
+    )
+    expect(extractJeanMcpBareToolName('mcp:jean:list_worktrees')).toBe(
+      'list_worktrees'
+    )
+    expect(extractJeanMcpBareToolName('mcp__jean__create_session')).toBe(
+      'create_session'
+    )
+    expect(
+      extractJeanMcpBareToolName('mcp__jean-dev__get_current_context')
+    ).toBe('get_current_context')
+    expect(extractJeanMcpBareToolName('get_current_context')).toBe(
+      'get_current_context'
+    )
+    expect(extractJeanMcpBareToolName('Bash')).toBeNull()
+    expect(extractJeanMcpBareToolName('mcp__github__search')).toBeNull()
+  })
+
+  it('formats friendly Jean labels', () => {
+    expect(formatJeanMcpToolLabel('jean_get_current_context')).toBe(
+      'Jean: Get Current Context'
+    )
+    expect(formatJeanMcpToolLabel('mcp:jean:create_session')).toBe(
+      'Jean: Create Session'
+    )
+    expect(isJeanMcpToolName('jean_list_projects')).toBe(true)
+    expect(isJeanMcpToolName('Read')).toBe(false)
+  })
+
+  it('unwraps use_tool in normalizeToolCallForDisplay', () => {
+    expect(
+      normalizeToolCallForDisplay('use_tool', {
+        tool_name: 'jean_create_session',
+        tool_input: {
+          backend: 'codex',
+          worktreeId: 'wt-1',
+        },
+      })
+    ).toMatchObject({
+      name: 'jean_create_session',
+      input: { backend: 'codex', worktreeId: 'wt-1' },
+    })
+
+    expect(
+      normalizeToolCallForDisplay('useTool', {
+        toolName: 'list_projects',
+        toolInput: {},
+      })
+    ).toMatchObject({
+      name: 'list_projects',
+      input: {},
+    })
   })
 })
 
