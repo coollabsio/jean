@@ -225,6 +225,8 @@ pub struct AppPreferences {
     pub syntax_theme_light: String, // Syntax highlighting theme for light mode
     #[serde(default = "default_compact_chat_view_enabled")]
     pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
+    #[serde(default = "default_sidebar_hover_open_enabled")]
+    pub sidebar_hover_open_enabled: bool, // Temporarily reveal collapsed sidebar from left edge
     #[serde(default = "default_auto_recaps_enabled")]
     pub auto_recaps_enabled: bool, // Ask agents to end multi-step turns with a recap block
     #[serde(default = "default_keep_ai_servers_warm")]
@@ -669,6 +671,10 @@ fn default_compact_chat_view_enabled() -> bool {
     true // Enabled by default
 }
 
+fn default_sidebar_hover_open_enabled() -> bool {
+    true // Enabled by default
+}
+
 fn default_auto_recaps_enabled() -> bool {
     true // Enabled by default
 }
@@ -996,6 +1002,26 @@ mod tests {
             .contains("Do not add feature-specific, bug-fix-specific, or small/local lessons"));
         assert!(prompt.contains("Remove narrow or specific entries when you detect them"));
         assert!(!prompt.contains("After ANY correction from the user"));
+    }
+
+    #[test]
+    fn sidebar_hover_open_defaults_on() {
+        let prefs = AppPreferences::default();
+
+        assert!(prefs.sidebar_hover_open_enabled);
+    }
+
+    #[test]
+    fn sidebar_hover_open_defaults_on_for_existing_preferences() {
+        let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("sidebar_hover_open_enabled");
+
+        let prefs: AppPreferences = serde_json::from_value(value).unwrap();
+
+        assert!(prefs.sidebar_hover_open_enabled);
     }
 
     #[test]
@@ -2789,6 +2815,7 @@ impl Default for AppPreferences {
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
             compact_chat_view_enabled: default_compact_chat_view_enabled(),
+            sidebar_hover_open_enabled: default_sidebar_hover_open_enabled(),
             auto_recaps_enabled: default_auto_recaps_enabled(),
             keep_ai_servers_warm: default_keep_ai_servers_warm(),
             magic_prompts: MagicPrompts::default(),

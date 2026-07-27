@@ -149,8 +149,11 @@ export const defaultResponses: Record<string, unknown> = {
   rename_session: null,
   send_chat_message: null,
   cancel_chat_message: false,
+  list_pending_wakeups: [],
 
   // Misc
+  get_package_scripts: [],
+  get_run_scripts: [],
   save_emergency_data: null,
   load_emergency_data: null,
 }

@@ -1331,6 +1331,7 @@ export interface AppPreferences {
   syntax_theme_dark: SyntaxTheme // Syntax highlighting theme for dark mode
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
   compact_chat_view_enabled: boolean // Collapse intermediate tool calls/replies into a single ticker line, only showing the latest activity
+  sidebar_hover_open_enabled?: boolean // Temporarily reveal the collapsed desktop sidebar from the left screen edge
   auto_recaps_enabled?: boolean // Ask agents to end multi-step/tool turns with a recap
   keep_ai_servers_warm?: boolean // Keep Codex/OpenCode servers alive briefly between requests
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
@@ -2507,6 +2508,7 @@ export const defaultPreferences: AppPreferences = {
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',
   compact_chat_view_enabled: true, // Default: enabled
+  sidebar_hover_open_enabled: true, // Default: enabled
   auto_recaps_enabled: true, // Default: enabled
   keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
