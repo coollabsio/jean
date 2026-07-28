@@ -1427,15 +1427,25 @@ export const useChatStore = create<ChatUIState>()(
                 (newHasData && inputChanged) ||
                 nameChanged
               ) {
+                const output =
+                  nameChanged && toolCall.name === 'Read'
+                    ? ''
+                    : nameChanged && toolCall.name === 'Monitor'
+                      ? undefined
+                      : old.output
                 const updated = [...existing]
                 updated[existingIndex] = {
                   ...old,
-                  // Preserve any output already attached by a prior tool_result
+                  // Reconcile early results once the real tool name is known.
+                  // Read contents can be large, while Monitor output duplicates
+                  // its streamed events. Other tools (including Bash and
+                  // questions) keep the result until normal handling replaces it.
                   name: nameChanged ? toolCall.name : old.name,
                   input:
                     (oldEmpty && newHasData) || (newHasData && inputChanged)
                       ? toolCall.input
                       : old.input,
+                  output,
                 }
                 return {
                   activeToolCalls: {

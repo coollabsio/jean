@@ -35,6 +35,26 @@ describe('ToolCallsDisplay', () => {
     expect(screen.getByText(/line 2/)).toBeInTheDocument()
   })
 
+  it.each(['completed', 'ok', 'success', 'context compacted'])(
+    'hides placeholder tool output "%s"',
+    output => {
+      const toolCalls: ToolCall[] = [
+        {
+          id: 'tool-1',
+          name: 'ExampleTool',
+          input: { value: 'test' },
+          output,
+        },
+      ]
+
+      render(<ToolCallsDisplay {...baseProps} toolCalls={toolCalls} />)
+      fireEvent.click(screen.getByRole('button', { name: /1 tool used/i }))
+
+      expect(screen.queryByText('Output:')).not.toBeInTheDocument()
+      expect(screen.queryByText(output)).not.toBeInTheDocument()
+    }
+  )
+
   it('renders native Codex request_user_input as an interactive question card', () => {
     const onQuestionAnswer =
       vi.fn<

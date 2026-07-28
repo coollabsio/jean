@@ -58,31 +58,18 @@ function isPlaceholderToolOutput(output: string | undefined | null): boolean {
 function shouldRenderRawOutput(toolCall: ToolCall): boolean {
   if (!toolCall.output?.trim()) return false
   if (isPlaceholderToolOutput(toolCall.output)) return false
+  const input = (toolCall.input ?? {}) as Record<string, unknown>
+  const normalizedName = normalizeToolCallForDisplay(toolCall.name, input).name
   // These tools already surface output (results/path/etc.) in expandedContent.
   if (
-    toolCall.name === 'FileChange' ||
-    toolCall.name === 'Monitor' ||
-    toolCall.name === 'CodexWebSearch' ||
-    toolCall.name === 'CodexImageView' ||
-    toolCall.name === 'CodexImageGeneration' ||
-    toolCall.name === 'CodexContextCompaction' ||
+    normalizedName === 'FileChange' ||
+    normalizedName === 'Monitor' ||
+    normalizedName === 'CodexWebSearch' ||
+    normalizedName === 'CodexImageView' ||
+    normalizedName === 'CodexImageGeneration' ||
+    normalizedName === 'CodexContextCompaction' ||
     // Bash/shell expandedContent includes stdout when present (issue #572).
-    toolCall.name === 'Bash' ||
-    toolCall.name === 'shell_command' ||
-    toolCall.name === 'run_terminal_command'
-  ) {
-    return false
-  }
-  // Grok/Cursor may keep a generic name until normalized; if the input looks
-  // like a shell command, expandedContent for Bash handles the output.
-  const input = (toolCall.input ?? {}) as Record<string, unknown>
-  if (
-    typeof input.command === 'string' &&
-    (input.variant === 'Bash' ||
-      input.variant === 'CursorShell' ||
-      toolCall.name === 'Shell' ||
-      toolCall.name === 'shell' ||
-      toolCall.name === 'execute')
+    normalizedName === 'Bash'
   ) {
     return false
   }
@@ -830,6 +817,16 @@ export function normalizeToolCallForDisplay(
   delete withoutVariant.variant
 
   switch (normalizedName) {
+    case 'Bash':
+    case 'shell_command':
+    case 'run_terminal_command':
+    case 'Shell':
+    case 'shell':
+    case 'execute':
+      return {
+        name: 'Bash',
+        input: withoutVariant,
+      }
     case 'read_file':
     case 'Read':
       return {
@@ -881,8 +878,6 @@ export function normalizeToolCallForDisplay(
           path: input.path ?? input.targetDirectory,
         },
       }
-    case 'shell_command':
-      return { name: 'Bash', input }
     case 'read_directory':
       return { name: 'List', input }
     case 'glob':

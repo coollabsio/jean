@@ -530,6 +530,56 @@ describe('ChatStore', () => {
       expect(toolCalls?.[0]?.output).toBe('exit: 0\nhello\n')
     })
 
+    it('filters a large Read result that arrives before tool_use', () => {
+      const { addToolCall, updateToolCallOutput } = useChatStore.getState()
+      const largeFileContents = 'file contents\n'.repeat(10_000)
+
+      updateToolCallOutput('session-1', 'tool-read-1', largeFileContents)
+      addToolCall('session-1', {
+        id: 'tool-read-1',
+        name: 'Read',
+        input: { file_path: '/large-file.txt' },
+      })
+
+      const toolCall =
+        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.name).toBe('Read')
+      expect(toolCall?.input).toEqual({ file_path: '/large-file.txt' })
+      expect(toolCall?.output).toBe('')
+    })
+
+    it('removes a Monitor result that arrives before tool_use', () => {
+      const { addToolCall, updateToolCallOutput } = useChatStore.getState()
+
+      updateToolCallOutput('session-1', 'tool-monitor-1', 'duplicate output')
+      addToolCall('session-1', {
+        id: 'tool-monitor-1',
+        name: 'Monitor',
+        input: {},
+      })
+
+      const toolCall =
+        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.name).toBe('Monitor')
+      expect(toolCall?.output).toBeUndefined()
+    })
+
+    it('keeps an early question result until answer handling replaces it', () => {
+      const { addToolCall, updateToolCallOutput } = useChatStore.getState()
+
+      updateToolCallOutput('session-1', 'tool-question-1', 'Answer questions?')
+      addToolCall('session-1', {
+        id: 'tool-question-1',
+        name: 'question',
+        input: { questions: [{ question: 'Continue?' }] },
+      })
+
+      const toolCall =
+        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.name).toBe('question')
+      expect(toolCall?.output).toBe('Answer questions?')
+    })
+
     it('clears tool calls', () => {
       const { addToolCall, clearToolCalls } = useChatStore.getState()
 

@@ -151,7 +151,8 @@ describe('ToolCallInline', () => {
           id: 'tool-bash-with-output',
           name: 'Bash',
           input: { command: 'cd /tmp; ls -la' },
-          output: 'exit: 0\ntotal 8\ndrwxr-xr-x 2 root root 4096 Jul 1 12:00 .\n',
+          output:
+            'exit: 0\ntotal 8\ndrwxr-xr-x 2 root root 4096 Jul 1 12:00 .\n',
         }}
       />
     )
@@ -184,6 +185,36 @@ describe('ToolCallInline', () => {
 
     expect(screen.getByText('Output:')).toBeInTheDocument()
     expect(screen.getByText(/deployed revision abc123/)).toBeInTheDocument()
+  })
+
+  it.each([
+    'Bash',
+    'shell_command',
+    'run_terminal_command',
+    'Shell',
+    'shell',
+    'execute',
+  ])('renders %s without a variant through the Bash renderer', name => {
+    const output = `stdout from ${name}`
+    const { unmount } = render(
+      <ToolCallInline
+        toolCall={{
+          id: `tool-${name}`,
+          name,
+          input: { command: 'printf hello' },
+          output,
+        }}
+      />
+    )
+
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+    expect(screen.getByText('printf hello')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText(output)).toBeInTheDocument()
+    expect(screen.getAllByText('Output:')).toHaveLength(1)
+    unmount()
   })
 
   it('renders additional Command Code snake_case tools without the unhandled fallback', () => {
