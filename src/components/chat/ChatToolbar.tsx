@@ -529,7 +529,7 @@ export const ChatToolbar = memo(function ChatToolbar({
           <UsageIndicator
             selectedBackend={selectedBackend}
             variant="toolbar"
-            className="flex @xl:hidden shrink-0"
+            className="inline-flex @xl:hidden shrink-0"
             side="top"
             align="start"
           />

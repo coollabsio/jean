@@ -198,6 +198,8 @@ export function UsageIndicator({
   const showShortcut =
     showKeybindingHint ?? (isNativeApp() && !isMobile)
 
+  // Dock: hide when no usage backend is ready. Toolbar: always show a chip
+  // for usage-capable selected backends (placeholder while loading).
   if (!activeEntry) return null
 
   // Toolbar dropdown: include the active backend even if still loading.
@@ -213,96 +215,94 @@ export function UsageIndicator({
     activeEntry.weekly
   )
 
+  // Match neighboring toolbar controls (`High`, model picker): put responsive
+  // visibility on the trigger button itself — not a wrapper (wrapper + Radix
+  // trigger was easy to zero-size / hide incorrectly).
   return (
-    // Wrapper owns responsive visibility so it never fights the trigger's `flex`.
-    <div className={cn(className)}>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={`${activeEntry.label} usage ${badgeText}`}
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`${activeEntry.label} usage ${badgeText}`}
+              className={cn(
+                isToolbar
+                  ? 'h-8 items-center gap-1 px-2 text-xs font-medium transition-colors hover:bg-muted/80 hover:text-foreground'
+                  : 'h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground xl:w-[88px] xl:justify-center xl:px-2',
+                // Default display when caller does not pass responsive classes
+                !className && (isToolbar ? 'inline-flex' : 'inline-flex'),
+                severityClass,
+                className
+              )}
+            >
+              <ActiveIcon
                 className={cn(
-                  isToolbar
-                    ? 'flex h-8 items-center gap-1 px-2 text-xs font-medium transition-colors hover:bg-muted/80 hover:text-foreground'
-                    : 'inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground xl:w-[88px] xl:justify-center xl:px-2',
-                  severityClass
+                  'shrink-0',
+                  isToolbar ? 'h-3.5 w-3.5' : 'size-4 xl:mr-1 xl:size-3.5'
+                )}
+              />
+              <span
+                className={cn(
+                  'tabular-nums leading-none',
+                  isToolbar ? 'text-[11px]' : 'hidden text-[11px] xl:inline'
                 )}
               >
-                <ActiveIcon
-                  className={cn(
-                    'shrink-0',
-                    isToolbar ? 'h-3.5 w-3.5' : 'size-4 xl:mr-1 xl:size-3.5'
-                  )}
-                />
-                <span
-                  className={cn(
-                    'tabular-nums leading-none',
-                    isToolbar
-                      ? 'text-[11px]'
-                      : 'hidden text-[11px] xl:inline'
-                  )}
-                >
-                  {badgeText}
+                {badgeText}
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side={side}>
+          {activeEntry.label} Session|Weekly
+          {showShortcut ? (
+            <kbd className="ml-1 text-[0.625rem] opacity-60">
+              {usageShortcut}
+            </kbd>
+          ) : null}
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        side={side}
+        align={align}
+        className="min-w-[180px]"
+        onEscapeKeyDown={e => e.stopPropagation()}
+      >
+        {menuEntries.map(entry => {
+          const Icon = USAGE_ICONS[entry.id]
+          const pair = formatUsagePair(entry.session, entry.weekly)
+          const planText =
+            entry.plan && entry.plan.trim().length > 0 ? entry.plan : '--'
+          return (
+            <DropdownMenuItem
+              key={entry.id}
+              onClick={() =>
+                useUIStore.getState().openPreferencesPane('usage')
+              }
+            >
+              <Icon className="mr-2 h-4 w-4 shrink-0" />
+              <div className="flex min-w-0 flex-col">
+                <span>{entry.label}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  Plan: {planText}
                 </span>
-              </button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side={side}>
-            {activeEntry.label} Session|Weekly
-            {showShortcut ? (
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {usageShortcut}
-              </kbd>
-            ) : null}
-          </TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent
-          side={side}
-          align={align}
-          className="min-w-[180px]"
-          onEscapeKeyDown={e => e.stopPropagation()}
-        >
-          {menuEntries.map(entry => {
-            const Icon = USAGE_ICONS[entry.id]
-            const pair = formatUsagePair(entry.session, entry.weekly)
-            const planText =
-              entry.plan && entry.plan.trim().length > 0 ? entry.plan : '--'
-            return (
-              <DropdownMenuItem
-                key={entry.id}
-                onClick={() =>
-                  useUIStore.getState().openPreferencesPane('usage')
-                }
+              </div>
+              <DropdownMenuShortcut
+                className={usageSeverityTextClass(entry.session, entry.weekly)}
               >
-                <Icon className="mr-2 h-4 w-4 shrink-0" />
-                <div className="flex min-w-0 flex-col">
-                  <span>{entry.label}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    Plan: {planText}
-                  </span>
-                </div>
-                <DropdownMenuShortcut
-                  className={usageSeverityTextClass(
-                    entry.session,
-                    entry.weekly
-                  )}
-                >
-                  {pair}
-                </DropdownMenuShortcut>
-              </DropdownMenuItem>
-            )
-          })}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => useUIStore.getState().openPreferencesPane('usage')}
-          >
-            <BarChart3 className="mr-2 h-4 w-4" />
-            Open Usage Details
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+                {pair}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )
+        })}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => useUIStore.getState().openPreferencesPane('usage')}
+        >
+          <BarChart3 className="mr-2 h-4 w-4" />
+          Open Usage Details
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

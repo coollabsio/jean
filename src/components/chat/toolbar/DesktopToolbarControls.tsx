@@ -693,7 +693,7 @@ export function DesktopToolbarControls({
       <UsageIndicator
         selectedBackend={selectedBackend}
         variant="toolbar"
-        className="hidden @xl:flex shrink-0"
+        className="hidden @xl:inline-flex shrink-0"
         side="top"
         align="start"
       />
