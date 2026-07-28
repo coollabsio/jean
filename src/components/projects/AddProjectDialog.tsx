@@ -239,8 +239,16 @@ export function AddProjectDialog() {
   ])
 
   return (
-    <Dialog open={addProjectDialogOpen} onOpenChange={setAddProjectDialogOpen}>
-      <>
+    <>
+      {/*
+        DirectoryBrowser is a sibling Dialog, not nested under New Project.
+        Nested Radix dialogs trap focus poorly and have been implicated in
+        WebView2 freezes when alt-tabbing on Windows (issue #575).
+      */}
+      <Dialog
+        open={addProjectDialogOpen}
+        onOpenChange={setAddProjectDialogOpen}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>New Project</DialogTitle>
@@ -308,25 +316,25 @@ export function AddProjectDialog() {
             </button>
           </div>
         </DialogContent>
+      </Dialog>
 
-        <DirectoryBrowser
-          open={browserMode !== null}
-          onOpenChange={handleBrowserOpenChange}
-          onSelect={handleBrowserSelect}
-          mode={browserMode ?? 'select'}
-          title={
-            browserMode === 'save'
-              ? 'Create new project'
-              : 'Select existing project'
-          }
-          description={
-            browserMode === 'save'
-              ? 'Choose a parent directory and enter a new project folder name.'
-              : 'Choose an existing git repository folder.'
-          }
-          defaultName={browserMode === 'save' ? 'my-project' : undefined}
-        />
-      </>
-    </Dialog>
+      <DirectoryBrowser
+        open={browserMode !== null}
+        onOpenChange={handleBrowserOpenChange}
+        onSelect={handleBrowserSelect}
+        mode={browserMode ?? 'select'}
+        title={
+          browserMode === 'save'
+            ? 'Create new project'
+            : 'Select existing project'
+        }
+        description={
+          browserMode === 'save'
+            ? 'Choose a parent directory and enter a new project folder name.'
+            : 'Choose an existing git repository folder.'
+        }
+        defaultName={browserMode === 'save' ? 'my-project' : undefined}
+      />
+    </>
   )
 }

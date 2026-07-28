@@ -1,13 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "identifier": "com.jean.desktop.dev",
-  "build": {
-    "beforeDevCommand": "bun run scripts/tauri-dev-before.mjs"
-  },
   "app": {
     "windows": [
       {
-        "title": "Jean (Dev)",
+        "title": "Jean",
         "width": 800,
         "height": 600,
         "minWidth": 1000,
@@ -22,7 +18,12 @@
         "alwaysOnTop": false,
         "transparent": false,
         "shadow": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "windowEffects": {
+          "effects": [],
+          "radius": 0,
+          "state": "active"
+        }
       }
     ]
   }

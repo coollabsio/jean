@@ -1,5 +1,24 @@
 # Troubleshooting Guide
 
+## Windows: Jean window goes "invisible" / shows desktop wallpaper
+
+**Symptoms:**
+- Jean window frame remains but content shows the desktop wallpaper (or is blank).
+- Task Manager may show only the Jean host process with no WebView2 child processes.
+- Reported after opening menus/dialogs (e.g. sidebar **New**) and alt-tabbing while connected to a remote Jean (issue [#575](https://github.com/coollabsio/jean/issues/575)).
+
+**Root cause:**
+WebView2's browser or renderer process crashed. Jean's window was historically transparent on all platforms; when the webview stops painting, the transparent host shows whatever is behind it (wallpaper), which looks like the app went invisible.
+
+**Fixes in current releases:**
+1. Windows builds force an opaque main window (`tauri.windows.conf.json` sets `transparent: false`).
+2. A WebView2 `ProcessFailed` handler reloads the page on renderer exits, or restarts Jean when the browser process dies (`src-tauri/src/platform/windows_webview.rs`).
+3. New Project no longer nests the remote `DirectoryBrowser` dialog inside another Radix dialog (focus-trap stacking).
+
+**If it still happens:** restart Jean (or wait for auto-restart after browser-process exit). Update WebView2 Runtime via Windows Update / Evergreen installer. Note GPU driver issues if crashes correlate with sleep/wake or multi-monitor changes.
+
+---
+
 ## Linux Graphics Issues
 
 ### White Screen on Ubuntu 24.04+ (AppImage)

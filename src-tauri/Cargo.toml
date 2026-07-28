@@ -52,6 +52,8 @@ gtk = "=0.18.2"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7.2"
+# Match Tauri/wry's WebView2 bindings for ProcessFailed recovery (issue #575).
+webview2-com = "0.38"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"

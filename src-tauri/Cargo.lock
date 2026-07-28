@@ -2518,6 +2518,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "webkit2gtk",
+ "webview2-com",
 ]
 
 [[package]]
