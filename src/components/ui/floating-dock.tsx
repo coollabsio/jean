@@ -18,6 +18,7 @@ import {
   GitPullRequest,
   ShieldAlert,
 } from 'lucide-react'
+import { UsageIndicator } from '@/components/chat/toolbar/UsageIndicator'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -53,28 +54,10 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { chatQueryKeys } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import { useWorktree, type GitHubRemote } from '@/services/projects'
-import {
-  useClaudeCliAuth,
-  useClaudeCliStatus,
-  useClaudeUsage,
-} from '@/services/claude-cli'
-import {
-  useCodexCliAuth,
-  useCodexCliStatus,
-  useCodexUsage,
-} from '@/services/codex-cli'
-import {
-  useGrokCliAuth,
-  useGrokCliStatus,
-  useGrokUsage,
-} from '@/services/grok-cli'
 import type { WorktreeSessions } from '@/types/chat'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { KeybindingHint } from '@/components/ui/keybinding-hints'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
-import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
-import { CodexIcon } from '@/components/icons/CodexIcon'
-import { GrokIcon } from '@/components/icons/GrokIcon'
 
 // Canvas-specific hints (used in ProjectCanvasView)
 const CANVAS_HINTS: KeybindingHint[] = [
@@ -213,102 +196,10 @@ export function FloatingDock() {
     activeSessionId ? state.selectedBackends[activeSessionId] : undefined
   )
   const [menuOpen, setMenuOpen] = useState(false)
-  const [usageMenuOpen, setUsageMenuOpen] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<string | null>(null)
-  const shouldFetchUsage = !import.meta.env.DEV || usageMenuOpen
 
-  const activeBackend = (selectedBackend ??
-    preferences?.default_backend ??
-    'claude') as
-    | 'claude'
-    | 'codex'
-    | 'opencode'
-    | 'cursor'
-    | 'pi'
-    | 'commandcode'
-    | 'grok'
-
-  const claudeStatus = useClaudeCliStatus()
-  const claudeAuth = useClaudeCliAuth({
-    enabled: !!claudeStatus.data?.installed,
-  })
-  const claudeUsage = useClaudeUsage({
-    enabled:
-      !!claudeStatus.data?.installed &&
-      !!claudeAuth.data?.authenticated &&
-      shouldFetchUsage,
-  })
-
-  const codexStatus = useCodexCliStatus()
-  const codexAuth = useCodexCliAuth({
-    enabled: !!codexStatus.data?.installed,
-  })
-  const codexUsage = useCodexUsage({
-    enabled:
-      !!codexStatus.data?.installed &&
-      !!codexAuth.data?.authenticated &&
-      shouldFetchUsage,
-  })
-
-  const grokStatus = useGrokCliStatus()
-  const grokAuth = useGrokCliAuth({
-    enabled: !!grokStatus.data?.installed,
-  })
-  const grokUsage = useGrokUsage({
-    enabled:
-      !!grokStatus.data?.installed &&
-      !!grokAuth.data?.authenticated &&
-      shouldFetchUsage,
-  })
-
-  // Only installed + authenticated backends appear in the usage menu.
-  const usageEntries = [
-    {
-      id: 'claude' as const,
-      label: 'Claude',
-      Icon: ClaudeIcon,
-      plan: claudeUsage.data?.planType ?? null,
-      session: claudeUsage.data?.session?.usedPercent ?? null,
-      weekly: claudeUsage.data?.weekly?.usedPercent ?? null,
-      available:
-        !!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated,
-    },
-    {
-      id: 'codex' as const,
-      label: 'Codex',
-      Icon: CodexIcon,
-      plan: codexUsage.data?.planType ?? null,
-      session: codexUsage.data?.session?.usedPercent ?? null,
-      weekly: codexUsage.data?.weekly?.usedPercent ?? null,
-      available:
-        !!codexStatus.data?.installed && !!codexAuth.data?.authenticated,
-    },
-    {
-      id: 'grok' as const,
-      label: 'Grok',
-      Icon: GrokIcon,
-      plan: grokUsage.data?.planType ?? null,
-      session: grokUsage.data?.session?.usedPercent ?? null,
-      weekly: grokUsage.data?.weekly?.usedPercent ?? null,
-      available:
-        !!grokStatus.data?.installed && !!grokAuth.data?.authenticated,
-    },
-  ].filter(entry => entry.available)
-
-  const activeUsageEntry =
-    usageEntries.find(entry => entry.id === activeBackend) ??
-    usageEntries[0] ??
-    null
-
-  const usageBadge = (() => {
-    const session = activeUsageEntry?.session ?? null
-    const weekly = activeUsageEntry?.weekly ?? null
-    const sessionText = session === null ? '--' : `${Math.round(session)}`
-    const weeklyText = weekly === null ? '--' : `${Math.round(weekly)}`
-    return {
-      text: `${sessionText}|${weeklyText}%`,
-    }
-  })()
+  const activeBackend =
+    selectedBackend ?? preferences?.default_backend ?? 'claude'
 
   const getActiveResumeCommand = useCallback(() => {
     const { selectedWorktreeId: currentWorktreeId } =
@@ -421,16 +312,6 @@ export function FloatingDock() {
     return () => window.removeEventListener('toggle-quick-menu', handler)
   }, [toggleMenu])
 
-  const toggleUsageMenu = useCallback(() => {
-    setUsageMenuOpen(prev => !prev)
-  }, [])
-
-  useEffect(() => {
-    const handler = () => toggleUsageMenu()
-    window.addEventListener('toggle-usage-menu', handler)
-    return () => window.removeEventListener('toggle-usage-menu', handler)
-  }, [toggleUsageMenu])
-
   const githubShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.open_github_dashboard ??
       DEFAULT_KEYBINDINGS.open_github_dashboard) as string
@@ -441,10 +322,6 @@ export function FloatingDock() {
       DEFAULT_KEYBINDINGS.open_quick_menu) as string
   )
 
-  const usageShortcut = formatShortcutDisplay(
-    (preferences?.keybindings?.open_usage_dropdown ??
-      DEFAULT_KEYBINDINGS.open_usage_dropdown) as string
-  )
   const isWebAccess = !isNativeApp()
   const showConnectionIndicator = isWebAccess && !isMobile
   const showKeybindingHints = isNativeApp() && !isMobile
@@ -585,74 +462,14 @@ export function FloatingDock() {
         </TooltipContent>
       </Tooltip>
 
-      {activeUsageEntry && (
-        <DropdownMenu open={usageMenuOpen} onOpenChange={setUsageMenuOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground xl:w-[88px] xl:justify-center xl:px-2"
-                >
-                  <activeUsageEntry.Icon className="size-4 shrink-0 xl:mr-1 xl:size-3.5" />
-                  <span className="hidden text-[11px] leading-none tabular-nums xl:inline">
-                    {usageBadge.text}
-                  </span>
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side={popoverSide}>
-              {activeUsageEntry.label} Session|Weekly{' '}
-              {showKeybindingHints && (
-                <kbd className="ml-1 text-[0.625rem] opacity-60">
-                  {usageShortcut}
-                </kbd>
-              )}
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent
-            side={popoverSide}
-            align={popoverAlign}
-            className="min-w-[180px]"
-            onEscapeKeyDown={e => e.stopPropagation()}
-          >
-            {usageEntries.map(entry => {
-              const sessionText =
-                entry.session === null ? '--' : `${Math.round(entry.session)}`
-              const weeklyText =
-                entry.weekly === null ? '--' : `${Math.round(entry.weekly)}`
-              const planText =
-                entry.plan && entry.plan.trim().length > 0 ? entry.plan : '--'
-              return (
-                <DropdownMenuItem
-                  key={entry.id}
-                  onClick={() =>
-                    useUIStore.getState().openPreferencesPane('usage')
-                  }
-                >
-                  <entry.Icon className="mr-2 h-4 w-4 shrink-0" />
-                  <div className="flex min-w-0 flex-col">
-                    <span>{entry.label}</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Plan: {planText}
-                    </span>
-                  </div>
-                  <DropdownMenuShortcut>
-                    {sessionText}|{weeklyText}%
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-              )
-            })}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => useUIStore.getState().openPreferencesPane('usage')}
-            >
-              Open Usage Details
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+      <UsageIndicator
+        selectedBackend={activeBackend}
+        variant="dock"
+        side={popoverSide}
+        align={popoverAlign}
+        showKeybindingHint={showKeybindingHints}
+        fetchOnlyWhenOpen={import.meta.env.DEV}
+      />
 
       {showConnectionIndicator && <ConnectionIndicator />}
       {showKeybindingHints && (

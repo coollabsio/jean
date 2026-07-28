@@ -24,6 +24,7 @@ import { MobileSettingsMenu } from '@/components/chat/toolbar/MobileSettingsMenu
 import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import { UsageIndicator } from '@/components/chat/toolbar/UsageIndicator'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
@@ -438,6 +439,14 @@ export const ChatToolbar = memo(function ChatToolbar({
       <div className="@container flex justify-start px-4 py-2 md:px-6">
         <div className="inline-flex max-w-full flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
           <DockBurgerButton className="flex @xl:hidden" />
+
+          <UsageIndicator
+            selectedBackend={selectedBackend}
+            variant="toolbar"
+            className="flex shrink-0"
+            side="top"
+            align="start"
+          />
 
           <MobileToolbarMenu
             isDisabled={false}
