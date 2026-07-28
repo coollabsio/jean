@@ -5,6 +5,7 @@ import {
   formatJeanMcpToolLabel,
   isJeanMcpToolName,
   normalizeToolCallForDisplay,
+  StackedGroup,
   TaskCallInline,
   ToolCallInline,
 } from './ToolCallInline'
@@ -490,10 +491,8 @@ describe('normalizeToolCallForDisplay', () => {
     }
   })
 
-  it('renders bare and mcp-prefixed Jean tools without unhandled fallback', () => {
+  it('renders prefixed Jean tools without unhandled fallback', () => {
     const names = [
-      'get_current_context',
-      'list_projects',
       'mcp:jean:list_worktrees',
       'mcp__jean__create_session',
       'mcp__jean-dev__get_current_context',
@@ -551,9 +550,7 @@ describe('Jean MCP tool helpers', () => {
     expect(
       extractJeanMcpBareToolName('mcp__jean-dev__get_current_context')
     ).toBe('get_current_context')
-    expect(extractJeanMcpBareToolName('get_current_context')).toBe(
-      'get_current_context'
-    )
+    expect(extractJeanMcpBareToolName('get_current_context')).toBeNull()
     expect(extractJeanMcpBareToolName('Bash')).toBeNull()
     expect(extractJeanMcpBareToolName('mcp__github__search')).toBeNull()
   })
@@ -592,6 +589,31 @@ describe('Jean MCP tool helpers', () => {
       name: 'list_projects',
       input: {},
     })
+  })
+})
+
+describe('StackedGroup', () => {
+  it('uses the wrapped Jean tool name in its summary', () => {
+    render(
+      <StackedGroup
+        items={[
+          {
+            type: 'tool',
+            tool: {
+              id: 'wrapped-jean-1',
+              name: 'use_tool',
+              input: {
+                tool_name: 'jean_list_projects',
+                tool_input: {},
+              },
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('1 Jean: List Projects')).toBeInTheDocument()
+    expect(screen.queryByText('1 use_tool')).not.toBeInTheDocument()
   })
 })
 

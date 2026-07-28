@@ -23,6 +23,35 @@ describe('CompactStreamingTicker', () => {
     areQuestionsSkipped: vi.fn(() => false),
   }
 
+  it('shows Jean MCP details from normalized wrapper arguments', () => {
+    render(
+      <CompactStreamingTicker
+        {...baseProps}
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'jean-1' }]}
+        toolCalls={[
+          {
+            id: 'jean-1',
+            name: 'use_tool',
+            input: {
+              tool_name: 'jean_create_worktree',
+              tool_input: {
+                customName: 'fix-streaming-ticker',
+                baseBranch: 'main',
+                model: 'gpt-5.6',
+              },
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(
+      screen.getByRole('button', {
+        name: /Jean: Create Worktree.*fix-streaming-ticker · main · gpt-5\.6/,
+      })
+    ).toBeVisible()
+  })
+
   it('keeps plan-mode tool batches compact while rendering the Codex plan', () => {
     render(
       <CompactStreamingTicker

@@ -10,6 +10,7 @@ import {
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
+  formatJeanMcpToolDetail,
   formatJeanMcpToolLabel,
   isJeanMcpToolName,
   normalizeToolCallForDisplay,
@@ -112,18 +113,19 @@ function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
               ? formatJeanMcpToolLabel(normalized.name)
               : normalized.name
 
-  const detail =
-    query ??
-    actionQuery ??
-    filePath ??
-    path ??
-    command ??
-    url ??
-    pattern ??
-    description ??
-    backend ??
-    toolName ??
-    undefined
+  const detail = isJeanMcpToolName(normalized.name)
+    ? formatJeanMcpToolDetail(input)
+    : (query ??
+      actionQuery ??
+      filePath ??
+      path ??
+      command ??
+      url ??
+      pattern ??
+      description ??
+      backend ??
+      toolName ??
+      undefined)
   return {
     label: friendlyLabel,
     detail: detail ? truncate(detail, 80) : undefined,

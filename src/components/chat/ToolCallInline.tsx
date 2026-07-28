@@ -83,51 +83,6 @@ function firstStringField(
   return undefined
 }
 
-/** Jean MCP bare tool names (registry in jean_mcp_core.rs). */
-const JEAN_MCP_BARE_TOOLS = new Set([
-  'list_projects',
-  'add_project',
-  'clone_project',
-  'init_project',
-  'list_worktrees',
-  'get_worktree',
-  'get_project_context',
-  'list_github_issues',
-  'list_github_prs',
-  'list_security_issues',
-  'list_security_advisories',
-  'list_linear_issues',
-  'create_worktree',
-  'create_worktree_from_existing_branch',
-  'import_worktree',
-  'rename_worktree',
-  'archive_worktree',
-  'unarchive_worktree',
-  'list_archived_worktrees',
-  'delete_worktree',
-  'permanently_delete_worktree',
-  'update_worktree_labels',
-  'list_sessions',
-  'create_session',
-  'send_chat_message',
-  'archive_session',
-  'unarchive_session',
-  'get_session_status',
-  'cancel_session_run',
-  'read_session_messages',
-  'set_session_model',
-  'get_usage',
-  'get_worktree_changes',
-  'get_worktree_diff',
-  'get_current_context',
-  'create_commit',
-  'push_worktree',
-  'detect_open_pr',
-  'create_pull_request',
-  'merge_pull_request',
-  'run_review',
-])
-
 /**
  * Strip MCP / client prefixes from a Jean tool name and return the bare registry name.
  * Handles: jean_get_current_context, jean-dev_list_projects, mcp:jean:list_worktrees,
@@ -145,7 +100,9 @@ export function extractJeanMcpBareToolName(name: string): string | null {
       const server = rest.slice(0, serverSep)
       const tool = rest.slice(serverSep + 2)
       if (
-        (server === 'jean' || server === 'jean-dev' || server.startsWith('jean')) &&
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
         tool
       ) {
         return tool
@@ -161,7 +118,9 @@ export function extractJeanMcpBareToolName(name: string): string | null {
       const server = parts[1] ?? ''
       const tool = parts.slice(2).join(':')
       if (
-        (server === 'jean' || server === 'jean-dev' || server.startsWith('jean')) &&
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
         tool
       ) {
         return tool
@@ -178,7 +137,6 @@ export function extractJeanMcpBareToolName(name: string): string | null {
     }
   }
 
-  if (JEAN_MCP_BARE_TOOLS.has(trimmed)) return trimmed
   return null
 }
 
@@ -211,7 +169,7 @@ export function formatJeanMcpToolLabel(name: string): string {
 }
 
 /** Detail line for Jean MCP tools from common argument fields. */
-function formatJeanMcpToolDetail(
+export function formatJeanMcpToolDetail(
   input: Record<string, unknown>
 ): string | undefined {
   const parts: string[] = []
@@ -235,7 +193,8 @@ function formatJeanMcpToolDetail(
   if (branch) parts.push(branch)
   if (model) parts.push(model)
   if (path) parts.push(path)
-  if (message) parts.push(message.length > 40 ? `${message.slice(0, 40)}…` : message)
+  if (message)
+    parts.push(message.length > 40 ? `${message.slice(0, 40)}…` : message)
   // Short id suffixes only when nothing more descriptive is available
   if (parts.length === 0) {
     if (worktreeId) parts.push(`worktree ${worktreeId.slice(0, 8)}`)
@@ -279,11 +238,7 @@ function unwrapMetaToolCall(
     input.parameters
 
   let nestedInput: Record<string, unknown> = {}
-  if (
-    rawNested &&
-    typeof rawNested === 'object' &&
-    !Array.isArray(rawNested)
-  ) {
+  if (rawNested && typeof rawNested === 'object' && !Array.isArray(rawNested)) {
     nestedInput = rawNested as Record<string, unknown>
   }
 
@@ -670,7 +625,7 @@ export function StackedGroup({
     if (item.type === 'thinking') {
       thinkingCount++
     } else {
-      const name = getToolSummaryName(item.tool.name)
+      const name = getToolSummaryName(item.tool)
       toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1)
     }
   }
@@ -1114,8 +1069,8 @@ export function normalizeToolCallForDisplay(
   }
 }
 
-function getToolSummaryName(name: string): string {
-  switch (name) {
+function getToolSummaryName(toolCall: ToolCall): string {
+  switch (toolCall.name) {
     case 'CodexWebSearch':
       return 'Web Search'
     case 'CodexImageGeneration':
@@ -1125,8 +1080,11 @@ function getToolSummaryName(name: string): string {
     case 'CodexContextCompaction':
       return 'Context Compaction'
     default: {
-      const normalized = normalizeToolCallForDisplay(name, {}).name
-      if (isJeanMcpToolName(normalized) || isJeanMcpToolName(name)) {
+      const normalized = normalizeToolCallForDisplay(
+        toolCall.name,
+        (toolCall.input ?? {}) as Record<string, unknown>
+      ).name
+      if (isJeanMcpToolName(normalized) || isJeanMcpToolName(toolCall.name)) {
         return formatJeanMcpToolLabel(normalized)
       }
       return normalized
