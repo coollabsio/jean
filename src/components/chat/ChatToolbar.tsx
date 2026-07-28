@@ -440,14 +440,6 @@ export const ChatToolbar = memo(function ChatToolbar({
         <div className="inline-flex max-w-full flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
           <DockBurgerButton className="flex @xl:hidden" />
 
-          <UsageIndicator
-            selectedBackend={selectedBackend}
-            variant="toolbar"
-            className="flex shrink-0"
-            side="top"
-            align="start"
-          />
-
           <MobileToolbarMenu
             isDisabled={false}
             hasOpenPr={hasOpenPr}
@@ -532,6 +524,15 @@ export const ChatToolbar = memo(function ChatToolbar({
               onBackendModelChange={onBackendModelChange}
             />
           )}
+
+          {/* Mobile: usage sits with model/mode controls, not the left menu cluster */}
+          <UsageIndicator
+            selectedBackend={selectedBackend}
+            variant="toolbar"
+            className="flex @xl:hidden shrink-0"
+            side="top"
+            align="start"
+          />
 
           <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
 

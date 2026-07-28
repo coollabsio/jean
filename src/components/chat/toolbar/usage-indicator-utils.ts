@@ -59,18 +59,46 @@ export function usageSeverityTextClass(
   return 'text-muted-foreground'
 }
 
+const USAGE_BACKEND_LABELS: Record<UsageCapableBackend, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  grok: 'Grok',
+}
+
+/** Placeholder entry so the toolbar chip stays visible while usage loads. */
+export function placeholderUsageEntry(
+  backend: UsageCapableBackend
+): UsageEntry {
+  return {
+    id: backend,
+    label: USAGE_BACKEND_LABELS[backend],
+    plan: null,
+    session: null,
+    weekly: null,
+    available: false,
+  }
+}
+
 /**
  * Prefer the session's selected backend when it has usage;
  * otherwise fall back to the first available entry (canvas dock case).
+ *
+ * When `preferSelectedPlaceholder` is true (chat toolbar), still return a
+ * placeholder for a usage-capable selected backend so the chip does not
+ * disappear while auth/usage is loading.
  */
 export function resolveActiveUsageEntry(
   entries: UsageEntry[],
-  selectedBackend: string | null | undefined
+  selectedBackend: string | null | undefined,
+  options?: { preferSelectedPlaceholder?: boolean }
 ): UsageEntry | null {
-  if (entries.length === 0) return null
   if (isUsageCapableBackend(selectedBackend)) {
     const match = entries.find(e => e.id === selectedBackend)
     if (match) return match
+    if (options?.preferSelectedPlaceholder) {
+      return placeholderUsageEntry(selectedBackend)
+    }
   }
+  if (entries.length === 0) return null
   return entries[0] ?? null
 }

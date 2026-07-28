@@ -76,4 +76,18 @@ describe('resolveActiveUsageEntry', () => {
   it('returns null when nothing is available', () => {
     expect(resolveActiveUsageEntry([], 'claude')).toBeNull()
   })
+
+  it('returns a placeholder for selected backend when toolbar prefers it', () => {
+    const placeholder = resolveActiveUsageEntry([], 'claude', {
+      preferSelectedPlaceholder: true,
+    })
+    expect(placeholder).toEqual({
+      id: 'claude',
+      label: 'Claude',
+      plan: null,
+      session: null,
+      weekly: null,
+      available: false,
+    })
+  })
 })
