@@ -12,6 +12,7 @@ import {
 } from '@/services/chat'
 import type { ExecutionMode, Session } from '@/types/chat'
 import type * as ChatService from '@/services/chat'
+import type * as CliAuthModule from '@/lib/cli-auth'
 
 const { mockInvoke, mockInstalledBackends } = vi.hoisted(() => ({
   mockInvoke: vi.fn().mockResolvedValue(undefined),
@@ -145,7 +146,7 @@ function renderUseMessageSending({
 }
 
 vi.mock('@/lib/cli-auth', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/lib/cli-auth')>()
+  const actual = await importOriginal<typeof CliAuthModule>()
   return {
     ...actual,
     handleCliAuthError: vi.fn((error: string) => error),
