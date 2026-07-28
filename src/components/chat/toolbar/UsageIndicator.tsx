@@ -228,7 +228,7 @@ export function UsageIndicator({
               aria-label={`${activeEntry.label} usage ${badgeText}`}
               className={cn(
                 isToolbar
-                  ? 'h-8 items-center gap-1 px-2 text-xs font-medium transition-colors hover:bg-muted/80 hover:text-foreground'
+                  ? 'h-8 items-center gap-1.5 px-2 text-xs font-medium transition-colors hover:bg-muted/80 hover:text-foreground'
                   : 'h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:text-foreground xl:w-[88px] xl:justify-center xl:px-2',
                 // Default display when caller does not pass responsive classes
                 !className && (isToolbar ? 'inline-flex' : 'inline-flex'),
@@ -245,7 +245,8 @@ export function UsageIndicator({
               <span
                 className={cn(
                   'tabular-nums leading-none',
-                  isToolbar ? 'text-[11px]' : 'hidden text-[11px] xl:inline'
+                  // Match neighboring toolbar labels (`text-xs` = 12px)
+                  isToolbar ? 'text-xs' : 'hidden text-xs xl:inline'
                 )}
               >
                 {badgeText}
