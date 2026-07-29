@@ -254,11 +254,7 @@ pub(crate) fn format_handoff_history_from_runs(runs: &[RunEntry], max_chars: usi
         }
 
         if run.renders_assistant_message() {
-            let backend_note = run
-                .backend
-                .as_ref()
-                .map(backend_label)
-                .unwrap_or("unknown");
+            let backend_note = run.backend.as_ref().map(backend_label).unwrap_or("unknown");
             let model_note = run.model.as_deref().unwrap_or("unknown-model");
             let status_note = match run.status {
                 RunStatus::Completed => "completed",

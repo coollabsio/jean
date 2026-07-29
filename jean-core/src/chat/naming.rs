@@ -279,7 +279,8 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
                                 text_content.push_str(text);
                             }
                         } else if block_type == Some("tool_use")
-                            && block.get("name").and_then(|n| n.as_str()) == Some("StructuredOutput")
+                            && block.get("name").and_then(|n| n.as_str())
+                                == Some("StructuredOutput")
                         {
                             if let Some(input) = block.get("input") {
                                 structured_json = Some(input.to_string());

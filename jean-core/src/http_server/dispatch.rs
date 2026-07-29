@@ -3553,7 +3553,10 @@ mod tests {
             for (command, args) in [
                 ("open_worktree_in_finder", json!({ "worktreePath": "/tmp" })),
                 ("open_worktree_in_editor", json!({ "worktreePath": "/tmp" })),
-                ("open_worktree_in_terminal", json!({ "worktreePath": "/tmp" })),
+                (
+                    "open_worktree_in_terminal",
+                    json!({ "worktreePath": "/tmp" }),
+                ),
                 ("open_file_in_default_app", json!({ "path": "/tmp/file" })),
             ] {
                 let error = runtime

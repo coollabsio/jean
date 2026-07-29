@@ -34,6 +34,22 @@ use crate::projects::types::{SessionType, Worktree};
 const QUEUE_DEFAULT_ALLOWED_TOOLS: [&str; 4] = ["Bash(git:*)", "Read", "Glob", "Grep"];
 const IMAGE_ONLY_DEFAULT_PROMPT: &str = "Please check this image and tell me what is wrong.";
 const TEXT_ONLY_DEFAULT_PROMPT: &str = "Please check the attached text as reference.";
+
+fn resumed_grok_tail_error_event(
+    session_id: &str,
+    worktree_id: &str,
+    error: &str,
+) -> (&'static str, super::grok::ErrorEvent) {
+    (
+        "chat:error",
+        super::grok::ErrorEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            error: error.to_string(),
+        },
+    )
+}
+
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 ## Not Plan Mode
 
@@ -8037,7 +8053,12 @@ pub async fn resume_session(
                                 log::error!("Failed to mark Grok run as crashed: {e}");
                             }
                         }
-                        emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
+                        let (event_name, event) = resumed_grok_tail_error_event(
+                            &session_id_clone,
+                            &worktree_id_clone,
+                            &e,
+                        );
+                        let _ = app_clone.emit_all(event_name, &event);
                         return;
                     }
                 };
@@ -9635,6 +9656,17 @@ pub async fn answer_opencode_question(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resumed_grok_host_error_uses_chat_error_event() {
+        let (event_name, event) =
+            resumed_grok_tail_error_event("session-1", "worktree-1", "rate limit reached");
+
+        assert_eq!(event_name, "chat:error");
+        assert_eq!(event.session_id, "session-1");
+        assert_eq!(event.worktree_id, "worktree-1");
+        assert_eq!(event.error, "rate limit reached");
+    }
 
     fn naming_test_worktree(branch: &str, base_branch: Option<&str>) -> Worktree {
         serde_json::from_value(serde_json::json!({

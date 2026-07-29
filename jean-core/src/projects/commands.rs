@@ -12164,8 +12164,7 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
                 }
             };
 
-            let base_branch =
-                resolve_worktree_status_base(&worktree, &project_default_branch);
+            let base_branch = resolve_worktree_status_base(&worktree, &project_default_branch);
 
             let info = ActiveWorktreeInfo {
                 worktree_id: worktree.id.clone(),
@@ -13080,7 +13079,8 @@ mod tests {
         );
 
         let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
-        assert!(format_open_error("vscodium", &other).starts_with("Failed to open VSCodium ('codium'):"));
+        assert!(format_open_error("vscodium", &other)
+            .starts_with("Failed to open VSCodium ('codium'):"));
     }
 
     #[test]

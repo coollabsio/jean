@@ -389,12 +389,7 @@ fn install_grok(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), Stri
     // Grok also gates servers via top-level `disabled_mcp_servers`. Jean rewrites
     // that list during turns; clear our name on install so Grok TUI + discovery
     // don't keep Jean MCP hidden after a prior session disabled it.
-    install_toml_mcp_server(
-        home.join(".grok").join("config.toml"),
-        entry,
-        "Grok",
-        true,
-    )
+    install_toml_mcp_server(home.join(".grok").join("config.toml"), entry, "Grok", true)
 }
 
 fn install_toml_mcp_server(
@@ -1214,8 +1209,7 @@ installer = "npm"
         .unwrap();
 
         let prod = test_entry(JeanMcpInstallMode::Prod);
-        let (written, backup) =
-            install_toml_mcp_server(path.clone(), &prod, "Grok", true).unwrap();
+        let (written, backup) = install_toml_mcp_server(path.clone(), &prod, "Grok", true).unwrap();
         assert_eq!(written, path);
         assert!(backup.is_some());
 

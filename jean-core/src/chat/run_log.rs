@@ -1351,7 +1351,9 @@ pub fn load_session_messages_window(
                             .unwrap_or_else(|| format!("missing-{}", run.run_id)),
                         session_id: session_id.to_string(),
                         role: MessageRole::Assistant,
-                        content: "*Assistant response unavailable (run log missing or unreadable).*".to_string(),
+                        content:
+                            "*Assistant response unavailable (run log missing or unreadable).*"
+                                .to_string(),
                         timestamp: run.ended_at.unwrap_or(run.started_at),
                         tool_calls: vec![],
                         content_blocks: vec![],
@@ -1401,7 +1403,8 @@ pub fn load_session_messages_window(
                             .unwrap_or_else(|| format!("unparsed-{}", run.run_id)),
                         session_id: session_id.to_string(),
                         role: MessageRole::Assistant,
-                        content: "*Assistant response unavailable (run log parse failed).*".to_string(),
+                        content: "*Assistant response unavailable (run log parse failed).*"
+                            .to_string(),
                         timestamp: run.ended_at.unwrap_or(run.started_at),
                         tool_calls: vec![],
                         content_blocks: vec![],

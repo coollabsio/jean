@@ -699,10 +699,7 @@ fn maybe_auto_select_system_coderabbit(
 /// Runtime `resolve_cli_binary` also falls back to PATH when Jean-managed is
 /// missing; this persists the source so the UI does not show a misleading
 /// "Jean" selection.
-fn maybe_auto_select_system_cli_sources(
-    app: &AppHandle,
-    preferences: &mut AppPreferences,
-) -> bool {
+fn maybe_auto_select_system_cli_sources(app: &AppHandle, preferences: &mut AppPreferences) -> bool {
     let mut changed = false;
 
     if preferences.claude_cli_source == "jean" && claude_cli::should_auto_use_system(app) {
@@ -868,7 +865,8 @@ mod tests {
 
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
-        assert!(prompt.contains("when the current execution mode is plan: do not write plan files or code"));
+        assert!(prompt
+            .contains("when the current execution mode is plan: do not write plan files or code"));
         assert!(prompt.contains("<proposed_plan>"));
         assert!(prompt.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(prompt.contains("Claude AskUserQuestion"));
@@ -992,11 +990,8 @@ mod tests {
 
     #[test]
     fn parse_cli_args_reads_allow_native_open_from_env_and_flag() {
-        let from_env = parse_cli_args_from(
-            ["jean", "--headless"],
-            [("JEAN_ALLOW_NATIVE_OPEN", "1")],
-        )
-        .unwrap();
+        let from_env =
+            parse_cli_args_from(["jean", "--headless"], [("JEAN_ALLOW_NATIVE_OPEN", "1")]).unwrap();
         assert!(from_env.allow_native_open);
 
         let from_flag = parse_cli_args_from(
@@ -1006,11 +1001,8 @@ mod tests {
         .unwrap();
         assert!(from_flag.allow_native_open);
 
-        let off = parse_cli_args_from(
-            ["jean", "--headless"],
-            std::iter::empty::<(&str, &str)>(),
-        )
-        .unwrap();
+        let off = parse_cli_args_from(["jean", "--headless"], std::iter::empty::<(&str, &str)>())
+            .unwrap();
         assert!(!off.allow_native_open);
     }
 
@@ -2559,23 +2551,26 @@ fn migrate_automation_magic_prompt_preferences(
 
     // GitHub bugs automation mirrors investigate_issue
     {
-        let backend_missing = backends_raw.is_none_or(|b| !b.contains_key("automate_github_bugs_backend"));
+        let backend_missing =
+            backends_raw.is_none_or(|b| !b.contains_key("automate_github_bugs_backend"));
         if backend_missing {
-            preferences.magic_prompt_backends.automate_github_bugs_backend =
-                preferences
-                    .magic_prompt_backends
-                    .investigate_issue_backend
-                    .clone();
+            preferences
+                .magic_prompt_backends
+                .automate_github_bugs_backend = preferences
+                .magic_prompt_backends
+                .investigate_issue_backend
+                .clone();
             changed = true;
         }
         let provider_missing =
             providers_raw.is_none_or(|p| !p.contains_key("automate_github_bugs_provider"));
         if provider_missing {
-            preferences.magic_prompt_providers.automate_github_bugs_provider =
-                preferences
-                    .magic_prompt_providers
-                    .investigate_issue_provider
-                    .clone();
+            preferences
+                .magic_prompt_providers
+                .automate_github_bugs_provider = preferences
+                .magic_prompt_providers
+                .investigate_issue_provider
+                .clone();
             changed = true;
         }
         let effort_missing =
@@ -2627,8 +2622,8 @@ fn migrate_automation_magic_prompt_preferences(
                 .clone();
             changed = true;
         }
-        let provider_missing = providers_raw
-            .is_none_or(|p| !p.contains_key("automate_security_advisories_provider"));
+        let provider_missing =
+            providers_raw.is_none_or(|p| !p.contains_key("automate_security_advisories_provider"));
         if provider_missing {
             preferences
                 .magic_prompt_providers
@@ -2661,7 +2656,9 @@ fn migrate_automation_magic_prompt_preferences(
             .unwrap_or(&preferences.default_backend);
         let investigate_model = &preferences.magic_prompt_models.investigate_advisory_model;
         let model_matches = magic_prompt_model_matches_backend(
-            &preferences.magic_prompt_models.automate_security_advisories_model,
+            &preferences
+                .magic_prompt_models
+                .automate_security_advisories_model,
             backend,
         );
         if model_missing || !model_matches {
@@ -4175,8 +4172,7 @@ where
     let mut no_token = env_truthy(env.get("JEAN_NO_TOKEN").map(String::as_str));
     let mut allow_unsafe_no_token =
         env_truthy(env.get("JEAN_ALLOW_UNSAFE_NO_TOKEN").map(String::as_str));
-    let mut allow_native_open =
-        env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
+    let mut allow_native_open = env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
     let mut host = env
         .get("JEAN_HOST")
         .map(|h| h.trim().to_string())
@@ -4247,11 +4243,7 @@ where
     }
 
     if !headless
-        && (host.is_some()
-            || port.is_some()
-            || token.is_some()
-            || no_token
-            || allow_native_open)
+        && (host.is_some() || port.is_some() || token.is_some() || no_token || allow_native_open)
     {
         eprintln!(
             "Warning: --host, --port, --token, --no-token, --allow-native-open are only effective with --headless"

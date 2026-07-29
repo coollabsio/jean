@@ -1353,11 +1353,7 @@ fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
             .to_string();
         // Enrich thin/empty plan bodies with full assistant plan text.
         if existing_plan.len() < plan_body.trim().len() {
-            if let Some(tool) = response
-                .tool_calls
-                .iter_mut()
-                .find(|tool| tool.id == id)
-            {
+            if let Some(tool) = response.tool_calls.iter_mut().find(|tool| tool.id == id) {
                 tool.input = serde_json::json!({
                     "source": "grok",
                     "plan": plan_body,
@@ -1371,9 +1367,9 @@ fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
                 ContentBlock::ToolUse { tool_call_id } if tool_call_id == &id
             )
         });
-        response
-            .content_blocks
-            .push(ContentBlock::ToolUse { tool_call_id: id.clone() });
+        response.content_blocks.push(ContentBlock::ToolUse {
+            tool_call_id: id.clone(),
+        });
         return Some(id);
     }
 
@@ -1388,9 +1384,9 @@ fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
         output: None,
         parent_tool_use_id: None,
     });
-    response
-        .content_blocks
-        .push(ContentBlock::ToolUse { tool_call_id: id.clone() });
+    response.content_blocks.push(ContentBlock::ToolUse {
+        tool_call_id: id.clone(),
+    });
     Some(id)
 }
 
@@ -1723,7 +1719,12 @@ fn grok_line_is_completion_result(line: &str) -> bool {
 fn grok_line_is_error_marker(line: &str) -> bool {
     serde_json::from_str::<Value>(line)
         .ok()
-        .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_string))
+        .and_then(|value| {
+            value
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .is_some_and(|event_type| event_type == "error")
 }
 
@@ -1755,22 +1756,29 @@ pub(crate) fn extract_grok_error_message(error: &Value) -> String {
         let message = message.trim();
         if message.is_empty() {
             // fall through
-        } else if let Some(data) = error.get("data") {
-            let data_str = if let Some(s) = data.as_str() {
-                s.trim().to_string()
-            } else if let Some(s) = data.get("message").and_then(Value::as_str) {
-                s.trim().to_string()
-            } else if data.is_null() {
-                String::new()
-            } else {
-                data.to_string()
-            };
-            if !data_str.is_empty() && data_str != "null" {
-                return format!("{message}: {data_str}");
-            }
-            return message.to_string();
         } else {
-            return message.to_string();
+            let message = if let Some(data) = error.get("data") {
+                let data_str = if let Some(s) = data.as_str() {
+                    s.trim().to_string()
+                } else if let Some(s) = data.get("message").and_then(Value::as_str) {
+                    s.trim().to_string()
+                } else if data.is_null() {
+                    String::new()
+                } else {
+                    data.to_string()
+                };
+                if !data_str.is_empty() && data_str != "null" {
+                    format!("{message}: {data_str}")
+                } else {
+                    message.to_string()
+                }
+            } else {
+                message.to_string()
+            };
+            if let Some(code) = error.get("code").and_then(Value::as_i64) {
+                return format!("[{code}] {message}");
+            }
+            return message;
         }
     }
 
@@ -1788,6 +1796,12 @@ pub(crate) fn format_grok_user_error(raw: &str) -> String {
     if trimmed.is_empty() {
         return "Grok error: unknown failure".to_string();
     }
+    if trimmed.starts_with("Grok rate/usage limit reached")
+        || trimmed.starts_with("Grok authentication failed")
+        || trimmed.starts_with("Grok error:")
+    {
+        return trimmed.to_string();
+    }
     let lower = trimmed.to_ascii_lowercase();
 
     let is_rate_or_quota = lower.contains("rate limit")
@@ -1803,6 +1817,7 @@ pub(crate) fn format_grok_user_error(raw: &str) -> String {
         || lower.contains("\"code\":429")
         || lower.contains("status code 429")
         || lower.contains(" http 429")
+        || lower.starts_with("[429]")
         || lower.starts_with("429 ")
         || lower.contains(" 429 ");
 
@@ -1841,10 +1856,7 @@ pub(crate) fn format_grok_user_error(raw: &str) -> String {
 ///
 /// On success: `{"type":"result",…}`. On JSON-RPC prompt failure: `{"type":"error",…}`.
 /// Never both — writing both caused empty completed runs (#580).
-pub(crate) fn grok_host_terminal_marker(
-    session_id: &str,
-    prompt_error: Option<&Value>,
-) -> Value {
+pub(crate) fn grok_host_terminal_marker(session_id: &str, prompt_error: Option<&Value>) -> Value {
     match prompt_error {
         Some(error) => serde_json::json!({
             "type": "error",
@@ -2731,12 +2743,15 @@ pub(crate) fn parse_grok_run_to_message(
     response.content = response.content.trim().to_string();
     // Surface host-recorded failures (rate limit / auth / JSON-RPC) so history
     // does not collapse into the empty "content was not captured" placeholder.
-    if response.content.is_empty() {
-        if let Some(err) = response.error.as_deref() {
-            let formatted = format_grok_user_error(err);
-            push_text_block(&mut response.content_blocks, &formatted);
-            response.content = formatted;
-        }
+    if let Some(err) = response.error.as_deref() {
+        let formatted = format_grok_user_error(err);
+        let error_text = if response.content.is_empty() {
+            formatted
+        } else {
+            format!("\n\n{formatted}")
+        };
+        push_text_block(&mut response.content_blocks, &error_text);
+        response.content.push_str(&error_text);
     }
     Ok(ChatMessage {
         id: run
@@ -4289,9 +4304,7 @@ fn extract_json_object(text: &str) -> Result<String, String> {
                 .and_then(Value::as_str)
                 .filter(|s| !s.trim().is_empty())
             {
-                return Err(format!(
-                    "Grok structured output failed: {err} ({last_err})"
-                ));
+                return Err(format!("Grok structured output failed: {err} ({last_err})"));
             }
 
             return Err(last_err);
@@ -4347,9 +4360,7 @@ fn build_one_shot_grok_cli_args(
         "--sandbox".to_string(),
         "read-only".to_string(),
         "--model".to_string(),
-        raw_grok_model(Some(model))
-            .unwrap_or(model)
-            .to_string(),
+        raw_grok_model(Some(model)).unwrap_or(model).to_string(),
     ];
     // Prefer native constrained decoding when a schema is available. Implies
     // --output-format json and populates structuredOutput on success.
@@ -4518,9 +4529,13 @@ mod tests {
         assert!(args.contains(&"--prompt-file".to_string()));
         let prompt_file_idx = args.iter().position(|a| a == "--prompt-file").unwrap();
         assert_eq!(args[prompt_file_idx + 1], "/tmp/jean-prompt.txt");
-        assert!(!args.iter().any(|a| a == "-p" || a == "--prompt" || a == "--single"));
+        assert!(!args
+            .iter()
+            .any(|a| a == "-p" || a == "--prompt" || a == "--single"));
         // Prompt body must not appear as an argv entry.
-        assert!(!args.iter().any(|a| a.contains("diff --git") || a.len() > 10_000));
+        assert!(!args
+            .iter()
+            .any(|a| a.contains("diff --git") || a.len() > 10_000));
         assert!(args.contains(&"--json-schema".to_string()));
         assert!(args.contains(&"--effort".to_string()));
         assert!(args.contains(&"high".to_string()));
@@ -4529,8 +4544,7 @@ mod tests {
 
     #[test]
     fn one_shot_cli_args_without_schema_use_json_output() {
-        let args =
-            build_one_shot_grok_cli_args("/tmp/p.txt", ".", "grok-build", None, None);
+        let args = build_one_shot_grok_cli_args("/tmp/p.txt", ".", "grok-build", None, None);
         assert!(args.contains(&"--output-format".to_string()));
         assert!(args.contains(&"json".to_string()));
         assert!(!args.iter().any(|a| a == "--json-schema"));
@@ -4850,7 +4864,10 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].name, "ExitPlanMode");
         assert_eq!(
-            response.tool_calls[0].input.get("plan").and_then(|v| v.as_str()),
+            response.tool_calls[0]
+                .input
+                .get("plan")
+                .and_then(|v| v.as_str()),
             Some(plan)
         );
     }
@@ -4901,7 +4918,10 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         assert_eq!(plan_id, "existing-plan");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(
-            response.tool_calls[0].input.get("plan").and_then(|v| v.as_str()),
+            response.tool_calls[0]
+                .input
+                .get("plan")
+                .and_then(|v| v.as_str()),
             Some(plan)
         );
         // Plan tool_use is last so mid-turn text stays between research tools and plan.
@@ -4978,10 +4998,38 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
     }
 
     #[test]
+    fn extract_and_format_grok_rate_limit_from_json_rpc_code() {
+        let rpc = serde_json::json!({
+            "code": 429,
+            "message": "Please slow down"
+        });
+        let raw = extract_grok_error_message(&rpc);
+        assert!(raw.contains("429"));
+
+        let formatted = format_grok_user_error(&raw);
+        assert!(
+            formatted.contains("rate/usage limit"),
+            "expected friendly rate-limit copy, got: {formatted}"
+        );
+    }
+
+    #[test]
     fn format_grok_user_error_auth_guidance() {
         let formatted = format_grok_user_error("Run `grok login` first, or set XAI_API_KEY.");
         assert!(formatted.contains("authentication failed"));
         assert!(formatted.contains("grok login"));
+    }
+
+    #[test]
+    fn format_grok_user_error_is_idempotent() {
+        for raw in [
+            "Rate limit exceeded",
+            "Run `grok login` first",
+            "Unexpected Grok failure",
+        ] {
+            let formatted = format_grok_user_error(raw);
+            assert_eq!(format_grok_user_error(&formatted), formatted);
+        }
     }
 
     #[test]
@@ -4995,7 +5043,10 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         let err = grok_host_terminal_marker("sess-2", Some(&err_payload));
         assert_eq!(err.get("type").and_then(Value::as_str), Some("error"));
         assert_eq!(err.get("error"), Some(&err_payload));
-        assert_eq!(err.get("session_id").and_then(Value::as_str), Some("sess-2"));
+        assert_eq!(
+            err.get("session_id").and_then(Value::as_str),
+            Some("sess-2")
+        );
     }
 
     #[test]
@@ -5018,6 +5069,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
     fn parse_grok_run_to_message_surfaces_rate_limit_error() {
         let lines = vec![
             r#"{"type":"session","session_id":"grok-hist-err"}"#.to_string(),
+            r#"{"type":"assistant","delta":"Partial reply before failure."}"#.to_string(),
             r#"{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded"},"session_id":"grok-hist-err"}"#.to_string(),
         ];
         let run = RunEntry {
@@ -5046,6 +5098,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             kimi_session_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
+        assert!(message.content.contains("Partial reply before failure."));
         assert!(
             message.content.contains("rate/usage limit")
                 || message.content.to_ascii_lowercase().contains("rate limit"),
@@ -5138,7 +5191,13 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             value.get("summary").and_then(Value::as_str),
             Some("Looks good")
         );
-        assert_eq!(value.get("findings").and_then(Value::as_array).map(|a| a.len()), Some(0));
+        assert_eq!(
+            value
+                .get("findings")
+                .and_then(Value::as_array)
+                .map(|a| a.len()),
+            Some(0)
+        );
     }
 
     #[test]
