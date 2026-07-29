@@ -346,6 +346,10 @@ struct SharedSseCoordinator {
     /// ancestor ID. Walked until a registered primary-session subscriber is found
     /// so child `session.error` events fail the owning Jean run.
     session_parents: Arc<Mutex<HashMap<String, String>>>,
+    /// Working directories observed for OpenCode sessions (from SSE envelope
+    /// `directory` or session info). Used so child/subagent aborts target the
+    /// session's own directory rather than the root worktree.
+    session_directories: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Default for SharedSseCoordinator {
@@ -354,6 +358,7 @@ impl Default for SharedSseCoordinator {
             subscribers: Arc::new(Mutex::new(HashMap::new())),
             listeners: Arc::new(Mutex::new(HashMap::new())),
             session_parents: Arc::new(Mutex::new(HashMap::new())),
+            session_directories: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -466,13 +471,50 @@ impl Drop for SharedSseSubscription {
                 subscribers.len()
             );
         }
-        // Drop parent-chain entries that point at (or are) this root so a later
-        // session never inherits a stale child→parent mapping.
+        // Drop the full descendant closure of this root (child, grandchild, …)
+        // so multi-level chains cannot leak after the primary session ends.
         let mut parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
-        parents.retain(|child, parent| {
-            child != &self.opencode_session_id && parent != &self.opencode_session_id
-        });
+        let removed_ids = prune_session_parent_descendants(&mut parents, &self.opencode_session_id);
+        let mut directories =
+            lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS");
+        directories.retain(|id, _| !removed_ids.contains(id));
     }
+}
+
+/// Remove `root_id` and every transitive descendant from the child→parent map.
+///
+/// OpenCode subagents form trees (`grandchild → child → root`). A shallow prune
+/// that only matches the immediate parent leaves deeper links behind as a slow
+/// leak and a stale-lineage hazard if session IDs are recycled.
+///
+/// Returns the set of session IDs that were pruned (including `root_id`).
+fn prune_session_parent_descendants(
+    parents: &mut HashMap<String, String>,
+    root_id: &str,
+) -> HashSet<String> {
+    let mut remove = HashSet::new();
+    if root_id.is_empty() {
+        return remove;
+    }
+
+    remove.insert(root_id.to_string());
+
+    // Expand until fixpoint: any child of a session marked for removal is also
+    // removed (covers grandchild → child → root and wider trees).
+    loop {
+        let mut added = false;
+        for (child, parent) in parents.iter() {
+            if remove.contains(parent) && remove.insert(child.clone()) {
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+
+    parents.retain(|child, _parent| !remove.contains(child));
+    remove
 }
 
 fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard<'a, T> {
@@ -1153,6 +1195,36 @@ fn remember_opencode_session_parent(session_id: &str, parent_id: &str) {
     }
 }
 
+/// Remember the working directory associated with an OpenCode session.
+///
+/// Sourced from the SSE envelope `directory` field (and optionally session info).
+/// Child/subagent sessions can be rooted outside the primary worktree; aborts
+/// must use that directory rather than the root subscriber's.
+fn remember_opencode_session_directory(session_id: &str, directory: &str) {
+    let session_id = session_id.trim();
+    let directory = directory.trim();
+    if session_id.is_empty() || directory.is_empty() {
+        return;
+    }
+    let mut dirs = lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS");
+    let previous = dirs.insert(session_id.to_string(), directory.to_string());
+    if previous.as_deref() != Some(directory) {
+        log::info!(
+            "OpenCode shared SSE: session directory session={session_id} directory={directory}"
+        );
+    }
+}
+
+fn lookup_opencode_session_directory(session_id: &str) -> Option<String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+    lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS")
+        .get(session_id)
+        .cloned()
+}
+
 /// Resolve an OpenCode session ID to a registered Jean SSE subscriber.
 ///
 /// Lookup order:
@@ -1203,7 +1275,7 @@ fn surface_opencode_sse_error(
         return false;
     };
 
-    let (root_session_id, subscriber_handle, abort_working_dir) = {
+    let (root_session_id, subscriber_handle, root_working_dir) = {
         let subscribers = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
         let parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
         match resolve_opencode_subscriber(&subscribers, &parents, opencode_session_id) {
@@ -1251,13 +1323,16 @@ fn surface_opencode_sse_error(
     );
     // Abort both the errored session (may be a child) and the root primary
     // session so the blocking parent turn cannot keep waiting.
+    //
+    // Each session is aborted with its own working directory. Child/subagent
+    // sessions can be rooted outside the primary worktree — never pass the
+    // root directory for a different session id (that can mis-scope the abort
+    // and leave the subagent burning tokens).
     if root_session_id != opencode_session_id {
-        super::registry::abort_opencode_session(
-            opencode_session_id.to_string(),
-            Some(abort_working_dir.clone()),
-        );
+        let child_working_dir = lookup_opencode_session_directory(opencode_session_id);
+        super::registry::abort_opencode_session(opencode_session_id.to_string(), child_working_dir);
     }
-    super::registry::abort_opencode_session(root_session_id, Some(abort_working_dir));
+    super::registry::abort_opencode_session(root_session_id, Some(root_working_dir));
     true
 }
 
@@ -2109,6 +2184,15 @@ fn process_shared_sse_event(
         }
     };
 
+    // OpenCode SSE wire format nests the event under `payload` and may include
+    // a top-level `directory` for the session instance that emitted it.
+    let event_directory = json
+        .get("directory")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     let (event_type, properties) = if let Some(payload) = json.get("payload") {
         let t = payload.get("type")?.as_str()?;
         let p = payload.get("properties").cloned().unwrap_or_default();
@@ -2132,6 +2216,17 @@ fn process_shared_sse_event(
                 .unwrap_or("");
             if let Some(parent_id) = info.get("parentID").and_then(|v| v.as_str()) {
                 remember_opencode_session_parent(session_id, parent_id);
+            }
+            // Prefer info.directory when present; otherwise the envelope directory.
+            let session_dir = info
+                .get("directory")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| event_directory.clone());
+            if let Some(dir) = session_dir.as_deref() {
+                remember_opencode_session_directory(session_id, dir);
             }
             Some(false)
         }
@@ -2208,6 +2303,9 @@ fn process_shared_sse_event(
             if opencode_session_id.is_empty() {
                 return Some(false);
             }
+            if let Some(dir) = event_directory.as_deref() {
+                remember_opencode_session_directory(opencode_session_id, dir);
+            }
             Some(surface_opencode_sse_error(
                 app,
                 subscribers,
@@ -2225,6 +2323,9 @@ fn process_shared_sse_event(
             };
             if opencode_session_id.is_empty() {
                 return Some(false);
+            }
+            if let Some(dir) = event_directory.as_deref() {
+                remember_opencode_session_directory(opencode_session_id, dir);
             }
             Some(surface_opencode_sse_error(
                 app,
@@ -2294,16 +2395,6 @@ where
     }
 }
 
-/// Whether a failed OpenCode `/message` POST may be automatically retried.
-///
-/// Always `false`: the POST is non-idempotent (it appends a user message to the
-/// OpenCode session). Timeouts and ambiguous request-level errors can mean the
-/// server already accepted the prompt; replaying produces duplicate messages and
-/// masks the real provider failure (see #587).
-fn should_retry_opencode_message_post(_err: &reqwest::Error) -> bool {
-    false
-}
-
 fn post_opencode_message_cancellable(
     msg_url: String,
     working_dir: String,
@@ -2362,10 +2453,10 @@ fn post_opencode_message_cancellable_with_timeout(
         {
             Some(Ok(resp)) => resp,
             Some(Err(e)) => {
-                if should_retry_opencode_message_post(&e) {
-                    // Kept as a guarded branch for clarity/tests; currently always false.
-                    log::warn!("OpenCode message error would retry (disabled): {e}");
-                }
+                // Never retried: the POST is non-idempotent (it appends a user
+                // message). A timeout may mean the server already accepted the
+                // prompt, so replaying duplicates it and masks the real provider
+                // failure (see #587).
                 return Err(format!("Failed to send OpenCode message: {e}"));
             }
             None => return Ok(None),
@@ -3307,6 +3398,10 @@ pub fn answer_opencode_question(
 mod tests {
     use super::*;
 
+    /// Serializes tests that mutate process-global `SHARED_SSE` maps so parallel
+    /// test threads cannot clear each other's subscribers/parents mid-assertion.
+    static SSE_TEST_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
     #[test]
     fn turn_started_gate_returns_false_for_unknown_session_quickly() {
         // No subscriber registered → gate must time out (not block forever) and
@@ -3542,20 +3637,6 @@ mod tests {
     }
 
     #[test]
-    fn should_retry_opencode_message_post_is_always_false() {
-        // Non-idempotent POST must never auto-retry, even for connect/timeout-shaped
-        // errors. Integration coverage is in post_opencode_message_times_out_once.
-        let err = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(50))
-            .build()
-            .unwrap()
-            .get("http://127.0.0.1:1/")
-            .send()
-            .expect_err("closed port should error");
-        assert!(!should_retry_opencode_message_post(&err));
-    }
-
-    #[test]
     fn resolve_opencode_subscriber_maps_child_to_parent_root() {
         let force_abort = Arc::new(AtomicBool::new(false));
         let upstream_error = Arc::new(Mutex::new(None));
@@ -3590,20 +3671,144 @@ mod tests {
             resolve_opencode_subscriber(&subscribers, &parents, "ses_grandchild").unwrap();
         assert_eq!(resolved.0, "ses_parent");
 
-        // A matching directory does not prove lineage: the shared stream can
-        // contain unrelated sessions from the same project.
+        // A lineage that never reaches a registered subscriber resolves to None.
+        let mut orphan_parents = HashMap::new();
+        orphan_parents.insert("ses_orphan".to_string(), "ses_unsubscribed".to_string());
         assert!(
-            resolve_opencode_subscriber(&subscribers, &HashMap::new(), "ses_unknown",).is_none()
+            resolve_opencode_subscriber(&subscribers, &orphan_parents, "ses_orphan").is_none()
         );
 
-        // Unknown session with no unique fallback is None.
+        // Unknown session with no lineage at all is None.
         assert!(
             resolve_opencode_subscriber(&subscribers, &HashMap::new(), "ses_unknown").is_none()
         );
     }
 
     #[test]
+    fn prune_session_parent_descendants_removes_full_closure() {
+        let mut parents = HashMap::new();
+        // Multi-level chain under the dropped root (the shape resolve tests use).
+        parents.insert("ses_child".to_string(), "ses_root".to_string());
+        parents.insert("ses_grandchild".to_string(), "ses_child".to_string());
+        parents.insert("ses_great_grandchild".to_string(), "ses_grandchild".to_string());
+        // Sibling branch under the same root.
+        parents.insert("ses_other_child".to_string(), "ses_root".to_string());
+        // Unrelated tree must survive.
+        parents.insert("ses_unrelated_child".to_string(), "ses_other_root".to_string());
+        parents.insert(
+            "ses_unrelated_grandchild".to_string(),
+            "ses_unrelated_child".to_string(),
+        );
+
+        let removed = prune_session_parent_descendants(&mut parents, "ses_root");
+
+        assert!(
+            !parents.contains_key("ses_child")
+                && !parents.contains_key("ses_grandchild")
+                && !parents.contains_key("ses_great_grandchild")
+                && !parents.contains_key("ses_other_child"),
+            "full descendant closure of ses_root must be removed, got {parents:?}"
+        );
+        assert!(
+            removed.contains("ses_root")
+                && removed.contains("ses_child")
+                && removed.contains("ses_grandchild")
+                && removed.contains("ses_great_grandchild")
+                && removed.contains("ses_other_child"),
+            "prune must report the full removed set, got {removed:?}"
+        );
+        assert_eq!(
+            parents.get("ses_unrelated_child").map(String::as_str),
+            Some("ses_other_root")
+        );
+        assert_eq!(
+            parents
+                .get("ses_unrelated_grandchild")
+                .map(String::as_str),
+            Some("ses_unrelated_child")
+        );
+    }
+
+    #[test]
+    fn shared_sse_subscription_drop_prunes_multi_level_lineage() {
+        let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
+        // Isolate global maps so this exercises Drop cleanup only.
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
+
+        {
+            let mut parents =
+                lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+            parents.insert("ses_child".to_string(), "ses_drop_root".to_string());
+            parents.insert("ses_grandchild".to_string(), "ses_child".to_string());
+            parents.insert("ses_keep_child".to_string(), "ses_keep_root".to_string());
+        }
+        {
+            let mut dirs =
+                lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS");
+            dirs.insert("ses_drop_root".to_string(), "/tmp/root".into());
+            dirs.insert("ses_child".to_string(), "/tmp/child".into());
+            dirs.insert("ses_grandchild".to_string(), "/tmp/grand".into());
+            dirs.insert("ses_keep_child".to_string(), "/tmp/keep".into());
+        }
+
+        // Construct a subscription handle and drop it — Drop must prune the full
+        // descendant chain, not only direct children of the root.
+        let subscription = SharedSseSubscription {
+            opencode_session_id: "ses_drop_root".to_string(),
+            handle: Arc::new(Mutex::new(SharedSseSubscriber {
+                jean_session_id: "jean-drop".into(),
+                worktree_id: "wt-drop".into(),
+                run_id: "run-drop".into(),
+                cancelled: Arc::new(AtomicBool::new(false)),
+                streamed_any: Arc::new(AtomicBool::new(false)),
+                turn_started: Arc::new(AtomicBool::new(false)),
+                session_idle: Arc::new(AtomicBool::new(false)),
+                steered: Arc::new(AtomicBool::new(false)),
+                upstream_error: Arc::new(Mutex::new(None)),
+                force_abort: Arc::new(AtomicBool::new(false)),
+                tracked_parts: HashMap::new(),
+                accumulated_blocks: Vec::new(),
+                accumulated_tool_calls: Vec::new(),
+            })),
+        };
+        drop(subscription);
+
+        let parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+        assert!(
+            !parents.contains_key("ses_child") && !parents.contains_key("ses_grandchild"),
+            "Drop must prune multi-level descendants, got {parents:?}"
+        );
+        assert_eq!(
+            parents.get("ses_keep_child").map(String::as_str),
+            Some("ses_keep_root"),
+            "unrelated lineage must remain"
+        );
+        drop(parents);
+
+        let dirs = lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS");
+        assert!(
+            !dirs.contains_key("ses_drop_root")
+                && !dirs.contains_key("ses_child")
+                && !dirs.contains_key("ses_grandchild"),
+            "Drop must prune session directories for the root closure, got {dirs:?}"
+        );
+        assert_eq!(
+            dirs.get("ses_keep_child").map(String::as_str),
+            Some("/tmp/keep"),
+            "unrelated session directories must remain"
+        );
+        drop(dirs);
+
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
+    }
+
+    #[test]
     fn child_session_error_surfaces_on_parent_subscriber() {
+        let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
         let tmp = tempfile::tempdir().unwrap();
         let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
         let force_abort = Arc::new(AtomicBool::new(false));
@@ -3642,6 +3847,7 @@ mod tests {
             parents.clear();
             parents.insert("ses_child".to_string(), "ses_parent".to_string());
         }
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
 
         let error = serde_json::json!({
             "name": "APIError",
@@ -3662,10 +3868,12 @@ mod tests {
         // Cleanup global state.
         lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
         lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
     }
 
     #[test]
     fn process_shared_sse_records_parent_and_surfaces_child_session_error() {
+        let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
         let tmp = tempfile::tempdir().unwrap();
         let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
         let force_abort = Arc::new(AtomicBool::new(false));
@@ -3698,9 +3906,11 @@ mod tests {
             );
         }
         lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
 
-        // session.created for a subagent child.
-        let created = r#"{"type":"session.created","properties":{"sessionID":"ses_sub","info":{"id":"ses_sub","parentID":"ses_root","title":"explore"}}}"#;
+        // session.created for a subagent child rooted outside the primary worktree.
+        // Envelope `directory` is the child session's own working directory.
+        let created = r#"{"directory":"/tmp/child-work","payload":{"type":"session.created","properties":{"sessionID":"ses_sub","info":{"id":"ses_sub","parentID":"ses_root","title":"explore"}}}}"#;
         assert_eq!(
             process_shared_sse_event(&app, created, &SHARED_SSE.subscribers),
             Some(false)
@@ -3711,9 +3921,14 @@ mod tests {
                 .map(String::as_str),
             Some("ses_root")
         );
+        assert_eq!(
+            lookup_opencode_session_directory("ses_sub").as_deref(),
+            Some("/tmp/child-work"),
+            "child session must retain its own directory for abort"
+        );
 
         // session.error on the child must fail the parent run.
-        let err_event = r#"{"type":"session.error","properties":{"sessionID":"ses_sub","error":{"name":"APIError","data":{"message":"provider offline"}}}}"#;
+        let err_event = r#"{"directory":"/tmp/child-work","payload":{"type":"session.error","properties":{"sessionID":"ses_sub","error":{"name":"APIError","data":{"message":"provider offline"}}}}}"#;
         assert_eq!(
             process_shared_sse_event(&app, err_event, &SHARED_SSE.subscribers),
             Some(true)
@@ -3723,9 +3938,16 @@ mod tests {
             take_upstream_error(&upstream_error).as_deref(),
             Some("provider offline")
         );
+        // After the error path, the child directory is still the child's own
+        // path (not the root subscriber's /tmp/proj).
+        assert_eq!(
+            lookup_opencode_session_directory("ses_sub").as_deref(),
+            Some("/tmp/child-work")
+        );
 
         lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
         lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
     }
 
     #[test]
@@ -3783,6 +4005,7 @@ mod tests {
 
     #[test]
     fn sse_provider_error_unblocks_force_abort_distinct_from_user_cancel() {
+        let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
         let tmp = tempfile::tempdir().unwrap();
         let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -3815,6 +4038,8 @@ mod tests {
                 },
             );
         }
+        // Clear lineage left by sibling tests so session resolution stays deterministic.
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
 
         let err_event = r#"{"type":"session.error","properties":{"sessionID":"ses_primary","error":"quota exceeded"}}"#;
         assert_eq!(

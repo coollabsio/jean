@@ -26,8 +26,14 @@ static USAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static APP_HANDLE: once_cell::sync::OnceCell<AppHandle> = once_cell::sync::OnceCell::new();
 
 /// Recent sanitized stdout/stderr lines from the Jean-managed OpenCode server.
+/// Scoped to the current spawn generation — cleared before each new process.
 static RECENT_DIAGNOSTICS: Lazy<Mutex<VecDeque<String>>> =
     Lazy::new(|| Mutex::new(VecDeque::with_capacity(DIAGNOSTIC_RING_CAP)));
+
+/// Monotonic generation for managed-server diagnostics. Logger threads from a
+/// prior process only append when their generation still matches, so a later
+/// startup failure cannot report stale lines from an earlier server.
+static DIAGNOSTIC_GENERATION: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 struct OpenCodeServerProcess {
@@ -84,22 +90,43 @@ fn sanitize_diagnostic_line(line: &str) -> Option<String> {
     .filter_map(|needle| lowercase.find(needle))
     .min();
     let mut redacted = match secret_start {
-        Some(idx) => format!("{}[redacted]", &cleaned[..idx]),
+        Some(idx) => format!("{prefix}[redacted]", prefix = &cleaned[..idx]),
         None => cleaned.to_string(),
     };
-    if redacted.len() > DIAGNOSTIC_LINE_MAX {
-        redacted.truncate(DIAGNOSTIC_LINE_MAX);
+    // Truncate by Unicode scalar values so multi-byte UTF-8 never panics
+    // on a mid-character boundary (String::truncate requires a char boundary).
+    if redacted.chars().count() > DIAGNOSTIC_LINE_MAX {
+        redacted = redacted.chars().take(DIAGNOSTIC_LINE_MAX).collect();
         redacted.push('…');
     }
     Some(redacted)
 }
 
-fn push_diagnostic_line(stream: &str, line: &str) {
+/// Clear the diagnostics ring and advance the generation so prior logger
+/// threads cannot contaminate the next startup failure report.
+fn begin_diagnostics_generation() -> usize {
+    let next = DIAGNOSTIC_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Ok(mut guard) = RECENT_DIAGNOSTICS.lock() {
+        guard.clear();
+    }
+    next
+}
+
+fn push_diagnostic_line(stream: &str, line: &str, generation: usize) {
     let Some(sanitized) = sanitize_diagnostic_line(line) else {
         return;
     };
     log::info!("OpenCode managed server {stream}: {sanitized}");
+    // Drop ring writes from a previous server generation (stale logger threads).
+    if DIAGNOSTIC_GENERATION.load(Ordering::SeqCst) != generation {
+        return;
+    }
     if let Ok(mut guard) = RECENT_DIAGNOSTICS.lock() {
+        // Re-check under the lock: a concurrent begin_diagnostics_generation()
+        // may have advanced the generation and cleared the ring.
+        if DIAGNOSTIC_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
         if guard.len() >= DIAGNOSTIC_RING_CAP {
             guard.pop_front();
         }
@@ -124,14 +151,18 @@ fn diagnostics_summary_for_error() -> String {
     tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
 }
 
-fn spawn_stdio_logger(stream: &'static str, pipe: impl std::io::Read + Send + 'static) {
+fn spawn_stdio_logger(
+    stream: &'static str,
+    pipe: impl std::io::Read + Send + 'static,
+    generation: usize,
+) {
     let _ = std::thread::Builder::new()
         .name(format!("opencode-server-{stream}"))
         .spawn(move || {
             let reader = BufReader::new(pipe);
             for line in reader.lines() {
                 match line {
-                    Ok(l) => push_diagnostic_line(stream, &l),
+                    Ok(l) => push_diagnostic_line(stream, &l, generation),
                     Err(e) => {
                         log::debug!("OpenCode managed server {stream} read ended: {e}");
                         break;
@@ -323,15 +354,19 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
 
+    // Isolate diagnostics to this process so a later startup failure cannot
+    // report output from an earlier managed server (or its dying logger threads).
+    let diagnostics_generation = begin_diagnostics_generation();
+
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start OpenCode server: {e}"))?;
 
     if let Some(stdout) = child.stdout.take() {
-        spawn_stdio_logger("stdout", stdout);
+        spawn_stdio_logger("stdout", stdout, diagnostics_generation);
     }
     if let Some(stderr) = child.stderr.take() {
-        spawn_stdio_logger("stderr", stderr);
+        spawn_stdio_logger("stderr", stderr, diagnostics_generation);
     }
 
     let server_pid = child.id();
@@ -454,6 +489,9 @@ pub async fn stop_opencode_server() -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Serialize tests that mutate the process-global diagnostics ring/generation.
+    static DIAGNOSTICS_TEST_GUARD: Mutex<()> = Mutex::new(());
+
     #[test]
     fn sanitize_diagnostic_line_strips_control_and_truncates() {
         let line = format!("hello\x00world {}", "x".repeat(500));
@@ -461,6 +499,17 @@ mod tests {
         assert!(!cleaned.contains('\0'));
         assert!(cleaned.chars().count() <= DIAGNOSTIC_LINE_MAX + 1); // + ellipsis
         assert!(cleaned.contains("hello"));
+    }
+
+    #[test]
+    fn sanitize_diagnostic_line_truncates_non_ascii_without_panic() {
+        // Multi-byte chars (each "日" is 3 bytes) would panic if truncate used a
+        // raw byte index inside a UTF-8 sequence.
+        let line = "日".repeat(DIAGNOSTIC_LINE_MAX + 50);
+        let cleaned = sanitize_diagnostic_line(&line).unwrap();
+        assert_eq!(cleaned.chars().count(), DIAGNOSTIC_LINE_MAX + 1);
+        assert!(cleaned.ends_with('…'));
+        assert!(cleaned.is_char_boundary(cleaned.len() - '…'.len_utf8()));
     }
 
     #[test]
@@ -491,13 +540,83 @@ mod tests {
 
     #[test]
     fn push_diagnostic_line_is_retained_in_ring() {
-        // Clear by pushing past capacity then checking presence of a unique marker.
-        let marker = format!("jean-diag-marker-{}", std::process::id());
-        push_diagnostic_line("stderr", &marker);
+        let _guard = DIAGNOSTICS_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Exercise retention + eviction: overfill with uniquely identifiable lines.
+        // Exact formatted strings avoid substring false-positives (e.g. "-1" in "-10").
+        let generation = begin_diagnostics_generation();
+        let prefix = format!("jean-diag-evict-{}", std::process::id());
+        let overflow = 25;
+        let total = DIAGNOSTIC_RING_CAP + overflow;
+        let line = |i: usize| format!("[stderr] {prefix}-{i}");
+        for i in 0..total {
+            push_diagnostic_line("stderr", &format!("{prefix}-{i}"), generation);
+        }
+
+        let snapshot = recent_managed_server_diagnostics();
+        assert_eq!(
+            snapshot.len(),
+            DIAGNOSTIC_RING_CAP,
+            "ring should be capped at DIAGNOSTIC_RING_CAP, got {}",
+            snapshot.len()
+        );
+
+        // Oldest entries must have been terminated (pop_front on overflow).
+        for i in 0..overflow {
+            let old = line(i);
+            assert!(
+                !snapshot.iter().any(|l| l == &old),
+                "oldest entry still present after eviction: {old}"
+            );
+        }
+
+        // Newest entries must remain, in FIFO order.
+        let expected: Vec<String> = (overflow..total).map(line).collect();
+        assert_eq!(
+            snapshot, expected,
+            "ring contents should be the newest DIAGNOSTIC_RING_CAP entries in order"
+        );
+    }
+
+    #[test]
+    fn begin_diagnostics_generation_clears_prior_lines() {
+        let _guard = DIAGNOSTICS_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let gen1 = begin_diagnostics_generation();
+        let stale = format!("jean-stale-diag-{}", std::process::id());
+        push_diagnostic_line("stderr", &stale, gen1);
+        assert!(
+            recent_managed_server_diagnostics()
+                .iter()
+                .any(|l| l.contains(&stale)),
+            "precondition: stale line must be present before clear"
+        );
+
+        let gen2 = begin_diagnostics_generation();
+        let snapshot_after_clear = recent_managed_server_diagnostics();
+        assert!(
+            snapshot_after_clear.is_empty(),
+            "expected empty ring after new generation, got {snapshot_after_clear:?}"
+        );
+        // Stale-generation writes must not re-contaminate the ring.
+        push_diagnostic_line("stderr", &stale, gen1);
+        assert!(
+            recent_managed_server_diagnostics().is_empty(),
+            "stale generation must not append after clear"
+        );
+
+        let fresh = format!("jean-fresh-diag-{}", std::process::id());
+        push_diagnostic_line("stderr", &fresh, gen2);
         let snapshot = recent_managed_server_diagnostics();
         assert!(
-            snapshot.iter().any(|l| l.contains(&marker)),
-            "expected marker in {snapshot:?}"
+            snapshot.iter().any(|l| l.contains(&fresh)),
+            "expected fresh marker in {snapshot:?}"
+        );
+        assert!(
+            snapshot.iter().all(|l| !l.contains(&stale)),
+            "stale marker must stay absent, got {snapshot:?}"
         );
     }
 }
