@@ -27,6 +27,7 @@ import {
   type KeybindingAction,
   type KeybindingsMap,
 } from '@/types/keybindings'
+import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
 
 const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan',
@@ -726,6 +727,12 @@ export function useMainWindowEventListeners() {
     }
   }, [preferences?.keybindings])
 
+  // After alt-tab / OS window reactivation, WebViews often leave the document
+  // without keyboard focus until a click. Restore the last focused element
+  // (or chat input / body) so typing and shortcuts like Ctrl/Cmd+L work again.
+  // Issue #577.
+  useEffect(() => installWindowKeyboardFocusRestore(), [])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Convert the keyboard event to our shortcut string format
@@ -964,7 +971,10 @@ export function useMainWindowEventListeners() {
             return
           }
           if (ui.isUpdateInstalling) {
-            commandContext.showToast('Update download already in progress', 'info')
+            commandContext.showToast(
+              'Update download already in progress',
+              'info'
+            )
             return
           }
           try {

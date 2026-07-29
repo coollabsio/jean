@@ -162,6 +162,38 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
     expect(document.activeElement).toBe(params.inputRef.current)
   })
 
+  it('re-focuses chat input when the window is re-activated after alt-tab', () => {
+    const params = renderUseChatWindowEvents()
+    const input = params.inputRef.current
+    expect(input).toBeTruthy()
+
+    // Simulate lost keyboard focus after alt-tab (focus sinks to body)
+    document.body.tabIndex = -1
+    document.body.focus()
+    expect(document.activeElement).toBe(document.body)
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('does not steal focus from a terminal when the window is re-activated', () => {
+    const params = renderUseChatWindowEvents()
+
+    const terminal = document.createElement('div')
+    terminal.className = 'xterm'
+    const terminalInput = document.createElement('textarea')
+    terminal.appendChild(terminalInput)
+    document.body.appendChild(terminal)
+    terminalInput.focus()
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(document.activeElement).toBe(terminalInput)
+    // Chat input should not have been focused
+    expect(document.activeElement).not.toBe(params.inputRef.current)
+  })
+
   it('opens the new session mode picker for CMD+T events', () => {
     renderUseChatWindowEvents()
 
@@ -174,7 +206,6 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
       intent: 'picker',
     })
   })
-
 
   it('saves browser grabbed context as a named pasted text attachment', async () => {
     vi.mocked(invoke).mockResolvedValueOnce({

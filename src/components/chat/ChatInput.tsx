@@ -1215,6 +1215,7 @@ export const ChatInput = memo(function ChatInput({
       />
       <Textarea
         ref={inputRef}
+        data-chat-input
         placeholder={
           isSending
             ? executionMode === 'yolo'

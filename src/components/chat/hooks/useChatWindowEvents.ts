@@ -186,6 +186,46 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('focus-chat-input', handler)
   }, [focusChatInput])
 
+  // After alt-tab back into Jean, re-focus the prompt when nothing else owns
+  // focus (terminal, dialogs, other inputs). Complements the global
+  // restore-keyboard-focus helper so prompt entry is ready without a click.
+  // Issue #577.
+  useEffect(() => {
+    if (isMobile) return
+
+    const onWindowFocus = () => {
+      if (
+        document.querySelector(
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
+        )
+      ) {
+        return
+      }
+
+      const active = document.activeElement as HTMLElement | null
+      if (
+        active &&
+        active !== document.body &&
+        active !== document.documentElement &&
+        active !== inputRef.current &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.isContentEditable ||
+          !!active.closest('.xterm, [data-terminal-emulator]'))
+      ) {
+        // Another intentional target still has DOM focus — leave it, but
+        // re-assert so the webview re-attaches keyboard input.
+        active.focus({ preventScroll: true })
+        return
+      }
+
+      focusChatInput()
+    }
+
+    window.addEventListener('focus', onWindowFocus)
+    return () => window.removeEventListener('focus', onWindowFocus)
+  }, [focusChatInput, inputRef, isMobile])
+
   // P key: Open plan dialog
   useEffect(() => {
     const handler = () => {
