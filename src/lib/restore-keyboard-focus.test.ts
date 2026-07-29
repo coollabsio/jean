@@ -89,7 +89,8 @@ describe('restore-keyboard-focus', () => {
       // Simulate ChatWindow listener focusing a textarea
       const input = document.createElement('textarea')
       document.body.appendChild(input)
-      window.addEventListener('focus-chat-input', () => input.focus())
+      const chatListener = () => input.focus()
+      window.addEventListener('focus-chat-input', chatListener)
 
       document.body.tabIndex = -1
       document.body.focus()
@@ -99,6 +100,7 @@ describe('restore-keyboard-focus', () => {
       expect(document.activeElement).toBe(input)
 
       window.removeEventListener('focus-chat-input', handler)
+      window.removeEventListener('focus-chat-input', chatListener)
     })
 
     it('falls back to body when chat is not mounted', () => {
