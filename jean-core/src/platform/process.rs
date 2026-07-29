@@ -71,6 +71,51 @@ pub fn silent_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     cmd
 }
 
+/// Open a URL in the system default browser without flashing a console window.
+///
+/// On Windows the shell association path is `cmd /c start "" <url>`. That
+/// intermediary `cmd.exe` must use [`silent_command`] (`CREATE_NO_WINDOW`);
+/// otherwise a visible Command Prompt briefly steals focus (issue #588).
+/// The browser window itself still opens normally.
+///
+/// Prefer this helper over raw `Command::new("cmd")` / `open` / `xdg-open`
+/// for any Jean-initiated URL launch.
+pub fn open_url_in_browser(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        silent_command("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        silent_command("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Empty title ("") is required so `start` treats the next token as the
+        // URL rather than a window title when the URL is quoted/contains spaces.
+        silent_command("cmd")
+            .args(["/c", "start", "", url])
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = url;
+        return Err("Opening a browser is not supported on this platform".to_string());
+    }
+
+    Ok(())
+}
+
 /// Raise the open-file-descriptor soft limit (`RLIMIT_NOFILE`) to the hard limit.
 ///
 /// macOS GUI apps launch with a low default soft limit (often 256). Jean spawns
@@ -401,4 +446,178 @@ pub fn terminate_process(pid: u32) -> Result<(), String> {
     }
     // Windows doesn't have SIGTERM, use TerminateProcess
     kill_process(pid)
+}
+
+#[cfg(test)]
+mod windows_console_flash_audit {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    /// Canonical home for silent `cmd /c start` URL launching (issue #588).
+    const ALLOWED_CMD_START_PATH_SUFFIX: &str = "platform/process.rs";
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("jean-core should live under the repo root")
+            .to_path_buf()
+    }
+
+    fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rust_files(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Build needles at runtime so this audit module cannot match its own source.
+    fn cmd_start_needle() -> String {
+        // ["/c", "start"] without writing that exact contiguous form in this file.
+        format!("\"/{}\", \"{}\"", "c", "start")
+    }
+
+    fn command_new_cmd_patterns() -> Vec<String> {
+        let cmd = format!("\"{}\"", "cmd");
+        let cmd_exe = format!("\"{}\"", "cmd.exe");
+        vec![
+            format!("Command::new({cmd})"),
+            format!("Command::new({cmd_exe})"),
+            format!("std::process::Command::new({cmd})"),
+            format!("std::process::Command::new({cmd_exe})"),
+        ]
+    }
+
+    fn line_number(source: &str, byte_offset: usize) -> usize {
+        source[..byte_offset]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1
+    }
+
+    /// Drop this audit module (and its constructed needles) from scans of process.rs.
+    fn production_source(path: &Path, source: &str) -> String {
+        let rel = path.to_string_lossy();
+        if !rel.ends_with(ALLOWED_CMD_START_PATH_SUFFIX) {
+            return source.to_string();
+        }
+        // Keep production helpers; strip only the #[cfg(test)] audit module.
+        if let Some(idx) = source.find("mod windows_console_flash_audit") {
+            // Include the preceding #[cfg(test)] attribute if present.
+            let cut = source[..idx].rfind("#[cfg(test)]").unwrap_or(idx);
+            return source[..cut].to_string();
+        }
+        source.to_string()
+    }
+
+    /// True when a `Command::new("cmd")` occurrence is covered by CREATE_NO_WINDOW
+    /// or `silent_command("cmd")` within a nearby window of source lines.
+    fn cmd_launch_is_silenced(source: &str, match_byte_offset: usize) -> bool {
+        let before = &source[..match_byte_offset];
+        let after = &source[match_byte_offset..];
+
+        // Prefer looking at the same statement chain and a few lines of context.
+        let context_before = before
+            .rsplit_once('\n')
+            .map(|(head, _)| {
+                let lines: Vec<&str> = head.lines().rev().take(12).collect();
+                lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+            })
+            .unwrap_or_default();
+        let context_after: String = after.lines().take(12).collect::<Vec<_>>().join("\n");
+        let window = format!("{context_before}\n{context_after}");
+
+        let silent_cmd = format!("silent_command(\"{}\")", "cmd");
+        let silent_cmd_exe = format!("silent_command(\"{}\")", "cmd.exe");
+
+        window.contains("CREATE_NO_WINDOW")
+            || window.contains(&silent_cmd)
+            || window.contains(&silent_cmd_exe)
+            || window.contains("open_url_in_browser")
+    }
+
+    #[test]
+    fn cmd_start_url_launchers_must_use_silent_helper() {
+        let root = repo_root();
+        let mut files = Vec::new();
+        collect_rust_files(&root.join("jean-core/src"), &mut files);
+        collect_rust_files(&root.join("src-tauri/src"), &mut files);
+
+        let needle = cmd_start_needle();
+        let silent_cmd = format!("silent_command(\"{}\")", "cmd");
+        let mut violations = Vec::new();
+
+        for path in &files {
+            let Ok(raw) = fs::read_to_string(path) else {
+                continue;
+            };
+            let source = production_source(path, &raw);
+            for (idx, _) in source.match_indices(&needle) {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                let rel_str = rel.to_string_lossy();
+                let line = line_number(&source, idx);
+                if rel_str.ends_with(ALLOWED_CMD_START_PATH_SUFFIX)
+                    && source[idx.saturating_sub(400)..idx].contains(&silent_cmd)
+                {
+                    continue;
+                }
+                violations.push(format!(
+                    "{rel_str}:{line}: raw cmd/start URL launcher without silent_command — use open_url_in_browser()"
+                ));
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "Unsilenced Windows cmd/start launchers found (issue #588):\n{}",
+            violations.join("\n")
+        );
+    }
+
+    #[test]
+    fn command_new_cmd_must_set_create_no_window() {
+        let root = repo_root();
+        let mut files = Vec::new();
+        collect_rust_files(&root.join("jean-core/src"), &mut files);
+        collect_rust_files(&root.join("src-tauri/src"), &mut files);
+
+        let patterns = command_new_cmd_patterns();
+        let mut violations = Vec::new();
+
+        for path in &files {
+            let Ok(raw) = fs::read_to_string(path) else {
+                continue;
+            };
+            let source = production_source(path, &raw);
+            let rel = path.strip_prefix(&root).unwrap_or(path);
+            let rel_str = rel.to_string_lossy();
+
+            for pattern in &patterns {
+                let mut search_from = 0;
+                while let Some(rel_idx) = source[search_from..].find(pattern.as_str()) {
+                    let idx = search_from + rel_idx;
+                    if !cmd_launch_is_silenced(&source, idx) {
+                        let line = line_number(&source, idx);
+                        violations.push(format!(
+                            "{rel_str}:{line}: {pattern} without CREATE_NO_WINDOW/silent_command nearby"
+                        ));
+                    }
+                    search_from = idx + pattern.len();
+                }
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "Windows cmd.exe launches missing CREATE_NO_WINDOW (issue #588):\n{}",
+            violations.join("\n")
+        );
+    }
 }

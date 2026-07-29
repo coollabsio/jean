@@ -5229,32 +5229,7 @@ pub async fn open_branch_on_github(repo_path: String, branch: String) -> Result<
     let url = format!("{github_url}/tree/{branch}");
 
     log::trace!("Opening GitHub branch URL: {url}");
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-    }
-
-    Ok(())
+    crate::platform::open_url_in_browser(&url)
 }
 
 /// Open the project's GitHub page in the browser
@@ -5273,32 +5248,7 @@ pub async fn open_project_on_github(app: AppHandle, project_id: String) -> Resul
     let github_url = get_project_github_url(&app, &project_id)?;
 
     log::trace!("Opening GitHub URL: {github_url}");
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&github_url)
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&github_url)
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &github_url])
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-    }
-
-    Ok(())
+    crate::platform::open_url_in_browser(&github_url)
 }
 
 /// Rename a worktree (display name only, doesn't affect git branch)

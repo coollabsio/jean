@@ -360,7 +360,9 @@ let output = Command::new("git")
 
 **For detached processes** that need both `CREATE_NO_WINDOW` and `CREATE_NEW_PROCESS_GROUP`: use `silent_command()` but re-set both flags via `creation_flags()` (it replaces, doesn't merge).
 
-The helper is defined in `src-tauri/src/platform/process.rs` and exported via `pub use process::*` in `platform/mod.rs`.
+**For opening URLs in the browser:** use `open_url_in_browser()` (not raw `cmd /c start`). On Windows the shell-association path still uses `cmd /c start`, but only through `silent_command()` so the intermediary console never flashes (issue #588).
+
+The helpers are defined in `jean-core/src/platform/process.rs` and re-exported via `pub use process::*` in `platform/mod.rs` (`open_url_in_browser` is also re-exported from `jean_core`).
 
 #### Canvas Views Architecture
 
