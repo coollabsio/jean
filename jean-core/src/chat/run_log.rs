@@ -2484,14 +2484,22 @@ pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &
         BufReader::new(file)
     };
 
+    // Prefer error over result: legacy Grok ACP hosts wrote both, and salvaging
+    // those as completed produced empty "content was not captured" runs (#580).
+    let mut has_result = false;
+    let mut has_error = false;
     for line in reader.lines() {
         if let Ok(line) = line {
+            // Compact JSON from serde_json::json! uses no space after `:`.
+            if line.contains("\"type\":\"error\"") {
+                has_error = true;
+            }
             if line.contains("\"type\":\"result\"") {
-                return true;
+                has_result = true;
             }
         }
     }
-    false
+    has_result && !has_error
 }
 
 /// Extract the Claude session ID from a run's JSONL file.

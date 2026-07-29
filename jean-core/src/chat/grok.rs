@@ -73,6 +73,9 @@ pub struct GrokResponse {
     pub content_blocks: Vec<ContentBlock>,
     pub cancelled: bool,
     pub usage: Option<UsageData>,
+    /// Host/stream-recorded failure (rate limit, auth, JSON-RPC error, …).
+    /// When set, the turn must surface `chat:error` instead of completing empty.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1102,6 +1105,7 @@ where
     let mut tool_calls = Vec::new();
     let mut session_id = initial_session_id.unwrap_or_default().to_string();
     let mut usage = None;
+    let mut error: Option<String> = None;
 
     for line in reader.lines() {
         let raw_line = line.map_err(|e| format!("Failed to read Grok CLI output: {e}"))?;
@@ -1131,6 +1135,23 @@ where
                 content_blocks.push(ContentBlock::UserInput {
                     text: text.to_string(),
                 });
+            }
+            continue;
+        }
+
+        // Host terminal error marker from ACP prompt JSON-RPC failure (#580).
+        // Capture and keep scanning so a legacy trailing `type:result` does not
+        // wipe the failure — callers treat `error` as fatal.
+        if parsed.get("type").and_then(Value::as_str) == Some("error") {
+            if let Some(err) = parsed.get("error") {
+                error = Some(extract_grok_error_message(err));
+            } else {
+                error = Some("Unknown Grok error".to_string());
+            }
+            if let Some(sid) = parsed.get("session_id").and_then(Value::as_str) {
+                if !sid.is_empty() {
+                    session_id = sid.to_string();
+                }
             }
             continue;
         }
@@ -1252,6 +1273,7 @@ where
         content_blocks,
         cancelled: false,
         usage,
+        error,
     })
 }
 
@@ -1695,6 +1717,145 @@ fn grok_line_is_completion_result(line: &str) -> bool {
                 .map(str::to_string)
         })
         .is_some_and(|event_type| event_type == "result" || event_type == "complete")
+}
+
+/// True when a host JSONL line is a terminal `type: "error"` marker.
+fn grok_line_is_error_marker(line: &str) -> bool {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_string))
+        .is_some_and(|event_type| event_type == "error")
+}
+
+/// Extract a human-readable message from a Grok/ACP error payload.
+///
+/// Handles:
+/// - string: `"message"`
+/// - JSON-RPC object: `{"code":…,"message":"…","data":…}`
+/// - nested: `{"error":{"message":"…"}}`
+pub(crate) fn extract_grok_error_message(error: &Value) -> String {
+    if let Some(s) = error.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    // Nested `error` wrapper (host may re-nest JSON-RPC payloads).
+    if let Some(inner) = error.get("error") {
+        if inner.as_object().is_some() || inner.as_str().is_some() {
+            let nested = extract_grok_error_message(inner);
+            if !nested.is_empty() && nested != "null" {
+                return nested;
+            }
+        }
+    }
+
+    if let Some(message) = error.get("message").and_then(Value::as_str) {
+        let message = message.trim();
+        if message.is_empty() {
+            // fall through
+        } else if let Some(data) = error.get("data") {
+            let data_str = if let Some(s) = data.as_str() {
+                s.trim().to_string()
+            } else if let Some(s) = data.get("message").and_then(Value::as_str) {
+                s.trim().to_string()
+            } else if data.is_null() {
+                String::new()
+            } else {
+                data.to_string()
+            };
+            if !data_str.is_empty() && data_str != "null" {
+                return format!("{message}: {data_str}");
+            }
+            return message.to_string();
+        } else {
+            return message.to_string();
+        }
+    }
+
+    let rendered = error.to_string();
+    if rendered == "null" || rendered.is_empty() {
+        "Unknown Grok error".to_string()
+    } else {
+        rendered
+    }
+}
+
+/// Format a raw Grok error into a user-facing string (rate limit, auth, generic).
+pub(crate) fn format_grok_user_error(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "Grok error: unknown failure".to_string();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+
+    let is_rate_or_quota = lower.contains("rate limit")
+        || lower.contains("ratelimit")
+        || lower.contains("rate_limit")
+        || lower.contains("too many requests")
+        || lower.contains("resource_exhausted")
+        || lower.contains("resource exhausted")
+        || lower.contains("quota")
+        || lower.contains("usage limit")
+        || lower.contains("limit exceeded")
+        || lower.contains("limit reached")
+        || lower.contains("\"code\":429")
+        || lower.contains("status code 429")
+        || lower.contains(" http 429")
+        || lower.starts_with("429 ")
+        || lower.contains(" 429 ");
+
+    if is_rate_or_quota {
+        return format!(
+            "Grok rate/usage limit reached. Wait for the limit to reset or check usage in Settings, then try again.\n\nDetails: {trimmed}"
+        );
+    }
+
+    let is_auth = lower.contains("not authenticated")
+        || lower.contains("unauthenticated")
+        || lower.contains("unauthorized")
+        || lower.contains("401 unauthorized")
+        || lower.contains("invalid api key")
+        || lower.contains("invalid_api_key")
+        || lower.contains("xai_api_key")
+        || lower.contains("run `grok login`")
+        || lower.contains("run grok login")
+        || lower.contains("please log in")
+        || lower.contains("please login");
+
+    if is_auth {
+        return format!(
+            "Grok authentication failed. Run `grok login` or set XAI_API_KEY in Settings.\n\nDetails: {trimmed}"
+        );
+    }
+
+    if trimmed.starts_with("Grok ") {
+        trimmed.to_string()
+    } else {
+        format!("Grok error: {trimmed}")
+    }
+}
+
+/// Build the single terminal host marker for a Grok ACP turn.
+///
+/// On success: `{"type":"result",…}`. On JSON-RPC prompt failure: `{"type":"error",…}`.
+/// Never both — writing both caused empty completed runs (#580).
+pub(crate) fn grok_host_terminal_marker(
+    session_id: &str,
+    prompt_error: Option<&Value>,
+) -> Value {
+    match prompt_error {
+        Some(error) => serde_json::json!({
+            "type": "error",
+            "error": error,
+            "session_id": session_id,
+        }),
+        None => serde_json::json!({
+            "type": "result",
+            "session_id": session_id,
+        }),
+    }
 }
 
 #[cfg(unix)]
@@ -2179,7 +2340,6 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
     )?;
 
     let mut line = String::new();
-    let mut completed = false;
     loop {
         if abort.load(Ordering::SeqCst) {
             break;
@@ -2239,26 +2399,17 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
             }
         }
         if value.get("id").and_then(Value::as_i64) == Some(prompt_request_id) {
-            if let Some(error) = value.get("error") {
-                let err_line = serde_json::json!({
-                    "type": "error",
-                    "error": error,
-                    "session_id": acp_session_id,
-                });
-                host_write_output_line(&output, &err_line.to_string())?;
-            }
-            completed = true;
+            // Write exactly one terminal marker: error OR result (never both).
+            // Writing both made Jean treat failed turns as empty completed runs (#580).
+            let prompt_error = value.get("error");
+            let marker = grok_host_terminal_marker(&acp_session_id, prompt_error);
+            host_write_output_line(&output, &marker.to_string())?;
             break;
         }
     }
 
-    if completed {
-        let result = serde_json::json!({
-            "type": "result",
-            "session_id": acp_session_id,
-        });
-        host_write_output_line(&output, &result.to_string())?;
-    }
+    // Abort/disconnect without a prompt response: no terminal marker (tail
+    // treats process death as cancel). Success/error markers are written above.
 
     stop.store(true, Ordering::SeqCst);
     let _ = UnixStream::connect(&socket_path);
@@ -2386,6 +2537,7 @@ pub fn tail_grok_output(
         content_blocks: Vec::new(),
         cancelled: false,
         usage: None,
+        error: None,
     };
     let started_at = Instant::now();
     let startup_timeout = Duration::from_secs(120);
@@ -2406,6 +2558,29 @@ pub fn tail_grok_output(
             if line.trim().is_empty() {
                 continue;
             }
+
+            // Fatal host error marker (rate limit, auth, JSON-RPC prompt failure).
+            // Fail the turn immediately — do not wait for a trailing result and
+            // never emit chat:done for empty "completed" runs (#580).
+            if grok_line_is_error_marker(&line) {
+                flush_coalesced_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
+                let raw = serde_json::from_str::<Value>(line.trim())
+                    .ok()
+                    .and_then(|value| {
+                        if let Some(sid) = value.get("session_id").and_then(Value::as_str) {
+                            if !sid.is_empty() {
+                                response.session_id = sid.to_string();
+                            }
+                        }
+                        value.get("error").map(extract_grok_error_message)
+                    })
+                    .unwrap_or_else(|| "Grok ACP host failed".to_string());
+                let msg = format_grok_user_error(&raw);
+                response.error = Some(msg.clone());
+                log::warn!("[Grok tail] host error session={session_id}: {msg}");
+                return Err(msg);
+            }
+
             if grok_line_is_completion_result(&line) {
                 completed = true;
             }
@@ -2425,6 +2600,9 @@ pub fn tail_grok_output(
                     }
                     if let Some(usage) = partial.usage {
                         response.usage = Some(usage);
+                    }
+                    if let Some(err) = partial.error {
+                        response.error = Some(err);
                     }
                     // Preserve mid-turn steered prompts in block order. Live UI
                     // already gets `chat:steered` from steer_grok_turn; this keeps
@@ -2526,6 +2704,14 @@ pub fn tail_grok_output(
     flush_coalesced_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
     response.cancelled = cancelled && !completed;
     response.content = response.content.trim().to_string();
+
+    // Legacy logs may still have type:error followed by type:result; prefer error.
+    if let Some(err) = response.error.take() {
+        let msg = format_grok_user_error(&err);
+        log::warn!("[Grok tail] turn ended with error session={session_id}: {msg}");
+        return Err(msg);
+    }
+
     if !response.cancelled {
         // Plan-mode synthetic tool injection happens in execute_grok after tail.
         // Pass authoritative content so the UI can replace any space-glued
@@ -2543,6 +2729,15 @@ pub(crate) fn parse_grok_run_to_message(
     let joined = lines.join("\n");
     let mut response = parse_grok_stream_inner(BufReader::new(joined.as_bytes()), None)?;
     response.content = response.content.trim().to_string();
+    // Surface host-recorded failures (rate limit / auth / JSON-RPC) so history
+    // does not collapse into the empty "content was not captured" placeholder.
+    if response.content.is_empty() {
+        if let Some(err) = response.error.as_deref() {
+            let formatted = format_grok_user_error(err);
+            push_text_block(&mut response.content_blocks, &formatted);
+            response.content = formatted;
+        }
+    }
     Ok(ChatMessage {
         id: run
             .assistant_message_id
@@ -3513,6 +3708,7 @@ fn send_grok_acp_prompt(
         content_blocks: Vec::new(),
         cancelled: false,
         usage: None,
+        error: None,
     };
     let mut chunk_coalescer = ChunkCoalescer::new();
     let mut line = String::new();
@@ -3639,7 +3835,8 @@ fn send_grok_acp_prompt(
         if value.get("id").and_then(Value::as_i64) == Some(prompt_request_id) {
             if let Some(error) = value.get("error") {
                 flush_coalesced_chunks(app, jean_session_id, worktree_id, &mut chunk_coalescer);
-                return Err(format!("Grok ACP prompt failed: {error}"));
+                let raw = extract_grok_error_message(error);
+                return Err(format_grok_user_error(&raw));
             }
             if response.usage.is_none() {
                 response.usage =
@@ -3773,6 +3970,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                 content_blocks: vec![],
                 cancelled: true,
                 usage: None,
+                error: None,
             });
         }
 
@@ -3895,6 +4093,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                 content_blocks: vec![],
                 cancelled: true,
                 usage: None,
+                error: None,
             });
         }
 
@@ -3927,17 +4126,19 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                         content_blocks: vec![],
                         cancelled: true,
                         usage: None,
+                        error: None,
                     });
                 }
+                let user_error = format_grok_user_error(&error);
                 let _ = app.emit_all(
                     "chat:error",
                     &ErrorEvent {
                         session_id: jean_session_id.to_string(),
                         worktree_id: worktree_id.to_string(),
-                        error: error.clone(),
+                        error: user_error.clone(),
                     },
                 );
-                return Err(error);
+                return Err(user_error);
             }
         };
 
@@ -4612,6 +4813,7 @@ mod tests {
             content_blocks: vec![],
             cancelled: false,
             usage: None,
+            error: None,
         };
         assert!(inject_synthetic_plan(&mut response).is_none());
         assert!(response.tool_calls.is_empty());
@@ -4641,6 +4843,7 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             content_blocks: vec![],
             cancelled: false,
             usage: None,
+            error: None,
         };
         let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
         assert_eq!(plan_id, "grok-plan");
@@ -4692,6 +4895,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             ],
             cancelled: false,
             usage: None,
+            error: None,
         };
         let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
         assert_eq!(plan_id, "existing-plan");
@@ -4721,6 +4925,134 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         assert_eq!(response.content, "Hello from Grok");
         assert_eq!(response.session_id, "grok-session-1");
         assert_eq!(response.usage.unwrap().output_tokens, 4);
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn parse_grok_stream_captures_host_error_marker() {
+        // Host writes type:error when session/prompt returns a JSON-RPC error (#580).
+        let input = r#"
+{"type":"session","session_id":"grok-err-1"}
+{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded","data":"retry after 60s"},"session_id":"grok-err-1"}
+"#;
+        let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
+        assert!(response.content.is_empty());
+        assert_eq!(response.session_id, "grok-err-1");
+        let err = response.error.expect("error captured");
+        assert!(err.to_ascii_lowercase().contains("rate limit"));
+        assert!(err.contains("retry after 60s"));
+    }
+
+    #[test]
+    fn parse_grok_stream_error_survives_legacy_trailing_result() {
+        // Old hosts wrote type:error then type:result — error must still win.
+        let input = r#"
+{"type":"error","error":"usage limit reached for this period","session_id":"s-legacy"}
+{"type":"result","session_id":"s-legacy"}
+"#;
+        let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
+        assert_eq!(
+            response.error.as_deref(),
+            Some("usage limit reached for this period")
+        );
+        assert!(response.content.is_empty());
+    }
+
+    #[test]
+    fn extract_and_format_grok_rate_limit_errors() {
+        let rpc = serde_json::json!({
+            "code": -32000,
+            "message": "Rate limit exceeded",
+            "data": {"message": "Too many requests"}
+        });
+        let raw = extract_grok_error_message(&rpc);
+        assert!(raw.contains("Rate limit exceeded"));
+        assert!(raw.contains("Too many requests"));
+
+        let formatted = format_grok_user_error(&raw);
+        assert!(
+            formatted.contains("rate/usage limit"),
+            "expected friendly rate-limit copy, got: {formatted}"
+        );
+        assert!(formatted.contains("Rate limit exceeded"));
+    }
+
+    #[test]
+    fn format_grok_user_error_auth_guidance() {
+        let formatted = format_grok_user_error("Run `grok login` first, or set XAI_API_KEY.");
+        assert!(formatted.contains("authentication failed"));
+        assert!(formatted.contains("grok login"));
+    }
+
+    #[test]
+    fn grok_host_terminal_marker_is_error_or_result_not_both() {
+        let ok = grok_host_terminal_marker("sess-1", None);
+        assert_eq!(ok.get("type").and_then(Value::as_str), Some("result"));
+        assert!(ok.get("error").is_none());
+        assert_eq!(ok.get("session_id").and_then(Value::as_str), Some("sess-1"));
+
+        let err_payload = serde_json::json!({"code": 429, "message": "rate limit"});
+        let err = grok_host_terminal_marker("sess-2", Some(&err_payload));
+        assert_eq!(err.get("type").and_then(Value::as_str), Some("error"));
+        assert_eq!(err.get("error"), Some(&err_payload));
+        assert_eq!(err.get("session_id").and_then(Value::as_str), Some("sess-2"));
+    }
+
+    #[test]
+    fn grok_line_classifiers_distinguish_error_and_result() {
+        assert!(grok_line_is_error_marker(
+            r#"{"type":"error","error":"nope","session_id":"s"}"#
+        ));
+        assert!(!grok_line_is_error_marker(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(grok_line_is_completion_result(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(!grok_line_is_completion_result(
+            r#"{"type":"error","error":"nope","session_id":"s"}"#
+        ));
+    }
+
+    #[test]
+    fn parse_grok_run_to_message_surfaces_rate_limit_error() {
+        let lines = vec![
+            r#"{"type":"session","session_id":"grok-hist-err"}"#.to_string(),
+            r#"{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded"},"session_id":"grok-hist-err"}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-err".to_string(),
+            user_message_id: "u-err".to_string(),
+            user_message: "hello grok".to_string(),
+            model: Some("grok-4.5".to_string()),
+            execution_mode: Some("plan".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: Some(super::super::types::Backend::Grok),
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: super::super::types::RunStatus::Completed,
+            assistant_message_id: Some("a-err".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: Some("grok-hist-err".to_string()),
+            kimi_session_id: None,
+        };
+        let message = parse_grok_run_to_message(&lines, &run).unwrap();
+        assert!(
+            message.content.contains("rate/usage limit")
+                || message.content.to_ascii_lowercase().contains("rate limit"),
+            "expected rate-limit message, got: {}",
+            message.content
+        );
+        assert!(!message.content.contains("not captured"));
     }
 
     #[test]
