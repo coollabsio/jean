@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import {
+  CheckCircle2,
+  ChevronDown,
+  Coffee,
+  RefreshCw,
+  UserRound,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
+import {
   draggable,
   dropTargetForElements,
   monitorForElements,
@@ -12,11 +21,19 @@ import {
 } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import type { WorktreeSessions } from '@/types/chat'
+import type { JenkinsWorktreeStatus } from '@/types/jenkins'
 import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 import { chatQueryKeys } from '@/services/chat'
+import { jenkinsQueryKeys } from '@/services/jenkins'
 import { isTauri, useReorderWorktrees } from '@/services/projects'
+import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
+import {
+  computeSessionCardData,
+  type SessionStatus,
+} from '@/components/chat/session-card-utils'
+import { useCanvasStoreState } from '@/components/chat/hooks/useCanvasStoreState'
 import {
   compareWorktreesForCanvasSort,
   getWorktreeLastActivity,
@@ -41,6 +58,73 @@ import {
   type WorktreeDropSnapshot,
   type WorktreeReorderDragState,
 } from '@/lib/drag-and-drop/worktree-reorder-ux'
+import {
+  classifyWorktreeCategory,
+  groupWorktreesByCategory,
+  type WorktreeCategory,
+} from './worktree-category'
+
+const HUMAN_SESSION_STATUSES = new Set<SessionStatus>([
+  'waiting',
+  'permission',
+  'review',
+])
+const ACTIVE_AI_SESSION_STATUSES = new Set<SessionStatus>([
+  'planning',
+  'vibing',
+  'yoloing',
+  'reviewing',
+])
+
+const CATEGORY_CONFIG: Record<
+  WorktreeCategory,
+  { label: string; icon: LucideIcon; tone: string; defaultOpen: boolean }
+> = {
+  needs_brain: {
+    label: 'Besoin de ton cerveau',
+    icon: UserRound,
+    tone: 'text-primary',
+    defaultOpen: true,
+  },
+  ai_running: {
+    label: 'IA en cours',
+    icon: RefreshCw,
+    tone: 'text-red-500',
+    defaultOpen: true,
+  },
+  monitoring: {
+    label: 'Jean surveille',
+    icon: Zap,
+    tone: 'text-amber-500',
+    defaultOpen: true,
+  },
+  standby: {
+    label: 'Standby métier',
+    icon: Coffee,
+    tone: 'text-violet-500',
+    defaultOpen: true,
+  },
+  calm: {
+    label: 'Calmes',
+    icon: CheckCircle2,
+    tone: 'text-emerald-500',
+    defaultOpen: false,
+  },
+}
+
+function cachedCiStatus(worktree: Worktree): string | undefined {
+  switch (worktree.cached_check_status) {
+    case 'success':
+      return 'SUCCESS'
+    case 'failure':
+    case 'error':
+      return 'FAILURE'
+    case 'pending':
+      return 'BUILDING'
+    default:
+      return undefined
+  }
+}
 
 interface SortableWorktreeProps {
   worktree: Worktree
@@ -169,6 +253,10 @@ export function WorktreeList({
   defaultBranch,
 }: WorktreeListProps) {
   const reorderWorktrees = useReorderWorktrees()
+  const storeState = useCanvasStoreState()
+  const worktreeLoadingOperations = useChatStore(
+    state => state.worktreeLoadingOperations
+  )
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -208,6 +296,17 @@ export function WorktreeList({
     })),
   })
 
+  const ciQueries = useQueries({
+    queries: readyWorktrees.map(worktree => ({
+      queryKey: jenkinsQueryKeys.status(worktree.id),
+      queryFn: async (): Promise<JenkinsWorktreeStatus> => {
+        throw new Error('WorktreeList only reads the Jenkins cache')
+      },
+      enabled: false,
+      staleTime: Infinity,
+    })),
+  })
+
   const sessionsFingerprint = sessionQueries
     .map(q => `${q.data?.worktree_id}:${q.dataUpdatedAt}:${q.isLoading}`)
     .join('|')
@@ -222,6 +321,21 @@ export function WorktreeList({
     return map
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionsFingerprint])
+
+  const ciFingerprint = ciQueries
+    .map(query => `${query.data?.worktreeId}:${query.dataUpdatedAt}`)
+    .join('|')
+
+  const ciByWorktreeId = useMemo(() => {
+    const map = new Map<string, JenkinsWorktreeStatus>()
+    for (const query of ciQueries) {
+      if (query.data?.worktreeId) {
+        map.set(query.data.worktreeId, query.data)
+      }
+    }
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ciFingerprint])
 
   // Match ProjectCanvasView ordering: pending first, then base session first,
   // then selected canvas sort mode using session last activity when requested.
@@ -252,6 +366,76 @@ export function WorktreeList({
 
     return [...sortedPending, ...sortedReady]
   }, [pendingWorktrees, readyWorktrees, sessionsByWorktreeId, worktreeSortMode])
+
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  useEffect(() => {
+    const currentTime = Math.floor(Date.now() / 1000)
+    const nextWakeUp = worktrees
+      .map(worktree => worktree.standby_until)
+      .filter((timestamp): timestamp is number => timestamp != null)
+      .filter(timestamp => timestamp > currentTime)
+      .sort((left, right) => left - right)[0]
+
+    if (!nextWakeUp) return
+
+    const delay = Math.min(
+      Math.max((nextWakeUp - currentTime) * 1000 + 100, 100),
+      2_147_000_000
+    )
+    const timeout = window.setTimeout(() => {
+      setNow(Math.floor(Date.now() / 1000))
+    }, delay)
+    return () => window.clearTimeout(timeout)
+  }, [now, worktrees])
+
+  const categoryGroups = useMemo(() => {
+    return groupWorktreesByCategory(
+      sortedWorktrees.map(worktree => {
+        const sessions = sessionsByWorktreeId.get(worktree.id)?.sessions ?? []
+        const statuses = sessions.map(
+          session => computeSessionCardData(session, storeState).status
+        )
+        const ci = ciByWorktreeId.get(worktree.id)
+
+        return {
+          item: worktree,
+          category: classifyWorktreeCategory({
+            isBase: isBaseSession(worktree),
+            worktreeStatus: worktree.status,
+            standbyReason: worktree.standby_reason,
+            standbyUntil: worktree.standby_until,
+            hasHumanAttention: statuses.some(status =>
+              HUMAN_SESSION_STATUSES.has(status)
+            ),
+            hasAiActivity:
+              !!worktreeLoadingOperations[worktree.id] ||
+              statuses.some(status => ACTIVE_AI_SESSION_STATUSES.has(status)),
+            hasPullRequest: worktree.pr_number != null,
+            ciOverallStatus: ci?.overallStatus ?? cachedCiStatus(worktree),
+            previewStatus: ci?.previewFreshness?.status,
+            now,
+          }),
+        }
+      })
+    )
+  }, [
+    ciByWorktreeId,
+    now,
+    sessionsByWorktreeId,
+    sortedWorktrees,
+    storeState,
+    worktreeLoadingOperations,
+  ])
+
+  const [openCategories, setOpenCategories] = useState<
+    Record<WorktreeCategory, boolean>
+  >(() => ({
+    needs_brain: CATEGORY_CONFIG.needs_brain.defaultOpen,
+    ai_running: CATEGORY_CONFIG.ai_running.defaultOpen,
+    monitoring: CATEGORY_CONFIG.monitoring.defaultOpen,
+    standby: CATEGORY_CONFIG.standby.defaultOpen,
+    calm: CATEGORY_CONFIG.calm.defaultOpen,
+  }))
 
   const canReorderWorktree = useCallback((worktree: Worktree) => {
     return (
@@ -506,21 +690,63 @@ export function WorktreeList({
       onDrop={handleNativeDrop}
       onDragEnd={handleNativeDragEnd}
     >
-      {sortedWorktrees.map(worktree => {
-        const isTarget = dragState.targetId === worktree.id
+      {categoryGroups.map(group => {
+        if (group.items.length === 0) return null
+        const config = CATEGORY_CONFIG[group.category]
+        const Icon = config.icon
+        const isOpen = openCategories[group.category]
+
         return (
-          <SortableWorktree
-            key={worktree.id}
-            worktree={worktree}
-            projectId={projectId}
-            projectPath={projectPath}
-            defaultBranch={defaultBranch}
-            disabled={
-              reorderWorktrees.isPending || !canReorderWorktree(worktree)
-            }
-            isDragging={dragState.draggingId === worktree.id}
-            closestEdge={isTarget ? dragState.closestEdge : null}
-          />
+          <section
+            key={group.category}
+            className="border-b border-sidebar-border/50 last:border-b-0"
+          >
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              onClick={() =>
+                setOpenCategories(current => ({
+                  ...current,
+                  [group.category]: !current[group.category],
+                }))
+              }
+              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left hover:bg-sidebar-accent/40"
+            >
+              <ChevronDown
+                className={cn(
+                  'size-3 text-muted-foreground transition-transform',
+                  !isOpen && '-rotate-90'
+                )}
+              />
+              <Icon className={cn('size-3', config.tone)} />
+              <span className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                {config.label}
+              </span>
+              <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[8px] font-bold text-muted-foreground">
+                {group.items.length}
+              </span>
+            </button>
+
+            {isOpen &&
+              group.items.map(worktree => {
+                const isTarget = dragState.targetId === worktree.id
+                return (
+                  <SortableWorktree
+                    key={worktree.id}
+                    worktree={worktree}
+                    projectId={projectId}
+                    projectPath={projectPath}
+                    defaultBranch={defaultBranch}
+                    disabled={
+                      reorderWorktrees.isPending ||
+                      !canReorderWorktree(worktree)
+                    }
+                    isDragging={dragState.draggingId === worktree.id}
+                    closestEdge={isTarget ? dragState.closestEdge : null}
+                  />
+                )
+              })}
+          </section>
         )
       })}
     </div>

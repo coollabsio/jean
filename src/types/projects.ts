@@ -208,6 +208,10 @@ export interface Worktree {
   archived_at?: number
   /** Unix timestamp when worktree was last opened/viewed by the user */
   last_opened_at?: number
+  /** Why this worktree is intentionally waiting on a business dependency */
+  standby_reason?: string
+  /** Unix timestamp when Jean should return this worktree to the attention list */
+  standby_until?: number
 }
 
 // =============================================================================

@@ -357,6 +357,20 @@ pub async fn dispatch_command(
             crate::projects::update_worktree_labels(app.clone(), worktree_id, labels).await?;
             Ok(Value::Null)
         }
+        "update_worktree_standby" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let reason: Option<String> = from_field_opt(&args, "reason")?;
+            let standby_until: Option<u64> = field_opt(&args, "standbyUntil", "standby_until")?;
+            let result = crate::projects::update_worktree_standby(
+                app.clone(),
+                worktree_id,
+                reason,
+                standby_until,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
         "has_uncommitted_changes" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let result = crate::projects::has_uncommitted_changes(app.clone(), worktree_id).await?;

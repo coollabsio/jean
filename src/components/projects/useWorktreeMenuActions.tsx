@@ -9,6 +9,7 @@ import {
   useOpenWorktreeInTerminal,
   useOpenWorktreeInEditor,
   useRunScripts,
+  useUpdateWorktreeStandby,
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useSessions } from '@/services/chat'
@@ -34,16 +35,19 @@ export function useWorktreeMenuActions({
 }: UseWorktreeMenuActionsProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showFinishConfirm, setShowFinishConfirm] = useState(false)
+  const [showStandbyDialog, setShowStandbyDialog] = useState(false)
   const archiveWorktree = useArchiveWorktree()
   const closeBaseSession = useCloseBaseSession()
   const deleteWorktree = useDeleteWorktree()
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInEditor = useOpenWorktreeInEditor()
+  const updateStandby = useUpdateWorktreeStandby()
   const { data: runScripts = [] } = useRunScripts(worktree.path)
   const { data: preferences } = usePreferences()
   const { data: sessionsData } = useSessions(worktree.id, worktree.path)
   const isBase = isBaseSession(worktree)
+  const isStandby = !!worktree.standby_reason && !!worktree.standby_until
 
   // Quick-open external links (cache-only Jenkins read; ClickUp from branch).
   const { data: jenkins } = useJenkinsStatusCached(worktree.id)
@@ -139,6 +143,33 @@ export function useWorktreeMenuActions({
     setShowDeleteConfirm(false)
   }, [deleteWorktree, worktree.id, projectId])
 
+  const handleSetStandby = useCallback(
+    (reason: string, standbyUntil: number) => {
+      setShowStandbyDialog(false)
+      updateStandby.mutate(
+        {
+          worktreeId: worktree.id,
+          projectId,
+          reason,
+          standbyUntil,
+        },
+        {
+          onSuccess: () => toast.success('Worktree mis en standby métier'),
+        }
+      )
+    },
+    [projectId, updateStandby, worktree.id]
+  )
+
+  const handleClearStandby = useCallback(() => {
+    updateStandby.mutate(
+      { worktreeId: worktree.id, projectId },
+      {
+        onSuccess: () => toast.success('Worktree sorti du standby'),
+      }
+    )
+  }, [projectId, updateStandby, worktree.id])
+
   const handleFinish = useCallback(() => {
     setShowFinishConfirm(false)
     const toastId = toast.loading('Terminer : ClickUp → TO DEPLOY + merge…')
@@ -158,7 +189,10 @@ export function useWorktreeMenuActions({
     setShowDeleteConfirm,
     showFinishConfirm,
     setShowFinishConfirm,
+    showStandbyDialog,
+    setShowStandbyDialog,
     isBase,
+    isStandby,
     hasMessages,
     runScripts,
     preferences,
@@ -172,6 +206,9 @@ export function useWorktreeMenuActions({
     handleOpenInEditor,
     handleArchiveOrClose,
     handleDelete,
+    handleSetStandby,
+    handleClearStandby,
+    isUpdatingStandby: updateStandby.isPending,
 
     // Finish (TO DEPLOY + merge) — gated to AI-pipeline projects with a PR.
     finish: {

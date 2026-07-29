@@ -1426,6 +1426,56 @@ export function useRenameWorktree() {
 }
 
 /**
+ * Park a worktree until a business dependency is expected to unblock.
+ * Passing no reason/date wakes it immediately.
+ */
+export function useUpdateWorktreeStandby() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      worktreeId,
+      reason,
+      standbyUntil,
+    }: {
+      worktreeId: string
+      projectId: string
+      reason?: string
+      standbyUntil?: number
+    }): Promise<Worktree> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      return invoke<Worktree>('update_worktree_standby', {
+        worktreeId,
+        reason,
+        standbyUntil,
+      })
+    },
+    onSuccess: (updatedWorktree, { projectId }) => {
+      queryClient.setQueryData<Worktree[]>(
+        projectsQueryKeys.worktrees(projectId),
+        worktrees =>
+          worktrees?.map(worktree =>
+            worktree.id === updatedWorktree.id ? updatedWorktree : worktree
+          )
+      )
+      queryClient.setQueryData<Worktree>(
+        [...projectsQueryKeys.all, 'worktree', updatedWorktree.id],
+        updatedWorktree
+      )
+    },
+    onError: error => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error('Impossible de modifier le standby', {
+        description: message,
+      })
+    },
+  })
+}
+
+/**
  * Hook to delete a worktree (background deletion with events)
  *
  * The backend returns immediately after marking the worktree for deletion,

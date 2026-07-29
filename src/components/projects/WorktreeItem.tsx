@@ -608,7 +608,7 @@ export function WorktreeItem({
 
   return (
     <div>
-      <WorktreeContextMenu actions={menuActions}>
+      <WorktreeContextMenu actions={menuActions} worktree={worktree}>
         <div
           className={cn(
             'group relative flex cursor-pointer flex-col gap-1 py-1.5 pr-2 overflow-hidden transition-colors duration-150',

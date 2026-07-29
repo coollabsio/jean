@@ -317,6 +317,12 @@ pub struct Worktree {
     /// Unix timestamp when worktree was last opened/viewed by the user
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_opened_at: Option<u64>,
+    /// Why this worktree is intentionally parked for a business dependency.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standby_reason: Option<String>,
+    /// Unix timestamp when the parked worktree should return to the attention list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standby_until: Option<u64>,
 }
 
 /// Container for all persisted project data
@@ -819,6 +825,30 @@ mod label_tests {
                 { "name": "Pinned", "color": "#22c55e", "pinned": true }
             ])
         );
+    }
+
+    #[test]
+    fn standby_fields_are_backward_compatible_and_round_trip() {
+        let legacy: Worktree = serde_json::from_value(serde_json::json!({
+            "id": "wt", "project_id": "p", "name": "n", "path": "/tmp", "branch": "b",
+            "created_at": 1, "setup_output": null, "setup_script": null, "order": 0
+        }))
+        .expect("legacy worktree");
+
+        assert_eq!(legacy.standby_reason, None);
+        assert_eq!(legacy.standby_until, None);
+
+        let standby: Worktree = serde_json::from_value(serde_json::json!({
+            "id": "wt", "project_id": "p", "name": "n", "path": "/tmp", "branch": "b",
+            "created_at": 1, "setup_output": null, "setup_script": null, "order": 0,
+            "standby_reason": "Validation métier",
+            "standby_until": 1_800_003_600_u64
+        }))
+        .expect("standby worktree");
+
+        let serialized = serde_json::to_value(standby).expect("serialize");
+        assert_eq!(serialized["standby_reason"], "Validation métier");
+        assert_eq!(serialized["standby_until"], 1_800_003_600_u64);
     }
 
     #[test]
