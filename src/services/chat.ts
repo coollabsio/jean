@@ -38,6 +38,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
@@ -1115,6 +1116,7 @@ export function useCloseSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
       // Switch to the new active session — but only if the caller hasn't already
@@ -1197,6 +1199,7 @@ export function useArchiveSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
       // Switch to the new active session — but only if the caller hasn't already
@@ -2094,6 +2097,7 @@ export function useClearSessionHistory() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
 
       toast.success('Chat history cleared')
     },

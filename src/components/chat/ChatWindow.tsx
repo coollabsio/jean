@@ -1248,7 +1248,11 @@ export function ChatWindow({
   } = useScrollManagement({
     messages: session?.messages,
     virtualizedListRef,
-    activeWorktreeId,
+    // Key scroll restoration on the displayed session (deferred) so we save
+    // and restore against the transcript that is actually mounted (issue #594).
+    activeSessionId: deferredSessionId,
+    contentReady:
+      !isLoading && !isSessionsLoading && !isSessionSwitching && !!session,
     isSending,
   })
 
