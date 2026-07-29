@@ -15,12 +15,14 @@
  */
 
 const BODY_FOCUSABLE_TAB_INDEX = -1
+const FOCUS_OWNING_OVERLAY_SELECTOR =
+  '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
+const OVERLAY_FOCUSABLE_SELECTOR =
+  'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]'
 
 /** Whether an open overlay should own focus (do not steal). */
 export function hasFocusOwningOverlay(): boolean {
-  return !!document.querySelector(
-    '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
-  )
+  return !!document.querySelector(FOCUS_OWNING_OVERLAY_SELECTOR)
 }
 
 /** True when the active element can meaningfully receive keyboard input. */
@@ -54,11 +56,19 @@ export function ensureBodyCanReceiveFocus(): void {
 export function restoreKeyboardFocusAfterWindowActivation(
   lastFocused: HTMLElement | null
 ): 'active' | 'last' | 'chat' | 'body' | 'overlay' {
+  const active = document.activeElement
+
   if (hasFocusOwningOverlay()) {
+    if (isMeaningfulFocusTarget(active)) {
+      active.focus({ preventScroll: true })
+    } else {
+      document
+        .querySelector(FOCUS_OWNING_OVERLAY_SELECTOR)
+        ?.querySelector<HTMLElement>(OVERLAY_FOCUSABLE_SELECTOR)
+        ?.focus({ preventScroll: true })
+    }
     return 'overlay'
   }
-
-  const active = document.activeElement
 
   // Case 1: DOM still reports a real focus target (common after alt-tab).
   // Re-calling focus() re-attaches WebView keyboard input without moving caret.

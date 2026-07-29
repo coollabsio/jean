@@ -119,11 +119,48 @@ describe('restore-keyboard-focus', () => {
       dialog.appendChild(dialogInput)
       document.body.appendChild(dialog)
       dialogInput.focus()
+      const focusSpy = vi.spyOn(dialogInput, 'focus')
 
       const outside = document.createElement('textarea')
       document.body.appendChild(outside)
 
       expect(restoreKeyboardFocusAfterWindowActivation(outside)).toBe('overlay')
+      expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+      expect(document.activeElement).toBe(dialogInput)
+    })
+
+    it('re-asserts meaningful active focus when an overlay is open', () => {
+      const dialog = document.createElement('div')
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('data-state', 'open')
+      document.body.appendChild(dialog)
+
+      const activeInput = document.createElement('input')
+      document.body.appendChild(activeInput)
+      activeInput.focus()
+      const focusSpy = vi.spyOn(activeInput, 'focus')
+      const chatFocusHandler = vi.fn()
+      window.addEventListener('focus-chat-input', chatFocusHandler)
+
+      expect(restoreKeyboardFocusAfterWindowActivation(null)).toBe('overlay')
+      expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+      expect(chatFocusHandler).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(activeInput)
+
+      window.removeEventListener('focus-chat-input', chatFocusHandler)
+    })
+
+    it('focuses an overlay control when activeElement is body', () => {
+      const dialog = document.createElement('div')
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('data-state', 'open')
+      const dialogInput = document.createElement('input')
+      dialog.appendChild(dialogInput)
+      document.body.appendChild(dialog)
+      document.body.tabIndex = -1
+      document.body.focus()
+
+      expect(restoreKeyboardFocusAfterWindowActivation(null)).toBe('overlay')
       expect(document.activeElement).toBe(dialogInput)
     })
 

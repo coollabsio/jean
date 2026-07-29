@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useUIStore } from '@/store/ui-store'
@@ -16,6 +17,7 @@ import {
   shouldAllowKeybindingThroughOpenOverlay,
   shouldLetPlanDialogHandleAction,
   switchActiveTerminalTabByIndexForShortcut,
+  useWindowKeyboardFocusRestore,
 } from './useMainWindowEventListeners'
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
@@ -26,17 +28,32 @@ import type {
   WorktreeSessions,
 } from '@/types/chat'
 
-const { mockInvoke, mockListen, mockDisposeTerminal } = vi.hoisted(() => ({
-  mockInvoke: vi.fn().mockResolvedValue(undefined),
-  mockListen: vi.fn().mockResolvedValue(() => {
-    /* noop cleanup */
-  }),
-  mockDisposeTerminal: vi.fn(),
-}))
+const { mockInvoke, mockListen, mockDisposeTerminal, mockEnvironment } =
+  vi.hoisted(() => ({
+    mockInvoke: vi.fn().mockResolvedValue(undefined),
+    mockListen: vi.fn().mockResolvedValue(() => {
+      /* noop cleanup */
+    }),
+    mockDisposeTerminal: vi.fn(),
+    mockEnvironment: {
+      native: true,
+      mobile: false,
+    },
+  }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
   listen: mockListen,
+  listenLocal: mockListen,
+}))
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  isNativeApp: () => mockEnvironment.native,
+}))
+
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => mockEnvironment.mobile,
 }))
 
 vi.mock('@/lib/terminal-instances', () => ({
@@ -75,6 +92,43 @@ function focusPlainSessionTerminal() {
   input.focus()
   return input
 }
+
+describe('useWindowKeyboardFocusRestore', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockEnvironment.native = true
+    mockEnvironment.mobile = false
+    document.body.innerHTML = ''
+    document.body.tabIndex = -1
+    document.body.focus()
+  })
+
+  it.each([
+    ['mobile', true, true],
+    ['web', false, false],
+  ])(
+    'does not focus the chat input after %s activation',
+    (_, native, mobile) => {
+      mockEnvironment.native = native
+      mockEnvironment.mobile = mobile
+
+      const input = document.createElement('textarea')
+      document.body.appendChild(input)
+      const focusInput = () => input.focus()
+      window.addEventListener('focus-chat-input', focusInput)
+
+      const { unmount } = renderHook(() => useWindowKeyboardFocusRestore())
+      window.dispatchEvent(new Event('focus'))
+      vi.runAllTimers()
+
+      expect(document.activeElement).toBe(document.body)
+
+      unmount()
+      window.removeEventListener('focus-chat-input', focusInput)
+      vi.useRealTimers()
+    }
+  )
+})
 
 describe('useMainWindowEventListeners terminal shortcuts', () => {
   beforeEach(() => {
@@ -345,9 +399,9 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       terminalId: 'term-running',
     })
     expect(mockDisposeTerminal).not.toHaveBeenCalled()
-    expect(useTerminalStore.getState().terminals['modal-worktree']).toHaveLength(
-      1
-    )
+    expect(
+      useTerminalStore.getState().terminals['modal-worktree']
+    ).toHaveLength(1)
 
     window.removeEventListener('confirm-close-terminal', confirmListener)
   })
@@ -523,7 +577,10 @@ describe('applySessionRenamedToCaches', () => {
       [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
       sessions
     )
-    queryClient.setQueryData(chatQueryKeys.session(sessionId), sessions.sessions[0])
+    queryClient.setQueryData(
+      chatQueryKeys.session(sessionId),
+      sessions.sessions[0]
+    )
     queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], {
       entries: [
         {
