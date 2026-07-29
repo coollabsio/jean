@@ -40,6 +40,10 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.web_access_sounds_enabled).toBe(true)
   })
 
+  it('enables finished session animation by default', () => {
+    expect(defaultPreferences.finished_session_animation_enabled).toBe(true)
+  })
+
   it('uses Jean-managed Command Code CLI by default', () => {
     expect(defaultPreferences.commandcode_cli_source).toBe('jean')
   })

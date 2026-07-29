@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAllSessions } from '@/services/chat'
+import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
@@ -154,6 +155,9 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const showDesktopKeyboardAffordances = isNativeApp() && !isMobile
   const queryClient = useQueryClient()
   const unreadCount = useUnreadCount()
+  const { data: preferences } = usePreferences()
+  const animationEnabled =
+    preferences?.finished_session_animation_enabled ?? true
   const { data: allSessions, isLoading } = useAllSessions(open)
   // Listen for command palette event to open the popover
   useEffect(() => {
@@ -427,13 +431,19 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <div className="card-border-spin">
+        <div className={cn(animationEnabled && 'finished-session-glow')}>
           <button
             type="button"
             onClick={handleTriggerClick}
             className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-yellow-400 cursor-pointer"
           >
-            <BellDot className="h-3.5 w-3.5 shrink-0 animate-[bell-ring_2s_ease-in-out_infinite]" />
+            <BellDot
+              className={cn(
+                'h-3.5 w-3.5 shrink-0',
+                animationEnabled &&
+                  'animate-[bell-ring_2s_ease-in-out_infinite]'
+              )}
+            />
             {displayCount} finished{' '}
             {displayCount === 1 ? 'session' : 'sessions'}
             {showDesktopKeyboardAffordances && (

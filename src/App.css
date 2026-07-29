@@ -278,6 +278,26 @@
   --card-spin-color: var(--destructive);
 }
 
+/* Soft glow for the finished-sessions badge.
+   Replaces the conic border spin (which looked like a split outline loop). */
+@keyframes finished-session-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, oklch(0.795 0.184 86.047) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 8px 1px color-mix(in srgb, oklch(0.795 0.184 86.047) 40%, transparent),
+      0 0 0 1px color-mix(in srgb, oklch(0.795 0.184 86.047) 35%, transparent);
+  }
+}
+
+.finished-session-glow {
+  border-radius: calc(var(--radius) - 2px);
+  animation: finished-session-glow 2.5s ease-in-out infinite;
+}
+
 /* Animated dots for loading indicator */
 @keyframes dots {
   0%,
@@ -652,7 +672,8 @@ body:not(.native-app) kbd {
   .animate-pulse,
   [class*='bell-ring'],
   .square-spinner::before,
-  .card-border-spin::before {
+  .card-border-spin::before,
+  .finished-session-glow {
     animation: none !important;
   }
 }
@@ -666,6 +687,7 @@ body:not(.native-app) kbd {
 .window-blurred .animate-pulse,
 .window-blurred [class*='bell-ring'],
 .window-blurred .card-border-spin::before,
-.window-blurred .square-spinner::before {
+.window-blurred .square-spinner::before,
+.window-blurred .finished-session-glow {
   animation-play-state: paused !important;
 }
