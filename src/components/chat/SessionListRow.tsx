@@ -27,6 +27,11 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   getResumeCommand,
   statusConfig,
   type SessionCardProps,
@@ -100,12 +105,21 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                 'border-primary/50 bg-primary/5 hover:border-primary/50 hover:bg-primary/10'
             )}
           >
-            {/* Status dot */}
-            <StatusIndicator
-              status={config.indicatorStatus}
-              variant={config.indicatorVariant}
-              className="h-2 w-2 shrink-0"
-            />
+            {/* Status indicator — shape + tooltip/label so status is not color-only */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex shrink-0">
+                  <StatusIndicator
+                    status={config.indicatorStatus}
+                    variant={config.indicatorVariant}
+                    shape={config.indicatorShape}
+                    label={config.label}
+                    className="h-2 w-2 shrink-0"
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{config.label}</TooltipContent>
+            </Tooltip>
 
             {/* Session name */}
             {isRenaming ? (

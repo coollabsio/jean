@@ -35,6 +35,21 @@ export function useCanvasStoreState(): ChatStoreState {
   const pendingPermissionDenials = useChatStore(
     state => state.pendingPermissionDenials
   )
+  const pendingCodexPermissionRequests = useChatStore(
+    state => state.pendingCodexPermissionRequests
+  )
+  const pendingCodexCommandApprovalRequests = useChatStore(
+    state => state.pendingCodexCommandApprovalRequests
+  )
+  const pendingCodexUserInputRequests = useChatStore(
+    state => state.pendingCodexUserInputRequests
+  )
+  const pendingCodexMcpElicitationRequests = useChatStore(
+    state => state.pendingCodexMcpElicitationRequests
+  )
+  const pendingCodexDynamicToolCallRequests = useChatStore(
+    state => state.pendingCodexDynamicToolCallRequests
+  )
   const sessionLabels = useChatStore(state => state.sessionLabels)
 
   return useMemo(
@@ -48,6 +63,11 @@ export function useCanvasStoreState(): ChatStoreState {
       waitingForInputSessionIds,
       reviewingSessions,
       pendingPermissionDenials,
+      pendingCodexPermissionRequests,
+      pendingCodexCommandApprovalRequests,
+      pendingCodexUserInputRequests,
+      pendingCodexMcpElicitationRequests,
+      pendingCodexDynamicToolCallRequests,
       sessionLabels,
     }),
     [
@@ -59,6 +79,11 @@ export function useCanvasStoreState(): ChatStoreState {
       waitingForInputSessionIds,
       reviewingSessions,
       pendingPermissionDenials,
+      pendingCodexPermissionRequests,
+      pendingCodexCommandApprovalRequests,
+      pendingCodexUserInputRequests,
+      pendingCodexMcpElicitationRequests,
+      pendingCodexDynamicToolCallRequests,
       sessionLabels,
     ]
   )

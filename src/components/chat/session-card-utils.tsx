@@ -1,4 +1,5 @@
 import type {
+  IndicatorShape,
   IndicatorStatus,
   IndicatorVariant,
 } from '@/components/ui/status-indicator'
@@ -11,6 +12,11 @@ import {
   type ContentBlock,
   type PermissionDenial,
   type LabelData,
+  type CodexPermissionRequest,
+  type CodexCommandApprovalRequest,
+  type CodexUserInputRequest,
+  type CodexMcpElicitationRequest,
+  type CodexDynamicToolCallRequest,
 } from '@/types/chat'
 import {
   buildNativeResumeArgs,
@@ -19,6 +25,11 @@ import {
 } from '@/lib/native-cli-session'
 import { findPlanFilePath, resolvePlanContent } from './tool-call-utils'
 
+/**
+ * Lossless session status for canvas/sidebar/tabs/summaries.
+ * Priority is applied in computeSessionCardData — do not collapse
+ * actionable states before rendering.
+ */
 export type SessionStatus =
   | 'idle'
   | 'planning'
@@ -26,9 +37,32 @@ export type SessionStatus =
   | 'yoloing'
   | 'reviewing'
   | 'waiting'
-  | 'review'
+  | 'plan_approval'
+  | 'input_required'
   | 'permission'
+  | 'command_approval'
+  | 'mcp_input'
+  | 'tool_approval'
+  | 'scheduled'
+  | 'review'
   | 'completed'
+  | 'cancelled'
+  | 'crashed'
+
+/** Statuses that require user action before the session can continue. */
+export const ACTIONABLE_WAITING_STATUSES: readonly SessionStatus[] = [
+  'waiting',
+  'plan_approval',
+  'input_required',
+  'permission',
+  'command_approval',
+  'mcp_input',
+  'tool_approval',
+] as const
+
+export function isActionableWaitingStatus(status: SessionStatus): boolean {
+  return (ACTIONABLE_WAITING_STATUSES as readonly string[]).includes(status)
+}
 
 export interface SessionCardData {
   session: Session
@@ -77,6 +111,7 @@ export const statusConfig: Record<
     label: string
     indicatorStatus: IndicatorStatus
     indicatorVariant?: IndicatorVariant
+    indicatorShape?: IndicatorShape
   }
 > = {
   idle: {
@@ -104,18 +139,60 @@ export const statusConfig: Record<
   waiting: {
     label: 'Waiting',
     indicatorStatus: 'waiting',
+    indicatorShape: 'diamond',
   },
-  review: {
-    label: 'Review',
-    indicatorStatus: 'review',
+  plan_approval: {
+    label: 'Plan approval required',
+    indicatorStatus: 'plan_approval',
+    indicatorShape: 'square',
+  },
+  input_required: {
+    label: 'Input required',
+    indicatorStatus: 'input_required',
+    indicatorShape: 'diamond',
   },
   permission: {
-    label: 'Permission',
-    indicatorStatus: 'waiting',
+    label: 'Permission required',
+    indicatorStatus: 'permission',
+    indicatorShape: 'square',
+  },
+  command_approval: {
+    label: 'Command approval required',
+    indicatorStatus: 'permission',
+    indicatorShape: 'square',
+  },
+  mcp_input: {
+    label: 'MCP input required',
+    indicatorStatus: 'input_required',
+    indicatorShape: 'diamond',
+  },
+  tool_approval: {
+    label: 'Tool approval required',
+    indicatorStatus: 'permission',
+    indicatorShape: 'square',
+  },
+  scheduled: {
+    label: 'Scheduled',
+    indicatorStatus: 'scheduled',
+    indicatorShape: 'diamond',
+  },
+  review: {
+    label: 'Review ready',
+    indicatorStatus: 'review',
   },
   completed: {
     label: 'Completed',
     indicatorStatus: 'completed',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    indicatorStatus: 'cancelled',
+    indicatorShape: 'ring',
+  },
+  crashed: {
+    label: 'Crashed',
+    indicatorStatus: 'crashed',
+    indicatorShape: 'square',
   },
 }
 
@@ -139,6 +216,20 @@ export interface ChatStoreState {
   waitingForInputSessionIds: Record<string, boolean>
   reviewingSessions: Record<string, boolean>
   pendingPermissionDenials: Record<string, PermissionDenial[]>
+  pendingCodexPermissionRequests: Record<string, CodexPermissionRequest[]>
+  pendingCodexCommandApprovalRequests: Record<
+    string,
+    CodexCommandApprovalRequest[]
+  >
+  pendingCodexUserInputRequests: Record<string, CodexUserInputRequest[]>
+  pendingCodexMcpElicitationRequests: Record<
+    string,
+    CodexMcpElicitationRequest[]
+  >
+  pendingCodexDynamicToolCallRequests: Record<
+    string,
+    CodexDynamicToolCallRequest[]
+  >
   sessionLabels: Record<string, LabelData>
 }
 
@@ -229,6 +320,13 @@ export function shouldShowReviewFullWidth({
   return isDedicatedEmptyCodeReviewSession(session)
 }
 
+function hasPendingEntries<T>(
+  storeEntries: T[] | undefined,
+  sessionEntries: T[] | undefined
+): boolean {
+  return (storeEntries?.length ?? 0) > 0 || (sessionEntries?.length ?? 0) > 0
+}
+
 export function computeSessionCardData(
   session: Session,
   storeState: ChatStoreState
@@ -243,6 +341,11 @@ export function computeSessionCardData(
     waitingForInputSessionIds,
     reviewingSessions,
     pendingPermissionDenials,
+    pendingCodexPermissionRequests,
+    pendingCodexCommandApprovalRequests,
+    pendingCodexUserInputRequests,
+    pendingCodexMcpElicitationRequests,
+    pendingCodexDynamicToolCallRequests,
     sessionLabels,
   } = storeState
 
@@ -388,13 +491,37 @@ export function computeSessionCardData(
       hasPendingQuestion ||
       (persistedWaitingForInput && inferredWaitingType === 'question')
 
-  // Check for pending permission denials
+  // Check for pending permission denials (Claude-style)
   const sessionDenials = pendingPermissionDenials[session.id] ?? []
   const persistedDenials = session.pending_permission_denials ?? []
   const hasPermissionDenials =
     sessionDenials.length > 0 || persistedDenials.length > 0
   const permissionDenialCount =
     sessionDenials.length > 0 ? sessionDenials.length : persistedDenials.length
+
+  // Codex pending approval/input queues (store first, then session persistence)
+  const hasCodexPermission = hasPendingEntries(
+    pendingCodexPermissionRequests[session.id],
+    session.pending_codex_permission_requests
+  )
+  const hasCodexCommandApproval = hasPendingEntries(
+    pendingCodexCommandApprovalRequests[session.id],
+    session.pending_codex_command_approval_requests
+  )
+  const hasCodexUserInput = hasPendingEntries(
+    pendingCodexUserInputRequests[session.id],
+    session.pending_codex_user_input_requests
+  )
+  const hasCodexMcpInput = hasPendingEntries(
+    pendingCodexMcpElicitationRequests[session.id],
+    session.pending_codex_mcp_elicitation_requests
+  )
+  const hasCodexToolApproval = hasPendingEntries(
+    pendingCodexDynamicToolCallRequests[session.id],
+    session.pending_codex_dynamic_tool_call_requests
+  )
+
+  const hasScheduledWakeup = !!session.scheduled_wakeup
 
   // Execution mode
   const executionMode = sessionSending
@@ -404,11 +531,33 @@ export function computeSessionCardData(
       'plan')
     : (executionModes[session.id] ?? session.selected_execution_mode ?? 'plan')
 
-  // Determine status
-  // Priority: permission > waiting > sending (active) > review > restart recovery > completed > idle
+  // Determine status — lossless priority matrix (actionable first, then active,
+  // then terminal run outcomes). Never collapse cancelled/crashed into idle.
+  // Priority:
+  //   permission > command_approval > tool_approval > mcp_input >
+  //   input_required > plan_approval > waiting >
+  //   sending modes > reviewing > review >
+  //   restart recovery (running/resumable) > scheduled >
+  //   cancelled > crashed > completed > idle
+  //
+  // Plan/question flags can be true while still streaming (hasExitPlanMode from
+  // live tool calls). Only promote them to actionable statuses once the session
+  // is actually waiting — otherwise keep the active planning/vibing status.
   let status: SessionStatus = 'idle'
-  if (hasPermissionDenials) {
+  if (hasPermissionDenials || hasCodexPermission) {
     status = 'permission'
+  } else if (hasCodexCommandApproval) {
+    status = 'command_approval'
+  } else if (hasCodexToolApproval) {
+    status = 'tool_approval'
+  } else if (hasCodexMcpInput) {
+    status = 'mcp_input'
+  } else if (hasCodexUserInput || (isWaiting && hasQuestion)) {
+    // Questions win over plan approval when both are present (UI hides Approve
+    // while a question is open).
+    status = 'input_required'
+  } else if (isWaiting && hasExitPlanMode) {
+    status = 'plan_approval'
   } else if (isWaiting) {
     status = 'waiting'
   } else if (sessionSending && executionMode === 'plan') {
@@ -440,6 +589,12 @@ export function computeSessionCardData(
     if (mode === 'plan') status = 'planning'
     else if (mode === 'build') status = 'vibing'
     else if (mode === 'yolo') status = 'yoloing'
+  } else if (!sessionSending && hasScheduledWakeup) {
+    status = 'scheduled'
+  } else if (!sessionSending && session.last_run_status === 'cancelled') {
+    status = 'cancelled'
+  } else if (!sessionSending && session.last_run_status === 'crashed') {
+    status = 'crashed'
   } else if (!sessionSending && session.last_run_status === 'completed') {
     status = 'completed'
   }
@@ -452,11 +607,24 @@ export function computeSessionCardData(
     status,
     executionMode: executionMode as ExecutionMode,
     isSending: sessionSending,
-    isWaiting,
+    isWaiting:
+      isWaiting ||
+      hasPermissionDenials ||
+      hasCodexPermission ||
+      hasCodexCommandApproval ||
+      hasCodexUserInput ||
+      hasCodexMcpInput ||
+      hasCodexToolApproval,
     hasExitPlanMode,
-    hasQuestion,
-    hasPermissionDenials,
-    permissionDenialCount,
+    hasQuestion: hasQuestion || hasCodexUserInput,
+    hasPermissionDenials: hasPermissionDenials || hasCodexPermission,
+    permissionDenialCount:
+      permissionDenialCount ||
+      (hasCodexPermission
+        ? (pendingCodexPermissionRequests[session.id]?.length ??
+          session.pending_codex_permission_requests?.length ??
+          0)
+        : 0),
     planFilePath,
     planContent,
     pendingPlanMessageId,
@@ -585,13 +753,22 @@ const STATUS_GROUP_ORDER: {
   title: string
   statuses: SessionStatus[]
 }[] = [
-  { key: 'waiting', title: 'Waiting', statuses: ['waiting', 'permission'] },
+  {
+    key: 'waiting',
+    title: 'Waiting',
+    statuses: [...ACTIONABLE_WAITING_STATUSES],
+  },
   {
     key: 'inProgress',
     title: 'In Progress',
-    statuses: ['planning', 'vibing', 'yoloing', 'reviewing'],
+    statuses: ['planning', 'vibing', 'yoloing', 'reviewing', 'scheduled'],
   },
-  { key: 'review', title: 'Review', statuses: ['review', 'completed'] },
+  {
+    key: 'review',
+    title: 'Review',
+    // Keep completed distinct from review-ready within the group via statusConfig labels
+    statuses: ['review', 'completed', 'cancelled', 'crashed'],
+  },
   { key: 'idle', title: 'Idle', statuses: ['idle'] },
 ]
 

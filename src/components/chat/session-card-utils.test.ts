@@ -149,6 +149,11 @@ describe('computeSessionCardData', () => {
       waitingForInputSessionIds: {},
       reviewingSessions: {},
       pendingPermissionDenials: {},
+      pendingCodexPermissionRequests: {},
+      pendingCodexCommandApprovalRequests: {},
+      pendingCodexUserInputRequests: {},
+      pendingCodexMcpElicitationRequests: {},
+      pendingCodexDynamicToolCallRequests: {},
       sessionLabels: {},
       ...overrides,
     }
@@ -241,7 +246,7 @@ describe('computeSessionCardData', () => {
     expect(card.planContent).toBe('Plan:\n- Implement changes\n- Add tests')
     expect(card.hasExitPlanMode).toBe(true)
     expect(card.isWaiting).toBe(true)
-    expect(card.status).toBe('waiting')
+    expect(card.status).toBe('plan_approval')
   })
 
   it('ignores stale Zustand waiting flag when session is completed and reviewing', () => {
@@ -433,7 +438,7 @@ describe('computeSessionCardData', () => {
     const card = computeSessionCardData(session, storeState)
 
     expect(card.isWaiting).toBe(true)
-    expect(card.status).toBe('waiting')
+    expect(card.status).toBe('plan_approval')
   })
 
   it('honors persisted waiting_for_input when completed run paused on a question', () => {
@@ -450,7 +455,7 @@ describe('computeSessionCardData', () => {
 
     expect(card.isWaiting).toBe(true)
     expect(card.hasQuestion).toBe(true)
-    expect(card.status).toBe('waiting')
+    expect(card.status).toBe('input_required')
   })
 
   it('clears waiting once a completed question run is answered', () => {
@@ -487,7 +492,7 @@ describe('computeSessionCardData', () => {
 
     expect(getEffectiveSessionWaiting(session, storeState)).toBe(true)
     expect(card.isWaiting).toBe(true)
-    expect(card.status).toBe('waiting')
+    expect(card.status).toBe('plan_approval')
   })
 
   it('honors persisted waiting_for_input while run still active', () => {
@@ -503,6 +508,178 @@ describe('computeSessionCardData', () => {
     const card = computeSessionCardData(session, storeState)
 
     expect(card.isWaiting).toBe(true)
-    expect(card.status).toBe('waiting')
+    expect(card.status).toBe('input_required')
+  })
+
+  it('maps cancelled last_run_status to cancelled (not idle)', () => {
+    const session = createBaseSession({ last_run_status: 'cancelled' })
+    const card = computeSessionCardData(session, createBaseStoreState())
+    expect(card.status).toBe('cancelled')
+    expect(statusConfig[card.status].label).toBe('Cancelled')
+  })
+
+  it('maps crashed last_run_status to crashed (not idle)', () => {
+    const session = createBaseSession({ last_run_status: 'crashed' })
+    const card = computeSessionCardData(session, createBaseStoreState())
+    expect(card.status).toBe('crashed')
+    expect(statusConfig[card.status].label).toBe('Crashed')
+  })
+
+  it('maps pending Claude permission denials to permission', () => {
+    const session = createBaseSession({
+      pending_permission_denials: [
+        {
+          tool_name: 'Bash',
+          tool_use_id: 'tu-1',
+          tool_input: {},
+        } as never,
+      ],
+    })
+    const card = computeSessionCardData(session, createBaseStoreState())
+    expect(card.status).toBe('permission')
+    expect(card.hasPermissionDenials).toBe(true)
+  })
+
+  it('maps Codex pending queues to specific actionable statuses', () => {
+    const base = createBaseSession({ last_run_status: 'running' })
+
+    expect(
+      computeSessionCardData(
+        {
+          ...base,
+          pending_codex_command_approval_requests: [
+            { rpc_id: 1, item_id: 'i', thread_id: 't', turn_id: 'u' },
+          ],
+        },
+        createBaseStoreState()
+      ).status
+    ).toBe('command_approval')
+
+    expect(
+      computeSessionCardData(
+        {
+          ...base,
+          pending_codex_user_input_requests: [
+            { rpc_id: 1, item_id: 'i' } as never,
+          ],
+        },
+        createBaseStoreState()
+      ).status
+    ).toBe('input_required')
+
+    expect(
+      computeSessionCardData(
+        {
+          ...base,
+          pending_codex_mcp_elicitation_requests: [
+            { rpc_id: 1, item_id: 'i' } as never,
+          ],
+        },
+        createBaseStoreState()
+      ).status
+    ).toBe('mcp_input')
+
+    expect(
+      computeSessionCardData(
+        {
+          ...base,
+          pending_codex_dynamic_tool_call_requests: [
+            { rpc_id: 1, item_id: 'i' } as never,
+          ],
+        },
+        createBaseStoreState()
+      ).status
+    ).toBe('tool_approval')
+
+    expect(
+      computeSessionCardData(
+        {
+          ...base,
+          pending_codex_permission_requests: [
+            {
+              rpc_id: 1,
+              item_id: 'i',
+              permissions: {},
+            },
+          ],
+        },
+        createBaseStoreState()
+      ).status
+    ).toBe('permission')
+  })
+
+  it('maps scheduled_wakeup to scheduled when otherwise idle', () => {
+    const session = createBaseSession({
+      last_run_status: 'completed',
+      scheduled_wakeup: {
+        fire_at_unix: Date.now() / 1000 + 60,
+        scheduled_at_unix: Date.now() / 1000,
+        delay_seconds: 60,
+        prompt: 'continue',
+        reason: 'wait',
+        tool_call_id: 'tc-1',
+      },
+    })
+    // completed normally wins over scheduled when last_run is completed
+    // and no waiting — but scheduled is checked before completed
+    const card = computeSessionCardData(session, createBaseStoreState())
+    expect(card.status).toBe('scheduled')
+  })
+
+  it('keeps review and completed distinguishable', () => {
+    const reviewCard = computeSessionCardData(
+      createBaseSession({
+        is_reviewing: true,
+        last_run_status: 'completed',
+      }),
+      createBaseStoreState({ reviewingSessions: { 'session-1': true } })
+    )
+    const completedCard = computeSessionCardData(
+      createBaseSession({ last_run_status: 'completed' }),
+      createBaseStoreState()
+    )
+    expect(reviewCard.status).toBe('review')
+    expect(completedCard.status).toBe('completed')
+    expect(statusConfig[reviewCard.status].label).toBe('Review ready')
+    expect(statusConfig[completedCard.status].label).toBe('Completed')
+  })
+
+  it('prefers input_required over plan_approval when both are waiting', () => {
+    const session = createBaseSession({
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'completed',
+      pending_plan_message_id: 'plan-msg',
+    })
+    // hasExitPlanMode from pending plan id inference only when type is plan;
+    // force both flags via messages
+    const withMessages: Session = {
+      ...session,
+      messages: [
+        {
+          id: 'msg-1',
+          session_id: 'session-1',
+          role: 'assistant',
+          content: 'Choose and plan',
+          timestamp: 1,
+          tool_calls: [
+            {
+              id: 'q1',
+              name: 'AskUserQuestion',
+              input: { questions: [] },
+            },
+            {
+              id: 'p1',
+              name: 'ExitPlanMode',
+              input: {},
+            },
+          ],
+        },
+      ],
+    }
+    const card = computeSessionCardData(withMessages, createBaseStoreState())
+    expect(card.hasQuestion).toBe(true)
+    expect(card.hasExitPlanMode).toBe(true)
+    expect(card.status).toBe('input_required')
   })
 })

@@ -780,9 +780,14 @@ export function WorktreeItem({
                     <StatusIndicator
                       status={config.indicatorStatus}
                       variant={config.indicatorVariant}
+                      shape={config.indicatorShape}
+                      label={config.label}
                       className="h-1.5 w-1.5 shrink-0"
                     />
-                    <span className="truncate text-xs">
+                    <span
+                      className="truncate text-xs"
+                      title={`${config.label}: ${card.session.name || 'Untitled'}`}
+                    >
                       {card.session.name || 'Untitled'}
                     </span>
                   </div>

@@ -93,6 +93,7 @@ import {
   buildNativeClientSessionInput,
   computeSessionCardData,
   getResumeCommand,
+  isActionableWaitingStatus,
   statusConfig,
   type SessionCardData,
 } from './session-card-utils'
@@ -143,7 +144,7 @@ function useOffScreenWaiting(
     if (!viewport) return
 
     const waitingIds = sortedCards
-      .filter(c => c.status === 'waiting')
+      .filter(c => isActionableWaitingStatus(c.status))
       .map(c => c.session.id)
 
     if (waitingIds.length === 0) {
@@ -778,7 +779,7 @@ export function SessionChatModal({
       if (!viewport) return
       const { scrollLeft, clientWidth } = viewport
       for (const card of sortedCards) {
-        if (card.status !== 'waiting') continue
+        if (!isActionableWaitingStatus(card.status)) continue
         const el = viewport.querySelector(
           `[data-session-id="${card.session.id}"]`
         ) as HTMLElement | null
@@ -1337,13 +1338,15 @@ export function SessionChatModal({
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                               draggedSessionId === session.id && 'opacity-60',
-                              status === 'waiting' &&
+                              isActionableWaitingStatus(status) &&
                                 'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
                             )}
                           >
                             <StatusIndicator
                               status={config.indicatorStatus}
                               variant={config.indicatorVariant}
+                              shape={config.indicatorShape}
+                              label={config.label}
                               className="h-1.5 w-1.5"
                             />
                             {idx < 9 && (

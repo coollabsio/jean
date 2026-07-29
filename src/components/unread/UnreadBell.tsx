@@ -51,12 +51,67 @@ interface UnreadItem {
 }
 
 function getSessionStatus(session: Session) {
-  if (session.waiting_for_input) {
-    const isplan = session.waiting_for_input_type === 'plan'
+  // Prefer specific actionable reasons over generic waiting (matches canvas)
+  const hasCodexPermission =
+    (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
+    (session.pending_permission_denials?.length ?? 0) > 0
+  const hasCodexCommand =
+    (session.pending_codex_command_approval_requests?.length ?? 0) > 0
+  const hasCodexUserInput =
+    (session.pending_codex_user_input_requests?.length ?? 0) > 0
+  const hasCodexMcp =
+    (session.pending_codex_mcp_elicitation_requests?.length ?? 0) > 0
+  const hasCodexTool =
+    (session.pending_codex_dynamic_tool_call_requests?.length ?? 0) > 0
+
+  if (hasCodexPermission) {
     return {
-      icon: isplan ? FileText : HelpCircle,
-      label: isplan ? 'Needs approval' : 'Needs input',
+      icon: AlertTriangle,
+      label: 'Permission required',
       className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexCommand) {
+    return {
+      icon: AlertTriangle,
+      label: 'Command approval required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexTool) {
+    return {
+      icon: AlertTriangle,
+      label: 'Tool approval required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexMcp) {
+    return {
+      icon: HelpCircle,
+      label: 'MCP input required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexUserInput) {
+    return {
+      icon: HelpCircle,
+      label: 'Input required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (session.waiting_for_input) {
+    const isPlan = session.waiting_for_input_type === 'plan'
+    return {
+      icon: isPlan ? FileText : HelpCircle,
+      label: isPlan ? 'Plan approval required' : 'Input required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (session.scheduled_wakeup) {
+    return {
+      icon: CirclePause,
+      label: 'Scheduled',
+      className: 'text-cyan-500',
     }
   }
   const config: Record<

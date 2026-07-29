@@ -1132,7 +1132,7 @@ export interface CodexAgent {
   /** The prompt given to the agent (truncated for display) */
   prompt: string
   /** Agent lifecycle status */
-  status: 'in_progress' | 'completed' | 'errored'
+  status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
 }
