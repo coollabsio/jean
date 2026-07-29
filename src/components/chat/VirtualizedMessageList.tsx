@@ -218,6 +218,17 @@ export const VirtualizedMessageList = memo(
       // Restore (or reset) visible count when session changes, and keep the
       // in-memory snapshot updated as the user expands the window.
       const prevSessionRef = useRef(sessionId)
+
+      // Persist only after the current session's visibleCount has settled.
+      // This effect must run *before* the restore effect so that on a session
+      // switch, prevSessionRef still points at the outgoing session and we
+      // skip writing that session's window size under the incoming id.
+      useEffect(() => {
+        if (!sessionId) return
+        if (prevSessionRef.current !== sessionId) return
+        updateSessionScrollState(sessionId, { visibleCount })
+      }, [sessionId, visibleCount])
+
       useEffect(() => {
         if (sessionId !== prevSessionRef.current) {
           const saved = sessionId
@@ -228,11 +239,6 @@ export const VirtualizedMessageList = memo(
           prevSessionRef.current = sessionId
         }
       }, [sessionId])
-
-      useEffect(() => {
-        if (!sessionId) return
-        updateSessionScrollState(sessionId, { visibleCount })
-      }, [sessionId, visibleCount])
 
       // Pre-compute hasFollowUpMessage for all messages in O(n) instead of O(n²)
       const hasFollowUpMap = useMemo(() => {

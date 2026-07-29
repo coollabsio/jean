@@ -481,6 +481,68 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
     expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
   })
 
+  it('saves on leave and restores after a full session round-trip', () => {
+    // Do not pre-seed with saveSessionScrollState — the leave layout effect
+    // (persistCurrentSessionScroll) must capture the outgoing session.
+    const { viewport, getByTestId, rerenderSession } = setupHook({
+      isSending: false,
+      activeSessionId: 'session-a',
+      contentReady: true,
+      messages: makeMessages(8),
+    })
+
+    expect(viewport.scrollTop).toBe(2000)
+
+    // Scroll session-a away from the tail the same way a real gesture would.
+    viewport.scrollTop = 1234
+    fireEvent.scroll(viewport)
+
+    // Switch to session-b: save-on-leave should snapshot session-a first.
+    act(() => {
+      rerenderSession({
+        sessionId: 'session-b',
+        ready: false,
+        msgs: makeMessages(5),
+      })
+    })
+
+    expect(getSessionScrollState('session-a')?.scrollTop).toBe(1234)
+    expect(getSessionScrollState('session-a')?.isFollowingTail).toBe(false)
+
+    act(() => {
+      rerenderSession({
+        sessionId: 'session-b',
+        ready: true,
+        msgs: makeMessages(5),
+      })
+    })
+
+    // New / unvisited sessions default to the tail.
+    expect(viewport.scrollTop).toBe(2000)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+
+    // Switch back to session-a through the loading → ready path and assert
+    // the leave-time snapshot is restored (not a pre-seeded value).
+    act(() => {
+      rerenderSession({
+        sessionId: 'session-a',
+        ready: false,
+        msgs: makeMessages(8),
+      })
+    })
+
+    act(() => {
+      rerenderSession({
+        sessionId: 'session-a',
+        ready: true,
+        msgs: makeMessages(8),
+      })
+    })
+
+    expect(viewport.scrollTop).toBe(1234)
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
+  })
+
   it('keeps a saved restore pending until the expanded history window mounts', async () => {
     saveSessionScrollState('session-b', {
       scrollTop: 700,
@@ -513,6 +575,36 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
 
     expect(viewport.scrollTop).toBe(700)
     expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
+  })
+
+  it('gives up on an unreachable restore and re-enables tail-following', async () => {
+    // Saved offset can never be reached (history cleared / compacted).
+    // Deferred restore must not latch pendingRestore forever and leave the
+    // floating Bottom button + streaming auto-scroll stuck off.
+    saveSessionScrollState('session-a', {
+      scrollTop: 5000,
+      isFollowingTail: false,
+      visibleCount: 80,
+    })
+
+    const { getByTestId } = setupHook({
+      isSending: false,
+      activeSessionId: 'session-a',
+      contentReady: true,
+      messages: makeMessages(3),
+      // clientHeight is 400 in the harness — no overflow, target unreachable.
+      scrollHeight: 400,
+    })
+
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
+
+    // Burn the deferred-restore budget via ResizeObserver (and any stall
+    // retries that fire between ticks). Cap is 20 attempts.
+    for (let i = 0; i < 25; i++) {
+      await triggerResize()
+    }
+
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
   })
 
   it('defaults new sessions to the bottom', () => {

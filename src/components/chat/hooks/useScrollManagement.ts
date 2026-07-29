@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -61,6 +62,10 @@ interface UseScrollManagementReturn {
 
 const BOTTOM_THRESHOLD_PX = 100
 const SCROLL_EPSILON_PX = 2
+/** Cap deferred non-tail restores so an unreachable scrollTop cannot latch forever. */
+const MAX_PENDING_RESTORE_ATTEMPTS = 20
+/** Re-check a still-pending restore when ResizeObserver goes quiet (history trim, etc.). */
+const PENDING_RESTORE_RETRY_MS = 50
 
 function hasScrollableOverflow(viewport: HTMLDivElement) {
   return viewport.scrollHeight - viewport.clientHeight > SCROLL_EPSILON_PX
@@ -123,8 +128,19 @@ export function useScrollManagement({
   // When true, the next content-ready layout pass should apply a saved
   // non-tail scrollTop instead of pinning to the bottom.
   const pendingRestoreRef = useRef(false)
-  const contentReadyRef = useRef(contentReady)
-  contentReadyRef.current = contentReady
+  // Bounds deferred restores so an unreachable scrollTop cannot latch forever
+  // and permanently disable tail-following (PR #605 review).
+  const pendingRestoreAttemptsRef = useRef(0)
+  const pendingRestoreRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+
+  const clearPendingRestoreRetry = useCallback(() => {
+    if (pendingRestoreRetryTimerRef.current != null) {
+      clearTimeout(pendingRestoreRetryTimerRef.current)
+      pendingRestoreRetryTimerRef.current = null
+    }
+  }, [])
 
   const persistCurrentSessionScroll = useCallback(
     (sessionId: string | null | undefined) => {
@@ -148,7 +164,9 @@ export function useScrollManagement({
   const rememberScroll = useCallback(
     (scrollTop: number, isFollowingTail: boolean) => {
       const sessionId = activeSessionId
-      if (!sessionId || !contentReadyRef.current) return
+      // Skip while the list is unmounted (Loading placeholder) so we don't
+      // overwrite a real snapshot with a collapsed scrollTop.
+      if (!sessionId || !contentReady) return
       lastKnownScrollRef.current = {
         sessionId,
         scrollTop,
@@ -156,7 +174,7 @@ export function useScrollManagement({
       }
       updateSessionScrollState(sessionId, { scrollTop, isFollowingTail })
     },
-    [activeSessionId]
+    [activeSessionId, contentReady]
   )
 
   const stopFollowingTail = useCallback(() => {
@@ -315,17 +333,151 @@ export function useScrollManagement({
     }
   }, [stopFollowingTail])
 
+  // Apply a saved scroll snapshot (or default to bottom) for the given session.
+  // Defined before size-sync / session effects so those closures can capture it
+  // directly (no render-time ref smuggling — issue #594 review).
+  const applySessionScrollState = useCallback(
+    (sessionId: string | null | undefined) => {
+      const viewport = scrollViewportRef.current
+      if (!viewport) return
+
+      const saved = sessionId ? getSessionScrollState(sessionId) : undefined
+
+      if (!saved || saved.isFollowingTail) {
+        isFollowingTailRef.current = true
+        isAtBottomRef.current = true
+        userScrollUpUntilRef.current = 0
+        setIsAtBottom(true)
+        scrollToTail(viewport)
+        lastScrollTopRef.current = viewport.scrollTop
+        if (sessionId) {
+          lastKnownScrollRef.current = {
+            sessionId,
+            scrollTop: viewport.scrollTop,
+            isFollowingTail: true,
+          }
+        }
+        pendingRestoreRef.current = false
+        pendingRestoreAttemptsRef.current = 0
+        clearPendingRestoreRetry()
+        return
+      }
+
+      // Non-tail restore: pin flags first so streaming auto-scroll does not
+      // fight the restored position while content settles.
+      isFollowingTailRef.current = false
+      isAtBottomRef.current = false
+      userScrollUpUntilRef.current = Date.now() + 1000
+      setIsAtBottom(false)
+
+      const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+      const targetTop = Math.min(Math.max(0, saved.scrollTop), maxScroll)
+      viewport.scrollTop = targetTop
+      lastScrollTopRef.current = targetTop
+      lastKnownScrollRef.current = {
+        sessionId: sessionId ?? '',
+        scrollTop: targetTop,
+        isFollowingTail: false,
+      }
+
+      // If content is still short (message list not fully mounted / virtualized
+      // window not expanded yet), keep pending so ResizeObserver can re-apply
+      // the target after the saved history window mounts. A session switch can
+      // temporarily render the previous session's smaller visibleCount, so no
+      // overflow here does not prove the saved session was following its tail.
+      if (!hasScrollableOverflow(viewport)) {
+        pendingRestoreRef.current = true
+      } else if (
+        saved.scrollTop > 0 &&
+        maxScroll < saved.scrollTop - SCROLL_EPSILON_PX
+      ) {
+        pendingRestoreRef.current = true
+      } else {
+        pendingRestoreRef.current = false
+        pendingRestoreAttemptsRef.current = 0
+        clearPendingRestoreRetry()
+        // Content may have grown such that the saved offset is now at bottom.
+        if (isViewportAtBottom(viewport)) {
+          isFollowingTailRef.current = true
+          isAtBottomRef.current = true
+          userScrollUpUntilRef.current = 0
+          setIsAtBottom(true)
+          lastKnownScrollRef.current = {
+            sessionId: sessionId ?? '',
+            scrollTop: viewport.scrollTop,
+            isFollowingTail: true,
+          }
+          updateSessionScrollState(sessionId ?? '', {
+            scrollTop: viewport.scrollTop,
+            isFollowingTail: true,
+          })
+        }
+      }
+    },
+    [clearPendingRestoreRetry]
+  )
+
   // Keep scroll state honest when content/viewport size changes. If the chat no
   // longer overflows (short message list, window got taller, content collapsed),
   // it is necessarily at the bottom. This clears stale "scrolled away" state
   // without changing behavior for genuinely scrollable chats.
   // Also re-applies a pending non-tail restore once the message list grows tall
   // enough (e.g. VirtualizedMessageList expands its visible window).
-  const activeSessionIdRef = useRef(activeSessionId)
-  activeSessionIdRef.current = activeSessionId
-  const applySessionScrollStateRef = useRef<
-    (sessionId: string | null | undefined) => void
-  >(() => {})
+  //
+  // Pending restores are bounded: if a saved scrollTop never becomes reachable
+  // (history cleared, run trimmed, messages compacted), retry only up to
+  // MAX_PENDING_RESTORE_ATTEMPTS, then clear the latch so tail-following and
+  // the no-overflow self-heal below can run again.
+  //
+  // useEffectEvent reads the latest activeSessionId / contentReady /
+  // applySessionScrollState without re-subscribing the ResizeObserver, and
+  // without render-time ref writes (react-hooks/refs).
+  const onViewportSizeChange = useEffectEvent(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+
+    const rePinToTail = () => {
+      userScrollUpUntilRef.current = 0
+      isFollowingTailRef.current = true
+      isAtBottomRef.current = true
+      setIsAtBottom(prev => (prev ? prev : true))
+    }
+
+    if (pendingRestoreRef.current && contentReady && activeSessionId) {
+      if (pendingRestoreAttemptsRef.current < MAX_PENDING_RESTORE_ATTEMPTS) {
+        pendingRestoreAttemptsRef.current += 1
+        applySessionScrollState(activeSessionId)
+        if (pendingRestoreRef.current) {
+          // Still waiting for content to grow tall enough. RO re-enters on real
+          // growth; also schedule a bounded retry so a stalled, unreachable
+          // snapshot cannot latch when no further size events arrive.
+          clearPendingRestoreRetry()
+          pendingRestoreRetryTimerRef.current = setTimeout(() => {
+            pendingRestoreRetryTimerRef.current = null
+            onViewportSizeChange()
+          }, PENDING_RESTORE_RETRY_MS)
+          return
+        }
+        clearPendingRestoreRetry()
+        pendingRestoreAttemptsRef.current = 0
+        return
+      }
+      // Give up on an unreachable snapshot and let the checks below re-pin.
+      clearPendingRestoreRetry()
+      pendingRestoreRef.current = false
+      pendingRestoreAttemptsRef.current = 0
+      // Clamped restores often leave the viewport at the end of shorter content;
+      // treat that as following the tail again so streaming auto-scroll and the
+      // floating Bottom button recover.
+      if (!hasScrollableOverflow(viewport) || isViewportAtBottom(viewport)) {
+        rePinToTail()
+      }
+      return
+    }
+    if (!hasScrollableOverflow(viewport)) {
+      rePinToTail()
+    }
+  })
 
   useEffect(() => {
     const viewport = scrollViewportRef.current
@@ -335,21 +487,7 @@ export function useScrollManagement({
     const syncViewportSize = () => {
       cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(() => {
-        const sessionId = activeSessionIdRef.current
-        if (
-          pendingRestoreRef.current &&
-          contentReadyRef.current &&
-          sessionId
-        ) {
-          applySessionScrollStateRef.current(sessionId)
-          return
-        }
-        if (!hasScrollableOverflow(viewport)) {
-          userScrollUpUntilRef.current = 0
-          isFollowingTailRef.current = true
-          isAtBottomRef.current = true
-          setIsAtBottom(prev => (prev ? prev : true))
-        }
+        onViewportSizeChange()
       })
     }
 
@@ -363,9 +501,12 @@ export function useScrollManagement({
 
     return () => {
       cancelAnimationFrame(rafId)
+      clearPendingRestoreRetry()
       observer.disconnect()
     }
-  }, [])
+    // onViewportSizeChange is an Effect Event — intentionally omitted from deps
+    // (identity changes every render; React docs require not listing it).
+  }, [clearPendingRestoreRetry])
 
   // [Tier 2 + 5] Auto-scroll during streaming using ResizeObserver.
   // rAF-coalesced: at most one scroll per animation frame.
@@ -491,85 +632,6 @@ export function useScrollManagement({
     wasSendingRef.current = !!isSending
   }, [isSending])
 
-  // Apply a saved scroll snapshot (or default to bottom) for the given session.
-  const applySessionScrollState = useCallback(
-    (sessionId: string | null | undefined) => {
-      const viewport = scrollViewportRef.current
-      if (!viewport) return
-
-      const saved = sessionId ? getSessionScrollState(sessionId) : undefined
-
-      if (!saved || saved.isFollowingTail) {
-        isFollowingTailRef.current = true
-        isAtBottomRef.current = true
-        userScrollUpUntilRef.current = 0
-        setIsAtBottom(true)
-        scrollToTail(viewport)
-        lastScrollTopRef.current = viewport.scrollTop
-        if (sessionId) {
-          lastKnownScrollRef.current = {
-            sessionId,
-            scrollTop: viewport.scrollTop,
-            isFollowingTail: true,
-          }
-        }
-        pendingRestoreRef.current = false
-        return
-      }
-
-      // Non-tail restore: pin flags first so streaming auto-scroll does not
-      // fight the restored position while content settles.
-      isFollowingTailRef.current = false
-      isAtBottomRef.current = false
-      userScrollUpUntilRef.current = Date.now() + 1000
-      setIsAtBottom(false)
-
-      const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-      const targetTop = Math.min(Math.max(0, saved.scrollTop), maxScroll)
-      viewport.scrollTop = targetTop
-      lastScrollTopRef.current = targetTop
-      lastKnownScrollRef.current = {
-        sessionId: sessionId ?? '',
-        scrollTop: targetTop,
-        isFollowingTail: false,
-      }
-
-      // If content is still short (message list not fully mounted / virtualized
-      // window not expanded yet), keep pending so ResizeObserver can re-apply
-      // the target after the saved history window mounts. A session switch can
-      // temporarily render the previous session's smaller visibleCount, so no
-      // overflow here does not prove the saved session was following its tail.
-      if (!hasScrollableOverflow(viewport)) {
-        pendingRestoreRef.current = true
-      } else if (
-        saved.scrollTop > 0 &&
-        maxScroll < saved.scrollTop - SCROLL_EPSILON_PX
-      ) {
-        pendingRestoreRef.current = true
-      } else {
-        pendingRestoreRef.current = false
-        // Content may have grown such that the saved offset is now at bottom.
-        if (isViewportAtBottom(viewport)) {
-          isFollowingTailRef.current = true
-          isAtBottomRef.current = true
-          userScrollUpUntilRef.current = 0
-          setIsAtBottom(true)
-          lastKnownScrollRef.current = {
-            sessionId: sessionId ?? '',
-            scrollTop: viewport.scrollTop,
-            isFollowingTail: true,
-          }
-          updateSessionScrollState(sessionId ?? '', {
-            scrollTop: viewport.scrollTop,
-            isFollowingTail: true,
-          })
-        }
-      }
-    },
-    []
-  )
-  applySessionScrollStateRef.current = applySessionScrollState
-
   // Persist the previous session and prepare restore when the displayed session
   // changes (covers both tab switches and worktree switches).
   useLayoutEffect(() => {
@@ -579,14 +641,19 @@ export function useScrollManagement({
     }
     prevSessionIdRef.current = activeSessionId
 
+    // Fresh session ⇒ fresh restore budget (do not carry exhausted attempts).
+    clearPendingRestoreRetry()
+    pendingRestoreAttemptsRef.current = 0
+
     if (!activeSessionId) return
 
     const saved = getSessionScrollState(activeSessionId)
     pendingRestoreRef.current = Boolean(saved && !saved.isFollowingTail)
 
     // Only apply immediately when the message list is mounted. Otherwise wait
-    // for the contentReady + messages layout effect below.
-    if (contentReadyRef.current) {
+    // for the contentReady + messages layout effect below. contentReady is read
+    // from this render's props (session-change trigger), not a mutable ref.
+    if (contentReady) {
       applySessionScrollState(activeSessionId)
     } else if (!saved || saved.isFollowingTail) {
       // Default: treat as following tail so FloatingButtons / auto-scroll stay
@@ -599,7 +666,13 @@ export function useScrollManagement({
       isAtBottomRef.current = false
       setIsAtBottom(false)
     }
-  }, [activeSessionId, applySessionScrollState, persistCurrentSessionScroll])
+  }, [
+    activeSessionId,
+    contentReady,
+    applySessionScrollState,
+    persistCurrentSessionScroll,
+    clearPendingRestoreRetry,
+  ])
 
   // Restore (or scroll to bottom) when content becomes ready / messages arrive.
   // Covers: first open of a session, async session load, and return from the
@@ -642,7 +715,7 @@ export function useScrollManagement({
 
       // Session-switch Loading placeholder (or other unmounted list): do not
       // overwrite a real per-session snapshot with a collapsed scrollTop.
-      if (!contentReadyRef.current) {
+      if (!contentReady) {
         return
       }
 
@@ -676,7 +749,7 @@ export function useScrollManagement({
       setIsAtBottom(prev => (prev === atBottom ? prev : atBottom))
       rememberScroll(target.scrollTop, isFollowingTailRef.current)
     },
-    [rememberScroll]
+    [contentReady, rememberScroll]
   )
 
   // Handle scroll-to-bottom completion from VirtualizedMessageList
