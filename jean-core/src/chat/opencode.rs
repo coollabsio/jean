@@ -5,7 +5,7 @@ use crate::http_server::EmitExt;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -342,6 +342,10 @@ fn clear_listener_cooldown(state: &SharedSseListenerState) {
 struct SharedSseCoordinator {
     subscribers: Arc<Mutex<HashMap<String, SharedSseSubscriberEntry>>>,
     listeners: Arc<Mutex<HashMap<String, SharedSseListenerState>>>,
+    /// Maps descendant OpenCode session IDs (subagents/children) to a known
+    /// ancestor ID. Walked until a registered primary-session subscriber is found
+    /// so child `session.error` events fail the owning Jean run.
+    session_parents: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Default for SharedSseCoordinator {
@@ -349,6 +353,7 @@ impl Default for SharedSseCoordinator {
         Self {
             subscribers: Arc::new(Mutex::new(HashMap::new())),
             listeners: Arc::new(Mutex::new(HashMap::new())),
+            session_parents: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -461,6 +466,12 @@ impl Drop for SharedSseSubscription {
                 subscribers.len()
             );
         }
+        // Drop parent-chain entries that point at (or are) this root so a later
+        // session never inherits a stale child→parent mapping.
+        let mut parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+        parents.retain(|child, parent| {
+            child != &self.opencode_session_id && parent != &self.opencode_session_id
+        });
     }
 }
 
@@ -1125,9 +1136,63 @@ fn extract_opencode_error_message(message: &serde_json::Value) -> Option<String>
     format_opencode_error_object(error)
 }
 
+/// Record a child→parent OpenCode session relationship from `session.created` /
+/// `session.updated` events. Subagent sessions carry `info.parentID`; Jean only
+/// registers the primary session as an SSE subscriber, so this map lets child
+/// provider errors resolve to the owning run.
+fn remember_opencode_session_parent(session_id: &str, parent_id: &str) {
+    let session_id = session_id.trim();
+    let parent_id = parent_id.trim();
+    if session_id.is_empty() || parent_id.is_empty() || session_id == parent_id {
+        return;
+    }
+    let mut parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+    let previous = parents.insert(session_id.to_string(), parent_id.to_string());
+    if previous.as_deref() != Some(parent_id) {
+        log::info!("OpenCode shared SSE: session lineage child={session_id} parent={parent_id}");
+    }
+}
+
+/// Resolve an OpenCode session ID to a registered Jean SSE subscriber.
+///
+/// Lookup order:
+/// 1. Exact subscriber match (primary session)
+/// 2. Walk `session_parents` until a registered ancestor is found
+fn resolve_opencode_subscriber(
+    subscribers: &HashMap<String, SharedSseSubscriberEntry>,
+    session_parents: &HashMap<String, String>,
+    opencode_session_id: &str,
+) -> Option<(String, SharedSseSubscriberEntry)> {
+    if opencode_session_id.is_empty() {
+        return None;
+    }
+
+    if let Some(entry) = subscribers.get(opencode_session_id) {
+        return Some((opencode_session_id.to_string(), entry.clone()));
+    }
+
+    let mut current = opencode_session_id;
+    let mut seen = HashSet::new();
+    seen.insert(current.to_string());
+    while let Some(parent) = session_parents.get(current) {
+        if !seen.insert(parent.clone()) {
+            break;
+        }
+        if let Some(entry) = subscribers.get(parent) {
+            return Some((parent.clone(), entry.clone()));
+        }
+        current = parent.as_str();
+    }
+
+    None
+}
+
 /// Record an upstream OpenCode error observed on the SSE stream, emit
 /// `chat:error`, flag the run cancelled so the blocking `/message` POST unblocks,
 /// and abort the OpenCode session server-side.
+///
+/// `opencode_session_id` may be a child/subagent session — it is resolved to the
+/// owning primary-session subscriber via parent lineage when needed.
 fn surface_opencode_sse_error(
     app: &AppHandle,
     subscribers: &Arc<Mutex<HashMap<String, SharedSseSubscriberEntry>>>,
@@ -1138,11 +1203,17 @@ fn surface_opencode_sse_error(
         return false;
     };
 
-    let (subscriber_handle, working_dir) = {
+    let (root_session_id, subscriber_handle, abort_working_dir) = {
         let subscribers = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
-        match subscribers.get(opencode_session_id) {
-            Some(entry) => (entry.handle.clone(), entry.working_dir.clone()),
-            None => return false,
+        let parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+        match resolve_opencode_subscriber(&subscribers, &parents, opencode_session_id) {
+            Some((root_id, entry)) => (root_id, entry.handle.clone(), entry.working_dir.clone()),
+            None => {
+                log::warn!(
+                    "OpenCode shared SSE: upstream error for unknown session={opencode_session_id} (no parent subscriber)"
+                );
+                return false;
+            }
         }
     };
 
@@ -1168,7 +1239,7 @@ fn surface_opencode_sse_error(
     }
 
     log::warn!(
-        "OpenCode shared SSE: upstream error opencode_session={opencode_session_id} msg={msg}"
+        "OpenCode shared SSE: upstream error event_session={opencode_session_id} root_session={root_session_id} msg={msg}"
     );
     let _ = app.emit_all(
         "chat:error",
@@ -1178,7 +1249,15 @@ fn surface_opencode_sse_error(
             error: msg,
         },
     );
-    super::registry::abort_opencode_session(opencode_session_id.to_string(), Some(working_dir));
+    // Abort both the errored session (may be a child) and the root primary
+    // session so the blocking parent turn cannot keep waiting.
+    if root_session_id != opencode_session_id {
+        super::registry::abort_opencode_session(
+            opencode_session_id.to_string(),
+            Some(abort_working_dir.clone()),
+        );
+    }
+    super::registry::abort_opencode_session(root_session_id, Some(abort_working_dir));
     true
 }
 
@@ -2042,10 +2121,26 @@ fn process_shared_sse_event(
 
     match event_type.as_str() {
         "server.connected" | "server.heartbeat" => Some(false),
+        "session.created" | "session.updated" => {
+            // Track parentID lineage so child/subagent session.error events can
+            // resolve to the primary Jean subscriber.
+            let info = properties.get("info").unwrap_or(&properties);
+            let session_id = info
+                .get("id")
+                .and_then(|v| v.as_str())
+                .or_else(|| properties.get("sessionID").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            if let Some(parent_id) = info.get("parentID").and_then(|v| v.as_str()) {
+                remember_opencode_session_parent(session_id, parent_id);
+            }
+            Some(false)
+        }
         "message.part.updated" | "message.part" | "message.part.added" => {
+            // Stream parts only for the primary subscribed session. Child/subagent
+            // parts stay isolated; only errors (below) fan in to the parent run.
             let part = properties.get("part").unwrap_or(&properties);
             let opencode_session_id = part.get("sessionID").and_then(|v| v.as_str()).unwrap_or("");
-            let (subscriber_handle, working_dir) = {
+            let (subscriber_handle, part_working_dir) = {
                 let lock_start = Instant::now();
                 let subscribers = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
                 let lock_wait = lock_start.elapsed();
@@ -2063,7 +2158,7 @@ fn process_shared_sse_event(
                 }
             };
             let mut subscriber = lock_recover(&subscriber_handle, "OPENCODE_SSE_SUBSCRIBER");
-            process_message_part_event(app, part, &mut subscriber, &working_dir)
+            process_message_part_event(app, part, &mut subscriber, &part_working_dir)
         }
         "message.part.delta" => {
             let opencode_session_id = properties
@@ -2092,7 +2187,7 @@ fn process_shared_sse_event(
             let mut subscriber = lock_recover(&subscriber, "OPENCODE_SSE_SUBSCRIBER");
             process_message_part_delta_event(app, &properties, &mut subscriber)
         }
-        "message.created" | "session.updated" => Some(false),
+        "message.created" => Some(false),
         "message.updated" => {
             // Assistant messages may land with `info.error` set when a local /
             // custom provider fails. Surface that immediately — the blocking
@@ -2141,6 +2236,8 @@ fn process_shared_sse_event(
         "session.idle" => {
             // The session's whole queue (original turn + any steered prompts)
             // has drained. Flag the subscriber so a steered run can finalize.
+            // Only the primary (subscribed) session matters — child/subagent
+            // idle events must not mark the parent run idle.
             let opencode_session_id = properties
                 .get("sessionID")
                 .and_then(|v| v.as_str())
@@ -2197,22 +2294,14 @@ where
     }
 }
 
-async fn sleep_or_cancel_opencode_http(
-    duration: Duration,
-    cancelled: Arc<AtomicBool>,
-    force_abort: Arc<AtomicBool>,
-    opencode_session_id: String,
-    working_dir: String,
-) -> bool {
-    await_opencode_http_or_cancel(
-        tokio::time::sleep(duration),
-        cancelled,
-        force_abort,
-        opencode_session_id,
-        working_dir,
-    )
-    .await
-    .is_none()
+/// Whether a failed OpenCode `/message` POST may be automatically retried.
+///
+/// Always `false`: the POST is non-idempotent (it appends a user message to the
+/// OpenCode session). Timeouts and ambiguous request-level errors can mean the
+/// server already accepted the prompt; replaying produces duplicate messages and
+/// masks the real provider failure (see #587).
+fn should_retry_opencode_message_post(_err: &reqwest::Error) -> bool {
+    false
 }
 
 fn post_opencode_message_cancellable(
@@ -2224,6 +2313,28 @@ fn post_opencode_message_cancellable(
     jean_session_id: String,
     opencode_session_id: String,
 ) -> Result<Option<(reqwest::StatusCode, String)>, String> {
+    post_opencode_message_cancellable_with_timeout(
+        msg_url,
+        working_dir,
+        payload,
+        cancelled,
+        force_abort,
+        jean_session_id,
+        opencode_session_id,
+        Duration::from_secs(1800),
+    )
+}
+
+fn post_opencode_message_cancellable_with_timeout(
+    msg_url: String,
+    working_dir: String,
+    payload: serde_json::Value,
+    cancelled: Arc<AtomicBool>,
+    force_abort: Arc<AtomicBool>,
+    jean_session_id: String,
+    opencode_session_id: String,
+    request_timeout: Duration,
+) -> Result<Option<(reqwest::StatusCode, String)>, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -2231,20 +2342,17 @@ fn post_opencode_message_cancellable(
 
     runtime.block_on(async move {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(1800))
+            .timeout(request_timeout)
             .build()
             .map_err(|e| format!("Failed to build OpenCode async HTTP client: {e}"))?;
 
-        let send_once = || {
+        // Single attempt only — never replay a non-idempotent message POST.
+        let response = match await_opencode_http_or_cancel(
             client
                 .post(&msg_url)
                 .query(&[("directory", working_dir.as_str())])
                 .json(&payload)
-                .send()
-        };
-
-        let response = match await_opencode_http_or_cancel(
-            send_once(),
+                .send(),
             cancelled.clone(),
             force_abort.clone(),
             opencode_session_id.clone(),
@@ -2253,35 +2361,13 @@ fn post_opencode_message_cancellable(
         .await
         {
             Some(Ok(resp)) => resp,
-            Some(Err(e)) if e.is_connect() || e.is_request() => {
-                log::warn!("OpenCode message connection error, retrying in 2s: {e}");
-                if sleep_or_cancel_opencode_http(
-                    std::time::Duration::from_secs(2),
-                    cancelled.clone(),
-                    force_abort.clone(),
-                    opencode_session_id.clone(),
-                    working_dir.clone(),
-                )
-                .await
-                {
-                    return Ok(None);
+            Some(Err(e)) => {
+                if should_retry_opencode_message_post(&e) {
+                    // Kept as a guarded branch for clarity/tests; currently always false.
+                    log::warn!("OpenCode message error would retry (disabled): {e}");
                 }
-
-                match await_opencode_http_or_cancel(
-                    send_once(),
-                    cancelled.clone(),
-                    force_abort.clone(),
-                    opencode_session_id.clone(),
-                    working_dir.clone(),
-                )
-                .await
-                {
-                    Some(Ok(resp)) => resp,
-                    Some(Err(e)) => return Err(format!("Failed to send OpenCode message: {e}")),
-                    None => return Ok(None),
-                }
+                return Err(format!("Failed to send OpenCode message: {e}"));
             }
-            Some(Err(e)) => return Err(format!("Failed to send OpenCode message: {e}")),
             None => return Ok(None),
         };
 
@@ -3453,5 +3539,302 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn should_retry_opencode_message_post_is_always_false() {
+        // Non-idempotent POST must never auto-retry, even for connect/timeout-shaped
+        // errors. Integration coverage is in post_opencode_message_times_out_once.
+        let err = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap()
+            .get("http://127.0.0.1:1/")
+            .send()
+            .expect_err("closed port should error");
+        assert!(!should_retry_opencode_message_post(&err));
+    }
+
+    #[test]
+    fn resolve_opencode_subscriber_maps_child_to_parent_root() {
+        let force_abort = Arc::new(AtomicBool::new(false));
+        let upstream_error = Arc::new(Mutex::new(None));
+        let handle = Arc::new(Mutex::new(SharedSseSubscriber {
+            jean_session_id: "jean-1".into(),
+            worktree_id: "wt-1".into(),
+            run_id: "run-1".into(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            streamed_any: Arc::new(AtomicBool::new(false)),
+            turn_started: Arc::new(AtomicBool::new(false)),
+            session_idle: Arc::new(AtomicBool::new(false)),
+            steered: Arc::new(AtomicBool::new(false)),
+            upstream_error,
+            force_abort,
+            tracked_parts: HashMap::new(),
+            accumulated_blocks: Vec::new(),
+            accumulated_tool_calls: Vec::new(),
+        }));
+        let mut subscribers = HashMap::new();
+        subscribers.insert(
+            "ses_parent".to_string(),
+            SharedSseSubscriberEntry {
+                working_dir: "/tmp/project".into(),
+                handle,
+            },
+        );
+        let mut parents = HashMap::new();
+        parents.insert("ses_child".to_string(), "ses_parent".to_string());
+        parents.insert("ses_grandchild".to_string(), "ses_child".to_string());
+
+        let resolved =
+            resolve_opencode_subscriber(&subscribers, &parents, "ses_grandchild").unwrap();
+        assert_eq!(resolved.0, "ses_parent");
+
+        // A matching directory does not prove lineage: the shared stream can
+        // contain unrelated sessions from the same project.
+        assert!(
+            resolve_opencode_subscriber(&subscribers, &HashMap::new(), "ses_unknown",).is_none()
+        );
+
+        // Unknown session with no unique fallback is None.
+        assert!(
+            resolve_opencode_subscriber(&subscribers, &HashMap::new(), "ses_unknown").is_none()
+        );
+    }
+
+    #[test]
+    fn child_session_error_surfaces_on_parent_subscriber() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        let force_abort = Arc::new(AtomicBool::new(false));
+        let upstream_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let handle = Arc::new(Mutex::new(SharedSseSubscriber {
+            jean_session_id: "jean-parent".into(),
+            worktree_id: "wt-parent".into(),
+            run_id: "run-parent".into(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            streamed_any: Arc::new(AtomicBool::new(false)),
+            turn_started: Arc::new(AtomicBool::new(false)),
+            session_idle: Arc::new(AtomicBool::new(false)),
+            steered: Arc::new(AtomicBool::new(false)),
+            upstream_error: upstream_error.clone(),
+            force_abort: force_abort.clone(),
+            tracked_parts: HashMap::new(),
+            accumulated_blocks: Vec::new(),
+            accumulated_tool_calls: Vec::new(),
+        }));
+
+        // Isolate global maps for this test.
+        {
+            let mut subscribers = lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+            subscribers.clear();
+            subscribers.insert(
+                "ses_parent".to_string(),
+                SharedSseSubscriberEntry {
+                    working_dir: "/tmp/wt".into(),
+                    handle,
+                },
+            );
+        }
+        {
+            let mut parents =
+                lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+            parents.clear();
+            parents.insert("ses_child".to_string(), "ses_parent".to_string());
+        }
+
+        let error = serde_json::json!({
+            "name": "APIError",
+            "data": { "message": "5-hour usage limit reached." }
+        });
+        let surfaced =
+            surface_opencode_sse_error(&app, &SHARED_SSE.subscribers, "ses_child", &error);
+        assert!(surfaced, "child error must surface via parent subscriber");
+        assert!(
+            force_abort.load(Ordering::SeqCst),
+            "must force-abort parent POST"
+        );
+        assert_eq!(
+            take_upstream_error(&upstream_error).as_deref(),
+            Some("5-hour usage limit reached.")
+        );
+
+        // Cleanup global state.
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+    }
+
+    #[test]
+    fn process_shared_sse_records_parent_and_surfaces_child_session_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        let force_abort = Arc::new(AtomicBool::new(false));
+        let upstream_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let handle = Arc::new(Mutex::new(SharedSseSubscriber {
+            jean_session_id: "jean-2".into(),
+            worktree_id: "wt-2".into(),
+            run_id: "run-2".into(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            streamed_any: Arc::new(AtomicBool::new(false)),
+            turn_started: Arc::new(AtomicBool::new(false)),
+            session_idle: Arc::new(AtomicBool::new(false)),
+            steered: Arc::new(AtomicBool::new(false)),
+            upstream_error: upstream_error.clone(),
+            force_abort: force_abort.clone(),
+            tracked_parts: HashMap::new(),
+            accumulated_blocks: Vec::new(),
+            accumulated_tool_calls: Vec::new(),
+        }));
+
+        {
+            let mut subscribers = lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+            subscribers.clear();
+            subscribers.insert(
+                "ses_root".to_string(),
+                SharedSseSubscriberEntry {
+                    working_dir: "/tmp/proj".into(),
+                    handle,
+                },
+            );
+        }
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+
+        // session.created for a subagent child.
+        let created = r#"{"type":"session.created","properties":{"sessionID":"ses_sub","info":{"id":"ses_sub","parentID":"ses_root","title":"explore"}}}"#;
+        assert_eq!(
+            process_shared_sse_event(&app, created, &SHARED_SSE.subscribers),
+            Some(false)
+        );
+        assert_eq!(
+            lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS")
+                .get("ses_sub")
+                .map(String::as_str),
+            Some("ses_root")
+        );
+
+        // session.error on the child must fail the parent run.
+        let err_event = r#"{"type":"session.error","properties":{"sessionID":"ses_sub","error":{"name":"APIError","data":{"message":"provider offline"}}}}"#;
+        assert_eq!(
+            process_shared_sse_event(&app, err_event, &SHARED_SSE.subscribers),
+            Some(true)
+        );
+        assert!(force_abort.load(Ordering::SeqCst));
+        assert_eq!(
+            take_upstream_error(&upstream_error).as_deref(),
+            Some("provider offline")
+        );
+
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+    }
+
+    #[test]
+    fn post_opencode_message_times_out_once_without_retry() {
+        use std::net::TcpListener;
+        use std::sync::atomic::AtomicUsize;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_bg = hits.clone();
+
+        // Accept connections but never complete the HTTP response so the client times out.
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            let mut connections = Vec::new();
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        hits_bg.fetch_add(1, Ordering::SeqCst);
+                        connections.push(stream);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("failed to accept test connection: {error}"),
+                }
+            }
+        });
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let force_abort = Arc::new(AtomicBool::new(false));
+        let result = post_opencode_message_cancellable_with_timeout(
+            format!("http://{addr}/session/ses_test/message"),
+            "/tmp".into(),
+            serde_json::json!({"parts": []}),
+            cancelled,
+            force_abort,
+            "jean-test".into(),
+            "ses_test".into(),
+            Duration::from_millis(300),
+        );
+
+        assert!(result.is_err(), "expected timeout error, got {result:?}");
+        // Give the accept thread a brief window in case a second attempt was made.
+        std::thread::sleep(Duration::from_millis(400));
+        server.join().unwrap();
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "timed-out message POST must be attempted exactly once"
+        );
+    }
+
+    #[test]
+    fn sse_provider_error_unblocks_force_abort_distinct_from_user_cancel() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let force_abort = Arc::new(AtomicBool::new(false));
+        let upstream_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let handle = Arc::new(Mutex::new(SharedSseSubscriber {
+            jean_session_id: "jean-3".into(),
+            worktree_id: "wt-3".into(),
+            run_id: "run-3".into(),
+            cancelled: cancelled.clone(),
+            streamed_any: Arc::new(AtomicBool::new(false)),
+            turn_started: Arc::new(AtomicBool::new(false)),
+            session_idle: Arc::new(AtomicBool::new(false)),
+            steered: Arc::new(AtomicBool::new(false)),
+            upstream_error: upstream_error.clone(),
+            force_abort: force_abort.clone(),
+            tracked_parts: HashMap::new(),
+            accumulated_blocks: Vec::new(),
+            accumulated_tool_calls: Vec::new(),
+        }));
+
+        {
+            let mut subscribers = lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+            subscribers.clear();
+            subscribers.insert(
+                "ses_primary".to_string(),
+                SharedSseSubscriberEntry {
+                    working_dir: "/tmp/x".into(),
+                    handle,
+                },
+            );
+        }
+
+        let err_event = r#"{"type":"session.error","properties":{"sessionID":"ses_primary","error":"quota exceeded"}}"#;
+        assert_eq!(
+            process_shared_sse_event(&app, err_event, &SHARED_SSE.subscribers),
+            Some(true)
+        );
+        assert!(
+            force_abort.load(Ordering::SeqCst),
+            "provider error must set force_abort"
+        );
+        assert!(
+            !cancelled.load(Ordering::SeqCst),
+            "provider error must not look like user cancellation"
+        );
+        assert_eq!(
+            take_upstream_error(&upstream_error).as_deref(),
+            Some("quota exceeded")
+        );
+
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
     }
 }

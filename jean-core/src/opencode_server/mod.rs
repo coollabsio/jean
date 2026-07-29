@@ -1,6 +1,8 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,6 +14,9 @@ use crate::opencode_cli::resolve_cli_binary;
 
 const DEFAULT_PORT: u16 = 4096;
 const DEFAULT_HOSTNAME: &str = "127.0.0.1";
+/// Keep a short ring of sanitized managed-server lines for startup failure messages.
+const DIAGNOSTIC_RING_CAP: usize = 80;
+const DIAGNOSTIC_LINE_MAX: usize = 400;
 
 /// Number of active consumers (prompts) using the managed server.
 /// Server is shut down only when this drops to 0.
@@ -19,6 +24,10 @@ static USAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Cached AppHandle so stop/release paths can access app data dir without param changes.
 static APP_HANDLE: once_cell::sync::OnceCell<AppHandle> = once_cell::sync::OnceCell::new();
+
+/// Recent sanitized stdout/stderr lines from the Jean-managed OpenCode server.
+static RECENT_DIAGNOSTICS: Lazy<Mutex<VecDeque<String>>> =
+    Lazy::new(|| Mutex::new(VecDeque::with_capacity(DIAGNOSTIC_RING_CAP)));
 
 #[derive(Debug)]
 struct OpenCodeServerProcess {
@@ -40,6 +49,96 @@ static OPENCODE_SERVER: Lazy<Mutex<Option<OpenCodeServerProcess>>> = Lazy::new(|
 
 fn server_url(hostname: &str, port: u16) -> String {
     format!("http://{hostname}:{port}")
+}
+
+/// Strip control characters, truncate, and redact obvious secret-looking tokens
+/// before logging or surfacing managed OpenCode server output.
+fn sanitize_diagnostic_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut cleaned: String = trimmed
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    // Collapse runs of whitespace introduced by control-char replacement.
+    while cleaned.contains("  ") {
+        cleaned = cleaned.replace("  ", " ");
+    }
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return None;
+    }
+    let lowercase = cleaned.to_ascii_lowercase();
+    let secret_start = [
+        "sk-",
+        "api_key",
+        "apikey",
+        "authorization:",
+        "bearer ",
+        "token=",
+        "secret=",
+    ]
+    .iter()
+    .filter_map(|needle| lowercase.find(needle))
+    .min();
+    let mut redacted = match secret_start {
+        Some(idx) => format!("{}[redacted]", &cleaned[..idx]),
+        None => cleaned.to_string(),
+    };
+    if redacted.len() > DIAGNOSTIC_LINE_MAX {
+        redacted.truncate(DIAGNOSTIC_LINE_MAX);
+        redacted.push('…');
+    }
+    Some(redacted)
+}
+
+fn push_diagnostic_line(stream: &str, line: &str) {
+    let Some(sanitized) = sanitize_diagnostic_line(line) else {
+        return;
+    };
+    log::info!("OpenCode managed server {stream}: {sanitized}");
+    if let Ok(mut guard) = RECENT_DIAGNOSTICS.lock() {
+        if guard.len() >= DIAGNOSTIC_RING_CAP {
+            guard.pop_front();
+        }
+        guard.push_back(format!("[{stream}] {sanitized}"));
+    }
+}
+
+/// Snapshot of recent sanitized managed-server output (for error messages / tests).
+pub fn recent_managed_server_diagnostics() -> Vec<String> {
+    RECENT_DIAGNOSTICS
+        .lock()
+        .map(|g| g.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn diagnostics_summary_for_error() -> String {
+    let lines = recent_managed_server_diagnostics();
+    if lines.is_empty() {
+        return "no managed-server output captured".to_string();
+    }
+    let tail: Vec<&str> = lines.iter().rev().take(12).map(String::as_str).collect();
+    tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
+}
+
+fn spawn_stdio_logger(stream: &'static str, pipe: impl std::io::Read + Send + 'static) {
+    let _ = std::thread::Builder::new()
+        .name(format!("opencode-server-{stream}"))
+        .spawn(move || {
+            let reader = BufReader::new(pipe);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => push_diagnostic_line(stream, &l),
+                    Err(e) => {
+                        log::debug!("OpenCode managed server {stream} read ended: {e}");
+                        break;
+                    }
+                }
+            }
+        });
 }
 
 fn is_healthy(url: &str) -> bool {
@@ -204,8 +303,10 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         .arg(&hostname)
         .arg("--port")
         .arg(port.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        // Capture output for diagnostics (startup failures, provider issues)
+        // instead of discarding it to null.
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     #[cfg(unix)]
     {
@@ -222,9 +323,16 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start OpenCode server: {e}"))?;
+
+    if let Some(stdout) = child.stdout.take() {
+        spawn_stdio_logger("stdout", stdout);
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_stdio_logger("stderr", stderr);
+    }
 
     let server_pid = child.id();
     *guard = Some(OpenCodeServerProcess {
@@ -237,7 +345,12 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
     write_pid_file(server_pid, port);
 
     if !wait_until_healthy(&url, 50) {
-        return Err("OpenCode server started but did not become healthy in time".to_string());
+        // Give logger threads a moment to flush a few lines after exit.
+        std::thread::sleep(Duration::from_millis(150));
+        let diag = diagnostics_summary_for_error();
+        return Err(format!(
+            "OpenCode server started but did not become healthy in time. Diagnostics: {diag}"
+        ));
     }
 
     Ok(url)
@@ -335,6 +448,58 @@ pub async fn start_opencode_server(app: AppHandle) -> Result<OpenCodeServerStatu
 pub async fn stop_opencode_server() -> Result<(), String> {
     let _ = stop_managed_server_inner()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_diagnostic_line_strips_control_and_truncates() {
+        let line = format!("hello\x00world {}", "x".repeat(500));
+        let cleaned = sanitize_diagnostic_line(&line).unwrap();
+        assert!(!cleaned.contains('\0'));
+        assert!(cleaned.chars().count() <= DIAGNOSTIC_LINE_MAX + 1); // + ellipsis
+        assert!(cleaned.contains("hello"));
+    }
+
+    #[test]
+    fn sanitize_diagnostic_line_redacts_secretish_tokens() {
+        let secret = format!("sk-{}", "super-secret-token-value-".repeat(8));
+        let cleaned =
+            sanitize_diagnostic_line(&format!("request failed Authorization: Bearer {secret}"))
+                .unwrap();
+        assert!(cleaned.contains("[redacted]"), "got {cleaned}");
+        assert!(cleaned.starts_with("request failed "), "got {cleaned}");
+        assert!(
+            !cleaned.contains(&secret) && !cleaned.contains("token-value"),
+            "credential suffix leaked: {cleaned}"
+        );
+    }
+
+    #[test]
+    fn sanitize_diagnostic_line_redacts_long_query_credential_through_line_end() {
+        let secret = "abcdefghijklmnopqrstuvwxyz0123456789".repeat(8);
+        let cleaned =
+            sanitize_diagnostic_line(&format!("provider request failed: token={secret}")).unwrap();
+        assert_eq!(cleaned, "provider request failed: [redacted]");
+        assert!(
+            !cleaned.contains(&secret[24..]),
+            "credential suffix leaked: {cleaned}"
+        );
+    }
+
+    #[test]
+    fn push_diagnostic_line_is_retained_in_ring() {
+        // Clear by pushing past capacity then checking presence of a unique marker.
+        let marker = format!("jean-diag-marker-{}", std::process::id());
+        push_diagnostic_line("stderr", &marker);
+        let snapshot = recent_managed_server_diagnostics();
+        assert!(
+            snapshot.iter().any(|l| l.contains(&marker)),
+            "expected marker in {snapshot:?}"
+        );
+    }
 }
 
 pub async fn get_opencode_server_status() -> Result<OpenCodeServerStatus, String> {
