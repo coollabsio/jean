@@ -415,6 +415,42 @@ fn default_model_for_backend(
     }
 }
 
+/// Trim and drop empty optional strings (MCP/UI may send `""` or whitespace).
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Resolve the model used for a send.
+///
+/// Precedence:
+/// 1. Explicit `model` on the send (one-shot override, e.g. MCP `send_chat_message`)
+/// 2. Session `selected_model` (set via UI or MCP `set_session_model`)
+/// 3. Backend default from preferences (when available)
+///
+/// Without (2), Jean MCP agents that call `set_session_model` then send without
+/// `model` would fall through to the CLI default (often Opus) instead of the
+/// session's chosen model.
+fn resolve_send_model(
+    explicit_model: Option<String>,
+    session_selected_model: Option<String>,
+    backend_default_model: Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit_model)
+        .or_else(|| normalize_optional_string(session_selected_model))
+        .or_else(|| normalize_optional_string(backend_default_model))
+}
+
+/// Resolve execution mode for a send: explicit override → session selection.
+fn resolve_send_execution_mode(
+    explicit_mode: Option<String>,
+    session_selected_mode: Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit_mode)
+        .or_else(|| normalize_optional_string(session_selected_mode))
+}
+
 fn build_kimi_system_prompt(
     app: &AppHandle,
     worktree_id: &str,
@@ -2737,15 +2773,34 @@ pub async fn send_chat_message(
     // Capture session info for run log before borrowing session mutably
     let session_name = session.name.clone();
     let session_order = session.order;
+    let session_backend = session.backend.clone();
+    let session_selected_model = session.selected_model.clone();
+    let session_selected_execution_mode = session.selected_execution_mode.clone();
+    let session_selected_thinking_level = session.selected_thinking_level.clone();
+    let session_selected_effort_level = session.selected_effort_level.clone();
+    let session_selected_provider = session.selected_provider.clone();
 
     // Note: User message is stored in NDJSON run entry (run.user_message),
     // not in sessions JSON. Messages are loaded from NDJSON on demand.
 
+    // MCP (and other non-UI callers) often omit per-turn settings. Fall back to
+    // the session's persisted choices so `set_session_model` / toolbar selection
+    // are respected when `model` / `executionMode` are not passed on the send.
+    // Explicit non-empty values remain one-shot overrides.
+    let mut model = resolve_send_model(model, session_selected_model, None);
+    let execution_mode =
+        resolve_send_execution_mode(execution_mode, session_selected_execution_mode);
+    let thinking_level = thinking_level.or(session_selected_thinking_level);
+    let effort_level = effort_level.or(session_selected_effort_level);
+    // selected_provider may be a sentinel (__anthropic__/__default__) rather than
+    // a real custom profile name — only use it when it looks like a profile id.
+    let custom_profile_name = normalize_optional_string(custom_profile_name).or_else(|| {
+        normalize_optional_string(session_selected_provider).filter(|provider| {
+            provider != "__anthropic__" && provider != "__default__"
+        })
+    });
+
     // Determine backend from session (or explicit param, or default to claude)
-    let session_backend = sessions
-        .find_session(&session_id)
-        .map(|s| s.backend.clone())
-        .unwrap_or_default();
     let effective_backend = match backend.as_deref() {
         Some("codex") => Backend::Codex,
         Some("opencode") => Backend::Opencode,
@@ -2763,6 +2818,18 @@ pub async fn send_chat_message(
     } else {
         effective_backend
     };
+
+    // Final model fallback: preferences default for the resolved backend.
+    // Covers sessions created before selected_model was persisted, or when
+    // create_session could not load preferences.
+    if model.is_none() {
+        if let Ok(prefs) = crate::load_preferences(app.clone()).await {
+            model = default_model_for_backend(&effective_backend, &prefs);
+        }
+    }
+    log::info!(
+        "[SendChat] resolved session={session_id} model={model:?} backend={effective_backend:?} execution_mode={execution_mode:?}"
+    );
 
     // Sync session.backend when model-based resolution overrides it
     // (e.g. user switched from Claude model to Codex model mid-session).
@@ -10012,6 +10079,65 @@ mod tests {
         assert_eq!(
             default_model_for_backend(&Backend::Commandcode, &prefs),
             Some("commandcode/deepseek/deepseek-v4-flash".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_prefers_explicit_over_session_and_prefs() {
+        assert_eq!(
+            resolve_send_model(
+                Some("claude-fable-5".to_string()),
+                Some("claude-opus-4-8[1m]".to_string()),
+                Some("claude-sonnet-4-6[1m]".to_string()),
+            ),
+            Some("claude-fable-5".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_falls_back_to_session_selected_model() {
+        // MCP set_session_model then send_chat_message without model
+        assert_eq!(
+            resolve_send_model(
+                None,
+                Some("claude-fable-5".to_string()),
+                Some("claude-opus-4-8[1m]".to_string()),
+            ),
+            Some("claude-fable-5".to_string())
+        );
+        // Empty / whitespace explicit model is treated as omitted
+        assert_eq!(
+            resolve_send_model(
+                Some("   ".to_string()),
+                Some("claude-fable-5".to_string()),
+                None,
+            ),
+            Some("claude-fable-5".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_falls_back_to_preferences_default() {
+        assert_eq!(
+            resolve_send_model(None, None, Some("claude-sonnet-4-6[1m]".to_string())),
+            Some("claude-sonnet-4-6[1m]".to_string())
+        );
+        assert_eq!(resolve_send_model(None, Some("".to_string()), None), None);
+    }
+
+    #[test]
+    fn resolve_send_execution_mode_falls_back_to_session() {
+        assert_eq!(
+            resolve_send_execution_mode(Some("yolo".to_string()), Some("plan".to_string())),
+            Some("yolo".to_string())
+        );
+        assert_eq!(
+            resolve_send_execution_mode(None, Some("build".to_string())),
+            Some("build".to_string())
+        );
+        assert_eq!(
+            resolve_send_execution_mode(Some("".to_string()), Some("plan".to_string())),
+            Some("plan".to_string())
         );
     }
 
