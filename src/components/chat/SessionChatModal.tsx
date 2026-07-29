@@ -1494,6 +1494,18 @@ export function SessionChatModal({
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session
                           </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => {
+                              void copyToClipboard(session.id)
+                                .then(() => toast.success('Session ID copied'))
+                                .catch(() =>
+                                  toast.error('Failed to copy session ID')
+                                )
+                            }}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy Session ID
+                          </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem
                             variant="destructive"
