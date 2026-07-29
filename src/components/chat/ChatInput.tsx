@@ -45,6 +45,7 @@ import {
   listControlChars,
   sanitizeTextInputValue,
 } from '@/lib/input-sanitization'
+import { isImeComposingEvent } from '@/lib/ime-composition'
 import {
   decodePromptAttachmentMetadata,
   parsePlainTextPromptMetadata,
@@ -481,6 +482,14 @@ export const ChatInput = memo(function ChatInput({
   // Handle keyboard events
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Japanese/CJK IME: Enter confirms composition — must not submit or
+      // select mentions. Do not preventDefault; let the IME handle the key.
+      // keyCode 229 covers Safari/WKWebView where compositionend can fire
+      // before keydown and leave isComposing false (issue #584).
+      if (isImeComposingEvent(e)) {
+        return
+      }
+
       // When file mention popover is open, handle navigation
       if (fileMentionOpen) {
         if (e.ctrlKey && e.shiftKey && e.key === 'ArrowLeft') {

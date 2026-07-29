@@ -345,3 +345,105 @@ describe('ChatInput attachments', () => {
     expect(textarea.value).toBe('')
   })
 })
+
+describe('ChatInput IME composition (issue #584)', () => {
+  beforeEach(() => {
+    processAttachmentFile.mockReset()
+    invokeMock.mockReset()
+    storeState.setInputDraft.mockReset()
+    storeState.getPendingFiles.mockReset()
+    storeState.getPendingFiles.mockReturnValue([])
+    storeState.removePendingFile.mockReset()
+    storeState.addPendingFile.mockReset()
+    storeState.addPendingSkill.mockReset()
+    storeState.addPendingImage.mockReset()
+    storeState.addPendingTextFile.mockReset()
+    storeState.inputDrafts = {}
+  })
+
+  const renderWithSubmit = () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+    const onSubmit = vi.fn()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+      />
+    )
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    return { textarea, onSubmit }
+  }
+
+  it('submits on normal Enter when not composing', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = 'hello'
+    fireEvent.change(textarea, { target: { value: 'hello' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit when Enter confirms IME composition (isComposing)', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = 'こんにちは'
+    fireEvent.change(textarea, { target: { value: 'こんにちは' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      isComposing: true,
+    })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('こんにちは')
+  })
+
+  it('does not submit on Safari/WKWebView IME Enter (keyCode 229, isComposing false)', () => {
+    // compositionend can run before keydown on Safari, so isComposing is
+    // already false; keyCode 229 still marks the event as IME-handled.
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = '日本語'
+    fireEvent.change(textarea, { target: { value: '日本語' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 229,
+      isComposing: false,
+    })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('日本語')
+  })
+
+  it('submits on the Enter after composition has finished', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = '日本語'
+    fireEvent.change(textarea, { target: { value: '日本語' } })
+
+    // Confirm composition (must not submit)
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 229,
+      isComposing: false,
+    })
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // Second Enter sends the message
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+})
