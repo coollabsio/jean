@@ -359,6 +359,7 @@ export const AppearancePane: React.FC = () => {
               description="Translucent window with desktop blur (uses significant GPU)"
             >
               <Switch
+                aria-label="Window transparency"
                 checked={preferences?.window_vibrancy ?? false}
                 onCheckedChange={handleVibrancyChange}
                 disabled={patchPreferences.isPending || isVibrancyPending}
@@ -548,6 +549,29 @@ export const AppearancePane: React.FC = () => {
               disabled={syncZoomLevels || patchPreferences.isPending}
             />
           </ScalingField>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Sidebar"
+        anchorId="pref-appearance-section-sidebar"
+      >
+        <div className="space-y-4">
+          <InlineField
+            label="Open from screen edge"
+            description="Temporarily reveal the collapsed sidebar when the pointer rests on the left edge"
+          >
+            <Switch
+              aria-label="Open sidebar from screen edge"
+              checked={preferences?.sidebar_hover_open_enabled ?? true}
+              onCheckedChange={checked =>
+                patchPreferences.mutate({
+                  sidebar_hover_open_enabled: checked,
+                })
+              }
+              disabled={patchPreferences.isPending}
+            />
+          </InlineField>
         </div>
       </SettingsSection>
 

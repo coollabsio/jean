@@ -106,6 +106,9 @@ export function TitleBar({
                 onClick={toggleLeftSidebar}
                 variant="ghost"
                 size="icon"
+                aria-label={
+                  leftSidebarVisible ? 'Hide Left Sidebar' : 'Show Left Sidebar'
+                }
                 className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
               >
                 {leftSidebarVisible ? (

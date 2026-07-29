@@ -86,7 +86,9 @@ export const test = base.extend<TauriMockFixtures>({
             }
           },
           list_worktrees: args => {
-            const projectId = args?.projectId as string | undefined
+            const projectId = (args?.projectId ?? args?.project_id) as
+              | string
+              | undefined
             return structuredClone(
               worktreeStore
                 .filter(

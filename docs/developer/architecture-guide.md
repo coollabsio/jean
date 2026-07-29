@@ -259,6 +259,20 @@ MainWindow (Top-level orchestrator)
     └── Toaster (Notifications)
 ```
 
+### Collapsed Sidebar Edge Preview
+
+On desktop pointer devices, `SidebarHoverPreview.tsx` temporarily renders
+`LeftSideBar` above the main content when the pointer rests on the left edge.
+This preview does not update `leftSidebarVisible`, so navigation inside it does
+not pin the sidebar or change persisted UI state. The normal sidebar toggle
+still updates `leftSidebarVisible`, converting the preview into the persistent,
+in-flow sidebar.
+
+The behavior is controlled by the persisted
+`sidebar_hover_open_enabled` preference, which defaults to `true`. Portaled
+sidebar menus and active drag operations hold the preview open until the
+interaction finishes.
+
 ### Canvas View
 
 **ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) shows sessions across all worktrees in a project, grouped by worktree with section headers. Sessions are opened via `SessionChatModal` overlay.
