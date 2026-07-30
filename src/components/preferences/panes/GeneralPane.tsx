@@ -159,6 +159,7 @@ import {
   notificationSoundOptions,
   type RemovalBehavior,
   type ClaudeModel,
+  getClaudeModelOptionsForProvider,
   type CodexModel,
   type CodexGoalExecutionMode,
   type CodexReasoningEffort,
@@ -335,10 +336,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
 
-  const remoteClaudeModelOptions = useMemo(
-    () => getCatalogModelOptions(modelCatalog, 'claude'),
-    [modelCatalog]
+  const customCliProfiles = useMemo(
+    () => preferences?.custom_cli_profiles ?? [],
+    [preferences?.custom_cli_profiles]
   )
+  const defaultClaudeProvider = preferences?.default_provider ?? null
+  const remoteClaudeModelOptions = useMemo(() => {
+    // When a custom CLI provider is the global default, surface the
+    // provider-routed opus/sonnet/haiku aliases so Settings → Claude can set
+    // a matching default model (issue #418).
+    const options = defaultClaudeProvider
+      ? getClaudeModelOptionsForProvider(
+          defaultClaudeProvider,
+          customCliProfiles
+        )
+      : getCatalogModelOptions(modelCatalog, 'claude')
+    const selected = preferences?.selected_model
+    if (selected && !options.some(option => option.value === selected)) {
+      return [...options, { value: selected as ClaudeModel, label: selected }]
+    }
+    return options
+  }, [
+    modelCatalog,
+    defaultClaudeProvider,
+    customCliProfiles,
+    preferences?.selected_model,
+  ])
   const remoteCodexDefaultModelOptions = useMemo(
     () => getCatalogDefaultModelOptions(modelCatalog, 'codex'),
     [modelCatalog]
@@ -2954,7 +2977,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <div className="space-y-4">
             <InlineField
               label="Model"
-              description="Claude model for AI assistance"
+              description={
+                defaultClaudeProvider
+                  ? `Claude model for AI assistance (routed via ${defaultClaudeProvider}). Change the default provider under Settings → Providers.`
+                  : 'Claude model for AI assistance. Custom CLI providers are configured under Settings → Providers.'
+              }
             >
               <Select
                 value={preferences?.selected_model ?? 'claude-opus-4-8[1m]'}

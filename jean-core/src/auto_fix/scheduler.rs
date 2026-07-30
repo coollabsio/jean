@@ -68,6 +68,8 @@ struct PendingAutoYolo {
     session_id: String,
     backend: String,
     model: Option<String>,
+    /// Claude custom CLI profile name (None = Anthropic direct).
+    provider: Option<String>,
 }
 
 static LAST_PROJECT_CHECKS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
@@ -487,6 +489,10 @@ async fn start_issue_auto_fix(
         .planning_model
         .clone()
         .unwrap_or_else(|| default_model_for_backend(&settings.planning_backend));
+    let planning_provider = normalize_claude_provider(
+        &settings.planning_backend,
+        settings.planning_provider.as_deref(),
+    );
 
     let result = crate::jean_mcp_core::start_background_investigation_impl(
         app,
@@ -495,9 +501,9 @@ async fn start_issue_auto_fix(
         prompt,
         model,
         settings.planning_backend.clone(),
+        planning_provider.clone(),
         None,
-        None,
-        None,
+        planning_provider.clone(),
         None,
         None,
         None,
@@ -524,6 +530,10 @@ async fn start_issue_auto_fix(
                 session_id: result.session_id,
                 backend: settings.yolo_backend.clone(),
                 model: settings.yolo_model.clone(),
+                provider: normalize_claude_provider(
+                    &settings.yolo_backend,
+                    settings.yolo_provider.as_deref(),
+                ),
             },
         );
     spawn_pending_auto_yolo_watch(app.clone(), pending_session_id);
@@ -789,6 +799,14 @@ async fn approve_plan_and_start_yolo(
         model.clone(),
     )
     .await?;
+    crate::chat::set_session_provider(
+        app.clone(),
+        entry.worktree_id.clone(),
+        entry.worktree_path.clone(),
+        entry.session_id.clone(),
+        entry.provider.clone(),
+    )
+    .await?;
 
     crate::chat::update_session_state(
         app.clone(),
@@ -849,7 +867,7 @@ async fn approve_plan_and_start_yolo(
         None,
         None,
         None,
-        None,
+        entry.provider.clone(),
         Some(entry.backend.clone()),
     )
     .await?;
@@ -894,6 +912,23 @@ fn disable_project_auto_fix(app: &AppHandle, project_id: &str) {
     }
 }
 
+/// Only Claude custom CLI profiles are valid providers; other backends ignore them.
+fn normalize_claude_provider(backend: &str, provider: Option<&str>) -> Option<String> {
+    if backend != "claude" {
+        return None;
+    }
+    let trimmed = provider?.trim();
+    if trimmed.is_empty()
+        || trimmed == "__anthropic__"
+        || trimmed == "__default__"
+        || trimmed.eq_ignore_ascii_case("anthropic")
+        || trimmed.eq_ignore_ascii_case("default")
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 fn default_model_for_backend(backend: &str) -> String {
     match backend {
         "codex" => "gpt-5.6-sol".to_string(),
@@ -920,9 +955,11 @@ mod tests {
             excluded_labels: Vec::new(),
             planning_backend: "claude".to_string(),
             planning_model: None,
+            planning_provider: None,
             auto_yolo_enabled: false,
             yolo_backend: "claude".to_string(),
             yolo_model: None,
+            yolo_provider: None,
             active_hours_enabled: false,
             active_hours_start: 20,
             active_hours_end: 8,
@@ -1375,6 +1412,7 @@ mod tests {
             session_id: "session-1".to_string(),
             backend: "claude".to_string(),
             model: None,
+            provider: None,
         };
         let entry_for_other_project = PendingAutoYolo {
             project_id: "project-2".to_string(),
@@ -1384,6 +1422,7 @@ mod tests {
             session_id: "session-2".to_string(),
             backend: "claude".to_string(),
             model: None,
+            provider: None,
         };
         {
             let mut pending = pending_yolo().lock().expect("pending auto yolo mutex");
@@ -1410,9 +1449,11 @@ mod tests {
             excluded_labels: Vec::new(),
             planning_backend: "claude".to_string(),
             planning_model: None,
+            planning_provider: None,
             auto_yolo_enabled: false,
             yolo_backend: "claude".to_string(),
             yolo_model: None,
+            yolo_provider: None,
             active_hours_enabled: false,
             active_hours_start: 20,
             active_hours_end: 8,
@@ -1432,14 +1473,33 @@ mod tests {
             excluded_labels: Vec::new(),
             planning_backend: "claude".to_string(),
             planning_model: None,
+            planning_provider: None,
             auto_yolo_enabled: true,
             yolo_backend: "claude".to_string(),
             yolo_model: None,
+            yolo_provider: None,
             active_hours_enabled: false,
             active_hours_start: 20,
             active_hours_end: 8,
         };
 
         assert!(should_queue_auto_yolo(&settings));
+    }
+
+    #[test]
+    fn normalize_claude_provider_only_keeps_claude_profiles() {
+        assert_eq!(
+            normalize_claude_provider("claude", Some("OpenRouter")),
+            Some("OpenRouter".to_string())
+        );
+        assert_eq!(normalize_claude_provider("claude", Some("  ")), None);
+        assert_eq!(
+            normalize_claude_provider("claude", Some("__anthropic__")),
+            None
+        );
+        assert_eq!(
+            normalize_claude_provider("codex", Some("OpenRouter")),
+            None
+        );
     }
 }

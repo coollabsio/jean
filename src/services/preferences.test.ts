@@ -133,6 +133,16 @@ describe('model option helpers', () => {
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
     expect(normalizeClaudeModel('claude-opus-4-6')).toBe('claude-opus-4-6')
     expect(normalizeClaudeModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6')
+    // Custom CLI providers keep Claude Code aliases for ANTHROPIC_DEFAULT_* routing
+    expect(
+      normalizeClaudeModel('sonnet', { preserveProviderAliases: true })
+    ).toBe('sonnet')
+    expect(
+      normalizeClaudeModel('opus', { preserveProviderAliases: true })
+    ).toBe('opus')
+    expect(
+      normalizeClaudeModel('haiku', { preserveProviderAliases: true })
+    ).toBe('haiku')
   })
 
   it('offers GPT 5.6 preview variants in Codex selectors', () => {

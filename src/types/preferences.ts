@@ -1669,7 +1669,25 @@ const knownClaudeModels = new Set<string>([
   'opus',
 ])
 
-export function normalizeClaudeModel(model: string): ClaudeModel {
+/**
+ * Normalize a Claude model id.
+ *
+ * When `preserveProviderAliases` is true (custom CLI provider is active), keep
+ * the Claude Code aliases `opus` / `sonnet` / `haiku` so they resolve through
+ * the provider's ANTHROPIC_DEFAULT_*_MODEL env vars instead of being rewritten
+ * to first-party Anthropic model IDs.
+ */
+export function normalizeClaudeModel(
+  model: string,
+  options?: { preserveProviderAliases?: boolean }
+): ClaudeModel {
+  if (
+    options?.preserveProviderAliases &&
+    (model === 'opus' || model === 'sonnet' || model === 'haiku')
+  ) {
+    return model
+  }
+
   if (model in legacyClaudeDefaultModelMap) {
     return legacyClaudeDefaultModelMap[
       model as keyof typeof legacyClaudeDefaultModelMap
@@ -1679,6 +1697,49 @@ export function normalizeClaudeModel(model: string): ClaudeModel {
   return knownClaudeModels.has(model)
     ? (model as ClaudeModel)
     : 'claude-opus-4-8[1m]'
+}
+
+/** Claude model options for a custom CLI profile (opus/sonnet/haiku aliases). */
+export function getClaudeModelOptionsForProvider(
+  provider: string | null | undefined,
+  customCliProfiles: CustomCliProfile[]
+): { value: ClaudeModel; label: string }[] {
+  if (
+    !provider ||
+    provider === '__anthropic__' ||
+    provider === '__default__' ||
+    provider === 'anthropic' ||
+    provider === 'default'
+  ) {
+    return modelOptions
+  }
+
+  const profile = customCliProfiles.find(p => p.name === provider)
+  let opusModel: string | undefined
+  let sonnetModel: string | undefined
+  let haikuModel: string | undefined
+  if (profile?.settings_json) {
+    try {
+      const settings = JSON.parse(profile.settings_json) as {
+        env?: Record<string, string>
+      }
+      const env = settings?.env
+      if (env) {
+        opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
+        sonnetModel = env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
+        haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
+      }
+    } catch {
+      // Ignore invalid profile JSON; fall back to short labels.
+    }
+  }
+
+  const suffix = (model?: string) => (model ? ` (${model})` : '')
+  return [
+    { value: 'opus', label: `Opus${suffix(opusModel)}` },
+    { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
+    { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
+  ]
 }
 
 // Claude models that support fast service tier. Fast mode is exposed via a

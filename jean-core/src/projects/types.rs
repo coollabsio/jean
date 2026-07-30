@@ -35,11 +35,17 @@ pub struct ProjectAutoFixSettings {
     pub planning_backend: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planning_model: Option<String>,
+    /// Claude custom CLI profile name for planning (None = Anthropic direct).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning_provider: Option<String>,
     #[serde(default)]
     pub auto_yolo_enabled: bool,
     pub yolo_backend: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yolo_model: Option<String>,
+    /// Claude custom CLI profile name for yolo (None = Anthropic direct).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_provider: Option<String>,
     #[serde(default)]
     pub active_hours_enabled: bool,
     #[serde(default)]
@@ -814,10 +820,12 @@ mod label_tests {
             included_labels: vec!["bug".to_string()],
             excluded_labels: vec!["wontfix".to_string()],
             planning_backend: "claude".to_string(),
-            planning_model: Some("claude-opus-4-8[1m]".to_string()),
+            planning_model: Some("opus".to_string()),
+            planning_provider: Some("OpenRouter".to_string()),
             auto_yolo_enabled: true,
             yolo_backend: "codex".to_string(),
             yolo_model: Some("gpt-5.3-codex".to_string()),
+            yolo_provider: None,
             active_hours_enabled: true,
             active_hours_start: 20,
             active_hours_end: 8,
@@ -825,6 +833,7 @@ mod label_tests {
 
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"interval_minutes\":15"));
+        assert!(json.contains("\"planning_provider\":\"OpenRouter\""));
         let parsed: ProjectAutoFixSettings = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.issue_limit, 3);
@@ -832,6 +841,9 @@ mod label_tests {
         assert_eq!(parsed.excluded_labels, vec!["wontfix".to_string()]);
         assert!(parsed.auto_yolo_enabled);
         assert_eq!(parsed.yolo_backend, "codex");
+        assert_eq!(parsed.planning_provider.as_deref(), Some("OpenRouter"));
+        assert_eq!(parsed.planning_model.as_deref(), Some("opus"));
+        assert!(parsed.yolo_provider.is_none());
     }
 
     #[test]
