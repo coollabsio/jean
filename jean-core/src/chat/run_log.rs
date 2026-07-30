@@ -70,6 +70,8 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let claude_sid = claude_session_id.map(|s| s.to_string());
 
+        let mut checkpoint_id: Option<String> = None;
+
         with_metadata_mut(
             &self.app,
             &self.session_id,
@@ -83,6 +85,7 @@ impl RunLogWriter {
                     run.assistant_message_id = Some(assistant_message_id.to_string());
                     run.claude_session_id = claude_sid.clone();
                     run.usage = usage.clone();
+                    checkpoint_id = run.checkpoint_id.clone();
                 }
 
                 // Update metadata's claude_session_id for resumption
@@ -93,6 +96,21 @@ impl RunLogWriter {
                 Ok(())
             },
         )?;
+
+        // Capture end-of-turn tree + file list for the AI checkpoint.
+        if let Some(cp_id) = checkpoint_id {
+            if let Err(e) = crate::projects::checkpoints::finalize_checkpoint(
+                &self.app,
+                &self.worktree_id,
+                &cp_id,
+            ) {
+                log::warn!(
+                    "[Checkpoint] finalize on complete failed run={} cp={}: {e}",
+                    self.run_id,
+                    cp_id
+                );
+            }
+        }
 
         log::trace!("Run completed: {}", self.run_id);
         Ok(())
@@ -109,6 +127,7 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let asst_id = assistant_message_id.map(|s| s.to_string());
         let claude_sid = claude_session_id.map(|s| s.to_string());
+        let mut checkpoint_id: Option<String> = None;
 
         with_metadata_mut(
             &self.app,
@@ -118,6 +137,7 @@ impl RunLogWriter {
             self.order,
             |metadata| {
                 if let Some(run) = metadata.find_run_mut(&run_id) {
+                    checkpoint_id = run.checkpoint_id.clone();
                     run.status = RunStatus::Cancelled;
                     run.ended_at = Some(now);
                     run.cancelled = true;
@@ -133,6 +153,21 @@ impl RunLogWriter {
                 Ok(())
             },
         )?;
+
+        // Still finalize so the user can review / restore partial AI changes.
+        if let Some(cp_id) = checkpoint_id {
+            if let Err(e) = crate::projects::checkpoints::finalize_checkpoint(
+                &self.app,
+                &self.worktree_id,
+                &cp_id,
+            ) {
+                log::warn!(
+                    "[Checkpoint] finalize on cancel failed run={} cp={}: {e}",
+                    self.run_id,
+                    cp_id
+                );
+            }
+        }
 
         log::trace!("Run cancelled: {}", self.run_id);
         Ok(())
@@ -390,6 +425,7 @@ pub fn start_run(
         cursor_chat_id: None,
         grok_session_id: None,
         kimi_session_id: None,
+        checkpoint_id: None,
     };
 
     with_metadata_mut(
@@ -1521,6 +1557,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         }
     }
 
@@ -2005,6 +2042,7 @@ Move services between instances without downtime.
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let lines = vec![

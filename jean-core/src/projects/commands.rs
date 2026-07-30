@@ -6403,12 +6403,8 @@ pub async fn detect_and_link_pr(
                 log::trace!(
                     "Filled missing PR URL for worktree {worktree_id} from PR #{pr_number}"
                 );
-                let _ = save_worktree_pr_link(
-                    &app,
-                    &worktree_id,
-                    response.pr_number,
-                    &response.pr_url,
-                );
+                let _ =
+                    save_worktree_pr_link(&app, &worktree_id, response.pr_number, &response.pr_url);
                 return Ok(Some(response));
             }
             log::trace!(

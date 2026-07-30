@@ -93,9 +93,13 @@ export interface GitDiff {
 
 /** Request to open the diff modal */
 export interface DiffRequest {
-  type: 'uncommitted' | 'branch'
+  type: 'uncommitted' | 'branch' | 'checkpoints'
   worktreePath: string
   baseBranch: string
   /** Remote the base branch lives on, when it isn't origin */
   baseRemote?: string
+  /** Worktree id — required for AI checkpoints tab */
+  worktreeId?: string
+  /** Optional checkpoint to pre-select when opening the checkpoints tab */
+  checkpointId?: string
 }

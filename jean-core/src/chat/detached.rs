@@ -590,9 +590,7 @@ pub fn spawn_detached_claude(
         // already be running under wslhost.exe).
         match child.wait() {
             Ok(status) if !status.success() => {
-                log::warn!(
-                    "WSL launcher exited with status {status} after reporting pid {pid}"
-                );
+                log::warn!("WSL launcher exited with status {status} after reporting pid {pid}");
             }
             Err(e) => log::warn!("Failed to wait for WSL launcher: {e}"),
             _ => {}
