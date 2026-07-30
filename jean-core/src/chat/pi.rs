@@ -1791,6 +1791,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             devin_session_id: None,
+            checkpoint_id: None,
         };
 
         let lines = vec![

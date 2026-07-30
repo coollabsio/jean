@@ -144,6 +144,11 @@ export interface UIState {
     string,
     { worktree_id: string; session_id: string }
   >
+  /**
+   * GitHub Actions workflow run database IDs the user has already opened
+   * (failed-run badges only count runs not in this list).
+   */
+  seen_failed_workflow_run_ids?: number[]
   version: number
 }
 
@@ -185,5 +190,6 @@ export const defaultUIState: UIState = {
   browser_bottom_panel_open: {},
   browser_bottom_panel_height: 360,
   github_dashboard_favorite_project_ids: [],
+  seen_failed_workflow_run_ids: [],
   version: 1,
 }

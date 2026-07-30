@@ -3674,9 +3674,7 @@ mod tests {
         // A lineage that never reaches a registered subscriber resolves to None.
         let mut orphan_parents = HashMap::new();
         orphan_parents.insert("ses_orphan".to_string(), "ses_unsubscribed".to_string());
-        assert!(
-            resolve_opencode_subscriber(&subscribers, &orphan_parents, "ses_orphan").is_none()
-        );
+        assert!(resolve_opencode_subscriber(&subscribers, &orphan_parents, "ses_orphan").is_none());
 
         // Unknown session with no lineage at all is None.
         assert!(
@@ -3690,11 +3688,17 @@ mod tests {
         // Multi-level chain under the dropped root (the shape resolve tests use).
         parents.insert("ses_child".to_string(), "ses_root".to_string());
         parents.insert("ses_grandchild".to_string(), "ses_child".to_string());
-        parents.insert("ses_great_grandchild".to_string(), "ses_grandchild".to_string());
+        parents.insert(
+            "ses_great_grandchild".to_string(),
+            "ses_grandchild".to_string(),
+        );
         // Sibling branch under the same root.
         parents.insert("ses_other_child".to_string(), "ses_root".to_string());
         // Unrelated tree must survive.
-        parents.insert("ses_unrelated_child".to_string(), "ses_other_root".to_string());
+        parents.insert(
+            "ses_unrelated_child".to_string(),
+            "ses_other_root".to_string(),
+        );
         parents.insert(
             "ses_unrelated_grandchild".to_string(),
             "ses_unrelated_child".to_string(),
@@ -3722,9 +3726,7 @@ mod tests {
             Some("ses_other_root")
         );
         assert_eq!(
-            parents
-                .get("ses_unrelated_grandchild")
-                .map(String::as_str),
+            parents.get("ses_unrelated_grandchild").map(String::as_str),
             Some("ses_unrelated_child")
         );
     }

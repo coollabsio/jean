@@ -71,7 +71,11 @@ function renderHandlers(
 describe('useToolbarHandlers', () => {
   beforeEach(() => {
     invokeMock.mockClear()
-    useChatStore.setState({ effortLevels: {} })
+    useChatStore.setState({
+      effortLevels: {},
+      selectedProviders: {},
+      selectedBackends: {},
+    })
   })
 
   it('persists effort level changes to session metadata and broadcasts them', () => {
@@ -96,6 +100,90 @@ describe('useToolbarHandlers', () => {
       sessionId: 'session-1',
       key: 'effortLevel',
       value: 'xhigh',
+    })
+  })
+
+  it('persists provider changes mid-session with optimistic cache and broadcast', () => {
+    const setSessionProvider = { mutate: vi.fn() }
+    const { result, queryClient } = renderHandlers({
+      setSessionProvider,
+      session: {
+        ...baseSession,
+        selected_provider: 'Z.ai',
+        messages: [
+          {
+            id: 'message-1',
+            session_id: 'session-1',
+            role: 'user',
+            content: 'hello',
+            timestamp: 1,
+            tool_calls: [],
+          },
+        ],
+      },
+    })
+    queryClient.setQueryData(chatQueryKeys.session('session-1'), {
+      ...baseSession,
+      selected_provider: 'Z.ai',
+    })
+
+    act(() => {
+      result.current.handleToolbarProviderChange('MiniMax')
+    })
+
+    expect(useChatStore.getState().selectedProviders['session-1']).toBe(
+      'MiniMax'
+    )
+    expect(setSessionProvider.mutate).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree',
+      provider: 'MiniMax',
+    })
+    expect(
+      queryClient.getQueryData<Session>(chatQueryKeys.session('session-1'))
+        ?.selected_provider
+    ).toBe('MiniMax')
+    expect(invokeMock).toHaveBeenCalledWith('broadcast_session_setting', {
+      sessionId: 'session-1',
+      key: 'provider',
+      value: 'MiniMax',
+    })
+  })
+
+  it('clears provider selection when switching back to the default', () => {
+    const setSessionProvider = { mutate: vi.fn() }
+    const { result, queryClient } = renderHandlers({
+      setSessionProvider,
+      session: {
+        ...baseSession,
+        selected_provider: 'MiniMax',
+      },
+    })
+    queryClient.setQueryData(chatQueryKeys.session('session-1'), {
+      ...baseSession,
+      selected_provider: 'MiniMax',
+    })
+
+    act(() => {
+      result.current.handleToolbarProviderChange(null)
+    })
+
+    expect(useChatStore.getState().selectedProviders['session-1']).toBeNull()
+    expect(setSessionProvider.mutate).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree',
+      provider: null,
+    })
+    expect(
+      queryClient.getQueryData<Session>(chatQueryKeys.session('session-1'))
+        ?.selected_provider
+    ).toBeUndefined()
+    expect(invokeMock).toHaveBeenCalledWith('broadcast_session_setting', {
+      sessionId: 'session-1',
+      key: 'provider',
+      value: '',
     })
   })
 

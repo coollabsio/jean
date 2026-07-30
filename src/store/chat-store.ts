@@ -36,7 +36,9 @@ export interface ScheduledWakeupState extends ScheduledWakeup {
 import type { StoredReviewResults } from '@/types/projects'
 import { invoke } from '@/lib/transport'
 import type { ClaudeModel, CodexModel, CliBackend } from '@/types/preferences'
+import type { ManualSessionStatus } from '@/components/chat/session-card-utils'
 export type { ClaudeModel, CodexModel }
+export type { ManualSessionStatus }
 
 /** Default model to use when none is selected (fallback only - preferences take priority) */
 export const DEFAULT_MODEL: ClaudeModel = 'claude-opus-4-8[1m]'
@@ -336,6 +338,14 @@ interface ChatUIState {
   // Actions - Reviewing status management (persisted)
   setSessionReviewing: (sessionId: string, reviewing: boolean) => void
   isSessionReviewing: (sessionId: string) => boolean
+
+  // Manual status overrides (idle/review/completed/cancelled), persisted
+  sessionStatusOverrides: Record<string, ManualSessionStatus>
+  setSessionStatusOverride: (
+    sessionId: string,
+    status: ManualSessionStatus | null
+  ) => void
+  getSessionStatusOverride: (sessionId: string) => ManualSessionStatus | null
 
   // Actions - Session label management (persisted)
   setSessionLabel: (sessionId: string, label: LabelData | null) => void
@@ -760,6 +770,7 @@ export const useChatStore = create<ChatUIState>()(
       lastCompaction: {},
       compactingSessions: {},
       reviewingSessions: {},
+      sessionStatusOverrides: {},
       planFilePaths: {},
       pendingPlanMessageIds: {},
       savingContext: {},
@@ -988,37 +999,84 @@ export const useChatStore = create<ChatUIState>()(
           'removeScheduledWakeup'
         ),
 
-      // Reviewing status management (persisted)
-      setSessionReviewing: (sessionId, reviewing) =>
+      // Reviewing status management (persisted) — thin wrapper over status override
+      setSessionReviewing: (sessionId, reviewing) => {
+        get().setSessionStatusOverride(sessionId, reviewing ? 'review' : null)
+      },
+
+      isSessionReviewing: sessionId =>
+        get().sessionStatusOverrides[sessionId] === 'review' ||
+        (get().reviewingSessions[sessionId] ?? false),
+
+      setSessionStatusOverride: (sessionId, status) =>
         set(
           state => {
-            if (reviewing) {
-              if (state.reviewingSessions[sessionId]) return state
-              // Clear waiting state so review status takes visual priority
-              const { [sessionId]: _w, ...waitingForInputSessionIds } =
-                state.waitingForInputSessionIds
-              const { [sessionId]: _p, ...pendingPlanMessageIds } =
-                state.pendingPlanMessageIds
-              return {
-                reviewingSessions: {
-                  ...state.reviewingSessions,
-                  [sessionId]: true,
-                },
-                waitingForInputSessionIds,
-                pendingPlanMessageIds,
+            const current = state.sessionStatusOverrides[sessionId] ?? null
+            if (current === status) {
+              // Still ensure reviewingSessions stays in sync
+              if (status === 'review' && !state.reviewingSessions[sessionId]) {
+                return {
+                  reviewingSessions: {
+                    ...state.reviewingSessions,
+                    [sessionId]: true,
+                  },
+                }
               }
+              if (
+                status !== 'review' &&
+                sessionId in state.reviewingSessions
+              ) {
+                const { [sessionId]: _, ...rest } = state.reviewingSessions
+                return { reviewingSessions: rest }
+              }
+              return state
+            }
+
+            const nextOverrides = { ...state.sessionStatusOverrides }
+            let reviewingSessions = state.reviewingSessions
+            let waitingForInputSessionIds = state.waitingForInputSessionIds
+            let pendingPlanMessageIds = state.pendingPlanMessageIds
+
+            if (status === null) {
+              delete nextOverrides[sessionId]
             } else {
-              if (!(sessionId in state.reviewingSessions)) return state
-              const { [sessionId]: _, ...rest } = state.reviewingSessions
-              return { reviewingSessions: rest }
+              nextOverrides[sessionId] = status
+            }
+
+            if (status === 'review') {
+              if (!reviewingSessions[sessionId]) {
+                reviewingSessions = {
+                  ...reviewingSessions,
+                  [sessionId]: true,
+                }
+              }
+              // Clear waiting so review takes visual priority (legacy behavior)
+              if (sessionId in waitingForInputSessionIds) {
+                const { [sessionId]: _w, ...restW } = waitingForInputSessionIds
+                waitingForInputSessionIds = restW
+              }
+              if (sessionId in pendingPlanMessageIds) {
+                const { [sessionId]: _p, ...restP } = pendingPlanMessageIds
+                pendingPlanMessageIds = restP
+              }
+            } else if (sessionId in reviewingSessions) {
+              const { [sessionId]: _, ...rest } = reviewingSessions
+              reviewingSessions = rest
+            }
+
+            return {
+              sessionStatusOverrides: nextOverrides,
+              reviewingSessions,
+              waitingForInputSessionIds,
+              pendingPlanMessageIds,
             }
           },
           undefined,
-          'setSessionReviewing'
+          'setSessionStatusOverride'
         ),
 
-      isSessionReviewing: sessionId =>
-        get().reviewingSessions[sessionId] ?? false,
+      getSessionStatusOverride: sessionId =>
+        get().sessionStatusOverrides[sessionId] ?? null,
 
       // Session label management (persisted)
       setSessionLabel: (sessionId, label) =>
@@ -3121,6 +3179,10 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _reviewing, ...reviewingSessions } =
               state.reviewingSessions
+            const nextStatusOverrides = { ...state.sessionStatusOverrides }
+            if (nextStatusOverrides[sessionId] === 'review') {
+              delete nextStatusOverrides[sessionId]
+            }
             const { [sessionId]: _sp, ...streamingPlanApprovals } =
               state.streamingPlanApprovals
             const { [sessionId]: _em, ...executingModes } = state.executingModes
@@ -3141,6 +3203,7 @@ export const useChatStore = create<ChatUIState>()(
                   ? { ...state.completedDurations, [sessionId]: elapsed }
                   : state.completedDurations,
               reviewingSessions,
+              sessionStatusOverrides: nextStatusOverrides,
             }
           },
           undefined,
@@ -3213,6 +3276,10 @@ export const useChatStore = create<ChatUIState>()(
               reviewingSessions: {
                 ...state.reviewingSessions,
                 [sessionId]: true,
+              },
+              sessionStatusOverrides: {
+                ...state.sessionStatusOverrides,
+                [sessionId]: 'review',
               },
             }
           },
@@ -3300,6 +3367,10 @@ export const useChatStore = create<ChatUIState>()(
                 ...state.reviewingSessions,
                 [sessionId]: true,
               },
+              sessionStatusOverrides: {
+                ...state.sessionStatusOverrides,
+                [sessionId]: 'review',
+              },
             }
           },
           undefined,
@@ -3328,6 +3399,8 @@ export const useChatStore = create<ChatUIState>()(
               state.deniedMessageContext
             const { [sessionId]: _reviewing, ...restReviewing } =
               state.reviewingSessions
+            const { [sessionId]: _statusOverride, ...restStatusOverrides } =
+              state.sessionStatusOverrides
             const { [sessionId]: _waiting, ...restWaiting } =
               state.waitingForInputSessionIds
             const { [sessionId]: _answered, ...restAnswered } =
@@ -3356,6 +3429,7 @@ export const useChatStore = create<ChatUIState>()(
               pendingCodexDynamicToolCallRequests: restDynamicReqs,
               deniedMessageContext: restDenied,
               reviewingSessions: restReviewing,
+              sessionStatusOverrides: restStatusOverrides,
               waitingForInputSessionIds: restWaiting,
               answeredQuestions: restAnswered,
               submittedAnswers: restSubmitted,

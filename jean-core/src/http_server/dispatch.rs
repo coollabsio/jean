@@ -2106,6 +2106,18 @@ pub async fn dispatch_command(
             let denied_message_context: Option<Option<crate::chat::types::DeniedMessageContext>> =
                 field_opt(&args, "deniedMessageContext", "denied_message_context")?;
             let is_reviewing: Option<bool> = field_opt(&args, "isReviewing", "is_reviewing")?;
+            // Special handling for status_override: missing vs null (clear) vs string
+            let status_override: Option<Option<String>> = match args
+                .get("statusOverride")
+                .or_else(|| args.get("status_override"))
+            {
+                None => None,
+                Some(Value::Null) => Some(None),
+                Some(v) => match v.as_str() {
+                    Some(s) => Some(Some(s.to_string())),
+                    None => return Err("Invalid status_override: expected string or null".into()),
+                },
+            };
             let waiting_for_input: Option<bool> =
                 field_opt(&args, "waitingForInput", "waiting_for_input")?;
             let waiting_for_input_type: Option<Option<String>> =
@@ -2152,6 +2164,7 @@ pub async fn dispatch_command(
                 pending_codex_dynamic_tool_call_requests,
                 denied_message_context,
                 is_reviewing,
+                status_override,
                 waiting_for_input,
                 waiting_for_input_type,
                 plan_file_path,
@@ -3164,6 +3177,88 @@ pub async fn dispatch_command(
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::set_worktree_last_opened(app.clone(), worktree_id).await?;
             Ok(Value::Null)
+        }
+        "create_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let run_id: Option<String> = field_opt(&args, "runId", "run_id")?;
+            let user_message_id: Option<String> =
+                field_opt(&args, "userMessageId", "user_message_id")?;
+            let user_message: String = field(&args, "userMessage", "user_message")?;
+            let result = crate::projects::create_ai_checkpoint(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                run_id,
+                user_message_id,
+                user_message,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_ai_checkpoints" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::list_ai_checkpoints(app.clone(), worktree_id).await?;
+            to_value(result)
+        }
+        "get_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result =
+                crate::projects::get_ai_checkpoint(app.clone(), worktree_id, checkpoint_id).await?;
+            to_value(result)
+        }
+        "get_ai_checkpoint_diff" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let scope: Option<String> = from_field_opt(&args, "scope")?;
+            let result = crate::projects::get_ai_checkpoint_diff(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                scope,
+            )
+            .await?;
+            to_value(result)
+        }
+        "restore_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result =
+                crate::projects::restore_ai_checkpoint(app.clone(), worktree_id, checkpoint_id)
+                    .await?;
+            emit_cache_invalidation(app, &["git-status"]);
+            to_value(result)
+        }
+        "restore_ai_checkpoint_file" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let file_path: String = field(&args, "filePath", "file_path")?;
+            crate::projects::restore_ai_checkpoint_file(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                file_path,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["git-status"]);
+            Ok(Value::Null)
+        }
+        "delete_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            crate::projects::delete_ai_checkpoint(app.clone(), worktree_id, checkpoint_id).await?;
+            Ok(Value::Null)
+        }
+        "finalize_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result =
+                crate::projects::finalize_ai_checkpoint(app.clone(), worktree_id, checkpoint_id)
+                    .await?;
+            to_value(result)
         }
         "git_stash" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

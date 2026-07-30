@@ -2,8 +2,6 @@ import { forwardRef, useCallback } from 'react'
 import {
   Archive,
   Copy,
-  Eye,
-  EyeOff,
   FileText,
   Pencil,
   RefreshCw,
@@ -36,6 +34,7 @@ import {
   statusConfig,
   type SessionCardProps,
 } from './session-card-utils'
+import { SessionStatusMenu } from './SessionStatusMenu'
 import { canReconnectSession } from '@/services/chat'
 
 export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
@@ -54,6 +53,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
       onWorktreeYoloApprove,
       onToggleLabel,
       onToggleReview,
+      onSetStatusOverride,
       onReconnect,
       isRenaming,
       renameValue,
@@ -65,6 +65,18 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
     ref
   ) {
     const config = statusConfig[card.status]
+    const handleSetStatusOverride =
+      onSetStatusOverride ??
+      (onToggleReview
+        ? (status: 'idle' | 'review' | 'completed' | 'cancelled' | null) => {
+            // Fallback for callers that only wire the legacy review toggle
+            if (status === 'review') {
+              if (card.status !== 'review') onToggleReview()
+            } else if (status === null || status === 'idle') {
+              if (card.status === 'review') onToggleReview()
+            }
+          }
+        : undefined)
     const hasPlan = !!(card.planFilePath || card.planContent)
     const resumeCommand = getResumeCommand(card.session)
     const canReconnect = canReconnectSession(card.session)
@@ -265,20 +277,12 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
               {card.label ? 'Remove Label' : 'Add Label'}
             </ContextMenuItem>
           )}
-          {onToggleReview && (
-            <ContextMenuItem onSelect={onToggleReview}>
-              {card.status === 'review' ? (
-                <>
-                  <EyeOff className="mr-2 h-4 w-4" />
-                  Mark as Idle
-                </>
-              ) : (
-                <>
-                  <Eye className="mr-2 h-4 w-4" />
-                  Mark for Review
-                </>
-              )}
-            </ContextMenuItem>
+          {handleSetStatusOverride && (
+            <SessionStatusMenu
+              statusOverride={card.statusOverride}
+              automaticStatus={card.automaticStatus}
+              onSetStatusOverride={handleSetStatusOverride}
+            />
           )}
           <ContextMenuItem onSelect={onArchive}>
             <Archive className="mr-2 h-4 w-4" />

@@ -17,7 +17,7 @@ use super::run_log;
 use super::storage::{
     cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
     get_index_path, get_session_dir, load_metadata, load_sessions, save_metadata,
-    with_existing_metadata_mut, with_sessions_mut,
+    with_existing_metadata_mut, with_metadata_mut, with_sessions_mut,
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
@@ -1660,6 +1660,7 @@ pub async fn update_session_state(
     >,
     denied_message_context: Option<Option<super::types::DeniedMessageContext>>,
     is_reviewing: Option<bool>,
+    status_override: Option<Option<String>>,
     waiting_for_input: Option<bool>,
     waiting_for_input_type: Option<Option<String>>,
     plan_file_path: Option<Option<String>>,
@@ -1707,6 +1708,28 @@ pub async fn update_session_state(
             }
             if let Some(v) = is_reviewing {
                 session.is_reviewing = v;
+                // Keep status_override in sync with legacy reviewing flag when
+                // callers only touch is_reviewing (e.g. cancel/fail completion).
+                if v {
+                    if session.status_override.as_deref() != Some("review") {
+                        session.status_override = Some("review".to_string());
+                    }
+                } else if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
+            }
+            if let Some(v) = status_override {
+                match &v {
+                    Some(status) if !matches!(status.as_str(), "idle" | "review" | "completed" | "cancelled") => {
+                        return Err(format!(
+                            "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
+                        ));
+                    }
+                    _ => {}
+                }
+                session.status_override = v;
+                // Keep legacy is_reviewing flag aligned with the override
+                session.is_reviewing = session.status_override.as_deref() == Some("review");
             }
             if let Some(v) = waiting_for_input {
                 session.waiting_for_input = v;
@@ -1813,6 +1836,9 @@ fn queued_prompt_skips_plan_wait(
 fn apply_non_waiting_completion_state(session: &mut Session) {
     session.waiting_for_input = false;
     session.is_reviewing = false;
+    if session.status_override.as_deref() == Some("review") {
+        session.status_override = None;
+    }
     session.waiting_for_input_type = None;
 }
 
@@ -2831,9 +2857,8 @@ pub async fn send_chat_message(
     // selected_provider may be a sentinel (__anthropic__/__default__) rather than
     // a real custom profile name — only use it when it looks like a profile id.
     let custom_profile_name = normalize_optional_string(custom_profile_name).or_else(|| {
-        normalize_optional_string(session_selected_provider).filter(|provider| {
-            provider != "__anthropic__" && provider != "__default__"
-        })
+        normalize_optional_string(session_selected_provider)
+            .filter(|provider| provider != "__anthropic__" && provider != "__default__")
     });
 
     // Determine backend from session (or explicit param, or default to claude)
@@ -2886,6 +2911,9 @@ pub async fn send_chat_message(
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.waiting_for_input = false;
             session.is_reviewing = false;
+            if session.status_override.as_deref() == Some("review") {
+                session.status_override = None;
+            }
             session.waiting_for_input_type = None;
         }
         Ok(())
@@ -3036,15 +3064,14 @@ pub async fn send_chat_message(
     } else {
         codex_thread_id
     };
-    let opencode_session_id =
-        if clear_target_resume && effective_backend == Backend::Opencode {
-            log::info!(
-                "[SendChat] OpenCode starting new session for provider handoff session={session_id}"
-            );
-            None
-        } else {
-            opencode_session_id
-        };
+    let opencode_session_id = if clear_target_resume && effective_backend == Backend::Opencode {
+        log::info!(
+            "[SendChat] OpenCode starting new session for provider handoff session={session_id}"
+        );
+        None
+    } else {
+        opencode_session_id
+    };
     let cursor_chat_id = if clear_target_resume && effective_backend == Backend::Cursor {
         None
     } else {
@@ -3110,6 +3137,59 @@ pub async fn send_chat_message(
     let input_file = run_log_writer.input_file_path()?;
     let output_file = run_log_writer.output_file_path()?;
     let run_id = run_log_writer.run_id().to_string();
+
+    // Snapshot the worktree before the agent can modify files so the user can
+    // review AI changes and restore individual files or the whole tree later.
+    // Failures are non-fatal — chat should still proceed.
+    let checkpoint_id = match crate::projects::checkpoints::create_checkpoint(
+        &app,
+        crate::projects::checkpoints::CreateCheckpointArgs {
+            worktree_id: worktree_id.clone(),
+            worktree_path: worktree_path.clone(),
+            session_id: session_id.clone(),
+            run_id: Some(run_id.clone()),
+            user_message_id: Some(user_message_id.clone()),
+            user_message: message.clone(),
+        },
+    ) {
+        Ok(cp) => {
+            let cp_id = cp.id.clone();
+            if let Err(e) = with_metadata_mut(
+                &app,
+                &session_id,
+                &worktree_id,
+                &session_name,
+                session_order,
+                |metadata| {
+                    if let Some(run) = metadata.find_run_mut(&run_id) {
+                        run.checkpoint_id = Some(cp_id.clone());
+                    }
+                    Ok(())
+                },
+            ) {
+                log::warn!("[Checkpoint] failed to attach id to run {run_id}: {e}");
+            }
+            // Emit so clients can show restore affordances immediately.
+            if let Err(e) = app.emit_all(
+                "checkpoint:created",
+                &serde_json::json!({
+                    "worktree_id": worktree_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "checkpoint_id": cp_id,
+                    "user_message_id": user_message_id,
+                }),
+            ) {
+                log::warn!("[Checkpoint] failed to emit checkpoint:created: {e}");
+            }
+            Some(cp_id)
+        }
+        Err(e) => {
+            log::warn!("[Checkpoint] create failed session={session_id} run={run_id}: {e}");
+            None
+        }
+    };
+    let _ = checkpoint_id;
 
     // Write input file with the effective backend prompt. Hidden handoff context
     // is intentionally not stored as the visible user message in metadata.
@@ -5331,6 +5411,9 @@ pub async fn send_chat_message(
             } else if has_blocking_tool {
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some(
                     if has_question_tool {
                         "question"
@@ -5343,6 +5426,9 @@ pub async fn send_chat_message(
                 // Codex/OpenCode plan-mode with content → waiting for plan approval
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some("plan".to_string());
             } else {
                 // Normal completion

@@ -49,6 +49,31 @@ export type SessionStatus =
   | 'cancelled'
   | 'crashed'
 
+/**
+ * User-settable status overrides. Automatic live states (running, waiting for
+ * input, permissions, …) still win while active; the override applies once the
+ * session is idle/terminal so users can pin review/completed/cancelled/idle.
+ */
+export type ManualSessionStatus = 'idle' | 'review' | 'completed' | 'cancelled'
+
+export const MANUAL_SESSION_STATUSES: readonly ManualSessionStatus[] = [
+  'idle',
+  'review',
+  'completed',
+  'cancelled',
+] as const
+
+export function isManualSessionStatus(
+  value: string | null | undefined
+): value is ManualSessionStatus {
+  return (
+    value === 'idle' ||
+    value === 'review' ||
+    value === 'completed' ||
+    value === 'cancelled'
+  )
+}
+
 /** Statuses that require user action before the session can continue. */
 export const ACTIONABLE_WAITING_STATUSES: readonly SessionStatus[] = [
   'waiting',
@@ -60,13 +85,32 @@ export const ACTIONABLE_WAITING_STATUSES: readonly SessionStatus[] = [
   'tool_approval',
 ] as const
 
+/** Live/automatic statuses that a manual override must not hide. */
+export const AUTOMATIC_PRIORITY_STATUSES: readonly SessionStatus[] = [
+  ...ACTIONABLE_WAITING_STATUSES,
+  'planning',
+  'vibing',
+  'yoloing',
+  'reviewing',
+  'scheduled',
+  'crashed',
+] as const
+
 export function isActionableWaitingStatus(status: SessionStatus): boolean {
   return (ACTIONABLE_WAITING_STATUSES as readonly string[]).includes(status)
+}
+
+export function isAutomaticPriorityStatus(status: SessionStatus): boolean {
+  return (AUTOMATIC_PRIORITY_STATUSES as readonly string[]).includes(status)
 }
 
 export interface SessionCardData {
   session: Session
   status: SessionStatus
+  /** Automatic status before any manual override is applied. */
+  automaticStatus: SessionStatus
+  /** Active manual override, if any. */
+  statusOverride: ManualSessionStatus | null
   executionMode: ExecutionMode
   isSending: boolean
   isWaiting: boolean
@@ -94,7 +138,9 @@ export interface SessionCardProps {
   onWorktreeBuildApprove?: () => void
   onWorktreeYoloApprove?: () => void
   onToggleLabel?: () => void
+  /** @deprecated Prefer onSetStatusOverride for full manual status control. */
   onToggleReview?: () => void
+  onSetStatusOverride?: (status: ManualSessionStatus | null) => void
   onReconnect?: () => void
   onRename?: (sessionId: string, newName: string) => void
   isRenaming?: boolean
@@ -215,6 +261,8 @@ export interface ChatStoreState {
   answeredQuestions: Record<string, Set<string>>
   waitingForInputSessionIds: Record<string, boolean>
   reviewingSessions: Record<string, boolean>
+  /** Manual status overrides (idle/review/completed/cancelled). */
+  sessionStatusOverrides: Record<string, ManualSessionStatus>
   pendingPermissionDenials: Record<string, PermissionDenial[]>
   pendingCodexPermissionRequests: Record<string, CodexPermissionRequest[]>
   pendingCodexCommandApprovalRequests: Record<
@@ -231,6 +279,37 @@ export interface ChatStoreState {
     CodexDynamicToolCallRequest[]
   >
   sessionLabels: Record<string, LabelData>
+}
+
+/**
+ * Resolve the effective manual override from store + session persistence.
+ * `status_override` is preferred; legacy `is_reviewing` maps to `'review'`.
+ */
+export function resolveSessionStatusOverride(
+  session: Session,
+  storeState: Pick<ChatStoreState, 'sessionStatusOverrides' | 'reviewingSessions'>
+): ManualSessionStatus | null {
+  const fromStore = storeState.sessionStatusOverrides[session.id]
+  if (isManualSessionStatus(fromStore)) return fromStore
+
+  if (isManualSessionStatus(session.status_override)) {
+    return session.status_override
+  }
+
+  // Legacy: is_reviewing / reviewingSessions without an explicit override
+  if (
+    storeState.reviewingSessions[session.id] ||
+    session.is_reviewing ||
+    session.review_results
+  ) {
+    // review_results alone still means "review ready" via automatic path;
+    // only treat reviewing flags as a manual override when no override field.
+    if (storeState.reviewingSessions[session.id] || session.is_reviewing) {
+      return 'review'
+    }
+  }
+
+  return null
 }
 
 export function sessionCanBeWaiting(session: Session): boolean {
@@ -340,6 +419,7 @@ export function computeSessionCardData(
     answeredQuestions,
     waitingForInputSessionIds,
     reviewingSessions,
+    sessionStatusOverrides,
     pendingPermissionDenials,
     pendingCodexPermissionRequests,
     pendingCodexCommandApprovalRequests,
@@ -599,12 +679,25 @@ export function computeSessionCardData(
     status = 'completed'
   }
 
+  const automaticStatus = status
+  const statusOverride = resolveSessionStatusOverride(session, {
+    sessionStatusOverrides: sessionStatusOverrides ?? {},
+    reviewingSessions,
+  })
+  // Manual override sits next to automatic status: live/actionable automatic
+  // states still win; otherwise the user-pinned override is displayed.
+  if (statusOverride && !isAutomaticPriorityStatus(automaticStatus)) {
+    status = statusOverride
+  }
+
   // Label from Zustand store (populated from persisted data on load)
   const label = sessionLabels[session.id] ?? null
 
   return {
     session,
     status,
+    automaticStatus,
+    statusOverride,
     executionMode: executionMode as ExecutionMode,
     isSending: sessionSending,
     isWaiting:
@@ -745,38 +838,44 @@ export function buildNativeClientSessionInput(
 export interface StatusGroup {
   key: 'inProgress' | 'waiting' | 'review' | 'idle'
   title: string
+  /** Representative status for group header icon/color. */
+  indicatorStatus: SessionStatus
   cards: SessionCardData[]
 }
 
 const STATUS_GROUP_ORDER: {
   key: StatusGroup['key']
   title: string
+  indicatorStatus: SessionStatus
   statuses: SessionStatus[]
 }[] = [
   {
     key: 'waiting',
     title: 'Waiting',
+    indicatorStatus: 'waiting',
     statuses: [...ACTIONABLE_WAITING_STATUSES],
   },
   {
     key: 'inProgress',
     title: 'In Progress',
+    indicatorStatus: 'vibing',
     statuses: ['planning', 'vibing', 'yoloing', 'reviewing', 'scheduled'],
   },
   {
     key: 'review',
     title: 'Review',
+    indicatorStatus: 'review',
     // Keep completed distinct from review-ready within the group via statusConfig labels
     statuses: ['review', 'completed', 'cancelled', 'crashed'],
   },
-  { key: 'idle', title: 'Idle', statuses: ['idle'] },
+  { key: 'idle', title: 'Idle', indicatorStatus: 'idle', statuses: ['idle'] },
 ]
 
 /** Group cards by status. Returns only non-empty groups.
  * - inProgress group: reversed so newest appears first
  * - review group: sorted by created_at (oldest first) */
 export function groupCardsByStatus(cards: SessionCardData[]): StatusGroup[] {
-  return STATUS_GROUP_ORDER.map(({ key, title, statuses }) => {
+  return STATUS_GROUP_ORDER.map(({ key, title, indicatorStatus, statuses }) => {
     let filteredCards = cards.filter(c => statuses.includes(c.status))
     // Reverse inProgress group so newest (most recently started) is first
     if (key === 'inProgress') {
@@ -788,7 +887,7 @@ export function groupCardsByStatus(cards: SessionCardData[]): StatusGroup[] {
         (a, b) => a.session.created_at - b.session.created_at
       )
     }
-    return { key, title, cards: filteredCards }
+    return { key, title, indicatorStatus, cards: filteredCards }
   }).filter(g => g.cards.length > 0)
 }
 

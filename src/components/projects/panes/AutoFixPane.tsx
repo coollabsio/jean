@@ -30,7 +30,9 @@ import { useProjects, useUpdateProjectSettings } from '@/services/projects'
 import type { ProjectAutoFixSettings } from '@/types/projects'
 import {
   codexDefaultModelOptions,
+  getClaudeModelOptionsForProvider,
   type CliBackend,
+  type CustomCliProfile,
   modelOptions,
 } from '@/types/preferences'
 import { BackendLabel } from '@/components/ui/backend-label'
@@ -45,9 +47,11 @@ import {
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useGitHubLabels } from '@/services/github'
 import type { GitHubLabel } from '@/types/github'
+import { usePreferences } from '@/services/preferences'
 
 export const MR_ROBOT_SETTINGS_BADGE = 'Beta'
 const BACKEND_DEFAULT_MODEL_VALUE = '__backend_default__'
+const ANTHROPIC_PROVIDER_VALUE = '__anthropic__'
 
 /** Structural defaults. Backend values are resolved via installed CLIs. */
 const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
@@ -59,9 +63,11 @@ const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
   excluded_labels: [],
   planning_backend: 'claude',
   planning_model: null,
+  planning_provider: null,
   auto_yolo_enabled: false,
   yolo_backend: 'claude',
   yolo_model: null,
+  yolo_provider: null,
   active_hours_enabled: false,
   active_hours_start: 20,
   active_hours_end: 8,
@@ -129,6 +135,25 @@ function parseLabelList(value: string): string[] {
   return labels
 }
 
+/** Normalize provider: empty/Anthropic sentinels become null; only keep for Claude. */
+export function normalizeAutoFixProvider(
+  backend: string,
+  provider: string | null | undefined
+): string | null {
+  if (backend !== 'claude') return null
+  const trimmed = provider?.trim()
+  if (
+    !trimmed ||
+    trimmed === ANTHROPIC_PROVIDER_VALUE ||
+    trimmed === '__default__' ||
+    trimmed === 'anthropic' ||
+    trimmed === 'default'
+  ) {
+    return null
+  }
+  return trimmed
+}
+
 function normalizeAutoFixSettings(
   settings: ProjectAutoFixSettings
 ): ProjectAutoFixSettings {
@@ -137,6 +162,14 @@ function normalizeAutoFixSettings(
     ...settings,
     planning_model: settings.planning_model?.trim() || null,
     yolo_model: settings.yolo_model?.trim() || null,
+    planning_provider: normalizeAutoFixProvider(
+      settings.planning_backend,
+      settings.planning_provider
+    ),
+    yolo_provider: normalizeAutoFixProvider(
+      settings.yolo_backend,
+      settings.yolo_provider
+    ),
     included_labels: parseLabelList((settings.included_labels ?? []).join(',')),
     excluded_labels: parseLabelList((settings.excluded_labels ?? []).join(',')),
   }
@@ -282,7 +315,11 @@ function GitHubLabelMultiSelect({
   )
 }
 
-function getModelOptions(backend: string) {
+function getModelOptions(
+  backend: string,
+  provider: string | null | undefined,
+  customCliProfiles: CustomCliProfile[]
+) {
   switch (backend) {
     case 'codex':
       return codexDefaultModelOptions
@@ -295,17 +332,65 @@ function getModelOptions(backend: string) {
     case 'commandcode':
       return COMMANDCODE_MODEL_OPTIONS
     case 'claude':
+      return getClaudeModelOptionsForProvider(provider, customCliProfiles)
     default:
       return modelOptions
   }
 }
 
-function getModelLabel(backend: string, model: string | null | undefined) {
+function getModelLabel(
+  backend: string,
+  model: string | null | undefined,
+  provider: string | null | undefined,
+  customCliProfiles: CustomCliProfile[]
+) {
   if (!model) return 'Backend default'
 
   return (
-    getModelOptions(backend).find(option => option.value === model)?.label ??
-    model
+    getModelOptions(backend, provider, customCliProfiles).find(
+      option => option.value === model
+    )?.label ?? model
+  )
+}
+
+function AutoFixProviderSelect({
+  label,
+  provider,
+  profiles,
+  disabled,
+  onChange,
+}: {
+  label: string
+  provider: string | null | undefined
+  profiles: CustomCliProfile[]
+  disabled?: boolean
+  onChange: (provider: string | null) => void
+}) {
+  if (profiles.length === 0) return null
+
+  return (
+    <Select
+      value={provider ?? ANTHROPIC_PROVIDER_VALUE}
+      onValueChange={value =>
+        onChange(value === ANTHROPIC_PROVIDER_VALUE ? null : value)
+      }
+      disabled={disabled}
+    >
+      <SelectTrigger
+        aria-label={`Choose ${label} provider`}
+        className="w-full"
+      >
+        <SelectValue placeholder="Anthropic" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ANTHROPIC_PROVIDER_VALUE}>Anthropic</SelectItem>
+        {profiles.map(profile => (
+          <SelectItem key={profile.name} value={profile.name}>
+            {profile.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -313,37 +398,57 @@ function AutoFixBackendModelPicker({
   label,
   backend,
   model,
+  provider,
+  customCliProfiles,
   disabled,
   onChange,
 }: {
   label: string
   backend: string
   model: string | null | undefined
+  provider: string | null | undefined
+  customCliProfiles: CustomCliProfile[]
   disabled?: boolean
-  onChange: (backend: string, model: string | null) => void
+  onChange: (
+    backend: string,
+    model: string | null,
+    provider: string | null
+  ) => void
 }) {
   const [open, setOpen] = useState(false)
   const { installedBackends } = useInstalledBackends()
   const selectedBackend = backend as CliBackend
+  const selectedProvider = normalizeAutoFixProvider(backend, provider)
   const selectedModel = model ?? BACKEND_DEFAULT_MODEL_VALUE
-  const modelLabel = getModelLabel(backend, model)
+  const modelLabel = getModelLabel(
+    backend,
+    model,
+    selectedProvider,
+    customCliProfiles
+  )
+  const providerLabel = selectedProvider ?? null
   const handleModelChange = useCallback(
     (nextModel: string) => {
       onChange(
         backend,
-        nextModel === BACKEND_DEFAULT_MODEL_VALUE ? null : nextModel
+        nextModel === BACKEND_DEFAULT_MODEL_VALUE ? null : nextModel,
+        selectedProvider
       )
     },
-    [backend, onChange]
+    [backend, onChange, selectedProvider]
   )
   const handleBackendModelChange = useCallback(
     (nextBackend: CliBackend, nextModel: string) => {
+      // Switching backends drops Claude-only custom providers.
+      const nextProvider =
+        nextBackend === 'claude' ? selectedProvider : null
       onChange(
         nextBackend,
-        nextModel === BACKEND_DEFAULT_MODEL_VALUE ? null : nextModel
+        nextModel === BACKEND_DEFAULT_MODEL_VALUE ? null : nextModel,
+        nextProvider
       )
     },
-    [onChange]
+    [onChange, selectedProvider]
   )
 
   return (
@@ -360,6 +465,11 @@ function AutoFixBackendModelPicker({
         >
           <span className="min-w-0 flex items-center gap-1.5">
             <BackendLabel backend={selectedBackend} className="shrink-0" />
+            {providerLabel && (
+              <span className="truncate text-muted-foreground">
+                · {providerLabel}
+              </span>
+            )}
             <span className="truncate">· {modelLabel}</span>
           </span>
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
@@ -373,9 +483,9 @@ function AutoFixBackendModelPicker({
           open={open}
           selectedBackend={selectedBackend}
           selectedModel={selectedModel}
-          selectedProvider={null}
+          selectedProvider={selectedProvider}
           installedBackends={installedBackends}
-          customCliProfiles={[]}
+          customCliProfiles={customCliProfiles}
           onModelChange={handleModelChange}
           onBackendModelChange={handleBackendModelChange}
           onRequestClose={() => setOpen(false)}
@@ -394,6 +504,11 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
   const project = projects.find(p => p.id === projectId)
   const updateSettings = useUpdateProjectSettings()
   const { installedBackends } = useInstalledBackends()
+  const { data: preferences } = usePreferences()
+  const customCliProfiles = useMemo(
+    () => preferences?.custom_cli_profiles ?? [],
+    [preferences?.custom_cli_profiles]
+  )
   const { data: githubLabels = [], isLoading: githubLabelsLoading } =
     useGitHubLabels(project?.path ?? null, {
       enabled: Boolean(project?.path && !project?.is_folder),
@@ -643,16 +758,60 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
               </div>
             </div>
 
+            {settings.planning_backend === 'claude' &&
+              customCliProfiles.length > 0 && (
+                <div className="mb-4">
+                  <Field
+                    label="Provider"
+                    description="Claude custom CLI profile (Settings → Providers)."
+                  >
+                    <AutoFixProviderSelect
+                      label="planning"
+                      provider={settings.planning_provider}
+                      profiles={customCliProfiles}
+                      disabled={updateSettings.isPending}
+                      onChange={planning_provider =>
+                        setSettings(current => {
+                          const nextModel =
+                            planning_provider &&
+                            current.planning_model &&
+                            !['opus', 'sonnet', 'haiku'].includes(
+                              current.planning_model
+                            )
+                              ? 'opus'
+                              : current.planning_model
+                          return {
+                            ...current,
+                            planning_provider,
+                            planning_model: nextModel,
+                          }
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
+              )}
+
             <Field label="Backend + model">
               <AutoFixBackendModelPicker
                 label="planning"
                 backend={settings.planning_backend}
                 model={settings.planning_model}
-                onChange={(planning_backend, planning_model) =>
+                provider={settings.planning_provider}
+                customCliProfiles={customCliProfiles}
+                onChange={(
+                  planning_backend,
+                  planning_model,
+                  planning_provider
+                ) =>
                   setSettings(current => ({
                     ...current,
                     planning_backend,
                     planning_model,
+                    planning_provider:
+                      planning_backend === 'claude'
+                        ? planning_provider
+                        : null,
                   }))
                 }
               />
@@ -678,17 +837,56 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
                 disabled={updateSettings.isPending}
               />
             </div>
+            {settings.yolo_backend === 'claude' &&
+              customCliProfiles.length > 0 && (
+                <div className="mb-4">
+                  <Field
+                    label="Provider"
+                    description="Claude custom CLI profile (Settings → Providers)."
+                  >
+                    <AutoFixProviderSelect
+                      label="yolo"
+                      provider={settings.yolo_provider}
+                      profiles={customCliProfiles}
+                      disabled={
+                        !settings.auto_yolo_enabled || updateSettings.isPending
+                      }
+                      onChange={yolo_provider =>
+                        setSettings(current => {
+                          const nextModel =
+                            yolo_provider &&
+                            current.yolo_model &&
+                            !['opus', 'sonnet', 'haiku'].includes(
+                              current.yolo_model
+                            )
+                              ? 'opus'
+                              : current.yolo_model
+                          return {
+                            ...current,
+                            yolo_provider,
+                            yolo_model: nextModel,
+                          }
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
+              )}
             <Field label="Backend + model">
               <AutoFixBackendModelPicker
                 label="yolo"
                 backend={settings.yolo_backend}
                 model={settings.yolo_model}
+                provider={settings.yolo_provider}
+                customCliProfiles={customCliProfiles}
                 disabled={!settings.auto_yolo_enabled}
-                onChange={(yolo_backend, yolo_model) =>
+                onChange={(yolo_backend, yolo_model, yolo_provider) =>
                   setSettings(current => ({
                     ...current,
                     yolo_backend,
                     yolo_model,
+                    yolo_provider:
+                      yolo_backend === 'claude' ? yolo_provider : null,
                   }))
                 }
               />

@@ -764,7 +764,12 @@ export function ChatWindow({
   const zustandProvider = useChatStore(state =>
     deferredSessionId ? state.selectedProviders[deferredSessionId] : undefined
   )
-  const sessionProvider = session?.selected_provider ?? zustandProvider
+  // Prefer in-memory toolbar selection when present so mid-session provider
+  // switches apply immediately (session query can lag until invalidate).
+  const sessionProvider =
+    zustandProvider !== undefined
+      ? zustandProvider
+      : session?.selected_provider
 
   // Installed backends (only these should be selectable)
   const { installedBackends } = useInstalledBackends()

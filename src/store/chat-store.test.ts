@@ -1620,6 +1620,38 @@ describe('ChatStore', () => {
     })
   })
 
+  describe('session status override', () => {
+    it('sets manual status overrides and keeps review flag in sync', () => {
+      const {
+        setSessionStatusOverride,
+        getSessionStatusOverride,
+        isSessionReviewing,
+      } = useChatStore.getState()
+
+      expect(getSessionStatusOverride('session-1')).toBeNull()
+
+      setSessionStatusOverride('session-1', 'review')
+      expect(getSessionStatusOverride('session-1')).toBe('review')
+      expect(isSessionReviewing('session-1')).toBe(true)
+
+      setSessionStatusOverride('session-1', 'completed')
+      expect(getSessionStatusOverride('session-1')).toBe('completed')
+      expect(isSessionReviewing('session-1')).toBe(false)
+
+      setSessionStatusOverride('session-1', null)
+      expect(getSessionStatusOverride('session-1')).toBeNull()
+    })
+
+    it('is a no-op when setting the same override again', () => {
+      const { setSessionStatusOverride } = useChatStore.getState()
+      setSessionStatusOverride('session-1', 'idle')
+      const first = useChatStore.getState().sessionStatusOverrides
+
+      setSessionStatusOverride('session-1', 'idle')
+      expect(useChatStore.getState().sessionStatusOverrides).toBe(first)
+    })
+  })
+
   describe('pending files', () => {
     it('deduplicates pending files by source scope and relative path', () => {
       const { addPendingFile } = useChatStore.getState()

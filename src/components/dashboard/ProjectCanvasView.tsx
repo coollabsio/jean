@@ -114,6 +114,7 @@ import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
 import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
 import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
+import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
 import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { PlanDialog } from '@/components/chat/PlanDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
@@ -936,7 +937,17 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     (mobileAdvisories?.filter(a => a.state === 'draft' || a.state === 'triage')
       .length ?? 0)
   const mobileWorkflowRunCount = mobileWorkflowRuns?.runs?.length ?? 0
-  const mobileFailedWorkflowCount = mobileWorkflowRuns?.failedCount ?? 0
+  const seenFailedWorkflowRunIds = useUIStore(
+    state => state.seenFailedWorkflowRunIds
+  )
+  const mobileFailedWorkflowCount = useMemo(
+    () =>
+      countUnreadFailedWorkflowRuns(
+        mobileWorkflowRuns?.runs ?? [],
+        seenFailedWorkflowRunIds
+      ),
+    [mobileWorkflowRuns?.runs, seenFailedWorkflowRunIds]
+  )
 
   // Get worktrees
   const { data: worktrees = [], isLoading: worktreesLoading } =

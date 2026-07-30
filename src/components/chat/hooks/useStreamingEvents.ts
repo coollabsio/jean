@@ -2198,7 +2198,7 @@ export default function useStreamingEvents({
       }
     )
 
-    // Handle session setting changes (backend, model, thinking level, execution mode)
+    // Handle session setting changes (backend, model, provider, thinking, execution mode)
     // Broadcast by other clients via broadcast_session_setting command
     const unlistenSettingChanged = listen<{
       session_id: string
@@ -2238,6 +2238,17 @@ export default function useStreamingEvents({
           break
         case 'executionMode':
           store.setExecutionMode(session_id, value as 'plan' | 'build' | 'yolo')
+          break
+        case 'provider':
+          store.setSelectedProvider(
+            session_id,
+            value === '' ||
+              value === '__anthropic__' ||
+              value === '__default__' ||
+              value === 'default'
+              ? null
+              : value
+          )
           break
         case 'waitingForInput':
           if (value === 'false') {

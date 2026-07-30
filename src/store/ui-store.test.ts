@@ -36,6 +36,22 @@ describe('UIStore', () => {
     expect(state.rightSidebarVisible).toBe(false)
     expect(state.commandPaletteOpen).toBe(false)
     expect(state.preferencesOpen).toBe(false)
+    expect(state.seenFailedWorkflowRunIds).toEqual([])
+  })
+
+  it('marks failed workflow runs as seen without no-op churn', () => {
+    useUIStore.setState({ seenFailedWorkflowRunIds: [] })
+    const { markFailedWorkflowRunsSeen } = useUIStore.getState()
+
+    markFailedWorkflowRunsSeen([10, 20])
+    expect(useUIStore.getState().seenFailedWorkflowRunIds).toEqual([10, 20])
+
+    const before = useUIStore.getState().seenFailedWorkflowRunIds
+    markFailedWorkflowRunsSeen([10, 20])
+    expect(useUIStore.getState().seenFailedWorkflowRunIds).toBe(before)
+
+    markFailedWorkflowRunsSeen([30])
+    expect(useUIStore.getState().seenFailedWorkflowRunIds).toEqual([30, 10, 20])
   })
 
   it('toggles left sidebar visibility', () => {
