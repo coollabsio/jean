@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
@@ -11,6 +12,9 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { PRItem } from './NewWorktreeItems'
+import { BulkInvestigateBar } from './BulkInvestigateBar'
+import { SelectAllControl } from './ItemSelectCheckbox'
+import { useMultiSelect } from './hooks/useMultiSelect'
 import type { GitHubPullRequest } from '@/types/github'
 
 export interface GitHubPRsTabProps {
@@ -28,14 +32,18 @@ export interface GitHubPRsTabProps {
   setSelectedIndex: (index: number) => void
   onSelectPR: (pr: GitHubPullRequest, background?: boolean) => void
   onInvestigatePR: (pr: GitHubPullRequest, background?: boolean) => void
+  onBulkInvestigatePRs?: (prs: GitHubPullRequest[]) => void | Promise<void>
   onStackPR: (pr: GitHubPullRequest, background?: boolean) => void
   onPreviewPR: (pr: GitHubPullRequest) => void
   creatingFromNumber: number | null
   stackingFromPR: number | null
+  isBulkInvestigating?: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
   onGhLogin: () => void
   isGhInstalled: boolean
 }
+
+const getPRKey = (pr: GitHubPullRequest) => pr.number
 
 export function GitHubPRsTab({
   searchQuery,
@@ -52,14 +60,24 @@ export function GitHubPRsTab({
   setSelectedIndex,
   onSelectPR,
   onInvestigatePR,
+  onBulkInvestigatePRs,
   onStackPR,
   onPreviewPR,
   creatingFromNumber,
   stackingFromPR,
+  isBulkInvestigating = false,
   searchInputRef,
   onGhLogin,
   isGhInstalled,
 }: GitHubPRsTabProps) {
+  const multi = useMultiSelect(prs, getPRKey)
+
+  const handleBulkInvestigate = useCallback(async () => {
+    if (!onBulkInvestigatePRs || multi.selectedItems.length < 1) return
+    await onBulkInvestigatePRs(multi.selectedItems)
+    multi.clear()
+  }, [onBulkInvestigatePRs, multi])
+
   const handleLabelClick = (labelName: string) => {
     const token = `label:"${labelName}"`
     if (!searchQuery.includes(token)) {
@@ -69,7 +87,6 @@ export function GitHubPRsTab({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Search and filters */}
       <div className="p-3 space-y-2 border-b border-border">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -106,7 +123,7 @@ export function GitHubPRsTab({
             <TooltipContent>Refresh pull requests</TooltipContent>
           </Tooltip>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Checkbox
             id="include-closed-prs"
             checked={includeClosed}
@@ -118,10 +135,18 @@ export function GitHubPRsTab({
           >
             Include closed/merged PRs
           </label>
+          {!isLoading && !error && prs.length > 0 && (
+            <SelectAllControl
+              id="select-all-prs"
+              allChecked={multi.allVisibleChecked}
+              someChecked={multi.someVisibleChecked}
+              onToggleAll={multi.toggleAllVisible}
+              ariaLabel="Select all visible pull requests"
+            />
+          )}
         </div>
       </div>
 
-      {/* PRs list */}
       <ScrollArea className="flex-1">
         {isLoading && (
           <div className="flex items-center justify-center py-8">
@@ -173,6 +198,8 @@ export function GitHubPRsTab({
                 isSelected={index === selectedIndex}
                 isCreating={creatingFromNumber === pr.number}
                 isStacking={stackingFromPR === pr.number}
+                isChecked={multi.isChecked(pr.number)}
+                onCheckedChange={checked => multi.toggle(pr.number, checked)}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={bg => onSelectPR(pr, bg)}
                 onInvestigate={bg => onInvestigatePR(pr, bg)}
@@ -192,6 +219,16 @@ export function GitHubPRsTab({
           </div>
         )}
       </ScrollArea>
+
+      {multi.showBulkBar && onBulkInvestigatePRs && (
+        <BulkInvestigateBar
+          count={multi.checkedCount}
+          isLoading={isBulkInvestigating}
+          noun={multi.checkedCount === 1 ? 'PR' : 'PRs'}
+          onClear={multi.clear}
+          onInvestigate={() => void handleBulkInvestigate()}
+        />
+      )}
     </div>
   )
 }

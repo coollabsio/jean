@@ -13,8 +13,6 @@ import {
   Archive,
   ChevronDown,
   Copy,
-  Eye,
-  EyeOff,
   GitBranchPlus,
   GitPullRequestArrow,
   Pencil,
@@ -93,9 +91,12 @@ import {
   buildNativeClientSessionInput,
   computeSessionCardData,
   getResumeCommand,
+  isActionableWaitingStatus,
   statusConfig,
+  type ManualSessionStatus,
   type SessionCardData,
 } from './session-card-utils'
+import { SessionStatusMenu } from './SessionStatusMenu'
 import {
   buildReorderedSessionIdsWithinStatus,
   resolveModalSessionId,
@@ -143,7 +144,7 @@ function useOffScreenWaiting(
     if (!viewport) return
 
     const waitingIds = sortedCards
-      .filter(c => c.status === 'waiting')
+      .filter(c => isActionableWaitingStatus(c.status))
       .map(c => c.session.id)
 
     if (waitingIds.length === 0) {
@@ -778,7 +779,7 @@ export function SessionChatModal({
       if (!viewport) return
       const { scrollLeft, clientWidth } = viewport
       for (const card of sortedCards) {
-        if (card.status !== 'waiting') continue
+        if (!isActionableWaitingStatus(card.status)) continue
         const el = viewport.querySelector(
           `[data-session-id="${card.session.id}"]`
         ) as HTMLElement | null
@@ -1337,13 +1338,15 @@ export function SessionChatModal({
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                               draggedSessionId === session.id && 'opacity-60',
-                              status === 'waiting' &&
+                              isActionableWaitingStatus(status) &&
                                 'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
                             )}
                           >
                             <StatusIndicator
                               status={config.indicatorStatus}
                               variant={config.indicatorVariant}
+                              shape={config.indicatorShape}
+                              label={config.label}
                               className="h-1.5 w-1.5"
                             />
                             {idx < 9 && (
@@ -1413,35 +1416,17 @@ export function SessionChatModal({
                             <Tag className="mr-2 h-4 w-4" />
                             {sessionLabel ? 'Remove Label' : 'Add Label'}
                           </ContextMenuItem>
-                          <ContextMenuItem
-                            // "Mark as Idle" only clears the manual reviewing
-                            // flag. When review is driven by AI review_results,
-                            // clearing the flag leaves the session in review —
-                            // no effect — so disable it there.
-                            disabled={
-                              status === 'review' && !!session.review_results
-                            }
-                            onSelect={() => {
-                              const { reviewingSessions, setSessionReviewing } =
-                                useChatStore.getState()
-                              const isReviewing =
-                                reviewingSessions[session.id] ||
-                                !!session.review_results
-                              setSessionReviewing(session.id, !isReviewing)
+                          <SessionStatusMenu
+                            statusOverride={card.statusOverride}
+                            automaticStatus={card.automaticStatus}
+                            onSetStatusOverride={(
+                              next: ManualSessionStatus | null
+                            ) => {
+                              useChatStore
+                                .getState()
+                                .setSessionStatusOverride(session.id, next)
                             }}
-                          >
-                            {status === 'review' ? (
-                              <>
-                                <EyeOff className="mr-2 h-4 w-4" />
-                                Mark as Idle
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="mr-2 h-4 w-4" />
-                                Mark for Review
-                              </>
-                            )}
-                          </ContextMenuItem>
+                          />
                           {resumeCommand && (
                             <>
                               <ContextMenuItem
@@ -1490,6 +1475,18 @@ export function SessionChatModal({
                           >
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => {
+                              void copyToClipboard(session.id)
+                                .then(() => toast.success('Session ID copied'))
+                                .catch(() =>
+                                  toast.error('Failed to copy session ID')
+                                )
+                            }}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy Session ID
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem

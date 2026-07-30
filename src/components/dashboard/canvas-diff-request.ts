@@ -9,6 +9,7 @@ export function getCanvasDiffRequest(
   return {
     type,
     worktreePath: worktree.path,
+    worktreeId: worktree.id,
     baseBranch: worktree.base_branch ?? defaultBranch,
     baseRemote: worktree.base_remote,
   }

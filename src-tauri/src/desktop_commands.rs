@@ -20,21 +20,9 @@ fn spawn(command: &str, args: &[String]) -> Result<(), String> {
 }
 
 fn open_url(url: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        spawn("open", &[url])
-    }
-    #[cfg(target_os = "windows")]
-    {
-        spawn(
-            "cmd",
-            &["/c".to_string(), "start".to_string(), String::new(), url],
-        )
-    }
-    #[cfg(target_os = "linux")]
-    {
-        spawn("xdg-open", &[url])
-    }
+    // Shared helper applies CREATE_NO_WINDOW on Windows so the cmd.exe
+    // intermediary for `start` never flashes a console (issue #588).
+    jean_core::open_url_in_browser(&url)
 }
 
 #[tauri::command]

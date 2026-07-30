@@ -1790,6 +1790,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let lines = vec![

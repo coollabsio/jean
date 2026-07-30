@@ -5,6 +5,15 @@ GTK, or display-server dependency. `jean-core` owns shared state, commands,
 events, persistence, projects, chat backends, terminals, background work, and
 the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 
+## Agent browser (AI + manual login)
+
+jean-server has no embedded WebView. For an AI-controlled browser where you log
+in manually once and agents reuse cookies, use a persistent Chromium profile
+driven by Playwright MCP (or similar). See:
+
+- `docs/developer/server-agent-browser.md` — architecture and roadmap
+- jean-docs: **Agent Browser on Jean Server** workflow
+
 ## Start locally
 
 When running a debug binary directly, build the browser bundle first. Jean
@@ -216,9 +225,16 @@ browser terminals can find tools installed by shell setup scripts (for example
 - The server Docker image is published by the Server Release workflow as
   `ghcr.io/<owner>/<repo>-server:<tag>`.
 - The image launches `jean-server` directly and contains no GTK/WebKit/Xvfb packages.
+- Runtime packages include `ca-certificates`, `curl`, `git`, `openssh-client`, and
+  the official **GitHub CLI (`gh`)** so onboarding and GitHub integration can run
+  without a separate install step. Prefer the **System PATH** CLI source in
+  onboarding/Settings when using the container image.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
 - Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
 - Put TLS/auth in front of the container for internet exposure.
+- For Tailscale access from a browser, prefer `tailscale serve` (HTTPS) in front
+  of `127.0.0.1` rather than plain `http://100.x.y.z` — browsers block the
+  clipboard API and other secure-context features on non-localhost HTTP.
 
 Example command:
 

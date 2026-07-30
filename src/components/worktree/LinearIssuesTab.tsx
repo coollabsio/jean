@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
 import { isLinearAuthError } from '@/services/linear'
 import { LinearAuthError } from '@/components/shared/LinearAuthError'
@@ -10,6 +11,9 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { LinearIssueItem } from './LinearIssueItem'
+import { BulkInvestigateBar } from './BulkInvestigateBar'
+import { SelectAllControl } from './ItemSelectCheckbox'
+import { useMultiSelect } from './hooks/useMultiSelect'
 import type { LinearIssue } from '@/types/linear'
 
 export interface LinearIssuesTabProps {
@@ -19,16 +23,20 @@ export interface LinearIssuesTabProps {
   isLoading: boolean
   isRefetching: boolean
   isSearching: boolean
-  error: Error | null
+  error: unknown
   onRefresh: () => void
   selectedIndex: number
   setSelectedIndex: (index: number) => void
   onSelectIssue: (issue: LinearIssue, background?: boolean) => void
   onInvestigateIssue: (issue: LinearIssue, background?: boolean) => void
+  onBulkInvestigateIssues?: (issues: LinearIssue[]) => void | Promise<void>
   onPreviewIssue?: (issue: LinearIssue) => void
   creatingFromId: string | null
+  isBulkInvestigating?: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
 }
+
+const getLinearKey = (issue: LinearIssue) => issue.id
 
 export function LinearIssuesTab({
   searchQuery,
@@ -43,13 +51,24 @@ export function LinearIssuesTab({
   setSelectedIndex,
   onSelectIssue,
   onInvestigateIssue,
+  onBulkInvestigateIssues,
   onPreviewIssue,
   creatingFromId,
+  isBulkInvestigating = false,
   searchInputRef,
 }: LinearIssuesTabProps) {
+  const multi = useMultiSelect(issues, getLinearKey)
+  const errorMessage =
+    error instanceof Error ? error.message : String(error ?? '')
+
+  const handleBulkInvestigate = useCallback(async () => {
+    if (!onBulkInvestigateIssues || multi.selectedItems.length < 1) return
+    await onBulkInvestigateIssues(multi.selectedItems)
+    multi.clear()
+  }, [onBulkInvestigateIssues, multi])
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Search */}
       <div className="p-3 space-y-2 border-b border-border">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -86,9 +105,20 @@ export function LinearIssuesTab({
             <TooltipContent>Refresh issues</TooltipContent>
           </Tooltip>
         </div>
+        {!isLoading && error == null && issues.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <SelectAllControl
+              id="select-all-linear"
+              allChecked={multi.allVisibleChecked}
+              someChecked={multi.someVisibleChecked}
+              onToggleAll={multi.toggleAllVisible}
+              ariaLabel="Select all visible Linear issues"
+              showSeparator={false}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Issues list */}
       <ScrollArea className="flex-1">
         {isLoading && (
           <div className="flex items-center justify-center py-8">
@@ -99,19 +129,19 @@ export function LinearIssuesTab({
           </div>
         )}
 
-        {error &&
+        {error != null &&
           (isLinearAuthError(error) ? (
             <LinearAuthError />
           ) : (
             <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
               <AlertCircle className="h-5 w-5 text-destructive mb-2" />
               <span className="text-sm text-muted-foreground">
-                {error.message || 'Failed to load issues'}
+                {errorMessage || 'Failed to load issues'}
               </span>
             </div>
           ))}
 
-        {!isLoading && !error && issues.length === 0 && !isSearching && (
+        {!isLoading && error == null && issues.length === 0 && !isSearching && (
           <div className="flex items-center justify-center py-8">
             <span className="text-sm text-muted-foreground">
               {searchQuery
@@ -121,7 +151,7 @@ export function LinearIssuesTab({
           </div>
         )}
 
-        {!isLoading && !error && issues.length === 0 && isSearching && (
+        {!isLoading && error == null && issues.length === 0 && isSearching && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             <span className="ml-2 text-sm text-muted-foreground">
@@ -130,7 +160,7 @@ export function LinearIssuesTab({
           </div>
         )}
 
-        {!isLoading && !error && issues.length > 0 && (
+        {!isLoading && error == null && issues.length > 0 && (
           <div className="py-1">
             {issues.map((issue, index) => (
               <LinearIssueItem
@@ -139,6 +169,8 @@ export function LinearIssuesTab({
                 index={index}
                 isSelected={index === selectedIndex}
                 isCreating={creatingFromId === issue.id}
+                isChecked={multi.isChecked(issue.id)}
+                onCheckedChange={checked => multi.toggle(issue.id, checked)}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={bg => onSelectIssue(issue, bg)}
                 onInvestigate={bg => onInvestigateIssue(issue, bg)}
@@ -158,6 +190,16 @@ export function LinearIssuesTab({
           </div>
         )}
       </ScrollArea>
+
+      {multi.showBulkBar && onBulkInvestigateIssues && (
+        <BulkInvestigateBar
+          count={multi.checkedCount}
+          isLoading={isBulkInvestigating}
+          noun={multi.checkedCount === 1 ? 'issue' : 'issues'}
+          onClear={multi.clear}
+          onInvestigate={() => void handleBulkInvestigate()}
+        />
+      )}
     </div>
   )
 }

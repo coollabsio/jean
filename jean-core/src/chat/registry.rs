@@ -816,9 +816,7 @@ pub fn cancel_process(
             .remove(session_id)
             .is_some();
         if removed {
-            log::info!(
-                "[Registry] freed OpenCode cancel flag after cancel session={session_id}"
-            );
+            log::info!("[Registry] freed OpenCode cancel flag after cancel session={session_id}");
         }
 
         // Mark run as cancelled immediately (before HTTP call returns)

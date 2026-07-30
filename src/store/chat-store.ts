@@ -36,7 +36,9 @@ export interface ScheduledWakeupState extends ScheduledWakeup {
 import type { StoredReviewResults } from '@/types/projects'
 import { invoke } from '@/lib/transport'
 import type { ClaudeModel, CodexModel, CliBackend } from '@/types/preferences'
+import type { ManualSessionStatus } from '@/components/chat/session-card-utils'
 export type { ClaudeModel, CodexModel }
+export type { ManualSessionStatus }
 
 /** Default model to use when none is selected (fallback only - preferences take priority) */
 export const DEFAULT_MODEL: ClaudeModel = 'claude-opus-4-8[1m]'
@@ -336,6 +338,14 @@ interface ChatUIState {
   // Actions - Reviewing status management (persisted)
   setSessionReviewing: (sessionId: string, reviewing: boolean) => void
   isSessionReviewing: (sessionId: string) => boolean
+
+  // Manual status overrides (idle/review/completed/cancelled), persisted
+  sessionStatusOverrides: Record<string, ManualSessionStatus>
+  setSessionStatusOverride: (
+    sessionId: string,
+    status: ManualSessionStatus | null
+  ) => void
+  getSessionStatusOverride: (sessionId: string) => ManualSessionStatus | null
 
   // Actions - Session label management (persisted)
   setSessionLabel: (sessionId: string, label: LabelData | null) => void
@@ -760,6 +770,7 @@ export const useChatStore = create<ChatUIState>()(
       lastCompaction: {},
       compactingSessions: {},
       reviewingSessions: {},
+      sessionStatusOverrides: {},
       planFilePaths: {},
       pendingPlanMessageIds: {},
       savingContext: {},
@@ -988,37 +999,84 @@ export const useChatStore = create<ChatUIState>()(
           'removeScheduledWakeup'
         ),
 
-      // Reviewing status management (persisted)
-      setSessionReviewing: (sessionId, reviewing) =>
+      // Reviewing status management (persisted) — thin wrapper over status override
+      setSessionReviewing: (sessionId, reviewing) => {
+        get().setSessionStatusOverride(sessionId, reviewing ? 'review' : null)
+      },
+
+      isSessionReviewing: sessionId =>
+        get().sessionStatusOverrides[sessionId] === 'review' ||
+        (get().reviewingSessions[sessionId] ?? false),
+
+      setSessionStatusOverride: (sessionId, status) =>
         set(
           state => {
-            if (reviewing) {
-              if (state.reviewingSessions[sessionId]) return state
-              // Clear waiting state so review status takes visual priority
-              const { [sessionId]: _w, ...waitingForInputSessionIds } =
-                state.waitingForInputSessionIds
-              const { [sessionId]: _p, ...pendingPlanMessageIds } =
-                state.pendingPlanMessageIds
-              return {
-                reviewingSessions: {
-                  ...state.reviewingSessions,
-                  [sessionId]: true,
-                },
-                waitingForInputSessionIds,
-                pendingPlanMessageIds,
+            const current = state.sessionStatusOverrides[sessionId] ?? null
+            if (current === status) {
+              // Still ensure reviewingSessions stays in sync
+              if (status === 'review' && !state.reviewingSessions[sessionId]) {
+                return {
+                  reviewingSessions: {
+                    ...state.reviewingSessions,
+                    [sessionId]: true,
+                  },
+                }
               }
+              if (
+                status !== 'review' &&
+                sessionId in state.reviewingSessions
+              ) {
+                const { [sessionId]: _, ...rest } = state.reviewingSessions
+                return { reviewingSessions: rest }
+              }
+              return state
+            }
+
+            const nextOverrides = { ...state.sessionStatusOverrides }
+            let reviewingSessions = state.reviewingSessions
+            let waitingForInputSessionIds = state.waitingForInputSessionIds
+            let pendingPlanMessageIds = state.pendingPlanMessageIds
+
+            if (status === null) {
+              delete nextOverrides[sessionId]
             } else {
-              if (!(sessionId in state.reviewingSessions)) return state
-              const { [sessionId]: _, ...rest } = state.reviewingSessions
-              return { reviewingSessions: rest }
+              nextOverrides[sessionId] = status
+            }
+
+            if (status === 'review') {
+              if (!reviewingSessions[sessionId]) {
+                reviewingSessions = {
+                  ...reviewingSessions,
+                  [sessionId]: true,
+                }
+              }
+              // Clear waiting so review takes visual priority (legacy behavior)
+              if (sessionId in waitingForInputSessionIds) {
+                const { [sessionId]: _w, ...restW } = waitingForInputSessionIds
+                waitingForInputSessionIds = restW
+              }
+              if (sessionId in pendingPlanMessageIds) {
+                const { [sessionId]: _p, ...restP } = pendingPlanMessageIds
+                pendingPlanMessageIds = restP
+              }
+            } else if (sessionId in reviewingSessions) {
+              const { [sessionId]: _, ...rest } = reviewingSessions
+              reviewingSessions = rest
+            }
+
+            return {
+              sessionStatusOverrides: nextOverrides,
+              reviewingSessions,
+              waitingForInputSessionIds,
+              pendingPlanMessageIds,
             }
           },
           undefined,
-          'setSessionReviewing'
+          'setSessionStatusOverride'
         ),
 
-      isSessionReviewing: sessionId =>
-        get().reviewingSessions[sessionId] ?? false,
+      getSessionStatusOverride: sessionId =>
+        get().sessionStatusOverrides[sessionId] ?? null,
 
       // Session label management (persisted)
       setSessionLabel: (sessionId, label) =>
@@ -1401,8 +1459,9 @@ export const useChatStore = create<ChatUIState>()(
               tc => tc.id === toolCall.id
             )
             if (existingIndex !== -1) {
-              // Already exists — update input if the new one has richer or newer data
-              // (e.g., enriched question data or streaming Codex plan deltas)
+              // Already exists — update name/input if the new one has richer or newer data
+              // (e.g., enriched question data, streaming Codex plan deltas, or a real
+              // tool_use arriving after an early tool_result stub — see updateToolCallOutput).
               const old = existing[existingIndex]
               if (!old) return state
               const oldEmpty =
@@ -1416,11 +1475,35 @@ export const useChatStore = create<ChatUIState>()(
               const inputChanged =
                 JSON.stringify(old.input ?? null) !==
                 JSON.stringify(toolCall.input ?? null)
-              if ((oldEmpty && newHasData) || (newHasData && inputChanged)) {
+              const nameChanged =
+                Boolean(toolCall.name) &&
+                toolCall.name !== old.name &&
+                // Prefer real tool names over the generic stub created for early results
+                (old.name === 'Tool' || old.name === 'Unknown' || !old.name)
+              if (
+                (oldEmpty && newHasData) ||
+                (newHasData && inputChanged) ||
+                nameChanged
+              ) {
+                const output =
+                  nameChanged && toolCall.name === 'Read'
+                    ? ''
+                    : nameChanged && toolCall.name === 'Monitor'
+                      ? undefined
+                      : old.output
                 const updated = [...existing]
                 updated[existingIndex] = {
                   ...old,
-                  input: toolCall.input,
+                  // Reconcile early results once the real tool name is known.
+                  // Read contents can be large, while Monitor output duplicates
+                  // its streamed events. Other tools (including Bash and
+                  // questions) keep the result until normal handling replaces it.
+                  name: nameChanged ? toolCall.name : old.name,
+                  input:
+                    (oldEmpty && newHasData) || (newHasData && inputChanged)
+                      ? toolCall.input
+                      : old.input,
+                  output,
                 }
                 return {
                   activeToolCalls: {
@@ -1447,14 +1530,33 @@ export const useChatStore = create<ChatUIState>()(
           state => {
             const toolCalls = state.activeToolCalls[sessionId] ?? []
             const existing = toolCalls.find(tc => tc.id === toolUseId)
-            if (!existing || existing.output === output) return state
-            const updatedToolCalls = toolCalls.map(tc =>
-              tc.id === toolUseId ? { ...tc, output } : tc
-            )
+            if (existing) {
+              if (existing.output === output) return state
+              const updatedToolCalls = toolCalls.map(tc =>
+                tc.id === toolUseId ? { ...tc, output } : tc
+              )
+              return {
+                activeToolCalls: {
+                  ...state.activeToolCalls,
+                  [sessionId]: updatedToolCalls,
+                },
+              }
+            }
+            // tool_result can arrive before tool_use (out-of-order events / race).
+            // Keep the output on a stub so chat:done and the optimistic message
+            // still surface bash/shell stdout instead of only the command.
             return {
               activeToolCalls: {
                 ...state.activeToolCalls,
-                [sessionId]: updatedToolCalls,
+                [sessionId]: [
+                  ...toolCalls,
+                  {
+                    id: toolUseId,
+                    name: 'Tool',
+                    input: {},
+                    output,
+                  },
+                ],
               },
             }
           },
@@ -1823,6 +1925,22 @@ export const useChatStore = create<ChatUIState>()(
             sessionId,
             blocks.slice(matchingIndex + 1)
           )
+          return true
+        }
+
+        // Grok (and similar ACP backends) re-emit tool_use/tool_block on every
+        // tool_call_update for the same id. After the first emission advances
+        // past that tool in the snapshot cursor, a second emission used to
+        // clear remaining replay blocks — which then re-applied every later
+        // text/tool from the WS buffer and duplicated the in-flight response
+        // on web reconnect. If the tool is already in the hydrated timeline,
+        // treat the re-emit as a no-op and keep deduping the rest.
+        const liveBlocks = get().streamingContentBlocks[sessionId] ?? []
+        const alreadyHydrated = liveBlocks.some(
+          block =>
+            block.type === 'tool_use' && block.tool_call_id === toolCallId
+        )
+        if (alreadyHydrated) {
           return true
         }
 
@@ -3061,6 +3179,10 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _reviewing, ...reviewingSessions } =
               state.reviewingSessions
+            const nextStatusOverrides = { ...state.sessionStatusOverrides }
+            if (nextStatusOverrides[sessionId] === 'review') {
+              delete nextStatusOverrides[sessionId]
+            }
             const { [sessionId]: _sp, ...streamingPlanApprovals } =
               state.streamingPlanApprovals
             const { [sessionId]: _em, ...executingModes } = state.executingModes
@@ -3081,6 +3203,7 @@ export const useChatStore = create<ChatUIState>()(
                   ? { ...state.completedDurations, [sessionId]: elapsed }
                   : state.completedDurations,
               reviewingSessions,
+              sessionStatusOverrides: nextStatusOverrides,
             }
           },
           undefined,
@@ -3153,6 +3276,10 @@ export const useChatStore = create<ChatUIState>()(
               reviewingSessions: {
                 ...state.reviewingSessions,
                 [sessionId]: true,
+              },
+              sessionStatusOverrides: {
+                ...state.sessionStatusOverrides,
+                [sessionId]: 'review',
               },
             }
           },
@@ -3240,6 +3367,10 @@ export const useChatStore = create<ChatUIState>()(
                 ...state.reviewingSessions,
                 [sessionId]: true,
               },
+              sessionStatusOverrides: {
+                ...state.sessionStatusOverrides,
+                [sessionId]: 'review',
+              },
             }
           },
           undefined,
@@ -3268,6 +3399,8 @@ export const useChatStore = create<ChatUIState>()(
               state.deniedMessageContext
             const { [sessionId]: _reviewing, ...restReviewing } =
               state.reviewingSessions
+            const { [sessionId]: _statusOverride, ...restStatusOverrides } =
+              state.sessionStatusOverrides
             const { [sessionId]: _waiting, ...restWaiting } =
               state.waitingForInputSessionIds
             const { [sessionId]: _answered, ...restAnswered } =
@@ -3296,6 +3429,7 @@ export const useChatStore = create<ChatUIState>()(
               pendingCodexDynamicToolCallRequests: restDynamicReqs,
               deniedMessageContext: restDenied,
               reviewingSessions: restReviewing,
+              sessionStatusOverrides: restStatusOverrides,
               waitingForInputSessionIds: restWaiting,
               answeredQuestions: restAnswered,
               submittedAnswers: restSubmitted,

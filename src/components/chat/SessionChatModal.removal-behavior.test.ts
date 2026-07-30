@@ -101,9 +101,8 @@ describe('SessionChatModal removal behavior', () => {
   it('keeps a yellow background on waiting session tabs', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
 
-    expect(source).toContain(
-      "status === 'waiting' &&\n                                'bg-yellow-500/10"
-    )
+    expect(source).toContain('isActionableWaitingStatus(status)')
+    expect(source).toContain("'bg-yellow-500/10")
   })
 
   it('offers to open resumable chat sessions in a separate native client session', () => {

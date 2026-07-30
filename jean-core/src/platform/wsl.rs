@@ -102,6 +102,18 @@ pub fn win_to_wsl_path(path: &str) -> String {
     // Normalize backslashes
     let normalized = path.replace('\\', "/");
 
+    // Strip Windows extended-length / verbatim prefixes. Path canonicalization
+    // (e.g. std::fs) can hand back `\\?\UNC\wsl.localhost\..` or `\\?\C:\..`,
+    // which would otherwise fall through untouched and produce an unresolved
+    // `--cd` (chdir fails -> pid 0 -> silent hang).
+    let normalized = if let Some(rest) = normalized.strip_prefix("//?/UNC/") {
+        format!("//{rest}")
+    } else if let Some(rest) = normalized.strip_prefix("//?/") {
+        rest.to_string()
+    } else {
+        normalized
+    };
+
     // Handle \\wsl.localhost\Distro\... or \\wsl$\Distro\...
     for prefix in &["//wsl.localhost/", "//wsl$/"] {
         if let Some(rest) = normalized.strip_prefix(prefix) {
@@ -739,6 +751,32 @@ mod tests {
     #[test]
     fn test_win_to_wsl_path_unc_wsl_dollar() {
         assert_eq!(win_to_wsl_path(r"\\wsl$\Ubuntu\home\user"), "/home/user");
+    }
+
+    #[test]
+    fn test_win_to_wsl_path_unc_localhost_dotted_distro() {
+        // Distro names with dots/dashes (e.g. Ubuntu-22.04) must still be skipped.
+        assert_eq!(
+            win_to_wsl_path(r"\\wsl.localhost\Ubuntu-22.04\home\firice\repos\idnexus"),
+            "/home/firice/repos/idnexus"
+        );
+    }
+
+    #[test]
+    fn test_win_to_wsl_path_verbatim_unc() {
+        // Extended-length UNC form from path canonicalization.
+        assert_eq!(
+            win_to_wsl_path(r"\\?\UNC\wsl.localhost\Ubuntu-22.04\home\firice\repos\idnexus"),
+            "/home/firice/repos/idnexus"
+        );
+    }
+
+    #[test]
+    fn test_win_to_wsl_path_verbatim_drive() {
+        assert_eq!(
+            win_to_wsl_path(r"\\?\C:\Users\foo\project"),
+            "/mnt/c/Users/foo/project"
+        );
     }
 
     #[test]

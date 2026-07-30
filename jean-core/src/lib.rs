@@ -68,6 +68,7 @@ pub use version::{app_version, set_app_version};
 // launch logic stays shared and complete: binary mapping, -g goto args,
 // macOS app fallbacks, Windows .cmd wrappers).
 pub use chat::open_file_in_default_app;
+pub use platform::open_url_in_browser;
 pub use projects::open_worktree_in_editor;
 
 // Validation functions
@@ -397,6 +398,8 @@ pub struct AppPreferences {
     pub expand_tool_calls_by_default: bool, // Expand all tool call collapsibles by default (default: false)
     #[serde(default)]
     pub window_vibrancy: bool, // macOS window vibrancy effect (high GPU cost, default false)
+    #[serde(default = "default_finished_session_animation_enabled")]
+    pub finished_session_animation_enabled: bool, // Soft glow on finished-sessions badge (default true)
     #[serde(default = "default_terminal_background")]
     pub terminal_background: String, // "auto" | "light" | "dark" | "custom"
     #[serde(default)]
@@ -409,6 +412,10 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
+}
+
+fn default_finished_session_animation_enabled() -> bool {
+    true
 }
 
 fn default_jean_mcp_enabled() -> bool {
@@ -698,10 +705,7 @@ fn maybe_auto_select_system_coderabbit(
 /// Runtime `resolve_cli_binary` also falls back to PATH when Jean-managed is
 /// missing; this persists the source so the UI does not show a misleading
 /// "Jean" selection.
-fn maybe_auto_select_system_cli_sources(
-    app: &AppHandle,
-    preferences: &mut AppPreferences,
-) -> bool {
+fn maybe_auto_select_system_cli_sources(app: &AppHandle, preferences: &mut AppPreferences) -> bool {
     let mut changed = false;
 
     if preferences.claude_cli_source == "jean" && claude_cli::should_auto_use_system(app) {
@@ -867,7 +871,8 @@ mod tests {
 
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
-        assert!(prompt.contains("when the current execution mode is plan: do not write plan files or code"));
+        assert!(prompt
+            .contains("when the current execution mode is plan: do not write plan files or code"));
         assert!(prompt.contains("<proposed_plan>"));
         assert!(prompt.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(prompt.contains("Claude AskUserQuestion"));
@@ -991,11 +996,8 @@ mod tests {
 
     #[test]
     fn parse_cli_args_reads_allow_native_open_from_env_and_flag() {
-        let from_env = parse_cli_args_from(
-            ["jean", "--headless"],
-            [("JEAN_ALLOW_NATIVE_OPEN", "1")],
-        )
-        .unwrap();
+        let from_env =
+            parse_cli_args_from(["jean", "--headless"], [("JEAN_ALLOW_NATIVE_OPEN", "1")]).unwrap();
         assert!(from_env.allow_native_open);
 
         let from_flag = parse_cli_args_from(
@@ -1005,11 +1007,8 @@ mod tests {
         .unwrap();
         assert!(from_flag.allow_native_open);
 
-        let off = parse_cli_args_from(
-            ["jean", "--headless"],
-            std::iter::empty::<(&str, &str)>(),
-        )
-        .unwrap();
+        let off = parse_cli_args_from(["jean", "--headless"], std::iter::empty::<(&str, &str)>())
+            .unwrap();
         assert!(!off.allow_native_open);
     }
 
@@ -1155,6 +1154,32 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!prefs.has_seen_jean_mcp_intro);
+    }
+
+    #[test]
+    fn app_preferences_default_finished_session_animation_enabled_for_new_and_missing_prefs() {
+        assert!(AppPreferences::default().finished_session_animation_enabled);
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("finished_session_animation_enabled");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(prefs.finished_session_animation_enabled);
+    }
+
+    #[test]
+    fn app_preferences_preserves_explicit_finished_session_animation_disabled() {
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json.as_object_mut().unwrap().insert(
+            "finished_session_animation_enabled".to_string(),
+            json!(false),
+        );
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(!prefs.finished_session_animation_enabled);
     }
 
     #[test]
@@ -2121,12 +2146,12 @@ fn default_global_system_prompt() -> String {
 pub(crate) fn default_provider_switch_handoff_prompt() -> String {
     r#"You are continuing a Jean chat session after the user switched AI backends.
 
-Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches.
+Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches. Treat the history below as the conversation you already had with the user — do not claim you lack prior context.
 
 Previous backend: {previous_backend}
 Current backend: {current_backend}
 
-Use the Jean-local history below to reconstruct context before answering the user's latest message. Do not mention this hidden handoff unless it is directly relevant.
+Read the Jean-local history carefully, reconstruct the task state, and answer the user's latest message with full continuity. Do not mention this hidden handoff unless it is directly relevant.
 
 <jean_local_history>
 {history}
@@ -2558,23 +2583,26 @@ fn migrate_automation_magic_prompt_preferences(
 
     // GitHub bugs automation mirrors investigate_issue
     {
-        let backend_missing = backends_raw.is_none_or(|b| !b.contains_key("automate_github_bugs_backend"));
+        let backend_missing =
+            backends_raw.is_none_or(|b| !b.contains_key("automate_github_bugs_backend"));
         if backend_missing {
-            preferences.magic_prompt_backends.automate_github_bugs_backend =
-                preferences
-                    .magic_prompt_backends
-                    .investigate_issue_backend
-                    .clone();
+            preferences
+                .magic_prompt_backends
+                .automate_github_bugs_backend = preferences
+                .magic_prompt_backends
+                .investigate_issue_backend
+                .clone();
             changed = true;
         }
         let provider_missing =
             providers_raw.is_none_or(|p| !p.contains_key("automate_github_bugs_provider"));
         if provider_missing {
-            preferences.magic_prompt_providers.automate_github_bugs_provider =
-                preferences
-                    .magic_prompt_providers
-                    .investigate_issue_provider
-                    .clone();
+            preferences
+                .magic_prompt_providers
+                .automate_github_bugs_provider = preferences
+                .magic_prompt_providers
+                .investigate_issue_provider
+                .clone();
             changed = true;
         }
         let effort_missing =
@@ -2626,8 +2654,8 @@ fn migrate_automation_magic_prompt_preferences(
                 .clone();
             changed = true;
         }
-        let provider_missing = providers_raw
-            .is_none_or(|p| !p.contains_key("automate_security_advisories_provider"));
+        let provider_missing =
+            providers_raw.is_none_or(|p| !p.contains_key("automate_security_advisories_provider"));
         if provider_missing {
             preferences
                 .magic_prompt_providers
@@ -2660,7 +2688,9 @@ fn migrate_automation_magic_prompt_preferences(
             .unwrap_or(&preferences.default_backend);
         let investigate_model = &preferences.magic_prompt_models.investigate_advisory_model;
         let model_matches = magic_prompt_model_matches_backend(
-            &preferences.magic_prompt_models.automate_security_advisories_model,
+            &preferences
+                .magic_prompt_models
+                .automate_security_advisories_model,
             backend,
         );
         if model_missing || !model_matches {
@@ -2883,6 +2913,7 @@ impl Default for AppPreferences {
             coderabbit_cli_source: default_cli_source(),
             expand_tool_calls_by_default: false,
             window_vibrancy: false,
+            finished_session_animation_enabled: default_finished_session_animation_enabled(),
             terminal_background: default_terminal_background(),
             terminal_background_custom: None,
             auto_update_ai_backends: default_auto_update_ai_backends(),
@@ -3068,6 +3099,11 @@ pub struct UIState {
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
 
+    /// GitHub Actions workflow run database IDs the user has already opened.
+    /// Failed-run badges only count runs not present in this list.
+    #[serde(default)]
+    pub seen_failed_workflow_run_ids: Vec<u64>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -3176,6 +3212,7 @@ impl Default for UIState {
             project_canvas_settings: std::collections::HashMap::new(),
             github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
+            seen_failed_workflow_run_ids: Vec::new(),
             version: default_ui_state_version(),
         }
     }
@@ -4174,8 +4211,7 @@ where
     let mut no_token = env_truthy(env.get("JEAN_NO_TOKEN").map(String::as_str));
     let mut allow_unsafe_no_token =
         env_truthy(env.get("JEAN_ALLOW_UNSAFE_NO_TOKEN").map(String::as_str));
-    let mut allow_native_open =
-        env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
+    let mut allow_native_open = env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
     let mut host = env
         .get("JEAN_HOST")
         .map(|h| h.trim().to_string())
@@ -4246,11 +4282,7 @@ where
     }
 
     if !headless
-        && (host.is_some()
-            || port.is_some()
-            || token.is_some()
-            || no_token
-            || allow_native_open)
+        && (host.is_some() || port.is_some() || token.is_some() || no_token || allow_native_open)
     {
         eprintln!(
             "Warning: --host, --port, --token, --no-token, --allow-native-open are only effective with --headless"

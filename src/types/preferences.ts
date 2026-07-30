@@ -844,12 +844,12 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 
 export const DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT = `You are continuing a Jean chat session after the user switched AI backends.
 
-Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches.
+Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches. Treat the history below as the conversation you already had with the user — do not claim you lack prior context.
 
 Previous backend: {previous_backend}
 Current backend: {current_backend}
 
-Use the Jean-local history below to reconstruct context before answering the user's latest message. Do not mention this hidden handoff unless it is directly relevant.
+Read the Jean-local history carefully, reconstruct the task state, and answer the user's latest message with full continuity. Do not mention this hidden handoff unless it is directly relevant.
 
 <jean_local_history>
 {history}
@@ -1457,6 +1457,8 @@ export interface AppPreferences {
   coderabbit_cli_source?: 'jean' | 'path' // CodeRabbit CLI source: 'jean' (managed) or 'path' (system PATH)
   expand_tool_calls_by_default: boolean // Expand all tool call collapsibles by default
   window_vibrancy: boolean // macOS window vibrancy effect (high GPU cost, default false)
+  /** Bell ring animation on the finished-sessions titlebar badge (default true) */
+  finished_session_animation_enabled?: boolean
   terminal_background: TerminalBackgroundMode // Override the terminal background independently of the app theme
   terminal_background_custom: string | null // Hex color used when terminal_background === 'custom'
   auto_update_ai_backends: boolean // Auto-install CLI updates in background when a new version is detected
@@ -1667,7 +1669,25 @@ const knownClaudeModels = new Set<string>([
   'opus',
 ])
 
-export function normalizeClaudeModel(model: string): ClaudeModel {
+/**
+ * Normalize a Claude model id.
+ *
+ * When `preserveProviderAliases` is true (custom CLI provider is active), keep
+ * the Claude Code aliases `opus` / `sonnet` / `haiku` so they resolve through
+ * the provider's ANTHROPIC_DEFAULT_*_MODEL env vars instead of being rewritten
+ * to first-party Anthropic model IDs.
+ */
+export function normalizeClaudeModel(
+  model: string,
+  options?: { preserveProviderAliases?: boolean }
+): ClaudeModel {
+  if (
+    options?.preserveProviderAliases &&
+    (model === 'opus' || model === 'sonnet' || model === 'haiku')
+  ) {
+    return model
+  }
+
   if (model in legacyClaudeDefaultModelMap) {
     return legacyClaudeDefaultModelMap[
       model as keyof typeof legacyClaudeDefaultModelMap
@@ -1677,6 +1697,49 @@ export function normalizeClaudeModel(model: string): ClaudeModel {
   return knownClaudeModels.has(model)
     ? (model as ClaudeModel)
     : 'claude-opus-4-8[1m]'
+}
+
+/** Claude model options for a custom CLI profile (opus/sonnet/haiku aliases). */
+export function getClaudeModelOptionsForProvider(
+  provider: string | null | undefined,
+  customCliProfiles: CustomCliProfile[]
+): { value: ClaudeModel; label: string }[] {
+  if (
+    !provider ||
+    provider === '__anthropic__' ||
+    provider === '__default__' ||
+    provider === 'anthropic' ||
+    provider === 'default'
+  ) {
+    return modelOptions
+  }
+
+  const profile = customCliProfiles.find(p => p.name === provider)
+  let opusModel: string | undefined
+  let sonnetModel: string | undefined
+  let haikuModel: string | undefined
+  if (profile?.settings_json) {
+    try {
+      const settings = JSON.parse(profile.settings_json) as {
+        env?: Record<string, string>
+      }
+      const env = settings?.env
+      if (env) {
+        opusModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL
+        sonnetModel = env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL
+        haikuModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL
+      }
+    } catch {
+      // Ignore invalid profile JSON; fall back to short labels.
+    }
+  }
+
+  const suffix = (model?: string) => (model ? ` (${model})` : '')
+  return [
+    { value: 'opus', label: `Opus${suffix(opusModel)}` },
+    { value: 'sonnet', label: `Sonnet${suffix(sonnetModel)}` },
+    { value: 'haiku', label: `Haiku${suffix(haikuModel)}` },
+  ]
 }
 
 // Claude models that support fast service tier. Fast mode is exposed via a
@@ -2475,6 +2538,7 @@ export const defaultPreferences: AppPreferences = {
   coderabbit_cli_source: 'jean', // Default: Jean-managed
   expand_tool_calls_by_default: false, // Default: collapsed
   window_vibrancy: false, // Default: disabled (high GPU cost)
+  finished_session_animation_enabled: true, // Default: bell ring on finished-sessions badge
   terminal_background: 'auto',
   terminal_background_custom: null,
   auto_update_ai_backends: true, // Default: auto-update AI backends in the background

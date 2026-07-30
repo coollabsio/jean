@@ -1,8 +1,12 @@
-use super::types::{Backend, ChatMessage, MessageRole, RunStatus, SessionMetadata};
+use super::types::{
+    Backend, ChatMessage, ContentBlock, MessageRole, RunEntry, RunStatus, SessionMetadata,
+};
 
 const HANDOFF_OPEN_TAG: &str = "<jean_provider_switch_handoff>";
 const HANDOFF_CLOSE_TAG: &str = "</jean_provider_switch_handoff>";
 const TRUNCATED_HISTORY_MARKER: &str = "[truncated older Jean history]";
+const HANDOFF_HISTORY_RUN_LIMIT: usize = 40;
+const HANDOFF_HISTORY_MAX_CHARS: usize = 60_000;
 
 /// Return the last `max_chars` characters of `input` (char-safe, never panics on multibyte).
 fn tail_chars(input: &str, max_chars: usize) -> String {
@@ -116,16 +120,61 @@ pub(crate) fn should_inject_claude_profile_handoff(
         && previous_profile != current_profile
 }
 
+/// Extract the best available plain-text body for handoff history.
+/// Prefer `content`, then text/user-input content blocks, then a brief tool summary.
+pub(crate) fn message_text_for_handoff(message: &ChatMessage) -> String {
+    let content = message.content.trim();
+    if !content.is_empty() {
+        return content.to_string();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    for block in &message.content_blocks {
+        match block {
+            ContentBlock::Text { text } => {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    parts.push(trimmed.to_string());
+                }
+            }
+            ContentBlock::UserInput { text } => {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    parts.push(format!("[steered user input] {trimmed}"));
+                }
+            }
+            ContentBlock::Thinking { .. } | ContentBlock::ToolUse { .. } => {}
+        }
+    }
+
+    if !message.tool_calls.is_empty() {
+        let tools: Vec<&str> = message
+            .tool_calls
+            .iter()
+            .map(|tc| tc.name.as_str())
+            .filter(|name| !name.is_empty())
+            .collect();
+        if !tools.is_empty() {
+            parts.push(format!("[tools used: {}]", tools.join(", ")));
+        }
+    }
+
+    parts.join("\n")
+}
+
 pub(crate) fn format_handoff_history(messages: &[ChatMessage], max_chars: usize) -> String {
     let rendered: Vec<String> = messages
         .iter()
-        .filter(|message| !message.content.trim().is_empty())
-        .map(|message| {
+        .filter_map(|message| {
+            let body = message_text_for_handoff(message);
+            if body.trim().is_empty() {
+                return None;
+            }
             let role = match message.role {
                 MessageRole::User => "User",
                 MessageRole::Assistant => "Assistant",
             };
-            format!("{role}: {}", message.content.trim())
+            Some(format!("{role}: {}", body.trim()))
         })
         .collect();
 
@@ -172,6 +221,115 @@ pub(crate) fn format_handoff_history(messages: &[ChatMessage], max_chars: usize)
     history
 }
 
+/// Fallback when full run-log parsing fails: use user messages (and optional model notes)
+/// from run metadata so backend switches still carry conversation context.
+pub(crate) fn format_handoff_history_from_runs(runs: &[RunEntry], max_chars: usize) -> String {
+    let mut pseudo_messages: Vec<ChatMessage> = Vec::new();
+    let end = runs.len();
+    let start = end.saturating_sub(HANDOFF_HISTORY_RUN_LIMIT);
+
+    for (idx, run) in runs.iter().enumerate().skip(start) {
+        if !run.is_renderable_in_chat_history() {
+            continue;
+        }
+        let user_text = run.user_message.trim();
+        if !user_text.is_empty() {
+            pseudo_messages.push(ChatMessage {
+                id: run.user_message_id.clone(),
+                session_id: String::new(),
+                role: MessageRole::User,
+                content: user_text.to_string(),
+                timestamp: run.started_at,
+                tool_calls: vec![],
+                content_blocks: vec![],
+                cancelled: false,
+                plan_approved: false,
+                model: run.model.clone(),
+                execution_mode: run.execution_mode.clone(),
+                thinking_level: run.thinking_level.clone(),
+                effort_level: run.effort_level.clone(),
+                recovered: false,
+                usage: None,
+            });
+        }
+
+        if run.renders_assistant_message() {
+            let backend_note = run.backend.as_ref().map(backend_label).unwrap_or("unknown");
+            let model_note = run.model.as_deref().unwrap_or("unknown-model");
+            let status_note = match run.status {
+                RunStatus::Completed => "completed",
+                RunStatus::Cancelled => "cancelled",
+                RunStatus::Crashed => "crashed",
+                RunStatus::Running => "running",
+                RunStatus::Resumable => "resumable",
+            };
+            pseudo_messages.push(ChatMessage {
+                id: format!("handoff-assistant-{idx}"),
+                session_id: String::new(),
+                role: MessageRole::Assistant,
+                content: format!(
+                    "[assistant reply via {backend_note}/{model_note}; status={status_note}; full body unavailable in handoff fallback]"
+                ),
+                timestamp: run.ended_at.unwrap_or(run.started_at),
+                tool_calls: vec![],
+                content_blocks: vec![],
+                cancelled: run.cancelled,
+                plan_approved: false,
+                model: run.model.clone(),
+                execution_mode: run.execution_mode.clone(),
+                thinking_level: run.thinking_level.clone(),
+                effort_level: run.effort_level.clone(),
+                recovered: false,
+                usage: None,
+            });
+        }
+    }
+
+    format_handoff_history(&pseudo_messages, max_chars)
+}
+
+/// Build handoff history for a provider switch: prefer full message window, fall back to run metadata.
+pub(crate) fn build_handoff_history_text(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    metadata: Option<&SessionMetadata>,
+) -> String {
+    match super::run_log::load_session_messages_window(
+        app,
+        session_id,
+        Some(HANDOFF_HISTORY_RUN_LIMIT),
+        None,
+    ) {
+        Ok(loaded) => {
+            let history = format_handoff_history(&loaded.messages, HANDOFF_HISTORY_MAX_CHARS);
+            if !history.trim().is_empty() {
+                return history;
+            }
+            log::warn!(
+                "[Handoff] session={session_id} full message window was empty; falling back to run metadata"
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[Handoff] session={session_id} failed to load message window for handoff: {e}; falling back to run metadata"
+            );
+        }
+    }
+
+    if let Some(meta) = metadata {
+        let fallback = format_handoff_history_from_runs(&meta.runs, HANDOFF_HISTORY_MAX_CHARS);
+        if fallback.trim().is_empty() {
+            log::warn!(
+                "[Handoff] session={session_id} run-metadata fallback also produced empty history (runs={})",
+                meta.runs.len()
+            );
+        }
+        return fallback;
+    }
+
+    String::new()
+}
+
 pub(crate) fn build_handoff_prompt(
     template: &str,
     previous_backend: &Backend,
@@ -210,7 +368,7 @@ pub(crate) fn prepend_hidden_handoff(user_message: &str, handoff_prompt: &str) -
 mod tests {
     use super::*;
     use crate::chat::types::{
-        Backend, ChatMessage, MessageRole, RunEntry, RunStatus, SessionMetadata,
+        Backend, ChatMessage, ContentBlock, MessageRole, RunEntry, RunStatus, SessionMetadata,
     };
 
     fn message(role: MessageRole, content: &str, timestamp: u64) -> ChatMessage {
@@ -280,6 +438,82 @@ mod tests {
     }
 
     #[test]
+    fn message_text_for_handoff_uses_content_blocks_when_content_empty() {
+        let mut msg = message(MessageRole::Assistant, "", 1);
+        msg.content_blocks = vec![ContentBlock::Text {
+            text: "  recovered from blocks  ".to_string(),
+        }];
+        assert_eq!(message_text_for_handoff(&msg), "recovered from blocks");
+
+        let history = format_handoff_history(std::slice::from_ref(&msg), 200);
+        assert!(history.contains("Assistant: recovered from blocks"));
+    }
+
+    #[test]
+    fn formats_handoff_history_from_runs_includes_user_turns() {
+        let runs = vec![
+            RunEntry {
+                run_id: "run-1".to_string(),
+                user_message_id: "user-1".to_string(),
+                user_message: "first user task".to_string(),
+                model: Some("claude-opus-4-8".to_string()),
+                execution_mode: None,
+                thinking_level: None,
+                effort_level: None,
+                backend: Some(Backend::Claude),
+                custom_profile_name: None,
+                started_at: 1,
+                ended_at: Some(2),
+                status: RunStatus::Completed,
+                assistant_message_id: Some("assistant-1".to_string()),
+                cancelled: false,
+                recovered: false,
+                claude_session_id: Some("claude-1".to_string()),
+                pid: None,
+                usage: None,
+                codex_thread_id: None,
+                codex_turn_id: None,
+                cursor_chat_id: None,
+                grok_session_id: None,
+                kimi_session_id: None,
+                checkpoint_id: None,
+            },
+            RunEntry {
+                run_id: "run-2".to_string(),
+                user_message_id: "user-2".to_string(),
+                user_message: "second user task".to_string(),
+                model: Some("opencode/moonshotai/kimi-k2.5".to_string()),
+                execution_mode: None,
+                thinking_level: None,
+                effort_level: None,
+                backend: Some(Backend::Opencode),
+                custom_profile_name: None,
+                started_at: 3,
+                ended_at: Some(4),
+                status: RunStatus::Completed,
+                assistant_message_id: Some("assistant-2".to_string()),
+                cancelled: false,
+                recovered: false,
+                claude_session_id: None,
+                pid: None,
+                usage: None,
+                codex_thread_id: None,
+                codex_turn_id: None,
+                cursor_chat_id: None,
+                grok_session_id: None,
+                kimi_session_id: None,
+                checkpoint_id: None,
+            },
+        ];
+
+        let history = format_handoff_history_from_runs(&runs, 2_000);
+        assert!(history.contains("User: first user task"));
+        assert!(history.contains("User: second user task"));
+        assert!(history.contains("claude"));
+        assert!(history.contains("opencode"));
+    }
+
+    #[test]
     fn bounds_history_by_chars_and_handles_multibyte() {
         // Single overlong multibyte line: byte-slicing here would panic.
         let messages = vec![message(MessageRole::User, &"é".repeat(200), 1)];
@@ -341,6 +575,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert_eq!(latest_completed_backend(&metadata), Some(Backend::Claude));
@@ -400,6 +635,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-2".to_string(),
@@ -425,6 +661,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert_eq!(

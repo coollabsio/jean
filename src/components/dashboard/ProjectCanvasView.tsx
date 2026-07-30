@@ -114,6 +114,7 @@ import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
 import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
 import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
+import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
 import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { PlanDialog } from '@/components/chat/PlanDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
@@ -142,6 +143,7 @@ import {
   computeSessionCardData,
   groupCardsByStatus,
   flattenGroups,
+  isActionableWaitingStatus,
 } from '@/components/chat/session-card-utils'
 import { WorktreeSetupCard } from '@/components/chat/WorktreeSetupCard'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
@@ -378,13 +380,16 @@ function isLabelFilterTabItem(
 }
 
 function getActiveStatus(cards: SessionCardData[]): ActiveStatus {
-  if (cards.some(c => c.status === 'waiting' || c.status === 'permission'))
-    return 'waiting'
-  if (cards.some(c => c.status === 'planning')) return 'planning'
+  // Actionable waiting (plan/input/permission/codex queues) collapses only at
+  // the worktree *summary* level — individual cards keep distinct statuses.
+  if (cards.some(c => isActionableWaitingStatus(c.status))) return 'waiting'
+  if (cards.some(c => c.status === 'planning' || c.status === 'scheduled'))
+    return 'planning'
   if (cards.some(c => c.status === 'vibing')) return 'vibing'
   if (cards.some(c => c.status === 'yoloing')) return 'yoloing'
-  if (cards.some(c => c.status === 'review' || c.status === 'completed'))
-    return 'review'
+  // Prefer review-ready over completed for worktree-level summary
+  if (cards.some(c => c.status === 'review')) return 'review'
+  if (cards.some(c => c.status === 'completed')) return 'review'
   return null
 }
 
@@ -413,13 +418,17 @@ function formatRelativeTime(timestamp?: number): string | null {
 }
 
 function getSessionMetrics(cards: SessionCardData[]) {
-  const waitingCount = cards.filter(
-    c => c.status === 'waiting' || c.status === 'permission'
+  const waitingCount = cards.filter(c =>
+    isActionableWaitingStatus(c.status)
   ).length
+  // Keep review-ready and completed countable together for metrics, but
+  // cancelled/crashed are not "ready for review".
   const reviewCount = cards.filter(
     c => c.status === 'review' || c.status === 'completed'
   ).length
-  const planningCount = cards.filter(c => c.status === 'planning').length
+  const planningCount = cards.filter(
+    c => c.status === 'planning' || c.status === 'scheduled'
+  ).length
   const buildingCount = cards.filter(c => c.status === 'vibing').length
   const yoloCount = cards.filter(c => c.status === 'yoloing').length
   const activeCount = planningCount + buildingCount + yoloCount
@@ -928,7 +937,17 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     (mobileAdvisories?.filter(a => a.state === 'draft' || a.state === 'triage')
       .length ?? 0)
   const mobileWorkflowRunCount = mobileWorkflowRuns?.runs?.length ?? 0
-  const mobileFailedWorkflowCount = mobileWorkflowRuns?.failedCount ?? 0
+  const seenFailedWorkflowRunIds = useUIStore(
+    state => state.seenFailedWorkflowRunIds
+  )
+  const mobileFailedWorkflowCount = useMemo(
+    () =>
+      countUnreadFailedWorkflowRuns(
+        mobileWorkflowRuns?.runs ?? [],
+        seenFailedWorkflowRunIds
+      ),
+    [mobileWorkflowRuns?.runs, seenFailedWorkflowRunIds]
+  )
 
   // Get worktrees
   const { data: worktrees = [], isLoading: worktreesLoading } =

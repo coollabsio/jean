@@ -764,7 +764,12 @@ export function ChatWindow({
   const zustandProvider = useChatStore(state =>
     deferredSessionId ? state.selectedProviders[deferredSessionId] : undefined
   )
-  const sessionProvider = session?.selected_provider ?? zustandProvider
+  // Prefer in-memory toolbar selection when present so mid-session provider
+  // switches apply immediately (session query can lag until invalidate).
+  const sessionProvider =
+    zustandProvider !== undefined
+      ? zustandProvider
+      : session?.selected_provider
 
   // Installed backends (only these should be selectable)
   const { installedBackends } = useInstalledBackends()
@@ -1248,7 +1253,11 @@ export function ChatWindow({
   } = useScrollManagement({
     messages: session?.messages,
     virtualizedListRef,
-    activeWorktreeId,
+    // Key scroll restoration on the displayed session (deferred) so we save
+    // and restore against the transcript that is actually mounted (issue #594).
+    activeSessionId: deferredSessionId,
+    contentReady:
+      !isLoading && !isSessionsLoading && !isSessionSwitching && !!session,
     isSending,
   })
 
@@ -3603,7 +3612,9 @@ export function ChatWindow({
                                   handleToolbarBackendModelChange
                                 }
                                 onResolveConflicts={handleResolveConflicts}
-                                hasOpenPr={Boolean(worktree?.pr_url)}
+                                hasOpenPr={Boolean(
+                                  worktree?.pr_number || worktree?.pr_url
+                                )}
                                 onSetDiffRequest={setDiffRequest}
                                 installedBackends={installedBackends}
                                 onModelChange={handleToolbarModelChange}

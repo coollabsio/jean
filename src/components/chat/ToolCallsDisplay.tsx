@@ -11,6 +11,18 @@ import {
 } from '@/types/chat'
 import { AskUserQuestion } from './AskUserQuestion'
 
+/** Placeholder outputs that add no value next to already-rendered tool details. */
+function isPlaceholderToolOutput(output: string): boolean {
+  const trimmed = output.trim().toLowerCase()
+  return (
+    trimmed === '' ||
+    trimmed === 'completed' ||
+    trimmed === 'ok' ||
+    trimmed === 'success' ||
+    trimmed === 'context compacted'
+  )
+}
+
 /**
  * Merge multiple AskUserQuestion tool calls into a single question set.
  * Claude sometimes emits multiple AskUserQuestion calls during streaming.
@@ -143,6 +155,18 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
                       </pre>
                     </div>
                   )}
+                  {/* Show tool stdout/result (bash and others) — was missing before #572 */}
+                  {typeof tool.output === 'string' &&
+                    !isPlaceholderToolOutput(tool.output) && (
+                      <div className="mt-1 overflow-x-auto">
+                        <div className="text-[0.625rem] text-muted-foreground/50 mb-0.5">
+                          Output:
+                        </div>
+                        <pre className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-1.5 text-[0.625rem] font-mono leading-tight text-foreground/80">
+                          {tool.output}
+                        </pre>
+                      </div>
+                    )}
                 </div>
               ))}
             </div>

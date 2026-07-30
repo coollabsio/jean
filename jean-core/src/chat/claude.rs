@@ -1298,6 +1298,40 @@ fn flush_pending_chunks(
     }
 }
 
+fn startup_failure_message(
+    startup_failed: bool,
+    user_cancelled: bool,
+    full_content: &str,
+    error_lines: &[String],
+) -> Option<String> {
+    if !startup_failed || user_cancelled || !full_content.is_empty() {
+        return None;
+    }
+
+    if !error_lines.is_empty() {
+        return Some(format!("Claude CLI failed: {}", error_lines.join("\n")));
+    }
+
+    Some(
+        "Claude CLI produced no output and was stopped. It may have failed to start; \
+         check the Claude CLI installation and, in WSL mode, the distro configuration."
+            .to_string(),
+    )
+}
+
+fn terminate_failed_startup(pid: u32) {
+    if pid <= 1 {
+        return;
+    }
+
+    if let Err(tree_error) = crate::platform::kill_process_tree(pid) {
+        log::warn!("Failed to terminate startup process group {pid}: {tree_error}");
+        if let Err(process_error) = crate::platform::kill_process(pid) {
+            log::warn!("Failed to terminate startup process {pid}: {process_error}");
+        }
+    }
+}
+
 /// Tail an NDJSON output file and emit events as new lines appear.
 ///
 /// This is used for detached Claude CLI processes where the CLI writes
@@ -1344,6 +1378,7 @@ pub fn tail_claude_output(
     let mut completed = false;
     let mut cancelled = false;
     let mut user_cancelled = false; // True only for explicit user cancel (not process death)
+    let mut startup_failed = false; // True when Claude produced no output before the startup timeout / died starting up
     let mut usage: Option<UsageData> = None;
     let mut error_lines: Vec<String> = Vec::new();
 
@@ -2344,6 +2379,7 @@ pub fn tail_claude_output(
                     elapsed.as_secs_f64()
                 );
                 cancelled = true;
+                startup_failed = true;
                 break;
             }
 
@@ -2353,6 +2389,7 @@ pub fn tail_claude_output(
                     startup_timeout
                 );
                 cancelled = true;
+                startup_failed = true;
                 break;
             }
 
@@ -2423,6 +2460,26 @@ pub fn tail_claude_output(
         }
     }
 
+    if let Some(error) =
+        startup_failure_message(startup_failed, user_cancelled, &full_content, &error_lines)
+    {
+        // A startup timeout can leave a live process behind. End the complete
+        // process group before returning the terminal error to the caller.
+        if is_process_alive(pid) {
+            terminate_failed_startup(pid);
+        }
+        log::warn!("Claude CLI startup failed for session {session_id}: {error}");
+        let _ = app.emit_all(
+            "chat:error",
+            &ErrorEvent {
+                session_id: session_id.to_string(),
+                worktree_id: worktree_id.to_string(),
+                error: error.clone(),
+            },
+        );
+        return Err(error);
+    }
+
     if !error_lines.is_empty() && full_content.is_empty() {
         let error_text = error_lines.join("\n");
         log::warn!("CLI error output for session {session_id}: {error_text}");
@@ -2471,6 +2528,32 @@ pub fn tail_claude_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_failure_uses_cli_output_when_available() {
+        let lines = vec!["claude: command not found".to_string()];
+
+        assert_eq!(
+            startup_failure_message(true, false, "", &lines),
+            Some("Claude CLI failed: claude: command not found".to_string())
+        );
+    }
+
+    #[test]
+    fn startup_failure_without_output_has_actionable_message() {
+        let message = startup_failure_message(true, false, "", &[])
+            .expect("startup failure should be terminal");
+
+        assert!(message.contains("produced no output"));
+        assert!(message.contains("WSL"));
+    }
+
+    #[test]
+    fn startup_failure_message_ignores_user_cancel_and_completed_content() {
+        assert_eq!(startup_failure_message(true, true, "", &[]), None);
+        assert_eq!(startup_failure_message(true, false, "done", &[]), None);
+        assert_eq!(startup_failure_message(false, false, "", &[]), None);
+    }
 
     #[test]
     fn compact_metadata_accepts_snake_case_from_claude_cli() {

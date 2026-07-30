@@ -72,7 +72,7 @@ export function BackendModelPickerContent({
   installedBackends,
   customCliProfiles,
   sessionHasMessages: _sessionHasMessages,
-  providerLocked,
+  providerLocked: _providerLocked,
   onModelChange,
   onBackendModelChange,
   onRequestClose,
@@ -463,10 +463,11 @@ export function BackendModelPickerContent({
     return () => window.removeEventListener('keydown', handler, true)
   }, [open, sidebarBackends, handleBackendButtonClick])
 
+  // Always surface the active Claude custom provider in the model picker so
+  // mid-session switches stay discoverable (provider is changed via the
+  // dedicated Provider control, not locked after the first message).
   const showProviderHint =
-    Boolean(providerLocked) &&
-    activeBackend === 'claude' &&
-    customCliProfiles.length > 0
+    activeBackend === 'claude' && customCliProfiles.length > 0
 
   const placeholder =
     searchPlaceholder ??

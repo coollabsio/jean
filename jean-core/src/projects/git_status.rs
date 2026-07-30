@@ -379,7 +379,11 @@ pub fn base_ref(base_remote: Option<&str>, base_branch: &str) -> String {
 }
 
 /// Get the number of lines added and removed compared to the base branch
-fn get_branch_diff_stats(repo_path: &str, base_branch: &str, base_remote: Option<&str>) -> (u32, u32) {
+fn get_branch_diff_stats(
+    repo_path: &str,
+    base_branch: &str,
+    base_remote: Option<&str>,
+) -> (u32, u32) {
     // git diff --numstat <remote>/main...HEAD shows changes in current branch vs base
     let origin_ref = base_ref(base_remote, base_branch);
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))

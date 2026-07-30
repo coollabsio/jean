@@ -2761,12 +2761,14 @@ mod tests {
 
     #[test]
     fn strip_non_tty_shell_noise_removes_bash_job_control_messages() {
-        let noisy = "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
+        let noisy =
+            "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
                      bash: no job control in this shell\n\
                      copied .env";
         assert_eq!(strip_non_tty_shell_noise(noisy), "copied .env");
 
-        let only_noise = "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
+        let only_noise =
+            "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
                           bash: no job control in this shell\n";
         assert_eq!(strip_non_tty_shell_noise(only_noise), "");
 

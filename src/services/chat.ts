@@ -38,6 +38,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
@@ -449,9 +450,13 @@ export async function prefetchSessions(
     })
     queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
 
-    // Restore reviewingSessions, waitingForInputSessionIds, sessionLabels, reviewResults,
-    // fixedFindings, and selected execution modes.
+    // Restore reviewingSessions, status overrides, waitingForInputSessionIds,
+    // sessionLabels, reviewResults, fixedFindings, and selected execution modes.
     const reviewingUpdates: Record<string, boolean> = {}
+    const statusOverrideUpdates: Record<
+      string,
+      'idle' | 'review' | 'completed' | 'cancelled'
+    > = {}
     const waitingUpdates: Record<string, boolean> = {}
     const executionModeUpdates: Record<string, ExecutionMode> = {}
     const primarySurfaceUpdates: Record<string, 'chat' | 'terminal'> = {}
@@ -464,8 +469,20 @@ export async function prefetchSessions(
     > = {}
     const fixedFindingsUpdates: Record<string, Set<string>> = {}
     for (const session of sessions.sessions) {
-      if (session.is_reviewing) {
+      const override = session.status_override
+      if (
+        override === 'idle' ||
+        override === 'review' ||
+        override === 'completed' ||
+        override === 'cancelled'
+      ) {
+        statusOverrideUpdates[session.id] = override
+        if (override === 'review') {
+          reviewingUpdates[session.id] = true
+        }
+      } else if (session.is_reviewing) {
         reviewingUpdates[session.id] = true
+        statusOverrideUpdates[session.id] = 'review'
       }
       // Only restore waiting state if the session's last run is actually active,
       // OR if it's a completed run parked for user input (plan approval, or an
@@ -534,6 +551,12 @@ export async function prefetchSessions(
       storeUpdates.reviewingSessions = {
         ...currentState.reviewingSessions,
         ...reviewingUpdates,
+      }
+    }
+    if (Object.keys(statusOverrideUpdates).length > 0) {
+      storeUpdates.sessionStatusOverrides = {
+        ...currentState.sessionStatusOverrides,
+        ...statusOverrideUpdates,
       }
     }
     if (Object.keys(waitingUpdates).length > 0) {
@@ -1115,6 +1138,7 @@ export function useCloseSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
       // Switch to the new active session — but only if the caller hasn't already
@@ -1197,6 +1221,7 @@ export function useArchiveSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
       // Switch to the new active session — but only if the caller hasn't already
@@ -2094,6 +2119,7 @@ export function useClearSessionHistory() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
 
       toast.success('Chat history cleared')
     },

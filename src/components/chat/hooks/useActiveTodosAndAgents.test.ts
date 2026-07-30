@@ -69,7 +69,7 @@ describe('extractCodexAgents', () => {
     ])
   })
 
-  it('marks interrupted v2 agents as errored', () => {
+  it('marks interrupted v2 agents as interrupted (not completed/errored)', () => {
     const tools = [
       toolCall('SpawnAgent', {
         receiver_thread_ids: ['agent-a'],
@@ -90,9 +90,33 @@ describe('extractCodexAgents', () => {
       {
         id: 'agent-a',
         prompt: '/root/reviewer',
-        status: 'errored',
+        status: 'interrupted',
         message: undefined,
       },
     ])
+  })
+
+  it('does not convert unresolved in_progress agents to completed when parent stream ends', () => {
+    const tools = [
+      toolCall('SpawnAgent', {
+        receiver_thread_ids: ['agent-a'],
+        prompt: 'Still working',
+        agents_states: {
+          'agent-a': { status: 'running', message: null },
+        },
+      }),
+    ]
+
+    expect(extractCodexAgents(tools, false)).toEqual([
+      {
+        id: 'agent-a',
+        prompt: 'Still working',
+        status: 'interrupted',
+        message: 'Interrupted before completion',
+      },
+    ])
+
+    // While parent is still sending, leave as in_progress
+    expect(extractCodexAgents(tools, true)[0]?.status).toBe('in_progress')
   })
 })

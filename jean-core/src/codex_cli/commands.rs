@@ -1787,12 +1787,8 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
     #[cfg(windows)]
     for helper in &windows_helpers {
         let helper_path = cli_dir.join(&helper.file_name);
-        crate::platform::write_binary_file(&helper_path, &helper.bytes).map_err(|e| {
-            format!(
-                "Failed to write Codex helper '{}': {e}",
-                helper.file_name
-            )
-        })?;
+        crate::platform::write_binary_file(&helper_path, &helper.bytes)
+            .map_err(|e| format!("Failed to write Codex helper '{}': {e}", helper.file_name))?;
         log::info!(
             "Installed Codex Windows helper {} ({} bytes)",
             helper.file_name,

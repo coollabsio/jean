@@ -7,12 +7,15 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { SentryIssue } from '@/types/sentry'
+import { ItemSelectCheckbox } from './ItemSelectCheckbox'
 
 interface SentryIssueItemProps {
   issue: SentryIssue
   index: number
   isSelected: boolean
   isCreating: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
@@ -33,6 +36,8 @@ export function SentryIssueItem({
   index,
   isSelected,
   isCreating,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -44,9 +49,18 @@ export function SentryIssueItem({
       className={cn(
         'w-full flex items-start gap-2 sm:gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         isCreating && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={isCreating}
+          ariaLabel={`Select Sentry issue ${issue.shortId}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground shrink-0" />
       ) : (

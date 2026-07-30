@@ -133,6 +133,16 @@ describe('model option helpers', () => {
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
     expect(normalizeClaudeModel('claude-opus-4-6')).toBe('claude-opus-4-6')
     expect(normalizeClaudeModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6')
+    // Custom CLI providers keep Claude Code aliases for ANTHROPIC_DEFAULT_* routing
+    expect(
+      normalizeClaudeModel('sonnet', { preserveProviderAliases: true })
+    ).toBe('sonnet')
+    expect(
+      normalizeClaudeModel('opus', { preserveProviderAliases: true })
+    ).toBe('opus')
+    expect(
+      normalizeClaudeModel('haiku', { preserveProviderAliases: true })
+    ).toBe('haiku')
   })
 
   it('offers GPT 5.6 preview variants in Codex selectors', () => {
@@ -1336,6 +1346,50 @@ describe('preferences service', () => {
     })
   })
 
+  describe('AppearancePane finished session animation', () => {
+    it('toggles the finished session animation preference', async () => {
+      const { invoke } = await import('@/lib/transport')
+      let storedPreferences = {
+        ...defaultPreferences,
+        finished_session_animation_enabled: true,
+      }
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        if (command === 'load_preferences') return storedPreferences
+        if (command === 'patch_preferences') {
+          storedPreferences = {
+            ...storedPreferences,
+            ...(args as { patch: Partial<AppPreferences> }).patch,
+          }
+          return undefined
+        }
+        throw new Error(`Unexpected command ${command}`)
+      })
+
+      const user = userEvent.setup()
+      render(
+        createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          createElement(AppearancePane)
+        )
+      )
+
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Finished session animation',
+      })
+      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+
+      await user.click(switchEl)
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
+          patch: { finished_session_animation_enabled: false },
+        })
+      })
+      expect(switchEl).toHaveAttribute('aria-checked', 'false')
+    })
+  })
+
   describe('AppearancePane window vibrancy', () => {
     it('keeps the switch off and skips runtime vibrancy when persistence fails', async () => {
       const { invoke } = await import('@/lib/transport')
@@ -1360,7 +1414,9 @@ describe('preferences service', () => {
         )
       )
 
-      const switchEl = await screen.findByRole('switch')
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Window transparency',
+      })
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
 
       await user.click(switchEl)

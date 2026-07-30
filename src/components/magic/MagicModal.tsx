@@ -465,7 +465,8 @@ export function MagicModal() {
   const [customResolveModel, setCustomResolveModel] = useState<string>('sonnet')
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
-  const hasOpenPr = Boolean(worktree?.pr_url)
+  // PR checkouts may have pr_number before pr_url is filled; treat either as open.
+  const hasOpenPr = Boolean(worktree?.pr_number || worktree?.pr_url)
 
   // Check if worktree has loaded issue/PR contexts (for enabling investigate options)
   // Contexts may be registered under session ID (Load Context) or worktree ID (create_worktree)
@@ -1497,6 +1498,30 @@ export function MagicModal() {
         case 'open-pr': {
           if (worktree.pr_url) {
             await openExternal(worktree.pr_url)
+            return
+          }
+          // Number without URL (e.g. older checkout_pr): resolve then open
+          if (worktree.pr_number) {
+            try {
+              const linked = await linkWorktreePr(
+                selectedWorktreeId,
+                worktree.path,
+                worktree.pr_number
+              )
+              queryClient.invalidateQueries({
+                queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+              })
+              queryClient.invalidateQueries({
+                queryKey: [
+                  ...projectsQueryKeys.all,
+                  'worktree',
+                  selectedWorktreeId,
+                ],
+              })
+              await openExternal(linked.pr_url)
+            } catch (error) {
+              toast.error(`Failed to open PR #${worktree.pr_number}: ${error}`)
+            }
             return
           }
           setWorktreeLoading(selectedWorktreeId, 'pr')
@@ -2599,9 +2624,9 @@ ${resolveInstructions}`
       }
 
       // If PR already exists, open it in the browser instead of creating a new one
-      if (option === 'open-pr' && worktree?.pr_url) {
-        await openExternal(worktree.pr_url)
+      if (option === 'open-pr' && (worktree?.pr_url || worktree?.pr_number)) {
         setMagicModalOpen(false)
+        void executeGitDirectly('open-pr')
         return
       }
 

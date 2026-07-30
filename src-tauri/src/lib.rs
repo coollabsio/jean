@@ -324,6 +324,11 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         create_app_menu(app)?;
         install_menu_events(app);
     }
+
+    // Recover from WebView2 process death on Windows (issue #575 — blank /
+    // "invisible" window after the browser process exits). No-op elsewhere.
+    platform::install_process_failed_recovery(app);
+
     Ok(())
 }
 

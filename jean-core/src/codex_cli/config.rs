@@ -85,8 +85,7 @@ fn jean_managed_path(app: &AppHandle) -> Result<PathBuf, String> {
     if wsl.enabled {
         return get_wsl_cli_binary_path(&wsl.distro).map(PathBuf::from);
     }
-    get_cli_binary_path(app)
-        .or_else(|_| Ok(PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME)))
+    get_cli_binary_path(app).or_else(|_| Ok(PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME)))
 }
 
 /// Resolve Codex binary path based on the user's preference.

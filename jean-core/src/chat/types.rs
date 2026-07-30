@@ -754,9 +754,12 @@ pub struct Session {
     /// Original message context for re-send after permission approval
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denied_message_context: Option<DeniedMessageContext>,
-    /// Whether this session is marked for review
+    /// Whether this session is marked for review (legacy; prefer status_override)
     #[serde(default)]
     pub is_reviewing: bool,
+    /// User-forced session status: "idle" | "review" | "completed" | "cancelled"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_override: Option<String>,
     /// Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode)
     #[serde(default)]
     pub waiting_for_input: bool,
@@ -907,6 +910,7 @@ impl Session {
             pending_codex_dynamic_tool_call_requests: vec![],
             denied_message_context: None,
             is_reviewing: false,
+            status_override: None,
             waiting_for_input: false,
             waiting_for_input_type: None,
             approved_plan_message_ids: vec![],
@@ -1129,6 +1133,7 @@ impl SessionMetadata {
                 .clone(),
             denied_message_context: self.denied_message_context.clone(),
             is_reviewing,
+            status_override: self.status_override.clone(),
             waiting_for_input,
             waiting_for_input_type: self.waiting_for_input_type.clone(),
             approved_plan_message_ids: self.approved_plan_message_ids.clone(),
@@ -1189,6 +1194,7 @@ impl SessionMetadata {
             session.pending_codex_dynamic_tool_call_requests.clone();
         self.denied_message_context = session.denied_message_context.clone();
         self.is_reviewing = session.is_reviewing;
+        self.status_override = session.status_override.clone();
         self.waiting_for_input = session.waiting_for_input;
         self.waiting_for_input_type = session.waiting_for_input_type.clone();
         self.approved_plan_message_ids = session.approved_plan_message_ids.clone();
@@ -1437,6 +1443,9 @@ pub struct RunEntry {
     /// Kimi Code ACP session ID — persisted per-run for conversation continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// AI change checkpoint id captured before this run (working-tree snapshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_id: Option<String>,
 }
 
 impl RunEntry {
@@ -1577,9 +1586,12 @@ pub struct SessionMetadata {
     /// Original message context for re-send after permission approval
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denied_message_context: Option<DeniedMessageContext>,
-    /// Whether this session is marked for review
+    /// Whether this session is marked for review (legacy; prefer status_override)
     #[serde(default)]
     pub is_reviewing: bool,
+    /// User-forced session status: "idle" | "review" | "completed" | "cancelled"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_override: Option<String>,
     /// Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode)
     #[serde(default)]
     pub waiting_for_input: bool,
@@ -1740,6 +1752,7 @@ impl SessionMetadata {
             pending_codex_dynamic_tool_call_requests: vec![],
             denied_message_context: None,
             is_reviewing: false,
+            status_override: None,
             waiting_for_input: false,
             waiting_for_input_type: None,
             approved_plan_message_ids: vec![],
@@ -2228,6 +2241,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         let restored = metadata.to_session();
@@ -2270,6 +2284,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert!(metadata.find_run("run-1").is_some());
@@ -2302,6 +2317,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         // Cancelled-with-content now renders user + partial assistant (incl tool calls).
@@ -2355,6 +2371,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-completed".to_string(),
@@ -2380,6 +2397,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         // Cancelled partial turn (user + assistant) + completed turn (user + assistant) = 4.
@@ -2423,6 +2441,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert!(metadata.latest_claude_session_id().is_none());
@@ -2452,6 +2471,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert_eq!(metadata.latest_claude_session_id(), Some("claude-sess-abc"));
