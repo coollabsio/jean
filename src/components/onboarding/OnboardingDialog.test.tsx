@@ -129,6 +129,12 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiPathDetection: () => pathResult(),
 }))
 
+vi.mock('@/services/devin-cli', () => ({
+  useDevinCliSetup: () => setupResult(),
+  useDevinCliAuth: () => authResult(),
+  useDevinPathDetection: () => pathResult(),
+}))
+
 vi.mock('@/services/gh-cli', () => ({
   useGhCliSetup: () => setupResult(true, '/usr/bin/gh'),
   useGhCliAuth: () => authResult(true),
@@ -146,6 +152,7 @@ vi.mock('@/services/preferences', () => ({
       commandcode_cli_source: 'path',
       grok_cli_source: 'path',
       kimi_cli_source: 'path',
+      devin_cli_source: 'path',
       gh_cli_source: 'path',
     },
   }),
@@ -221,7 +228,9 @@ describe('OnboardingDialog backends', () => {
     expect(onInstall).toHaveBeenCalledOnce()
   })
 
-  async function chooseLocalAndContinue(user: ReturnType<typeof userEvent.setup>) {
+  async function chooseLocalAndContinue(
+    user: ReturnType<typeof userEvent.setup>
+  ) {
     expect(
       await screen.findByText('How will you use Jean?')
     ).toBeInTheDocument()
