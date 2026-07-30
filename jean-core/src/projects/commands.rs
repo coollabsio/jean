@@ -3317,6 +3317,13 @@ pub async fn checkout_pr(
 
     // Fetch PR details from GitHub (for context and worktree naming)
     let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number).await?;
+    // Persist the same PR link fields as create/link PR so magic actions
+    // (Open/Merge/PR Comments/status polling) work immediately after checkout.
+    let pr_url = if pr_detail.url.trim().is_empty() {
+        None
+    } else {
+        Some(pr_detail.url.clone())
+    };
 
     // Prefer the PR's target branch so status/diff compare against the same base
     // GitHub uses (e.g. v4.x), not always the project default (main).
@@ -3440,7 +3447,7 @@ pub async fn checkout_pr(
         setup_success: None,
         session_type: SessionType::Worktree,
         pr_number: Some(pr_number),
-        pr_url: None,
+        pr_url: pr_url.clone(),
         issue_number: None,
         linear_issue_identifier: None,
         security_alert_number: None,
@@ -3479,6 +3486,7 @@ pub async fn checkout_pr(
     let worktree_name_clone = final_worktree_name.clone();
     let temp_branch_clone = temp_branch_name.clone();
     let base_branch_clone = base_branch.clone();
+    let pr_url_clone = pr_url.clone();
     let pr_title = pr_detail.title.clone();
     let pr_body = pr_detail.body.clone();
     let pr_head_ref = pr_detail.head_ref_name.clone();
@@ -3766,7 +3774,7 @@ pub async fn checkout_pr(
                     setup_success,
                     session_type: SessionType::Worktree,
                     pr_number: Some(pr_number),
-                    pr_url: None,
+                    pr_url: pr_url_clone,
                     issue_number: None,
                     linear_issue_identifier: None,
                     security_alert_number: None,
@@ -6294,6 +6302,67 @@ pub async fn detect_open_pr_for_branch(
     find_open_pr_for_branch(&app, &worktree_path)
 }
 
+/// Parse `gh pr view --json number,url,title` output into a PR link response.
+fn parse_pr_view_link(output: &[u8]) -> Result<Option<DetectPrResponse>, String> {
+    let view_json: serde_json::Value = serde_json::from_slice(output)
+        .map_err(|e| format!("Failed to parse PR view response: {e}"))?;
+    let viewed_pr_number = view_json["number"].as_u64().unwrap_or(0) as u32;
+    let pr_url = view_json["url"].as_str().unwrap_or("").to_string();
+    let title = view_json["title"].as_str().unwrap_or("").to_string();
+
+    if viewed_pr_number == 0 || pr_url.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(DetectPrResponse {
+        pr_number: viewed_pr_number,
+        pr_url,
+        title,
+    }))
+}
+
+/// Resolve PR number/url/title via `gh pr view <number>`.
+fn view_pr_link_by_number(
+    app: &AppHandle,
+    worktree_path: &str,
+    pr_number: u32,
+) -> Result<Option<DetectPrResponse>, String> {
+    let gh = resolve_gh_binary(app);
+    let output = gh_command(&gh, worktree_path)
+        .args([
+            "pr",
+            "view",
+            &pr_number.to_string(),
+            "--json",
+            "number,url,title",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh pr view #{pr_number}: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!("gh pr view #{pr_number} failed: {stderr}");
+        return Ok(None);
+    }
+
+    parse_pr_view_link(&output.stdout)
+}
+
+fn save_worktree_pr_link(
+    app: &AppHandle,
+    worktree_id: &str,
+    pr_number: u32,
+    pr_url: &str,
+) -> Result<(), String> {
+    let mut data = load_projects_data(app)?;
+    if let Some(wt) = data.worktrees.iter_mut().find(|w| w.id == worktree_id) {
+        wt.pr_number = Some(pr_number);
+        wt.pr_url = Some(pr_url.to_string());
+        save_projects_data(app, &data)?;
+    }
+    Ok(())
+}
+
 /// Detect and link an existing PR for the current branch of a worktree.
 ///
 /// Checks explicitly for an open PR. If found, saves the PR info to the
@@ -6326,6 +6395,30 @@ pub async fn detect_and_link_pr(
         return Ok(None);
     }
 
+    // Older PR checkouts stored the number but left the URL empty. Fill it by
+    // exact PR number so magic Open/Merge/status work without branch detection.
+    if let Some(pr_number) = existing_pr_number {
+        if existing_pr_url.is_none() {
+            if let Some(response) = view_pr_link_by_number(&app, &worktree_path, pr_number)? {
+                log::trace!(
+                    "Filled missing PR URL for worktree {worktree_id} from PR #{pr_number}"
+                );
+                let _ = save_worktree_pr_link(
+                    &app,
+                    &worktree_id,
+                    response.pr_number,
+                    &response.pr_url,
+                );
+                return Ok(Some(response));
+            }
+            log::trace!(
+                "Could not resolve URL for linked PR #{pr_number} on worktree {worktree_id}"
+            );
+            // Keep the intentional number; do not replace via branch name.
+            return Ok(None);
+        }
+    }
+
     if let Some(response) = find_open_pr_for_branch(&app, &worktree_path)? {
         // If the worktree was created from a specific PR but URL is still missing,
         // only accept a branch match for that same number — never overwrite with
@@ -6345,13 +6438,7 @@ pub async fn detect_and_link_pr(
             response.pr_number
         );
 
-        if let Ok(mut data) = load_projects_data(&app) {
-            if let Some(wt) = data.worktrees.iter_mut().find(|w| w.id == worktree_id) {
-                wt.pr_number = Some(response.pr_number);
-                wt.pr_url = Some(response.pr_url.clone());
-                let _ = save_projects_data(&app, &data);
-            }
-        }
+        let _ = save_worktree_pr_link(&app, &worktree_id, response.pr_number, &response.pr_url);
 
         return Ok(Some(response));
     }
@@ -11114,8 +11201,8 @@ pub async fn merge_worktree_to_base(
         return Err("Cannot merge base branch into itself".to_string());
     }
 
-    // Validate: no open PR
-    if worktree.pr_url.is_some() {
+    // Validate: no open PR (checkout may store number before/without URL)
+    if worktree.pr_number.is_some() || worktree.pr_url.is_some() {
         return Err(
             "Cannot merge locally while a PR is open. Close or merge the PR on GitHub first."
                 .to_string(),
@@ -13094,6 +13181,36 @@ mod tests {
         assert_eq!(response.pr_number, 42);
         assert_eq!(response.pr_url, "https://github.com/acme/app/pull/42");
         assert_eq!(response.title, "Ship it");
+    }
+
+    #[test]
+    fn parse_pr_view_link_returns_number_url_and_title() {
+        let response = parse_pr_view_link(
+            br#"{"number":99,"url":"https://github.com/acme/app/pull/99","title":"Checkout fix"}"#,
+        )
+        .expect("parse response")
+        .expect("pr link");
+
+        assert_eq!(response.pr_number, 99);
+        assert_eq!(response.pr_url, "https://github.com/acme/app/pull/99");
+        assert_eq!(response.title, "Checkout fix");
+    }
+
+    #[test]
+    fn parse_pr_view_link_rejects_missing_url() {
+        let response = parse_pr_view_link(br#"{"number":99,"url":"","title":"No url"}"#)
+            .expect("parse response");
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn generate_pr_worktree_name_prefers_pr_number_prefix() {
+        assert_eq!(
+            generate_pr_worktree_name(42, "feature/cool-thing"),
+            "pr-42-feature_cool-thing"
+        );
+        assert_eq!(generate_pr_worktree_name(7, "main"), "pr-7-main");
+        assert_eq!(generate_pr_worktree_name(7, ""), "pr-7");
     }
 
     #[test]

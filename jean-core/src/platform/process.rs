@@ -206,6 +206,12 @@ pub fn raise_fd_limit() {}
 /// - Windows: Uses OpenProcess + GetExitCodeProcess
 #[cfg(unix)]
 pub fn is_process_alive(pid: u32) -> bool {
+    // pid 0 is never a real spawned child: kill(0, 0) targets the caller's
+    // process group and would report "alive" forever. Treat as dead so a bad
+    // spawn (pid 0) can't wedge callers into an infinite liveness wait.
+    if pid == 0 {
+        return false;
+    }
     // kill with signal 0 checks if process exists without actually sending a signal
     let result = unsafe { libc::kill(pid as i32, 0) };
     if result == 0 {
@@ -219,17 +225,7 @@ pub fn is_process_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-pub fn is_process_alive(pid: u32) -> bool {
-    // When WSL is enabled, PIDs are WSL-internal — check via wsl.exe
-    let wsl = super::wsl::get_wsl_config();
-    if wsl.enabled {
-        return silent_command("wsl.exe")
-            .args(["-d", &wsl.distro, "--", "kill", "-0", &pid.to_string()])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-    }
-
+fn windows_process_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -247,6 +243,27 @@ pub fn is_process_alive(pid: u32) -> bool {
 
         result != 0 && exit_code == STILL_ACTIVE as u32
     }
+}
+
+#[cfg(windows)]
+pub fn is_process_alive(pid: u32) -> bool {
+    // pid 0 is never a real spawned child. In WSL mode `kill -0 0` targets the
+    // process group and always succeeds, which would report a failed spawn
+    // (pid 0) as "alive" forever and wedge the tailer until its startup timeout.
+    if pid == 0 {
+        return false;
+    }
+    // When WSL is enabled, PIDs are WSL-internal — check via wsl.exe
+    let wsl = super::wsl::get_wsl_config();
+    if wsl.enabled {
+        return silent_command("wsl.exe")
+            .args(["-d", &wsl.distro, "--", "kill", "-0", &pid.to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+    }
+
+    windows_process_alive(pid)
 }
 
 /// Kill a single process

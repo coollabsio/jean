@@ -3607,7 +3607,9 @@ export function ChatWindow({
                                   handleToolbarBackendModelChange
                                 }
                                 onResolveConflicts={handleResolveConflicts}
-                                hasOpenPr={Boolean(worktree?.pr_url)}
+                                hasOpenPr={Boolean(
+                                  worktree?.pr_number || worktree?.pr_url
+                                )}
                                 onSetDiffRequest={setDiffRequest}
                                 installedBackends={installedBackends}
                                 onModelChange={handleToolbarModelChange}

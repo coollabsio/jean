@@ -33,6 +33,16 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
     )
 }
 
+/// Commands that must preserve WebSocket receive order.
+///
+/// Terminal input is the critical case: xterm.js emits small `onData` chunks
+/// that the browser forwards as independent `terminal_write` invokes. If each
+/// invoke is spawned as an independent task, those tasks can race for the PTY
+/// writer lock and reorder typed characters (e.g. `hello world` → `hewollo ld`).
+fn command_must_run_in_ws_order(command: &str) -> bool {
+    matches!(command, "terminal_write")
+}
+
 async fn dispatch_invoke_response(
     app: AppHandle,
     id: String,
@@ -86,9 +96,60 @@ fn spawn_dispatch_response(
     });
 }
 
+/// Spawn a command that must preserve WebSocket receive order.
+///
+/// Each task waits for the previous ordered task before dispatching, so
+/// independent PTY writer lock acquisitions cannot reorder input chunks.
+/// The connection select loop stays free for heartbeats and broadcast events
+/// (unlike awaiting dispatch inline in the receive arm).
+fn spawn_ordered_dispatch_response(
+    app: AppHandle,
+    id: String,
+    command: String,
+    args: Value,
+    tx: mpsc::UnboundedSender<String>,
+    previous: Option<tokio::task::JoinHandle<()>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if let Some(previous) = previous {
+            // A cancelled/panicked predecessor must not drop subsequent ordered
+            // input forever — continue the chain regardless of join outcome.
+            let _ = previous.await;
+        }
+        let resp = dispatch_invoke_response(app, id, command, args).await;
+        if let Ok(json) = serde_json::to_string(&resp) {
+            let _ = tx.send(json);
+        }
+    })
+}
+
+/// Route a client invoke: ordered commands chain serially; everything else
+/// dispatches independently so long-running work cannot block the WS loop.
+fn dispatch_client_invoke(
+    app: &AppHandle,
+    id: String,
+    command: String,
+    args: Value,
+    resp_tx: &mpsc::UnboundedSender<String>,
+    ordered_tail: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    if command_must_run_in_ws_order(&command) {
+        *ordered_tail = Some(spawn_ordered_dispatch_response(
+            app.clone(),
+            id,
+            command,
+            args,
+            resp_tx.clone(),
+            ordered_tail.take(),
+        ));
+    } else {
+        spawn_dispatch_response(app.clone(), id, command, args, resp_tx.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::command_should_run_on_blocking_pool;
+    use super::{command_must_run_in_ws_order, command_should_run_on_blocking_pool};
 
     #[test]
     fn commit_generation_runs_on_blocking_pool() {
@@ -106,6 +167,13 @@ mod tests {
     #[test]
     fn lightweight_session_creation_stays_on_async_runtime() {
         assert!(!command_should_run_on_blocking_pool("create_session"));
+    }
+
+    #[test]
+    fn terminal_input_writes_run_in_websocket_order() {
+        assert!(command_must_run_in_ws_order("terminal_write"));
+        assert!(!command_must_run_in_ws_order("terminal_resize"));
+        assert!(!command_must_run_in_ws_order("create_session"));
     }
 }
 
@@ -155,6 +223,9 @@ struct InvokeResponse {
 ///
 /// 2. **Command dispatch is spawned** as separate tokio tasks so it never
 ///    blocks event delivery. Responses come back via an unbounded channel.
+///    Order-sensitive commands (`terminal_write`) chain through
+///    `spawn_ordered_dispatch_response` so receive order is preserved without
+///    awaiting inline in the select loop.
 ///
 /// 3. **Batched writes** — after receiving the first message, we drain
 ///    additional pending messages with `try_recv()` and write them all with
@@ -172,6 +243,11 @@ pub async fn handle_ws_connection(
     // Channel for command dispatch responses. Unbounded because command
     // responses are infrequent (user-initiated) and must never be dropped.
     let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<String>();
+
+    // Tail of the per-connection ordered-command chain. Only `terminal_write`
+    // (and any future `command_must_run_in_ws_order` entries) use this; other
+    // commands still fan out independently.
+    let mut ordered_dispatch_tail: Option<tokio::task::JoinHandle<()>> = None;
 
     // Heartbeat: server-driven protocol ping every PING_INTERVAL. If no
     // inbound traffic (pong, text, ping) for PONG_TIMEOUT, treat connection as
@@ -216,14 +292,13 @@ pub async fn handle_ws_connection(
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<WsClientMessage>(&text) {
                             Ok(WsClientMessage::Invoke { id, command, args }) => {
-                                // Spawn dispatch as a separate task so the
-                                // select loop stays free to drain events.
-                                spawn_dispatch_response(
-                                    app.clone(),
+                                dispatch_client_invoke(
+                                    &app,
                                     id,
                                     command,
                                     args,
-                                    resp_tx.clone(),
+                                    &resp_tx,
+                                    &mut ordered_dispatch_tail,
                                 );
                             }
                             Ok(WsClientMessage::TerminalReplay { terminal_id, last_seq }) => {
@@ -241,12 +316,13 @@ pub async fn handle_ws_connection(
                                 // Try legacy format (no "type" field — old clients send bare invoke)
                                 match serde_json::from_str::<InvokeRequest>(&text) {
                                     Ok(req) => {
-                                        spawn_dispatch_response(
-                                            app.clone(),
+                                        dispatch_client_invoke(
+                                            &app,
                                             req.id,
                                             req.command,
                                             req.args,
-                                            resp_tx.clone(),
+                                            &resp_tx,
+                                            &mut ordered_dispatch_tail,
                                         );
                                     }
                                     Err(_) => {

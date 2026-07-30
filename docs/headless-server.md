@@ -225,9 +225,16 @@ browser terminals can find tools installed by shell setup scripts (for example
 - The server Docker image is published by the Server Release workflow as
   `ghcr.io/<owner>/<repo>-server:<tag>`.
 - The image launches `jean-server` directly and contains no GTK/WebKit/Xvfb packages.
+- Runtime packages include `ca-certificates`, `curl`, `git`, `openssh-client`, and
+  the official **GitHub CLI (`gh`)** so onboarding and GitHub integration can run
+  without a separate install step. Prefer the **System PATH** CLI source in
+  onboarding/Settings when using the container image.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
 - Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
 - Put TLS/auth in front of the container for internet exposure.
+- For Tailscale access from a browser, prefer `tailscale serve` (HTTPS) in front
+  of `127.0.0.1` rather than plain `http://100.x.y.z` — browsers block the
+  clipboard API and other secure-context features on non-localhost HTTP.
 
 Example command:
 
