@@ -60,4 +60,26 @@ describe('applySessionSettingToSession', () => {
       selected_thinking_level: 'off',
     })
   })
+
+  it('updates custom provider', () => {
+    expect(
+      applySessionSettingToSession(baseSession, 'provider', 'MiniMax')
+    ).toMatchObject({
+      selected_provider: 'MiniMax',
+    })
+  })
+
+  it('clears provider for default/sentinel values', () => {
+    const withProvider = {
+      ...baseSession,
+      selected_provider: 'Z.ai',
+    }
+
+    for (const value of ['', '__anthropic__', '__default__', 'default']) {
+      expect(
+        applySessionSettingToSession(withProvider, 'provider', value)
+          .selected_provider
+      ).toBeUndefined()
+    }
+  })
 })
