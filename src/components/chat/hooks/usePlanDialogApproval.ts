@@ -23,6 +23,7 @@ import type { CliBackend } from '@/types/preferences'
 
 const THINKING_LEVEL_VALUES = new Set<ThinkingLevel>([
   'off',
+  'adaptive',
   'think',
   'megathink',
   'ultrathink',

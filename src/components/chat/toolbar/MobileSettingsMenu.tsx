@@ -70,6 +70,7 @@ import {
   KIMI_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  withAdaptiveEffortOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   getPrStatusDisplay,
@@ -230,23 +231,24 @@ export function MobileSettingsMenu({
       (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels
+      ? withAdaptiveEffortOption(modelReasoning.levels)
       : isPi
         ? PI_EFFORT_LEVEL_OPTIONS
         : isCodex
           ? CODEX_EFFORT_LEVEL_OPTIONS
           : isKimi
-            ? KIMI_EFFORT_LEVEL_OPTIONS
+            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS)
             : isGrok
               ? GROK_EFFORT_LEVEL_OPTIONS
               : EFFORT_LEVEL_OPTIONS
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
-      ? modelReasoning.levels
+      ? withAdaptiveEffortOption(modelReasoning.levels)
       : THINKING_LEVEL_OPTIONS
   const displayedEffortLevel =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels.some(o => o.value === selectedEffortLevel)
+      ? selectedEffortLevel === 'adaptive' ||
+        modelReasoning.levels.some(o => o.value === selectedEffortLevel)
         ? selectedEffortLevel
         : modelReasoning.default
       : isCodex || isPi
@@ -262,10 +264,12 @@ export function MobileSettingsMenu({
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
   const displayedThinkingLevel =
-    modelReasoning?.type === 'thinking' &&
-    !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
-      ? modelReasoning.default
-      : selectedThinkingLevel
+    selectedThinkingLevel === 'adaptive'
+      ? selectedThinkingLevel
+      : modelReasoning?.type === 'thinking' &&
+          !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
+        ? modelReasoning.default
+        : selectedThinkingLevel
   const displayedThinkingLabel =
     thinkingLevelOptions.find(o => o.value === displayedThinkingLevel)?.label ??
     displayedThinkingLevel

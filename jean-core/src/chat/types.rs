@@ -165,6 +165,8 @@ pub enum MessageRole {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ThinkingLevel {
     Off,
+    /// Omit thinking settings so the model can choose its own depth
+    Adaptive,
     Think,
     Megathink,
     #[default]
@@ -189,6 +191,7 @@ impl<'de> Deserialize<'de> for ThinkingLevel {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "off" => Self::Off,
+            "adaptive" => Self::Adaptive,
             "think" => Self::Think,
             "megathink" => Self::Megathink,
             "ultrathink" => Self::Ultrathink,
@@ -205,6 +208,8 @@ impl<'de> Deserialize<'de> for ThinkingLevel {
 pub enum EffortLevel {
     /// Don't send effort (used when thinking is disabled for mode)
     Off,
+    /// Omit effort so the model chooses its own reasoning depth
+    Adaptive,
     Minimal,
     Low,
     Medium,
@@ -221,7 +226,7 @@ impl Serialize for EffortLevel {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.effort_value().unwrap_or("off"))
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -233,6 +238,7 @@ impl<'de> Deserialize<'de> for EffortLevel {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "off" => Self::Off,
+            "adaptive" => Self::Adaptive,
             "minimal" => Self::Minimal,
             "low" => Self::Low,
             "medium" => Self::Medium,
@@ -246,10 +252,28 @@ impl<'de> Deserialize<'de> for EffortLevel {
 }
 
 impl EffortLevel {
-    /// Get the effort value string for CLI --settings JSON
+    /// Stable string form for persistence / wire format
+    pub fn as_str(&self) -> &str {
+        match self {
+            EffortLevel::Off => "off",
+            EffortLevel::Adaptive => "adaptive",
+            EffortLevel::Minimal => "minimal",
+            EffortLevel::Low => "low",
+            EffortLevel::Medium => "medium",
+            EffortLevel::High => "high",
+            EffortLevel::Xhigh => "xhigh",
+            EffortLevel::Max => "max",
+            EffortLevel::Ultracode => "ultracode",
+            EffortLevel::Other(value) => value.as_str(),
+        }
+    }
+
+    /// Get the effort value string for CLI --settings JSON.
+    /// Returns `None` when Jean should omit the effort parameter entirely
+    /// (`Off` disables thinking for a mode; `Adaptive` lets the model decide).
     pub fn effort_value(&self) -> Option<&str> {
         match self {
-            EffortLevel::Off => None,
+            EffortLevel::Off | EffortLevel::Adaptive => None,
             EffortLevel::Minimal => Some("minimal"),
             EffortLevel::Low => Some("low"),
             EffortLevel::Medium => Some("medium"),
@@ -266,6 +290,7 @@ impl ThinkingLevel {
     pub fn thinking_value(&self) -> &str {
         match self {
             Self::Off => "off",
+            Self::Adaptive => "adaptive",
             Self::Think => "think",
             Self::Megathink => "megathink",
             Self::Ultrathink => "ultrathink",
@@ -273,15 +298,22 @@ impl ThinkingLevel {
         }
     }
 
-    /// Whether thinking is enabled for this level
+    /// Whether thinking is enabled for this level.
+    /// `Adaptive` omits thinking settings entirely (model decides), so it is
+    /// not treated as explicitly enabled.
     pub fn is_enabled(&self) -> bool {
-        !matches!(self, ThinkingLevel::Off)
+        !matches!(self, ThinkingLevel::Off | ThinkingLevel::Adaptive)
+    }
+
+    /// Whether Jean should omit thinking settings so the model decides.
+    pub fn omits_thinking_settings(&self) -> bool {
+        matches!(self, ThinkingLevel::Adaptive)
     }
 
     /// Get the MAX_THINKING_TOKENS value for this level
     pub fn thinking_tokens(&self) -> Option<u32> {
         match self {
-            ThinkingLevel::Off => None,
+            ThinkingLevel::Off | ThinkingLevel::Adaptive => None,
             ThinkingLevel::Think => Some(4_000),
             ThinkingLevel::Megathink => Some(10_000),
             ThinkingLevel::Ultrathink => Some(31_999),
@@ -1808,6 +1840,20 @@ mod tests {
     }
 
     #[test]
+    fn effort_level_adaptive_omits_backend_value() {
+        assert_eq!(EffortLevel::Adaptive.effort_value(), None);
+        assert_eq!(EffortLevel::Adaptive.as_str(), "adaptive");
+        assert_eq!(
+            serde_json::to_string(&EffortLevel::Adaptive).unwrap(),
+            "\"adaptive\""
+        );
+        assert_eq!(
+            serde_json::from_str::<EffortLevel>("\"adaptive\"").unwrap(),
+            EffortLevel::Adaptive
+        );
+    }
+
+    #[test]
     fn effort_level_accepts_catalog_defined_values() {
         let effort = serde_json::from_str::<EffortLevel>("\"turbo\"").unwrap();
         assert_eq!(effort.effort_value(), Some("turbo"));
@@ -1825,6 +1871,8 @@ mod tests {
     #[test]
     fn test_thinking_level_is_enabled() {
         assert!(!ThinkingLevel::Off.is_enabled());
+        assert!(!ThinkingLevel::Adaptive.is_enabled());
+        assert!(ThinkingLevel::Adaptive.omits_thinking_settings());
         assert!(ThinkingLevel::Think.is_enabled());
         assert!(ThinkingLevel::Megathink.is_enabled());
         assert!(ThinkingLevel::Ultrathink.is_enabled());
@@ -1833,9 +1881,23 @@ mod tests {
     #[test]
     fn test_thinking_level_tokens() {
         assert_eq!(ThinkingLevel::Off.thinking_tokens(), None);
+        assert_eq!(ThinkingLevel::Adaptive.thinking_tokens(), None);
         assert_eq!(ThinkingLevel::Think.thinking_tokens(), Some(4_000));
         assert_eq!(ThinkingLevel::Megathink.thinking_tokens(), Some(10_000));
         assert_eq!(ThinkingLevel::Ultrathink.thinking_tokens(), Some(31_999));
+    }
+
+    #[test]
+    fn thinking_level_adaptive_roundtrips() {
+        assert_eq!(ThinkingLevel::Adaptive.thinking_value(), "adaptive");
+        assert_eq!(
+            serde_json::to_string(&ThinkingLevel::Adaptive).unwrap(),
+            "\"adaptive\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ThinkingLevel>("\"adaptive\"").unwrap(),
+            ThinkingLevel::Adaptive
+        );
     }
 
     #[test]

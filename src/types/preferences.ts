@@ -1728,6 +1728,7 @@ export function getModelFastInfo(
 }
 
 export const thinkingLevelOptions: { value: ThinkingLevel; label: string }[] = [
+  { value: 'adaptive', label: 'Adaptive/Default' },
   { value: 'off', label: 'Off' },
   { value: 'think', label: 'Think (4K)' },
   { value: 'megathink', label: 'Megathink (10K)' },
@@ -1739,6 +1740,11 @@ export const effortLevelOptions: {
   label: string
   description: string
 }[] = [
+  {
+    value: 'adaptive',
+    label: 'Adaptive/Default',
+    description: 'Model default (no forced level)',
+  },
   { value: 'low', label: 'Low', description: 'Minimal Claude Opus effort' },
   {
     value: 'medium',

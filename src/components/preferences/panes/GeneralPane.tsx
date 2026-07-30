@@ -143,6 +143,7 @@ import {
   getCatalogModelReasoning,
   useModelCatalog,
 } from '@/services/model-catalog'
+import { withAdaptiveEffortOption } from '@/components/chat/toolbar/toolbar-options'
 import type { AppPreferences } from '@/types/preferences'
 import {
   effortLevelOptions,
@@ -297,24 +298,29 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     'codex',
     preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   )
-  const selectedCodexReasoningOptions =
+  const selectedCodexReasoningOptions = withAdaptiveEffortOption(
     codexReasoning?.type === 'effort'
       ? codexReasoning.levels
       : codexReasoningOptions
+  )
   const grokReasoning = getCatalogModelReasoning(
     modelCatalog,
     'grok',
     preferences?.selected_grok_model ?? 'grok/grok-4.5'
   )
-  const selectedGrokReasoningOptions =
+  const selectedGrokReasoningOptions = withAdaptiveEffortOption(
     grokReasoning?.type === 'effort'
       ? grokReasoning.levels
       : grokReasoningOptions
+  )
   const claudeReasoning = getCatalogModelReasoning(
     modelCatalog,
     'claude',
     preferences?.selected_model ?? 'claude-opus-4-8[1m]'
   )
+  const selectedClaudeReasoningOptions = claudeReasoning
+    ? withAdaptiveEffortOption(claudeReasoning.levels)
+    : []
   const patchPreferences = usePatchPreferences()
   const isWebAccessView = !isNativeApp()
   const webAccessSoundsEnabled = preferences?.web_access_sounds_enabled ?? true
@@ -1208,7 +1214,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       preferences,
       piModelOptions
     )
-  const buildReasoning =
+  const buildReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveBuildBackend, buildModel) ??
     (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveBuildBackend)
       ? {
@@ -1222,7 +1228,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 : effortLevelOptions,
         }
       : null)
-  const yoloReasoning =
+  const buildReasoning = buildReasoningRaw
+    ? {
+        ...buildReasoningRaw,
+        levels: withAdaptiveEffortOption(buildReasoningRaw.levels),
+      }
+    : null
+  const yoloReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveYoloBackend, yoloModel) ??
     (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveYoloBackend)
       ? {
@@ -1236,6 +1248,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 : effortLevelOptions,
         }
       : null)
+  const yoloReasoning = yoloReasoningRaw
+    ? {
+        ...yoloReasoningRaw,
+        levels: withAdaptiveEffortOption(yoloReasoningRaw.levels),
+      }
+    : null
   const piAuthMessage = piAuth?.error
 
   const selectedCommandCodeModel =
@@ -2988,7 +3006,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {claudeReasoning.levels.map(option => (
+                    {selectedClaudeReasoningOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -3015,7 +3033,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {claudeReasoning.levels.map(option => (
+                    {selectedClaudeReasoningOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>

@@ -377,7 +377,7 @@ fn codex_reasoning_effort<'a>(effort: &'a EffortLevel, model: Option<&str>) -> O
         )
     );
     match effort {
-        EffortLevel::Off => None,
+        EffortLevel::Off | EffortLevel::Adaptive => None,
         EffortLevel::Minimal => Some("low"),
         // Migrate GPT 5.6 sessions persisted before the Codex-native value was fixed.
         EffortLevel::Ultracode if supports_ultra => Some("ultra"),
@@ -3053,14 +3053,16 @@ pub async fn send_chat_message(
     };
     let run_effort_level = match effective_backend {
         Backend::Cursor | Backend::Commandcode => None,
-        Backend::Pi => effort_level.as_ref().map(|e| match e {
-            EffortLevel::Off => "off",
-            EffortLevel::Minimal => "minimal",
-            EffortLevel::Low => "low",
-            EffortLevel::Medium => "medium",
-            EffortLevel::High => "high",
-            EffortLevel::Xhigh | EffortLevel::Max | EffortLevel::Ultracode => "xhigh",
-            EffortLevel::Other(value) => value.as_str(),
+        Backend::Pi => effort_level.as_ref().and_then(|e| match e {
+            // Adaptive omits the flag so PI can choose its own depth.
+            EffortLevel::Adaptive => None,
+            EffortLevel::Off => Some("off"),
+            EffortLevel::Minimal => Some("minimal"),
+            EffortLevel::Low => Some("low"),
+            EffortLevel::Medium => Some("medium"),
+            EffortLevel::High => Some("high"),
+            EffortLevel::Xhigh | EffortLevel::Max | EffortLevel::Ultracode => Some("xhigh"),
+            EffortLevel::Other(value) => Some(value.as_str()),
         }),
         _ => effort_level.as_ref().and_then(|e| e.effort_value()),
     };
@@ -3845,7 +3847,10 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("xhigh".to_string()),
                         super::types::EffortLevel::Ultracode => Some("xhigh".to_string()),
-                        super::types::EffortLevel::Off => None,
+                        // Off / Adaptive: omit so the model can choose depth
+                        super::types::EffortLevel::Off | super::types::EffortLevel::Adaptive => {
+                            None
+                        }
                         super::types::EffortLevel::Other(value) => Some(value.clone()),
                     });
 
@@ -4647,7 +4652,10 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("max".to_string()),
                         super::types::EffortLevel::Ultracode => Some("max".to_string()),
-                        super::types::EffortLevel::Off => None,
+                        // Off / Adaptive: omit --effort so Grok can choose depth
+                        super::types::EffortLevel::Off | super::types::EffortLevel::Adaptive => {
+                            None
+                        }
                         super::types::EffortLevel::Other(value) => Some(value.clone()),
                     });
 

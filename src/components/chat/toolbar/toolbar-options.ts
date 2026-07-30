@@ -109,11 +109,26 @@ export const KIMI_EFFORT_LEVEL_OPTIONS: {
   { value: 'high', label: 'Thinking On', description: 'Enable thinking' },
 ]
 
+export const ADAPTIVE_EFFORT_OPTION: {
+  value: EffortLevel
+  label: string
+  description: string
+} = {
+  value: 'adaptive',
+  label: 'Adaptive/Default',
+  description: 'Model default (no forced level)',
+}
+
 export const THINKING_LEVEL_OPTIONS: {
   value: ThinkingLevel
   label: string
   tokens: string
 }[] = [
+  {
+    value: 'adaptive',
+    label: 'Adaptive/Default',
+    tokens: 'Model default',
+  },
   { value: 'off', label: 'Off', tokens: 'Disabled' },
   { value: 'think', label: 'Think', tokens: '4K' },
   { value: 'megathink', label: 'Megathink', tokens: '10K' },
@@ -125,6 +140,7 @@ export const EFFORT_LEVEL_OPTIONS: {
   label: string
   description: string
 }[] = [
+  ADAPTIVE_EFFORT_OPTION,
   { value: 'low', label: 'Low', description: 'Minimal' },
   { value: 'medium', label: 'Medium', description: 'Moderate' },
   { value: 'high', label: 'High', description: 'Deep' },
@@ -146,6 +162,7 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
   label: string
   description: string
 }[] = [
+  ADAPTIVE_EFFORT_OPTION,
   { value: 'off', label: 'Off', description: 'Disabled' },
   { value: 'minimal', label: 'Minimal', description: 'Minimal' },
   { value: 'low', label: 'Low', description: 'Low' },
@@ -153,6 +170,14 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
   { value: 'high', label: 'High', description: 'High' },
   { value: 'xhigh', label: 'xHigh', description: 'Extra high' },
 ]
+
+/** Prepend Adaptive when catalog/backend levels omit it. */
+export function withAdaptiveEffortOption<
+  T extends { value: string; label: string; description?: string },
+>(levels: T[]): Array<T | typeof ADAPTIVE_EFFORT_OPTION> {
+  if (levels.some(level => level.value === 'adaptive')) return levels
+  return [ADAPTIVE_EFFORT_OPTION, ...levels]
+}
 
 // Grok supports low/medium/high/xhigh/max natively. ultracode is a Jean
 // main-loop concept (xHigh + workflows), not a Grok CLI effort level.

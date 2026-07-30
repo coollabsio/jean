@@ -1282,6 +1282,14 @@ pub async fn dispatch_command(
             {
                 None => None,
                 Some("off") => Some(crate::chat::types::ThinkingLevel::Off),
+                // Adaptive: omit forced thinking settings. Also map to effort
+                // Adaptive when no explicit effort was provided.
+                Some("adaptive") => {
+                    if effort_level.is_none() {
+                        effort_level = Some(crate::chat::types::EffortLevel::Adaptive);
+                    }
+                    Some(crate::chat::types::ThinkingLevel::Adaptive)
+                }
                 Some("think") => Some(crate::chat::types::ThinkingLevel::Think),
                 Some("megathink") => Some(crate::chat::types::ThinkingLevel::Megathink),
                 Some("ultrathink") => Some(crate::chat::types::ThinkingLevel::Ultrathink),

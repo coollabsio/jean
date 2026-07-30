@@ -230,6 +230,9 @@ export const ChatToolbar = memo(function ChatToolbar({
     const values = new Set(
       selectedModelReasoning.levels.map(level => level.value)
     )
+    // Adaptive is always valid: Jean injects it into every effort/thinking
+    // dropdown and omits the forced level on send.
+    values.add('adaptive')
     if (selectedModelReasoning.type === 'effort') {
       if (!values.has(selectedEffortLevel)) {
         onEffortLevelChange(selectedModelReasoning.default as EffortLevel)
