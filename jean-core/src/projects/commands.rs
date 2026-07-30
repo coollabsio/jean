@@ -1370,6 +1370,9 @@ fn clear_session_runtime_state(session: &mut Session) {
     session.grok_session_id = None;
     session.kimi_session_id = None;
     session.is_reviewing = false;
+    if session.status_override.as_deref() == Some("review") {
+        session.status_override = None;
+    }
     session.waiting_for_input = false;
     session.waiting_for_input_type = None;
     session.pending_permission_denials.clear();
@@ -1444,6 +1447,9 @@ fn prepare_forked_metadata(
     metadata.pending_codex_dynamic_tool_call_requests.clear();
     metadata.denied_message_context = None;
     metadata.is_reviewing = false;
+    if metadata.status_override.as_deref() == Some("review") {
+        metadata.status_override = None;
+    }
     metadata.waiting_for_input = false;
     metadata.waiting_for_input_type = None;
     metadata.queued_messages.clear();
@@ -9919,6 +9925,7 @@ async fn update_review_session_state(
         None,
         None,
         is_reviewing,
+        None, // status_override
         None,
         None,
         None,

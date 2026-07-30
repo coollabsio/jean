@@ -1478,10 +1478,16 @@ fn persist_codex_recovered_completion_state(
         metadata.waiting_for_input = true;
         metadata.waiting_for_input_type = Some("plan".to_string());
         metadata.is_reviewing = false;
+        if metadata.status_override.as_deref() == Some("review") {
+            metadata.status_override = None;
+        }
     } else {
         metadata.waiting_for_input = false;
         metadata.waiting_for_input_type = None;
         metadata.is_reviewing = false;
+        if metadata.status_override.as_deref() == Some("review") {
+            metadata.status_override = None;
+        }
     }
 
     super::storage::save_metadata(app, &metadata)

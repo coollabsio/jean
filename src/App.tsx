@@ -410,6 +410,10 @@ function App() {
       // Also restore Zustand state for reviewing/waiting status
       if (data.sessionsByWorktree) {
         const reviewingUpdates: Record<string, boolean> = {}
+        const statusOverrideUpdates: Record<
+          string,
+          'idle' | 'review' | 'completed' | 'cancelled'
+        > = {}
         const waitingUpdates: Record<string, boolean> = {}
         const sessionMappings: Record<string, string> = {}
 
@@ -432,8 +436,20 @@ function App() {
           const wts = sessionsData as WorktreeSessions
           for (const session of wts.sessions) {
             sessionMappings[session.id] = worktreeId
-            if (session.is_reviewing) {
+            const override = session.status_override
+            if (
+              override === 'idle' ||
+              override === 'review' ||
+              override === 'completed' ||
+              override === 'cancelled'
+            ) {
+              statusOverrideUpdates[session.id] = override
+              if (override === 'review') {
+                reviewingUpdates[session.id] = true
+              }
+            } else if (session.is_reviewing) {
               reviewingUpdates[session.id] = true
+              statusOverrideUpdates[session.id] = 'review'
             }
             if (session.waiting_for_input) {
               waitingUpdates[session.id] = true
@@ -465,15 +481,22 @@ function App() {
               ([sessionId]) => !runningSessionIds.has(sessionId)
             )
           )
+          const filteredStatusOverrideUpdates = Object.fromEntries(
+            Object.entries(statusOverrideUpdates).filter(
+              ([sessionId]) => !runningSessionIds.has(sessionId)
+            )
+          )
           const filteredWaitingUpdates = Object.fromEntries(
             Object.entries(waitingUpdates).filter(
               ([sessionId]) => !runningSessionIds.has(sessionId)
             )
           )
           storeUpdates.reviewingSessions = filteredReviewingUpdates
+          storeUpdates.sessionStatusOverrides = filteredStatusOverrideUpdates
           storeUpdates.waitingForInputSessionIds = filteredWaitingUpdates
         } else {
           storeUpdates.reviewingSessions = reviewingUpdates
+          storeUpdates.sessionStatusOverrides = statusOverrideUpdates
           storeUpdates.waitingForInputSessionIds = waitingUpdates
         }
         // Replace (not merge) reviewing/waiting state — server is source of truth.
@@ -492,14 +515,30 @@ function App() {
       // more messages from an event or query response racing the bootstrap.
       if (data.activeSessions) {
         const activeReviewingUpdates: Record<string, boolean> = {}
+        const activeStatusOverrideUpdates: Record<
+          string,
+          'idle' | 'review' | 'completed' | 'cancelled'
+        > = {}
         const activeWaitingUpdates: Record<string, boolean> = {}
 
         for (const [sessionId, initSession] of Object.entries(
           data.activeSessions
         )) {
           const session = initSession as Session
-          if (session.is_reviewing) {
+          const override = session.status_override
+          if (
+            override === 'idle' ||
+            override === 'review' ||
+            override === 'completed' ||
+            override === 'cancelled'
+          ) {
+            activeStatusOverrideUpdates[sessionId] = override
+            if (override === 'review') {
+              activeReviewingUpdates[sessionId] = true
+            }
+          } else if (session.is_reviewing) {
             activeReviewingUpdates[sessionId] = true
+            activeStatusOverrideUpdates[sessionId] = 'review'
           }
           if (session.waiting_for_input) {
             activeWaitingUpdates[sessionId] = true
@@ -536,6 +575,7 @@ function App() {
 
         if (
           Object.keys(activeReviewingUpdates).length > 0 ||
+          Object.keys(activeStatusOverrideUpdates).length > 0 ||
           Object.keys(activeWaitingUpdates).length > 0
         ) {
           beginSessionStateHydration()
@@ -545,6 +585,10 @@ function App() {
                 data.sessionsByWorktree === undefined
                   ? activeReviewingUpdates
                   : state.reviewingSessions,
+              sessionStatusOverrides:
+                data.sessionsByWorktree === undefined
+                  ? activeStatusOverrideUpdates
+                  : state.sessionStatusOverrides,
               waitingForInputSessionIds:
                 data.sessionsByWorktree === undefined
                   ? activeWaitingUpdates

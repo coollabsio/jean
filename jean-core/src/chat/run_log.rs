@@ -2378,6 +2378,9 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                     if completed {
                         run.status = RunStatus::Completed;
                         metadata.is_reviewing = false;
+                        if metadata.status_override.as_deref() == Some("review") {
+                            metadata.status_override = None;
+                        }
 
                         // Recover the provider-owned session id from JSONL so a
                         // turn that completed while Jean was closed keeps its context.

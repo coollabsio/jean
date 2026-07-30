@@ -278,8 +278,14 @@ export interface Session {
   denied_message_context?: DeniedMessageContext
   /** AI code review results for this session */
   review_results?: StoredReviewResults
-  /** Whether this session is marked for review */
+  /** Whether this session is marked for review (legacy; prefer status_override) */
   is_reviewing?: boolean
+  /**
+   * User-forced session status. Applied when the session is not in a live
+   * automatic state (running, waiting for input, permissions, …).
+   * Values: 'idle' | 'review' | 'completed' | 'cancelled'
+   */
+  status_override?: 'idle' | 'review' | 'completed' | 'cancelled' | null
   /** Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode) */
   waiting_for_input?: boolean
   /** Type of waiting: 'question' for AskUserQuestion, 'plan' for ExitPlanMode */

@@ -1644,6 +1644,7 @@ pub async fn update_session_state(
     >,
     denied_message_context: Option<Option<super::types::DeniedMessageContext>>,
     is_reviewing: Option<bool>,
+    status_override: Option<Option<String>>,
     waiting_for_input: Option<bool>,
     waiting_for_input_type: Option<Option<String>>,
     plan_file_path: Option<Option<String>>,
@@ -1691,6 +1692,28 @@ pub async fn update_session_state(
             }
             if let Some(v) = is_reviewing {
                 session.is_reviewing = v;
+                // Keep status_override in sync with legacy reviewing flag when
+                // callers only touch is_reviewing (e.g. cancel/fail completion).
+                if v {
+                    if session.status_override.as_deref() != Some("review") {
+                        session.status_override = Some("review".to_string());
+                    }
+                } else if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
+            }
+            if let Some(v) = status_override {
+                match &v {
+                    Some(status) if !matches!(status.as_str(), "idle" | "review" | "completed" | "cancelled") => {
+                        return Err(format!(
+                            "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
+                        ));
+                    }
+                    _ => {}
+                }
+                session.status_override = v;
+                // Keep legacy is_reviewing flag aligned with the override
+                session.is_reviewing = session.status_override.as_deref() == Some("review");
             }
             if let Some(v) = waiting_for_input {
                 session.waiting_for_input = v;
@@ -1797,6 +1820,9 @@ fn queued_prompt_skips_plan_wait(
 fn apply_non_waiting_completion_state(session: &mut Session) {
     session.waiting_for_input = false;
     session.is_reviewing = false;
+    if session.status_override.as_deref() == Some("review") {
+        session.status_override = None;
+    }
     session.waiting_for_input_type = None;
 }
 
@@ -2865,6 +2891,9 @@ pub async fn send_chat_message(
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.waiting_for_input = false;
             session.is_reviewing = false;
+            if session.status_override.as_deref() == Some("review") {
+                session.status_override = None;
+            }
             session.waiting_for_input_type = None;
         }
         Ok(())
@@ -5262,6 +5291,9 @@ pub async fn send_chat_message(
             } else if has_blocking_tool {
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some(
                     if has_question_tool {
                         "question"
@@ -5274,6 +5306,9 @@ pub async fn send_chat_message(
                 // Codex/OpenCode plan-mode with content → waiting for plan approval
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some("plan".to_string());
             } else {
                 // Normal completion

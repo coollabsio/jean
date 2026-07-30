@@ -148,6 +148,7 @@ describe('computeSessionCardData', () => {
       answeredQuestions: {},
       waitingForInputSessionIds: {},
       reviewingSessions: {},
+      sessionStatusOverrides: {},
       pendingPermissionDenials: {},
       pendingCodexPermissionRequests: {},
       pendingCodexCommandApprovalRequests: {},
@@ -260,12 +261,64 @@ describe('computeSessionCardData', () => {
     const storeState = createBaseStoreState({
       waitingForInputSessionIds: { 'session-1': true },
       reviewingSessions: { 'session-1': true },
+      sessionStatusOverrides: { 'session-1': 'review' },
     })
 
     const card = computeSessionCardData(session, storeState)
 
     expect(card.isWaiting).toBe(false)
     expect(card.status).toBe('review')
+    expect(card.statusOverride).toBe('review')
+    expect(card.automaticStatus).toBe('review')
+  })
+
+  it('applies a manual status override when automatic status is terminal', () => {
+    const session = createBaseSession({
+      last_run_status: 'completed',
+      last_run_execution_mode: 'build',
+    })
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'cancelled' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('completed')
+    expect(card.statusOverride).toBe('cancelled')
+    expect(card.status).toBe('cancelled')
+  })
+
+  it('does not let a manual override hide live waiting status', () => {
+    const session = createBaseSession({
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'completed',
+      last_run_execution_mode: 'plan',
+    })
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'review' },
+      waitingForInputSessionIds: { 'session-1': true },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('input_required')
+    expect(card.statusOverride).toBe('review')
+    expect(card.status).toBe('input_required')
+  })
+
+  it('can force idle even when automatic status is completed', () => {
+    const session = createBaseSession({
+      last_run_status: 'completed',
+    })
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'idle' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('completed')
+    expect(card.status).toBe('idle')
   })
 
   it('shows an unopened code review session as loading from persisted state', () => {

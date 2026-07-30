@@ -806,6 +806,7 @@ async fn approve_plan_and_start_yolo(
         None,
         None,
         Some(false),
+        None, // status_override
         Some(false),
         Some(None),
         None,

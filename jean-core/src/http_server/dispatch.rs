@@ -2106,6 +2106,18 @@ pub async fn dispatch_command(
             let denied_message_context: Option<Option<crate::chat::types::DeniedMessageContext>> =
                 field_opt(&args, "deniedMessageContext", "denied_message_context")?;
             let is_reviewing: Option<bool> = field_opt(&args, "isReviewing", "is_reviewing")?;
+            // Special handling for status_override: missing vs null (clear) vs string
+            let status_override: Option<Option<String>> = match args
+                .get("statusOverride")
+                .or_else(|| args.get("status_override"))
+            {
+                None => None,
+                Some(Value::Null) => Some(None),
+                Some(v) => match v.as_str() {
+                    Some(s) => Some(Some(s.to_string())),
+                    None => return Err("Invalid status_override: expected string or null".into()),
+                },
+            };
             let waiting_for_input: Option<bool> =
                 field_opt(&args, "waitingForInput", "waiting_for_input")?;
             let waiting_for_input_type: Option<Option<String>> =
@@ -2152,6 +2164,7 @@ pub async fn dispatch_command(
                 pending_codex_dynamic_tool_call_requests,
                 denied_message_context,
                 is_reviewing,
+                status_override,
                 waiting_for_input,
                 waiting_for_input_type,
                 plan_file_path,

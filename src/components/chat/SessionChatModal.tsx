@@ -13,8 +13,6 @@ import {
   Archive,
   ChevronDown,
   Copy,
-  Eye,
-  EyeOff,
   GitBranchPlus,
   GitPullRequestArrow,
   Pencil,
@@ -95,8 +93,10 @@ import {
   getResumeCommand,
   isActionableWaitingStatus,
   statusConfig,
+  type ManualSessionStatus,
   type SessionCardData,
 } from './session-card-utils'
+import { SessionStatusMenu } from './SessionStatusMenu'
 import {
   buildReorderedSessionIdsWithinStatus,
   resolveModalSessionId,
@@ -1416,35 +1416,17 @@ export function SessionChatModal({
                             <Tag className="mr-2 h-4 w-4" />
                             {sessionLabel ? 'Remove Label' : 'Add Label'}
                           </ContextMenuItem>
-                          <ContextMenuItem
-                            // "Mark as Idle" only clears the manual reviewing
-                            // flag. When review is driven by AI review_results,
-                            // clearing the flag leaves the session in review —
-                            // no effect — so disable it there.
-                            disabled={
-                              status === 'review' && !!session.review_results
-                            }
-                            onSelect={() => {
-                              const { reviewingSessions, setSessionReviewing } =
-                                useChatStore.getState()
-                              const isReviewing =
-                                reviewingSessions[session.id] ||
-                                !!session.review_results
-                              setSessionReviewing(session.id, !isReviewing)
+                          <SessionStatusMenu
+                            statusOverride={card.statusOverride}
+                            automaticStatus={card.automaticStatus}
+                            onSetStatusOverride={(
+                              next: ManualSessionStatus | null
+                            ) => {
+                              useChatStore
+                                .getState()
+                                .setSessionStatusOverride(session.id, next)
                             }}
-                          >
-                            {status === 'review' ? (
-                              <>
-                                <EyeOff className="mr-2 h-4 w-4" />
-                                Mark as Idle
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="mr-2 h-4 w-4" />
-                                Mark for Review
-                              </>
-                            )}
-                          </ContextMenuItem>
+                          />
                           {resumeCommand && (
                             <>
                               <ContextMenuItem

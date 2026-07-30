@@ -32,6 +32,9 @@ export function useCanvasStoreState(): ChatStoreState {
     state => state.waitingForInputSessionIds
   )
   const reviewingSessions = useChatStore(state => state.reviewingSessions)
+  const sessionStatusOverrides = useChatStore(
+    state => state.sessionStatusOverrides
+  )
   const pendingPermissionDenials = useChatStore(
     state => state.pendingPermissionDenials
   )
@@ -62,6 +65,7 @@ export function useCanvasStoreState(): ChatStoreState {
       answeredQuestions,
       waitingForInputSessionIds,
       reviewingSessions,
+      sessionStatusOverrides,
       pendingPermissionDenials,
       pendingCodexPermissionRequests,
       pendingCodexCommandApprovalRequests,
@@ -78,6 +82,7 @@ export function useCanvasStoreState(): ChatStoreState {
       answeredQuestions,
       waitingForInputSessionIds,
       reviewingSessions,
+      sessionStatusOverrides,
       pendingPermissionDenials,
       pendingCodexPermissionRequests,
       pendingCodexCommandApprovalRequests,
