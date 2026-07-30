@@ -75,6 +75,10 @@ pub struct AiCheckpoint {
     pub finalized_at: Option<u64>,
     /// Commit object capturing the full working tree at snapshot time.
     pub start_commit: String,
+    /// Commit object capturing the real index at snapshot time. Older
+    /// checkpoints omit this and preserve the index that exists at restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_index_commit: Option<String>,
     /// Commit object capturing the working tree when the turn finished.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_commit: Option<String>,
@@ -210,8 +214,18 @@ fn head_commit(repo_path: &str) -> Option<String> {
     git_output(repo_path, &["rev-parse", "HEAD"], None).ok()
 }
 
-fn checkpoint_ref(id: &str) -> String {
-    format!("refs/jean/checkpoints/{id}")
+#[derive(Clone, Copy)]
+enum CheckpointRefKind {
+    Start,
+    End,
+}
+
+fn checkpoint_ref(id: &str, kind: CheckpointRefKind) -> String {
+    let suffix = match kind {
+        CheckpointRefKind::Start => "start",
+        CheckpointRefKind::End => "end",
+    };
+    format!("refs/jean/checkpoints/{id}/{suffix}")
 }
 
 /// Capture the full working tree (tracked + untracked, excluding ignored) as a
@@ -219,6 +233,14 @@ fn checkpoint_ref(id: &str) -> String {
 ///
 /// Returns the commit SHA.
 pub fn capture_working_tree_commit(repo_path: &str, message: &str) -> Result<String, String> {
+    capture_checkpoint_commits(repo_path, message).map(|(working_commit, _)| working_commit)
+}
+
+/// Capture the working tree and real index as separate commits.
+///
+/// The index commit is a parent of the working-tree commit so the checkpoint
+/// ref keeps both objects reachable.
+fn capture_checkpoint_commits(repo_path: &str, message: &str) -> Result<(String, String), String> {
     let (git_dir, _) = resolve_git_dirs(Path::new(repo_path))
         .ok_or_else(|| format!("Not a git repository: {repo_path}"))?;
 
@@ -230,6 +252,29 @@ pub fn capture_working_tree_commit(repo_path: &str, message: &str) -> Result<Str
     };
 
     let result = (|| {
+        let index_tree = git_output(repo_path, &["write-tree"], None)?;
+        let index_message = format!("{message}:index");
+        let index_commit = if let Some(parent) = head_commit(repo_path) {
+            git_output(
+                repo_path,
+                &[
+                    "commit-tree",
+                    &index_tree,
+                    "-p",
+                    &parent,
+                    "-m",
+                    &index_message,
+                ],
+                None,
+            )?
+        } else {
+            git_output(
+                repo_path,
+                &["commit-tree", &index_tree, "-m", &index_message],
+                None,
+            )?
+        };
+
         // Seed temp index from HEAD when possible, otherwise start empty.
         if has_head(repo_path) {
             git_output(repo_path, &["read-tree", "HEAD"], Some(&index_path))?;
@@ -246,38 +291,45 @@ pub fn capture_working_tree_commit(repo_path: &str, message: &str) -> Result<Str
             return Err("git write-tree returned empty tree hash".to_string());
         }
 
-        // Build a commit object. Parent is HEAD when it exists so the commit
-        // graph stays meaningful for `git log` / tooling.
-        let commit = if let Some(parent) = head_commit(repo_path) {
-            git_output(
-                repo_path,
-                &["commit-tree", &tree, "-p", &parent, "-m", message],
-                None,
-            )?
-        } else {
-            git_output(repo_path, &["commit-tree", &tree, "-m", message], None)?
-        };
+        // Parent the worktree snapshot to the index snapshot, which itself is
+        // parented to HEAD. This keeps both commits reachable from one ref.
+        let commit = git_output(
+            repo_path,
+            &["commit-tree", &tree, "-p", &index_commit, "-m", message],
+            None,
+        )?;
 
         if commit.len() < 7 {
             return Err(format!("Unexpected commit hash: {commit}"));
         }
 
-        Ok(commit)
+        Ok((commit, index_commit))
     })();
 
     cleanup();
     result
 }
 
-fn update_checkpoint_ref(repo_path: &str, id: &str, commit: &str) -> Result<(), String> {
-    let ref_name = checkpoint_ref(id);
+fn update_checkpoint_ref(
+    repo_path: &str,
+    id: &str,
+    kind: CheckpointRefKind,
+    commit: &str,
+) -> Result<(), String> {
+    let ref_name = checkpoint_ref(id, kind);
     git_output(repo_path, &["update-ref", &ref_name, commit], None)?;
     Ok(())
 }
 
-fn delete_checkpoint_ref(repo_path: &str, id: &str) {
-    let ref_name = checkpoint_ref(id);
-    let _ = git_output(repo_path, &["update-ref", "-d", &ref_name], None);
+fn delete_checkpoint_refs(repo_path: &str, id: &str) {
+    for kind in [CheckpointRefKind::Start, CheckpointRefKind::End] {
+        let ref_name = checkpoint_ref(id, kind);
+        let _ = git_output(repo_path, &["update-ref", "-d", &ref_name], None);
+    }
+    // Clean up refs created by versions that stored the start commit directly
+    // at refs/jean/checkpoints/<id>.
+    let legacy_ref = format!("refs/jean/checkpoints/{id}");
+    let _ = git_output(repo_path, &["update-ref", "-d", &legacy_ref], None);
 }
 
 /// Diff two trees/commits (or a commit vs working tree when `to` is None).
@@ -426,8 +478,14 @@ pub fn create_checkpoint(
     let preview = truncate_preview(&args.user_message);
     let message = format!("jean-checkpoint:{id}");
 
-    let start_commit = capture_working_tree_commit(&args.worktree_path, &message)?;
-    update_checkpoint_ref(&args.worktree_path, &id, &start_commit)?;
+    let (start_commit, start_index_commit) =
+        capture_checkpoint_commits(&args.worktree_path, &message)?;
+    update_checkpoint_ref(
+        &args.worktree_path,
+        &id,
+        CheckpointRefKind::Start,
+        &start_commit,
+    )?;
 
     let head = head_commit(&args.worktree_path);
     let created_at = now_secs();
@@ -442,6 +500,7 @@ pub fn create_checkpoint(
         created_at,
         finalized_at: None,
         start_commit,
+        start_index_commit: Some(start_index_commit),
         end_commit: None,
         head_commit: head,
         worktree_path: args.worktree_path,
@@ -459,7 +518,7 @@ pub fn create_checkpoint(
     // Prune oldest beyond retention limit (also drop their refs).
     while store.checkpoints.len() > MAX_CHECKPOINTS_PER_WORKTREE {
         let removed = store.checkpoints.remove(0);
-        delete_checkpoint_ref(&removed.worktree_path, &removed.id);
+        delete_checkpoint_refs(&removed.worktree_path, &removed.id);
     }
 
     save_store(app, &args.worktree_id, &store)?;
@@ -494,7 +553,18 @@ pub fn finalize_checkpoint(
 
     let end_message = format!("jean-checkpoint-end:{checkpoint_id}");
     let end_commit = match capture_working_tree_commit(&checkpoint.worktree_path, &end_message) {
-        Ok(sha) => Some(sha),
+        Ok(sha) => match update_checkpoint_ref(
+            &checkpoint.worktree_path,
+            checkpoint_id,
+            CheckpointRefKind::End,
+            &sha,
+        ) {
+            Ok(()) => Some(sha),
+            Err(e) => {
+                log::warn!("[Checkpoint] failed to protect end tree for {checkpoint_id}: {e}");
+                None
+            }
+        },
         Err(e) => {
             log::warn!("[Checkpoint] failed to capture end tree for {checkpoint_id}: {e}");
             None
@@ -591,7 +661,7 @@ pub fn get_checkpoint_diff(
 
 /// Restore the entire worktree to a checkpoint's start state.
 ///
-/// Resets both the index and working tree to match the checkpoint commit.
+/// Restores the working tree and index snapshots independently.
 /// Untracked files that did not exist in the checkpoint are removed.
 pub fn restore_checkpoint(
     app: &AppHandle,
@@ -608,20 +678,45 @@ pub fn restore_checkpoint(
         .ok_or_else(|| format!("Checkpoint not found: {checkpoint_id}"))?;
 
     let commit = checkpoint.start_commit.clone();
+    let index_commit = checkpoint.start_index_commit.clone();
     let repo = checkpoint.worktree_path.clone();
 
-    // Reset index + worktree to the checkpoint tree.
-    git_output(&repo, &["read-tree", "-u", "--reset", &commit], None)?;
-
-    // Remove untracked files that appeared after the checkpoint.
-    // `-fd` removes untracked files and directories; ignored files stay.
-    let _ = git_output(&repo, &["clean", "-fd"], None);
+    if let Some(index_commit) = index_commit {
+        restore_checkpoint_commits(&repo, &commit, &index_commit)?;
+    } else {
+        // Legacy checkpoints did not capture the original index. Restore the
+        // working tree image, then put the current index back rather than
+        // incorrectly staging every checkpoint difference.
+        let current_index_tree = git_output(&repo, &["write-tree"], None)?;
+        git_output(&repo, &["read-tree", "-u", "--reset", &commit], None)?;
+        let _ = git_output(&repo, &["clean", "-fd"], None);
+        git_output(&repo, &["read-tree", "--reset", &current_index_tree], None)?;
+    }
 
     checkpoint.status = CheckpointStatus::Restored;
     let result = checkpoint.clone();
     save_store(app, worktree_id, &store)?;
     log::info!("[Checkpoint] restored full worktree id={checkpoint_id}");
     Ok(result)
+}
+
+fn restore_checkpoint_commits(
+    repo_path: &str,
+    working_commit: &str,
+    index_commit: &str,
+) -> Result<(), String> {
+    // Populate the worktree from its snapshot, then replace only the index
+    // with its own snapshot to retain the original staged/unstaged boundary.
+    git_output(
+        repo_path,
+        &["read-tree", "-u", "--reset", working_commit],
+        None,
+    )?;
+    // At this point snapshot files are all represented by the temporary
+    // worktree index, so clean removes only files created after capture.
+    let _ = git_output(repo_path, &["clean", "-fd"], None);
+    git_output(repo_path, &["read-tree", "--reset", index_commit], None)?;
+    Ok(())
 }
 
 fn validated_restore_path(repo: &Path, file_path: &Path) -> Result<PathBuf, String> {
@@ -713,7 +808,7 @@ pub fn delete_checkpoint(
         return Err(format!("Checkpoint not found: {checkpoint_id}"));
     };
     let removed = store.checkpoints.remove(idx);
-    delete_checkpoint_ref(&removed.worktree_path, &removed.id);
+    delete_checkpoint_refs(&removed.worktree_path, &removed.id);
     save_store(app, worktree_id, &store)?;
     log::info!("[Checkpoint] deleted id={checkpoint_id}");
     Ok(())
@@ -1018,12 +1113,20 @@ mod tests {
         delete_checkpoint_refs(&repo_str, id);
         assert!(!git_ok(
             &repo_str,
-            &["rev-parse", "--verify", &format!("refs/jean/checkpoints/{id}/start")],
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/jean/checkpoints/{id}/start")
+            ],
             None,
         ));
         assert!(!git_ok(
             &repo_str,
-            &["rev-parse", "--verify", &format!("refs/jean/checkpoints/{id}/end")],
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/jean/checkpoints/{id}/end")
+            ],
             None,
         ));
     }
