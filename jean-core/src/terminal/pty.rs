@@ -25,6 +25,68 @@ fn is_windows_batch_file(path: &str) -> bool {
 }
 
 #[cfg(unix)]
+#[derive(Debug, PartialEq)]
+struct ParentLocale {
+    lang: Option<String>,
+    lc_all: Option<String>,
+    lc_ctype: Option<String>,
+}
+
+#[cfg(unix)]
+fn default_utf8_locale() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "en_US.UTF-8"
+    } else {
+        "C.UTF-8"
+    }
+}
+
+#[cfg(unix)]
+fn locale_value_is_utf8(value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let normalized = value.to_ascii_lowercase();
+    normalized.contains("utf-8") || normalized.contains("utf8")
+}
+
+#[cfg(unix)]
+fn current_parent_locale() -> ParentLocale {
+    ParentLocale {
+        lang: std::env::var("LANG").ok().filter(|value| !value.is_empty()),
+        lc_all: std::env::var("LC_ALL")
+            .ok()
+            .filter(|value| !value.is_empty()),
+        lc_ctype: std::env::var("LC_CTYPE")
+            .ok()
+            .filter(|value| !value.is_empty()),
+    }
+}
+
+#[cfg(unix)]
+fn terminal_utf8_locale_overrides(parent: &ParentLocale) -> Vec<(&'static str, &'static str)> {
+    if locale_value_is_utf8(parent.lc_all.as_deref())
+        || locale_value_is_utf8(parent.lc_ctype.as_deref())
+        || locale_value_is_utf8(parent.lang.as_deref())
+    {
+        return Vec::new();
+    }
+
+    if parent.lc_all.is_some() || parent.lc_ctype.is_some() {
+        return Vec::new();
+    }
+
+    vec![("LC_CTYPE", default_utf8_locale())]
+}
+
+#[cfg(unix)]
+fn apply_terminal_locale_env(cmd: &mut CommandBuilder) {
+    for (key, value) in terminal_utf8_locale_overrides(&current_parent_locale()) {
+        cmd.env(key, value);
+    }
+}
+
+#[cfg(unix)]
 fn build_unix_shell_command(
     shell: &str,
     command: &str,
@@ -206,6 +268,8 @@ pub fn spawn_terminal(
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    #[cfg(unix)]
+    apply_terminal_locale_env(&mut cmd);
     cmd.env("JEAN_WORKTREE_PATH", &worktree_path);
 
     // Spawn the shell
@@ -498,6 +562,8 @@ mod tests {
     #[cfg(unix)]
     use super::build_unix_shell_command;
     use super::is_windows_batch_file;
+    #[cfg(unix)]
+    use super::{terminal_utf8_locale_overrides, ParentLocale};
 
     #[cfg(unix)]
     #[test]
@@ -530,5 +596,83 @@ mod tests {
         assert!(is_windows_batch_file(r"C:\tools\run.bat"));
         assert!(!is_windows_batch_file(r"C:\tools\opencode.exe"));
         assert!(!is_windows_batch_file(r"C:\tools\opencode"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_sets_utf8_ctype_when_parent_locale_is_not_utf8() {
+        let overrides = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("C".to_string()),
+            lc_all: None,
+            lc_ctype: None,
+        });
+
+        assert_eq!(overrides, vec![("LC_CTYPE", super::default_utf8_locale())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_sets_utf8_ctype_when_parent_locale_is_unset() {
+        let overrides = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: None,
+            lc_all: None,
+            lc_ctype: None,
+        });
+
+        assert_eq!(overrides, vec![("LC_CTYPE", super::default_utf8_locale())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_sets_utf8_ctype_for_posix_lang() {
+        let overrides = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("POSIX".to_string()),
+            lc_all: None,
+            lc_ctype: None,
+        });
+
+        assert_eq!(overrides, vec![("LC_CTYPE", super::default_utf8_locale())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_keeps_existing_utf8_locale() {
+        let utf8_lang = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("en_US.UTF-8".to_string()),
+            lc_all: None,
+            lc_ctype: None,
+        });
+        let utf8_lang_no_hyphen = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("en_US.utf8".to_string()),
+            lc_all: None,
+            lc_ctype: None,
+        });
+        let utf8_lc_ctype = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("C".to_string()),
+            lc_all: None,
+            lc_ctype: Some("C.UTF-8".to_string()),
+        });
+
+        assert!(utf8_lang.is_empty());
+        assert!(utf8_lang_no_hyphen.is_empty());
+        assert!(utf8_lc_ctype.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_does_not_override_explicit_ctype_or_lc_all() {
+        let explicit_ctype = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("C".to_string()),
+            lc_all: None,
+            lc_ctype: Some("C".to_string()),
+        });
+        let explicit_lc_all = terminal_utf8_locale_overrides(&ParentLocale {
+            lang: Some("C".to_string()),
+            lc_all: Some("C".to_string()),
+            lc_ctype: None,
+        });
+
+        assert!(explicit_ctype.is_empty());
+        assert!(explicit_lc_all.is_empty());
     }
 }
