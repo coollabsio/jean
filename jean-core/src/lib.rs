@@ -3099,6 +3099,11 @@ pub struct UIState {
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
 
+    /// GitHub Actions workflow run database IDs the user has already opened.
+    /// Failed-run badges only count runs not present in this list.
+    #[serde(default)]
+    pub seen_failed_workflow_run_ids: Vec<u64>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -3207,6 +3212,7 @@ impl Default for UIState {
             project_canvas_settings: std::collections::HashMap::new(),
             github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
+            seen_failed_workflow_run_ids: Vec::new(),
             version: default_ui_state_version(),
         }
     }

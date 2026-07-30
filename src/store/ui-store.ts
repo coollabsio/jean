@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import type { CliType } from '@/lib/cli-update'
+import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
 
 export type PreferencePane =
   | 'general'
@@ -122,6 +123,11 @@ interface UIState {
   workflowRunsModalOpen: boolean
   workflowRunsModalProjectPath: string | null
   workflowRunsModalBranch: string | null
+  /**
+   * GitHub Actions run database IDs already viewed by the user.
+   * Failed-workflow badges only count IDs not in this list.
+   */
+  seenFailedWorkflowRunIds: number[]
   cliUpdateModalOpen: boolean
   cliUpdateModalType: CliUpdateModalType
   cliLoginModalOpen: boolean
@@ -243,6 +249,8 @@ interface UIState {
     projectPath?: string | null,
     branch?: string | null
   ) => void
+  markFailedWorkflowRunsSeen: (runIds: number[]) => void
+  setSeenFailedWorkflowRunIds: (runIds: number[]) => void
   openCliUpdateModal: (type: Exclude<CliUpdateModalType, null>) => void
   closeCliUpdateModal: () => void
   openCliLoginModal: (
@@ -346,6 +354,7 @@ export const useUIStore = create<UIState>()(
       workflowRunsModalOpen: false,
       workflowRunsModalProjectPath: null,
       workflowRunsModalBranch: null,
+      seenFailedWorkflowRunIds: [],
       cliUpdateModalOpen: false,
       cliUpdateModalType: null,
       cliLoginModalOpen: false,
@@ -657,6 +666,31 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'setWorkflowRunsModalOpen'
+        ),
+
+      markFailedWorkflowRunsSeen: runIds =>
+        set(
+          state => {
+            if (runIds.length === 0) return state
+            const next = mergeSeenFailedWorkflowRunIds(
+              state.seenFailedWorkflowRunIds,
+              runIds
+            )
+            if (next === state.seenFailedWorkflowRunIds) return state
+            return { seenFailedWorkflowRunIds: next }
+          },
+          undefined,
+          'markFailedWorkflowRunsSeen'
+        ),
+
+      setSeenFailedWorkflowRunIds: runIds =>
+        set(
+          state =>
+            state.seenFailedWorkflowRunIds === runIds
+              ? state
+              : { seenFailedWorkflowRunIds: runIds },
+          undefined,
+          'setSeenFailedWorkflowRunIds'
         ),
 
       openCliUpdateModal: type =>
