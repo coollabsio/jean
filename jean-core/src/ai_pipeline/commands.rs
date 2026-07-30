@@ -626,6 +626,17 @@ async fn claim_clickup_task(
 /// Fetch the pickable ClickUp tickets (review columns + `stuck`) from every
 /// configured list (Planexpo + Sprint), deduped by id. Uses the API status
 /// filter and a client-side guard.
+fn pickable_tasks_path(list_id: &str) -> String {
+    let status_query = REVIEW_STATUSES
+        .iter()
+        .chain(std::iter::once(&STUCK_STATUS))
+        .map(|s| format!("statuses%5B%5D={}", s.replace(' ', "%20")))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    format!("/list/{list_id}/task?{status_query}&include_closed=false&subtasks=true")
+}
+
 async fn fetch_pickable_tasks(
     app: &AppHandle,
     project_id: &str,
@@ -644,14 +655,6 @@ async fn fetch_pickable_tasks(
         );
     }
 
-    // Statuses we ask the API for, url-encoded (`statuses[]=…`).
-    let status_query: String = REVIEW_STATUSES
-        .iter()
-        .chain(std::iter::once(&STUCK_STATUS))
-        .map(|s| format!("statuses%5B%5D={}", s.replace(' ', "%20")))
-        .collect::<Vec<_>>()
-        .join("&");
-
     // Resilient: a misconfigured list (e.g. a workspace id pasted as a list id →
     // 404) must not blank the whole feature. Skip failing lists and continue;
     // only surface an error when *every* configured list failed (e.g. bad token).
@@ -660,7 +663,7 @@ async fn fetch_pickable_tasks(
     let mut any_ok = false;
     let mut last_err: Option<String> = None;
     for list_id in lists {
-        let path = format!("/list/{list_id}/task?{status_query}&include_closed=false");
+        let path = pickable_tasks_path(&list_id);
         match clickup_get(&token, &path).await {
             Ok(value) => {
                 any_ok = true;
@@ -938,6 +941,16 @@ pub async fn finish_ai_pipeline_pr(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pickable_tasks_query_includes_subtasks() {
+        let path = pickable_tasks_path("46575365");
+
+        assert_eq!(
+            path,
+            "/list/46575365/task?statuses%5B%5D=to%20review&statuses%5B%5D=in%20review&statuses%5B%5D=stuck&include_closed=false&subtasks=true"
+        );
+    }
 
     /// Mirrors a `gh pr list --json …` array for one repo (Spottt/planexpo).
     fn sample_payload() -> serde_json::Value {
