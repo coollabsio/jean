@@ -1,4 +1,5 @@
 // Keybinding action identifiers - extensible for future shortcuts
+import { isNativeApp } from '@/lib/environment'
 import { isClientMacOS } from '@/lib/platform'
 
 export type KeybindingAction =
@@ -470,6 +471,19 @@ export function formatShortcutDisplay(
     .join(' + ')
 }
 
+/**
+ * Primary modifier for "mod" shortcuts.
+ * - macOS native app: Command (metaKey) — Control must pass through to terminals
+ *   (e.g. Ctrl+T) instead of opening a new session (issue #615)
+ * - macOS web: Control (browser intercepts Cmd)
+ * - Windows/Linux: Control
+ */
+export function isModKeyEvent(
+  e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey'>
+): boolean {
+  return isClientMacOS && isNativeApp() ? e.metaKey : e.ctrlKey
+}
+
 // Helper to parse keyboard event into shortcut string
 export function eventToShortcutString(e: KeyboardEvent): ShortcutString | null {
   // Ignore modifier-only presses
@@ -477,8 +491,15 @@ export function eventToShortcutString(e: KeyboardEvent): ShortcutString | null {
     return null
   }
 
+  // On macOS native, Control chords are not app "mod" shortcuts. Returning null
+  // lets them reach focused terminals (Ctrl+T, Ctrl+R, …) instead of matching
+  // mod+t / mod+r / etc. Issue #615.
+  if (isClientMacOS && isNativeApp() && e.ctrlKey && !e.metaKey) {
+    return null
+  }
+
   const parts: string[] = []
-  if (e.metaKey || e.ctrlKey) parts.push('mod')
+  if (isModKeyEvent(e)) parts.push('mod')
   if (e.shiftKey) parts.push('shift')
   if (e.altKey) parts.push('alt')
 

@@ -1,9 +1,32 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_KEYBINDINGS,
   eventToShortcutString,
+  isModKeyEvent,
   KEYBINDING_DEFINITIONS,
 } from '@/types/keybindings'
+
+const environmentMocks = vi.hoisted(() => ({
+  isNativeApp: false,
+}))
+
+const platformMocks = vi.hoisted(() => ({
+  isClientMacOS: false,
+}))
+
+vi.mock('@/lib/environment', () => ({
+  isNativeApp: () => environmentMocks.isNativeApp,
+}))
+
+vi.mock('@/lib/platform', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/platform')>()
+  return {
+    ...actual,
+    get isClientMacOS() {
+      return platformMocks.isClientMacOS
+    },
+  }
+})
 
 function keyboardKey(token: string): { key: string; code: string } {
   if (/^[a-z]$/.test(token)) {
@@ -27,7 +50,19 @@ function keyboardKey(token: string): { key: string; code: string } {
   return result
 }
 
+function setPlatform(options: {
+  isClientMacOS: boolean
+  isNativeApp: boolean
+}) {
+  platformMocks.isClientMacOS = options.isClientMacOS
+  environmentMocks.isNativeApp = options.isNativeApp
+}
+
 describe('eventToShortcutString', () => {
+  afterEach(() => {
+    setPlatform({ isClientMacOS: false, isNativeApp: false })
+  })
+
   it('maps alt-modified letter keys using physical key code', () => {
     const modelEvent = new KeyboardEvent('keydown', {
       key: 'µ',
@@ -67,7 +102,7 @@ describe('eventToShortcutString', () => {
     const deleteEvent = new KeyboardEvent('keydown', {
       key: 'Delete',
       code: 'Delete',
-      metaKey: true,
+      ctrlKey: true,
       altKey: true,
     })
 
@@ -84,7 +119,37 @@ describe('eventToShortcutString', () => {
     expect(eventToShortcutString(altOnlyEvent)).toBeNull()
   })
 
-  it('matches every default mod shortcut with either Command or Control', () => {
+  it('matches every default mod shortcut with the platform mod key (Ctrl on non-mac)', () => {
+    setPlatform({ isClientMacOS: false, isNativeApp: false })
+
+    for (const shortcut of Object.values(DEFAULT_KEYBINDINGS)) {
+      const parts = shortcut.split('+')
+      if (!parts.includes('mod')) continue
+
+      const keyToken = parts.at(-1)
+      if (!keyToken) throw new Error(`Missing key in ${shortcut}`)
+      const key = keyboardKey(keyToken)
+      const modifiers = {
+        shiftKey: parts.includes('shift'),
+        altKey: parts.includes('alt'),
+      }
+
+      expect(
+        eventToShortcutString(
+          new KeyboardEvent('keydown', {
+            ...key,
+            ...modifiers,
+            ctrlKey: true,
+          })
+        ),
+        `Control should match ${shortcut}`
+      ).toBe(shortcut)
+    }
+  })
+
+  it('matches every default mod shortcut with Command on macOS native', () => {
+    setPlatform({ isClientMacOS: true, isNativeApp: true })
+
     for (const shortcut of Object.values(DEFAULT_KEYBINDINGS)) {
       const parts = shortcut.split('+')
       if (!parts.includes('mod')) continue
@@ -107,17 +172,50 @@ describe('eventToShortcutString', () => {
         ),
         `Command should match ${shortcut}`
       ).toBe(shortcut)
-      expect(
-        eventToShortcutString(
-          new KeyboardEvent('keydown', {
-            ...key,
-            ...modifiers,
-            ctrlKey: true,
-          })
-        ),
-        `Control should match ${shortcut}`
-      ).toBe(shortcut)
     }
+  })
+
+  it('does not treat Control as mod on macOS native so Ctrl+T reaches the terminal (issue #615)', () => {
+    setPlatform({ isClientMacOS: true, isNativeApp: true })
+
+    const ctrlT = new KeyboardEvent('keydown', {
+      key: 't',
+      code: 'KeyT',
+      ctrlKey: true,
+    })
+    const cmdT = new KeyboardEvent('keydown', {
+      key: 't',
+      code: 'KeyT',
+      metaKey: true,
+    })
+
+    expect(isModKeyEvent(ctrlT)).toBe(false)
+    expect(eventToShortcutString(ctrlT)).toBeNull()
+
+    expect(isModKeyEvent(cmdT)).toBe(true)
+    expect(eventToShortcutString(cmdT)).toBe('mod+t')
+  })
+
+  it('treats Control as mod on macOS web (browser intercepts Cmd)', () => {
+    setPlatform({ isClientMacOS: true, isNativeApp: false })
+
+    const ctrlT = new KeyboardEvent('keydown', {
+      key: 't',
+      code: 'KeyT',
+      ctrlKey: true,
+    })
+    const cmdT = new KeyboardEvent('keydown', {
+      key: 't',
+      code: 'KeyT',
+      metaKey: true,
+    })
+
+    expect(isModKeyEvent(ctrlT)).toBe(true)
+    expect(eventToShortcutString(ctrlT)).toBe('mod+t')
+
+    // Cmd is not the web mod key; leave unmatched rather than treating as bare "t"
+    expect(isModKeyEvent(cmdT)).toBe(false)
+    expect(eventToShortcutString(cmdT)).toBe('t')
   })
 
   it('keeps the settings definitions aligned with every default shortcut', () => {
