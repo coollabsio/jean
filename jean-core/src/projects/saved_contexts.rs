@@ -10,6 +10,33 @@ pub struct AttachedSavedContext {
     pub created_at: u64,
 }
 
+/// Slug used when attaching a lightweight session reference to another session.
+pub fn session_reference_slug(source_session_id: &str) -> String {
+    format!("session-ref-{source_session_id}")
+}
+
+/// Build the MCP-pointer prompt attached when injecting a session into context.
+///
+/// Intentionally does **not** embed message history — the agent should use
+/// Jean MCP `read_session_messages` to fetch only what it needs.
+pub fn build_session_reference_content(
+    source_session_id: &str,
+    session_name: &str,
+    project_name: &str,
+    worktree_name: &str,
+) -> String {
+    format!(
+        r#"# Session: {session_name}
+
+The user has requested to take a look at session `{source_session_id}` (name: "{session_name}", project: {project_name}, worktree: {worktree_name}).
+
+Use the Jean MCP tool `read_session_messages` with `sessionId` set to `{source_session_id}` to fetch the most recent messages from the user and agent (start with a small `limit`, e.g. 2–10; results are most recent first). If you need more context to understand what the user is looking for, you may fetch additional messages from the history. Do **not** consume the entire session at once.
+
+You may also use `get_session_status` with the same `sessionId` if you need run state for that session.
+"#
+    )
+}
+
 /// Attach a saved context to a session by copying it to the session-specific location.
 ///
 /// Storage location: `app-data/session-context/{session_id}-context-{slug}.md`
@@ -245,4 +272,131 @@ pub fn cleanup_saved_contexts_for_session(
         }
     }
     Ok(())
+}
+
+/// Inject a lightweight session reference into another session's context.
+///
+/// Writes a small markdown context file with an MCP pointer prompt (no message
+/// dump) to `session-context/{target_session_id}-context-session-ref-{source}.md`.
+pub async fn attach_session_reference(
+    app: tauri::AppHandle,
+    target_session_id: String,
+    source_session_id: String,
+    session_name: String,
+    project_name: String,
+    worktree_name: String,
+) -> Result<AttachedSavedContext, String> {
+    if target_session_id == source_session_id {
+        return Err("Cannot inject a session into itself".to_string());
+    }
+    if source_session_id.trim().is_empty() {
+        return Err("Source session id is required".to_string());
+    }
+
+    let slug = session_reference_slug(&source_session_id);
+    let content = build_session_reference_content(
+        &source_session_id,
+        &session_name,
+        &project_name,
+        &worktree_name,
+    );
+    let name = Some(format!("Session: {session_name}"));
+
+    log::trace!(
+        "Attaching session reference '{source_session_id}' to session {target_session_id}"
+    );
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?;
+
+    let saved_contexts_dir = app_data_dir.join("session-context");
+    std::fs::create_dir_all(&saved_contexts_dir)
+        .map_err(|e| format!("Failed to create session-context directory: {e}"))?;
+
+    let dest_file = saved_contexts_dir.join(format!("{target_session_id}-context-{slug}.md"));
+
+    // Already attached — return existing metadata without rewriting.
+    if dest_file.exists() {
+        let metadata = std::fs::metadata(&dest_file)
+            .map_err(|e| format!("Failed to get file metadata: {e}"))?;
+        let size = metadata.len();
+        let created_at = metadata
+            .created()
+            .or_else(|_| metadata.modified())
+            .map_err(|e| format!("Failed to get file time: {e}"))?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Failed to convert time: {e}"))?
+            .as_secs();
+        log::trace!(
+            "Session reference '{source_session_id}' already attached to {target_session_id}"
+        );
+        return Ok(AttachedSavedContext {
+            slug,
+            name,
+            size,
+            created_at,
+        });
+    }
+
+    std::fs::write(&dest_file, &content)
+        .map_err(|e| format!("Failed to write session reference file: {e}"))?;
+
+    let metadata =
+        std::fs::metadata(&dest_file).map_err(|e| format!("Failed to get file metadata: {e}"))?;
+    let size = metadata.len();
+    let created_at = metadata
+        .created()
+        .or_else(|_| metadata.modified())
+        .map_err(|e| format!("Failed to get file time: {e}"))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Failed to convert time: {e}"))?
+        .as_secs();
+
+    log::trace!(
+        "Attached session reference '{source_session_id}' to session {target_session_id}"
+    );
+
+    Ok(AttachedSavedContext {
+        slug,
+        name,
+        size,
+        created_at,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_reference_slug_is_stable() {
+        assert_eq!(
+            session_reference_slug("abc-123"),
+            "session-ref-abc-123"
+        );
+    }
+
+    #[test]
+    fn session_reference_content_points_at_mcp_not_full_history() {
+        let content = build_session_reference_content(
+            "sess-42",
+            "Fix login bug",
+            "jean",
+            "issue-596",
+        );
+
+        assert!(content.contains("# Session: Fix login bug"));
+        assert!(content.contains("`sess-42`"));
+        assert!(content.contains("read_session_messages"));
+        assert!(content.contains("sessionId"));
+        assert!(content.contains("get_session_status"));
+        assert!(content.contains("Do **not** consume the entire session at once"));
+        // Must not embed fabricated conversation content
+        assert!(!content.contains("User:"));
+        assert!(!content.contains("Assistant:"));
+        assert!(content.contains("project: jean"));
+        assert!(content.contains("worktree: issue-596"));
+    }
 }

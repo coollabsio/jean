@@ -126,6 +126,7 @@ import { resolveMcpConfigForSend } from '@/services/mcp'
 type MagicOption =
   | 'save-context'
   | 'load-context'
+  | 'inject-session'
   | 'linked-projects'
   | 'fork-session'
   | 'commit'
@@ -250,6 +251,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           key: 'L',
         },
         {
+          id: 'inject-session',
+          label: 'Inject Session',
+          icon: MessageSquare,
+          key: 'J',
+        },
+        {
           id: 'linked-projects',
           label: 'Linked Projects',
           icon: Link2,
@@ -372,6 +379,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
 const KEY_TO_OPTION: Record<string, MagicOption> = {
   s: 'save-context',
   l: 'load-context',
+  j: 'inject-session',
   k: 'linked-projects',
   w: 'fork-session',
   c: 'commit',

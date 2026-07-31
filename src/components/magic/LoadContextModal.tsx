@@ -511,6 +511,7 @@ export function LoadContextModal({
               onRenameKeyDown={handlers.handleRenameKeyDown}
               onDeleteContext={handlers.handleDeleteContext}
               onSessionClick={handlers.handleSessionClick}
+              onGenerateSessionContext={handlers.handleGenerateSessionContext}
             />
           )}
         </div>

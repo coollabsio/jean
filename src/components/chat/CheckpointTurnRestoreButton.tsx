@@ -151,20 +151,16 @@ export const CheckpointTurnRestoreButton = memo(
 
     if (!shouldShow || !worktreeId) return null
 
-    // Always visible on touch/coarse pointers; hover-reveal on fine pointers (desktop).
-    const buttonClass =
-      variant === 'userBubble'
-        ? cn(
-            'shrink-0 p-1 rounded cursor-pointer transition-colors',
-            'text-muted-foreground/70 hover:text-foreground hover:bg-muted/50',
-            '[@media(pointer:fine)]:text-muted-foreground/0 [@media(pointer:fine)]:group-hover:text-muted-foreground/60',
-            'focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            className
-          )
-        : cn(
-            'inline-flex items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            className
-          )
+    // Shared look for under-prompt and edited-files row (icon + label).
+    // Fine pointers: slightly muted until hover; touch: always readable.
+    const buttonClass = cn(
+      'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] cursor-pointer transition-colors',
+      'text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground',
+      'focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      variant === 'userBubble' &&
+        '[@media(pointer:fine)]:text-muted-foreground/0 [@media(pointer:fine)]:group-hover:text-muted-foreground/70',
+      className
+    )
 
     return (
       <>
@@ -176,8 +172,8 @@ export const CheckpointTurnRestoreButton = memo(
               onClick={openDialog}
               className={buttonClass}
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              {variant === 'inline' && <span>Restore</span>}
+              <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+              <span>Restore</span>
             </button>
           </TooltipTrigger>
           <TooltipContent>
