@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => {
     setLastSentMessage: vi.fn(),
     setError: vi.fn(),
     clearInputDraft: vi.fn(),
+    setEnabledMcpServers: vi.fn(),
     toastSuccess: vi.fn(),
     toastError: vi.fn(),
     toastLoading: vi.fn(() => 'toast-1'),
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => {
     gitPush: vi.fn(),
     openExternal: vi.fn(),
     activeWorktreePath: null as string | null,
+    worktreePaths: {} as Record<string, string>,
     worktree,
   }
 })
@@ -105,6 +107,7 @@ vi.mock('@/store/projects-store', () => ({
 }))
 
 vi.mock('@/store/chat-store', () => ({
+  DEFAULT_MODEL: 'claude-opus-4-8[1m]',
   useChatStore: Object.assign(
     (selector?: (state: ChatState) => unknown) => {
       const state: ChatState = {
@@ -118,11 +121,14 @@ vi.mock('@/store/chat-store', () => ({
       getState: () => ({
         activeWorktreePath: mocks.activeWorktreePath,
         activeSessionIds: {},
+        worktreePaths: mocks.worktreePaths as Record<string, string>,
         setWorktreeLoading: vi.fn(),
         clearWorktreeLoading: vi.fn(),
         setActiveWorktree: vi.fn(),
         setPendingMagicCommand: vi.fn(),
         registerWorktreePath: mocks.registerWorktreePath,
+        getWorktreePath: (worktreeId: string) =>
+          mocks.worktreePaths[worktreeId],
         setActiveSession: mocks.setActiveSession,
         setSelectedBackend: mocks.setSelectedBackend,
         setSelectedModel: mocks.setSelectedModel,
@@ -132,6 +138,7 @@ vi.mock('@/store/chat-store', () => ({
         setLastSentMessage: mocks.setLastSentMessage,
         setError: mocks.setError,
         clearInputDraft: mocks.clearInputDraft,
+        setEnabledMcpServers: mocks.setEnabledMcpServers,
         copySessionSettings: vi.fn(),
       }),
     }
@@ -177,10 +184,17 @@ vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
     data: {
       default_backend: 'claude',
+      selected_model: 'claude-opus-4-8[1m]',
       selected_codex_model: 'gpt-5.5',
-      magic_prompt_models: { final_review_model: 'gpt-5.5' },
-      magic_prompt_efforts: { final_review_effort: 'high' },
-      magic_prompt_modes: { final_review_mode: 'plan' },
+      magic_prompt_models: {
+        final_review_model: 'gpt-5.5',
+      },
+      magic_prompt_efforts: {
+        final_review_effort: 'high',
+      },
+      magic_prompt_modes: {
+        final_review_mode: 'plan',
+      },
       magic_prompts: {
         resolve_conflicts: 'Resolve and finish.',
         final_review: 'Run the custom final audit and return tables.',
@@ -619,6 +633,14 @@ describe('MagicModal manual PR link', () => {
 
     expect(
       screen.getByRole('button', { name: /fork session/i })
+    ).toBeInTheDocument()
+  })
+
+  it('shows the inject session magic command', () => {
+    render(<MagicModal />)
+
+    expect(
+      screen.getByRole('button', { name: /inject session/i })
     ).toBeInTheDocument()
   })
 

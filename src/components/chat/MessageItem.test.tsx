@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
+import userEvent from '@testing-library/user-event'
 import { MessageItem } from './MessageItem'
 import type {
   ChatMessage,
@@ -7,6 +8,23 @@ import type {
   QuestionAnswer,
   Question,
 } from '@/types/chat'
+
+const mocks = vi.hoisted(() => ({
+  copyToClipboard: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}))
+
+vi.mock('@/lib/clipboard', () => ({
+  copyToClipboard: mocks.copyToClipboard,
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: mocks.toastSuccess,
+    error: mocks.toastError,
+  },
+}))
 
 describe('MessageItem', () => {
   const noopQuestionAnswer = (
@@ -383,6 +401,60 @@ describe('MessageItem', () => {
     expect(screen.getByText('23s')).toBeVisible()
   })
 
+  it('copies an assistant response to the clipboard', async () => {
+    mocks.copyToClipboard.mockResolvedValue(undefined)
+
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: 'This is the assistant response.',
+          tool_calls: [],
+          content_blocks: [],
+        }}
+      />
+    )
+
+    screen.getByRole('button', { name: 'Copy response to clipboard' }).click()
+
+    await waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(
+        'This is the assistant response.'
+      )
+      expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        'Response copied to clipboard'
+      )
+    })
+  })
+
+  it('copies text from content blocks when the persisted response is empty', async () => {
+    mocks.copyToClipboard.mockResolvedValue(undefined)
+
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: '',
+          tool_calls: [],
+          content_blocks: [
+            { type: 'text', text: 'First response block.' },
+            { type: 'text', text: 'Second response block.' },
+          ],
+        }}
+      />
+    )
+
+    screen.getByRole('button', { name: 'Copy response to clipboard' }).click()
+
+    await waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(
+        'First response block.\nSecond response block.'
+      )
+    })
+  })
+
   it('copies steered prompts rendered in full native messages', () => {
     const onCopyToInput = vi.fn()
 
@@ -413,5 +485,43 @@ describe('MessageItem', () => {
         content: 'copy this steered prompt',
       })
     )
+  })
+
+  it('shows a custom context menu on right-click instead of browser defaults', async () => {
+    const user = userEvent.setup()
+    const original = window.getSelection
+    window.getSelection = () =>
+      ({
+        toString: () => '',
+      }) as Selection
+
+    mocks.copyToClipboard.mockResolvedValue(undefined)
+
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: 'Right-click me for a custom menu.',
+          tool_calls: [],
+          content_blocks: [],
+        }}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByText('Right-click me for a custom menu.'))
+
+    const item = await screen.findByRole('menuitem', {
+      name: /copy response/i,
+    })
+    await user.click(item)
+
+    await waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(
+        'Right-click me for a custom menu.'
+      )
+    })
+
+    window.getSelection = original
   })
 })

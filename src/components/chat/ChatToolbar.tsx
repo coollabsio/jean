@@ -92,6 +92,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   sessionHasMessages,
   providerLocked,
   baseBranch,
+  baseRemote,
   prUrl,
   prNumber,
   displayStatus,
@@ -127,11 +128,13 @@ export const ChatToolbar = memo(function ChatToolbar({
   onBackendModelChange,
   onProviderChange,
   customCliProfiles,
+  customCodexProviders = [],
   onThinkingLevelChange,
   onEffortLevelChange,
   onSetExecutionMode,
   onAttach,
   onCancel,
+  willSteer,
   queuedMessageCount,
   availableMcpServers,
   enabledMcpServers,
@@ -152,6 +155,9 @@ export const ChatToolbar = memo(function ChatToolbar({
   const [mcpDropdownOpen, setMcpDropdownOpen] = useState(false)
   const [mobileBackendModelPickerOpen, setMobileBackendModelPickerOpen] =
     useState(false)
+  // Bumped after a mobile model pick so MobileSettingsMenu opens effort/thinking
+  // without forcing the user to reopen the gear (issue #574).
+  const [openReasoningSheetSignal, setOpenReasoningSheetSignal] = useState(0)
   const isMobile = useIsMobile()
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
@@ -227,6 +233,10 @@ export const ChatToolbar = memo(function ChatToolbar({
     const values = new Set(
       selectedModelReasoning.levels.map(level => level.value)
     )
+    // Adaptive/Default is only valid for Gemini models.
+    if (selectedModel?.toLowerCase().includes('gemini')) {
+      values.add('adaptive')
+    }
     if (selectedModelReasoning.type === 'effort') {
       if (!values.has(selectedEffortLevel)) {
         onEffortLevelChange(selectedModelReasoning.default as EffortLevel)
@@ -238,6 +248,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     onEffortLevelChange,
     onThinkingLevelChange,
     selectedEffortLevel,
+    selectedModel,
     selectedModelReasoning,
     selectedThinkingLevel,
   ])
@@ -297,9 +308,14 @@ export const ChatToolbar = memo(function ChatToolbar({
 
   const handleProviderChange = useCallback(
     (value: string) => {
-      const provider = value === 'default' ? null : value
+      const provider =
+        value === 'default' ||
+        value === '__anthropic__' ||
+        value === '__default__'
+          ? null
+          : value
       onProviderChange(provider)
-      if (provider && provider !== '__anthropic__') {
+      if (provider) {
         if (selectedModel === 'claude-opus-4-8[1m]') {
           onModelChange('claude-opus-4-8' as ClaudeModel)
         } else if (selectedModel === 'claude-opus-4-7[1m]') {
@@ -331,6 +347,14 @@ export const ChatToolbar = memo(function ChatToolbar({
     [onEffortLevelChange]
   )
 
+  const handleAfterMobileModelSelect = useCallback(() => {
+    // Defer so selectedBackend/model props refresh before the reasoning sheet
+    // decides effort vs thinking options.
+    requestAnimationFrame(() => {
+      setOpenReasoningSheetSignal(n => n + 1)
+    })
+  }, [])
+
   const handlePullClick = useCallback(async () => {
     if (!activeWorktreePath || !worktreeId) return
     await performGitPull({
@@ -338,11 +362,13 @@ export const ChatToolbar = memo(function ChatToolbar({
       worktreePath: activeWorktreePath,
       baseBranch,
       projectId,
+      remote: baseRemote,
       onMergeConflict: onResolveConflicts,
     })
   }, [
     activeWorktreePath,
     baseBranch,
+    baseRemote,
     worktreeId,
     projectId,
     onResolveConflicts,
@@ -451,6 +477,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             isDisabled={false}
             providerLocked={providerLocked}
             selectedBackend={selectedBackend}
+            selectedModel={selectedModel}
             selectedProvider={selectedProvider}
             backendModelLabel={backendModelLabel}
             backendModelLabelText={backendModelLabelText}
@@ -462,12 +489,14 @@ export const ChatToolbar = memo(function ChatToolbar({
             isCodex={isCodex}
             modelReasoning={selectedModelReasoning}
             customCliProfiles={customCliProfiles}
+            customCodexProviders={customCodexProviders}
             onOpenBackendModelPicker={() =>
               setMobileBackendModelPickerOpen(true)
             }
             handleProviderChange={handleProviderChange}
             handleEffortLevelChange={handleEffortLevelChange}
             handleThinkingLevelChange={handleThinkingLevelChange}
+            openReasoningSheetSignal={openReasoningSheetSignal}
             loadedIssueContexts={loadedIssueContexts}
             loadedPRContexts={loadedPRContexts}
             loadedSecurityContexts={loadedSecurityContexts}
@@ -510,6 +539,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               customCliProfiles={customCliProfiles}
               onModelChange={handleModelChange}
               onBackendModelChange={onBackendModelChange}
+              onAfterModelSelect={handleAfterMobileModelSelect}
             />
           )}
 
@@ -537,6 +567,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             sessionHasMessages={sessionHasMessages}
             providerLocked={providerLocked}
             customCliProfiles={customCliProfiles}
+            customCodexProviders={customCodexProviders}
             isCodex={isCodex}
             modelReasoning={selectedModelReasoning}
             prUrl={prUrl}
@@ -589,6 +620,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}
+              willSteer={willSteer}
               queuedMessageCount={queuedMessageCount}
               onCancel={onCancel}
             />

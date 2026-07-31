@@ -92,7 +92,13 @@ import {
   type MagicPromptModels,
 } from '@/types/preferences'
 import { isServerWindows } from '@/lib/platform'
+import {
+  getActiveConnectionId,
+  LOCAL_CONNECTION_ID,
+} from '@/lib/remote-connections'
 import { WslSetupStep } from './WslSetupStep'
+import { UsageModeStep, type OnboardingUsageMode } from './UsageModeStep'
+import { RemoteSetupStep } from './RemoteSetupStep'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
 type AIBackend =
@@ -118,6 +124,8 @@ export const AI_BACKENDS: AIBackend[] = [
 ]
 
 type OnboardingStep =
+  | 'usage-mode'
+  | 'remote-setup'
   | 'wsl-setup'
   | 'backend-select'
   | 'claude-setup'
@@ -165,6 +173,8 @@ type OnboardingStep =
  * they never appear as a Back destination.
  */
 const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
+  'usage-mode',
+  'remote-setup',
   'wsl-setup',
   'backend-select',
   'claude-setup',
@@ -849,18 +859,6 @@ function OnboardingDialogContent() {
       setGhLoginAttempt(0)
     })
 
-    // On Windows, show WSL mode selection first if not yet chosen
-    if (
-      isServerWindows() &&
-      preferences &&
-      !preferences.wsl_mode_chosen &&
-      !onboardingStartStep
-    ) {
-      dbg('init effect: Windows + WSL not chosen → wsl-setup')
-      queueMicrotask(() => setStep('wsl-setup', { replace: true }))
-      return
-    }
-
     if (onboardingStartStep === 'gh') {
       dbg('init effect: startStep=gh → gh-setup')
       queueMicrotask(() => {
@@ -883,37 +881,61 @@ function OnboardingDialogContent() {
 
     const readyBackends = AI_BACKENDS.filter(isBackendReady)
     const ghReady = !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
+    const remoteActive = getActiveConnectionId() !== LOCAL_CONNECTION_ID
     dbg(
       'init effect: readyBackends:',
       readyBackends,
       'ghReady:',
       ghReady,
+      'remoteActive:',
+      remoteActive,
       'manuallyTriggered:',
       onboardingManuallyTriggered
     )
 
-    // When manually triggered, always start at wsl-setup on Windows so users
-    // can change their WSL/native choice, then backend-select (via Continue
-    // on the WSL step). Non-Windows goes straight to backend-select.
+    // Manual re-open always starts with Local vs Remote so users can switch.
     if (onboardingManuallyTriggered) {
-      const firstStep: OnboardingStep = isServerWindows()
-        ? 'wsl-setup'
-        : 'backend-select'
-      dbg('init effect: manual trigger →', firstStep)
+      dbg('init effect: manual trigger → usage-mode')
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
-        setStep(firstStep, { replace: true })
+        setStep('usage-mode', { replace: true })
       })
       return
     }
 
-    if (ghReady && readyBackends.length > 0) {
+    // Already on a remote: skip usage mode and continue CLI setup there.
+    // WSL mode only applies to local Windows development.
+    if (remoteActive) {
+      if (ghReady && readyBackends.length > 0) {
+        dbg('init effect: remote all ready → complete')
+        queueMicrotask(() => setStep('complete', { replace: true }))
+        return
+      }
+      if (readyBackends.length > 0) {
+        dbg('init effect: remote + some backends ready → after backends')
+        queueMicrotask(() => {
+          setSelectedBackends(readyBackends)
+          setStep(getNextStepAfterBackends(), { replace: true })
+        })
+        return
+      }
+      dbg('init effect: remote + nothing ready → backend-select')
+      queueMicrotask(() => setStep('backend-select', { replace: true }))
+      return
+    }
+
+    const needsWslChoice =
+      isServerWindows() && !!preferences && !preferences.wsl_mode_chosen
+
+    // Local tools already ready and environment chosen → finish.
+    if (ghReady && readyBackends.length > 0 && !needsWslChoice) {
       dbg('init effect: all ready → complete')
       queueMicrotask(() => setStep('complete', { replace: true }))
       return
     }
 
-    if (readyBackends.length > 0) {
+    // Partial local progress (and WSL already chosen): resume CLI setup.
+    if (readyBackends.length > 0 && !needsWslChoice) {
       dbg('init effect: some backends ready → skip to after backends')
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
@@ -922,8 +944,10 @@ function OnboardingDialogContent() {
       return
     }
 
-    dbg('init effect: nothing ready → backend-select')
-    queueMicrotask(() => setStep('backend-select', { replace: true }))
+    // First-run (or Windows still needs environment choice after Local):
+    // Local vs Remote before any CLI installs.
+    dbg('init effect: nothing ready or needs env choice → usage-mode')
+    queueMicrotask(() => setStep('usage-mode', { replace: true }))
   }, [
     onboardingOpen,
     onboardingStartStep,
@@ -2182,8 +2206,45 @@ function OnboardingDialogContent() {
     },
   })
 
+  const continueAfterLocalChoice = useCallback(() => {
+    if (isServerWindows() && preferences && !preferences.wsl_mode_chosen) {
+      dbg('local chosen → wsl-setup')
+      setStep('wsl-setup')
+      return
+    }
+    dbg('local chosen → backend-select')
+    setStep('backend-select')
+  }, [preferences, setStep])
+
+  const handleUsageModeSelect = useCallback(
+    (mode: OnboardingUsageMode) => {
+      if (mode === 'remote') {
+        dbg('usage-mode → remote-setup')
+        setStep('remote-setup')
+        return
+      }
+      continueAfterLocalChoice()
+    },
+    [continueAfterLocalChoice, setStep]
+  )
+
   const getDialogContent = () => {
     const dialogStep = step as OnboardingStep
+    if (dialogStep === 'usage-mode') {
+      return {
+        title: 'Welcome to Jean',
+        description: 'Choose local development or remote control.',
+      }
+    }
+
+    if (dialogStep === 'remote-setup') {
+      return {
+        title: 'Connect to a remote Jean',
+        description:
+          'Install jean-server over SSH, or connect with an existing Web Access URL.',
+      }
+    }
+
     if (dialogStep === 'wsl-setup') {
       return {
         title: 'Welcome to Jean',
@@ -2462,12 +2523,34 @@ function OnboardingDialogContent() {
         </DialogHeader>
 
         <div className="overflow-y-auto py-4 flex flex-col">
-          {step !== 'wsl-setup' && renderStepIndicator()}
+          {step !== 'usage-mode' &&
+            step !== 'remote-setup' &&
+            step !== 'wsl-setup' &&
+            renderStepIndicator()}
 
           <div className="w-full">
-            {step === 'wsl-setup' ? (
+            {step === 'usage-mode' ? (
+              <UsageModeStep onSelect={handleUsageModeSelect} />
+            ) : step === 'remote-setup' ? (
+              <RemoteSetupStep />
+            ) : step === 'wsl-setup' ? (
               <WslSetupStep
                 onComplete={() => {
+                  const ready = AI_BACKENDS.filter(isBackendReady)
+                  const ghOk =
+                    !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
+                  if (ghOk && ready.length > 0) {
+                    dbg('WSL setup complete → complete')
+                    setSelectedBackends(ready)
+                    setStep('complete')
+                    return
+                  }
+                  if (ready.length > 0) {
+                    dbg('WSL setup complete → after backends')
+                    setSelectedBackends(ready)
+                    setStep(getNextStepAfterBackends())
+                    return
+                  }
                   dbg('WSL setup complete → backend-select')
                   setStep('backend-select')
                 }}

@@ -85,9 +85,12 @@ function normalizeCodexAgentStatus(
   if (agentStatus === 'completed' || agentStatus === 'shutdown') {
     return 'completed'
   }
+  if (agentStatus === 'interrupted') {
+    // Authoritative interrupted terminal state — do not conflate with error
+    return 'interrupted'
+  }
   if (
     agentStatus === 'errored' ||
-    agentStatus === 'interrupted' ||
     agentStatus === 'notFound' ||
     toolCallStatus === 'failed'
   ) {
@@ -152,9 +155,16 @@ export function extractCodexAgents(
     }
   }
 
+  // Never invent a terminal "completed" state just because the parent stream
+  // ended. Unresolved in_progress agents become "interrupted" so the widget
+  // does not show a green completion treatment for cancelled/abandoned work.
   return Array.from(agents.values()).map(agent => {
     if (isSending || agent.status !== 'in_progress') return agent
-    return { ...agent, status: 'completed' }
+    return {
+      ...agent,
+      status: 'interrupted' as const,
+      message: agent.message ?? 'Interrupted before completion',
+    }
   })
 }
 

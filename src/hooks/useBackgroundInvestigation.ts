@@ -5,6 +5,7 @@ import { useUIStore } from '@/store/ui-store'
 import { usePreferences } from '@/services/preferences'
 import { chatQueryKeys } from '@/services/chat'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
+import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_PR_PROMPT,
@@ -30,12 +31,13 @@ type InvestigationType =
   | 'sentry-issue'
 
 /**
- * Headless hook for starting investigations on background-created worktrees.
+ * Headless hook for starting investigations on auto-investigate worktrees.
  *
- * When a worktree is created via CMD+Click with auto-investigate, the ChatWindow
- * never mounts (no modal opens), so the auto-investigate flag is never consumed.
- * This hook watches those flags, builds the investigation prompt, and sends it
- * through the shared backend background-investigation command — no modal needed.
+ * Owns the entire auto-investigate path for both CMD+Click background creates
+ * and foreground creates that open a session modal. Always queues the prompt
+ * through `start_background_investigation` so remote/web clients (where the
+ * frontend queue processor does not drain) still start investigations even when
+ * the worktree becomes active or opens in a modal.
  *
  * Must be mounted at App level alongside useQueueProcessor.
  */
@@ -78,30 +80,97 @@ export function useBackgroundInvestigation(): void {
       autoInvestigateAdvisoryWorktreeIds,
       autoInvestigateLinearIssueWorktreeIds,
       autoInvestigateSentryIssueWorktreeIds,
-      autoOpenSessionWorktreeIds,
     } = useUIStore.getState()
 
-    const { worktreePaths, activeWorktreeId } = useChatStore.getState()
+    const { worktreePaths } = useChatStore.getState()
 
+    // Client-only `status` is set by worktree event handlers. Backend
+    // get_worktree/list_worktrees never include it, so remote/web refetches
+    // wipe `status: 'ready'` back to undefined. Treat anything other than an
+    // explicit in-flight status as ready once we know about the worktree.
     const isWorktreeReady = (worktreeId: string): boolean => {
       const cached = queryClient.getQueryData<Worktree>([
         ...projectsQueryKeys.all,
         'worktree',
         worktreeId,
       ])
-      return cached?.status === 'ready'
+      if (
+        cached?.status === 'pending' ||
+        cached?.status === 'error' ||
+        cached?.status === 'deleting'
+      ) {
+        return false
+      }
+      if (cached) return true
+
+      // Recovery path: list cache may already have the server-backed worktree
+      // after a missed worktree:created event, while the single-worktree entry
+      // was never promoted off pending / never written.
+      const listQueries = queryClient.getQueriesData<Worktree[]>({
+        queryKey: projectsQueryKeys.all,
+      })
+      for (const [, list] of listQueries) {
+        if (!Array.isArray(list)) continue
+        const found = list.find(w => w.id === worktreeId)
+        if (
+          found &&
+          found.status !== 'pending' &&
+          found.status !== 'error' &&
+          found.status !== 'deleting'
+        ) {
+          queryClient.setQueryData<Worktree>(
+            [...projectsQueryKeys.all, 'worktree', worktreeId],
+            { ...found, status: 'ready' }
+          )
+          if (found.path) {
+            useChatStore.getState().registerWorktreePath(worktreeId, found.path)
+          }
+          return true
+        }
+      }
+      return false
     }
 
     // Collect all worktree IDs that need background investigation
     const candidates: { worktreeId: string; type: InvestigationType }[] = []
-    let skippedNotReady = 0
+    let skippedWaiting = 0
+
+    // Always handle auto-investigate headlessly — do not skip active or
+    // auto-opening worktrees. ChatWindow used to own those cases, but remote
+    // Jean clients can open the worktree without reliably sending the prompt.
+    const resolveWorktreePath = (worktreeId: string): string | undefined => {
+      if (worktreePaths[worktreeId]) return worktreePaths[worktreeId]
+
+      // List/single caches often already know the path after a recovery
+      // refetch even when worktreePaths was never registered (missed
+      // worktree:created on remote).
+      const cached =
+        queryClient.getQueryData<Worktree>([
+          ...projectsQueryKeys.all,
+          'worktree',
+          worktreeId,
+        ]) ??
+        queryClient
+          .getQueriesData<Worktree[]>({ queryKey: projectsQueryKeys.all })
+          .flatMap(([, list]) => (Array.isArray(list) ? list : []))
+          .find(w => w.id === worktreeId)
+      if (!cached?.path) return undefined
+
+      useChatStore.getState().registerWorktreePath(worktreeId, cached.path)
+      return cached.path
+    }
 
     const checkCandidate = (worktreeId: string): boolean => {
-      if (worktreeId === activeWorktreeId) return false
-      if (autoOpenSessionWorktreeIds.has(worktreeId)) return false
-      if (!worktreePaths[worktreeId]) return false
+      // Missing path and not-ready both need retries. Previously only the
+      // not-ready branch scheduled a timer; a missing path with no later
+      // worktreePathCount bump (e.g. missed worktree:created on remote) left
+      // the investigation flag stuck forever.
+      if (!resolveWorktreePath(worktreeId)) {
+        skippedWaiting++
+        return false
+      }
       if (!isWorktreeReady(worktreeId)) {
-        skippedNotReady++
+        skippedWaiting++
         return false
       }
       if (processingRef.current.has(worktreeId)) return false
@@ -134,11 +203,11 @@ export function useBackgroundInvestigation(): void {
       retryTimerRef.current = null
     }
 
-    // If worktrees are flagged but not ready yet, retry after 2s.
+    // If worktrees are flagged but path/status aren't ready yet, retry after 2s.
     // The effect has no dependency that changes when worktree status goes
-    // from pending → ready, so without this retry the effect would never
-    // re-fire for those worktrees.
-    if (skippedNotReady > 0) {
+    // from pending → ready (and path registration can be missed on remote),
+    // so without this retry the effect would never re-fire for those worktrees.
+    if (skippedWaiting > 0) {
       retryTimerRef.current = setTimeout(() => setRetryTick(t => t + 1), 2000)
     }
 
@@ -200,7 +269,7 @@ async function buildPrompt(
   if (type === 'issue') {
     const contexts = await invoke<{ number: number }[]>(
       'list_loaded_issue_contexts',
-      { sessionId: worktreeId }
+      { sessionId: worktreeId, worktreeId }
     )
     const refs = (contexts ?? []).map(c => `#${c.number}`).join(', ')
     const word = (contexts ?? []).length === 1 ? 'issue' : 'issues'
@@ -217,7 +286,9 @@ async function buildPrompt(
   if (type === 'pr') {
     const contexts = await invoke<{ number: number }[]>(
       'list_loaded_pr_contexts',
-      { sessionId: worktreeId }
+      // create_worktree stores refs under worktree_id; pass both so remote
+      // servers resolve context whether queried by session or worktree key.
+      { sessionId: worktreeId, worktreeId }
     )
     const refs = (contexts ?? []).map(c => `#${c.number}`).join(', ')
     const word = (contexts ?? []).length === 1 ? 'PR' : 'PRs'
@@ -398,7 +469,11 @@ async function processBackgroundInvestigation(
   queryClient: ReturnType<typeof useQueryClient>
 ): Promise<void> {
   const worktreePath = useChatStore.getState().worktreePaths[worktreeId]
-  if (!worktreePath) return
+  if (!worktreePath) {
+    // Throw so the caller keeps the auto-investigate flag and retries instead
+    // of treating a missing path as success and consuming the flag.
+    throw new Error(`Worktree path not registered for ${worktreeId}`)
+  }
 
   logger.info('Starting background investigation', { worktreeId, type })
 
@@ -409,9 +484,6 @@ async function processBackgroundInvestigation(
     worktreeId,
   ])
   const projectId = cachedWorktree?.project_id
-
-  // Build the investigation prompt
-  const prompt = await buildPrompt(worktreeId, type, preferences, projectId)
 
   // Resolve model, provider, backend
   const { modelKey, providerKey, effortKey, modeKey } =
@@ -447,6 +519,12 @@ async function processBackgroundInvestigation(
   const executionMode =
     preferences?.magic_prompt_modes?.[modeKey] ??
     DEFAULT_MAGIC_PROMPT_MODES[modeKey]
+
+  // Build the investigation prompt (append fix directive when mode is yolo)
+  const prompt = applyYoloInvestigationFixDirective(
+    await buildPrompt(worktreeId, type, preferences, projectId),
+    executionMode
+  )
 
   const result = await invoke<{
     sessionId: string

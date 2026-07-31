@@ -55,11 +55,13 @@ export function resolveSessionDebugDetails(params: {
     'claude'
   const model = session?.selected_model ?? selectedModel
   const modelImpliedBackend = getModelImpliedBackend(model)
-  const clampedBackend =
-    installedBackends.length > 0 && !installedBackends.includes(resolvedBackend)
-      ? (installedBackends[0] ?? resolvedBackend)
-      : resolvedBackend
-  const finalBackend = modelImpliedBackend ?? clampedBackend
+  const preferredBackend = modelImpliedBackend ?? resolvedBackend
+  // Prefer model-implied backend, but never a backend the user isn't logged into.
+  const finalBackend =
+    installedBackends.length > 0 &&
+    !installedBackends.includes(preferredBackend)
+      ? (installedBackends[0] ?? preferredBackend)
+      : preferredBackend
 
   const defaultModel =
     finalBackend === 'codex'

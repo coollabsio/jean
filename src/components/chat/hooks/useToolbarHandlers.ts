@@ -250,20 +250,42 @@ export function useToolbarHandlers({
 
   const handleToolbarProviderChange = useCallback(
     (provider: string | null) => {
-      if (activeSessionId) {
+      if (activeSessionId && activeWorktreeId && activeWorktreePath) {
         useChatStore.getState().setSelectedProvider(activeSessionId, provider)
-        if (activeWorktreeId && activeWorktreePath) {
-          setSessionProvider.mutate({
-            sessionId: activeSessionId,
-            worktreeId: activeWorktreeId,
-            worktreePath: activeWorktreePath,
-            provider,
-          })
-        }
+        // Optimistically update session cache so mid-session provider switches
+        // are not overridden by stale selected_provider until invalidate lands.
+        queryClient.setQueryData(
+          chatQueryKeys.session(activeSessionId),
+          (old: Session | null | undefined) =>
+            old
+              ? applySessionSettingToSession(
+                  old,
+                  'provider',
+                  provider ?? ''
+                )
+              : old
+        )
+        setSessionProvider.mutate({
+          sessionId: activeSessionId,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          provider,
+        })
+        invoke('broadcast_session_setting', {
+          sessionId: activeSessionId,
+          key: 'provider',
+          value: provider ?? '',
+        }).catch(() => undefined)
       }
       window.dispatchEvent(new CustomEvent('focus-chat-input'))
     },
-    [activeSessionId, activeWorktreeId, activeWorktreePath, setSessionProvider]
+    [
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      queryClient,
+      setSessionProvider,
+    ]
   )
 
   const handleToolbarThinkingLevelChange = useCallback(

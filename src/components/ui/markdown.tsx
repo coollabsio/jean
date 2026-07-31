@@ -17,6 +17,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
+import { remarkFixInterruptedLists } from '@/lib/remark-fix-interrupted-lists'
 import { Copy, Check, Table, ListChecks } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -39,7 +40,7 @@ interface MarkdownProps {
    */
   streaming?: boolean
   className?: string
-  /** Rendering context; tool-call markdown needs a wider ordered-list gutter. */
+  /** Rendering context (tool-call keeps the same ordered-list gutter as chat). */
   variant?: 'chat' | 'tool-call'
   /** Chat message ID — enables per-table checklist persistence when set */
   messageId?: string
@@ -424,10 +425,14 @@ const components: Components = {
       {children}
     </ul>
   ),
+  // pl-8 (not pl-6): double-digit markers ("10.") need extra gutter width when
+  // list-outside paints into padding; chat parents use overflow-x-hidden and
+  // otherwise clip the tens digit to ".0", ".1" (issue #542). tool-call keeps
+  // the same width for consistency.
   ol: ({ children, className, ...props }) => (
     <ol
       {...props}
-      className={cn('my-4 pl-6 list-decimal list-outside space-y-2', className)}
+      className={cn('my-4 pl-8 list-decimal list-outside space-y-2', className)}
     >
       {children}
     </ol>
@@ -555,7 +560,9 @@ const compactComponents: Components = {
 }
 
 // Module-level plugin arrays keep references stable across renders.
-const remarkPlugins = [remarkGfm]
+// remarkFixInterruptedLists runs after GFM so task lists are already parsed,
+// then nests orphan sibling ULs under the preceding OL item (issue #200).
+const remarkPlugins = [remarkGfm, remarkFixInterruptedLists]
 // rehype-raw re-parses the full accumulated text as HTML on every render —
 // the dominant per-frame cost while streaming — so streaming mode skips it
 // and only completed (non-streaming) renders apply it.

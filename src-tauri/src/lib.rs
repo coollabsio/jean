@@ -8,6 +8,7 @@ mod browser;
 mod desktop_commands;
 mod http_server;
 mod platform;
+mod remote_install;
 
 pub(crate) struct CoreRuntime(pub jean_core::RuntimeContext);
 
@@ -92,6 +93,11 @@ fn create_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         .build()?;
     let view_menu = SubmenuBuilder::new(app, "View")
         .item(&MenuItemBuilder::with_id("toggle-left-sidebar", "Toggle Left Sidebar").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id("toggle-file-browser", "Toggle File Browser")
+                .accelerator("CmdOrCtrl+Shift+B")
+                .build(app)?,
+        )
         .item(&MenuItemBuilder::with_id("toggle-right-sidebar", "Toggle Right Sidebar").build(app)?)
         .separator()
         .item(
@@ -138,6 +144,7 @@ fn install_menu_events(app: &tauri::App) {
             "check-updates" => Some("menu-check-updates"),
             "preferences" => Some("menu-preferences"),
             "toggle-left-sidebar" => Some("menu-toggle-left-sidebar"),
+            "toggle-file-browser" => Some("menu-toggle-file-browser"),
             "toggle-right-sidebar" => Some("menu-toggle-right-sidebar"),
             "toggle-terminal" => Some("menu-toggle-terminal"),
             "toggle-browser" => Some("menu-toggle-browser"),
@@ -276,6 +283,9 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         }
     });
 
+    // Window materials: production config starts opaque (no sidebar effects).
+    // Apply the saved window_vibrancy preference once prefs load. Default is
+    // false so text stays sharp; vibrancy remains an explicit opt-in.
     let http = core.clone();
     let desktop_app = app.handle().clone();
     tauri::async_runtime::spawn(async move {
@@ -317,6 +327,11 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         create_app_menu(app)?;
         install_menu_events(app);
     }
+
+    // Recover from WebView2 process death on Windows (issue #575 — blank /
+    // "invisible" window after the browser process exits). No-op elsewhere.
+    platform::install_process_failed_recovery(app);
+
     Ok(())
 }
 
@@ -339,6 +354,12 @@ pub fn run() {
 
     #[cfg(target_os = "macos")]
     fix_macos_path();
+
+    // Must run before tauri::Builder creates the WebKitGTK webview.
+    // Policy: DMABUF off by default; full software compositing is opt-in
+    // via JEAN_SAFE_GRAPHICS=1 (see platform/linux_webkit.rs, issue #129).
+    #[cfg(target_os = "linux")]
+    platform::apply_linux_webkit_env();
 
     let log_targets = vec![
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
@@ -386,6 +407,7 @@ pub fn run() {
             desktop_commands::set_project_avatar,
             desktop_commands::start_http_server,
             desktop_commands::stop_http_server,
+            desktop_commands::install_remote_jean_server,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,

@@ -15,4 +15,16 @@ describe('web running-session bootstrap', () => {
       /const resumableIds = new Set[\s\S]*?if \(!webBackend\) \{[\s\S]*?removeSendingSession\(sessionId\)[\s\S]*?\}/
     )
   })
+
+  it('deduplicates resume-path snapshot replay for all backends, not only Claude', () => {
+    // Grok/Pi/Kimi re-emit tools and re-tail from the start of the run log.
+    // Restricting dedupeReplayedOutput to Claude left those backends doubling
+    // streaming content on web reconnect while a prompt was still running.
+    expect(source).toMatch(
+      /hydrateRunningSnapshot\(session\.session_id, lastMsg, \{\s*allowWhileSending: true,\s*dedupeReplayedOutput: true,\s*\}\)/
+    )
+    expect(source).not.toMatch(
+      /dedupeReplayedOutput:\s*sessionSnapshot\?\.backend === ['"]claude['"]/
+    )
+  })
 })

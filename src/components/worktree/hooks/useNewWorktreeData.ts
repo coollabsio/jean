@@ -277,6 +277,7 @@ export function useNewWorktreeData(
     remotes,
 
     // Branches
+    branches: branches ?? [],
     filteredBranches,
     isLoadingBranches,
     isRefetchingBranches,

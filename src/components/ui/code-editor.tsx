@@ -10,14 +10,14 @@ import {
   crosshairCursor,
   dropCursor,
 } from '@codemirror/view'
-import { EditorState, Compartment } from '@codemirror/state'
+import { EditorState, Compartment, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import {
   syntaxHighlighting,
-  defaultHighlightStyle,
+  HighlightStyle,
   type LanguageSupport,
 } from '@codemirror/language'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { tags as t } from '@lezer/highlight'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
 import { html } from '@codemirror/lang-html'
@@ -63,71 +63,271 @@ function getLanguageSupport(language: string): LanguageSupport | null {
   }
 }
 
-// Light theme (simple, matches app background)
-const lightTheme = EditorView.theme({
-  '&': {
-    backgroundColor: 'hsl(var(--muted))',
-    color: 'hsl(var(--foreground))',
+/**
+ * Jean light chrome — uses app CSS tokens (oklch/hex), not hsl() wrappers.
+ * Matches :root tokens: white surface, dark text, soft muted panels.
+ */
+const jeanLightChrome = EditorView.theme(
+  {
+    '&': {
+      backgroundColor: 'var(--card)',
+      color: 'var(--foreground)',
+      height: '100%',
+    },
+    '.cm-scroller': {
+      fontFamily: 'var(--font-family-mono, ui-monospace, monospace)',
+      lineHeight: '1.55',
+    },
+    '.cm-content': {
+      caretColor: 'var(--foreground)',
+      fontSize: '12px',
+      padding: '8px 0',
+    },
+    '.cm-line': {
+      wordBreak: 'break-word',
+      padding: '0 8px',
+    },
+    '.cm-cursor, .cm-dropCursor': {
+      borderLeftColor: 'var(--foreground)',
+    },
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection':
+      {
+        backgroundColor: 'color-mix(in srgb, var(--primary) 18%, transparent)',
+      },
+    '.cm-activeLine': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 80%, transparent)',
+    },
+    '.cm-gutters': {
+      backgroundColor: 'var(--muted)',
+      color: 'var(--muted-foreground)',
+      border: 'none',
+      borderRight: '1px solid var(--border)',
+    },
+    '.cm-activeLineGutter': {
+      backgroundColor: 'var(--accent)',
+      color: 'var(--accent-foreground)',
+    },
+    '.cm-lineNumbers .cm-gutterElement': {
+      padding: '0 8px 0 10px',
+      minWidth: '2.5rem',
+    },
+    '.cm-foldGutter': {
+      width: '0',
+    },
+    '.cm-matchingBracket, .cm-nonmatchingBracket': {
+      backgroundColor: 'color-mix(in srgb, var(--primary) 14%, transparent)',
+      outline: '1px solid color-mix(in srgb, var(--primary) 35%, transparent)',
+    },
+    '.cm-searchMatch': {
+      backgroundColor: 'color-mix(in srgb, var(--warning) 35%, transparent)',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected': {
+      backgroundColor: 'color-mix(in srgb, var(--warning) 55%, transparent)',
+    },
+    '.cm-tooltip': {
+      backgroundColor: 'var(--popover)',
+      color: 'var(--popover-foreground)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md, 0.5rem)',
+    },
+    '.cm-panels': {
+      backgroundColor: 'var(--muted)',
+      color: 'var(--foreground)',
+    },
   },
-  '.cm-content': {
-    caretColor: 'hsl(var(--foreground))',
-    fontFamily: 'var(--font-family-mono, ui-monospace, monospace)',
-    fontSize: '12px',
-  },
-  '.cm-cursor': {
-    borderLeftColor: 'hsl(var(--foreground))',
-  },
-  '.cm-activeLine': {
-    backgroundColor: 'hsl(var(--accent) / 0.5)',
-  },
-  '.cm-gutters': {
-    backgroundColor: 'hsl(var(--muted))',
-    color: 'hsl(var(--muted-foreground))',
-    border: 'none',
-  },
-  '.cm-activeLineGutter': {
-    backgroundColor: 'hsl(var(--accent) / 0.5)',
-  },
-  '.cm-selectionBackground, ::selection': {
-    backgroundColor: 'hsl(var(--accent))',
-  },
-  '&.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'hsl(var(--accent))',
-  },
-})
+  { dark: false }
+)
 
-// Dark theme based on oneDark but customized
-const darkTheme = EditorView.theme({
-  '&': {
-    backgroundColor: 'hsl(var(--muted))',
-    color: 'hsl(var(--foreground))',
+/**
+ * Jean dark chrome — Coolify coolgray + yellow primary.
+ * Matches .dark tokens: #101010 base, #181818 card, #fcd452 accent.
+ */
+const jeanDarkChrome = EditorView.theme(
+  {
+    '&': {
+      backgroundColor: 'var(--card)',
+      color: 'var(--foreground)',
+      height: '100%',
+    },
+    '.cm-scroller': {
+      fontFamily: 'var(--font-family-mono, ui-monospace, monospace)',
+      lineHeight: '1.55',
+    },
+    '.cm-content': {
+      caretColor: 'var(--primary)',
+      fontSize: '12px',
+      padding: '8px 0',
+    },
+    '.cm-line': {
+      wordBreak: 'break-word',
+      padding: '0 8px',
+    },
+    '.cm-cursor, .cm-dropCursor': {
+      borderLeftColor: 'var(--primary)',
+    },
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection':
+      {
+        backgroundColor: 'color-mix(in srgb, var(--primary) 22%, transparent)',
+      },
+    '.cm-activeLine': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 70%, transparent)',
+    },
+    '.cm-gutters': {
+      backgroundColor: 'var(--background)',
+      color: 'var(--muted-foreground)',
+      border: 'none',
+      borderRight: '1px solid var(--border)',
+    },
+    '.cm-activeLineGutter': {
+      backgroundColor: 'var(--accent)',
+      color: 'var(--primary)',
+    },
+    '.cm-lineNumbers .cm-gutterElement': {
+      padding: '0 8px 0 10px',
+      minWidth: '2.5rem',
+    },
+    '.cm-foldGutter': {
+      width: '0',
+    },
+    '.cm-matchingBracket, .cm-nonmatchingBracket': {
+      backgroundColor: 'color-mix(in srgb, var(--primary) 16%, transparent)',
+      outline: '1px solid color-mix(in srgb, var(--primary) 40%, transparent)',
+    },
+    '.cm-searchMatch': {
+      backgroundColor: 'color-mix(in srgb, var(--primary) 28%, transparent)',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected': {
+      backgroundColor: 'color-mix(in srgb, var(--primary) 45%, transparent)',
+    },
+    '.cm-tooltip': {
+      backgroundColor: 'var(--popover)',
+      color: 'var(--popover-foreground)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md, 0.5rem)',
+    },
+    '.cm-panels': {
+      backgroundColor: 'var(--muted)',
+      color: 'var(--foreground)',
+    },
   },
-  '.cm-content': {
-    caretColor: 'hsl(var(--foreground))',
-    fontFamily: 'var(--font-family-mono, ui-monospace, monospace)',
-    fontSize: '12px',
-  },
-  '.cm-cursor': {
-    borderLeftColor: 'hsl(var(--foreground))',
-  },
-  '.cm-activeLine': {
-    backgroundColor: 'hsl(var(--accent) / 0.3)',
-  },
-  '.cm-gutters': {
-    backgroundColor: 'hsl(var(--muted))',
-    color: 'hsl(var(--muted-foreground))',
-    border: 'none',
-  },
-  '.cm-activeLineGutter': {
-    backgroundColor: 'hsl(var(--accent) / 0.3)',
-  },
-  '.cm-selectionBackground, ::selection': {
-    backgroundColor: 'hsl(var(--accent))',
-  },
-  '&.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'hsl(var(--accent))',
-  },
-})
+  { dark: true }
+)
+
+/**
+ * Syntax colors tuned for Jean light (readable on white / soft muted).
+ */
+const jeanLightHighlight = HighlightStyle.define([
+  { tag: t.comment, color: '#6b7280', fontStyle: 'italic' },
+  { tag: t.lineComment, color: '#6b7280', fontStyle: 'italic' },
+  { tag: t.blockComment, color: '#6b7280', fontStyle: 'italic' },
+  { tag: t.docComment, color: '#6b7280', fontStyle: 'italic' },
+  { tag: t.keyword, color: '#7c3aed' },
+  { tag: t.controlKeyword, color: '#7c3aed' },
+  { tag: t.moduleKeyword, color: '#7c3aed' },
+  { tag: t.operatorKeyword, color: '#7c3aed' },
+  { tag: t.definitionKeyword, color: '#7c3aed' },
+  { tag: t.self, color: '#c2410c' },
+  { tag: t.bool, color: '#b45309' },
+  { tag: t.null, color: '#b45309' },
+  { tag: t.atom, color: '#b45309' },
+  { tag: t.number, color: '#b45309' },
+  { tag: t.integer, color: '#b45309' },
+  { tag: t.float, color: '#b45309' },
+  { tag: t.string, color: '#15803d' },
+  { tag: t.special(t.string), color: '#15803d' },
+  { tag: t.regexp, color: '#0f766e' },
+  { tag: t.escape, color: '#0f766e' },
+  { tag: t.variableName, color: '#1f2937' },
+  { tag: t.definition(t.variableName), color: '#1d4ed8' },
+  { tag: t.function(t.variableName), color: '#1d4ed8' },
+  { tag: t.propertyName, color: '#0369a1' },
+  { tag: t.definition(t.propertyName), color: '#0369a1' },
+  { tag: t.typeName, color: '#a16207' },
+  { tag: t.className, color: '#a16207' },
+  { tag: t.namespace, color: '#a16207' },
+  { tag: t.macroName, color: '#c026d3' },
+  { tag: t.labelName, color: '#c026d3' },
+  { tag: t.attributeName, color: '#0369a1' },
+  { tag: t.attributeValue, color: '#15803d' },
+  { tag: t.tagName, color: '#b91c1c' },
+  { tag: t.angleBracket, color: '#6b7280' },
+  { tag: t.operator, color: '#4b5563' },
+  { tag: t.punctuation, color: '#4b5563' },
+  { tag: t.bracket, color: '#4b5563' },
+  { tag: t.paren, color: '#4b5563' },
+  { tag: t.squareBracket, color: '#4b5563' },
+  { tag: t.brace, color: '#4b5563' },
+  { tag: t.meta, color: '#6b7280' },
+  { tag: t.invalid, color: '#dc2626' },
+  { tag: t.heading, color: '#1d4ed8', fontWeight: 'bold' },
+  { tag: t.strong, fontWeight: 'bold' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.link, color: '#1d4ed8', textDecoration: 'underline' },
+  { tag: t.url, color: '#0f766e' },
+  { tag: t.monospace, color: '#1f2937' },
+])
+
+/**
+ * Syntax colors for Jean dark coolgray + yellow accent.
+ * Keywords lean amber/yellow; strings green (success); types soft gold.
+ */
+const jeanDarkHighlight = HighlightStyle.define([
+  { tag: t.comment, color: '#7a7a7a', fontStyle: 'italic' },
+  { tag: t.lineComment, color: '#7a7a7a', fontStyle: 'italic' },
+  { tag: t.blockComment, color: '#7a7a7a', fontStyle: 'italic' },
+  { tag: t.docComment, color: '#7a7a7a', fontStyle: 'italic' },
+  { tag: t.keyword, color: '#fcd452' },
+  { tag: t.controlKeyword, color: '#fcd452' },
+  { tag: t.moduleKeyword, color: '#f0c14b' },
+  { tag: t.operatorKeyword, color: '#fcd452' },
+  { tag: t.definitionKeyword, color: '#fcd452' },
+  { tag: t.self, color: '#f5a97f' },
+  { tag: t.bool, color: '#f0a868' },
+  { tag: t.null, color: '#f0a868' },
+  { tag: t.atom, color: '#f0a868' },
+  { tag: t.number, color: '#f0a868' },
+  { tag: t.integer, color: '#f0a868' },
+  { tag: t.float, color: '#f0a868' },
+  { tag: t.string, color: '#4ade80' },
+  { tag: t.special(t.string), color: '#4ade80' },
+  { tag: t.regexp, color: '#2dd4bf' },
+  { tag: t.escape, color: '#2dd4bf' },
+  { tag: t.variableName, color: '#e8e8e8' },
+  { tag: t.definition(t.variableName), color: '#7dd3fc' },
+  { tag: t.function(t.variableName), color: '#7dd3fc' },
+  { tag: t.propertyName, color: '#93c5fd' },
+  { tag: t.definition(t.propertyName), color: '#93c5fd' },
+  { tag: t.typeName, color: '#f0d78c' },
+  { tag: t.className, color: '#f0d78c' },
+  { tag: t.namespace, color: '#f0d78c' },
+  { tag: t.macroName, color: '#e879f9' },
+  { tag: t.labelName, color: '#e879f9' },
+  { tag: t.attributeName, color: '#93c5fd' },
+  { tag: t.attributeValue, color: '#4ade80' },
+  { tag: t.tagName, color: '#f87171' },
+  { tag: t.angleBracket, color: '#a1a1a1' },
+  { tag: t.operator, color: '#c4c4c4' },
+  { tag: t.punctuation, color: '#a1a1a1' },
+  { tag: t.bracket, color: '#a1a1a1' },
+  { tag: t.paren, color: '#a1a1a1' },
+  { tag: t.squareBracket, color: '#a1a1a1' },
+  { tag: t.brace, color: '#a1a1a1' },
+  { tag: t.meta, color: '#7a7a7a' },
+  { tag: t.invalid, color: '#f87171' },
+  { tag: t.heading, color: '#fcd452', fontWeight: 'bold' },
+  { tag: t.strong, fontWeight: 'bold' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.link, color: '#7dd3fc', textDecoration: 'underline' },
+  { tag: t.url, color: '#2dd4bf' },
+  { tag: t.monospace, color: '#e8e8e8' },
+])
+
+function jeanThemeExtensions(mode: 'dark' | 'light'): Extension[] {
+  if (mode === 'dark') {
+    return [jeanDarkChrome, syntaxHighlighting(jeanDarkHighlight)]
+  }
+  return [jeanLightChrome, syntaxHighlighting(jeanLightHighlight)]
+}
 
 interface CodeEditorProps {
   /** Initial content of the editor */
@@ -144,7 +344,7 @@ interface CodeEditorProps {
 
 /**
  * CodeMirror 6 based code editor component
- * Supports syntax highlighting for common languages
+ * Jean light/dark themes aligned with app CSS tokens.
  */
 export const CodeEditor = memo(function CodeEditor({
   value,
@@ -180,7 +380,6 @@ export const CodeEditor = memo(function CodeEditor({
     }
 
     const langSupport = getLanguageSupport(language)
-    const isDark = resolvedTheme === 'dark'
 
     const extensions = [
       lineNumbers(),
@@ -191,9 +390,10 @@ export const CodeEditor = memo(function CodeEditor({
       rectangularSelection(),
       crosshairCursor(),
       history(),
+      // Soft-wrap long lines so mobile / narrow panels stay readable
+      EditorView.lineWrapping,
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-      themeCompartment.current.of(isDark ? [oneDark, darkTheme] : lightTheme),
+      themeCompartment.current.of(jeanThemeExtensions(resolvedTheme)),
       languageCompartment.current.of(langSupport ? [langSupport] : []),
       readOnlyCompartment.current.of(
         readOnly ? EditorState.readOnly.of(true) : []
@@ -232,10 +432,9 @@ export const CodeEditor = memo(function CodeEditor({
   // Update theme when it changes
   useEffect(() => {
     if (!editorRef.current) return
-    const isDark = resolvedTheme === 'dark'
     editorRef.current.dispatch({
       effects: themeCompartment.current.reconfigure(
-        isDark ? [oneDark, darkTheme] : lightTheme
+        jeanThemeExtensions(resolvedTheme)
       ),
     })
   }, [resolvedTheme])
@@ -284,7 +483,7 @@ export const CodeEditor = memo(function CodeEditor({
   return (
     <div
       ref={containerRef}
-      className={`overflow-hidden rounded-md [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto ${className ?? ''}`}
+      className={`overflow-hidden rounded-md border border-border bg-card [&_.cm-editor]:h-full [&_.cm-editor]:outline-none [&_.cm-scroller]:overflow-auto ${className ?? ''}`}
     />
   )
 })

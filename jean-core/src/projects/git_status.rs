@@ -379,7 +379,11 @@ pub fn base_ref(base_remote: Option<&str>, base_branch: &str) -> String {
 }
 
 /// Get the number of lines added and removed compared to the base branch
-fn get_branch_diff_stats(repo_path: &str, base_branch: &str, base_remote: Option<&str>) -> (u32, u32) {
+fn get_branch_diff_stats(
+    repo_path: &str,
+    base_branch: &str,
+    base_remote: Option<&str>,
+) -> (u32, u32) {
     // git diff --numstat <remote>/main...HEAD shows changes in current branch vs base
     let origin_ref = base_ref(base_remote, base_branch);
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
@@ -789,8 +793,14 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     let base_branch_ahead_count = count_commits_between(repo_path, &origin_ref, base_branch);
     let base_branch_behind_count = count_commits_between(repo_path, base_branch, &origin_ref);
 
-    // Commits unique to this worktree (ahead of local base branch)
-    let worktree_ahead_count = count_commits_between(repo_path, base_branch, "HEAD");
+    // Commits unique to this worktree. Explicit remote bases must use their
+    // qualified ref so the remote's own commits are not counted as worktree work.
+    let worktree_base_ref = if base_remote.is_some() {
+        &origin_ref
+    } else {
+        base_branch
+    };
+    let worktree_ahead_count = count_commits_between(repo_path, worktree_base_ref, "HEAD");
 
     // Commits not yet pushed to the upstream tracking ref
     // Prefers the remembered PR push target (supports fork PRs where @{upstream} points
@@ -893,6 +903,45 @@ mod tests {
         // Without this, a worktree started from fork/main is compared against
         // origin/main and every commit fork is ahead shows up as its own work.
         assert_eq!(base_ref(Some("fork"), "main"), "fork/main");
+    }
+
+    #[test]
+    fn unpushed_fallback_uses_the_picked_remote_base() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        run_test_git(repo, &["init", "--initial-branch", "main"]);
+        run_test_git(repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(repo, &["config", "user.name", "Test"]);
+
+        std::fs::write(repo.join("file.txt"), "origin\n").expect("write initial file");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "origin base"]);
+        run_test_git(repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+        run_test_git(repo, &["checkout", "-b", "fork-base"]);
+        std::fs::write(repo.join("file.txt"), "fork\n").expect("write fork file");
+        run_test_git(repo, &["commit", "-am", "fork base"]);
+        run_test_git(repo, &["update-ref", "refs/remotes/fork/main", "HEAD"]);
+
+        run_test_git(repo, &["checkout", "-b", "feature"]);
+        std::fs::write(repo.join("feature.txt"), "feature\n").expect("write feature file");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "feature commit"]);
+
+        let status = get_branch_status(&ActiveWorktreeInfo {
+            worktree_id: "test-id".to_string(),
+            worktree_path: repo.to_string_lossy().into_owned(),
+            base_branch: "main".to_string(),
+            base_remote: Some("fork".to_string()),
+            pr_number: None,
+            pr_url: None,
+            pr_push_remote: None,
+            pr_push_branch: None,
+        })
+        .expect("branch status");
+
+        assert_eq!(status.worktree_ahead_count, 1);
+        assert_eq!(status.unpushed_count, 1);
     }
 
     #[test]

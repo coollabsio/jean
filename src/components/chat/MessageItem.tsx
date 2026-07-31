@@ -1,8 +1,11 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Markdown } from '@/components/ui/markdown'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import type {
   ChatMessage,
   Question,
@@ -27,6 +30,10 @@ import { SkillBadge } from './SkillBadge'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { ExitPlanModeButton } from './ExitPlanModeButton'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import {
+  CheckpointTurnRestoreButton,
+  turnHasFileEdits,
+} from './CheckpointTurnRestoreButton'
 import {
   Tooltip,
   TooltipTrigger,
@@ -80,6 +87,8 @@ interface MessageItemProps {
   sessionId: string
   /** Worktree path for resolving file mentions */
   worktreePath: string
+  /** Worktree id for checkpoint restore (modal + main window) */
+  worktreeId?: string | null
   /** Keyboard shortcut to display on approve button */
   approveShortcut: string
   /** Keyboard shortcut to display on approve yolo button */
@@ -166,6 +175,7 @@ export const MessageItem = memo(function MessageItem({
   hasFollowUpMessage,
   sessionId,
   worktreePath,
+  worktreeId = null,
   approveShortcut,
   approveShortcutYolo,
   approveShortcutClearContext,
@@ -208,6 +218,14 @@ export const MessageItem = memo(function MessageItem({
     message.role === 'user' ? extractSkillPaths(message.content) : []
   const displayContent =
     message.role === 'user' ? stripAllMarkers(message.content) : message.content
+  const assistantResponse =
+    message.role === 'assistant'
+      ? message.content.trim() ||
+        (message.content_blocks ?? [])
+          .flatMap(block => (block.type === 'text' ? [block.text] : []))
+          .join('\n')
+          .trim()
+      : ''
   // Show content if it's not empty
   const showContent = displayContent.trim()
 
@@ -269,6 +287,28 @@ export const MessageItem = memo(function MessageItem({
   const handleCopyToInput = useCallback(() => {
     onCopyToInput?.(message)
   }, [onCopyToInput, message])
+
+  const userTurnHasFileEdits = useMemo(() => {
+    if (message.role !== 'user' || !getMessages) return false
+    return turnHasFileEdits(getMessages(), messageIndex)
+  }, [message.role, getMessages, messageIndex])
+
+  const precedingUserMessageId = useMemo(() => {
+    if (message.role !== 'assistant' || !getMessages) return null
+    const msgs = getMessages()
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      if (msgs[i]?.role === 'user') return msgs[i]!.id
+    }
+    return null
+  }, [message.role, getMessages, messageIndex])
+
+  const handleCopyAssistantResponse = useCallback(() => {
+    if (!assistantResponse) return
+
+    void copyToClipboard(assistantResponse)
+      .then(() => toast.success('Response copied to clipboard'))
+      .catch(() => toast.error('Failed to copy response'))
+  }, [assistantResponse])
 
   const handleCopySteeredText = useCallback(
     (text: string) => {
@@ -829,8 +869,10 @@ export const MessageItem = memo(function MessageItem({
           <EditedFilesDisplay
             toolCalls={message.tool_calls}
             worktreePath={worktreePath}
+            worktreeId={worktreeId}
             getMessages={getMessages}
             messageIndex={messageIndex}
+            userMessageId={precedingUserMessageId}
           />
         )}
 
@@ -842,7 +884,7 @@ export const MessageItem = memo(function MessageItem({
     </>
   )
 
-  return (
+  const messageRow = (
     <div
       className={cn(
         'w-full min-w-0',
@@ -850,24 +892,8 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {message.role === 'user' ? (
-        <div className="relative group flex items-start gap-1 max-w-[85%] sm:max-w-[70%]">
-          {/* Copy to clipboard button - appears on hover */}
-          {onCopyToInput && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Copy message to input"
-                  onClick={handleCopyToInput}
-                  className="shrink-0 mt-2 p-1 rounded cursor-pointer text-muted-foreground/0 [@media(pointer:coarse)]:text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50 group-hover:text-muted-foreground/50 transition-colors"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Copy to clipboard</TooltipContent>
-            </Tooltip>
-          )}
-          <div className="text-foreground border border-border rounded-lg px-3 py-2 bg-muted/20 min-w-0 break-words">
+        <div className="group flex max-w-[85%] flex-col items-end gap-1 sm:max-w-[70%]">
+          <div className="min-w-0 break-words rounded-lg border border-border bg-muted/20 px-3 py-2 text-foreground">
             {messageBoxContent}
             {message.model && (
               <div className="mt-1.5">
@@ -881,12 +907,85 @@ export const MessageItem = memo(function MessageItem({
               </div>
             )}
           </div>
+          {/* Actions under the prompt (restore when turn edited files) */}
+          {(userTurnHasFileEdits || onCopyToInput) && (
+            <div className="flex shrink-0 items-center gap-1 pr-0.5">
+              {userTurnHasFileEdits && (
+                <CheckpointTurnRestoreButton
+                  userMessageId={message.id}
+                  worktreeId={worktreeId}
+                  hasFileEdits
+                  variant="userBubble"
+                  className="mt-0"
+                />
+              )}
+              {onCopyToInput && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Copy message to input"
+                      onClick={handleCopyToInput}
+                      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] cursor-pointer transition-colors text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground focus-visible:text-foreground [@media(pointer:fine)]:text-muted-foreground/0 [@media(pointer:fine)]:group-hover:text-muted-foreground/70"
+                    >
+                      <Copy className="h-3.5 w-3.5 shrink-0" />
+                      <span>Copy</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Copy to clipboard</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          )}
         </div>
       ) : (
-        <div className="text-foreground/90 w-full min-w-0 break-words">
+        <div className="group relative text-foreground/90 w-full min-w-0 break-words">
           {messageBoxContent}
+          {assistantResponse && (
+            <div className="mt-1 flex justify-end">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Copy response to clipboard"
+                    onClick={handleCopyAssistantResponse}
+                    className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] cursor-pointer transition-colors text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground focus-visible:text-foreground [@media(pointer:fine)]:text-muted-foreground/0 [@media(pointer:fine)]:group-hover:text-muted-foreground/70"
+                  >
+                    <Copy className="h-3.5 w-3.5 shrink-0" />
+                    <span>Copy</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Copy response</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
         </div>
       )}
     </div>
+  )
+
+  // Custom right-click menu replaces the unusable browser default on the thread.
+  if (message.role === 'user') {
+    return (
+      <MessageThreadContextMenu
+        messageText={displayContent}
+        copyMessageLabel="Copy message"
+        onCopyMessage={onCopyToInput ? handleCopyToInput : undefined}
+      >
+        {messageRow}
+      </MessageThreadContextMenu>
+    )
+  }
+
+  return (
+    <MessageThreadContextMenu
+      messageText={assistantResponse}
+      copyMessageLabel="Copy response"
+      onCopyMessage={
+        assistantResponse ? handleCopyAssistantResponse : undefined
+      }
+    >
+      {messageRow}
+    </MessageThreadContextMenu>
   )
 })

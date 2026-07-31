@@ -13,6 +13,7 @@ import {
   removeAdvisoryContext,
   getAdvisoryContextContent,
   attachSavedContext,
+  attachSessionReference,
   removeSavedContext,
   getSavedContextContent,
 } from '@/services/github'
@@ -752,7 +753,56 @@ export function useLoadContextHandlers({
     [handleRenameSubmit]
   )
 
+  /** Inject a lightweight MCP pointer for a session (no full history dump). */
   const handleSessionClick = useCallback(
+    async (sessionWithContext: SessionWithContext) => {
+      const {
+        session,
+        projectName: sessionProjectName,
+        worktreeName: sessionWorktreeName,
+      } = sessionWithContext
+
+      if (!activeSessionId) {
+        toast.error('No active session')
+        return
+      }
+
+      if (session.id === activeSessionId) {
+        toast.error('Cannot inject the current session into itself')
+        return
+      }
+
+      setGeneratingSessionId(session.id)
+      const toastId = toast.loading(
+        `Injecting session "${session.name || session.id}"...`
+      )
+
+      try {
+        await attachSessionReference(
+          activeSessionId,
+          session.id,
+          session.name || session.id,
+          sessionProjectName,
+          sessionWorktreeName
+        )
+        await refetchAttachedContexts()
+        toast.success(
+          `Session "${session.name || session.id}" injected as context`,
+          { id: toastId }
+        )
+        onClearSearch()
+      } catch (err) {
+        console.error('Failed to inject session:', err)
+        toast.error(`Failed to inject session: ${err}`, { id: toastId })
+      } finally {
+        setGeneratingSessionId(null)
+      }
+    },
+    [activeSessionId, refetchAttachedContexts, onClearSearch]
+  )
+
+  /** Optional: AI-summarize a session into a permanent saved context and attach it. */
+  const handleGenerateSessionContext = useCallback(
     async (sessionWithContext: SessionWithContext) => {
       const {
         session,
@@ -887,5 +937,6 @@ export function useLoadContextHandlers({
     handleRenameSubmit,
     handleRenameKeyDown,
     handleSessionClick,
+    handleGenerateSessionContext,
   }
 }

@@ -31,7 +31,10 @@ Edit
 
 View
 ├── Toggle Left Sidebar
-└── Toggle Right Sidebar
+├── Toggle File Browser       (Cmd+Shift+B)
+├── Toggle Right Sidebar
+├── Toggle Terminal           (Cmd+`)
+└── Toggle Browser            (Cmd+Shift+`)
 
 Git
 └── Open Pull Request...

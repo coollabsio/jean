@@ -32,6 +32,8 @@ import {
   normalizeQuestionMultipleField,
 } from '@/types/chat'
 import { MessageItem } from './MessageItem'
+import { getProviderChangeBeforeMessage } from './message-settings-labels'
+import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
 import { AskUserQuestion } from './AskUserQuestion'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
@@ -62,6 +64,7 @@ interface CompactMessageListProps {
   lastPlanMessageIndex: number
   sessionId: string
   worktreePath: string
+  worktreeId?: string | null
   approveShortcut: string
   approveShortcutYolo?: string
   approveShortcutClearContext?: string
@@ -653,6 +656,7 @@ export const CompactMessageList = memo(
         lastPlanMessageIndex,
         sessionId,
         worktreePath,
+        worktreeId = null,
         approveShortcut,
         approveShortcutYolo,
         approveShortcutClearContext,
@@ -712,6 +716,19 @@ export const CompactMessageList = memo(
           if (messages[i]?.role === 'user') {
             foundUserMessage = true
           }
+        }
+        return map
+      }, [messages])
+
+      // Pre-compute provider switches between consecutive user prompts
+      const providerChangeMap = useMemo(() => {
+        const map = new Map<
+          number,
+          ReturnType<typeof getProviderChangeBeforeMessage>
+        >()
+        for (let i = 0; i < messages.length; i++) {
+          const change = getProviderChangeBeforeMessage(messages, i)
+          if (change) map.set(i, change)
         }
         return map
       }, [messages])
@@ -852,6 +869,7 @@ export const CompactMessageList = memo(
             hasFollowUpMessage={extra.hasFollowUpMessage}
             sessionId={sessionId}
             worktreePath={worktreePath}
+            worktreeId={worktreeId}
             approveShortcut={approveShortcut}
             approveShortcutYolo={approveShortcutYolo}
             approveShortcutClearContext={approveShortcutClearContext}
@@ -889,6 +907,7 @@ export const CompactMessageList = memo(
           lastPlanMessageIndex,
           sessionId,
           worktreePath,
+          worktreeId,
           approveShortcut,
           approveShortcutYolo,
           approveShortcutClearContext,
@@ -1041,6 +1060,8 @@ export const CompactMessageList = memo(
               const hasFollowUpMessage =
                 item.message.role === 'assistant' &&
                 hasFollowUpFor(item.globalIndex)
+              const providerChange =
+                providerChangeMap.get(item.globalIndex) ?? null
               return (
                 <div
                   key={item.message.id}
@@ -1053,6 +1074,9 @@ export const CompactMessageList = memo(
                     item.globalIndex === lastIndex && isSending ? '' : 'pb-4'
                   }
                 >
+                  {providerChange && (
+                    <ProviderChangeSeparator change={providerChange} />
+                  )}
                   {renderMessageItem(
                     { message: item.message, globalIndex: item.globalIndex },
                     {
@@ -1200,6 +1224,7 @@ export const CompactMessageList = memo(
                       <EditedFilesDisplay
                         toolCalls={surfacedLatestToolCalls}
                         worktreePath={worktreePath}
+                        worktreeId={worktreeId}
                       />
                     )}
                   </div>

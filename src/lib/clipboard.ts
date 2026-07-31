@@ -1,13 +1,21 @@
 import { isNativeApp } from './environment'
 import { invoke } from './transport'
 
+function isInsecureWebContext(): boolean {
+  // Browsers only treat HTTPS and loopback HTTP (localhost / 127.0.0.1 / ::1)
+  // as secure contexts. Plain HTTP on a Tailscale IP/MagicDNS name is insecure,
+  // so navigator.clipboard is unavailable or rejects.
+  return typeof window !== 'undefined' && window.isSecureContext === false
+}
+
 /**
  * Copy text to clipboard with fallback for insecure contexts (HTTP).
  *
  * Fallback chain:
  * 1. Native app → Tauri clipboard plugin
- * 2. Secure context → navigator.clipboard.writeText()
- * 3. Insecure context → document.execCommand('copy') with hidden textarea
+ * 2. Insecure HTTP → sync document.execCommand('copy') first (preserves user gesture)
+ * 3. Secure context → navigator.clipboard.writeText()
+ * 4. Remaining fallbacks → execCommand, then same-machine backend clipboard
  */
 export async function copyToClipboard(text: string): Promise<void> {
   if (isNativeApp()) {
@@ -16,23 +24,40 @@ export async function copyToClipboard(text: string): Promise<void> {
     return
   }
 
-  if (navigator.clipboard?.writeText) {
+  const insecure = isInsecureWebContext()
+
+  // On plain HTTP (e.g. http://100.x.y.z Tailscale), prefer the sync fallback
+  // immediately. Awaiting the Clipboard API first can burn user activation and
+  // leave execCommand blocked as well.
+  if (insecure && execCommandCopyFallback(text)) {
+    return
+  }
+
+  if (!insecure && navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text)
       return
     } catch {
-      // Browser clipboard can be denied in web access after async command work.
+      // Browser clipboard can be denied after async work or without permission.
       // Fall through to local fallbacks instead of reporting success with no copy.
     }
   }
 
-  // Fallback for insecure contexts (HTTP web access)
   if (execCommandCopyFallback(text)) return
 
   // Last resort for Jean web access on the same machine: ask the backend to
-  // write the OS clipboard. This fixes command-palette actions that fetch data
-  // asynchronously before copying, which can lose browser user activation.
-  await invoke('write_clipboard_text', { text })
+  // write the OS clipboard. Useful after async command-palette work that lost
+  // browser user activation. Not useful for remote clients (writes host OS).
+  try {
+    await invoke('write_clipboard_text', { text })
+  } catch (error) {
+    if (insecure) {
+      throw new Error(
+        'Copy failed: browsers block the clipboard API on plain HTTP except localhost. Open Jean via HTTPS (Tailscale Serve or a reverse proxy), or use http://localhost on this machine.'
+      )
+    }
+    throw error instanceof Error ? error : new Error(String(error))
+  }
 }
 
 /**
@@ -44,17 +69,25 @@ export async function copyHtmlToClipboard(
   plainText: string,
   fallbackPlainText = plainText
 ): Promise<void> {
-  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        'text/plain': new Blob([plainText], { type: 'text/plain' }),
-        'text/html': new Blob([html], { type: 'text/html' }),
-      }),
-    ])
-    return
+  // ClipboardItem / clipboard.write require a secure context.
+  if (
+    !isInsecureWebContext() &&
+    typeof ClipboardItem !== 'undefined' &&
+    navigator.clipboard?.write
+  ) {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+          'text/html': new Blob([html], { type: 'text/html' }),
+        }),
+      ])
+      return
+    } catch {
+      // Fall through to plain text
+    }
   }
 
-  // Fall back to plain text
   await copyToClipboard(fallbackPlainText)
 }
 
@@ -63,16 +96,30 @@ function execCommandCopyFallback(text: string): boolean {
 
   const textarea = document.createElement('textarea')
   textarea.value = text
+  // iOS / some mobile browsers only copy from editable, non-readonly fields
+  // that are in the document and selectable.
+  textarea.setAttribute('readonly', '')
   textarea.style.position = 'fixed'
   textarea.style.left = '-9999px'
-  textarea.style.top = '-9999px'
+  textarea.style.top = '0'
   textarea.style.opacity = '0'
   document.body.appendChild(textarea)
+
+  const selection = document.getSelection()
+  const previousRange =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+
   textarea.focus()
   textarea.select()
+  textarea.setSelectionRange(0, text.length)
+
   try {
     return document.execCommand('copy')
   } finally {
     document.body.removeChild(textarea)
+    if (selection) {
+      selection.removeAllRanges()
+      if (previousRange) selection.addRange(previousRange)
+    }
   }
 }

@@ -5,6 +5,15 @@ GTK, or display-server dependency. `jean-core` owns shared state, commands,
 events, persistence, projects, chat backends, terminals, background work, and
 the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 
+## Agent browser (AI + manual login)
+
+jean-server has no embedded WebView. For an AI-controlled browser where you log
+in manually once and agents reuse cookies, use a persistent Chromium profile
+driven by Playwright MCP (or similar). See:
+
+- `docs/developer/server-agent-browser.md` — architecture and roadmap
+- jean-docs: **Agent Browser on Jean Server** workflow
+
 ## Start locally
 
 When running a debug binary directly, build the browser bundle first. Jean
@@ -157,14 +166,24 @@ bun run install:local:server
 | `--token <token>`         | `JEAN_TOKEN`                   | saved/generated token                  |
 | `--no-token`              | `JEAN_NO_TOKEN=1`              | off                                    |
 | `--allow-unsafe-no-token` | `JEAN_ALLOW_UNSAFE_NO_TOKEN=1` | off                                    |
+| `--allow-native-open`     | `JEAN_ALLOW_NATIVE_OPEN=1`     | off (auto-on under WSL)                |
 | n/a                       | `JEAN_ALLOWED_ORIGINS`         | same-origin only                       |
 
 By default a token is required (using `--token`, `JEAN_TOKEN`, or an auto-generated one); pass `--no-token` to disable it. `--token` and `--no-token` are mutually exclusive. Jean rejects `--no-token` with `--host 0.0.0.0` or `--host ::` unless `--allow-unsafe-no-token` is also set.
 
+### Native open actions (editor / file manager / terminal)
+
+HTTP/WebSocket clients can trigger **Open in editor**, **Open worktrees folder**, and related actions only when native open is allowed:
+
+- **Auto-enabled under WSL** — headless Jean inside WSL routes folders through `explorer.exe` and editors through the Linux CLI binaries on PATH (same as #490 / #522).
+- **Opt-in elsewhere** — pass `--allow-native-open` or set `JEAN_ALLOW_NATIVE_OPEN=1` for a local headless server that should open host apps.
+- **Desktop Web Access** — automatically allowed when the desktop app hosts the HTTP server.
+- **Remote/VPS headless** — left off by default so a browser client cannot spawn GUI tools on the server.
+
 ## Health checks
 
-- `GET /healthz` — process is alive.
-- `GET /readyz` — HTTP server is initialized and WebSocket broadcaster state is ready.
+- `GET /healthz` - process is alive.
+- `GET /readyz` - HTTP server is initialized and WebSocket broadcaster state is ready.
 
 Authenticated endpoints accept either the existing `?token=...` query parameter or an HTTP bearer token:
 
@@ -206,9 +225,16 @@ browser terminals can find tools installed by shell setup scripts (for example
 - The server Docker image is published by the Server Release workflow as
   `ghcr.io/<owner>/<repo>-server:<tag>`.
 - The image launches `jean-server` directly and contains no GTK/WebKit/Xvfb packages.
+- Runtime packages include `ca-certificates`, `curl`, `git`, `openssh-client`, and
+  the official **GitHub CLI (`gh`)** so onboarding and GitHub integration can run
+  without a separate install step. Prefer the **System PATH** CLI source in
+  onboarding/Settings when using the container image.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
 - Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
 - Put TLS/auth in front of the container for internet exposure.
+- For Tailscale access from a browser, prefer `tailscale serve` (HTTPS) in front
+  of `127.0.0.1` rather than plain `http://100.x.y.z` — browsers block the
+  clipboard API and other secure-context features on non-localhost HTTP.
 
 Example command:
 
@@ -264,7 +290,7 @@ jean --headless --host 100.x.y.z --port 3456 --token "$JEAN_TOKEN"
 ## Server updates (bare-metal Linux)
 
 `jean-server` can install a newer binary when you choose to from Web Access.
-Nothing is installed in the background — apply only runs after you click
+Nothing is installed in the background - apply only runs after you click
 **Update & restart**.
 
 | Piece           | Behavior                                                                                                       |
@@ -274,7 +300,7 @@ Nothing is installed in the background — apply only runs after you click
 | Apply           | User clicks **Update & restart** → `apply_server_update`                                                       |
 | Verify          | SHA-256 from the release manifest                                                                              |
 | Restart         | `systemctl restart jean-server.service` when that unit is loaded (or `JEAN_SERVER_SERVICE`), otherwise re-exec |
-| Containers      | Not supported — update the Docker/GHCR image instead                                                           |
+| Containers      | Not supported - update the Docker/GHCR image instead                                                           |
 | Active sessions | Apply is refused while chat sessions are running                                                               |
 
 ## Security recommendations
@@ -286,13 +312,38 @@ Nothing is installed in the background — apply only runs after you click
 
 ## Connect from the native Jean app
 
-In the desktop app, click the server icon in the title bar, choose **Add
-remote**, and enter either the full Web Access URL (including `?token=...`) or
-the server URL and token separately. Selecting the remote switches the entire
-Jean backend while keeping the desktop app's bundled React UI and local native
-shell capabilities. Commands and events for the selected instance travel over
-HTTP/WebSocket. Select **Local** from the same dialog to return to the desktop
-app's local backend.
+In the desktop app, click the server icon in the title bar and choose **Add
+remote**. You can either:
+
+1. **Install via SSH** (native app only) — enter an SSH user and host/IP
+   (optional name, SSH port, Jean port). Jean connects with key-based SSH
+   (`BatchMode`, no password prompt), runs the official
+   `install-jean-server.sh` installer on the remote Linux host (system install
+   with passwordless `sudo -n` when available, otherwise `--user-install`),
+   waits until `/healthz`, `/readyz`, and `/api/auth` succeed from this client,
+   then saves the remote and switches to it.
+2. **Existing URL** — paste a full Web Access URL (including `?token=...`) or
+   enter the server URL and token separately.
+
+Selecting the remote switches the entire Jean backend while keeping the desktop
+app's bundled React UI and local native shell capabilities. Commands and events
+for the selected instance travel over HTTP/WebSocket. Select **Local** from the
+same dialog to return to the desktop app's local backend.
+
+**SSH install requirements:**
+
+- OpenSSH client on the machine running Jean
+- Key-based SSH access to `user@host` (password auth is not supported)
+- Remote host is Linux (amd64/arm64) with `curl` and `tar`
+- Port `3456` (or the Jean port you chose) reachable from this client; the
+  installer binds `0.0.0.0` so LAN/Tailscale IPs work
+- Passwordless sudo for a system install, or a working user systemd session for
+  `--user-install`
 
 Native Jean client origins are allowed automatically. HTTP and HTTPS server
 URLs are both supported; keep token authentication enabled on remote servers.
+
+The connection picker shows each remote's `appVersion` (from `/api/auth`) next
+to Local's client version. When the versions differ, Jean shows a warning toast
+and highlights the mismatch in the picker, but still allows the connection so
+you are not locked out. Prefer matching versions for the best experience.

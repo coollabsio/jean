@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import {
+  ADAPTIVE_EFFORT_OPTION,
   EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
@@ -49,14 +50,20 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
     ? PI_EFFORT_LEVEL_OPTIONS
     : EFFORT_LEVEL_OPTIONS
 
-  const effortLabel = effortLevel
-    ? (effortOptions.find(o => o.value === effortLevel)?.label ?? effortLevel)
-    : null
+  const effortLabel =
+    effortLevel === 'adaptive'
+      ? ADAPTIVE_EFFORT_OPTION.label
+      : effortLevel
+        ? (effortOptions.find(o => o.value === effortLevel)?.label ??
+          effortLevel)
+        : null
 
   const thinkingLabel =
     !usesEffortOnly && thinkingLevel && thinkingLevel !== 'off'
-      ? (THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ??
-        thinkingLevel)
+      ? thinkingLevel === 'adaptive'
+        ? ADAPTIVE_EFFORT_OPTION.label
+        : (THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)
+            ?.label ?? thinkingLevel)
       : null
 
   return (

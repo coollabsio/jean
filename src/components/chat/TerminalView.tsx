@@ -31,6 +31,16 @@ import {
   disposeTerminal,
   disposePanelWorktreeTerminals,
 } from '@/lib/terminal-instances'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Kbd } from '@/components/ui/kbd'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
@@ -309,6 +319,16 @@ export function TerminalView({
     },
     [worktreeId]
   )
+  // Pending close when the target still has a live PTY (issue #56: no silent
+  // kill). A close can target one terminal (keyboard), one pane of a split, a
+  // whole view (tab) or every panel terminal at once.
+  const [pendingClose, setPendingClose] = useState<
+    | { type: 'one'; terminalId: string }
+    | { type: 'pane'; terminalId: string }
+    | { type: 'group'; groupId: string }
+    | { type: 'all' }
+    | null
+  >(null)
 
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
 
@@ -355,10 +375,20 @@ export function TerminalView({
     disposeTerminal(terminalId)
   }, [])
 
+  // Drop one terminal entirely (PTY + xterm + store), wherever it sits.
+  // Used by the keyboard close path, which addresses a terminal, not a view.
+  const closeTerminalById = useCallback(
+    async (terminalId: string) => {
+      await stopAndDispose(terminalId)
+      useTerminalStore.getState().removeTerminal(worktreeId, terminalId)
+      closePanelIfEmpty()
+    },
+    [worktreeId, stopAndDispose, closePanelIfEmpty]
+  )
+
   // Close a whole view (tab): every pane it contains.
-  const handleCloseGroup = useCallback(
-    async (e: React.MouseEvent, groupId: string) => {
-      e.stopPropagation()
+  const closeGroupById = useCallback(
+    async (groupId: string) => {
       const group = (useTerminalStore.getState().groups[worktreeId] ?? []).find(
         g => g.id === groupId
       )
@@ -372,14 +402,43 @@ export function TerminalView({
     [worktreeId, stopAndDispose, closePanelIfEmpty]
   )
 
+  const handleCloseGroup = useCallback(
+    (e: React.MouseEvent, groupId: string) => {
+      e.stopPropagation()
+      // Running PTYs need an explicit confirm so a held/mis-clicked close
+      // cannot silently kill work in progress (issue #56).
+      const group = (useTerminalStore.getState().groups[worktreeId] ?? []).find(
+        g => g.id === groupId
+      )
+      const running = useTerminalStore.getState().runningTerminals
+      if (group && collectLeafIds(group.layout).some(id => running.has(id))) {
+        setPendingClose({ type: 'group', groupId })
+        return
+      }
+      void closeGroupById(groupId)
+    },
+    [worktreeId, closeGroupById]
+  )
+
   // Close a single pane within the active view.
-  const handleCloseSplitPane = useCallback(
+  const closeSplitPaneById = useCallback(
     async (terminalId: string) => {
       await stopAndDispose(terminalId)
       useTerminalStore.getState().closeSplitPane(worktreeId, terminalId)
       closePanelIfEmpty()
     },
     [worktreeId, stopAndDispose, closePanelIfEmpty]
+  )
+
+  const handleCloseSplitPane = useCallback(
+    (terminalId: string) => {
+      if (useTerminalStore.getState().runningTerminals.has(terminalId)) {
+        setPendingClose({ type: 'pane', terminalId })
+        return
+      }
+      void closeSplitPaneById(terminalId)
+    },
+    [closeSplitPaneById]
   )
 
   const handleSelectGroup = useCallback(
@@ -505,47 +564,137 @@ export function TerminalView({
   }, [setTerminalVisible])
 
   const handleCloseAll = useCallback(() => {
+    const panelTerminals = (
+      useTerminalStore.getState().terminals[worktreeId] ?? []
+    ).filter(isPanelTerminal)
+    const hasRunning = panelTerminals.some(t =>
+      useTerminalStore.getState().runningTerminals.has(t.id)
+    )
+    if (hasRunning) {
+      setPendingClose({ type: 'all' })
+      return
+    }
     // Dispose side/drawer terminal tabs only; session terminals are independent.
     disposePanelWorktreeTerminals(worktreeId)
   }, [worktreeId])
 
+  const confirmPendingClose = useCallback(() => {
+    if (!pendingClose) return
+    if (pendingClose.type === 'all') {
+      disposePanelWorktreeTerminals(worktreeId)
+    } else if (pendingClose.type === 'group') {
+      void closeGroupById(pendingClose.groupId)
+    } else if (pendingClose.type === 'pane') {
+      void closeSplitPaneById(pendingClose.terminalId)
+    } else {
+      void closeTerminalById(pendingClose.terminalId)
+    }
+    setPendingClose(null)
+  }, [
+    pendingClose,
+    worktreeId,
+    closeGroupById,
+    closeSplitPaneById,
+    closeTerminalById,
+  ])
+
+  // Keyboard close path (Ctrl/Cmd+W) dispatches this when the active tab is
+  // still running so we can show the same confirm dialog as the tab X button.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ worktreeId: string; terminalId: string }>)
+        .detail
+      if (!detail || detail.worktreeId !== worktreeId) return
+      setPendingClose({ type: 'one', terminalId: detail.terminalId })
+    }
+    window.addEventListener('confirm-close-terminal', handler)
+    return () => window.removeEventListener('confirm-close-terminal', handler)
+  }, [worktreeId])
+
+  const closeConfirmDialog = (
+    <AlertDialog
+      open={pendingClose !== null}
+      onOpenChange={open => {
+        if (!open) setPendingClose(null)
+      }}
+    >
+      <AlertDialogContent
+        onEscapeKeyDown={e => e.stopPropagation()}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            e.stopPropagation()
+            confirmPendingClose()
+          }
+        }}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {pendingClose?.type === 'all'
+              ? 'Close all terminals?'
+              : pendingClose?.type === 'group'
+                ? 'Close running view?'
+                : 'Close running terminal?'}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingClose?.type === 'all'
+              ? 'One or more terminals still have a running process. Closing them will terminate those processes.'
+              : pendingClose?.type === 'group'
+                ? 'One or more panes in this view still have a running process. Closing the view will terminate those processes.'
+                : 'This terminal still has a running process. Closing it will terminate that process.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={confirmPendingClose}>
+            Close
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+
   // When collapsed, show collapsed bar but keep terminals mounted (hidden) to preserve state
   if (isCollapsed) {
     return (
-      <div className="flex h-full flex-col bg-background">
-        {/* Collapsed bar */}
-        <button
-          type="button"
-          onClick={onExpand}
-          className="flex h-full w-full items-center gap-2 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-        >
-          <Terminal className="h-3.5 w-3.5" />
-          <span>Terminal</span>
-          {hasRunningPanelTerminal && (
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-          )}
-          <div className="flex-1" />
-          <ChevronUp className="h-3.5 w-3.5" />
-        </button>
-        {/* Keep terminals mounted but hidden to preserve state */}
-        <div className="hidden">
-          {panelTerminals.map(terminal => (
-            <TerminalTabContent
-              key={terminal.id}
-              terminal={terminal}
-              worktreeId={worktreeId}
-              worktreePath={worktreePath}
-              isVisible={activeLeafIds.has(terminal.id)}
-              isCollapsed
-              isWorktreeActive={isWorktreeActive}
-            />
-          ))}
+      <>
+        <div className="flex h-full flex-col bg-background">
+          {/* Collapsed bar */}
+          <button
+            type="button"
+            onClick={onExpand}
+            className="flex h-full w-full items-center gap-2 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            <span>Terminal</span>
+            {hasRunningPanelTerminal && (
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            )}
+            <div className="flex-1" />
+            <ChevronUp className="h-3.5 w-3.5" />
+          </button>
+          {/* Keep terminals mounted but hidden to preserve state */}
+          <div className="hidden">
+            {panelTerminals.map(terminal => (
+              <TerminalTabContent
+                key={terminal.id}
+                terminal={terminal}
+                worktreeId={worktreeId}
+                worktreePath={worktreePath}
+                isVisible={activeLeafIds.has(terminal.id)}
+                isCollapsed
+                isWorktreeActive={isWorktreeActive}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+        {closeConfirmDialog}
+      </>
     )
   }
 
   return (
+    <>
     <div className="flex h-full flex-col bg-background">
       {/* Tab bar - fixed height for consistency */}
       <div
@@ -753,5 +902,7 @@ export function TerminalView({
         </div>
       </div>
     </div>
+    {closeConfirmDialog}
+    </>
   )
 }

@@ -19,8 +19,8 @@ const handleToggleMaximize = async () => {
 }
 
 const handleClose = async () => {
-  const appWindow = await getAppWindow()
-  await appWindow.close()
+  const { requestAppQuit } = await import('@/lib/window-close')
+  await requestAppQuit()
 }
 
 export function LinuxWindowControls() {

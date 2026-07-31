@@ -42,12 +42,304 @@ import {
 } from '@/components/ui/collapsible'
 import { InlineFileDiff } from './InlineFileDiff'
 
-function shouldRenderRawOutput(toolCall: ToolCall): boolean {
+/** Placeholder outputs that add no value next to already-rendered tool details. */
+function isPlaceholderToolOutput(output: string | undefined | null): boolean {
+  if (!output) return true
+  const trimmed = output.trim().toLowerCase()
   return (
-    Boolean(toolCall.output) &&
-    toolCall.name !== 'FileChange' &&
-    toolCall.name !== 'Monitor'
+    trimmed === '' ||
+    trimmed === 'completed' ||
+    trimmed === 'ok' ||
+    trimmed === 'success' ||
+    trimmed === 'context compacted'
   )
+}
+
+function shouldRenderRawOutput(toolCall: ToolCall): boolean {
+  if (!toolCall.output?.trim()) return false
+  if (isPlaceholderToolOutput(toolCall.output)) return false
+  const input = (toolCall.input ?? {}) as Record<string, unknown>
+  const normalizedName = normalizeToolCallForDisplay(toolCall.name, input).name
+  // These tools already surface output (results/path/etc.) in expandedContent.
+  if (
+    normalizedName === 'FileChange' ||
+    normalizedName === 'Monitor' ||
+    normalizedName === 'CodexWebSearch' ||
+    normalizedName === 'CodexImageView' ||
+    normalizedName === 'CodexImageGeneration' ||
+    normalizedName === 'CodexContextCompaction' ||
+    // Bash/shell expandedContent includes stdout when present (issue #572).
+    normalizedName === 'Bash'
+  ) {
+    return false
+  }
+  return true
+}
+
+/** Best-effort one-line detail from common tool input fields. */
+function firstStringField(
+  input: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return undefined
+}
+
+/**
+ * Strip MCP / client prefixes from a Jean tool name and return the bare registry name.
+ * Handles: jean_get_current_context, jean-dev_list_projects, mcp:jean:list_worktrees,
+ * mcp__jean__create_session, mcp__jean-dev__get_current_context.
+ */
+export function extractJeanMcpBareToolName(name: string): string | null {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+
+  if (trimmed.startsWith('mcp__')) {
+    // mcp__jean__tool or mcp__jean-dev__tool (tool may contain underscores)
+    const rest = trimmed.slice('mcp__'.length)
+    const serverSep = rest.indexOf('__')
+    if (serverSep > 0) {
+      const server = rest.slice(0, serverSep)
+      const tool = rest.slice(serverSep + 2)
+      if (
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
+        tool
+      ) {
+        return tool
+      }
+    }
+    return null
+  }
+
+  if (trimmed.startsWith('mcp:')) {
+    // mcp:jean:tool or mcp:jean-dev:tool
+    const parts = trimmed.split(':')
+    if (parts.length >= 3) {
+      const server = parts[1] ?? ''
+      const tool = parts.slice(2).join(':')
+      if (
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
+        tool
+      ) {
+        return tool
+      }
+    }
+    return null
+  }
+
+  // Client-side prefix: jean_get_current_context / jean-dev_list_projects
+  for (const prefix of ['jean-dev_', 'jean_']) {
+    if (trimmed.startsWith(prefix)) {
+      const bare = trimmed.slice(prefix.length)
+      if (bare) return bare
+    }
+  }
+
+  return null
+}
+
+export function isJeanMcpToolName(name: string): boolean {
+  return extractJeanMcpBareToolName(name) != null
+}
+
+/** True for tools that should not get the "(unhandled tool)" suffix. */
+function isRecognizedExternalTool(name: string): boolean {
+  return (
+    name.startsWith('mcp__') ||
+    name.startsWith('mcp:') ||
+    isJeanMcpToolName(name)
+  )
+}
+
+/** Title-case a snake_case / kebab-case tool id for display. */
+function humanizeSnakeCase(name: string): string {
+  return name
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ')
+}
+
+/** Friendly label for a Jean MCP tool call. */
+export function formatJeanMcpToolLabel(name: string): string {
+  const bare = extractJeanMcpBareToolName(name) ?? name
+  return `Jean: ${humanizeSnakeCase(bare)}`
+}
+
+/** Detail line for Jean MCP tools from common argument fields. */
+export function formatJeanMcpToolDetail(
+  input: Record<string, unknown>
+): string | undefined {
+  const parts: string[] = []
+  const backend = firstStringField(input, ['backend'])
+  const projectId = firstStringField(input, ['projectId', 'project_id'])
+  const worktreeId = firstStringField(input, ['worktreeId', 'worktree_id'])
+  const sessionId = firstStringField(input, ['sessionId', 'session_id'])
+  const path = firstStringField(input, ['path'])
+  const name = firstStringField(input, ['name', 'customName', 'custom_name'])
+  const branch = firstStringField(input, [
+    'baseBranch',
+    'base_branch',
+    'branchName',
+    'branch_name',
+  ])
+  const model = firstStringField(input, ['model'])
+  const message = firstStringField(input, ['message'])
+
+  if (backend) parts.push(backend)
+  if (name) parts.push(name)
+  if (branch) parts.push(branch)
+  if (model) parts.push(model)
+  if (path) parts.push(path)
+  if (message)
+    parts.push(message.length > 40 ? `${message.slice(0, 40)}…` : message)
+  // Short id suffixes only when nothing more descriptive is available
+  if (parts.length === 0) {
+    if (worktreeId) parts.push(`worktree ${worktreeId.slice(0, 8)}`)
+    else if (projectId) parts.push(`project ${projectId.slice(0, 8)}`)
+    else if (sessionId) parts.push(`session ${sessionId.slice(0, 8)}`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
+/**
+ * Unwrap meta tool wrappers (e.g. Grok/MCP bridge `use_tool`) that nest the
+ * real tool name + args under tool_name / tool_input.
+ */
+function unwrapMetaToolCall(
+  name: string,
+  input: Record<string, unknown>
+): { name: string; input: Record<string, unknown> } | null {
+  const isMeta =
+    name === 'use_tool' ||
+    name === 'useTool' ||
+    name === 'UseTool' ||
+    name === 'call_tool' ||
+    name === 'callTool' ||
+    name === 'CallTool'
+  if (!isMeta) return null
+
+  const nestedName = firstStringField(input, [
+    'tool_name',
+    'toolName',
+    'name',
+    'tool',
+  ])
+  if (!nestedName) return null
+
+  const rawNested =
+    input.tool_input ??
+    input.toolInput ??
+    input.arguments ??
+    input.args ??
+    input.input ??
+    input.parameters
+
+  let nestedInput: Record<string, unknown> = {}
+  if (rawNested && typeof rawNested === 'object' && !Array.isArray(rawNested)) {
+    nestedInput = rawNested as Record<string, unknown>
+  }
+
+  return { name: nestedName, input: nestedInput }
+}
+
+function formatCodexWebSearchDetail(
+  input: Record<string, unknown>
+): string | undefined {
+  const query = firstStringField(input, ['query'])
+  if (query) return query
+
+  const action =
+    input.action && typeof input.action === 'object'
+      ? (input.action as Record<string, unknown>)
+      : undefined
+  if (!action) return undefined
+
+  const actionType = typeof action.type === 'string' ? action.type : undefined
+  const actionQuery = firstStringField(action, ['query'])
+  if (actionQuery) return actionQuery
+
+  if (Array.isArray(action.queries)) {
+    const queries = action.queries.filter(
+      (q): q is string => typeof q === 'string' && q.trim().length > 0
+    )
+    if (queries.length > 0) return queries.join(', ')
+  }
+
+  const url = firstStringField(action, ['url'])
+  if (url) {
+    return actionType === 'findInPage' || actionType === 'find_in_page'
+      ? firstStringField(action, ['pattern'])
+        ? `${firstStringField(action, ['pattern'])} in ${url}`
+        : url
+      : url
+  }
+
+  const pattern = firstStringField(action, ['pattern'])
+  if (pattern) return pattern
+
+  return undefined
+}
+
+function formatCodexWebSearchExpanded(
+  input: Record<string, unknown>,
+  output: string | undefined
+): string {
+  const parts: string[] = []
+  const query = firstStringField(input, ['query'])
+  if (query) parts.push(`Query: ${query}`)
+
+  const action =
+    input.action && typeof input.action === 'object'
+      ? (input.action as Record<string, unknown>)
+      : undefined
+  if (action) {
+    const actionType = typeof action.type === 'string' ? action.type : 'action'
+    const actionBits: string[] = [`Action: ${actionType}`]
+    const actionQuery = firstStringField(action, ['query'])
+    if (actionQuery) actionBits.push(`query=${actionQuery}`)
+    if (Array.isArray(action.queries) && action.queries.length > 0) {
+      actionBits.push(
+        `queries=${action.queries
+          .filter((q): q is string => typeof q === 'string')
+          .join(', ')}`
+      )
+    }
+    const url = firstStringField(action, ['url'])
+    if (url) actionBits.push(`url=${url}`)
+    const pattern = firstStringField(action, ['pattern'])
+    if (pattern) actionBits.push(`pattern=${pattern}`)
+    parts.push(actionBits.join(' · '))
+  }
+
+  if (input.results != null) {
+    const resultsText =
+      typeof input.results === 'string'
+        ? input.results
+        : JSON.stringify(input.results, null, 2)
+    if (resultsText && resultsText !== 'null' && resultsText !== '[]') {
+      parts.push(`Results:\n${resultsText}`)
+    }
+  }
+
+  if (output && !isPlaceholderToolOutput(output)) {
+    // Avoid duplicating results already shown from input.results
+    if (!parts.some(p => p.includes(output))) {
+      parts.push(output)
+    }
+  }
+
+  if (parts.length === 0) {
+    return JSON.stringify(input, null, 2)
+  }
+  return parts.join('\n\n')
 }
 
 // Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
@@ -204,6 +496,8 @@ export function TaskCallInline({
   const subagentType = input.subagent_type as string | undefined
   const description = input.description as string | undefined
   const prompt = input.prompt as string | undefined
+  const report = taskToolCall.output?.trim() || undefined
+  const toolLabel = taskToolCall.name === 'Agent' ? 'Agent' : 'Task'
 
   return (
     <Collapsible
@@ -220,7 +514,7 @@ export function TaskCallInline({
         <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
           <Bot className="h-3.5 w-3.5 shrink-0" />
           <span className="font-medium shrink-0 whitespace-nowrap">
-            {subagentType ? `Task (${subagentType})` : 'Task'}
+            {subagentType ? `${toolLabel} (${subagentType})` : toolLabel}
           </span>
           {description && (
             <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{description}</code>
@@ -260,7 +554,8 @@ export function TaskCallInline({
             {subToolCalls.length > 0 ? (
               <div className="space-y-1">
                 {subToolCalls.map(subTool =>
-                  subTool.name === 'Task' && allToolCalls ? (
+                  (subTool.name === 'Task' || subTool.name === 'Agent') &&
+                  allToolCalls ? (
                     <TaskCallInline
                       key={subTool.id}
                       taskToolCall={subTool}
@@ -284,6 +579,16 @@ export function TaskCallInline({
               <p className="text-xs text-muted-foreground/60 italic">
                 No sub-tools recorded
               </p>
+            )}
+            {/* Subagent final report returned to the parent agent */}
+            {report && (
+              <div className="space-y-1">
+                <div className="border-t border-border/30" />
+                <div className="text-xs text-muted-foreground/60">Report:</div>
+                <div className="max-h-64 overflow-y-auto text-xs text-foreground/80 bg-muted/50 rounded p-2">
+                  <Markdown variant="tool-call">{report}</Markdown>
+                </div>
+              </div>
             )}
           </div>
         </CollapsibleContent>
@@ -325,7 +630,7 @@ export function StackedGroup({
     if (item.type === 'thinking') {
       thinkingCount++
     } else {
-      const name = getToolSummaryName(item.tool.name)
+      const name = getToolSummaryName(item.tool)
       toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1)
     }
   }
@@ -631,6 +936,13 @@ export function normalizeToolCallForDisplay(
   name: string,
   input: Record<string, unknown>
 ): { name: string; input: Record<string, unknown> } {
+  // Unwrap meta wrappers (use_tool / call_tool) before other normalization so
+  // Jean MCP and other nested tools get the right renderer.
+  const unwrapped = unwrapMetaToolCall(name, input)
+  if (unwrapped) {
+    return normalizeToolCallForDisplay(unwrapped.name, unwrapped.input)
+  }
+
   const variant = typeof input.variant === 'string' ? input.variant : undefined
   const normalizedName = (() => {
     switch (variant) {
@@ -674,6 +986,16 @@ export function normalizeToolCallForDisplay(
   delete withoutVariant.variant
 
   switch (normalizedName) {
+    case 'Bash':
+    case 'shell_command':
+    case 'run_terminal_command':
+    case 'Shell':
+    case 'shell':
+    case 'execute':
+      return {
+        name: 'Bash',
+        input: withoutVariant,
+      }
     case 'read_file':
     case 'Read':
       return {
@@ -725,8 +1047,6 @@ export function normalizeToolCallForDisplay(
           path: input.path ?? input.targetDirectory,
         },
       }
-    case 'shell_command':
-      return { name: 'Bash', input }
     case 'read_directory':
       return { name: 'List', input }
     case 'glob':
@@ -762,8 +1082,27 @@ export function normalizeToolCallForDisplay(
   }
 }
 
-function getToolSummaryName(name: string): string {
-  return normalizeToolCallForDisplay(name, {}).name
+function getToolSummaryName(toolCall: ToolCall): string {
+  switch (toolCall.name) {
+    case 'CodexWebSearch':
+      return 'Web Search'
+    case 'CodexImageGeneration':
+      return 'Image Generation'
+    case 'CodexImageView':
+      return 'Image View'
+    case 'CodexContextCompaction':
+      return 'Context Compaction'
+    default: {
+      const normalized = normalizeToolCallForDisplay(
+        toolCall.name,
+        (toolCall.input ?? {}) as Record<string, unknown>
+      ).name
+      if (isJeanMcpToolName(normalized) || isJeanMcpToolName(toolCall.name)) {
+        return formatJeanMcpToolLabel(normalized)
+      }
+      return normalized
+    }
+  }
 }
 
 /** Live-ticking remaining seconds for a pending ScheduleWakeup. */
@@ -895,13 +1234,32 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         command && command.length > 50
           ? command.substring(0, 50) + '...'
           : command
+      const header = description
+        ? `${description}\n\n$ ${command ?? '(no command)'}`
+        : `$ ${command ?? '(no command)'}`
+      // Surface stdout/stderr in the main expanded body so bash results are
+      // visible without relying on a separate "Output:" panel (issue #572).
+      const output = toolCall.output?.trim()
+      const hasOutput = Boolean(output) && !isPlaceholderToolOutput(output)
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: 'Bash',
         detail: truncatedCommand,
-        expandedContent: description
-          ? `${description}\n\n$ ${command}`
-          : `$ ${command ?? '(no command)'}`,
+        expandedContent: hasOutput ? (
+          <div className="space-y-2">
+            <div className="whitespace-pre-wrap">{header}</div>
+            <div>
+              <div className="text-xs text-muted-foreground/60 mb-1">
+                Output:
+              </div>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs font-mono text-foreground/80 bg-muted/50 rounded p-2">
+                {output}
+              </pre>
+            </div>
+          </div>
+        ) : (
+          header
+        ),
       }
     }
 
@@ -1307,40 +1665,76 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     case 'CodexWebSearch': {
-      const query = input.query as string | undefined
+      const detail = formatCodexWebSearchDetail(input)
       return {
         icon: <Globe className="h-4 w-4 shrink-0" />,
         label: 'Web Search',
-        detail: query,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail,
+        expandedContent: formatCodexWebSearchExpanded(input, toolCall.output),
       }
     }
 
     case 'CodexImageGeneration': {
-      const prompt = input.prompt as string | undefined
+      const prompt =
+        firstStringField(input, [
+          'prompt',
+          'revised_prompt',
+          'revisedPrompt',
+        ]) ?? undefined
+      const savedPath = firstStringField(input, [
+        'saved_path',
+        'savedPath',
+        'path',
+      ])
+      const status = firstStringField(input, ['status'])
+      const detail = prompt ?? savedPath ?? status
+      const parts: string[] = []
+      if (prompt) parts.push(`Prompt: ${prompt}`)
+      if (savedPath) parts.push(`Saved: ${savedPath}`)
+      if (status) parts.push(`Status: ${status}`)
+      if (
+        toolCall.output &&
+        !isPlaceholderToolOutput(toolCall.output) &&
+        toolCall.output !== savedPath
+      ) {
+        parts.push(toolCall.output)
+      }
       return {
         icon: <ImageIcon className="h-4 w-4 shrink-0" />,
         label: 'Image Generation',
-        detail: prompt,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail,
+        expandedContent:
+          parts.length > 0 ? parts.join('\n') : JSON.stringify(input, null, 2),
       }
     }
 
     case 'CodexImageView': {
+      const path = firstStringField(input, ['path', 'file_path', 'filePath'])
+      const filename = path ? getFilename(path) : undefined
       return {
         icon: <ImageIcon className="h-4 w-4 shrink-0" />,
         label: 'Image View',
-        detail: undefined,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail: filename ?? path,
+        filePath: path,
+        expandedContent:
+          path ??
+          (toolCall.output && !isPlaceholderToolOutput(toolCall.output)
+            ? toolCall.output
+            : JSON.stringify(input, null, 2)),
       }
     }
 
     case 'CodexContextCompaction': {
+      const summary = firstStringField(input, ['summary'])
       return {
         icon: <Layers className="h-4 w-4 shrink-0" />,
         label: 'Context Compaction',
-        detail: undefined,
-        expandedContent: toolCall.output ?? JSON.stringify(input, null, 2),
+        detail: summary ? summary.slice(0, 60) : undefined,
+        expandedContent:
+          summary ??
+          (toolCall.output && !isPlaceholderToolOutput(toolCall.output)
+            ? toolCall.output
+            : 'Context compacted'),
       }
     }
 
@@ -1427,14 +1821,55 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     default: {
-      const isMcpTool = normalized.name.startsWith('mcp__')
+      const jeanBare = extractJeanMcpBareToolName(normalized.name)
+      if (jeanBare) {
+        const detail = formatJeanMcpToolDetail(input)
+        const expanded = toolCall.output?.trim()
+          ? toolCall.output
+          : Object.keys(input).length > 0
+            ? JSON.stringify(input, null, 2)
+            : 'No details available'
+        return {
+          icon: <Bot className="h-4 w-4 shrink-0" />,
+          label: formatJeanMcpToolLabel(normalized.name),
+          detail,
+          expandedContent: expanded,
+        }
+      }
+
+      const isKnownExternal = isRecognizedExternalTool(normalized.name)
+      // Surface something useful even for tools without a dedicated renderer.
+      const detail =
+        firstStringField(input, [
+          'query',
+          'command',
+          'path',
+          'file_path',
+          'filePath',
+          'url',
+          'pattern',
+          'description',
+          'prompt',
+          'title',
+          'name',
+          'tool_name',
+          'toolName',
+          'backend',
+          'projectId',
+          'worktreeId',
+        ]) ?? formatJeanMcpToolDetail(input)
+      const expanded = toolCall.output?.trim()
+        ? toolCall.output
+        : Object.keys(input).length > 0
+          ? JSON.stringify(input, null, 2)
+          : 'No details available'
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
-        label: isMcpTool
+        label: isKnownExternal
           ? normalized.name
           : `${normalized.name} (unhandled tool)`,
-        detail: undefined,
-        expandedContent: JSON.stringify(input, null, 2),
+        detail,
+        expandedContent: expanded,
       }
     }
   }

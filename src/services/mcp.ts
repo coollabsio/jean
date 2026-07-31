@@ -261,6 +261,90 @@ export function buildMcpConfigJson(
   return JSON.stringify({ mcpServers })
 }
 
+/**
+ * Resolve enabled MCP servers with the same cascade as ChatWindow:
+ * session override → project → global defaults, then auto-enable newly
+ * discovered servers (unless a session override is set).
+ */
+export function resolveEnabledMcpServers(options: {
+  availableServers: McpServerInfo[]
+  /** Explicit session override; presence (including empty array) skips auto-enable */
+  sessionEnabled?: string[]
+  projectEnabled?: string[] | null
+  globalEnabled?: string[]
+  knownServers?: string[]
+}): string[] {
+  const hasSessionOverride = options.sessionEnabled !== undefined
+  const baseEnabled = hasSessionOverride
+    ? (options.sessionEnabled ?? [])
+    : options.projectEnabled != null
+      ? options.projectEnabled
+      : (options.globalEnabled ?? [])
+
+  if (hasSessionOverride) return baseEnabled
+
+  const knownServers = options.knownServers ?? []
+  const newlyEnabled = getNewServersToAutoEnable(
+    options.availableServers,
+    baseEnabled,
+    knownServers
+  )
+  return newlyEnabled.length > 0
+    ? [...baseEnabled, ...newlyEnabled]
+    : baseEnabled
+}
+
+export interface ResolveMcpConfigForSendOptions {
+  worktreePath: string
+  backend: CliBackend
+  sessionEnabled?: string[]
+  projectEnabled?: string[] | null
+  globalEnabled?: string[]
+  knownServers?: string[]
+}
+
+/**
+ * Fetch MCP servers and build the config JSON used by send_chat_message.
+ * Safe to call outside React (magic commands, background automation).
+ *
+ * Always attempts discovery via invoke (no isTauri gate) so fire-and-forget
+ * magic paths work in the same environments as create_session/send_chat_message.
+ */
+export async function resolveMcpConfigForSend(
+  options: ResolveMcpConfigForSendOptions
+): Promise<{ mcpConfig?: string; enabledServers: string[] }> {
+  let availableServers: McpServerInfo[] = []
+  try {
+    availableServers = await invoke<McpServerInfo[]>('get_mcp_servers', {
+      backend: options.backend,
+      worktreePath: options.worktreePath,
+    })
+    if (!Array.isArray(availableServers)) {
+      availableServers = []
+    }
+  } catch {
+    // Proceed with empty discovery — Claude still gets Jean MCP via backend merge
+    availableServers = []
+  }
+
+  const enabledServers = resolveEnabledMcpServers({
+    availableServers,
+    sessionEnabled: options.sessionEnabled,
+    projectEnabled: options.projectEnabled,
+    globalEnabled: options.globalEnabled,
+    knownServers: options.knownServers,
+  })
+
+  return {
+    enabledServers,
+    mcpConfig: buildMcpConfigJson(
+      availableServers,
+      enabledServers,
+      options.backend
+    ),
+  }
+}
+
 // ── Composite key helpers ──────────────────────────────────────────────
 // MCP servers are identified by "backend:name" composite keys to avoid
 // collisions when different backends have servers with the same name.

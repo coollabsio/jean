@@ -52,13 +52,62 @@ pub fn get_wsl_cli_binary_path(distro: &str) -> Result<String, String> {
     ))
 }
 
+/// Whether the Jean-managed Claude binary is present and executable.
+pub fn jean_managed_installed(app: &AppHandle) -> bool {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return get_wsl_cli_binary_path(&wsl.distro)
+            .map(|path| crate::platform::wsl_file_executable(&wsl.distro, &path))
+            .unwrap_or(false);
+    }
+    get_cli_binary_path(app)
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+/// Find Claude on the system PATH (excluding the Jean-managed binary).
+pub fn find_system_binary(app: &AppHandle) -> Option<PathBuf> {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return crate::platform::wsl_which(
+            &wsl.distro,
+            "claude",
+            get_wsl_cli_binary_path(&wsl.distro).ok().as_deref(),
+        )
+        .map(PathBuf::from);
+    }
+
+    let jean_managed = get_cli_binary_path(app)
+        .ok()
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    crate::platform::find_cli_in_host_path("claude", jean_managed.as_deref())
+}
+
+/// True when Jean-managed Claude is missing but a system PATH install exists.
+/// Used to auto-select `claude_cli_source = "path"` so Homebrew installs work
+/// without requiring a manual Settings toggle (issue #387).
+pub fn should_auto_use_system(app: &AppHandle) -> bool {
+    !jean_managed_installed(app) && find_system_binary(app).is_some()
+}
+
+fn jean_managed_path(app: &AppHandle) -> PathBuf {
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        return get_wsl_cli_binary_path(&wsl.distro)
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(CLI_BINARY_NAME_UNIX));
+    }
+    get_cli_binary_path(app).unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME))
+}
+
 /// Resolve Claude binary path based on the user's preference.
 ///
-/// If `claude_cli_source` preference is `"path"`, look up `claude` in system PATH.
-/// Otherwise (default `"jean"`), use the Jean-managed binary.
+/// If `claude_cli_source` is `"path"`, look up `claude` in system PATH.
+/// If `"jean"` (default) and the Jean-managed binary exists, use it.
+/// Otherwise fall back to a system PATH install when present so Homebrew
+/// (and similar) CLIs work without an explicit source switch.
 pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
-    // Read preference from disk to avoid needing managed state
-    let use_path = match crate::get_preferences_path(app) {
+    let prefer_path = match crate::get_preferences_path(app) {
         Ok(prefs_path) => {
             if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
                 if let Ok(prefs) = serde_json::from_str::<crate::AppPreferences>(&contents) {
@@ -73,37 +122,29 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
         Err(_) => false,
     };
 
-    if use_path {
-        let wsl = get_wsl_config();
-        if wsl.enabled {
-            // In WSL mode, resolve the absolute Unix path so the session
-            // spawn path can exec it directly. `wsl_which` uses a login
-            // shell so PATH additions from ~/.profile / ~/.bashrc apply
-            // (nvm, bun, volta, npm-global, etc.).
-            if let Some(unix_path) = crate::platform::wsl_which(
-                &wsl.distro,
-                "claude",
-                get_wsl_cli_binary_path(&wsl.distro).ok().as_deref(),
-            ) {
-                return PathBuf::from(unix_path);
-            }
-        } else if let Some(path) = crate::platform::find_cli_in_host_path("claude", None) {
+    if prefer_path {
+        if let Some(path) = find_system_binary(app) {
             return path;
         }
-        // Fallback: if PATH lookup fails, still return Jean-managed path
-        log::warn!("claude_cli_source is 'path' but could not find claude in PATH, falling back to Jean-managed binary");
+        log::warn!(
+            "claude_cli_source is 'path' but could not find claude in PATH, falling back to Jean-managed binary"
+        );
+        return jean_managed_path(app);
     }
 
-    // In WSL mode, the Jean-managed install lives inside the distro — return
-    // the Linux absolute path so the runtime can exec it via `wsl.exe`.
-    let wsl = get_wsl_config();
-    if wsl.enabled {
-        return get_wsl_cli_binary_path(&wsl.distro)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(CLI_BINARY_NAME_UNIX));
+    if jean_managed_installed(app) {
+        return jean_managed_path(app);
     }
 
-    get_cli_binary_path(app).unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME))
+    if let Some(path) = find_system_binary(app) {
+        log::info!(
+            "Jean-managed Claude CLI not installed; using system PATH binary at {}",
+            path.display()
+        );
+        return path;
+    }
+
+    jean_managed_path(app)
 }
 
 /// Ensure the CLI directory exists, creating it if necessary

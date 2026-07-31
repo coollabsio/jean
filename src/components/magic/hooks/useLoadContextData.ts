@@ -280,15 +280,19 @@ export function useLoadContextData({
     )
   }, [contextsData, searchQuery, attachedSavedContexts])
 
-  // Filter sessions (exclude current session, apply search, group by project/worktree)
+  // Filter sessions (exclude current session + already-injected refs, apply search)
   const filteredEntries = useMemo(() => {
     if (!allSessionsData?.entries) return []
+
+    const attachedSlugs = new Set(attachedSavedContexts?.map(c => c.slug) ?? [])
 
     return allSessionsData.entries
       .map(entry => {
         const filteredSessions = entry.sessions
           .filter(s => s.messages.length > 0)
           .filter(s => s.id !== activeSessionId)
+          // Hide sessions already injected as session-ref-* attached contexts
+          .filter(s => !attachedSlugs.has(`session-ref-${s.id}`))
           .filter(s => {
             if (!searchQuery) return true
             const query = searchQuery.toLowerCase()
@@ -303,7 +307,7 @@ export function useLoadContextData({
         return { ...entry, sessions: filteredSessions }
       })
       .filter(entry => entry.sessions.length > 0)
-  }, [allSessionsData, searchQuery, activeSessionId])
+  }, [allSessionsData, searchQuery, activeSessionId, attachedSavedContexts])
 
   // Filter Linear issues locally, merge with search results, exclude already loaded ones
   const filteredLinearIssues = useMemo(() => {

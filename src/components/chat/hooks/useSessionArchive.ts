@@ -11,9 +11,9 @@ interface UseSessionArchiveParams {
 /**
  * Provides archive and delete handlers for sessions.
  *
- * When the last session is removed, the backend automatically creates a
- * fallback "Session 1" and the service layer switches to it via query
- * invalidation — no navigation needed.
+ * When the last non-archived session is removed, the backend leaves the
+ * worktree empty and the service layer navigates to the blank project picker
+ * (issue #501) instead of auto-creating a fallback "Session 1".
  *
  * - handleArchiveSession: always archives (context menu "Archive Session")
  * - handleDeleteSession: respects removalBehavior preference (context menu "Delete Session")

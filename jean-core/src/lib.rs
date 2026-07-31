@@ -70,6 +70,13 @@ mod version;
 
 pub use version::{app_version, set_app_version};
 
+// Desktop-only open helpers (native Tauri commands delegate here so editor
+// launch logic stays shared and complete: binary mapping, -g goto args,
+// macOS app fallbacks, Windows .cmd wrappers).
+pub use chat::open_file_in_default_app;
+pub use platform::open_url_in_browser;
+pub use projects::open_worktree_in_editor;
+
 // Validation functions
 fn validate_filename(filename: &str) -> Result<(), String> {
     // Regex pattern: only alphanumeric, dash, underscore, dot
@@ -172,7 +179,7 @@ pub struct AppPreferences {
     #[serde(default = "default_terminal_font_size")]
     pub terminal_font_size: u32, // Embedded terminal font size in pixels (10-24)
     #[serde(default = "default_editor")]
-    pub editor: String, // Editor app: zed, vscode, cursor, xcode, intellij
+    pub editor: String, // Editor app: zed, vscode, vscodium, cursor, xcode, intellij
     #[serde(default = "default_open_in")]
     pub open_in: String, // Default Open In action: editor, terminal, finder, github
     #[serde(default = "default_auto_branch_naming")]
@@ -273,22 +280,32 @@ pub struct AppPreferences {
     pub has_seen_jean_config_wizard: bool, // Whether user has seen the jean.json setup wizard
     #[serde(default)]
     pub has_seen_jean_mcp_intro: bool, // Whether user has seen the Jean MCP server announcement
+    #[serde(default)]
+    pub has_seen_external_display_zoom_tip: bool, // Soft-text tip on 1× displays when zoom ≠ 100%
     #[serde(default = "default_chrome_enabled")]
     pub chrome_enabled: bool, // Enable browser automation via Chrome extension
     #[serde(default = "default_zoom_level")]
-    pub zoom_level: u32, // Desktop zoom level percentage (50-200, default 90)
+    pub zoom_level: u32, // Desktop zoom level percentage (50-200, default 100)
     #[serde(default = "default_zoom_level")]
-    pub mobile_zoom_level: u32, // Mobile zoom level percentage (50-200, default 90)
+    pub mobile_zoom_level: u32, // Mobile zoom level percentage (50-200, default 100)
     #[serde(default = "default_sync_zoom_levels")]
     pub sync_zoom_levels: bool, // Keep desktop and mobile zoom levels in sync
     #[serde(default)]
     pub custom_cli_profiles: Vec<CustomCliProfile>, // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
     #[serde(default)]
-    pub default_provider: Option<String>, // Default provider profile name (None = Anthropic direct)
+    pub default_provider: Option<String>, // Default Claude provider profile name (None = Anthropic direct)
+    #[serde(default)]
+    pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
+    #[serde(default)]
+    pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    #[serde(default)]
+    pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
     pub favorite_models: Vec<String>, // Favourited model keys ("backend:model") shown at top of picker
     #[serde(default)]
     pub favorite_package_scripts: Vec<String>, // Favourited package script keys ("project_id:script")
+    #[serde(default)]
+    pub favorite_base_branches: Vec<String>, // Starred base branches ("project_id:branch") for new worktree picker
     #[serde(default)]
     pub fast_mode_models: Vec<String>, // Model keys ("backend:baseModel") with fast tier last enabled
     #[serde(default = "default_canvas_layout")]
@@ -317,6 +334,8 @@ pub struct AppPreferences {
     pub selected_kimi_model: String, // Default Kimi Code model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
+    #[serde(default = "default_codex_model_verbosity")]
+    pub default_codex_model_verbosity: String, // Codex model verbosity: low, medium, high
     #[serde(default = "default_grok_reasoning_effort")]
     pub default_grok_reasoning_effort: String, // Grok reasoning effort: low, medium, high, xhigh, max
     #[serde(default = "default_codex_goal_execution_mode")]
@@ -387,6 +406,8 @@ pub struct AppPreferences {
     pub expand_tool_calls_by_default: bool, // Expand all tool call collapsibles by default (default: false)
     #[serde(default)]
     pub window_vibrancy: bool, // macOS window vibrancy effect (high GPU cost, default false)
+    #[serde(default = "default_finished_session_animation_enabled")]
+    pub finished_session_animation_enabled: bool, // Soft glow on finished-sessions badge (default true)
     #[serde(default = "default_terminal_background")]
     pub terminal_background: String, // "auto" | "light" | "dark" | "custom"
     #[serde(default)]
@@ -399,6 +420,10 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
+}
+
+fn default_finished_session_animation_enabled() -> bool {
+    true
 }
 
 fn default_jean_mcp_enabled() -> bool {
@@ -450,6 +475,36 @@ pub struct CustomCliProfile {
     pub file_path: String,
     #[serde(default = "default_true")]
     pub supports_thinking: Option<bool>,
+}
+
+/// Codex custom model_provider profile injected via app-server config / -c overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexProviderProfile {
+    pub name: String,
+    pub provider_id: String,
+    pub base_url: String,
+    pub env_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_api: Option<String>,
+}
+
+/// PI custom provider merged into ~/.pi/agent/models.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderProfile {
+    pub name: String,
+    pub base_url: String,
+    pub api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub models: Vec<PiProviderModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiProviderModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 fn slugify_profile_name(name: &str) -> String {
@@ -586,7 +641,7 @@ fn default_syntax_theme_light() -> String {
 }
 
 fn default_file_edit_mode() -> String {
-    "external".to_string() // Default to external editor (VS Code, etc.)
+    "inline".to_string() // Default to Jean's CodeMirror inline editor
 }
 
 fn default_parallel_execution_prompt_enabled() -> bool {
@@ -651,6 +706,46 @@ fn maybe_auto_select_system_coderabbit(
     false
 }
 
+/// When Jean-managed Claude/Codex/OpenCode is missing but a system PATH install
+/// exists, switch the preference to `"path"` so Settings UI, auth, and status
+/// checks agree with the binary actually used (issue #387).
+///
+/// Runtime `resolve_cli_binary` also falls back to PATH when Jean-managed is
+/// missing; this persists the source so the UI does not show a misleading
+/// "Jean" selection.
+fn maybe_auto_select_system_cli_sources(app: &AppHandle, preferences: &mut AppPreferences) -> bool {
+    let mut changed = false;
+
+    if preferences.claude_cli_source == "jean" && claude_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting Claude CLI source=path (Jean-managed missing, system found)");
+        preferences.claude_cli_source = "path".to_string();
+        changed = true;
+    }
+    if preferences.codex_cli_source == "jean" && codex_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting Codex CLI source=path (Jean-managed missing, system found)");
+        preferences.codex_cli_source = "path".to_string();
+        changed = true;
+    }
+    if preferences.opencode_cli_source == "jean" && opencode_cli::should_auto_use_system(app) {
+        log::info!("Auto-selecting OpenCode CLI source=path (Jean-managed missing, system found)");
+        preferences.opencode_cli_source = "path".to_string();
+        changed = true;
+    }
+
+    changed
+}
+
+/// Apply all PATH auto-selection migrations. Returns true if any preference changed.
+fn maybe_auto_select_system_cli_preferences(
+    app: &AppHandle,
+    preferences: &mut AppPreferences,
+    raw_preferences: Option<&Value>,
+) -> bool {
+    let mut changed = maybe_auto_select_system_coderabbit(app, preferences, raw_preferences);
+    changed |= maybe_auto_select_system_cli_sources(app, preferences);
+    changed
+}
+
 fn normalize_parallel_execution_preferences(preferences: &mut AppPreferences) -> bool {
     if preferences.parallel_execution_prompt_enabled && !preferences.codex_multi_agent_enabled {
         preferences.codex_multi_agent_enabled = true;
@@ -696,6 +791,10 @@ fn default_codex_reasoning_effort() -> String {
     "high".to_string()
 }
 
+fn default_codex_model_verbosity() -> String {
+    "medium".to_string()
+}
+
 fn default_grok_reasoning_effort() -> String {
     "high".to_string()
 }
@@ -713,7 +812,7 @@ fn default_codex_max_agent_threads() -> u32 {
 }
 
 fn default_zoom_level() -> u32 {
-    90 // 90% = slightly smaller default
+    100 // 100% = sharpest default (esp. external 1× displays)
 }
 
 fn default_sync_zoom_levels() -> bool {
@@ -780,11 +879,15 @@ mod tests {
 
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
-        assert!(prompt.contains("when the current execution mode is plan: after the user answers native `request_user_input`"));
+        assert!(prompt
+            .contains("when the current execution mode is plan: do not write plan files or code"));
+        assert!(prompt.contains("<proposed_plan>"));
         assert!(prompt.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(prompt.contains("Claude AskUserQuestion"));
         assert!(prompt.contains("OpenCode question"));
         assert!(prompt.contains("Use a plain-text Unresolved Questions section only"));
+        assert!(prompt.contains("zero-context handoff"));
+        assert!(!prompt.contains("Make the plan extremely concise"));
         assert!(prompt.contains("Jean Worktree Policy"));
         assert!(prompt.contains("Do NOT create git worktrees manually"));
         assert!(prompt.contains("Jean MCP/tools"));
@@ -868,6 +971,7 @@ mod tests {
         assert_eq!(args.port, Some(4567));
         assert_eq!(args.token.as_deref(), Some("secret"));
         assert!(!args.no_token);
+        assert!(!args.allow_native_open);
     }
 
     #[test]
@@ -896,6 +1000,24 @@ mod tests {
         assert_eq!(args.host.as_deref(), Some("100.64.0.1"));
         assert_eq!(args.port, Some(5678));
         assert_eq!(args.token.as_deref(), Some("cli-secret"));
+    }
+
+    #[test]
+    fn parse_cli_args_reads_allow_native_open_from_env_and_flag() {
+        let from_env =
+            parse_cli_args_from(["jean", "--headless"], [("JEAN_ALLOW_NATIVE_OPEN", "1")]).unwrap();
+        assert!(from_env.allow_native_open);
+
+        let from_flag = parse_cli_args_from(
+            ["jean", "--headless", "--allow-native-open"],
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        assert!(from_flag.allow_native_open);
+
+        let off = parse_cli_args_from(["jean", "--headless"], std::iter::empty::<(&str, &str)>())
+            .unwrap();
+        assert!(!off.allow_native_open);
     }
 
     #[test]
@@ -998,6 +1120,24 @@ mod tests {
     }
 
     #[test]
+    fn app_preferences_default_codex_model_verbosity_for_existing_prefs() {
+        assert_eq!(
+            AppPreferences::default().default_codex_model_verbosity,
+            "medium"
+        );
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("default_codex_model_verbosity");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+
+        assert_eq!(prefs.default_codex_model_verbosity, "medium");
+    }
+
+    #[test]
     fn app_preferences_sync_zoom_levels_for_existing_prefs() {
         let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
         let object = prefs_json.as_object_mut().unwrap();
@@ -1006,7 +1146,7 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
-        assert_eq!(prefs.mobile_zoom_level, 90);
+        assert_eq!(prefs.mobile_zoom_level, 100);
         assert!(prefs.sync_zoom_levels);
     }
 
@@ -1022,6 +1162,46 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!prefs.has_seen_jean_mcp_intro);
+    }
+
+    #[test]
+    fn app_preferences_external_display_zoom_tip_unseen_for_existing_prefs() {
+        assert!(!AppPreferences::default().has_seen_external_display_zoom_tip);
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("has_seen_external_display_zoom_tip");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(!prefs.has_seen_external_display_zoom_tip);
+    }
+
+    #[test]
+    fn app_preferences_default_finished_session_animation_enabled_for_new_and_missing_prefs() {
+        assert!(AppPreferences::default().finished_session_animation_enabled);
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("finished_session_animation_enabled");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(prefs.finished_session_animation_enabled);
+    }
+
+    #[test]
+    fn app_preferences_preserves_explicit_finished_session_animation_disabled() {
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json.as_object_mut().unwrap().insert(
+            "finished_session_animation_enabled".to_string(),
+            json!(false),
+        );
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(!prefs.finished_session_animation_enabled);
     }
 
     #[test]
@@ -1136,6 +1316,8 @@ mod tests {
         );
         assert_eq!(prefs.magic_prompt_modes.investigate_issue_mode, "yolo");
         assert_eq!(prefs.magic_prompt_modes.review_comments_mode, "plan");
+        // Missing code_review_fix_mode in partial JSON falls back to plan
+        assert_eq!(prefs.magic_prompt_modes.code_review_fix_mode, "plan");
         assert_eq!(
             prefs.magic_prompt_models.final_review_model,
             default_model()
@@ -1526,7 +1708,7 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
         .to_string()
 }
 
-fn default_investigate_advisory_prompt() -> String {
+pub(crate) fn default_investigate_advisory_prompt() -> String {
     r#"<task>
 
 Investigate the loaded security {advisoryWord} ({advisoryRefs})
@@ -1780,11 +1962,11 @@ fn default_global_system_prompt() -> String {
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
-- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
+- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
-- For Codex specifically, when the current execution mode is plan: after the user answers native `request_user_input`/open questions, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.
-- Every Codex response that contains or revises a plan while the current execution mode is plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
+- For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
+- Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete `<proposed_plan>` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
 
 ### 2. Documentation First
@@ -1852,12 +2034,12 @@ fn default_global_system_prompt() -> String {
 pub(crate) fn default_provider_switch_handoff_prompt() -> String {
     r#"You are continuing a Jean chat session after the user switched AI backends.
 
-Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches.
+Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches. Treat the history below as the conversation you already had with the user — do not claim you lack prior context.
 
 Previous backend: {previous_backend}
 Current backend: {current_backend}
 
-Use the Jean-local history below to reconstruct context before answering the user's latest message. Do not mention this hidden handoff unless it is directly relevant.
+Read the Jean-local history carefully, reconstruct the task state, and answer the user's latest message with full continuity. Do not mention this hidden handoff unless it is directly relevant.
 
 <jean_local_history>
 {history}
@@ -1908,6 +2090,10 @@ pub struct MagicCodeReviewConfig {
     pub model: String,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// Mode for sessions created when sending this reviewer's findings to chat.
+    /// Defaults to plan when missing from older prefs.
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub fix_mode: String,
 }
 
 fn default_sonnet_model() -> String {
@@ -2142,6 +2328,9 @@ pub struct MagicPromptModes {
     pub investigate_linear_issue_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
     pub investigate_sentry_issue_mode: String,
+    /// Mode for sessions created when sending code-review findings to fix
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub code_review_fix_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
     pub review_comments_mode: String,
     #[serde(default = "default_magic_prompt_yolo_mode")]
@@ -2160,10 +2349,46 @@ impl Default for MagicPromptModes {
             investigate_advisory_mode: default_magic_prompt_plan_mode(),
             investigate_linear_issue_mode: default_magic_prompt_plan_mode(),
             investigate_sentry_issue_mode: default_magic_prompt_plan_mode(),
+            code_review_fix_mode: default_magic_prompt_plan_mode(),
             review_comments_mode: default_magic_prompt_plan_mode(),
             final_review_mode: default_magic_prompt_yolo_mode(),
             resolve_conflicts_mode: default_magic_prompt_yolo_mode(),
         }
+    }
+}
+
+fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
+    match backend {
+        "codex" => is_codex_model(model),
+        "opencode" => is_opencode_model(model),
+        "cursor" => is_cursor_model(model),
+        "pi" => is_pi_model(model),
+        "commandcode" => model.starts_with("commandcode/"),
+        "grok" => is_grok_model(model),
+        "kimi" => is_kimi_model(model),
+        "claude" => {
+            !is_codex_model(model)
+                && !is_opencode_model(model)
+                && !is_cursor_model(model)
+                && !is_pi_model(model)
+                && !is_grok_model(model)
+                && !is_kimi_model(model)
+                && !model.starts_with("commandcode/")
+        }
+        _ => true,
+    }
+}
+
+fn selected_model_for_backend(preferences: &AppPreferences, backend: &str) -> String {
+    match backend {
+        "codex" => preferences.selected_codex_model.clone(),
+        "opencode" => preferences.selected_opencode_model.clone(),
+        "cursor" => preferences.selected_cursor_model.clone(),
+        "pi" => preferences.selected_pi_model.clone(),
+        "commandcode" => preferences.selected_commandcode_model.clone(),
+        "grok" => preferences.selected_grok_model.clone(),
+        "kimi" => preferences.selected_kimi_model.clone(),
+        _ => preferences.selected_model.clone(),
     }
 }
 
@@ -2180,43 +2405,16 @@ fn migrate_final_review_preferences(
         .final_review_backend
         .as_deref()
         .unwrap_or(&preferences.default_backend);
-    let model_matches_backend = match backend {
-        "codex" => is_codex_model(&preferences.magic_prompt_models.final_review_model),
-        "opencode" => is_opencode_model(&preferences.magic_prompt_models.final_review_model),
-        "cursor" => is_cursor_model(&preferences.magic_prompt_models.final_review_model),
-        "pi" => is_pi_model(&preferences.magic_prompt_models.final_review_model),
-        "commandcode" => preferences
-            .magic_prompt_models
-            .final_review_model
-            .starts_with("commandcode/"),
-        "grok" => is_grok_model(&preferences.magic_prompt_models.final_review_model),
-        "kimi" => is_kimi_model(&preferences.magic_prompt_models.final_review_model),
-        "claude" => {
-            let model = &preferences.magic_prompt_models.final_review_model;
-            !is_codex_model(model)
-                && !is_opencode_model(model)
-                && !is_cursor_model(model)
-                && !is_pi_model(model)
-                && !is_grok_model(model)
-                && !is_kimi_model(model)
-                && !model.starts_with("commandcode/")
-        }
-        _ => true,
-    };
+    let model_matches_backend = magic_prompt_model_matches_backend(
+        &preferences.magic_prompt_models.final_review_model,
+        backend,
+    );
     if !model_missing && model_matches_backend {
         return false;
     }
 
-    preferences.magic_prompt_models.final_review_model = match backend {
-        "codex" => preferences.selected_codex_model.clone(),
-        "opencode" => preferences.selected_opencode_model.clone(),
-        "cursor" => preferences.selected_cursor_model.clone(),
-        "pi" => preferences.selected_pi_model.clone(),
-        "commandcode" => preferences.selected_commandcode_model.clone(),
-        "grok" => preferences.selected_grok_model.clone(),
-        "kimi" => preferences.selected_kimi_model.clone(),
-        _ => preferences.selected_model.clone(),
-    };
+    preferences.magic_prompt_models.final_review_model =
+        selected_model_for_backend(preferences, backend);
     true
 }
 
@@ -2354,14 +2552,19 @@ impl Default for AppPreferences {
             has_seen_feature_tour: false,
             has_seen_jean_config_wizard: false,
             has_seen_jean_mcp_intro: false,
+            has_seen_external_display_zoom_tip: false,
             chrome_enabled: default_chrome_enabled(),
             zoom_level: default_zoom_level(),
             mobile_zoom_level: default_zoom_level(),
             sync_zoom_levels: default_sync_zoom_levels(),
             custom_cli_profiles: Vec::new(),
             default_provider: None,
+            custom_codex_providers: Vec::new(),
+            default_codex_provider: None,
+            custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
+            favorite_base_branches: Vec::new(),
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
@@ -2376,6 +2579,7 @@ impl Default for AppPreferences {
             selected_grok_model: default_grok_model(),
             selected_kimi_model: default_kimi_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
+            default_codex_model_verbosity: default_codex_model_verbosity(),
             default_grok_reasoning_effort: default_grok_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: default_codex_multi_agent_enabled(),
@@ -2411,6 +2615,7 @@ impl Default for AppPreferences {
             coderabbit_cli_source: default_cli_source(),
             expand_tool_calls_by_default: false,
             window_vibrancy: false,
+            finished_session_animation_enabled: default_finished_session_animation_enabled(),
             terminal_background: default_terminal_background(),
             terminal_background_custom: None,
             auto_update_ai_backends: default_auto_update_ai_backends(),
@@ -2459,6 +2664,14 @@ pub struct UIState {
     /// Left sidebar visibility, defaults to false
     #[serde(default)]
     pub left_sidebar_visible: Option<bool>,
+
+    /// File browser sidebar width in pixels, defaults to 280
+    #[serde(default)]
+    pub file_browser_size: Option<f64>,
+
+    /// File browser sidebar visibility, defaults to false
+    #[serde(default)]
+    pub file_browser_visible: Option<bool>,
 
     /// Active session ID per worktree (for restoring open tabs)
     #[serde(default)]
@@ -2588,6 +2801,11 @@ pub struct UIState {
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
 
+    /// GitHub Actions workflow run database IDs the user has already opened.
+    /// Failed-run badges only count runs not present in this list.
+    #[serde(default)]
+    pub seen_failed_workflow_run_ids: Vec<u64>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -2662,6 +2880,8 @@ impl Default for UIState {
             expanded_folder_ids: Vec::new(),
             left_sidebar_size: None,
             left_sidebar_visible: None,
+            file_browser_size: None,
+            file_browser_visible: None,
             active_session_ids: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
             pending_images: std::collections::HashMap::new(),
@@ -2694,6 +2914,7 @@ impl Default for UIState {
             project_canvas_settings: std::collections::HashMap::new(),
             github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
+            seen_failed_workflow_run_ids: Vec::new(),
             version: default_ui_state_version(),
         }
     }
@@ -2717,7 +2938,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let prefs_path = get_preferences_path(app)?;
     if !prefs_path.exists() {
         let mut preferences = AppPreferences::default();
-        maybe_auto_select_system_coderabbit(app, &mut preferences, None);
+        maybe_auto_select_system_cli_preferences(app, &mut preferences, None);
         return Ok(preferences);
     }
     let contents = std::fs::read_to_string(&prefs_path)
@@ -2728,7 +2949,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
     normalize_parallel_execution_preferences(&mut preferences);
-    maybe_auto_select_system_coderabbit(app, &mut preferences, Some(&raw_preferences));
+    maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
 }
 
@@ -2739,10 +2960,10 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     if !prefs_path.exists() {
         log::trace!("Preferences file not found, using defaults");
         let mut preferences = AppPreferences::default();
-        if maybe_auto_select_system_coderabbit(&app, &mut preferences, None) {
+        if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None) {
             if let Ok(json) = serde_json::to_string_pretty(&preferences) {
                 let _ = std::fs::write(&prefs_path, json);
-                log::trace!("Saved preferences after CodeRabbit PATH auto-detection");
+                log::trace!("Saved preferences after CLI PATH auto-detection");
             }
         }
         return Ok(preferences);
@@ -2783,7 +3004,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.branch_naming_model = default_branch_naming_model();
         needs_resave = true;
     }
-    if maybe_auto_select_system_coderabbit(&app, &mut preferences, Some(&raw_preferences)) {
+    if maybe_auto_select_system_cli_preferences(&app, &mut preferences, Some(&raw_preferences)) {
         needs_resave = true;
     }
     if preferences.session_naming_model == "haiku" {
@@ -3216,6 +3437,9 @@ pub async fn start_http_server(
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
+    // Desktop-hosted Web Access can open local Finder/editor/terminal for clients.
+    platform::set_allow_native_open(true);
+
     let prefs = load_preferences(app.clone()).await?;
     let actual_port = port.unwrap_or(prefs.http_server_port);
     let bind_host = resolve_http_server_bind_host(&prefs);
@@ -3600,6 +3824,8 @@ struct CliArgs {
     token: Option<String>,
     no_token: bool,
     allow_unsafe_no_token: bool,
+    /// Allow HTTP clients to open local file managers / editors / terminals.
+    allow_native_open: bool,
 }
 
 /// CLI overrides for HTTP server configuration.
@@ -3626,12 +3852,14 @@ fn print_cli_help() {
     println!("  --no-token          Disable token authentication");
     println!("  --allow-unsafe-no-token");
     println!("                      Allow --no-token with a wildcard bind host");
+    println!("  --allow-native-open Allow Open in editor/finder/terminal over HTTP");
+    println!("                      (auto-enabled under WSL; off by default otherwise)");
     println!("  --help              Show this help message");
     println!("  --version           Show version");
     println!();
     println!("Environment:");
     println!("  JEAN_HEADLESS=1 JEAN_HOST JEAN_PORT JEAN_TOKEN JEAN_NO_TOKEN=1");
-    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1");
+    println!("  JEAN_ALLOW_UNSAFE_NO_TOKEN=1 JEAN_ALLOW_NATIVE_OPEN=1");
 }
 
 fn parse_cli_args() -> CliArgs {
@@ -3683,6 +3911,7 @@ where
     let mut no_token = env_truthy(env.get("JEAN_NO_TOKEN").map(String::as_str));
     let mut allow_unsafe_no_token =
         env_truthy(env.get("JEAN_ALLOW_UNSAFE_NO_TOKEN").map(String::as_str));
+    let mut allow_native_open = env_truthy(env.get("JEAN_ALLOW_NATIVE_OPEN").map(String::as_str));
     let mut host = env
         .get("JEAN_HOST")
         .map(|h| h.trim().to_string())
@@ -3741,6 +3970,9 @@ where
             "--allow-unsafe-no-token" => {
                 allow_unsafe_no_token = true;
             }
+            "--allow-native-open" => {
+                allow_native_open = true;
+            }
             _ => {} // ignore unknown flags (Tauri/OS may pass their own)
         }
     }
@@ -3749,9 +3981,11 @@ where
         return Err("--token and --no-token are mutually exclusive".to_string());
     }
 
-    if !headless && (host.is_some() || port.is_some() || token.is_some() || no_token) {
+    if !headless
+        && (host.is_some() || port.is_some() || token.is_some() || no_token || allow_native_open)
+    {
         eprintln!(
-            "Warning: --host, --port, --token, --no-token are only effective with --headless"
+            "Warning: --host, --port, --token, --no-token, --allow-native-open are only effective with --headless"
         );
     }
 
@@ -3762,6 +3996,7 @@ where
         token,
         no_token,
         allow_unsafe_no_token,
+        allow_native_open,
     })
 }
 
@@ -3944,6 +4179,8 @@ pub async fn run_server() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
     let cli = parse_cli_args();
+    // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
+    platform::set_allow_native_open(cli.allow_native_open);
     let context = RuntimeContext::from_environment()?;
     initialize_runtime(&context)?;
 

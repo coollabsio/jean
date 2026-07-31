@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an idea or improvement for Jean
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: Describe the feature
+      description: What would you like Jean to do?
+      placeholder: Tell us about the feature or improvement you would like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Why would this be useful?
+      description: What problem would this solve, or what use case would it support?
+      placeholder: Describe the problem or workflow this feature would improve.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: Share any alternatives or workarounds you have tried.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add any other context, examples, or screenshots.

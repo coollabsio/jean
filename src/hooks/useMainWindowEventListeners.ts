@@ -20,7 +20,12 @@ import {
 import { useBrowserStore } from '@/store/browser-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
-import type { QueuedMessage } from '@/types/chat'
+import type {
+  AllSessionsResponse,
+  QueuedMessage,
+  Session,
+  WorktreeSessions,
+} from '@/types/chat'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
@@ -28,10 +33,13 @@ import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
 import {
   eventToShortcutString,
+  isModKeyEvent,
   DEFAULT_KEYBINDINGS,
   type KeybindingAction,
   type KeybindingsMap,
 } from '@/types/keybindings'
+import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan',
@@ -58,6 +66,141 @@ export function findKeybindingAction(
   }
 
   return null
+}
+
+export function useWindowKeyboardFocusRestore() {
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    if (!isNativeApp() || isMobile) return
+    return installWindowKeyboardFocusRestore()
+  }, [isMobile])
+}
+
+/**
+ * Keybindings that intentionally re-fire while a key is held (OS key-repeat).
+ * Everything else is one-shot: a held Ctrl+W must not cascade-close terminals
+ * or sessions (GitHub issue #56).
+ */
+const KEYBINDING_ACTIONS_ALLOWING_REPEAT = new Set<KeybindingAction>([
+  'scroll_chat_up',
+  'scroll_chat_down',
+  'scroll_chat_up_medium',
+  'scroll_chat_down_medium',
+  'scroll_chat_up_small',
+  'scroll_chat_down_small',
+  'next_session',
+  'previous_session',
+])
+
+/** Whether OS key-repeat should re-execute this keybinding action. */
+export function allowsKeybindingRepeat(action: KeybindingAction): boolean {
+  return KEYBINDING_ACTIONS_ALLOWING_REPEAT.has(action)
+}
+
+/**
+ * Apply backend `cache:invalidate` keys to the React Query client.
+ * Shared by the debounced multi-client sync listener.
+ *
+ * `sessions` also invalidates `['all-sessions']` (finished/unread bell) which
+ * is intentionally outside `chatQueryKeys.all` (`['chat']`).
+ */
+export function applyCacheInvalidationKeys(
+  queryClient: QueryClient,
+  keys: Iterable<string>
+): void {
+  for (const key of keys) {
+    switch (key) {
+      case 'sessions':
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.all,
+        })
+        // UnreadBell / useUnreadCount read from this separate key.
+        queryClient.invalidateQueries({
+          queryKey: ['all-sessions'],
+        })
+        break
+      case 'projects':
+        queryClient.invalidateQueries({
+          queryKey: projectsQueryKeys.all,
+        })
+        break
+      case 'preferences':
+        queryClient.invalidateQueries({
+          queryKey: ['preferences'],
+        })
+        break
+      case 'ui-state':
+        queryClient.invalidateQueries({
+          queryKey: ['ui-state'],
+        })
+        break
+      case 'contexts':
+        queryClient.invalidateQueries({
+          queryKey: ['contexts'],
+        })
+        queryClient.invalidateQueries({
+          queryKey: ['saved-contexts'],
+        })
+        break
+    }
+  }
+}
+
+/**
+ * Optimistically apply a session rename across all React Query caches that
+ * display session names (tab bar, ProjectCanvas with-counts, all-sessions bell).
+ * Used by the `session-renamed` event so web clients update immediately without
+ * waiting for a refetch race against concurrent chat:done cache writes.
+ */
+export function applySessionRenamedToCaches(
+  queryClient: QueryClient,
+  worktreeId: string,
+  sessionId: string,
+  newName: string
+): void {
+  const patchWorktreeSessions = (
+    old: WorktreeSessions | undefined
+  ): WorktreeSessions | undefined => {
+    if (!old) return old
+    let changed = false
+    const sessions = old.sessions.map(session => {
+      if (session.id !== sessionId || session.name === newName) return session
+      changed = true
+      return { ...session, name: newName }
+    })
+    return changed ? { ...old, sessions } : old
+  }
+
+  queryClient.setQueryData<WorktreeSessions>(
+    chatQueryKeys.sessions(worktreeId),
+    patchWorktreeSessions
+  )
+  // ProjectCanvasView uses the with-counts variant — update it directly so the
+  // dashboard list renames even before the invalidate refetch completes.
+  queryClient.setQueryData<WorktreeSessions>(
+    [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+    patchWorktreeSessions
+  )
+  queryClient.setQueryData<Session>(chatQueryKeys.session(sessionId), old => {
+    if (!old || old.name === newName) return old
+    return { ...old, name: newName }
+  })
+  queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
+    if (!old) return old
+    let changed = false
+    const entries = old.entries.map(entry => {
+      let entryChanged = false
+      const sessions = entry.sessions.map(session => {
+        if (session.id !== sessionId || session.name === newName) return session
+        entryChanged = true
+        changed = true
+        return { ...session, name: newName }
+      })
+      return entryChanged ? { ...entry, sessions } : entry
+    })
+    return changed ? { ...old, entries } : old
+  })
 }
 
 export function shouldAllowKeybindingThroughOpenOverlay(
@@ -131,6 +274,17 @@ export function closeActiveTerminalTabForShortcut(): boolean {
   const activeTerminalId = terminalStore.activeTerminalIds[worktreeId]
 
   if (!activeTerminalId) return true
+
+  // Running PTYs need an explicit confirm (issue #56). TerminalView listens
+  // for this event and opens the same dialog as the tab close button.
+  if (terminalStore.runningTerminals.has(activeTerminalId)) {
+    window.dispatchEvent(
+      new CustomEvent('confirm-close-terminal', {
+        detail: { worktreeId, terminalId: activeTerminalId },
+      })
+    )
+    return true
+  }
 
   invoke('stop_terminal', { terminalId: activeTerminalId }).catch(() => {
     /* noop */
@@ -276,6 +430,13 @@ function executeKeybindingAction(
       const { leftSidebarVisible, setLeftSidebarVisible } =
         useUIStore.getState()
       setLeftSidebarVisible(!leftSidebarVisible)
+      break
+    }
+    case 'toggle_file_browser': {
+      logger.debug('Keybinding: toggle_file_browser')
+      const { fileBrowserVisible, setFileBrowserVisible } =
+        useUIStore.getState()
+      setFileBrowserVisible(!fileBrowserVisible)
       break
     }
     case 'open_preferences':
@@ -675,6 +836,12 @@ export function useMainWindowEventListeners() {
     }
   }, [preferences?.keybindings])
 
+  // After alt-tab / OS window reactivation, WebViews often leave the document
+  // without keyboard focus until a click. Restore the last focused element
+  // (or chat input / body) so typing and shortcuts like Ctrl/Cmd+L work again.
+  // Issue #577.
+  useWindowKeyboardFocusRestore()
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Convert the keyboard event to our shortcut string format
@@ -706,6 +873,15 @@ export function useMainWindowEventListeners() {
 
       const keybindings = keybindingsRef.current
       const matchedAction = findKeybindingAction(shortcut, keybindings)
+
+      // OS key-repeat must not re-fire one-shot actions (issue #56: holding
+      // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).
+      // Consume the event so the browser does not handle the repeated shortcut.
+      if (e.repeat && matchedAction && !allowsKeybindingRepeat(matchedAction)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
 
       // Cancel prompt should work even when modals are open
       if (matchedAction === 'cancel_prompt') {
@@ -746,7 +922,7 @@ export function useMainWindowEventListeners() {
           const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
 
           if (
-            (e.metaKey || e.ctrlKey) &&
+            isModKeyEvent(e) &&
             !e.shiftKey &&
             !e.altKey &&
             digit >= 1 &&
@@ -788,8 +964,9 @@ export function useMainWindowEventListeners() {
         }
       }
 
-      // CMD/Ctrl+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      // Mod+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
+      // Use platform mod (Cmd on macOS native, Ctrl elsewhere) so Ctrl+digit reaches terminals.
+      if (isModKeyEvent(e) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
         const digitMatch = e.code.match(/^Digit(\d)$/)
         const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
@@ -898,6 +1075,22 @@ export function useMainWindowEventListeners() {
         listenLocal('menu-check-updates', async () => {
           logger.debug('Check for updates menu event received')
           if (!isNativeApp()) return
+          const ui = useUIStore.getState()
+          // Package already installed this session — prompt restart, don't re-offer download
+          if (ui.updateReadyVersion) {
+            commandContext.showToast(
+              `Update ${ui.updateReadyVersion} is ready — restart to apply`,
+              'success'
+            )
+            return
+          }
+          if (ui.isUpdateInstalling) {
+            commandContext.showToast(
+              'Update download already in progress',
+              'info'
+            )
+            return
+          }
           try {
             const { check } = await import('@tauri-apps/plugin-updater')
             const update = await check()
@@ -930,6 +1123,13 @@ export function useMainWindowEventListeners() {
           const { leftSidebarVisible, setLeftSidebarVisible } =
             useUIStore.getState()
           setLeftSidebarVisible(!leftSidebarVisible)
+        }),
+
+        listenLocal('menu-toggle-file-browser', () => {
+          logger.debug('Toggle file browser menu event received')
+          const { fileBrowserVisible, setFileBrowserVisible } =
+            useUIStore.getState()
+          setFileBrowserVisible(!fileBrowserVisible)
         }),
 
         listenLocal('menu-toggle-right-sidebar', () => {
@@ -1015,9 +1215,20 @@ export function useMainWindowEventListeners() {
             oldName: event.payload.old_name,
             newName: event.payload.new_name,
           })
-          // Invalidate sessions query to refresh the session name in the UI
+          // Optimistically patch all caches first so the UI renames immediately
+          // (especially important for web clients and ProjectCanvas with-counts).
+          applySessionRenamedToCaches(
+            queryClient,
+            event.payload.worktree_id,
+            event.payload.session_id,
+            event.payload.new_name
+          )
+          // Then invalidate so disk is the eventual source of truth.
           queryClient.invalidateQueries({
             queryKey: chatQueryKeys.sessions(event.payload.worktree_id),
+          })
+          queryClient.invalidateQueries({
+            queryKey: ['all-sessions'],
           })
         }),
 
@@ -1065,43 +1276,7 @@ export function useMainWindowEventListeners() {
 
           const flushInvalidations = () => {
             flushTimer = null
-            for (const key of pendingKeys) {
-              switch (key) {
-                case 'sessions':
-                  queryClient.invalidateQueries({
-                    queryKey: chatQueryKeys.all,
-                  })
-                  // The unread bell reads a separate ['all-sessions'] query; keep
-                  // it in sync so finished/waiting sessions surface live.
-                  queryClient.invalidateQueries({
-                    queryKey: ['all-sessions'],
-                  })
-                  break
-                case 'projects':
-                  queryClient.invalidateQueries({
-                    queryKey: projectsQueryKeys.all,
-                  })
-                  break
-                case 'preferences':
-                  queryClient.invalidateQueries({
-                    queryKey: ['preferences'],
-                  })
-                  break
-                case 'ui-state':
-                  queryClient.invalidateQueries({
-                    queryKey: ['ui-state'],
-                  })
-                  break
-                case 'contexts':
-                  queryClient.invalidateQueries({
-                    queryKey: ['contexts'],
-                  })
-                  queryClient.invalidateQueries({
-                    queryKey: ['saved-contexts'],
-                  })
-                  break
-              }
-            }
+            applyCacheInvalidationKeys(queryClient, pendingKeys)
             pendingKeys.clear()
           }
 
@@ -1159,50 +1334,6 @@ export function useMainWindowEventListeners() {
     }
   }, [commandContext, queryClient])
 
-  // Quit confirmation for system-level close events (Alt+F4, taskbar close).
-  // The X button handles its own confirmation via window-close command,
-  // but system close events still go through onCloseRequested.
-  useEffect(() => {
-    // Skip in development mode - only block quit in production
-    if (import.meta.env.DEV) return
-    if (!isNativeApp()) return
-
-    let unlisten: (() => void) | null = null
-
-    const setup = async () => {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      getCurrentWindow()
-        .onCloseRequested(async event => {
-          try {
-            const hasRunning = await Promise.race([
-              invoke<boolean>('has_running_sessions'),
-              new Promise<boolean>((_, reject) =>
-                setTimeout(() => reject(new Error('timeout')), 2000)
-              ),
-            ])
-            if (hasRunning) {
-              event.preventDefault()
-              window.dispatchEvent(
-                new CustomEvent('quit-confirmation-requested')
-              )
-            }
-          } catch (error) {
-            logger.error('Failed to check running sessions', { error })
-            // Allow quit if we can't check (fail open)
-          }
-        })
-        .then(fn => {
-          unlisten = fn
-        })
-        .catch(error => {
-          logger.error('Failed to setup close listener', { error })
-        })
-    }
-
-    setup()
-
-    return () => {
-      unlisten?.()
-    }
-  }, [])
+  // Window close / quit confirmation is owned by useNativeWindowCloseGuard at
+  // App root so it stays active during preloading (MainWindow unmounted).
 }

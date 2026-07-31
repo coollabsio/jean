@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  canOpenInEditor,
+  canOpenNativeApps,
+  canOpenRemoteEditorLocally,
   hasBackend,
   hasBackendTransport,
   isLocalBackend,
   isNativeApp,
+  setNativeOpenAllowed,
   setWebAccessEnabled,
   setWsConnected,
 } from './environment'
@@ -23,6 +27,7 @@ describe('environment detection', () => {
     clearInternals()
     setWsConnected(false)
     setWebAccessEnabled(false)
+    setNativeOpenAllowed(false)
     selectConnection(LOCAL_CONNECTION_ID)
   })
 
@@ -62,6 +67,15 @@ describe('environment detection', () => {
     expect(isNativeApp()).toBe(true)
     expect(isLocalBackend()).toBe(false)
     expect(hasBackendTransport()).toBe(true)
+    expect(canOpenNativeApps()).toBe(false)
+    expect(canOpenRemoteEditorLocally()).toBe(true)
+    expect(canOpenInEditor()).toBe(true)
+  })
+
+  it('allows host-native open when the server reports nativeOpenAllowed', () => {
+    setNativeOpenAllowed(true)
+    expect(canOpenNativeApps()).toBe(true)
+    expect(canOpenInEditor()).toBe(true)
   })
 
   it('treats WebSocket connection as browser backend', () => {

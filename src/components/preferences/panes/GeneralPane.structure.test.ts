@@ -107,6 +107,36 @@ describe('GeneralPane settings structure', () => {
     expect(executionOverrides).not.toContain('? codexReasoningOptions')
   })
 
+  // Regression #505: shared patchPreferences.isPending made the AI Language
+  // Save button spin when model defaults (or any other General field) saved.
+  it('scopes AI Language save loading to its own preferences mutation', () => {
+    const generalSource = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const fieldSource = readFileSync(
+      'src/components/preferences/panes/AiLanguageField.tsx',
+      'utf8'
+    )
+
+    // Field lives in its own module with an independent mutation instance
+    expect(generalSource).toContain(
+      "import { AiLanguageField } from './AiLanguageField'"
+    )
+    expect(generalSource).toContain(
+      '<AiLanguageField preferences={preferences} />'
+    )
+    expect(generalSource).not.toMatch(
+      /<AiLanguageField[\s\S]*?patchPreferences=/
+    )
+    expect(fieldSource).toContain('usePatchPreferences()')
+    expect(fieldSource).toContain('isAiLanguageSavePending')
+    expect(fieldSource).toContain('disabled={!hasChanges || isSaving}')
+    expect(fieldSource).not.toContain(
+      'disabled={!hasChanges || patchPreferences.isPending}'
+    )
+  })
+
   it('renders the app version and build commit at the bottom of general settings', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',

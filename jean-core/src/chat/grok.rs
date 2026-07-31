@@ -73,6 +73,9 @@ pub struct GrokResponse {
     pub content_blocks: Vec<ContentBlock>,
     pub cancelled: bool,
     pub usage: Option<UsageData>,
+    /// Host/stream-recorded failure (rate limit, auth, JSON-RPC error, …).
+    /// When set, the turn must surface `chat:error` instead of completing empty.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1102,6 +1105,7 @@ where
     let mut tool_calls = Vec::new();
     let mut session_id = initial_session_id.unwrap_or_default().to_string();
     let mut usage = None;
+    let mut error: Option<String> = None;
 
     for line in reader.lines() {
         let raw_line = line.map_err(|e| format!("Failed to read Grok CLI output: {e}"))?;
@@ -1131,6 +1135,23 @@ where
                 content_blocks.push(ContentBlock::UserInput {
                     text: text.to_string(),
                 });
+            }
+            continue;
+        }
+
+        // Host terminal error marker from ACP prompt JSON-RPC failure (#580).
+        // Capture and keep scanning so a legacy trailing `type:result` does not
+        // wipe the failure — callers treat `error` as fatal.
+        if parsed.get("type").and_then(Value::as_str) == Some("error") {
+            if let Some(err) = parsed.get("error") {
+                error = Some(extract_grok_error_message(err));
+            } else {
+                error = Some("Unknown Grok error".to_string());
+            }
+            if let Some(sid) = parsed.get("session_id").and_then(Value::as_str) {
+                if !sid.is_empty() {
+                    session_id = sid.to_string();
+                }
             }
             continue;
         }
@@ -1252,6 +1273,7 @@ where
         content_blocks,
         cancelled: false,
         usage,
+        error,
     })
 }
 
@@ -1260,7 +1282,7 @@ where
 /// Grok plan-mode turns often start with "I'll draft a plan…" then tool research.
 /// If those tools fail or the turn ends early, that preamble must NOT become an
 /// ExitPlanMode approval gate — only real plan structure should.
-fn looks_like_plan_content(content: &str) -> bool {
+pub(crate) fn looks_like_plan_content(content: &str) -> bool {
     let trimmed = content.trim();
     if trimmed.chars().count() < 280 {
         return false;
@@ -1304,31 +1326,68 @@ fn looks_like_plan_content(content: &str) -> bool {
     structured_lines >= 4
 }
 
-fn inject_synthetic_plan(response: &mut GrokResponse) -> bool {
-    if response.content.trim().is_empty()
-        || response
-            .tool_calls
-            .iter()
-            .any(|tool| tool.name == GROK_SYNTHETIC_PLAN_TOOL_NAME)
-        || !looks_like_plan_content(&response.content)
-    {
-        return false;
+/// Ensure plan-mode turns always expose a plan tool call with full plan body.
+///
+/// Returns the synthetic/enriched plan tool id when the response should wait
+/// for plan approval. Mid-turn text/tool chronology is preserved — only the
+/// plan tool is appended (or re-appended) at the end with the richest body.
+fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
+    if response.content.trim().is_empty() || !looks_like_plan_content(&response.content) {
+        return None;
     }
+
+    let plan_body = response.content.clone();
+    let existing = response
+        .tool_calls
+        .iter()
+        .find(|tool| tool.name == GROK_SYNTHETIC_PLAN_TOOL_NAME);
+
+    if let Some(existing) = existing {
+        let id = existing.id.clone();
+        let existing_plan = existing
+            .input
+            .get("plan")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        // Enrich thin/empty plan bodies with full assistant plan text.
+        if existing_plan.len() < plan_body.trim().len() {
+            if let Some(tool) = response.tool_calls.iter_mut().find(|tool| tool.id == id) {
+                tool.input = serde_json::json!({
+                    "source": "grok",
+                    "plan": plan_body,
+                });
+            }
+        }
+        // Keep a single plan tool_use block at the end of content_blocks.
+        response.content_blocks.retain(|block| {
+            !matches!(
+                block,
+                ContentBlock::ToolUse { tool_call_id } if tool_call_id == &id
+            )
+        });
+        response.content_blocks.push(ContentBlock::ToolUse {
+            tool_call_id: id.clone(),
+        });
+        return Some(id);
+    }
+
     let id = "grok-plan".to_string();
     response.tool_calls.push(ToolCall {
         id: id.clone(),
         name: GROK_SYNTHETIC_PLAN_TOOL_NAME.to_string(),
         input: serde_json::json!({
             "source": "grok",
-            "plan": response.content,
+            "plan": plan_body,
         }),
         output: None,
         parent_tool_use_id: None,
     });
-    response
-        .content_blocks
-        .push(ContentBlock::ToolUse { tool_call_id: id });
-    true
+    response.content_blocks.push(ContentBlock::ToolUse {
+        tool_call_id: id.clone(),
+    });
+    Some(id)
 }
 
 /// Render the resolved Grok CLI invocation as a copy-pasteable shell command for debug logs.
@@ -1350,7 +1409,7 @@ fn format_grok_command(cli_path: &Path, args: &[String]) -> String {
             redact_next = false;
             continue;
         }
-        if arg == "-p" || arg == "--prompt" {
+        if arg == "-p" || arg == "--prompt" || arg == "--prompt-file" {
             redact_next = true;
         }
         parts.push(quote(arg));
@@ -1656,6 +1715,161 @@ fn grok_line_is_completion_result(line: &str) -> bool {
         .is_some_and(|event_type| event_type == "result" || event_type == "complete")
 }
 
+/// True when a host JSONL line is a terminal `type: "error"` marker.
+fn grok_line_is_error_marker(line: &str) -> bool {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .is_some_and(|event_type| event_type == "error")
+}
+
+/// Extract a human-readable message from a Grok/ACP error payload.
+///
+/// Handles:
+/// - string: `"message"`
+/// - JSON-RPC object: `{"code":…,"message":"…","data":…}`
+/// - nested: `{"error":{"message":"…"}}`
+pub(crate) fn extract_grok_error_message(error: &Value) -> String {
+    if let Some(s) = error.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    // Nested `error` wrapper (host may re-nest JSON-RPC payloads).
+    if let Some(inner) = error.get("error") {
+        if inner.as_object().is_some() || inner.as_str().is_some() {
+            let nested = extract_grok_error_message(inner);
+            if !nested.is_empty() && nested != "null" {
+                return nested;
+            }
+        }
+    }
+
+    if let Some(message) = error.get("message").and_then(Value::as_str) {
+        let message = message.trim();
+        if message.is_empty() {
+            // fall through
+        } else {
+            let message = if let Some(data) = error.get("data") {
+                let data_str = if let Some(s) = data.as_str() {
+                    s.trim().to_string()
+                } else if let Some(s) = data.get("message").and_then(Value::as_str) {
+                    s.trim().to_string()
+                } else if data.is_null() {
+                    String::new()
+                } else {
+                    data.to_string()
+                };
+                if !data_str.is_empty() && data_str != "null" {
+                    format!("{message}: {data_str}")
+                } else {
+                    message.to_string()
+                }
+            } else {
+                message.to_string()
+            };
+            if let Some(code) = error.get("code").and_then(Value::as_i64) {
+                return format!("[{code}] {message}");
+            }
+            return message;
+        }
+    }
+
+    let rendered = error.to_string();
+    if rendered == "null" || rendered.is_empty() {
+        "Unknown Grok error".to_string()
+    } else {
+        rendered
+    }
+}
+
+/// Format a raw Grok error into a user-facing string (rate limit, auth, generic).
+pub(crate) fn format_grok_user_error(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "Grok error: unknown failure".to_string();
+    }
+    if trimmed.starts_with("Grok rate/usage limit reached")
+        || trimmed.starts_with("Grok authentication failed")
+        || trimmed.starts_with("Grok error:")
+    {
+        return trimmed.to_string();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+
+    let is_rate_or_quota = lower.contains("rate limit")
+        || lower.contains("ratelimit")
+        || lower.contains("rate_limit")
+        || lower.contains("too many requests")
+        || lower.contains("resource_exhausted")
+        || lower.contains("resource exhausted")
+        || lower.contains("quota")
+        || lower.contains("usage limit")
+        || lower.contains("limit exceeded")
+        || lower.contains("limit reached")
+        || lower.contains("\"code\":429")
+        || lower.contains("status code 429")
+        || lower.contains(" http 429")
+        || lower.starts_with("[429]")
+        || lower.starts_with("429 ")
+        || lower.contains(" 429 ");
+
+    if is_rate_or_quota {
+        return format!(
+            "Grok rate/usage limit reached. Wait for the limit to reset or check usage in Settings, then try again.\n\nDetails: {trimmed}"
+        );
+    }
+
+    let is_auth = lower.contains("not authenticated")
+        || lower.contains("unauthenticated")
+        || lower.contains("unauthorized")
+        || lower.contains("401 unauthorized")
+        || lower.contains("invalid api key")
+        || lower.contains("invalid_api_key")
+        || lower.contains("xai_api_key")
+        || lower.contains("run `grok login`")
+        || lower.contains("run grok login")
+        || lower.contains("please log in")
+        || lower.contains("please login");
+
+    if is_auth {
+        return format!(
+            "Grok authentication failed. Run `grok login` or set XAI_API_KEY in Settings.\n\nDetails: {trimmed}"
+        );
+    }
+
+    if trimmed.starts_with("Grok ") {
+        trimmed.to_string()
+    } else {
+        format!("Grok error: {trimmed}")
+    }
+}
+
+/// Build the single terminal host marker for a Grok ACP turn.
+///
+/// On success: `{"type":"result",…}`. On JSON-RPC prompt failure: `{"type":"error",…}`.
+/// Never both — writing both caused empty completed runs (#580).
+pub(crate) fn grok_host_terminal_marker(session_id: &str, prompt_error: Option<&Value>) -> Value {
+    match prompt_error {
+        Some(error) => serde_json::json!({
+            "type": "error",
+            "error": error,
+            "session_id": session_id,
+        }),
+        None => serde_json::json!({
+            "type": "result",
+            "session_id": session_id,
+        }),
+    }
+}
+
 #[cfg(unix)]
 pub(crate) fn grok_acp_socket_path(app_data_dir: &Path, session_id: &str, run_id: &str) -> PathBuf {
     fn short_id(value: &str) -> String {
@@ -1754,7 +1968,7 @@ fn spawn_grok_acp_host(
         serde_json::to_string(mcp_servers).unwrap_or_else(|_| "[]".to_string()),
     )
     .map_err(|e| format!("Failed to write Grok MCP servers file: {e}"))?;
-    let exe = std::env::current_exe().map_err(|e| format!("Failed to get Jean executable: {e}"))?;
+    let exe = super::detached::current_executable_for_detached_host()?;
 
     let mut args = vec![
         GROK_ACP_HOST_ARG.to_string(),
@@ -2138,7 +2352,6 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
     )?;
 
     let mut line = String::new();
-    let mut completed = false;
     loop {
         if abort.load(Ordering::SeqCst) {
             break;
@@ -2198,26 +2411,17 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
             }
         }
         if value.get("id").and_then(Value::as_i64) == Some(prompt_request_id) {
-            if let Some(error) = value.get("error") {
-                let err_line = serde_json::json!({
-                    "type": "error",
-                    "error": error,
-                    "session_id": acp_session_id,
-                });
-                host_write_output_line(&output, &err_line.to_string())?;
-            }
-            completed = true;
+            // Write exactly one terminal marker: error OR result (never both).
+            // Writing both made Jean treat failed turns as empty completed runs (#580).
+            let prompt_error = value.get("error");
+            let marker = grok_host_terminal_marker(&acp_session_id, prompt_error);
+            host_write_output_line(&output, &marker.to_string())?;
             break;
         }
     }
 
-    if completed {
-        let result = serde_json::json!({
-            "type": "result",
-            "session_id": acp_session_id,
-        });
-        host_write_output_line(&output, &result.to_string())?;
-    }
+    // Abort/disconnect without a prompt response: no terminal marker (tail
+    // treats process death as cancel). Success/error markers are written above.
 
     stop.store(true, Ordering::SeqCst);
     let _ = UnixStream::connect(&socket_path);
@@ -2345,6 +2549,7 @@ pub fn tail_grok_output(
         content_blocks: Vec::new(),
         cancelled: false,
         usage: None,
+        error: None,
     };
     let started_at = Instant::now();
     let startup_timeout = Duration::from_secs(120);
@@ -2365,6 +2570,29 @@ pub fn tail_grok_output(
             if line.trim().is_empty() {
                 continue;
             }
+
+            // Fatal host error marker (rate limit, auth, JSON-RPC prompt failure).
+            // Fail the turn immediately — do not wait for a trailing result and
+            // never emit chat:done for empty "completed" runs (#580).
+            if grok_line_is_error_marker(&line) {
+                flush_coalesced_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
+                let raw = serde_json::from_str::<Value>(line.trim())
+                    .ok()
+                    .and_then(|value| {
+                        if let Some(sid) = value.get("session_id").and_then(Value::as_str) {
+                            if !sid.is_empty() {
+                                response.session_id = sid.to_string();
+                            }
+                        }
+                        value.get("error").map(extract_grok_error_message)
+                    })
+                    .unwrap_or_else(|| "Grok ACP host failed".to_string());
+                let msg = format_grok_user_error(&raw);
+                response.error = Some(msg.clone());
+                log::warn!("[Grok tail] host error session={session_id}: {msg}");
+                return Err(msg);
+            }
+
             if grok_line_is_completion_result(&line) {
                 completed = true;
             }
@@ -2384,6 +2612,9 @@ pub fn tail_grok_output(
                     }
                     if let Some(usage) = partial.usage {
                         response.usage = Some(usage);
+                    }
+                    if let Some(err) = partial.error {
+                        response.error = Some(err);
                     }
                     // Preserve mid-turn steered prompts in block order. Live UI
                     // already gets `chat:steered` from steer_grok_turn; this keeps
@@ -2485,6 +2716,14 @@ pub fn tail_grok_output(
     flush_coalesced_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
     response.cancelled = cancelled && !completed;
     response.content = response.content.trim().to_string();
+
+    // Legacy logs may still have type:error followed by type:result; prefer error.
+    if let Some(err) = response.error.take() {
+        let msg = format_grok_user_error(&err);
+        log::warn!("[Grok tail] turn ended with error session={session_id}: {msg}");
+        return Err(msg);
+    }
+
     if !response.cancelled {
         // Plan-mode synthetic tool injection happens in execute_grok after tail.
         // Pass authoritative content so the UI can replace any space-glued
@@ -2502,6 +2741,18 @@ pub(crate) fn parse_grok_run_to_message(
     let joined = lines.join("\n");
     let mut response = parse_grok_stream_inner(BufReader::new(joined.as_bytes()), None)?;
     response.content = response.content.trim().to_string();
+    // Surface host-recorded failures (rate limit / auth / JSON-RPC) so history
+    // does not collapse into the empty "content was not captured" placeholder.
+    if let Some(err) = response.error.as_deref() {
+        let formatted = format_grok_user_error(err);
+        let error_text = if response.content.is_empty() {
+            formatted
+        } else {
+            format!("\n\n{formatted}")
+        };
+        push_text_block(&mut response.content_blocks, &error_text);
+        response.content.push_str(&error_text);
+    }
     Ok(ChatMessage {
         id: run
             .assistant_message_id
@@ -3472,6 +3723,7 @@ fn send_grok_acp_prompt(
         content_blocks: Vec::new(),
         cancelled: false,
         usage: None,
+        error: None,
     };
     let mut chunk_coalescer = ChunkCoalescer::new();
     let mut line = String::new();
@@ -3598,7 +3850,8 @@ fn send_grok_acp_prompt(
         if value.get("id").and_then(Value::as_i64) == Some(prompt_request_id) {
             if let Some(error) = value.get("error") {
                 flush_coalesced_chunks(app, jean_session_id, worktree_id, &mut chunk_coalescer);
-                return Err(format!("Grok ACP prompt failed: {error}"));
+                let raw = extract_grok_error_message(error);
+                return Err(format_grok_user_error(&raw));
             }
             if response.usage.is_none() {
                 response.usage =
@@ -3732,6 +3985,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                 content_blocks: vec![],
                 cancelled: true,
                 usage: None,
+                error: None,
             });
         }
 
@@ -3779,8 +4033,30 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
             response.session_id = existing_grok_session_id.unwrap_or_default().to_string();
         }
 
-        let waiting_for_plan =
-            execution_mode == Some("plan") && inject_synthetic_plan(&mut response);
+        let plan_tool_id = if execution_mode == Some("plan") {
+            inject_synthetic_plan(&mut response)
+        } else {
+            None
+        };
+        let waiting_for_plan = plan_tool_id.is_some();
+        // Emit the plan tool live so the streaming timeline always has a plan
+        // tool call (with full details) — not only after message persistence.
+        if !response.cancelled {
+            if let Some(plan_id) = plan_tool_id.as_deref() {
+                if let Some(tool) = response.tool_calls.iter().find(|tc| tc.id == plan_id) {
+                    emit_tool_use(
+                        app,
+                        jean_session_id,
+                        worktree_id,
+                        &ParsedToolCall {
+                            id: tool.id.clone(),
+                            name: tool.name.clone(),
+                            input: tool.input.clone(),
+                        },
+                    );
+                }
+            }
+        }
         // tail_grok_output already emitted chat:done when not cancelled; re-emit
         // only when plan-mode waiting state differs from the generic done event.
         if !response.cancelled && waiting_for_plan {
@@ -3832,6 +4108,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                 content_blocks: vec![],
                 cancelled: true,
                 usage: None,
+                error: None,
             });
         }
 
@@ -3864,17 +4141,19 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                         content_blocks: vec![],
                         cancelled: true,
                         usage: None,
+                        error: None,
                     });
                 }
+                let user_error = format_grok_user_error(&error);
                 let _ = app.emit_all(
                     "chat:error",
                     &ErrorEvent {
                         session_id: jean_session_id.to_string(),
                         worktree_id: worktree_id.to_string(),
-                        error: error.clone(),
+                        error: user_error.clone(),
                     },
                 );
-                return Err(error);
+                return Err(user_error);
             }
         };
 
@@ -3901,9 +4180,27 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
             log::warn!("[Grok ACP] stderr: {}", strip_ansi(&stderr).trim());
         }
 
-        let waiting_for_plan =
-            execution_mode == Some("plan") && inject_synthetic_plan(&mut response);
+        let plan_tool_id = if execution_mode == Some("plan") {
+            inject_synthetic_plan(&mut response)
+        } else {
+            None
+        };
+        let waiting_for_plan = plan_tool_id.is_some();
         if !response.cancelled {
+            if let Some(plan_id) = plan_tool_id.as_deref() {
+                if let Some(tool) = response.tool_calls.iter().find(|tc| tc.id == plan_id) {
+                    emit_tool_use(
+                        app,
+                        jean_session_id,
+                        worktree_id,
+                        &ParsedToolCall {
+                            id: tool.id.clone(),
+                            name: tool.name.clone(),
+                            input: tool.input.clone(),
+                        },
+                    );
+                }
+            }
             response.content = response.content.trim().to_string();
             let final_content = (!response.content.is_empty()).then_some(response.content.as_str());
             emit_done(
@@ -3944,57 +4241,17 @@ fn is_grok_cli_json_wrapper(value: &Value) -> bool {
         || (value.get("text").is_some() && value.get("usage").is_some())
 }
 
-fn extract_json_object(text: &str) -> Result<String, String> {
+/// Scan free-form text for the first parseable JSON object.
+fn scan_json_object(text: &str) -> Result<String, String> {
     let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("No JSON object found in Grok response".to_string());
+    }
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        // Avoid treating the CLI envelope as payload when nested extractors call us.
         if is_grok_cli_json_wrapper(&value) {
-            // Native --json-schema path: preferred structured payload.
-            match value.get("structuredOutput") {
-                Some(Value::Object(_)) | Some(Value::Array(_)) => {
-                    return serde_json::to_string(value.get("structuredOutput").unwrap())
-                        .map_err(|e| format!("Failed to serialize Grok structuredOutput: {e}"));
-                }
-                Some(Value::String(inner)) if !inner.trim().is_empty() => {
-                    return extract_json_object(inner);
-                }
-                Some(Value::Null) | None => {}
-                Some(other) => {
-                    return Err(format!(
-                        "Unexpected structuredOutput type in Grok response: {other}"
-                    ));
-                }
-            }
-
-            // Fall back to the assistant text field (prompt-only JSON mode).
-            if let Some(inner) = value.get("text").and_then(Value::as_str) {
-                match extract_json_object(inner) {
-                    Ok(json) => return Ok(json),
-                    Err(text_err) => {
-                        if let Some(err) = value
-                            .get("structuredOutputError")
-                            .and_then(Value::as_str)
-                            .filter(|s| !s.trim().is_empty())
-                        {
-                            return Err(format!(
-                                "Grok structured output failed: {err} (text also unusable: {text_err})"
-                            ));
-                        }
-                        return Err(text_err);
-                    }
-                }
-            }
-
-            if let Some(err) = value
-                .get("structuredOutputError")
-                .and_then(Value::as_str)
-                .filter(|s| !s.trim().is_empty())
-            {
-                return Err(format!("Grok structured output failed: {err}"));
-            }
-
             return Err("No JSON object found in Grok response".to_string());
         }
-        // Already a bare JSON object/array/value — return as-is.
         return Ok(trimmed.to_string());
     }
     let start = trimmed
@@ -4009,15 +4266,154 @@ fn extract_json_object(text: &str) -> Result<String, String> {
     Ok(candidate.to_string())
 }
 
+fn extract_json_object(text: &str) -> Result<String, String> {
+    let trimmed = text.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        if is_grok_cli_json_wrapper(&value) {
+            // Native --json-schema path: preferred structured payload.
+            match value.get("structuredOutput") {
+                Some(Value::Object(_)) | Some(Value::Array(_)) => {
+                    return serde_json::to_string(value.get("structuredOutput").unwrap())
+                        .map_err(|e| format!("Failed to serialize Grok structuredOutput: {e}"));
+                }
+                Some(Value::String(inner)) if !inner.trim().is_empty() => {
+                    return scan_json_object(inner);
+                }
+                Some(Value::Null) | None => {}
+                Some(other) => {
+                    return Err(format!(
+                        "Unexpected structuredOutput type in Grok response: {other}"
+                    ));
+                }
+            }
+
+            // Fall back to assistant text, then thought (models sometimes only
+            // draft JSON there when structured output is cancelled mid-turn).
+            let mut last_err = "No JSON object found in Grok response".to_string();
+            for key in ["text", "thought"] {
+                if let Some(inner) = value.get(key).and_then(Value::as_str) {
+                    match scan_json_object(inner) {
+                        Ok(json) => return Ok(json),
+                        Err(err) => last_err = err,
+                    }
+                }
+            }
+
+            if let Some(err) = value
+                .get("structuredOutputError")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+            {
+                return Err(format!("Grok structured output failed: {err} ({last_err})"));
+            }
+
+            return Err(last_err);
+        }
+        // Already a bare JSON object/array/value — return as-is.
+        return Ok(trimmed.to_string());
+    }
+    scan_json_object(trimmed)
+}
+
 fn build_one_shot_json_prompt(prompt: &str, json_schema: Option<&str>) -> String {
     match json_schema {
         // Schema is passed via --json-schema; only remind the model to answer as JSON.
         Some(_) => format!(
-            "{prompt}\n\nReturn only a single valid JSON object matching the provided JSON schema. Do not wrap it in markdown or add commentary."
+            "{prompt}\n\nReturn only a single valid JSON object matching the provided JSON schema. Do not wrap it in markdown or add commentary. Do not invoke skills, subagents, or tools — the full input is already in this message."
         ),
         None => {
             format!("{prompt}\n\nReturn only a single valid JSON object. Do not wrap it in markdown.")
         }
+    }
+}
+
+/// Rules injected for structured one-shot calls so Grok does not detour into
+/// interactive review skills / MCP / tool exploration (which frequently cancels
+/// constrained decoding and yields empty or missing findings).
+const ONE_SHOT_STRUCTURED_RULES: &str = "\
+Complete structured JSON output in a single turn without tools, skills, subagents, or MCP. \
+Review/answer only from content already in the user message. \
+When the task is a code review, report clear security, correctness, race, data-loss, and contract bugs with high confidence — do not approve with empty findings when the provided diff introduces obvious defects. \
+Prefer no finding only when no actionable defect is present.";
+
+/// Build argv for a headless Grok one-shot. The prompt is always referenced via
+/// `--prompt-file` (never inline `-p`) so large magic-prompt inputs (PR diffs up
+/// to ~200KB plus commits/context) do not exceed OS ARG_MAX (E2BIG / os error 7).
+fn build_one_shot_grok_cli_args(
+    prompt_file: &str,
+    cwd: &str,
+    model: &str,
+    json_schema: Option<&str>,
+    effort_level: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "--no-auto-update".to_string(),
+        "--no-memory".to_string(),
+        "--no-subagents".to_string(),
+        "--disable-web-search".to_string(),
+        "--prompt-file".to_string(),
+        prompt_file.to_string(),
+        "--cwd".to_string(),
+        cwd.to_string(),
+        "--permission-mode".to_string(),
+        "dontAsk".to_string(),
+        "--sandbox".to_string(),
+        "read-only".to_string(),
+        "--model".to_string(),
+        raw_grok_model(Some(model)).unwrap_or(model).to_string(),
+    ];
+    // Prefer native constrained decoding when a schema is available. Implies
+    // --output-format json and populates structuredOutput on success.
+    //
+    // Structured one-shots must not use tools/MCP: Grok's auto skill discovery
+    // (review / caveman-review) plus MCP frequently cancels constrained decoding
+    // and returns empty findings even when the model drafted real issues.
+    if let Some(schema) = json_schema {
+        args.extend([
+            "--json-schema".to_string(),
+            schema.to_string(),
+            // Empty allowlist removes built-in tools for this headless run.
+            "--tools".to_string(),
+            String::new(),
+            "--deny".to_string(),
+            "MCPTool(*)".to_string(),
+            "--rules".to_string(),
+            ONE_SHOT_STRUCTURED_RULES.to_string(),
+            // One-shot magic prompts should finish quickly once tools are gone.
+            "--max-turns".to_string(),
+            "2".to_string(),
+        ]);
+    } else {
+        args.extend(["--output-format".to_string(), "json".to_string()]);
+    }
+    if let Some(effort) = effort_level.filter(|effort| !effort.is_empty()) {
+        args.extend(["--effort".to_string(), effort.to_string()]);
+    }
+    args
+}
+
+fn write_one_shot_prompt_file(prompt: &str) -> Result<std::path::PathBuf, String> {
+    let prompt_file = std::env::temp_dir().join(format!(
+        "jean-grok-one-shot-prompt-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::write(&prompt_file, prompt)
+        .map_err(|e| format!("Failed to write Grok one-shot prompt file: {e}"))?;
+    Ok(prompt_file)
+}
+
+/// Resolve a host-local path for the Grok CLI child. On Windows+WSL the CLI runs
+/// inside the distro, so temp paths must be converted to Unix form.
+fn resolve_cli_path_arg(path: &Path) -> String {
+    let wsl = crate::platform::get_wsl_config();
+    if cfg!(windows) && wsl.enabled {
+        crate::platform::win_to_wsl_path(&path.to_string_lossy())
+    } else {
+        path.to_string_lossy().into_owned()
     }
 }
 
@@ -4036,44 +4432,61 @@ pub fn execute_one_shot_grok(
     let dir = working_dir.unwrap_or_else(|| Path::new("."));
     let model = resolve_one_shot_grok_model(model);
     let json_prompt = build_one_shot_json_prompt(prompt, json_schema);
-    let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
-    cmd.args([
-        "--no-auto-update",
-        "-p",
-        &json_prompt,
-        "--cwd",
+    let prompt_file = write_one_shot_prompt_file(&json_prompt)?;
+    let prompt_file_arg = resolve_cli_path_arg(&prompt_file);
+
+    let args = build_one_shot_grok_cli_args(
+        &prompt_file_arg,
         &dir.to_string_lossy(),
-        "--permission-mode",
-        "dontAsk",
-        "--sandbox",
-        "read-only",
-        "--disable-web-search",
-        "--no-subagents",
-        "--model",
-        raw_grok_model(Some(model)).unwrap_or(model),
-    ]);
-    // Prefer native constrained decoding when a schema is available. Implies
-    // --output-format json and populates structuredOutput on success.
-    if let Some(schema) = json_schema {
-        cmd.args(["--json-schema", schema]);
-    } else {
-        cmd.args(["--output-format", "json"]);
-    }
-    if let Some(effort) = effort_level.filter(|effort| !effort.is_empty()) {
-        cmd.args(["--effort", effort]);
-    }
+        model,
+        json_schema,
+        effort_level,
+    );
+
+    let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
+    cmd.args(&args);
     cmd.current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run Grok one-shot request: {e}"))?;
+    log::info!(
+        "[Grok one-shot] command: {}",
+        format_grok_command(&cli_path, &args)
+    );
+    log::debug!(
+        "[Grok one-shot] prompt_file={} prompt_bytes={}",
+        prompt_file.display(),
+        json_prompt.len()
+    );
+
+    let output = cmd.output().map_err(|e| {
+        let _ = std::fs::remove_file(&prompt_file);
+        format!("Failed to run Grok one-shot request: {e}")
+    })?;
+    let _ = std::fs::remove_file(&prompt_file);
+
     if !output.status.success() {
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
         return Err(format!("Grok one-shot request failed: {}", stderr.trim()));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Ok(wrapper) = serde_json::from_str::<Value>(stdout.trim()) {
+        if is_grok_cli_json_wrapper(&wrapper) {
+            let stop = wrapper
+                .get("stopReason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let has_structured = matches!(
+                wrapper.get("structuredOutput"),
+                Some(Value::Object(_)) | Some(Value::Array(_)) | Some(Value::String(_))
+            );
+            if stop.eq_ignore_ascii_case("cancelled") && !has_structured {
+                log::warn!(
+                    "Grok one-shot cancelled without structuredOutput; attempting recovery from text/thought"
+                );
+            }
+        }
+    }
     extract_json_object(&stdout)
 }
 
@@ -4092,6 +4505,7 @@ mod tests {
         // Schema is passed via --json-schema; do not bloat the prompt with a copy.
         assert!(!prompt.contains(schema));
         assert!(prompt.contains("matching the provided JSON schema"));
+        assert!(prompt.contains("Do not invoke skills"));
     }
 
     #[test]
@@ -4099,6 +4513,66 @@ mod tests {
         let prompt = build_one_shot_json_prompt("Name this session", None);
         assert!(prompt.contains("Name this session"));
         assert!(prompt.contains("Return only a single valid JSON object"));
+    }
+
+    #[test]
+    fn one_shot_cli_args_use_prompt_file_not_inline_prompt() {
+        // ARG_MAX / E2BIG: never put large PR diffs on argv via `-p`.
+        let args = build_one_shot_grok_cli_args(
+            "/tmp/jean-prompt.txt",
+            "/repo",
+            "grok-build",
+            Some(r#"{"type":"object"}"#),
+            Some("high"),
+        );
+
+        assert!(args.contains(&"--prompt-file".to_string()));
+        let prompt_file_idx = args.iter().position(|a| a == "--prompt-file").unwrap();
+        assert_eq!(args[prompt_file_idx + 1], "/tmp/jean-prompt.txt");
+        assert!(!args
+            .iter()
+            .any(|a| a == "-p" || a == "--prompt" || a == "--single"));
+        // Prompt body must not appear as an argv entry.
+        assert!(!args
+            .iter()
+            .any(|a| a.contains("diff --git") || a.len() > 10_000));
+        assert!(args.contains(&"--json-schema".to_string()));
+        assert!(args.contains(&"--effort".to_string()));
+        assert!(args.contains(&"high".to_string()));
+        assert!(args.contains(&"--max-turns".to_string()));
+    }
+
+    #[test]
+    fn one_shot_cli_args_without_schema_use_json_output() {
+        let args = build_one_shot_grok_cli_args("/tmp/p.txt", ".", "grok-build", None, None);
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert!(!args.iter().any(|a| a == "--json-schema"));
+    }
+
+    #[test]
+    fn write_one_shot_prompt_file_round_trips_large_content() {
+        // Simulate a PR-sized payload that would blow ARG_MAX if inlined as `-p`.
+        let large = "x".repeat(250_000);
+        let path = write_one_shot_prompt_file(&large).expect("write prompt file");
+        let read = std::fs::read_to_string(&path).expect("read prompt file");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(read.len(), 250_000);
+        assert_eq!(read, large);
+    }
+
+    #[test]
+    fn format_grok_command_redacts_prompt_file_path() {
+        let args = vec![
+            "--prompt-file".to_string(),
+            "/tmp/secret-prompt.txt".to_string(),
+            "--model".to_string(),
+            "grok-build".to_string(),
+        ];
+        let rendered = format_grok_command(Path::new("grok"), &args);
+        assert!(rendered.contains("--prompt-file"));
+        assert!(rendered.contains("<REDACTED_PROMPT>"));
+        assert!(!rendered.contains("secret-prompt"));
     }
 
     #[test]
@@ -4353,8 +4827,9 @@ mod tests {
             content_blocks: vec![],
             cancelled: false,
             usage: None,
+            error: None,
         };
-        assert!(!inject_synthetic_plan(&mut response));
+        assert!(inject_synthetic_plan(&mut response).is_none());
         assert!(response.tool_calls.is_empty());
     }
 
@@ -4382,10 +4857,78 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             content_blocks: vec![],
             cancelled: false,
             usage: None,
+            error: None,
         };
-        assert!(inject_synthetic_plan(&mut response));
+        let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
+        assert_eq!(plan_id, "grok-plan");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(
+            response.tool_calls[0]
+                .input
+                .get("plan")
+                .and_then(|v| v.as_str()),
+            Some(plan)
+        );
+    }
+
+    #[test]
+    fn inject_synthetic_plan_enriches_thin_existing_plan_tool() {
+        let plan = r#"# Full Plan
+
+## Overview
+Ship the feature end-to-end with tests and clear handoff notes for YOLO.
+
+## Tasks
+1. Inspect existing server ports and free anything still bound to :8000
+2. Start instance a on :8001 with a clean multi-instance config
+3. Start instance b on :8002 with a clean multi-instance config
+4. Verify transfer between instances stays healthy under load
+
+### Testing
+- [ ] Smoke both instances
+- [ ] Run transfer integration test
+"#;
+        let mut response = GrokResponse {
+            content: plan.to_string(),
+            session_id: "s1".into(),
+            tool_calls: vec![ToolCall {
+                id: "existing-plan".into(),
+                name: "ExitPlanMode".into(),
+                input: serde_json::json!({ "source": "grok", "plan": "thin" }),
+                output: None,
+                parent_tool_use_id: None,
+            }],
+            content_blocks: vec![
+                ContentBlock::Text {
+                    text: "research done".into(),
+                },
+                ContentBlock::ToolUse {
+                    tool_call_id: "existing-plan".into(),
+                },
+                ContentBlock::Text {
+                    text: plan.to_string(),
+                },
+            ],
+            cancelled: false,
+            usage: None,
+            error: None,
+        };
+        let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
+        assert_eq!(plan_id, "existing-plan");
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(
+            response.tool_calls[0]
+                .input
+                .get("plan")
+                .and_then(|v| v.as_str()),
+            Some(plan)
+        );
+        // Plan tool_use is last so mid-turn text stays between research tools and plan.
+        assert!(matches!(
+            response.content_blocks.last(),
+            Some(ContentBlock::ToolUse { tool_call_id }) if tool_call_id == "existing-plan"
+        ));
     }
 
     #[test]
@@ -4402,6 +4945,168 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
         assert_eq!(response.content, "Hello from Grok");
         assert_eq!(response.session_id, "grok-session-1");
         assert_eq!(response.usage.unwrap().output_tokens, 4);
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn parse_grok_stream_captures_host_error_marker() {
+        // Host writes type:error when session/prompt returns a JSON-RPC error (#580).
+        let input = r#"
+{"type":"session","session_id":"grok-err-1"}
+{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded","data":"retry after 60s"},"session_id":"grok-err-1"}
+"#;
+        let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
+        assert!(response.content.is_empty());
+        assert_eq!(response.session_id, "grok-err-1");
+        let err = response.error.expect("error captured");
+        assert!(err.to_ascii_lowercase().contains("rate limit"));
+        assert!(err.contains("retry after 60s"));
+    }
+
+    #[test]
+    fn parse_grok_stream_error_survives_legacy_trailing_result() {
+        // Old hosts wrote type:error then type:result — error must still win.
+        let input = r#"
+{"type":"error","error":"usage limit reached for this period","session_id":"s-legacy"}
+{"type":"result","session_id":"s-legacy"}
+"#;
+        let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
+        assert_eq!(
+            response.error.as_deref(),
+            Some("usage limit reached for this period")
+        );
+        assert!(response.content.is_empty());
+    }
+
+    #[test]
+    fn extract_and_format_grok_rate_limit_errors() {
+        let rpc = serde_json::json!({
+            "code": -32000,
+            "message": "Rate limit exceeded",
+            "data": {"message": "Too many requests"}
+        });
+        let raw = extract_grok_error_message(&rpc);
+        assert!(raw.contains("Rate limit exceeded"));
+        assert!(raw.contains("Too many requests"));
+
+        let formatted = format_grok_user_error(&raw);
+        assert!(
+            formatted.contains("rate/usage limit"),
+            "expected friendly rate-limit copy, got: {formatted}"
+        );
+        assert!(formatted.contains("Rate limit exceeded"));
+    }
+
+    #[test]
+    fn extract_and_format_grok_rate_limit_from_json_rpc_code() {
+        let rpc = serde_json::json!({
+            "code": 429,
+            "message": "Please slow down"
+        });
+        let raw = extract_grok_error_message(&rpc);
+        assert!(raw.contains("429"));
+
+        let formatted = format_grok_user_error(&raw);
+        assert!(
+            formatted.contains("rate/usage limit"),
+            "expected friendly rate-limit copy, got: {formatted}"
+        );
+    }
+
+    #[test]
+    fn format_grok_user_error_auth_guidance() {
+        let formatted = format_grok_user_error("Run `grok login` first, or set XAI_API_KEY.");
+        assert!(formatted.contains("authentication failed"));
+        assert!(formatted.contains("grok login"));
+    }
+
+    #[test]
+    fn format_grok_user_error_is_idempotent() {
+        for raw in [
+            "Rate limit exceeded",
+            "Run `grok login` first",
+            "Unexpected Grok failure",
+        ] {
+            let formatted = format_grok_user_error(raw);
+            assert_eq!(format_grok_user_error(&formatted), formatted);
+        }
+    }
+
+    #[test]
+    fn grok_host_terminal_marker_is_error_or_result_not_both() {
+        let ok = grok_host_terminal_marker("sess-1", None);
+        assert_eq!(ok.get("type").and_then(Value::as_str), Some("result"));
+        assert!(ok.get("error").is_none());
+        assert_eq!(ok.get("session_id").and_then(Value::as_str), Some("sess-1"));
+
+        let err_payload = serde_json::json!({"code": 429, "message": "rate limit"});
+        let err = grok_host_terminal_marker("sess-2", Some(&err_payload));
+        assert_eq!(err.get("type").and_then(Value::as_str), Some("error"));
+        assert_eq!(err.get("error"), Some(&err_payload));
+        assert_eq!(
+            err.get("session_id").and_then(Value::as_str),
+            Some("sess-2")
+        );
+    }
+
+    #[test]
+    fn grok_line_classifiers_distinguish_error_and_result() {
+        assert!(grok_line_is_error_marker(
+            r#"{"type":"error","error":"nope","session_id":"s"}"#
+        ));
+        assert!(!grok_line_is_error_marker(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(grok_line_is_completion_result(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(!grok_line_is_completion_result(
+            r#"{"type":"error","error":"nope","session_id":"s"}"#
+        ));
+    }
+
+    #[test]
+    fn parse_grok_run_to_message_surfaces_rate_limit_error() {
+        let lines = vec![
+            r#"{"type":"session","session_id":"grok-hist-err"}"#.to_string(),
+            r#"{"type":"assistant","delta":"Partial reply before failure."}"#.to_string(),
+            r#"{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded"},"session_id":"grok-hist-err"}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-err".to_string(),
+            user_message_id: "u-err".to_string(),
+            user_message: "hello grok".to_string(),
+            model: Some("grok-4.5".to_string()),
+            execution_mode: Some("plan".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: Some(super::super::types::Backend::Grok),
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: super::super::types::RunStatus::Completed,
+            assistant_message_id: Some("a-err".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: Some("grok-hist-err".to_string()),
+            kimi_session_id: None,
+            checkpoint_id: None,
+        };
+        let message = parse_grok_run_to_message(&lines, &run).unwrap();
+        assert!(message.content.contains("Partial reply before failure."));
+        assert!(
+            message.content.contains("rate/usage limit")
+                || message.content.to_ascii_lowercase().contains("rate limit"),
+            "expected rate-limit message, got: {}",
+            message.content
+        );
+        assert!(!message.content.contains("not captured"));
     }
 
     #[test]
@@ -4487,7 +5192,13 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             value.get("summary").and_then(Value::as_str),
             Some("Looks good")
         );
-        assert_eq!(value.get("findings").and_then(Value::as_array).map(|a| a.len()), Some(0));
+        assert_eq!(
+            value
+                .get("findings")
+                .and_then(Value::as_array)
+                .map(|a| a.len()),
+            Some(0)
+        );
     }
 
     #[test]
@@ -4504,6 +5215,32 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
         assert!(
             err.contains("model did not produce structured output"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn extract_json_object_recovers_json_from_thought_when_structured_output_missing() {
+        let stdout = r#"{
+  "text": "",
+  "thought": "Drafting review.\n{\"summary\":\"Bug found\",\"findings\":[{\"severity\":\"critical\",\"category\":\"security\",\"confidence\":\"high\",\"blocking\":true,\"introduced_by_diff\":true,\"file\":\"a.rs\",\"line\":1,\"title\":\"auth bypass\",\"description\":\"always true\",\"failure_scenario\":\"any login\",\"suggestion\":\"check password\"}],\"approval_status\":\"changes_requested\"}",
+  "stopReason": "Cancelled",
+  "sessionId": "grok-session-1",
+  "structuredOutput": null,
+  "structuredOutputError": "model did not produce structured output"
+}"#;
+
+        let json = extract_json_object(stdout).unwrap();
+        let value: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value.get("approval_status").and_then(Value::as_str),
+            Some("changes_requested")
+        );
+        assert_eq!(
+            value
+                .get("findings")
+                .and_then(Value::as_array)
+                .map(|a| a.len()),
+            Some(1)
         );
     }
 
@@ -5094,6 +5831,7 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-1".to_string()),
             kimi_session_id: None,
+            checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
         assert_eq!(message.content, "Survived restart");
@@ -5170,6 +5908,7 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
         assert_eq!(message.content, "BeforeAfter");

@@ -41,6 +41,9 @@ vi.mock('./components/layout/MainWindow', () => ({
 }))
 
 vi.mock('./hooks/use-zoom', () => ({ useZoom: vi.fn() }))
+vi.mock('./hooks/use-external-display-zoom-tip', () => ({
+  useExternalDisplayZoomTip: vi.fn(),
+}))
 
 describe('App remote UI', () => {
   it('keeps the bundled local React UI for an active native remote', async () => {

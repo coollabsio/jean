@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import type { CliType } from '@/lib/cli-update'
+import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
 
 export type PreferencePane =
   | 'general'
@@ -84,6 +85,12 @@ export type CliLoginModalType =
 interface UIState {
   leftSidebarVisible: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
+  /** File browser (worktree explorer) visibility */
+  fileBrowserVisible: boolean
+  /** File browser width in pixels, persisted across sessions */
+  fileBrowserSize: number
+  /** Absolute path of file open in the global FileContentModal (null = closed) */
+  viewingFilePath: string | null
   rightSidebarVisible: boolean
   commandPaletteOpen: boolean
   preferencesOpen: boolean
@@ -120,6 +127,11 @@ interface UIState {
   aiPipelineModalOpen: boolean
   aiPipelineModalProjectId: string | null
   // --- /perso/ai-pipeline ---
+  /**
+   * GitHub Actions run database IDs already viewed by the user.
+   * Failed-workflow badges only count IDs not in this list.
+   */
+  seenFailedWorkflowRunIds: number[]
   cliUpdateModalOpen: boolean
   cliUpdateModalType: CliUpdateModalType
   cliLoginModalOpen: boolean
@@ -150,6 +162,9 @@ interface UIState {
   /** Whether the chat toolbar is mounted — used to hide the global FloatingDock
    *  because its burger-menu counterpart now lives in the chat toolbar. */
   chatToolbarMounted: boolean
+  /** Whether the full-width review results surface is mounted — used to hide the
+   *  global FloatingDock so it does not overlap the review Send buttons. */
+  reviewSurfaceMounted: boolean
   /** Which worktree the session chat modal is for (for magic command worktree resolution) */
   sessionChatModalWorktreeId: string | null
   /** Per-session primary surface shown inside the chat bounds */
@@ -177,6 +192,13 @@ interface UIState {
   /** When non-null, shows the update available modal */
   updateModalVersion: string | null
   /**
+   * App update package installed but not applied yet — title bar shows Restart.
+   * Prevents re-download loops while the old binary is still running (#507).
+   */
+  updateReadyVersion: string | null
+  /** True while downloadAndInstall is in progress */
+  isUpdateInstalling: boolean
+  /**
    * Pending jean-server update (remote / Web Access) — sticky title-bar
    * indicator so dismissing the toast does not lose the offer.
    */
@@ -186,6 +208,10 @@ interface UIState {
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
   setLeftSidebarSize: (size: number) => void
+  toggleFileBrowser: () => void
+  setFileBrowserVisible: (visible: boolean) => void
+  setFileBrowserSize: (size: number) => void
+  setViewingFilePath: (path: string | null) => void
   toggleRightSidebar: () => void
   setRightSidebarVisible: (visible: boolean) => void
   toggleCommandPalette: () => void
@@ -230,6 +256,8 @@ interface UIState {
   // --- perso/ai-pipeline ---
   setAiPipelineModalOpen: (open: boolean, projectId?: string | null) => void
   // --- /perso/ai-pipeline ---
+  markFailedWorkflowRunsSeen: (runIds: number[]) => void
+  setSeenFailedWorkflowRunIds: (runIds: number[]) => void
   openCliUpdateModal: (type: Exclude<CliUpdateModalType, null>) => void
   closeCliUpdateModal: () => void
   openCliLoginModal: (
@@ -271,6 +299,7 @@ interface UIState {
   openNewSessionModeModal: (target: NewSessionModeTarget) => void
   closeNewSessionModeModal: () => void
   setChatToolbarMounted: (mounted: boolean) => void
+  setReviewSurfaceMounted: (mounted: boolean) => void
   setGitDiffModalOpen: (open: boolean) => void
   toggleGitDiffSelectedFile: (filePath: string) => void
   clearGitDiffSelectedFiles: () => void
@@ -281,6 +310,8 @@ interface UIState {
   setUIStateInitialized: (initialized: boolean) => void
   setPendingUpdateVersion: (version: string | null) => void
   setUpdateModalVersion: (version: string | null) => void
+  setUpdateReadyVersion: (version: string | null) => void
+  setIsUpdateInstalling: (installing: boolean) => void
   setPendingServerUpdate: (update: PendingServerUpdate | null) => void
   setAvailableCliUpdates: (updates: PendingCliUpdate[]) => void
   dismissCliUpdateNotice: (type: PendingCliUpdate['type']) => void
@@ -306,6 +337,9 @@ export const useUIStore = create<UIState>()(
     (set, get) => ({
       leftSidebarVisible: false,
       leftSidebarSize: 250, // Default width in pixels
+      fileBrowserVisible: false,
+      fileBrowserSize: 280,
+      viewingFilePath: null,
       rightSidebarVisible: false,
       commandPaletteOpen: false,
       preferencesOpen: false,
@@ -332,6 +366,7 @@ export const useUIStore = create<UIState>()(
       workflowRunsModalBranch: null,
       aiPipelineModalOpen: false,
       aiPipelineModalProjectId: null,
+      seenFailedWorkflowRunIds: [],
       cliUpdateModalOpen: false,
       cliUpdateModalType: null,
       cliLoginModalOpen: false,
@@ -354,6 +389,7 @@ export const useUIStore = create<UIState>()(
       sessionTerminalIds: {},
       newSessionModeTarget: null,
       chatToolbarMounted: false,
+      reviewSurfaceMounted: false,
       gitDiffModalOpen: false,
       gitDiffSelectedFiles: new Set<string>(),
       planDialogOpen: false,
@@ -363,6 +399,8 @@ export const useUIStore = create<UIState>()(
       uiStateInitialized: false,
       pendingUpdateVersion: null,
       updateModalVersion: null,
+      updateReadyVersion: null,
+      isUpdateInstalling: false,
       pendingServerUpdate: null,
       availableCliUpdates: [],
       chatSearchOpen: false,
@@ -398,6 +436,39 @@ export const useUIStore = create<UIState>()(
             state.leftSidebarSize === size ? state : { leftSidebarSize: size },
           undefined,
           'setLeftSidebarSize'
+        ),
+
+      toggleFileBrowser: () =>
+        set(
+          state => ({ fileBrowserVisible: !state.fileBrowserVisible }),
+          undefined,
+          'toggleFileBrowser'
+        ),
+
+      setFileBrowserVisible: visible =>
+        set(
+          state =>
+            state.fileBrowserVisible === visible
+              ? state
+              : { fileBrowserVisible: visible },
+          undefined,
+          'setFileBrowserVisible'
+        ),
+
+      setFileBrowserSize: size =>
+        set(
+          state =>
+            state.fileBrowserSize === size ? state : { fileBrowserSize: size },
+          undefined,
+          'setFileBrowserSize'
+        ),
+
+      setViewingFilePath: path =>
+        set(
+          state =>
+            state.viewingFilePath === path ? state : { viewingFilePath: path },
+          undefined,
+          'setViewingFilePath'
         ),
 
       setRightSidebarVisible: visible =>
@@ -618,6 +689,31 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'setAiPipelineModalOpen'
+        ),
+
+      markFailedWorkflowRunsSeen: runIds =>
+        set(
+          state => {
+            if (runIds.length === 0) return state
+            const next = mergeSeenFailedWorkflowRunIds(
+              state.seenFailedWorkflowRunIds,
+              runIds
+            )
+            if (next === state.seenFailedWorkflowRunIds) return state
+            return { seenFailedWorkflowRunIds: next }
+          },
+          undefined,
+          'markFailedWorkflowRunsSeen'
+        ),
+
+      setSeenFailedWorkflowRunIds: runIds =>
+        set(
+          state =>
+            state.seenFailedWorkflowRunIds === runIds
+              ? state
+              : { seenFailedWorkflowRunIds: runIds },
+          undefined,
+          'setSeenFailedWorkflowRunIds'
         ),
 
       openCliUpdateModal: type =>
@@ -1015,6 +1111,13 @@ export const useUIStore = create<UIState>()(
             : { chatToolbarMounted: mounted }
         ),
 
+      setReviewSurfaceMounted: (mounted: boolean) =>
+        set(state =>
+          state.reviewSurfaceMounted === mounted
+            ? state
+            : { reviewSurfaceMounted: mounted }
+        ),
+
       setGitDiffModalOpen: (open: boolean) =>
         set(
           state =>
@@ -1111,6 +1214,26 @@ export const useUIStore = create<UIState>()(
               : { updateModalVersion: version },
           undefined,
           'setUpdateModalVersion'
+        ),
+
+      setUpdateReadyVersion: (version: string | null) =>
+        set(
+          state =>
+            state.updateReadyVersion === version
+              ? state
+              : { updateReadyVersion: version },
+          undefined,
+          'setUpdateReadyVersion'
+        ),
+
+      setIsUpdateInstalling: (installing: boolean) =>
+        set(
+          state =>
+            state.isUpdateInstalling === installing
+              ? state
+              : { isUpdateInstalling: installing },
+          undefined,
+          'setIsUpdateInstalling'
         ),
 
       setPendingServerUpdate: (update: PendingServerUpdate | null) =>

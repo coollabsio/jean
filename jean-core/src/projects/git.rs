@@ -404,6 +404,56 @@ pub fn remove_git_remote(repo_path: &str, remote_name: &str) -> Result<(), Strin
     Ok(())
 }
 
+/// Remotes Jean may auto-remove when a PR is cleared/deleted.
+///
+/// Never treat `origin` (or empty names) as ephemeral — those are permanent
+/// project remotes the user expects to keep.
+pub fn is_ephemeral_pr_remote(remote_name: &str) -> bool {
+    let name = remote_name.trim();
+    !name.is_empty() && name != "origin"
+}
+
+/// Best-effort remove of a Jean-managed PR/fork remote.
+///
+/// No-ops for `origin`, missing remotes, and empty names. Logs failures rather
+/// than propagating them so PR cleanup can still complete.
+pub fn try_remove_ephemeral_remote(repo_path: &str, remote_name: &str) {
+    if !is_ephemeral_pr_remote(remote_name) {
+        return;
+    }
+    if !remote_exists(repo_path, remote_name) {
+        return;
+    }
+    match remove_git_remote(repo_path, remote_name) {
+        Ok(()) => {
+            log::info!("Removed ephemeral PR remote '{remote_name}' from {repo_path}");
+        }
+        Err(e) => {
+            log::warn!("Failed to remove ephemeral PR remote '{remote_name}': {e}");
+        }
+    }
+}
+
+/// Configured remote for a local branch (`branch.<name>.remote`), if any.
+pub fn configured_branch_remote(repo_path: &str, branch: &str) -> Option<String> {
+    if branch.is_empty() {
+        return None;
+    }
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["config", "--get", &format!("branch.{branch}.remote")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let remote = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if remote.is_empty() {
+        None
+    } else {
+        Some(remote)
+    }
+}
+
 /// Get all git remotes for a repository (not filtered to GitHub)
 pub fn get_git_remotes(repo_path: &str) -> Result<Vec<GitRemote>, String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
@@ -2160,12 +2210,12 @@ pub fn has_uncommitted_changes(repo_path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Rebase the current branch onto a base branch from origin
+/// Rebase the current branch onto a base branch from a remote
 ///
 /// This performs:
 /// 1. Commits any uncommitted changes with the provided message
-/// 2. Fetches from origin
-/// 3. Rebases onto origin/{base_branch}
+/// 2. Fetches from the given remote (defaults to origin)
+/// 3. Rebases onto {remote}/{base_branch}
 /// 4. Force pushes with lease
 ///
 /// Returns an error message if any step fails
@@ -2173,8 +2223,11 @@ pub fn rebase_onto_base(
     repo_path: &str,
     base_branch: &str,
     commit_message: Option<&str>,
+    base_remote: Option<&str>,
 ) -> Result<String, String> {
-    log::trace!("Starting rebase onto {base_branch} in {repo_path}");
+    let remote = base_remote.unwrap_or("origin");
+    let qualified_base = format!("{remote}/{base_branch}");
+    log::trace!("Starting rebase onto {qualified_base} in {repo_path}");
 
     // Step 1: Check for uncommitted changes and commit if needed
     if has_uncommitted_changes(repo_path) {
@@ -2207,22 +2260,22 @@ pub fn rebase_onto_base(
         }
     }
 
-    // Step 2: Fetch from origin
-    log::trace!("Fetching from origin...");
+    // Step 2: Fetch from the base remote
+    log::trace!("Fetching from {remote}...");
     let fetch_output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["fetch", "origin", base_branch])
+        .args(["fetch", remote, base_branch])
         .output()
-        .map_err(|e| format!("Failed to fetch from origin: {e}"))?;
+        .map_err(|e| format!("Failed to fetch from {remote}: {e}"))?;
 
     if !fetch_output.status.success() {
         let stderr = String::from_utf8_lossy(&fetch_output.stderr);
-        return Err(format!("Failed to fetch from origin: {stderr}"));
+        return Err(format!("Failed to fetch from {remote}: {stderr}"));
     }
 
-    // Step 3: Rebase onto origin/{base_branch}
-    log::trace!("Rebasing onto origin/{base_branch}...");
+    // Step 3: Rebase onto {remote}/{base_branch}
+    log::trace!("Rebasing onto {qualified_base}...");
     let rebase_output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["rebase", &format!("origin/{base_branch}")])
+        .args(["rebase", &qualified_base])
         .output()
         .map_err(|e| format!("Failed to rebase: {e}"))?;
 
@@ -2758,12 +2811,14 @@ mod tests {
 
     #[test]
     fn strip_non_tty_shell_noise_removes_bash_job_control_messages() {
-        let noisy = "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
+        let noisy =
+            "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
                      bash: no job control in this shell\n\
                      copied .env";
         assert_eq!(strip_non_tty_shell_noise(noisy), "copied .env");
 
-        let only_noise = "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
+        let only_noise =
+            "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
                           bash: no job control in this shell\n";
         assert_eq!(strip_non_tty_shell_noise(only_noise), "");
 
@@ -2888,6 +2943,52 @@ mod tests {
     }
 
     #[test]
+    fn test_is_ephemeral_pr_remote_skips_origin_and_empty() {
+        assert!(!is_ephemeral_pr_remote("origin"));
+        assert!(!is_ephemeral_pr_remote(""));
+        assert!(!is_ephemeral_pr_remote("   "));
+        assert!(is_ephemeral_pr_remote("fork"));
+        assert!(is_ephemeral_pr_remote("some-contributor"));
+    }
+
+    #[test]
+    fn test_try_remove_ephemeral_remote_removes_fork_keeps_origin() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", "https://example.com/origin.git"],
+        );
+
+        try_remove_ephemeral_remote(path, "origin");
+        assert!(remote_exists(path, "origin"));
+
+        try_remove_ephemeral_remote(path, "fork");
+        assert!(!remote_exists(path, "fork"));
+        assert!(remote_exists(path, "origin"));
+
+        // Missing remotes and empty names are no-ops
+        try_remove_ephemeral_remote(path, "already-gone");
+        try_remove_ephemeral_remote(path, "");
+    }
+
+    #[test]
+    fn test_configured_branch_remote_reads_branch_config() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["config", "branch.main.remote", "fork"],
+        );
+        assert_eq!(
+            configured_branch_remote(path, "main").as_deref(),
+            Some("fork")
+        );
+        assert_eq!(configured_branch_remote(path, "missing"), None);
+        assert_eq!(configured_branch_remote(path, ""), None);
+    }
+
+    #[test]
     fn test_remote_tracking_branch_exists() {
         let dir = repo_with_fork_remote();
         let path = dir.path().to_str().unwrap();
@@ -2966,5 +3067,26 @@ mod tests {
             &["update-ref", "refs/remotes/origin/fork/head", "HEAD"],
         );
         assert_eq!(split_remote_qualified_base(path, "fork/head"), None);
+    }
+
+    #[test]
+    fn test_split_remote_qualified_base_keeps_remote_only_branches() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        // Branch exists only on the fork remote — not locally, not on origin.
+        // get_valid_base_branch would fall back to main if we stripped the
+        // remote prefix and re-validated against local/origin only.
+        run_git(
+            dir.path(),
+            &["update-ref", "refs/remotes/fork/feature-x", "HEAD"],
+        );
+        assert_eq!(
+            split_remote_qualified_base(path, "fork/feature-x"),
+            Some(("fork".to_string(), "feature-x".to_string()))
+        );
+        assert!(remote_tracking_branch_exists(path, "fork", "feature-x"));
+        // Local/origin checks that get_valid_base_branch uses must both fail.
+        assert!(!branch_exists(path, "feature-x"));
+        assert!(!remote_branch_exists(path, "feature-x"));
     }
 }

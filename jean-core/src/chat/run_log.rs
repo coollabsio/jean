@@ -70,6 +70,8 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let claude_sid = claude_session_id.map(|s| s.to_string());
 
+        let mut checkpoint_id: Option<String> = None;
+
         with_metadata_mut(
             &self.app,
             &self.session_id,
@@ -83,6 +85,7 @@ impl RunLogWriter {
                     run.assistant_message_id = Some(assistant_message_id.to_string());
                     run.claude_session_id = claude_sid.clone();
                     run.usage = usage.clone();
+                    checkpoint_id = run.checkpoint_id.clone();
                 }
 
                 // Update metadata's claude_session_id for resumption
@@ -93,6 +96,21 @@ impl RunLogWriter {
                 Ok(())
             },
         )?;
+
+        // Capture end-of-turn tree + file list for the AI checkpoint.
+        if let Some(cp_id) = checkpoint_id {
+            if let Err(e) = crate::projects::checkpoints::finalize_checkpoint(
+                &self.app,
+                &self.worktree_id,
+                &cp_id,
+            ) {
+                log::warn!(
+                    "[Checkpoint] finalize on complete failed run={} cp={}: {e}",
+                    self.run_id,
+                    cp_id
+                );
+            }
+        }
 
         log::trace!("Run completed: {}", self.run_id);
         Ok(())
@@ -109,6 +127,7 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let asst_id = assistant_message_id.map(|s| s.to_string());
         let claude_sid = claude_session_id.map(|s| s.to_string());
+        let mut checkpoint_id: Option<String> = None;
 
         with_metadata_mut(
             &self.app,
@@ -118,6 +137,7 @@ impl RunLogWriter {
             self.order,
             |metadata| {
                 if let Some(run) = metadata.find_run_mut(&run_id) {
+                    checkpoint_id = run.checkpoint_id.clone();
                     run.status = RunStatus::Cancelled;
                     run.ended_at = Some(now);
                     run.cancelled = true;
@@ -133,6 +153,21 @@ impl RunLogWriter {
                 Ok(())
             },
         )?;
+
+        // Still finalize so the user can review / restore partial AI changes.
+        if let Some(cp_id) = checkpoint_id {
+            if let Err(e) = crate::projects::checkpoints::finalize_checkpoint(
+                &self.app,
+                &self.worktree_id,
+                &cp_id,
+            ) {
+                log::warn!(
+                    "[Checkpoint] finalize on cancel failed run={} cp={}: {e}",
+                    self.run_id,
+                    cp_id
+                );
+            }
+        }
 
         log::trace!("Run cancelled: {}", self.run_id);
         Ok(())
@@ -390,6 +425,7 @@ pub fn start_run(
         cursor_chat_id: None,
         grok_session_id: None,
         kimi_session_id: None,
+        checkpoint_id: None,
     };
 
     with_metadata_mut(
@@ -520,6 +556,33 @@ pub fn read_run_log(
     let lines: Result<Vec<_>, _> = reader.lines().collect();
 
     lines.map_err(|e| format!("Failed to read run log: {e}"))
+}
+
+/// Extract plain text from a tool_result `content` field.
+///
+/// Content can be a plain string (most tools) OR an array of content blocks
+/// (Task/Agent subagent reports return `[{ "type": "text", "text": "..." }]`).
+/// Shared by live streaming and history rebuild so reloaded sessions keep reports.
+pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> String {
+    if let Some(s) = content.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = content.as_array() {
+        return arr
+            .iter()
+            .filter_map(|item| {
+                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    item.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    String::new()
 }
 
 /// Parse JSONL lines and build a ChatMessage
@@ -792,8 +855,12 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                     .get("tool_use_id")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
-                                let output =
-                                    block.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                // Content can be a string OR an array of content blocks
+                                // (Task/Agent subagent final reports use the array shape).
+                                let output = block
+                                    .get("content")
+                                    .map(tool_result_content_to_string)
+                                    .unwrap_or_default();
                                 let is_error = block
                                     .get("is_error")
                                     .and_then(|v| v.as_bool())
@@ -803,7 +870,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                 if is_error && !tool_id.is_empty() {
                                     errored_tool_ids.insert(tool_id.to_string());
                                     errored_tool_outputs
-                                        .insert(tool_id.to_string(), output.to_string());
+                                        .insert(tool_id.to_string(), output.clone());
                                 }
 
                                 // For armed Monitors, capture the tool_result text
@@ -820,7 +887,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                     tool_calls.iter_mut().find(|t| t.id == tool_id)
                                 {
                                     // Non-Monitor tool: normal output update
-                                    tc.output = Some(output.to_string());
+                                    tc.output = Some(output);
                                 }
                             }
                         }
@@ -1043,6 +1110,11 @@ fn should_inject_synthetic_exit_plan(
 
     match backend {
         Backend::Opencode | Backend::Pi | Backend::Commandcode | Backend::Kimi => base_match,
+        // Grok owns live injection in grok.rs; recover plan tool on history reload
+        // only when assistant text looks like a real plan (not research preamble).
+        Backend::Grok => {
+            base_match && crate::chat::grok::looks_like_plan_content(&assistant_msg.content)
+        }
         Backend::Cursor => false, // Plan approval only on real createPlanToolCall / interaction_query
         _ => false,
     }
@@ -1081,6 +1153,14 @@ fn inject_synthetic_exit_plan(backend: &Backend, run_id: &str, assistant_msg: &m
             serde_json::json!({
                 "plan": assistant_msg.content,
                 "source": "kimi",
+            }),
+        )
+    } else if matches!(backend, Backend::Grok) {
+        (
+            "ExitPlanMode",
+            serde_json::json!({
+                "plan": assistant_msg.content,
+                "source": "grok",
             }),
         )
     } else {
@@ -1291,22 +1371,89 @@ pub fn load_session_messages_window(
         if run.renders_assistant_message()
             || cancelled_artifact_run_indices.borrow().contains(run_index)
         {
-            let lines = read_run_log(app, session_id, &run.run_id)?;
+            // One corrupt/missing run log must not abort the whole history load —
+            // provider-switch handoff and UI history both depend on partial success.
+            let lines = match read_run_log(app, session_id, &run.run_id) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    log::warn!(
+                        "[LoadMessages] session={session_id} run={} failed to read log: {e}",
+                        run.run_id
+                    );
+                    let mut placeholder = ChatMessage {
+                        id: run
+                            .assistant_message_id
+                            .clone()
+                            .unwrap_or_else(|| format!("missing-{}", run.run_id)),
+                        session_id: session_id.to_string(),
+                        role: MessageRole::Assistant,
+                        content:
+                            "*Assistant response unavailable (run log missing or unreadable).*"
+                                .to_string(),
+                        timestamp: run.ended_at.unwrap_or(run.started_at),
+                        tool_calls: vec![],
+                        content_blocks: vec![],
+                        cancelled: run.cancelled,
+                        plan_approved: false,
+                        model: run.model.clone(),
+                        execution_mode: run.execution_mode.clone(),
+                        thinking_level: run.thinking_level.clone(),
+                        effort_level: run.effort_level.clone(),
+                        recovered: run.recovered,
+                        usage: run.usage.clone(),
+                    };
+                    if run.status == RunStatus::Running {
+                        placeholder.id = format!("running-{}", run.run_id);
+                    }
+                    messages.push(placeholder);
+                    continue;
+                }
+            };
 
             // Parse JSONL content — route by backend.
             // Per-run model is authoritative when present. Only fall back to
             // session-level metadata.backend for legacy runs with no model stored.
             let use_codex_parser = run_uses_codex_history_parser(&metadata.backend, run);
-            let mut assistant_msg = if use_codex_parser {
-                super::codex::parse_codex_run_to_message(&lines, run)?
+            let parse_result = if use_codex_parser {
+                super::codex::parse_codex_run_to_message(&lines, run)
             } else if run_uses_pi_history_parser(&metadata.backend, run) {
-                super::pi::parse_pi_run_to_message(&lines, run)?
+                super::pi::parse_pi_run_to_message(&lines, run)
             } else if run_uses_grok_history_parser(&metadata.backend, run) {
-                super::grok::parse_grok_run_to_message(&lines, run)?
+                super::grok::parse_grok_run_to_message(&lines, run)
             } else if run_uses_kimi_history_parser(&metadata.backend, run) {
-                super::kimi::parse_kimi_run_to_message(&lines, run)?
+                super::kimi::parse_kimi_run_to_message(&lines, run)
             } else {
-                parse_run_to_message(&lines, run)?
+                parse_run_to_message(&lines, run)
+            };
+            let mut assistant_msg = match parse_result {
+                Ok(msg) => msg,
+                Err(e) => {
+                    log::warn!(
+                        "[LoadMessages] session={session_id} run={} failed to parse log: {e}",
+                        run.run_id
+                    );
+                    ChatMessage {
+                        id: run
+                            .assistant_message_id
+                            .clone()
+                            .unwrap_or_else(|| format!("unparsed-{}", run.run_id)),
+                        session_id: session_id.to_string(),
+                        role: MessageRole::Assistant,
+                        content: "*Assistant response unavailable (run log parse failed).*"
+                            .to_string(),
+                        timestamp: run.ended_at.unwrap_or(run.started_at),
+                        tool_calls: vec![],
+                        content_blocks: vec![],
+                        cancelled: run.cancelled,
+                        plan_approved: false,
+                        model: run.model.clone(),
+                        execution_mode: run.execution_mode.clone(),
+                        thinking_level: run.thinking_level.clone(),
+                        effort_level: run.effort_level.clone(),
+                        recovered: run.recovered,
+                        usage: run.usage.clone(),
+                    }
+                }
             };
             let is_cursor_run = run
                 .model
@@ -1410,6 +1557,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         }
     }
 
@@ -1501,6 +1649,56 @@ mod tests {
         assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
         assert_eq!(msg.tool_calls[0].input["source"], "kimi");
         assert_eq!(msg.tool_calls[0].input["plan"], "Here is the plan");
+    }
+
+    #[test]
+    fn injects_synthetic_exit_plan_for_recovered_grok_plan_runs() {
+        let run = sample_run();
+        let plan = r#"# Server Migration Plan
+
+## Overview
+Move services between instances without downtime.
+
+## Tasks
+1. Start instance a on a free port
+2. Start instance b on a free port
+3. Run transfer and verify both stay healthy
+
+### Testing
+- [ ] Smoke both instances
+- [ ] Confirm transfer logs are clean
+"#;
+        let mut msg = ChatMessage {
+            content: plan.to_string(),
+            ..sample_assistant_message()
+        };
+
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Grok,
+            &run,
+            &msg
+        ));
+
+        inject_synthetic_exit_plan(&Backend::Grok, &run.run_id, &mut msg);
+
+        assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(msg.tool_calls[0].input["source"], "grok");
+        assert_eq!(msg.tool_calls[0].input["plan"], plan);
+    }
+
+    #[test]
+    fn does_not_inject_grok_plan_for_research_preamble() {
+        let run = sample_run();
+        let msg = ChatMessage {
+            content: "I'll draft a full Hermes integration plan with Hermes profiles as a first-class requirement. Gathering Jean's backend patterns first.".to_string(),
+            ..sample_assistant_message()
+        };
+
+        assert!(!should_inject_synthetic_exit_plan(
+            &Backend::Grok,
+            &run,
+            &msg
+        ));
     }
 
     #[test]
@@ -1674,6 +1872,112 @@ mod tests {
     }
 
     #[test]
+    fn parse_run_extracts_task_tool_result_from_content_blocks() {
+        let run = sample_run();
+        let tool_id = "toolu_task_report";
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": "Task",
+                        "input": {
+                            "description": "Explore auth",
+                            "prompt": "Find how auth works",
+                            "subagent_type": "Explore"
+                        }
+                    }]
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            { "type": "text", "text": "Findings: auth uses JWT middleware." },
+                            { "type": "text", "text": "Entry point is `src/auth.rs`." }
+                        ]
+                    }]
+                }
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].name, "Task");
+        assert_eq!(
+            msg.tool_calls[0].output.as_deref(),
+            Some("Findings: auth uses JWT middleware.\nEntry point is `src/auth.rs`.")
+        );
+    }
+
+    #[test]
+    fn parse_run_extracts_tool_result_from_string_content() {
+        let run = sample_run();
+        let tool_id = "toolu_read_file";
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": "Read",
+                        "input": { "file_path": "README.md" }
+                    }]
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": "# Hello\n\nWorld"
+                    }]
+                }
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(
+            msg.tool_calls[0].output.as_deref(),
+            Some("# Hello\n\nWorld")
+        );
+    }
+
+    #[test]
+    fn tool_result_content_to_string_handles_shapes() {
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!("plain")),
+            "plain"
+        );
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!([
+                { "type": "text", "text": "a" },
+                { "type": "image", "source": {} },
+                { "type": "text", "text": "b" }
+            ])),
+            "a\nb"
+        );
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!({ "unexpected": true })),
+            ""
+        );
+    }
+
+    #[test]
     fn parse_run_drops_unavailable_ask_user_question_errors() {
         let run = sample_run();
         let tool_id = "toolu_unavailable_question";
@@ -1738,6 +2042,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let lines = vec![
@@ -2111,6 +2416,9 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                     if completed {
                         run.status = RunStatus::Completed;
                         metadata.is_reviewing = false;
+                        if metadata.status_override.as_deref() == Some("review") {
+                            metadata.status_override = None;
+                        }
 
                         // Recover the provider-owned session id from JSONL so a
                         // turn that completed while Jean was closed keeps its context.
@@ -2220,14 +2528,22 @@ pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &
         BufReader::new(file)
     };
 
+    // Prefer error over result: legacy Grok ACP hosts wrote both, and salvaging
+    // those as completed produced empty "content was not captured" runs (#580).
+    let mut has_result = false;
+    let mut has_error = false;
     for line in reader.lines() {
         if let Ok(line) = line {
+            // Compact JSON from serde_json::json! uses no space after `:`.
+            if line.contains("\"type\":\"error\"") {
+                has_error = true;
+            }
             if line.contains("\"type\":\"result\"") {
-                return true;
+                has_result = true;
             }
         }
     }
-    false
+    has_result && !has_error
 }
 
 /// Extract the Claude session ID from a run's JSONL file.

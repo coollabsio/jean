@@ -1,6 +1,7 @@
 import type {
   ClaudeModel,
   CliBackend,
+  CodexProviderProfile,
   CustomCliProfile,
 } from '@/types/preferences'
 import type {
@@ -53,6 +54,8 @@ export interface ChatToolbarProps {
   providerLocked?: boolean
 
   baseBranch: string
+  /** Remote the base branch lives on when explicitly picked (e.g. "fork") */
+  baseRemote?: string
   uncommittedAdded: number
   uncommittedRemoved: number
   branchDiffAdded: number
@@ -97,11 +100,15 @@ export interface ChatToolbarProps {
   onBackendModelChange: (backend: CliBackend, model: string) => void
   onProviderChange: (provider: string | null) => void
   customCliProfiles: CustomCliProfile[]
+  /** Codex custom model_provider profiles from Settings → Providers */
+  customCodexProviders?: CodexProviderProfile[]
   onThinkingLevelChange: (level: ThinkingLevel) => void
   onEffortLevelChange: (level: EffortLevel) => void
   onSetExecutionMode: (mode: ExecutionMode) => void
   onAttach: () => void
   onCancel: () => void
+  /** When true while sending, the secondary submit button steers instead of queues. */
+  willSteer?: boolean
   queuedMessageCount?: number
 
   availableMcpServers: McpServerInfo[]

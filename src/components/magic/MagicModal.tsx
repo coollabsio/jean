@@ -121,10 +121,12 @@ import {
   startCodeReviewsSequentially,
 } from '@/lib/code-review-configs'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
+import { resolveMcpConfigForSend } from '@/services/mcp'
 
 type MagicOption =
   | 'save-context'
   | 'load-context'
+  | 'inject-session'
   | 'linked-projects'
   | 'fork-session'
   | 'commit'
@@ -249,6 +251,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           key: 'L',
         },
         {
+          id: 'inject-session',
+          label: 'Inject Session',
+          icon: MessageSquare,
+          key: 'J',
+        },
+        {
           id: 'linked-projects',
           label: 'Linked Projects',
           icon: Link2,
@@ -371,6 +379,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
 const KEY_TO_OPTION: Record<string, MagicOption> = {
   s: 'save-context',
   l: 'load-context',
+  j: 'inject-session',
   k: 'linked-projects',
   w: 'fork-session',
   c: 'commit',
@@ -437,7 +446,8 @@ export function MagicModal() {
   const [customResolveModel, setCustomResolveModel] = useState<string>('sonnet')
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
-  const hasOpenPr = Boolean(worktree?.pr_url)
+  // PR checkouts may have pr_number before pr_url is filled; treat either as open.
+  const hasOpenPr = Boolean(worktree?.pr_number || worktree?.pr_url)
 
   // Check if worktree has loaded issue/PR contexts (for enabling investigate options)
   // Contexts may be registered under session ID (Load Context) or worktree ID (create_worktree)
@@ -671,122 +681,280 @@ export function MagicModal() {
       ? resolveDefaults.provider
       : null
 
-  const startFinalReview = useCallback(async () => {
-    if (!selectedWorktreeId || !worktree?.path) return
+  /**
+   * Resolve the worktree to run a new prompt session in.
+   * Prefer store snapshots over React Query so prompt sessions still work when
+   * useWorktree() has not loaded yet (common right after opening Magic).
+   */
+  const resolvePromptSessionWorktree = useCallback(async (): Promise<{
+    worktreeId: string
+    worktreePath: string
+    projectId: string | null
+  } | null> => {
+    const projectsState = useProjectsStore.getState()
+    const chatState = useChatStore.getState()
+    const uiState = useUIStore.getState()
 
-    const defaultBackend =
-      project?.default_backend ?? preferences?.default_backend ?? 'claude'
-    const backend = (resolveMagicPromptBackend(
-      preferences?.magic_prompt_backends,
-      'final_review_backend',
-      defaultBackend
-    ) ?? defaultBackend) as CliBackend
-    const model =
-      preferences?.magic_prompt_models?.final_review_model ??
-      resolveDefaultModelForBackend(backend, preferences)
-    const provider =
-      backend === 'claude'
-        ? resolveMagicPromptProvider(
-            preferences?.magic_prompt_providers,
-            'final_review_provider',
-            preferences?.default_provider
-          )
-        : null
-    const executionMode =
-      preferences?.magic_prompt_modes?.final_review_mode ??
-      DEFAULT_MAGIC_PROMPT_MODES.final_review_mode
+    const worktreeId =
+      selectedWorktreeId ??
+      projectsState.selectedWorktreeId ??
+      chatState.activeWorktreeId ??
+      uiState.sessionChatModalWorktreeId
+
+    if (!worktreeId) return null
+
+    let worktreePath: string | null | undefined =
+      (worktree?.id === worktreeId ? worktree.path : null) ??
+      chatState.getWorktreePath(worktreeId) ??
+      (chatState.activeWorktreeId === worktreeId
+        ? chatState.activeWorktreePath
+        : null)
+
+    let projectId: string | null =
+      (worktree?.id === worktreeId ? worktree.project_id : null) ??
+      projectsState.selectedProjectId ??
+      selectedProjectId ??
+      null
+
+    if (!worktreePath) {
+      try {
+        const fetched = await invoke<{
+          id: string
+          path: string
+          project_id?: string
+        } | null>('get_worktree', { worktreeId })
+        if (fetched?.path) {
+          worktreePath = fetched.path
+          projectId = fetched.project_id ?? projectId
+          chatState.registerWorktreePath(worktreeId, fetched.path)
+        }
+      } catch {
+        // Fall through to null — caller shows a clear error toast
+      }
+    }
+
+    if (!worktreePath) return null
+
+    return { worktreeId, worktreePath, projectId }
+  }, [selectedProjectId, selectedWorktreeId, worktree])
+
+  const startPromptSession = useCallback(
+    async ({
+      sessionName,
+      backendKey,
+      modelKey,
+      providerKey,
+      modeKey,
+      effortKey,
+      prompt,
+      errorLabel,
+    }: {
+      sessionName: string
+      backendKey: 'final_review_backend'
+      modelKey: 'final_review_model'
+      providerKey: 'final_review_provider'
+      modeKey: 'final_review_mode'
+      effortKey: 'final_review_effort'
+      prompt: string
+      errorLabel: string
+    }) => {
+      const resolved = await resolvePromptSessionWorktree()
+      if (!resolved) {
+        toast.error(`Failed to start ${errorLabel}: No worktree selected`)
+        notify('No worktree selected', undefined, { type: 'error' })
+        return
+      }
+
+      const { worktreeId, worktreePath } = resolved
+
+      const defaultBackend =
+        project?.default_backend ?? preferences?.default_backend ?? 'claude'
+      const backend = (resolveMagicPromptBackend(
+        preferences?.magic_prompt_backends,
+        backendKey,
+        defaultBackend
+      ) ?? defaultBackend) as CliBackend
+      const backendDefaultModel = resolveDefaultModelForBackend(
+        backend,
+        preferences
+      )
+      const configuredModel = preferences?.magic_prompt_models?.[modelKey]
+      // Avoid mismatched pairs like Grok backend + Claude Opus model (common for
+      // newly-added magic prompts before prefs migration runs).
+      const model = (() => {
+        if (!configuredModel) return backendDefaultModel
+        const matchesBackend =
+          backend === 'claude'
+            ? !configuredModel.includes('/') &&
+              !configuredModel.startsWith('gpt-')
+            : backend === 'codex'
+              ? configuredModel.includes('codex') ||
+                configuredModel.startsWith('gpt-')
+              : backend === 'opencode'
+                ? configuredModel.startsWith('opencode/')
+                : backend === 'cursor'
+                  ? configuredModel.startsWith('cursor/')
+                  : backend === 'pi'
+                    ? configuredModel.startsWith('pi/')
+                    : backend === 'commandcode'
+                      ? configuredModel.startsWith('commandcode/')
+                      : backend === 'grok'
+                        ? configuredModel.startsWith('grok/')
+                        : backend === 'kimi'
+                          ? configuredModel.startsWith('kimi/')
+                          : true
+        return matchesBackend ? configuredModel : backendDefaultModel
+      })()
+      const provider =
+        backend === 'claude'
+          ? resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              providerKey,
+              preferences?.default_provider
+            )
+          : null
+      const executionMode =
+        preferences?.magic_prompt_modes?.[modeKey] ??
+        DEFAULT_MAGIC_PROMPT_MODES[modeKey]
+
+      const loadingToastId = toast.loading(`Starting ${errorLabel}...`)
+
+      try {
+        // Resolve MCP the same way ChatWindow does so Jean MCP and other
+        // enabled servers are available on the first prompt-session turn.
+        const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
+          worktreePath,
+          backend,
+          projectEnabled: project?.enabled_mcp_servers,
+          globalEnabled: preferences?.default_enabled_mcp_servers,
+          knownServers:
+            project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+        })
+
+        const session = await invoke<Session>('create_session', {
+          worktreeId,
+          worktreePath,
+          name: sessionName,
+          backend: backend !== 'claude' ? backend : undefined,
+        })
+        const store = useChatStore.getState()
+
+        store.registerWorktreePath(worktreeId, worktreePath)
+        store.setSelectedBackend(session.id, backend)
+        store.setSelectedModel(session.id, model)
+        store.setSelectedProvider(session.id, provider)
+        store.setActiveSession(worktreeId, session.id)
+        store.setExecutionMode(session.id, executionMode)
+        store.setExecutingMode(session.id, executionMode)
+        store.setLastSentMessage(session.id, prompt)
+        store.setError(session.id, null)
+        store.clearInputDraft(session.id)
+        store.setEnabledMcpServers(session.id, enabledServers)
+
+        // Prefer open-session-modal so the new session tab is selected even
+        // when a worktree chat modal is already open.
+        window.dispatchEvent(
+          new CustomEvent('open-session-modal', {
+            detail: {
+              sessionId: session.id,
+              worktreeId,
+              worktreePath,
+            },
+          })
+        )
+        window.dispatchEvent(
+          new CustomEvent('open-worktree-modal', {
+            detail: {
+              worktreeId,
+              worktreePath,
+            },
+          })
+        )
+
+        await Promise.all([
+          invoke('set_session_backend', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            backend,
+          }),
+          invoke('set_session_model', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            model,
+          }),
+          invoke('set_session_provider', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            provider,
+          }),
+          invoke('update_session_state', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            selectedExecutionMode: executionMode,
+            enabledMcpServers: enabledServers,
+          }),
+        ])
+
+        await invoke('send_chat_message', {
+          sessionId: session.id,
+          worktreeId,
+          worktreePath,
+          message: prompt,
+          model,
+          executionMode,
+          effortLevel:
+            preferences?.magic_prompt_efforts?.[effortKey] ?? undefined,
+          parallelExecutionPrompt:
+            preferences?.parallel_execution_prompt_enabled
+              ? (preferences.magic_prompts?.parallel_execution ??
+                DEFAULT_PARALLEL_EXECUTION_PROMPT)
+              : undefined,
+          backend: backend !== 'claude' ? backend : undefined,
+          customProfileName:
+            provider && provider !== '__anthropic__' ? provider : undefined,
+          chromeEnabled: preferences?.chrome_enabled ?? false,
+          aiLanguage: preferences?.ai_language,
+          mcpConfig,
+        })
+
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        toast.success(`${sessionName} started`, { id: loadingToastId })
+      } catch (error) {
+        toast.error(`Failed to start ${errorLabel}: ${error}`, {
+          id: loadingToastId,
+        })
+      }
+    },
+    [
+      preferences,
+      project?.default_backend,
+      project?.enabled_mcp_servers,
+      project?.known_mcp_servers,
+      queryClient,
+      resolvePromptSessionWorktree,
+    ]
+  )
+
+  const startFinalReview = useCallback(async () => {
     const prompt =
       preferences?.magic_prompts?.final_review ?? DEFAULT_FINAL_REVIEW_PROMPT
-
-    try {
-      const session = await invoke<Session>('create_session', {
-        worktreeId: selectedWorktreeId,
-        worktreePath: worktree.path,
-        name: 'Final review',
-        backend: backend !== 'claude' ? backend : undefined,
-      })
-      const store = useChatStore.getState()
-
-      store.registerWorktreePath(selectedWorktreeId, worktree.path)
-      store.setSelectedBackend(session.id, backend)
-      store.setSelectedModel(session.id, model)
-      store.setSelectedProvider(session.id, provider)
-      store.setActiveSession(selectedWorktreeId, session.id)
-      store.setExecutionMode(session.id, executionMode)
-      store.setExecutingMode(session.id, executionMode)
-      store.setLastSentMessage(session.id, prompt)
-      store.setError(session.id, null)
-      store.clearInputDraft(session.id)
-
-      window.dispatchEvent(
-        new CustomEvent('open-worktree-modal', {
-          detail: {
-            worktreeId: selectedWorktreeId,
-            worktreePath: worktree.path,
-          },
-        })
-      )
-
-      await Promise.all([
-        invoke('set_session_backend', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          backend,
-        }),
-        invoke('set_session_model', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          model,
-        }),
-        invoke('set_session_provider', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          provider,
-        }),
-        invoke('update_session_state', {
-          worktreeId: selectedWorktreeId,
-          worktreePath: worktree.path,
-          sessionId: session.id,
-          selectedExecutionMode: executionMode,
-        }),
-      ])
-
-      await invoke('send_chat_message', {
-        sessionId: session.id,
-        worktreeId: selectedWorktreeId,
-        worktreePath: worktree.path,
-        message: prompt,
-        model,
-        executionMode,
-        effortLevel:
-          preferences?.magic_prompt_efforts?.final_review_effort ?? undefined,
-        parallelExecutionPrompt: preferences?.parallel_execution_prompt_enabled
-          ? (preferences.magic_prompts?.parallel_execution ??
-            DEFAULT_PARALLEL_EXECUTION_PROMPT)
-          : undefined,
-        backend: backend !== 'claude' ? backend : undefined,
-        customProfileName:
-          provider && provider !== '__anthropic__' ? provider : undefined,
-        chromeEnabled: preferences?.chrome_enabled ?? false,
-        aiLanguage: preferences?.ai_language,
-      })
-
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(selectedWorktreeId),
-      })
-    } catch (error) {
-      toast.error(`Failed to start final review: ${error}`)
-    }
-  }, [
-    preferences,
-    project?.default_backend,
-    queryClient,
-    selectedWorktreeId,
-    worktree?.path,
-  ])
+    await startPromptSession({
+      sessionName: 'Final review',
+      backendKey: 'final_review_backend',
+      modelKey: 'final_review_model',
+      providerKey: 'final_review_provider',
+      modeKey: 'final_review_mode',
+      effortKey: 'final_review_effort',
+      prompt,
+      errorLabel: 'final review',
+    })
+  }, [preferences?.magic_prompts?.final_review, startPromptSession])
 
   const investigateClaudeModelOptions = useMemo(
     () => getClaudeModelOptionsForProvider(investigateClaudeProvider),
@@ -1164,10 +1332,11 @@ export function MagicModal() {
             await performGitPull({
               worktreeId: selectedWorktreeId,
               worktreePath: worktree.path,
-              baseBranch: project?.default_branch ?? 'main',
+              baseBranch:
+                worktree.base_branch ?? project?.default_branch ?? 'main',
               branchLabel: worktree.branch,
               projectId: worktree.project_id ?? undefined,
-              remote,
+              remote: remote ?? worktree.base_remote,
               onMergeConflict: () => executeGitDirectly('resolve-conflicts'),
             })
           })
@@ -1217,6 +1386,30 @@ export function MagicModal() {
         case 'open-pr': {
           if (worktree.pr_url) {
             await openExternal(worktree.pr_url)
+            return
+          }
+          // Number without URL (e.g. older checkout_pr): resolve then open
+          if (worktree.pr_number) {
+            try {
+              const linked = await linkWorktreePr(
+                selectedWorktreeId,
+                worktree.path,
+                worktree.pr_number
+              )
+              queryClient.invalidateQueries({
+                queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+              })
+              queryClient.invalidateQueries({
+                queryKey: [
+                  ...projectsQueryKeys.all,
+                  'worktree',
+                  selectedWorktreeId,
+                ],
+              })
+              await openExternal(linked.pr_url)
+            } catch (error) {
+              toast.error(`Failed to open PR #${worktree.pr_number}: ${error}`)
+            }
             return
           }
           setWorktreeLoading(selectedWorktreeId, 'pr')
@@ -1453,12 +1646,14 @@ export function MagicModal() {
               const diffSection = prResult.conflict_diff
                 ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
                 : ''
-              const baseBranch = project?.default_branch || 'main'
+              const baseBranch =
+                worktree.base_branch || project?.default_branch || 'main'
+              const baseRemote = worktree.base_remote || 'origin'
               const resolveInstructions =
                 preferences?.magic_prompts?.resolve_conflicts ??
                 DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-              const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+              const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}
@@ -1470,11 +1665,28 @@ ${resolveInstructions}`
               setExecutionMode(newSession.id, 'yolo')
               setExecutingMode(newSession.id, 'yolo')
               clearInputDraft(newSession.id)
+
+              const {
+                mcpConfig: prConflictMcpConfig,
+                enabledServers: prConflictEnabledMcp,
+              } = await resolveMcpConfigForSend({
+                worktreePath: worktree.path,
+                backend: resolvedBackend as CliBackend,
+                projectEnabled: project?.enabled_mcp_servers,
+                globalEnabled: preferences?.default_enabled_mcp_servers,
+                knownServers:
+                  project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+              })
+              useChatStore
+                .getState()
+                .setEnabledMcpServers(newSession.id, prConflictEnabledMcp)
+
               invoke('update_session_state', {
                 worktreeId: selectedWorktreeId,
                 worktreePath: worktree.path,
                 sessionId: newSession.id,
                 selectedExecutionMode: 'yolo',
+                enabledMcpServers: prConflictEnabledMcp,
               }).catch(() => undefined)
 
               await invoke('send_chat_message', {
@@ -1493,6 +1705,7 @@ ${resolveInstructions}`
                     : undefined,
                 chromeEnabled: preferences?.chrome_enabled ?? false,
                 aiLanguage: preferences?.ai_language,
+                mcpConfig: prConflictMcpConfig,
               })
 
               queryClient.invalidateQueries({
@@ -1652,11 +1865,28 @@ ${resolveInstructions}`
             setExecutionMode(newSession.id, 'yolo')
             setExecutingMode(newSession.id, 'yolo')
             clearInputDraft(newSession.id)
+
+            const {
+              mcpConfig: conflictMcpConfig,
+              enabledServers: conflictEnabledMcp,
+            } = await resolveMcpConfigForSend({
+              worktreePath: worktree.path,
+              backend: resolvedBackend as CliBackend,
+              projectEnabled: project?.enabled_mcp_servers,
+              globalEnabled: preferences?.default_enabled_mcp_servers,
+              knownServers:
+                project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+            })
+            useChatStore
+              .getState()
+              .setEnabledMcpServers(newSession.id, conflictEnabledMcp)
+
             invoke('update_session_state', {
               worktreeId: selectedWorktreeId,
               worktreePath: worktree.path,
               sessionId: newSession.id,
               selectedExecutionMode: 'yolo',
+              enabledMcpServers: conflictEnabledMcp,
             }).catch(() => undefined)
 
             await invoke('send_chat_message', {
@@ -1675,6 +1905,7 @@ ${resolveInstructions}`
                   : undefined,
               chromeEnabled: preferences?.chrome_enabled ?? false,
               aiLanguage: preferences?.ai_language,
+              mcpConfig: conflictMcpConfig,
             })
 
             queryClient.invalidateQueries({
@@ -1853,9 +2084,9 @@ ${resolveInstructions}`
                   })
                 }
 
+                // Sonner ignores `duration` for loading toasts — dismiss explicitly.
                 toast.loading(`${reviewLabel} running for ${reviewTarget}...`, {
                   id: toastId,
-                  duration: 5000,
                   cancel: {
                     label: 'Cancel',
                     onClick: () => {
@@ -1869,6 +2100,9 @@ ${resolveInstructions}`
                     },
                   },
                 })
+                const autoDismissTimer = window.setTimeout(() => {
+                  toast.dismiss(toastId)
+                }, 5000)
 
                 let unlistenReviewJob: (() => void) | null = null
                 let handledTerminalReviewJob = false
@@ -1878,6 +2112,7 @@ ${resolveInstructions}`
                   if (handledTerminalReviewJob) return
 
                   handledTerminalReviewJob = true
+                  window.clearTimeout(autoDismissTimer)
                   unlistenReviewJob?.()
                   if (reviewJob.status === 'completed') {
                     const completedSessionId = reviewJob.sessionId
@@ -2261,9 +2496,9 @@ ${resolveInstructions}`
       }
 
       // If PR already exists, open it in the browser instead of creating a new one
-      if (option === 'open-pr' && worktree?.pr_url) {
-        await openExternal(worktree.pr_url)
+      if (option === 'open-pr' && (worktree?.pr_url || worktree?.pr_number)) {
         setMagicModalOpen(false)
+        void executeGitDirectly('open-pr')
         return
       }
 
@@ -2418,7 +2653,7 @@ ${resolveInstructions}`
         <DialogContent
           ref={contentRef}
           tabIndex={-1}
-          className="sm:max-w-[560px] p-0 outline-none"
+          className="sm:max-w-[560px] max-h-[min(90vh,760px)] overflow-y-auto p-0 outline-none"
           onOpenAutoFocus={e => {
             e.preventDefault()
             contentRef.current?.focus()
@@ -2437,6 +2672,9 @@ ${resolveInstructions}`
               (columnSections, colIndex) => (
                 <div
                   key={colIndex}
+                  data-testid={
+                    colIndex === 0 ? 'magic-column-left' : 'magic-column-right'
+                  }
                   className={cn(colIndex === 0 && 'border-r border-border')}
                 >
                   {columnSections.map((section, sectionIndex) => (

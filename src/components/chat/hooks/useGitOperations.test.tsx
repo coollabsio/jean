@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   toastWarning: vi.fn(),
   toastError: vi.fn(),
   toastDismiss: vi.fn(),
+  linkWorktreePr: vi.fn(),
+  saveWorktreePr: vi.fn(),
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -38,6 +40,17 @@ vi.mock('sonner', () => ({
     dismiss: mocks.toastDismiss,
   },
 }))
+vi.mock('@/services/projects', async () => {
+  const actual = await vi.importActual<typeof import('@/services/projects')>(
+    '@/services/projects'
+  )
+  return {
+    ...actual,
+    isTauri: () => true,
+    linkWorktreePr: mocks.linkWorktreePr,
+    saveWorktreePr: mocks.saveWorktreePr,
+  }
+})
 vi.mock('@/services/git-status', () => ({
   gitPush: vi.fn(),
   triggerImmediateGitPoll: vi.fn(),
@@ -77,7 +90,10 @@ const project: Project = {
   order: 0,
 }
 
-function renderGitOperations(preferenceOverrides = {}) {
+function renderGitOperations(
+  preferenceOverrides = {},
+  worktreeOverrides: Partial<Worktree> = {}
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -85,6 +101,7 @@ function renderGitOperations(preferenceOverrides = {}) {
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
+  const activeWorktree = { ...worktree, ...worktreeOverrides }
 
   const hook = renderHook(
     () =>
@@ -92,7 +109,7 @@ function renderGitOperations(preferenceOverrides = {}) {
         activeWorktreeId: 'wt-1',
         activeSessionId: 'session-current',
         activeWorktreePath: '/repo/worktree',
-        worktree,
+        worktree: activeWorktree,
         project,
         queryClient,
         inputRef: ref({ focus: vi.fn() } as unknown as HTMLTextAreaElement),
@@ -234,6 +251,50 @@ describe('useGitOperations conflict resolution', () => {
     })
   })
 
+  it('opens an already-linked PR instead of creating a new one', async () => {
+    const { openExternal } = await import('@/lib/platform')
+    const { result } = renderGitOperations()
+
+    await act(async () => {
+      await result.current.handleOpenPr()
+    })
+
+    expect(openExternal).toHaveBeenCalledWith('https://github.com/o/r/pull/31')
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      'create_pr_with_ai_content',
+      expect.anything()
+    )
+  })
+
+  it('resolves missing PR URL from linked number before opening', async () => {
+    const { openExternal } = await import('@/lib/platform')
+    mocks.linkWorktreePr.mockResolvedValue({
+      pr_number: 31,
+      pr_url: 'https://github.com/o/r/pull/31',
+      title: 'Feature',
+    })
+
+    const { result } = renderGitOperations(
+      {},
+      { pr_number: 31, pr_url: undefined }
+    )
+
+    await act(async () => {
+      await result.current.handleOpenPr()
+    })
+
+    expect(mocks.linkWorktreePr).toHaveBeenCalledWith(
+      'wt-1',
+      '/repo/worktree',
+      31
+    )
+    expect(openExternal).toHaveBeenCalledWith('https://github.com/o/r/pull/31')
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      'create_pr_with_ai_content',
+      expect.anything()
+    )
+  })
+
   it('shows a cancel button while creating a PR and cancels the backend action', async () => {
     let resolveCreatePr: ((value: unknown) => void) | undefined
     mocks.invoke.mockImplementation((command: string) => {
@@ -248,7 +309,11 @@ describe('useGitOperations conflict resolution', () => {
       return Promise.resolve(undefined)
     })
 
-    const { result } = renderGitOperations()
+    // Unlinked worktree so Open PR creates instead of opening an existing link
+    const { result } = renderGitOperations(
+      {},
+      { pr_number: undefined, pr_url: undefined }
+    )
 
     await act(async () => {
       void result.current.handleOpenPr()
@@ -405,6 +470,88 @@ describe('useGitOperations conflict resolution', () => {
     )
   })
 
+  it('names the worktree base remote in the conflict prompt when set', async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_merge_conflicts') {
+        return Promise.resolve({
+          has_conflicts: false,
+          conflicts: [],
+          conflict_diff: '',
+        })
+      }
+      if (command === 'fetch_and_merge_base') {
+        return Promise.resolve({
+          has_conflicts: true,
+          conflicts: ['src/pr-file.ts'],
+          conflict_diff: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> main',
+        })
+      }
+      if (command === 'create_session') {
+        const session: Session = {
+          id: 'pr-conflict-session',
+          name: 'PR: resolve conflicts',
+          order: 1,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          backend: 'claude',
+        }
+        return Promise.resolve(session)
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const forkedWorktree: Worktree = {
+      ...worktree,
+      base_branch: 'main',
+      base_remote: 'fork',
+    }
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const sendMessage = { mutate: vi.fn() }
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(
+      () =>
+        useGitOperations({
+          activeWorktreeId: 'wt-1',
+          activeSessionId: 'session-current',
+          activeWorktreePath: '/repo/worktree',
+          worktree: forkedWorktree,
+          project,
+          queryClient,
+          inputRef: ref({ focus: vi.fn() } as unknown as HTMLTextAreaElement),
+          preferences: {
+            default_backend: 'claude',
+            selected_model: 'sonnet',
+            selected_codex_model: 'gpt-5.5',
+            magic_prompts: { resolve_conflicts: 'Resolve and finish.' },
+            magic_prompt_backends: { resolve_conflicts_backend: 'codex' },
+          } as never,
+          setSessionModel: { mutate: vi.fn() },
+          setSessionBackend: { mutate: vi.fn() },
+          setSessionProvider: { mutate: vi.fn() },
+          sendMessage,
+          selectedThinkingLevelRef: ref('off' as ThinkingLevel),
+          selectedEffortLevelRef: ref('medium' as EffortLevel),
+          mcpServersDataRef: ref([] as McpServerInfo[]),
+          enabledMcpServersRef: ref([]),
+        }),
+      { wrapper }
+    )
+
+    await act(async () => {
+      await result.current.handleResolveConflicts()
+    })
+
+    const sentArgs = sendMessage.mutate.mock.calls[0]?.[0]
+    expect(sentArgs?.message).toContain(
+      'I merged `fork/main` into this branch to resolve PR conflicts'
+    )
+  })
+
   it('reconciles a review job that finished before the listener is active', async () => {
     const reviewSession: Session = {
       id: 'review-session',
@@ -522,9 +669,58 @@ describe('useGitOperations conflict resolution', () => {
       'Review running for Project/feature...',
       expect.objectContaining({
         cancel: expect.objectContaining({ label: 'Cancel' }),
-        duration: 5000,
       })
     )
+  })
+
+  it('auto-dismisses the running review toast after 5 seconds', async () => {
+    vi.useFakeTimers()
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'start_review_job') {
+        return Promise.resolve({
+          job: {
+            id: 'job-1',
+            reviewRunId: 'run-1',
+            worktreeId: 'wt-1',
+            worktreePath: '/repo/worktree',
+            sessionId: 'review-session',
+            source: 'ai',
+            status: 'running',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        })
+      }
+      if (command === 'get_review_job') {
+        return Promise.resolve({
+          id: 'job-1',
+          reviewRunId: 'run-1',
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          sessionId: 'review-session',
+          source: 'ai',
+          status: 'running',
+          createdAt: 1,
+          updatedAt: 1,
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const { result } = renderGitOperations()
+
+    await act(async () => {
+      await result.current.handleReview()
+    })
+
+    expect(mocks.toastDismiss).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+
+    expect(mocks.toastDismiss).toHaveBeenCalledWith('toast-1')
+    vi.useRealTimers()
   })
 
   it('passes the code review magic prompt backend to review jobs', async () => {

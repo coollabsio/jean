@@ -62,3 +62,17 @@ export function getExtension(path: string): string {
   if (lastDot <= 0) return ''
   return filename.slice(lastDot)
 }
+
+/**
+ * Join a root directory path with a relative path (cross-platform).
+ * Uses the separator style of the root when it looks Windows-like.
+ */
+export function joinPaths(root: string, relative: string): string {
+  if (!relative) return root
+  if (!root) return relative
+  const usesBackslash = root.includes('\\') && !root.includes('/')
+  const sep = usesBackslash ? '\\' : '/'
+  const cleanRoot = root.replace(/[\\/]+$/, '')
+  const cleanRelative = relative.replace(/^[\\/]+/, '').replace(/[\\/]+/g, sep)
+  return `${cleanRoot}${sep}${cleanRelative}`
+}

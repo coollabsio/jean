@@ -132,6 +132,7 @@ function getBundledReasoning(
   if (backend !== 'claude' || model === 'haiku') return undefined
   const usesEffort =
     model.includes('fable-5') ||
+    model.includes('opus-5') ||
     model.includes('sonnet-5') ||
     model.includes('opus-4-8') ||
     model.includes('opus-4-7') ||

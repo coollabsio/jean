@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+import { ItemSelectCheckbox } from './ItemSelectCheckbox'
 import { isNewIssue } from '@/services/github'
 import type {
   GitHubIssue,
@@ -78,6 +79,8 @@ export interface IssueItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
@@ -90,6 +93,8 @@ export function IssueItem({
   index,
   isSelected,
   isCreating,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -104,9 +109,18 @@ export function IssueItem({
         'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
         'hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         isCreating && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={isCreating}
+          ariaLabel={`Select issue #${issue.number}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (
@@ -186,6 +200,8 @@ export interface PRItemProps {
   isSelected: boolean
   isCreating: boolean
   isStacking: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
@@ -200,6 +216,8 @@ export function PRItem({
   isSelected,
   isCreating,
   isStacking,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -216,9 +234,18 @@ export function PRItem({
         'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
         'hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         busy && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={busy}
+          ariaLabel={`Select PR #${pr.number}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {busy ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (
@@ -475,6 +502,8 @@ export interface SecurityAlertItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
@@ -486,6 +515,8 @@ export function SecurityAlertItem({
   index,
   isSelected,
   isCreating,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -503,9 +534,18 @@ export function SecurityAlertItem({
         'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
         'hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         isCreating && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={isCreating}
+          ariaLabel={`Select security alert #${alert.number}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (
@@ -567,6 +607,8 @@ export interface AdvisoryItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
@@ -578,6 +620,8 @@ export function AdvisoryItem({
   index,
   isSelected,
   isCreating,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -595,9 +639,18 @@ export function AdvisoryItem({
         'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
         'hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         isCreating && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={isCreating}
+          ariaLabel={`Select advisory ${advisory.ghsaId}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (

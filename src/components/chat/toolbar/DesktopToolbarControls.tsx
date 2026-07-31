@@ -27,7 +27,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { CliBackend, CustomCliProfile } from '@/types/preferences'
+import type {
+  CliBackend,
+  CodexProviderProfile,
+  CustomCliProfile,
+} from '@/types/preferences'
 import type {
   EffortLevel,
   ExecutionMode,
@@ -58,6 +62,7 @@ import {
   KIMI_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  withAdaptiveEffortOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   getPrStatusDisplay,
@@ -81,6 +86,7 @@ interface DesktopToolbarControlsProps {
   sessionHasMessages?: boolean
   providerLocked?: boolean
   customCliProfiles: CustomCliProfile[]
+  customCodexProviders?: CodexProviderProfile[]
   isCodex: boolean
   modelReasoning?: ModelReasoningCapability | null
 
@@ -146,6 +152,7 @@ export function DesktopToolbarControls({
   sessionHasMessages,
   providerLocked,
   customCliProfiles,
+  customCodexProviders = [],
   isCodex,
   modelReasoning,
   prUrl,
@@ -200,23 +207,25 @@ export function DesktopToolbarControls({
       (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
       : isPi
-        ? PI_EFFORT_LEVEL_OPTIONS
+        ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
         : isCodex
-          ? CODEX_EFFORT_LEVEL_OPTIONS
+          ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)
           : isKimi
-            ? KIMI_EFFORT_LEVEL_OPTIONS
+            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS, selectedModel)
             : isGrok
-              ? GROK_EFFORT_LEVEL_OPTIONS
-              : EFFORT_LEVEL_OPTIONS
+              ? withAdaptiveEffortOption(GROK_EFFORT_LEVEL_OPTIONS, selectedModel)
+              : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
-      ? modelReasoning.levels
-      : THINKING_LEVEL_OPTIONS
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
+      : withAdaptiveEffortOption(THINKING_LEVEL_OPTIONS, selectedModel)
+  const effortOptionValues = new Set(effortLevelOptions.map(o => o.value))
+  const thinkingOptionValues = new Set(thinkingLevelOptions.map(o => o.value))
   const displayedEffortLevel =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels.some(o => o.value === selectedEffortLevel)
+      ? effortOptionValues.has(selectedEffortLevel)
         ? selectedEffortLevel
         : modelReasoning.default
       : isCodex || isPi
@@ -232,10 +241,11 @@ export function DesktopToolbarControls({
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
   const displayedThinkingLevel =
-    modelReasoning?.type === 'thinking' &&
-    !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
-      ? modelReasoning.default
-      : selectedThinkingLevel
+    thinkingOptionValues.has(selectedThinkingLevel)
+      ? selectedThinkingLevel
+      : modelReasoning?.type === 'thinking'
+        ? modelReasoning.default
+        : selectedThinkingLevel
   const displayedThinkingLabel =
     thinkingLevelOptions.find(o => o.value === displayedThinkingLevel)?.label ??
     displayedThinkingLevel
@@ -257,7 +267,15 @@ export function DesktopToolbarControls({
     loadedSecurityContexts.length + loadedAdvisoryContexts.length
   const loadedLinearCount = loadedLinearContexts.length
   const loadedContextCount = attachedSavedContexts.length
-  const providerDisplayName = getProviderDisplayName(selectedProvider)
+  const providerDisplayName = getProviderDisplayName(
+    selectedProvider,
+    selectedBackend
+  )
+  const showClaudeProviders =
+    customCliProfiles.length > 0 && selectedBackend === 'claude'
+  const showCodexProviders =
+    customCodexProviders.length > 0 && selectedBackend === 'codex'
+  const showProviderDropdown = showClaudeProviders || showCodexProviders
 
   return (
     <>
@@ -574,7 +592,7 @@ export function DesktopToolbarControls({
         </>
       )}
 
-      {customCliProfiles.length > 0 && selectedBackend === 'claude' && (
+      {showProviderDropdown && (
         <>
           <div className="hidden @xl:block h-4 w-px bg-border/50" />
           <DropdownMenu
@@ -600,35 +618,59 @@ export function DesktopToolbarControls({
               onEscapeKeyDown={e => e.stopPropagation()}
               onCloseAutoFocus={focusChatInput}
             >
-              <DropdownMenuRadioGroup
-                value={selectedProvider ?? '__anthropic__'}
-                onValueChange={handleProviderChange}
-              >
-                <DropdownMenuRadioItem value="__anthropic__">
-                  Anthropic
-                  <Kbd className="ml-auto text-[10px]">1</Kbd>
-                </DropdownMenuRadioItem>
-                {customCliProfiles.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
-                      Custom Providers
-                      <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
-                        cc
-                      </span>
-                    </DropdownMenuLabel>
-                    {customCliProfiles.map((profile, i) => (
-                      <DropdownMenuRadioItem
-                        key={profile.name}
-                        value={profile.name}
-                      >
-                        {profile.name}
-                        <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </>
-                )}
-              </DropdownMenuRadioGroup>
+              {showClaudeProviders ? (
+                <DropdownMenuRadioGroup
+                  value={selectedProvider ?? '__anthropic__'}
+                  onValueChange={handleProviderChange}
+                >
+                  <DropdownMenuRadioItem value="__anthropic__">
+                    Anthropic
+                    <Kbd className="ml-auto text-[10px]">1</Kbd>
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    Custom Providers
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
+                      cc
+                    </span>
+                  </DropdownMenuLabel>
+                  {customCliProfiles.map((profile, i) => (
+                    <DropdownMenuRadioItem
+                      key={profile.name}
+                      value={profile.name}
+                    >
+                      {profile.name}
+                      <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              ) : (
+                <DropdownMenuRadioGroup
+                  value={selectedProvider ?? '__default__'}
+                  onValueChange={handleProviderChange}
+                >
+                  <DropdownMenuRadioItem value="__default__">
+                    Default (OpenAI)
+                    <Kbd className="ml-auto text-[10px]">1</Kbd>
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    Custom Providers
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
+                      cx
+                    </span>
+                  </DropdownMenuLabel>
+                  {customCodexProviders.map((profile, i) => (
+                    <DropdownMenuRadioItem
+                      key={profile.name}
+                      value={profile.name}
+                    >
+                      {profile.name}
+                      <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </>

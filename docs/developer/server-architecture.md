@@ -15,9 +15,16 @@ those events to browser clients and retains the existing replay behavior. The
 shared dispatcher remains the protocol compatibility boundary for browser
 commands.
 
-Native window, embedded browser, clipboard, picker, notification, menu, and
-Finder/editor operations stay desktop-only. Server calls to native-only command
-paths return an explicit error instead of initializing a graphical toolkit.
+Native window, embedded browser, clipboard, picker, notification, and menu
+operations stay desktop-only. Finder/editor/terminal open commands are gated:
+
+- allowed automatically under WSL (Windows host tools via `explorer.exe` / CLI)
+- allowed with `--allow-native-open` / `JEAN_ALLOW_NATIVE_OPEN=1`
+- allowed when the desktop app hosts Web Access
+- otherwise return an explicit "desktop app" error over HTTP
+
+Server paths never initialize a graphical toolkit; they only spawn existing host
+tools when the gate above permits it.
 
 ## Required server gates
 

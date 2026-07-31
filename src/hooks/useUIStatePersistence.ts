@@ -144,8 +144,11 @@ export function useUIStatePersistence() {
     const {
       leftSidebarSize,
       leftSidebarVisible,
+      fileBrowserSize,
+      fileBrowserVisible,
       sessionTerminalIds,
       sessionPrimarySurface,
+      seenFailedWorkflowRunIds,
     } = useUIStore.getState()
     const {
       terminals,
@@ -192,6 +195,8 @@ export function useUIStatePersistence() {
       expanded_folder_ids: Array.from(expandedFolderIds),
       left_sidebar_size: leftSidebarSize,
       left_sidebar_visible: leftSidebarVisible,
+      file_browser_size: fileBrowserSize,
+      file_browser_visible: fileBrowserVisible,
       active_session_ids: activeSessionIds,
       input_drafts: inputDrafts,
       pending_images: serializePendingImages(pendingImages),
@@ -253,6 +258,7 @@ export function useUIStatePersistence() {
           { worktree_id: entry.worktreeId, session_id: entry.sessionId },
         ])
       ),
+      seen_failed_workflow_run_ids: seenFailedWorkflowRunIds,
       version: 1, // Reset for first release
     }
   }, [])
@@ -325,6 +331,22 @@ export function useUIStatePersistence() {
         visible: uiState.left_sidebar_visible,
       })
       useUIStore.getState().setLeftSidebarVisible(uiState.left_sidebar_visible)
+    }
+
+    // Restore file browser size (must be at least 150px to be valid)
+    if (uiState.file_browser_size != null && uiState.file_browser_size >= 150) {
+      logger.debug('Restoring file browser size', {
+        size: uiState.file_browser_size,
+      })
+      useUIStore.getState().setFileBrowserSize(uiState.file_browser_size)
+    }
+
+    // Restore file browser visibility
+    if (uiState.file_browser_visible !== undefined) {
+      logger.debug('Restoring file browser visibility', {
+        visible: uiState.file_browser_visible,
+      })
+      useUIStore.getState().setFileBrowserVisible(uiState.file_browser_visible)
     }
 
     // Restore active project first (selectProject clears selectedWorktreeId)
@@ -838,6 +860,16 @@ export function useUIStatePersistence() {
         .setGitHubDashboardFavoriteProjectIds(githubDashboardFavoriteProjectIds)
     }
 
+    const seenFailedWorkflowRunIds = uiState.seen_failed_workflow_run_ids ?? []
+    if (seenFailedWorkflowRunIds.length > 0) {
+      logger.debug('Restoring seen failed workflow run IDs', {
+        count: seenFailedWorkflowRunIds.length,
+      })
+      useUIStore
+        .getState()
+        .setSeenFailedWorkflowRunIds(seenFailedWorkflowRunIds)
+    }
+
     // Restore browser pane state (per-worktree tabs + 3-surface visibility)
     const persistedBrowserTabs = uiState.browser_tabs ?? {}
     const browserActiveTabIds = uiState.browser_active_tab_ids ?? {}
@@ -998,8 +1030,12 @@ export function useUIStatePersistence() {
       useProjectsStore.getState().githubDashboardFavoriteProjectIds
     let prevLeftSidebarSize = useUIStore.getState().leftSidebarSize
     let prevLeftSidebarVisible = useUIStore.getState().leftSidebarVisible
+    let prevFileBrowserSize = useUIStore.getState().fileBrowserSize
+    let prevFileBrowserVisible = useUIStore.getState().fileBrowserVisible
     let prevSessionTerminalIds = useUIStore.getState().sessionTerminalIds
     let prevSessionPrimarySurface = useUIStore.getState().sessionPrimarySurface
+    let prevSeenFailedWorkflowRunIds =
+      useUIStore.getState().seenFailedWorkflowRunIds
     let prevWorktreeId = useChatStore.getState().activeWorktreeId
     let prevWorktreePath = useChatStore.getState().activeWorktreePath
     let prevLastActiveWorktreeId = useChatStore.getState().lastActiveWorktreeId
@@ -1079,21 +1115,33 @@ export function useUIStatePersistence() {
       const sizeChanged = state.leftSidebarSize !== prevLeftSidebarSize
       const visibilityChanged =
         state.leftSidebarVisible !== prevLeftSidebarVisible
+      const fileBrowserSizeChanged =
+        state.fileBrowserSize !== prevFileBrowserSize
+      const fileBrowserVisibilityChanged =
+        state.fileBrowserVisible !== prevFileBrowserVisible
       const sessionTerminalIdsChanged =
         state.sessionTerminalIds !== prevSessionTerminalIds
       const sessionPrimarySurfaceChanged =
         state.sessionPrimarySurface !== prevSessionPrimarySurface
+      const seenFailedWorkflowRunIdsChanged =
+        state.seenFailedWorkflowRunIds !== prevSeenFailedWorkflowRunIds
 
       if (
         sizeChanged ||
         visibilityChanged ||
+        fileBrowserSizeChanged ||
+        fileBrowserVisibilityChanged ||
         sessionTerminalIdsChanged ||
-        sessionPrimarySurfaceChanged
+        sessionPrimarySurfaceChanged ||
+        seenFailedWorkflowRunIdsChanged
       ) {
         prevLeftSidebarSize = state.leftSidebarSize
         prevLeftSidebarVisible = state.leftSidebarVisible
+        prevFileBrowserSize = state.fileBrowserSize
+        prevFileBrowserVisible = state.fileBrowserVisible
         prevSessionTerminalIds = state.sessionTerminalIds
         prevSessionPrimarySurface = state.sessionPrimarySurface
+        prevSeenFailedWorkflowRunIds = state.seenFailedWorkflowRunIds
         const currentState = getCurrentUIState()
         debouncedSaveRef.current?.(currentState)
       }

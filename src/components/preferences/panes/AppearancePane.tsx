@@ -356,15 +356,32 @@ export const AppearancePane: React.FC = () => {
           {isClientMacOS && (
             <InlineField
               label="Window transparency"
-              description="Translucent window with desktop blur (uses significant GPU)"
+              description="Translucent window with desktop blur (uses significant GPU; can soften text on external monitors)"
             >
               <Switch
+                aria-label="Window transparency"
                 checked={preferences?.window_vibrancy ?? false}
                 onCheckedChange={handleVibrancyChange}
                 disabled={patchPreferences.isPending || isVibrancyPending}
               />
             </InlineField>
           )}
+
+          <InlineField
+            label="Finished session animation"
+            description="Bell animation on the finished-sessions badge in the title bar"
+          >
+            <Switch
+              aria-label="Finished session animation"
+              checked={preferences?.finished_session_animation_enabled ?? true}
+              onCheckedChange={checked =>
+                patchPreferences.mutate({
+                  finished_session_animation_enabled: checked,
+                })
+              }
+              disabled={patchPreferences.isPending}
+            />
+          </InlineField>
 
           <InlineField
             label="Terminal background"
@@ -528,7 +545,9 @@ export const AppearancePane: React.FC = () => {
             />
             <p className="text-xs text-muted-foreground">
               You can change the zoom level with {modKey} +/- and reset to the
-              default zoom with {modKey}+0.
+              default zoom with {modKey}+0. On external monitors, prefer 100%
+              for the sharpest text; non-100% zoom can look soft on 1×
+              displays.
             </p>
           </ScalingField>
 
@@ -561,7 +580,7 @@ export const AppearancePane: React.FC = () => {
             description="How to edit files when viewing them in Jean"
           >
             <Select
-              value={preferences?.file_edit_mode ?? 'external'}
+              value={preferences?.file_edit_mode ?? 'inline'}
               onValueChange={value =>
                 handleFileEditModeChange(value as FileEditMode)
               }

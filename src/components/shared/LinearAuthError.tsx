@@ -4,6 +4,7 @@ import { useUIStore } from '@/store/ui-store'
 
 /**
  * Shown when Linear API key is not configured or invalid for a project.
+ * Mirrors SentryAuthError layout so unconfigured integrations feel consistent.
  */
 export function LinearAuthError() {
   const openPreferencesPane = useUIStore(state => state.openPreferencesPane)
@@ -13,10 +14,11 @@ export function LinearAuthError() {
       <KeyRound className="h-5 w-5 text-muted-foreground" />
       <div className="space-y-1">
         <p className="text-sm font-medium text-foreground">
-          Linear API key not configured
+          Linear access is not configured
         </p>
         <p className="text-xs text-muted-foreground">
-          Add your Linear personal API key in Settings &rarr; Integrations
+          Add and test a personal API key in Settings &rarr; Integrations, then
+          optionally filter issues by team for this Jean project.
         </p>
       </div>
       <Button
@@ -24,7 +26,7 @@ export function LinearAuthError() {
         size="sm"
         onClick={() => openPreferencesPane('integrations')}
       >
-        Open Settings
+        Open Integrations
       </Button>
     </div>
   )

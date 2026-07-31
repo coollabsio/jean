@@ -1,5 +1,24 @@
 # Troubleshooting Guide
 
+## Windows: Jean window goes "invisible" / shows desktop wallpaper
+
+**Symptoms:**
+- Jean window frame remains but content shows the desktop wallpaper (or is blank).
+- Task Manager may show only the Jean host process with no WebView2 child processes.
+- Reported after opening menus/dialogs (e.g. sidebar **New**) and alt-tabbing while connected to a remote Jean (issue [#575](https://github.com/coollabsio/jean/issues/575)).
+
+**Root cause:**
+WebView2's browser or renderer process crashed. Jean's window was historically transparent on all platforms; when the webview stops painting, the transparent host shows whatever is behind it (wallpaper), which looks like the app went invisible.
+
+**Fixes in current releases:**
+1. Windows builds force an opaque main window (`tauri.windows.conf.json` sets `transparent: false`).
+2. A WebView2 `ProcessFailed` handler reloads the page on renderer exits, or restarts Jean when the browser process dies (`src-tauri/src/platform/windows_webview.rs`).
+3. New Project no longer nests the remote `DirectoryBrowser` dialog inside another Radix dialog (focus-trap stacking).
+
+**If it still happens:** restart Jean (or wait for auto-restart after browser-process exit). Update WebView2 Runtime via Windows Update / Evergreen installer. Note GPU driver issues if crashes correlate with sleep/wake or multi-monitor changes.
+
+---
+
 ## Linux Graphics Issues
 
 ### White Screen on Ubuntu 24.04+ (AppImage)
@@ -17,10 +36,14 @@ GStreamer element autoaudiosink not found. Please install it
 **Root Cause:**
 The AppImage bundles GLib 2.72 (from the Ubuntu 22.04 build host), but Ubuntu 24.04 has GLib 2.80. When the bundled old GLib is loaded, system GIO modules that require `g_task_set_static_name` (added in GLib 2.76) fail. This cascading failure crashes WebKitWebProcess, resulting in a white/blank screen.
 
-Additionally, the AppImage bundles `libgstreamer` but no GStreamer plugins, so audio element initialization fails.
+Additionally, older AppImages bundled `libgstreamer` without GStreamer plugins, so WebKit could not create `appsrc` / `appsink` / `autoaudiosink` and the renderer process died.
 
-**Fix:**
-This is handled by the custom AppRun script (`scripts/appimage-webkit-fix.sh`) which prefers system libraries when system WebKitGTK is available. If you have an AppImage that doesn't include this fix, you can work around it by extracting and running with system libs:
+**Fix (current releases):**
+1. Custom AppRun (`scripts/appimage-webkit-fix.sh`) prefers system libraries when system WebKitGTK is available, and sets `GST_PLUGIN_PATH` to bundled/system plugin dirs.
+2. AppImage packaging enables `bundleMediaFramework` so required GStreamer plugins ship inside the AppImage.
+3. Jean sets `WEBKIT_DISABLE_COMPOSITING_MODE=1` and `WEBKIT_DISABLE_DMABUF_RENDERER=1` on Linux before creating the webview.
+
+If you have an older AppImage without these fixes, work around by extracting and running with system libs:
 
 ```bash
 # Extract
@@ -33,6 +56,36 @@ GIO_MODULE_DIR=/dev/null LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:squashfs-roo
 Alternatively, install the `.deb` package which uses system libraries directly.
 
 **Related Issues:** [#54](https://github.com/coollabsio/jean/issues/54), [#100](https://github.com/coollabsio/jean/issues/100)
+
+---
+
+### Required Linux Dependencies (dev / .deb / system WebKit path)
+
+WebKitGTK needs GStreamer plugins at runtime. Without them, the WebKit renderer can crash with a blank screen even outside AppImage.
+
+**Debian/Ubuntu/Linux Mint:**
+
+```bash
+sudo apt install gstreamer1.0-plugins-good
+```
+
+**Arch/Manjaro:**
+
+```bash
+sudo pacman -S gst-plugins-good
+```
+
+**Fedora:**
+
+```bash
+sudo dnf install gstreamer1-plugins-good
+```
+
+**Symptoms of missing GStreamer plugins:**
+
+- Blank/gray window with no content
+- `GStreamer element autoaudiosink not found` in terminal
+- `GLib-GObject-CRITICAL: invalid (NULL) pointer instance` errors
 
 ---
 
@@ -63,38 +116,52 @@ Incompatibility between WebKitGTK's hardware-accelerated compositing and certain
 
 ## Automatic Fixes
 
-Jean automatically applies the following environment variables on Linux to prevent these issues:
+Jean applies the following environment variables on Linux **before** the webview starts
+(`src-tauri/src/platform/linux_webkit.rs`, called from `src-tauri/src/lib.rs`):
 
-### Primary Fixes
+### Default (performance-oriented)
 
-- `WEBKIT_DISABLE_COMPOSITING_MODE=1` - Disables hardware-accelerated compositing
-- `WEBKIT_DISABLE_DMABUF_RENDERER=1` - Disables DMABUF renderer (common GBM error cause)
+- `WEBKIT_DISABLE_DMABUF_RENDERER=1` — Disables the DMABUF renderer (common GBM error cause) without forcing full software compositing
+
+User-set values are never overwritten.
+
+### Opt-in safe graphics (stability over speed)
+
+Software compositing avoids some driver bugs but is much slower on low-power CPUs
+(for example Intel N-series). It is **not** enabled by default.
+
+```bash
+export JEAN_SAFE_GRAPHICS=1
+# equivalent direct override:
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+```
 
 ### Optional X11 Backend Force
 
-If Wayland causes issues, Jean can force X11 backend (requires manual override):
+If Wayland causes issues, force X11 (non-AppImage only):
 
-- `GDK_BACKEND=x11` - Forces GTK to use X11 instead of Wayland
+```bash
+export JEAN_FORCE_X11=1
+```
 
-These fixes are applied in `src-tauri/src/lib.rs` before Tauri initialization.
+This sets `GDK_BACKEND=x11` when not already set. AppImage runs ignore `JEAN_FORCE_X11`
+because AppRun/apprun-hooks own the backend choice.
 
 ---
 
 ## Manual Overrides
 
-If automatic fixes cause performance issues (slower rendering), you can override them:
-
-### Force Wayland (if X11 fallback isn't needed)
+### Re-enable DMABUF / full GPU path (may cause GBM errors)
 
 ```bash
-export JEAN_FORCE_X11=0
+export WEBKIT_DISABLE_DMABUF_RENDERER=0
+export WEBKIT_DISABLE_COMPOSITING_MODE=0
 ```
 
-### Re-enable GPU Compositing (risky - may cause GBM errors)
+### Prefer maximum stability (software compositing)
 
 ```bash
-export WEBKIT_DISABLE_COMPOSITING_MODE=0
-export WEBKIT_DISABLE_DMABUF_RENDERER=0
+export JEAN_SAFE_GRAPHICS=1
 ```
 
 ### Alternative: NVIDIA-specific Fixes
@@ -103,6 +170,8 @@ If issues persist on NVIDIA hardware:
 
 ```bash
 export __NV_DISABLE_EXPLICIT_SYNC=1
+# or full safe mode:
+export JEAN_SAFE_GRAPHICS=1
 ```
 
 ### Software Rendering (last resort)
@@ -111,6 +180,49 @@ export __NV_DISABLE_EXPLICIT_SYNC=1
 export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=softpipe
 ```
+
+---
+
+---
+
+## macOS: Blurry text on external monitors
+
+**Symptoms:**
+- Jean text looks soft/fuzzy on an external display but sharp on the built-in Retina panel
+- Blurriness appears or worsens after dragging Jean between displays
+- Other native apps may look fine while Jean looks soft
+
+**Common causes (layered):**
+
+1. **App zoom ≠ 100%** — Non-100% webview zoom on a 1× external LCD produces non-integer glyph rasterization and soft text. Jean defaults to 100%.
+2. **macOS display scaling** — “Looks like” resolutions that aren’t true HiDPI force the whole desktop (including WKWebView) through fractional scaling.
+3. **Font smoothing** — Forced grayscale anti-aliasing is softer on low-PPI external LCDs than on Retina.
+4. **Window transparency / vibrancy** — Translucent + blur materials can add an extra soft pass over content.
+
+**What to try in Jean (quickest first):**
+
+1. **Settings → Appearance → Desktop zoom level → 100%** (or `Cmd+0`). Prefer 100% on external monitors; use UI/chat font scaling if you need larger text without page zoom. Jean may show a one-time toast on 1× displays when zoom ≠ 100% with a **Use 100%** action.
+2. Turn **Window transparency** off (same pane) if it is enabled. Jean starts **opaque by default**; vibrancy is opt-in only.
+3. Move Jean fully onto the external display, then toggle zoom 100% → 90% → 100% once so the webview rebuilds its backing store after a display change (Jean also re-applies zoom on scale-factor changes automatically).
+
+**macOS system checks:**
+
+1. **System Settings → Displays** for the external monitor: prefer native resolution or a labeled **HiDPI** option when available. Avoid odd scaled “Looks like” sizes when possible.
+2. Confirm cable/adapter is driving the full resolution (some hubs force lower modes).
+3. Optional system font smoothing (logout required; affects all apps):
+
+```bash
+# Stronger smoothing (try 1–3). 0 disables.
+defaults -currentHost write -g AppleFontSmoothing -int 2
+```
+
+**Engineering notes:**
+
+- Native zoom is applied via `getCurrentWebview().setZoom()` in `src/hooks/use-zoom.ts`.
+- On display scale changes, Jean re-applies zoom (bounce through 1.0 when target ≠ 100%) so WKWebView refreshes its layer after multi-monitor moves.
+- CSS uses `-webkit-font-smoothing: antialiased` on HiDPI, and `auto` on 1× displays (`src/App.css`).
+- Main window config is opaque with empty `windowEffects` (`src-tauri/tauri.conf.json`); `set_window_vibrancy` enables translucency only when the Appearance preference is on.
+- Soft-text tip: `useExternalDisplayZoomTip` + `has_seen_external_display_zoom_tip` preference.
 
 ---
 
@@ -148,8 +260,8 @@ export GALLIUM_DRIVER=softpipe
 ### NVIDIA GPUs
 
 - **Most Affected:** Higher frequency of GBM buffer errors
-- **Known Workarounds:** `WEBKIT_DISABLE_COMPOSITING_MODE=1` is most reliable
-- **Performance Impact:** Software rendering is noticeably slower than GPU-accelerated
+- **Known Workarounds:** `JEAN_SAFE_GRAPHICS=1` (or `WEBKIT_DISABLE_COMPOSITING_MODE=1`) is most reliable
+- **Performance Impact:** Software compositing is noticeably slower than GPU-accelerated — only enable when needed
 - **Alternative:** Consider using older NVIDIA drivers or switching to X11
 
 ### AMD/Intel GPUs
@@ -157,13 +269,14 @@ export GALLIUM_DRIVER=softpipe
 - **Generally Less Affected:** Fewer reported GBM errors
 - **Compositor Support:** Better Wayland compositor compatibility
 - **Transparency:** Usually works without special configuration
+- **Performance:** Keep GPU compositing enabled (default). Full software compositing can peg low-power Intel CPUs during chat streaming (see [#129](https://github.com/coollabsio/jean/issues/129))
 
 ### Desktop Environments
 
 **GNOME (Wayland):**
 
 - **Issue:** Wayland's lack of transparent window decorations
-- **Solution:** Automatic X11 backend fallback or `JEAN_FORCE_X11=0`
+- **Solution:** Prefer Wayland by default; use `JEAN_FORCE_X11=1` only if transparency/compositing fails
 
 **KDE Plasma (Wayland):**
 
@@ -186,6 +299,8 @@ After making changes, test with:
 # Clear environment and restart Jean
 unset WEBKIT_DISABLE_COMPOSITING_MODE
 unset WEBKIT_DISABLE_DMABUF_RENDERER
+unset JEAN_SAFE_GRAPHICS
+unset JEAN_FORCE_X11
 unset GDK_BACKEND
 ./jean
 ```
