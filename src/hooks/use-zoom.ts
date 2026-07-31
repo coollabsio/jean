@@ -22,14 +22,7 @@ function findNearestTickIndex(zoom: number): number {
   return closest
 }
 
-/**
- * Apply UI zoom.
- *
- * Native desktop uses WKWebView/WebView2 page zoom. Fractional zoom +
- * multi-monitor scale factors is a common source of soft/blurry text on
- * macOS external displays, so callers re-apply this when the window's
- * scale factor changes.
- */
+/** Apply UI zoom when the saved preference changes. */
 async function applyZoom(scaleFactor: number) {
   if (!isNativeApp()) {
     const root = document.documentElement
@@ -50,31 +43,6 @@ async function applyZoom(scaleFactor: number) {
   }
 }
 
-/**
- * WKWebView can keep a stale backing-store scale after the window moves
- * between a Retina laptop panel and an external display. Forcing zoom to
- * 1 first, then back to the target, rebuilds the layer at the new DPR.
- */
-async function reapplyNativeZoom(scaleFactor: number) {
-  if (!isNativeApp()) {
-    await applyZoom(scaleFactor)
-    return
-  }
-
-  try {
-    const { getCurrentWebview } = await import('@tauri-apps/api/webview')
-    const webview = getCurrentWebview()
-    // Only bounce through 1 when the target isn't already 1 — avoids a
-    // flash for users already at 100% while still refreshing the surface.
-    if (Math.abs(scaleFactor - 1) > 0.001) {
-      await webview.setZoom(1)
-    }
-    await webview.setZoom(scaleFactor)
-  } catch (error) {
-    console.error('Failed to re-apply zoom after scale change:', error)
-  }
-}
-
 export function useZoom() {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
@@ -91,44 +59,63 @@ export function useZoom() {
     void applyZoom(zoomLevel / 100)
   }, [zoomLevel])
 
-  // Re-apply zoom when the window moves between displays with different
-  // scale factors (classic macOS multi-monitor blur source for webviews).
+  // A native display-scale event is the reliable signal that the window moved
+  // between monitors. Do not use resize/devicePixelRatio here: setZoom() can
+  // change both and feed the zoom operation back into itself.
   useEffect(() => {
     if (!isNativeApp()) return
 
     const scaleFactor = zoomLevel / 100
     let unlisten: (() => void) | undefined
     let cancelled = false
-    let lastDpr = window.devicePixelRatio
+    let refreshing = false
+    let lastDisplayScale: number | undefined
 
     void (async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window')
         if (cancelled) return
-        unlisten = await getCurrentWindow().onScaleChanged(() => {
-          lastDpr = window.devicePixelRatio
-          void reapplyNativeZoom(scaleFactor)
+
+        unlisten = await getCurrentWindow().onScaleChanged(event => {
+          const displayScale = event.payload.scaleFactor
+          if (
+            cancelled ||
+            refreshing ||
+            Math.abs(scaleFactor - 1) < 0.001 ||
+            displayScale === lastDisplayScale
+          ) {
+            return
+          }
+
+          lastDisplayScale = displayScale
+          refreshing = true
+
+          void (async () => {
+            try {
+              const { getCurrentWebview } = await import(
+                '@tauri-apps/api/webview'
+              )
+              const webview = getCurrentWebview()
+              await webview.setZoom(1)
+              await webview.setZoom(scaleFactor)
+            } catch (error) {
+              console.error(
+                'Failed to re-apply zoom after display scale change:',
+                error
+              )
+            } finally {
+              refreshing = false
+            }
+          })()
         })
       } catch (error) {
         console.error('Failed to listen for display scale changes:', error)
       }
     })()
 
-    // Fallback: some WebKit builds update devicePixelRatio without a clean
-    // Tauri scale event (e.g. after sleep/wake with external monitors).
-    // Only re-apply when DPR actually changes — not on every window resize.
-    const onWindowResize = () => {
-      const nextDpr = window.devicePixelRatio
-      if (Math.abs(nextDpr - lastDpr) < 0.001) return
-      lastDpr = nextDpr
-      void reapplyNativeZoom(scaleFactor)
-    }
-    window.addEventListener('resize', onWindowResize)
-
     return () => {
       cancelled = true
       unlisten?.()
-      window.removeEventListener('resize', onWindowResize)
     }
   }, [zoomLevel])
 
