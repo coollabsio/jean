@@ -1,15 +1,39 @@
-import { useState } from 'react'
-import { GitBranch, GitFork, Loader2, Plus, Settings } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Check,
+  ChevronsUpDown,
+  GitBranch,
+  GitFork,
+  Loader2,
+  Plus,
+  Settings,
+  Star,
+} from 'lucide-react'
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
+import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import {
   normalizeRunScripts,
+  useProjectRemotes,
   type JeanConfig,
   type ProjectRemote,
 } from '@/services/projects'
@@ -21,10 +45,20 @@ export interface QuickActionsTabProps {
   isCreating: boolean
   projectId: string | null
   jeanConfig: JeanConfig | null | undefined
-  /** Git remotes of the project, origin first. */
+  /**
+   * Fallback remotes (usually for the default branch). When `projectPath` is
+   * set, remotes are re-queried for the *selected* base branch so multi-remote
+   * cards only offer remotes that actually have that branch.
+   */
   remotes?: ProjectRemote[]
+  /** Absolute path of the project repo (for remotes-with-branch lookup). */
+  projectPath?: string | null
   /** Project default branch, used as the base branch on every remote. */
   defaultBranch?: string
+  /** Remote (or local fallback) branches available as base for new worktrees. */
+  branches?: string[]
+  /** True while remote branches are being fetched. */
+  isLoadingBranches?: boolean
 }
 
 const INVALID_BRANCH_CHAR = /[\s:?*~^[\\]/
@@ -50,20 +84,120 @@ export function QuickActionsTab({
   projectId,
   jeanConfig,
   remotes,
+  projectPath,
   defaultBranch,
+  branches = [],
+  isLoadingBranches = false,
 }: QuickActionsTabProps) {
   const [customBranchName, setCustomBranchName] = useState('')
+  const [selectedBaseBranch, setSelectedBaseBranch] = useState(
+    defaultBranch ?? ''
+  )
+  const [baseBranchOpen, setBaseBranchOpen] = useState(false)
   const setupScript = jeanConfig?.scripts.setup
   const runScripts = normalizeRunScripts(jeanConfig?.scripts.run)
+
+  const { data: preferences } = usePreferences()
+  const patchPreferences = usePatchPreferences()
+  const favoriteKeys = preferences?.favorite_base_branches ?? []
+  const favoritePrefix = projectId ? `${projectId}:` : null
+  const starredBranches = useMemo(
+    () =>
+      new Set(
+        favoritePrefix
+          ? favoriteKeys
+              .filter(key => key.startsWith(favoritePrefix))
+              .map(key => key.slice(favoritePrefix.length))
+          : []
+      ),
+    [favoriteKeys, favoritePrefix]
+  )
 
   const trimmedBranchName = customBranchName.trim()
   const isInvalid = isInvalidBranchName(trimmedBranchName)
 
+  // Keep selection in sync when the project default arrives/changes, and when
+  // the fetched branch list no longer includes the current selection.
+  useEffect(() => {
+    setSelectedBaseBranch(prev => {
+      if (defaultBranch && (!prev || prev === defaultBranch)) {
+        return defaultBranch
+      }
+      if (prev && branches.length > 0 && !branches.includes(prev)) {
+        return defaultBranch && branches.includes(defaultBranch)
+          ? defaultBranch
+          : (branches[0] ?? prev)
+      }
+      if (!prev && defaultBranch) return defaultBranch
+      if (!prev && branches.length > 0) return branches[0] ?? ''
+      return prev
+    })
+  }, [defaultBranch, branches])
+
+  const effectiveBaseBranch =
+    selectedBaseBranch || defaultBranch || undefined
+
+  // Remotes that actually have the *selected* base branch fetched. Parent may
+  // pass default-branch remotes as a fallback while this query loads.
+  const { data: remotesForSelectedBase } = useProjectRemotes(
+    projectPath,
+    effectiveBaseBranch
+  )
+  const activeRemotes =
+    remotesForSelectedBase && remotesForSelectedBase.length > 0
+      ? remotesForSelectedBase
+      : (remotes ?? [])
+
   // With several remotes (e.g. upstream + fork) the single "New Worktree"
   // action is ambiguous, so offer one explicit start point per remote instead.
   const remoteOptions =
-    defaultBranch && remotes && remotes.length > 1 ? remotes : []
+    effectiveBaseBranch && activeRemotes.length > 1 ? activeRemotes : []
   const hasRemoteOptions = remoteOptions.length > 0
+  const remoteNameSet = useMemo(
+    () => new Set(remoteOptions.map(r => r.name)),
+    [remoteOptions]
+  )
+
+  // Options for the combobox: ensure default is present even if fetch lags.
+  // Multi-remote cards prefix the remote themselves, so only short names go
+  // in the picker there (skip "fork/feature" style entries).
+  // Starred branches sort to the top, then alphabetical.
+  const branchOptions = useMemo(() => {
+    const set = new Set(branches)
+    if (defaultBranch) set.add(defaultBranch)
+    if (selectedBaseBranch) set.add(selectedBaseBranch)
+    let options = Array.from(set)
+    if (hasRemoteOptions) {
+      options = options.filter(b => {
+        const slash = b.indexOf('/')
+        if (slash === -1) return true
+        return !remoteNameSet.has(b.slice(0, slash))
+      })
+    }
+    return options.sort((a, b) => {
+      const aStar = starredBranches.has(a) ? 0 : 1
+      const bStar = starredBranches.has(b) ? 0 : 1
+      if (aStar !== bStar) return aStar - bStar
+      return a.localeCompare(b)
+    })
+  }, [
+    branches,
+    defaultBranch,
+    selectedBaseBranch,
+    hasRemoteOptions,
+    remoteNameSet,
+    starredBranches,
+  ])
+
+  const toggleStarredBranch = (branch: string) => {
+    if (!projectId) return
+    const key = `${projectId}:${branch}`
+    patchPreferences.mutate({
+      favorite_base_branches: favoriteKeys.includes(key)
+        ? favoriteKeys.filter(favorite => favorite !== key)
+        : [...favoriteKeys, key],
+    })
+  }
 
   const handleRunClick = () => {
     if (!projectId) return
@@ -75,7 +209,10 @@ export function QuickActionsTab({
 
   const handleCreateClick = (baseBranch?: string) => {
     if (isInvalid) return
-    onCreateWorktree(trimmedBranchName || undefined, baseBranch)
+    onCreateWorktree(
+      trimmedBranchName || undefined,
+      baseBranch ?? effectiveBaseBranch
+    )
     setCustomBranchName('')
   }
 
@@ -83,8 +220,117 @@ export function QuickActionsTab({
   // "N" shortcut so both keyboard paths pick the same start point.
   const primaryRemote = remoteOptions[0]
   const primaryBaseBranch = primaryRemote
-    ? `${primaryRemote.name}/${defaultBranch}`
-    : undefined
+    ? `${primaryRemote.name}/${effectiveBaseBranch ?? defaultBranch}`
+    : effectiveBaseBranch
+
+  const baseBranchPicker = (
+    <div className="mt-1 w-full max-w-[200px] flex flex-col items-center gap-0.5">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        Base branch
+      </span>
+      <Popover open={baseBranchOpen} onOpenChange={setBaseBranchOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            role="combobox"
+            aria-expanded={baseBranchOpen}
+            aria-label="Base branch"
+            disabled={isCreating}
+            className={cn(
+              'w-full flex items-center gap-1.5 px-2 py-1 text-xs rounded border border-border bg-background',
+              'hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring',
+              'disabled:opacity-50'
+            )}
+          >
+            <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="truncate flex-1 text-left font-mono">
+              {isLoadingBranches && !effectiveBaseBranch
+                ? 'Loading…'
+                : (effectiveBaseBranch ?? 'Select branch')}
+            </span>
+            <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-50" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="p-0 w-[220px]"
+          align="center"
+          onWheel={e => e.stopPropagation()}
+        >
+          <Command>
+            <CommandInput placeholder="Search branches..." />
+            <CommandList onWheel={e => e.stopPropagation()}>
+              <CommandEmpty>
+                {isLoadingBranches ? 'Loading branches…' : 'No branches found.'}
+              </CommandEmpty>
+              <CommandGroup>
+                {branchOptions.map(branch => {
+                  const isStarred = starredBranches.has(branch)
+                  return (
+                    <CommandItem
+                      key={branch}
+                      value={branch}
+                      onSelect={() => {
+                        // Use the closed-over name: cmdk lowercases the onSelect arg.
+                        setSelectedBaseBranch(branch)
+                        setBaseBranchOpen(false)
+                      }}
+                      className="pr-1"
+                    >
+                      <Check
+                        className={cn(
+                          'mr-2 h-3.5 w-3.5 shrink-0',
+                          effectiveBaseBranch === branch
+                            ? 'opacity-100'
+                            : 'opacity-0'
+                        )}
+                      />
+                      <span className="font-mono text-xs truncate flex-1 min-w-0">
+                        {branch}
+                      </span>
+                      {projectId && (
+                        <button
+                          type="button"
+                          className={cn(
+                            '-my-0.5 -mr-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded',
+                            'text-muted-foreground transition-colors',
+                            'hover:bg-muted hover:text-foreground',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                          )}
+                          aria-label={
+                            isStarred
+                              ? `Unstar ${branch}`
+                              : `Star ${branch}`
+                          }
+                          aria-pressed={isStarred}
+                          onClick={event => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            toggleStarredBranch(branch)
+                          }}
+                          onPointerDown={event => {
+                            // Prevent cmdk from selecting the item on press.
+                            event.preventDefault()
+                            event.stopPropagation()
+                          }}
+                        >
+                          <Star
+                            className={cn(
+                              'h-3.5 w-3.5',
+                              isStarred && 'fill-yellow-500 text-yellow-500'
+                            )}
+                          />
+                        </button>
+                      )}
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
 
   const branchNameInput = (
     <>
@@ -116,13 +362,13 @@ export function QuickActionsTab({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full max-w-xl">
         {hasRemoteOptions ? (
           remoteOptions.map((remote, index) => {
-            const baseBranch = `${remote.name}/${defaultBranch}`
+            const baseBranch = `${remote.name}/${effectiveBaseBranch ?? defaultBranch}`
             const RemoteIcon = index === 0 ? Plus : GitFork
             return (
               <button
                 key={remote.name}
                 onClick={() => handleCreateClick(baseBranch)}
-                disabled={isCreating || isInvalid}
+                disabled={isCreating || isInvalid || !effectiveBaseBranch}
                 className={cn(
                   'relative flex flex-col items-center justify-center gap-3 sm:gap-4 p-4 sm:p-8 sm:h-full rounded-xl text-sm transition-colors',
                   'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
@@ -208,6 +454,7 @@ export function QuickActionsTab({
                   </span>
                 )}
               </div>
+              {baseBranchPicker}
               {branchNameInput}
               <button
                 onClick={() => handleCreateClick()}
@@ -229,9 +476,10 @@ export function QuickActionsTab({
         )}
       </div>
 
-      {/* Shared branch name for the per-remote actions */}
+      {/* Shared base branch + branch name for the per-remote actions */}
       {hasRemoteOptions && (
-        <div className="flex flex-col items-center gap-1 mt-6">
+        <div className="flex flex-col items-center gap-2 mt-6">
+          {baseBranchPicker}
           {branchNameInput}
         </div>
       )}

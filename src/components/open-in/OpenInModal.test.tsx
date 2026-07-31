@@ -3,6 +3,8 @@ import { render, screen } from '@/test/test-utils'
 import { OpenInModal } from './OpenInModal'
 
 const localBackendState = vi.hoisted(() => ({ value: true }))
+const nativeOpenAllowedState = vi.hoisted(() => ({ value: false }))
+const remoteEditorLocallyState = vi.hoisted(() => ({ value: false }))
 
 const mocks = vi.hoisted(() => ({
   setOpenInModalOpen: vi.fn(),
@@ -77,7 +79,16 @@ vi.mock('@/services/preferences', () => ({
 
 vi.mock('@/lib/environment', () => ({
   isLocalBackend: () => localBackendState.value,
-  isNativeApp: () => localBackendState.value,
+  isNativeApp: () =>
+    localBackendState.value || remoteEditorLocallyState.value,
+  canOpenNativeApps: () =>
+    localBackendState.value || nativeOpenAllowedState.value,
+  canOpenRemoteEditorLocally: () => remoteEditorLocallyState.value,
+  canOpenInEditor: () =>
+    localBackendState.value ||
+    nativeOpenAllowedState.value ||
+    remoteEditorLocallyState.value,
+  isNativeOpenAllowed: () => nativeOpenAllowedState.value,
 }))
 
 vi.mock('@/lib/platform', () => ({
@@ -159,10 +170,14 @@ describe('OpenInModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localBackendState.value = true
+    nativeOpenAllowedState.value = false
+    remoteEditorLocallyState.value = false
   })
 
-  it('hides Finder/editor/terminal in browser/headless mode', async () => {
+  it('hides Finder/editor/terminal in browser/headless mode without native open', async () => {
     localBackendState.value = false
+    nativeOpenAllowedState.value = false
+    remoteEditorLocallyState.value = false
 
     render(<OpenInModal />)
 
@@ -172,9 +187,39 @@ describe('OpenInModal', () => {
     expect(screen.queryByText('Ghostty')).not.toBeInTheDocument()
   })
 
-  it('hides Finder/editor/terminal on remote connections', async () => {
-    // Native shell with a remote Jean backend: local apps target the wrong machine.
+  it('shows Finder/editor/terminal when the backend allows native open', async () => {
+    // Browser or remote client against a WSL/--allow-native-open headless server.
     localBackendState.value = false
+    nativeOpenAllowedState.value = true
+    remoteEditorLocallyState.value = false
+
+    render(<OpenInModal />)
+
+    expect(await screen.findByText('Zed')).toBeInTheDocument()
+    expect(screen.getByText('Finder')).toBeInTheDocument()
+    expect(screen.getByText('Ghostty')).toBeInTheDocument()
+  })
+
+  it('shows Zed with E shortcut on remote native connections (local ssh:// open)', async () => {
+    // Native shell + remote Jean: editor remaps to local Zed; Finder/terminal stay host-side.
+    localBackendState.value = false
+    nativeOpenAllowedState.value = false
+    remoteEditorLocallyState.value = true
+
+    render(<OpenInModal />)
+
+    expect(await screen.findByText('Zed')).toBeInTheDocument()
+    expect(screen.getByText('E')).toBeInTheDocument()
+    expect(screen.getByText('GitHub')).toBeInTheDocument()
+    expect(screen.queryByText('Finder')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ghostty')).not.toBeInTheDocument()
+  })
+
+  it('hides Finder/terminal on remote connections without native open or local editor', async () => {
+    // Pure browser/web remote without --allow-native-open.
+    localBackendState.value = false
+    nativeOpenAllowedState.value = false
+    remoteEditorLocallyState.value = false
 
     render(<OpenInModal />)
 

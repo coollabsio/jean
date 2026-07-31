@@ -1,6 +1,14 @@
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import { normalizeToolCallForDisplay, ToolCallInline } from './ToolCallInline'
+import {
+  extractJeanMcpBareToolName,
+  formatJeanMcpToolLabel,
+  isJeanMcpToolName,
+  normalizeToolCallForDisplay,
+  StackedGroup,
+  TaskCallInline,
+  ToolCallInline,
+} from './ToolCallInline'
 import type { ComponentProps } from 'react'
 import type * as InlineFileDiffModule from './InlineFileDiff'
 
@@ -138,6 +146,79 @@ describe('ToolCallInline', () => {
     expect(screen.getByText('Bash')).toBeInTheDocument()
     expect(screen.getByText('date')).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+  })
+
+  it('renders bash/shell stdout in the expanded tool body (issue #572)', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-bash-with-output',
+          name: 'Bash',
+          input: { command: 'cd /tmp; ls -la' },
+          output:
+            'exit: 0\ntotal 8\ndrwxr-xr-x 2 root root 4096 Jul 1 12:00 .\n',
+        }}
+      />
+    )
+
+    // Collapsed row still shows the command
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+    expect(screen.getByText('cd /tmp; ls -la')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    // Expanded body must surface the actual command return, not only `$ command`
+    expect(screen.getByText('Output:')).toBeInTheDocument()
+    expect(screen.getByText(/total 8/)).toBeInTheDocument()
+    expect(screen.getByText(/\$ cd \/tmp; ls -la/)).toBeInTheDocument()
+  })
+
+  it('renders shell_command stdout the same way as Bash', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-commandcode-shell-success',
+          name: 'shell_command',
+          input: { command: 'deploy' },
+          output: 'deployed revision abc123\n',
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('Output:')).toBeInTheDocument()
+    expect(screen.getByText(/deployed revision abc123/)).toBeInTheDocument()
+  })
+
+  it.each([
+    'Bash',
+    'shell_command',
+    'run_terminal_command',
+    'Shell',
+    'shell',
+    'execute',
+  ])('renders %s without a variant through the Bash renderer', name => {
+    const output = `stdout from ${name}`
+    const { unmount } = render(
+      <ToolCallInline
+        toolCall={{
+          id: `tool-${name}`,
+          name,
+          input: { command: 'printf hello' },
+          output,
+        }}
+      />
+    )
+
+    expect(screen.getByText('Bash')).toBeInTheDocument()
+    expect(screen.getByText('printf hello')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText(output)).toBeInTheDocument()
+    expect(screen.getAllByText('Output:')).toHaveLength(1)
+    unmount()
   })
 
   it('renders additional Command Code snake_case tools without the unhandled fallback', () => {
@@ -320,5 +401,383 @@ describe('normalizeToolCallForDisplay', () => {
     expect(screen.getByText('Grep')).toBeInTheDocument()
     expect(screen.getByText('"needle" in /tmp')).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+  })
+
+  it('renders CodexWebSearch with query detail instead of blank completed', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'ws-1',
+          name: 'CodexWebSearch',
+          input: {
+            query: 'tauri v2 plugins',
+            results: [{ title: 'Tauri docs', url: 'https://v2.tauri.app' }],
+          },
+          output: 'completed',
+        }}
+      />
+    )
+
+    expect(screen.getByText('Web Search')).toBeInTheDocument()
+    expect(screen.getByText('tauri v2 plugins')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText(/Query: tauri v2 plugins/)).toBeInTheDocument()
+    expect(screen.getByText(/Tauri docs/)).toBeInTheDocument()
+    // Placeholder "completed" must not appear as useful content
+    expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Output:')).not.toBeInTheDocument()
+  })
+
+  it('renders CodexWebSearch openPage action url as detail', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'ws-2',
+          name: 'CodexWebSearch',
+          input: {
+            query: '',
+            action: { type: 'openPage', url: 'https://example.com/docs' },
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('Web Search')).toBeInTheDocument()
+    expect(screen.getByText('https://example.com/docs')).toBeInTheDocument()
+  })
+
+  it('renders CodexImageView path instead of blank completed', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'img-1',
+          name: 'CodexImageView',
+          input: { path: '/tmp/screenshots/ui.png' },
+          output: 'completed',
+        }}
+      />
+    )
+
+    expect(screen.getByText('Image View')).toBeInTheDocument()
+    expect(screen.getByText('ui.png')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('/tmp/screenshots/ui.png')).toBeInTheDocument()
+    expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument()
+  })
+
+  it('surfaces a detail field for unhandled tools when available', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'dyn-1',
+          name: 'DynamicToolCall:lookup',
+          input: { query: 'session recovery' },
+          output: 'completed',
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText('DynamicToolCall:lookup (unhandled tool)')
+    ).toBeInTheDocument()
+    expect(screen.getByText('session recovery')).toBeInTheDocument()
+  })
+
+  it('renders Jean MCP tools via use_tool wrapper without unhandled fallback', () => {
+    // Matches issue #573 screenshot: use_tool({ tool_name, tool_input })
+    const cases = [
+      {
+        id: 'jean-ctx',
+        tool_name: 'jean_get_current_context',
+        tool_input: {},
+        label: 'Jean: Get Current Context',
+      },
+      {
+        id: 'jean-projects',
+        tool_name: 'jean_list_projects',
+        tool_input: {},
+        label: 'Jean: List Projects',
+      },
+      {
+        id: 'jean-worktrees',
+        tool_name: 'jean_list_worktrees',
+        tool_input: { projectId: 'b11f5add-ad7a-487c-b236-356ca6b4f18e' },
+        label: 'Jean: List Worktrees',
+        detail: 'project b11f5add',
+      },
+      {
+        id: 'jean-session',
+        tool_name: 'jean_create_session',
+        tool_input: {
+          backend: 'codex',
+          name: 'pg-moderation-verify',
+          worktreeId: '77a6074b-8035-4bdc-a477-06653f5af4d8',
+        },
+        label: 'Jean: Create Session',
+        detail: 'codex · pg-moderation-verify',
+      },
+    ]
+
+    for (const tc of cases) {
+      const { unmount } = render(
+        <ToolCallInline
+          toolCall={{
+            id: tc.id,
+            name: 'use_tool',
+            input: {
+              tool_name: tc.tool_name,
+              tool_input: tc.tool_input,
+            },
+          }}
+        />
+      )
+
+      expect(screen.getByText(tc.label)).toBeInTheDocument()
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^use_tool$/)).not.toBeInTheDocument()
+      if (tc.detail) {
+        expect(screen.getByText(tc.detail)).toBeInTheDocument()
+      }
+      unmount()
+    }
+  })
+
+  it('renders prefixed Jean tools without unhandled fallback', () => {
+    const names = [
+      'mcp:jean:list_worktrees',
+      'mcp__jean__create_session',
+      'mcp__jean-dev__get_current_context',
+      'jean_list_sessions',
+    ]
+
+    for (const name of names) {
+      const { unmount } = render(
+        <ToolCallInline
+          toolCall={{
+            id: `tool-${name}`,
+            name,
+            input: {},
+          }}
+        />
+      )
+
+      expect(screen.getByText(/^Jean:/)).toBeInTheDocument()
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('still labels true unknowns as unhandled', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'mystery-1',
+          name: 'SomeFutureTool',
+          input: { foo: 'bar' },
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText('SomeFutureTool (unhandled tool)')
+    ).toBeInTheDocument()
+  })
+})
+
+describe('Jean MCP tool helpers', () => {
+  it('extracts bare names from prefixed forms', () => {
+    expect(extractJeanMcpBareToolName('jean_get_current_context')).toBe(
+      'get_current_context'
+    )
+    expect(extractJeanMcpBareToolName('jean-dev_list_projects')).toBe(
+      'list_projects'
+    )
+    expect(extractJeanMcpBareToolName('mcp:jean:list_worktrees')).toBe(
+      'list_worktrees'
+    )
+    expect(extractJeanMcpBareToolName('mcp__jean__create_session')).toBe(
+      'create_session'
+    )
+    expect(
+      extractJeanMcpBareToolName('mcp__jean-dev__get_current_context')
+    ).toBe('get_current_context')
+    expect(extractJeanMcpBareToolName('get_current_context')).toBeNull()
+    expect(extractJeanMcpBareToolName('Bash')).toBeNull()
+    expect(extractJeanMcpBareToolName('mcp__github__search')).toBeNull()
+  })
+
+  it('formats friendly Jean labels', () => {
+    expect(formatJeanMcpToolLabel('jean_get_current_context')).toBe(
+      'Jean: Get Current Context'
+    )
+    expect(formatJeanMcpToolLabel('mcp:jean:create_session')).toBe(
+      'Jean: Create Session'
+    )
+    expect(isJeanMcpToolName('jean_list_projects')).toBe(true)
+    expect(isJeanMcpToolName('Read')).toBe(false)
+  })
+
+  it('unwraps use_tool in normalizeToolCallForDisplay', () => {
+    expect(
+      normalizeToolCallForDisplay('use_tool', {
+        tool_name: 'jean_create_session',
+        tool_input: {
+          backend: 'codex',
+          worktreeId: 'wt-1',
+        },
+      })
+    ).toMatchObject({
+      name: 'jean_create_session',
+      input: { backend: 'codex', worktreeId: 'wt-1' },
+    })
+
+    expect(
+      normalizeToolCallForDisplay('useTool', {
+        toolName: 'list_projects',
+        toolInput: {},
+      })
+    ).toMatchObject({
+      name: 'list_projects',
+      input: {},
+    })
+  })
+})
+
+describe('StackedGroup', () => {
+  it('uses the wrapped Jean tool name in its summary', () => {
+    render(
+      <StackedGroup
+        items={[
+          {
+            type: 'tool',
+            tool: {
+              id: 'wrapped-jean-1',
+              name: 'use_tool',
+              input: {
+                tool_name: 'jean_list_projects',
+                tool_input: {},
+              },
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('1 Jean: List Projects')).toBeInTheDocument()
+    expect(screen.queryByText('1 use_tool')).not.toBeInTheDocument()
+  })
+})
+
+describe('TaskCallInline', () => {
+  it('shows the subagent final report when expanded', () => {
+    render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'task-1',
+          name: 'Task',
+          input: {
+            description: 'Explore auth',
+            prompt: 'Find how auth works',
+            subagent_type: 'Explore',
+          },
+          output:
+            'Findings: auth uses JWT middleware.\n\nEntry point is `src/auth.rs`.',
+        }}
+        subToolCalls={[
+          {
+            id: 'sub-read-1',
+            name: 'Read',
+            input: { file_path: 'src/auth.rs' },
+            parent_tool_use_id: 'task-1',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Task (Explore)')).toBeInTheDocument()
+    expect(screen.getByText('Explore auth')).toBeInTheDocument()
+    expect(screen.queryByText('Report:')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('Report:')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Findings: auth uses JWT middleware/)
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Find how auth works/)).toBeInTheDocument()
+  })
+
+  it('does not render a Report section when output is empty', () => {
+    render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'task-empty',
+          name: 'Task',
+          input: {
+            description: 'Still running',
+            prompt: 'Do research',
+          },
+          output: '   ',
+        }}
+        subToolCalls={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(screen.getByText('Do research')).toBeInTheDocument()
+    expect(screen.queryByText('Report:')).not.toBeInTheDocument()
+  })
+
+  it('labels Agent tool calls as Agent and nests them', () => {
+    render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'agent-1',
+          name: 'Agent',
+          input: {
+            description: 'Nested agent',
+            prompt: 'Delegate work',
+            subagent_type: 'general-purpose',
+          },
+          output: 'Nested agent finished.',
+        }}
+        subToolCalls={[
+          {
+            id: 'agent-nested',
+            name: 'Agent',
+            input: {
+              description: 'Child agent',
+              prompt: 'Child work',
+            },
+            parent_tool_use_id: 'agent-1',
+          },
+        ]}
+        allToolCalls={[
+          {
+            id: 'agent-nested',
+            name: 'Agent',
+            input: {
+              description: 'Child agent',
+              prompt: 'Child work',
+            },
+            parent_tool_use_id: 'agent-1',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Agent (general-purpose)')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Agent (general-purpose)'))
+
+    expect(screen.getByText('Report:')).toBeInTheDocument()
+    expect(screen.getByText('Nested agent finished.')).toBeInTheDocument()
+    // Nested Agent renders as another TaskCallInline row, not a SubToolItem
+    expect(screen.getByText('Child agent')).toBeInTheDocument()
   })
 })

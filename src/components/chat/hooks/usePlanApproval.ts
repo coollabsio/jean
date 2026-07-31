@@ -20,6 +20,7 @@ import type { SessionCardData } from '../session-card-utils'
 
 const THINKING_LEVEL_VALUES = new Set<ThinkingLevel>([
   'off',
+  'adaptive',
   'think',
   'megathink',
   'ultrathink',
@@ -34,6 +35,7 @@ function isThinkingLevel(
 
 const EFFORT_LEVEL_VALUES = new Set<EffortLevel>([
   'off',
+  'adaptive',
   'minimal',
   'low',
   'medium',

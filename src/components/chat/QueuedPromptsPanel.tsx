@@ -11,6 +11,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { isImeComposingEvent } from '@/lib/ime-composition'
 import type { QueuedMessage } from '@/types/chat'
 
 interface QueuedPromptsPanelProps {
@@ -207,6 +208,10 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                       onClick={e => e.stopPropagation()}
                       onKeyDown={e => {
                         e.stopPropagation()
+                        // Don't commit edit when Enter confirms IME composition
+                        if (isImeComposingEvent(e)) {
+                          return
+                        }
                         if (e.key === 'Escape') {
                           e.preventDefault()
                           cancelEditing()

@@ -112,6 +112,7 @@ describe('model option helpers', () => {
   it('offers Claude 1M variants alongside standard context models', () => {
     expect(modelOptions.map(option => option.value)).toEqual([
       'claude-fable-5',
+      'claude-opus-5',
       'claude-sonnet-5',
       'claude-opus-4-8[1m]',
       'claude-opus-4-8',
@@ -126,11 +127,22 @@ describe('model option helpers', () => {
     ])
     expect(normalizeClaudeModel('sonnet')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-fable-5')).toBe('claude-fable-5')
+    expect(normalizeClaudeModel('claude-opus-5')).toBe('claude-opus-5')
     expect(normalizeClaudeModel('claude-sonnet-5')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8')
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
     expect(normalizeClaudeModel('claude-opus-4-6')).toBe('claude-opus-4-6')
     expect(normalizeClaudeModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6')
+    // Custom CLI providers keep Claude Code aliases for ANTHROPIC_DEFAULT_* routing
+    expect(
+      normalizeClaudeModel('sonnet', { preserveProviderAliases: true })
+    ).toBe('sonnet')
+    expect(
+      normalizeClaudeModel('opus', { preserveProviderAliases: true })
+    ).toBe('opus')
+    expect(
+      normalizeClaudeModel('haiku', { preserveProviderAliases: true })
+    ).toBe('haiku')
   })
 
   it('offers GPT 5.6 preview variants in Codex selectors', () => {
@@ -192,14 +204,15 @@ describe('model option helpers', () => {
     ).toEqual(new Set(['gpt-5.6-terra-fast']))
   })
 
-  it('documents Codex questions-tool answers must re-show the plan tool', () => {
+  it('documents Codex plan mode uses proposed_plan and no file writes', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'backend-native interactive question UI'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Codex request_user_input')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'when the current execution mode is plan: after the user answers native `request_user_input`'
+      'when the current execution mode is plan: do not write plan files or code'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('<proposed_plan>')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Every Codex response that contains or revises a plan while the current execution mode is plan'
     )
@@ -324,6 +337,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -339,6 +355,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -481,6 +498,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -496,6 +516,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -617,6 +638,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -633,6 +657,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -746,6 +771,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -761,6 +789,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -876,6 +905,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -891,6 +923,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -1048,6 +1081,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -1063,6 +1099,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -1176,6 +1213,9 @@ describe('preferences service', () => {
         zoom_level: 100,
         custom_cli_profiles: [],
         default_provider: null,
+        custom_codex_providers: [],
+        default_codex_provider: null,
+        custom_pi_providers: [],
         favorite_models: [],
         fast_mode_models: [],
 
@@ -1191,6 +1231,7 @@ describe('preferences service', () => {
         selected_pi_model: 'pi/sonnet',
         selected_grok_model: 'grok/grok-4.5',
         default_codex_reasoning_effort: 'high',
+        default_codex_model_verbosity: 'medium',
         default_grok_reasoning_effort: 'high',
         codex_goal_execution_mode: 'build',
         codex_multi_agent_enabled: false,
@@ -1299,9 +1340,53 @@ describe('preferences service', () => {
 
       await waitFor(() => {
         expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { mobile_zoom_level: 100 },
+          patch: { mobile_zoom_level: 110 },
         })
       })
+    })
+  })
+
+  describe('AppearancePane finished session animation', () => {
+    it('toggles the finished session animation preference', async () => {
+      const { invoke } = await import('@/lib/transport')
+      let storedPreferences = {
+        ...defaultPreferences,
+        finished_session_animation_enabled: true,
+      }
+      vi.mocked(invoke).mockImplementation(async (command, args) => {
+        if (command === 'load_preferences') return storedPreferences
+        if (command === 'patch_preferences') {
+          storedPreferences = {
+            ...storedPreferences,
+            ...(args as { patch: Partial<AppPreferences> }).patch,
+          }
+          return undefined
+        }
+        throw new Error(`Unexpected command ${command}`)
+      })
+
+      const user = userEvent.setup()
+      render(
+        createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          createElement(AppearancePane)
+        )
+      )
+
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Finished session animation',
+      })
+      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+
+      await user.click(switchEl)
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
+          patch: { finished_session_animation_enabled: false },
+        })
+      })
+      expect(switchEl).toHaveAttribute('aria-checked', 'false')
     })
   })
 
@@ -1329,7 +1414,9 @@ describe('preferences service', () => {
         )
       )
 
-      const switchEl = await screen.findByRole('switch')
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Window transparency',
+      })
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
 
       await user.click(switchEl)

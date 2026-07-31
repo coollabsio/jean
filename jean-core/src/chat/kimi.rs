@@ -544,8 +544,7 @@ fn spawn_kimi_acp_host(
     std::fs::create_dir_all(&log_dir)
         .map_err(|error| format!("Failed to create Kimi ACP host log directory: {error}"))?;
     let log_file = log_dir.join(format!("{}-{run_id}.log", options.jean_session_id));
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("Failed to get Jean executable: {error}"))?;
+    let executable = super::detached::current_executable_for_detached_host()?;
     let mut args = vec![
         KIMI_ACP_HOST_ARG.to_string(),
         "--socket".to_string(),

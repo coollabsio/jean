@@ -20,6 +20,7 @@ vi.mock('sonner', () => ({
 
 import {
   canReconnectSession,
+  isSessionRemovalNavigationUnchanged,
   prefetchSessions,
   reconnectNativeCliSession,
 } from './chat'
@@ -30,6 +31,40 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { toast } from 'sonner'
 import { disposeTerminal } from '@/lib/terminal-instances'
 import type { Session } from '@/types/chat'
+
+describe('session removal navigation guard', () => {
+  const navigation = {
+    activeWorktreeId: 'wt-1',
+    activeWorktreePath: '/tmp/wt-1',
+    activeSessionId: 'session-1',
+    selectedProjectId: 'project-1',
+    selectedWorktreeId: 'wt-1',
+  }
+
+  it('allows navigation when selection has not changed', () => {
+    expect(
+      isSessionRemovalNavigationUnchanged(navigation, { ...navigation })
+    ).toBe(true)
+  })
+
+  it('blocks delayed navigation after the user selects another session', () => {
+    expect(
+      isSessionRemovalNavigationUnchanged(navigation, {
+        ...navigation,
+        activeSessionId: 'session-2',
+      })
+    ).toBe(false)
+  })
+
+  it('blocks delayed navigation after the user selects another project', () => {
+    expect(
+      isSessionRemovalNavigationUnchanged(navigation, {
+        ...navigation,
+        selectedProjectId: 'project-2',
+      })
+    ).toBe(false)
+  })
+})
 
 const toastMock = toast as unknown as {
   success: ReturnType<typeof vi.fn>

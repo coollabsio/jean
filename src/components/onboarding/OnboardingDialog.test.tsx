@@ -221,11 +221,44 @@ describe('OnboardingDialog backends', () => {
     expect(onInstall).toHaveBeenCalledOnce()
   })
 
+  async function chooseLocalAndContinue(user: ReturnType<typeof userEvent.setup>) {
+    expect(
+      await screen.findByText('How will you use Jean?')
+    ).toBeInTheDocument()
+    // Local is the default selection
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+  }
+
+  it('starts with local vs remote selection', async () => {
+    const { OnboardingDialog } = await import('./OnboardingDialog')
+    render(<OnboardingDialog />)
+
+    expect(
+      await screen.findByText('How will you use Jean?')
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Local/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Remote/i })).toBeInTheDocument()
+  })
+
+  it('shows remote setup after choosing remote', async () => {
+    const user = userEvent.setup()
+    const { OnboardingDialog } = await import('./OnboardingDialog')
+    render(<OnboardingDialog />)
+
+    await user.click(await screen.findByRole('button', { name: /Remote/i }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(
+      await screen.findByText(/Install jean-server over SSH/i)
+    ).toBeInTheDocument()
+  })
+
   it('installs and authenticates Cursor before continuing to GitHub setup', async () => {
     const user = userEvent.setup()
     const { OnboardingDialog } = await import('./OnboardingDialog')
     render(<OnboardingDialog />)
 
+    await chooseLocalAndContinue(user)
     await user.click(
       await screen.findByRole('checkbox', { name: /cursor cli/i })
     )
@@ -253,6 +286,7 @@ describe('OnboardingDialog backends', () => {
     const { OnboardingDialog } = await import('./OnboardingDialog')
     render(<OnboardingDialog />)
 
+    await chooseLocalAndContinue(user)
     await user.click(
       await screen.findByRole('checkbox', { name: /cursor cli/i })
     )

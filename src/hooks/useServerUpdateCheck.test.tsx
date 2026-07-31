@@ -30,11 +30,15 @@ describe('useServerUpdateCheck', () => {
     invokeMock.mockReset()
     isLocalBackendMock.mockReturnValue(false)
     useUIStore.getState().setPendingServerUpdate(null)
+    useUIStore.getState().setPendingUpdateVersion(null)
+    useUIStore.getState().setUpdateModalVersion(null)
   })
 
   afterEach(() => {
     vi.useRealTimers()
     useUIStore.getState().setPendingServerUpdate(null)
+    useUIStore.getState().setPendingUpdateVersion(null)
+    useUIStore.getState().setUpdateModalVersion(null)
   })
 
   it('stores a sticky pending server update that survives toast-only dismissal', async () => {
@@ -44,6 +48,7 @@ describe('useServerUpdateCheck', () => {
       latestVersion: '1.2.0',
       canUpdate: true,
       reason: null,
+      channel: 'server',
     })
 
     renderHook(() => useServerUpdateCheck())
@@ -60,6 +65,27 @@ describe('useServerUpdateCheck', () => {
     })
   })
 
+  it('opens the desktop update modal for desktop host channel (issue #509)', async () => {
+    invokeMock.mockResolvedValue({
+      updateAvailable: true,
+      currentVersion: '1.0.0',
+      latestVersion: '1.2.0',
+      canUpdate: true,
+      reason: 'Install runs on the host Jean desktop app (native updater)',
+      channel: 'desktop',
+    })
+
+    renderHook(() => useServerUpdateCheck())
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000)
+    })
+
+    expect(useUIStore.getState().pendingServerUpdate).toBeNull()
+    expect(useUIStore.getState().updateModalVersion).toBe('1.2.0')
+    expect(useUIStore.getState().pendingUpdateVersion).toBeNull()
+  })
+
   it('clears sticky state after a successful apply', async () => {
     useUIStore.getState().setPendingServerUpdate({
       latestVersion: '1.2.0',
@@ -67,6 +93,7 @@ describe('useServerUpdateCheck', () => {
       canUpdate: true,
       reason: null,
     })
+    useUIStore.getState().setPendingUpdateVersion('1.2.0')
 
     invokeMock.mockResolvedValue({
       success: true,
@@ -78,6 +105,7 @@ describe('useServerUpdateCheck', () => {
     await applyServerUpdate('1.2.0')
 
     expect(useUIStore.getState().pendingServerUpdate).toBeNull()
+    expect(useUIStore.getState().pendingUpdateVersion).toBeNull()
     expect(invokeMock).toHaveBeenCalledWith('apply_server_update')
   })
 

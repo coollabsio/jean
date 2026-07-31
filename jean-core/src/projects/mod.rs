@@ -1,3 +1,4 @@
+pub mod checkpoints;
 pub mod clickup_client;
 pub mod clickup_config;
 pub mod clickup_link;
@@ -18,6 +19,12 @@ pub mod storage;
 pub mod types;
 
 // Re-export commands for registration in lib.rs
+pub use checkpoints::{
+    analyze_ai_checkpoint_restore, apply_ai_checkpoint_restore_proposal, create_ai_checkpoint,
+    delete_ai_checkpoint, finalize_ai_checkpoint, get_ai_checkpoint, get_ai_checkpoint_diff,
+    list_ai_checkpoints, propose_ai_checkpoint_restore, restore_ai_checkpoint,
+    restore_ai_checkpoint_file, restore_ai_checkpoint_turn,
+};
 pub use clickup_config::*;
 pub use clickup_link::*;
 pub use clickup_tasks::*;

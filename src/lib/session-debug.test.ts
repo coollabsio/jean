@@ -83,7 +83,8 @@ describe('resolveSessionDebugDetails', () => {
     expect(result).toEqual({
       selectedBackend: 'codex',
       selectedModel: 'gpt-5.4-fast',
-      providerDisplay: 'OpenAI',
+      // Project default_provider applies to the resolved session provider label.
+      providerDisplay: 'project-provider',
     })
   })
 
@@ -117,6 +118,18 @@ describe('resolveSessionDebugDetails', () => {
     })
 
     expect(result.selectedBackend).toBe('pi')
+  })
+
+  it('clamps model-implied backend to authenticated/installed backends', () => {
+    // Model implies codex, but only claude is usable (installed+authenticated)
+    const result = resolveSessionDebugDetails({
+      selectedBackend: 'codex',
+      selectedModel: 'gpt-5.4',
+      preferences,
+      installedBackends: ['claude'],
+    })
+
+    expect(result.selectedBackend).toBe('claude')
   })
 
   it('reports xAI as the provider for Grok sessions', () => {

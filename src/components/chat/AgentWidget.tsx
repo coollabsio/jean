@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Loader2,
   ChevronRight,
+  CirclePause,
   Users,
   XCircle,
   X,
@@ -111,11 +112,22 @@ function AgentItem({ agent }: AgentItemProps) {
     <li className="flex items-start gap-2 py-0.5 text-xs">
       <span className="mt-0.5 shrink-0">
         {agent.status === 'completed' ? (
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <CheckCircle2
+            className="h-4 w-4 text-green-500"
+            aria-label="Completed"
+          />
         ) : agent.status === 'errored' ? (
-          <XCircle className="h-4 w-4 text-amber-500" />
+          <XCircle className="h-4 w-4 text-amber-500" aria-label="Errored" />
+        ) : agent.status === 'interrupted' ? (
+          <CirclePause
+            className="h-4 w-4 text-muted-foreground"
+            aria-label="Interrupted"
+          />
         ) : (
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <Loader2
+            className="h-4 w-4 animate-spin text-primary"
+            aria-label="In progress"
+          />
         )}
       </span>
       <span
@@ -123,10 +135,17 @@ function AgentItem({ agent }: AgentItemProps) {
           'text-muted-foreground',
           agent.status === 'completed' &&
             'line-through text-muted-foreground/60',
-          agent.status === 'errored' && 'text-muted-foreground/60'
+          (agent.status === 'errored' || agent.status === 'interrupted') &&
+            'text-muted-foreground/60'
         )}
+        title={agent.message}
       >
         {agent.prompt}
+        {agent.status === 'interrupted' && (
+          <span className="ml-1 text-[10px] uppercase tracking-wide">
+            Interrupted
+          </span>
+        )}
       </span>
     </li>
   )

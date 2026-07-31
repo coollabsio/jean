@@ -554,8 +554,9 @@ export function WorktreeItem({
       await performGitPull({
         worktreeId: worktree.id,
         worktreePath: worktree.path,
-        baseBranch: defaultBranch,
+        baseBranch: worktree.base_branch ?? defaultBranch,
         projectId,
+        remote: worktree.base_remote,
         onMergeConflict: () => {
           selectWorktree(worktree.id)
           setTimeout(() => {
@@ -568,7 +569,15 @@ export function WorktreeItem({
         },
       })
     },
-    [worktree.id, worktree.path, defaultBranch, projectId, selectWorktree]
+    [
+      worktree.id,
+      worktree.path,
+      worktree.base_branch,
+      worktree.base_remote,
+      defaultBranch,
+      projectId,
+      selectWorktree,
+    ]
   )
 
   const handlePush = useCallback(
@@ -762,48 +771,63 @@ export function WorktreeItem({
             isNarrowSidebar ? 'ml-6' : 'ml-9'
           )}
         >
-          {sessionGroups.map(group => (
-            <div key={group.key}>
-              <div className="pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {group.title}{' '}
-                <span className="text-muted-foreground/60">
-                  {group.cards.length}
-                </span>
+          {sessionGroups.map(group => {
+            const groupConfig = statusConfig[group.indicatorStatus]
+            return (
+              <div key={group.key}>
+                <div className="flex items-center gap-1.5 pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <StatusIndicator
+                    status={groupConfig.indicatorStatus}
+                    variant={groupConfig.indicatorVariant}
+                    shape={groupConfig.indicatorShape}
+                    label={group.title}
+                    className="h-1.5 w-1.5 shrink-0"
+                  />
+                  <span>{group.title}</span>
+                  <span className="text-muted-foreground/60">
+                    {group.cards.length}
+                  </span>
+                </div>
+                {group.cards.map(card => {
+                  const config = statusConfig[card.status]
+                  return (
+                    <div
+                      key={card.session.id}
+                      className={cn(
+                        'flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate',
+                        activeSessionId === card.session.id && isSelected
+                          ? 'text-foreground bg-primary/10 font-medium'
+                          : activeSessionId === card.session.id
+                            ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                      )}
+                      onClick={e => {
+                        e.stopPropagation()
+                        handleSessionSelect(card.session.id)
+                      }}
+                      {...middleClickClose(() =>
+                        handleSessionMiddleClose(card.session)
+                      )}
+                    >
+                      <StatusIndicator
+                        status={config.indicatorStatus}
+                        variant={config.indicatorVariant}
+                        shape={config.indicatorShape}
+                        label={config.label}
+                        className="h-1.5 w-1.5 shrink-0"
+                      />
+                      <span
+                        className="truncate text-xs"
+                        title={`${config.label}: ${card.session.name || 'Untitled'}`}
+                      >
+                        {card.session.name || 'Untitled'}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
-              {group.cards.map(card => {
-                const config = statusConfig[card.status]
-                return (
-                  <div
-                    key={card.session.id}
-                    className={cn(
-                      'flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate',
-                      activeSessionId === card.session.id && isSelected
-                        ? 'text-foreground bg-primary/10 font-medium'
-                        : activeSessionId === card.session.id
-                          ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
-                    )}
-                    onClick={e => {
-                      e.stopPropagation()
-                      handleSessionSelect(card.session.id)
-                    }}
-                    {...middleClickClose(() =>
-                      handleSessionMiddleClose(card.session)
-                    )}
-                  >
-                    <StatusIndicator
-                      status={config.indicatorStatus}
-                      variant={config.indicatorVariant}
-                      className="h-1.5 w-1.5 shrink-0"
-                    />
-                    <span className="truncate text-xs">
-                      {card.session.name || 'Untitled'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

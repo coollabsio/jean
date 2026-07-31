@@ -37,7 +37,7 @@ interface LinearItemsTabProps {
   isLoading: boolean
   isRefetching: boolean
   isSearching: boolean
-  error: Error | null
+  error: unknown
   onRefresh: () => void
   selectedIndex: number
   setSelectedIndex: (i: number) => void
@@ -66,6 +66,9 @@ export function LinearItemsTab({
   setSelectedIndex,
   onSelectIssue,
 }: LinearItemsTabProps) {
+  const errorMessage =
+    error instanceof Error ? error.message : String(error ?? '')
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Loaded items section */}
@@ -204,20 +207,20 @@ export function LinearItemsTab({
           </div>
         )}
 
-        {error &&
+        {error != null &&
           (isLinearAuthError(error) ? (
             <LinearAuthError />
           ) : (
             <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
               <AlertCircle className="h-5 w-5 text-destructive mb-2" />
               <span className="text-sm text-muted-foreground">
-                {error.message || 'Failed to load issues'}
+                {errorMessage || 'Failed to load issues'}
               </span>
             </div>
           ))}
 
         {!isLoading &&
-          !error &&
+          error == null &&
           filteredIssues.length === 0 &&
           !isSearching && (
             <div className="flex items-center justify-center py-8">
@@ -231,16 +234,19 @@ export function LinearItemsTab({
             </div>
           )}
 
-        {!isLoading && !error && filteredIssues.length === 0 && isSearching && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-sm text-muted-foreground">
-              Searching Linear...
-            </span>
-          </div>
-        )}
+        {!isLoading &&
+          error == null &&
+          filteredIssues.length === 0 &&
+          isSearching && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">
+                Searching Linear...
+              </span>
+            </div>
+          )}
 
-        {!isLoading && !error && filteredIssues.length > 0 && (
+        {!isLoading && error == null && filteredIssues.length > 0 && (
           <div className="py-1">
             {filteredIssues.map((issue, index) => (
               <button

@@ -7,7 +7,12 @@
 //! - Cursor compat: `~/.cursor/mcp.json` + `<worktree>/.cursor/mcp.json`
 //! - Standard: `<worktree>/.mcp.json` (cwd → git root walk, best-effort cwd only here)
 //!
-//! `disabled_mcp_servers` in config.toml marks servers disabled.
+//! Per-server `enabled = false` marks a server permanently disabled for Jean's
+//! toggle UI. Do **not** treat top-level `disabled_mcp_servers` as permanent:
+//! Jean rewrites that list around each Grok turn to apply session enablement,
+//! then restores the previous value — so residual entries would hide servers
+//! from the MCP picker (showing "None") even when Jean MCP is installed and
+//! enabled in Jean preferences.
 //!
 //! Jean session enablement is applied by syncing `disabled_mcp_servers` before
 //! ACP `session/new`/`session/load`, and by passing enabled server configs as
@@ -23,9 +28,11 @@ use tauri::AppHandle;
 /// Discover MCP servers Grok would load for the given worktree.
 /// Precedence (highest wins on name collision): project grok → user grok →
 /// project .mcp.json → cursor project → cursor user → claude.
+///
+/// `McpServerInfo.disabled` reflects only the per-server `enabled = false`
+/// (or JSON `disabled`/`enabled`) flag — not `disabled_mcp_servers`.
 pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
     let mut by_name: HashMap<String, McpServerInfo> = HashMap::new();
-    let disabled = disabled_mcp_server_names(worktree_path);
 
     // Lowest priority first so higher scopes overwrite.
     if let Some(home) = dirs::home_dir() {
@@ -61,9 +68,6 @@ pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
 
     let mut servers: Vec<McpServerInfo> = by_name.into_values().collect();
     for server in &mut servers {
-        if disabled.contains(&server.name) {
-            server.disabled = true;
-        }
         server.backend = "grok".to_string();
     }
     servers.sort_by(|a, b| a.name.cmp(&b.name));
@@ -252,22 +256,6 @@ pub fn restore_disabled_list(previous: Option<Vec<String>>) -> Result<(), String
 }
 
 // ── internals ──────────────────────────────────────────────────────────
-
-fn disabled_mcp_server_names(worktree_path: Option<&str>) -> HashSet<String> {
-    let mut disabled = HashSet::new();
-    if let Some(home) = dirs::home_dir() {
-        if let Some(list) = read_disabled_list(&home.join(".grok").join("config.toml")) {
-            disabled.extend(list);
-        }
-    }
-    if let Some(wt) = worktree_path {
-        if let Some(list) = read_disabled_list(&PathBuf::from(wt).join(".grok").join("config.toml"))
-        {
-            disabled.extend(list);
-        }
-    }
-    disabled
-}
 
 fn read_disabled_list(path: &Path) -> Option<Vec<String>> {
     let content = std::fs::read_to_string(path).ok()?;
@@ -673,6 +661,11 @@ enabled = true
 
 [mcp_servers.off-server]
 url = "https://example.com/mcp"
+enabled = true
+
+[mcp_servers.hard-off]
+command = "false"
+enabled = false
 "#,
         )
         .unwrap();
@@ -691,7 +684,12 @@ url = "https://example.com/mcp"
         assert!(by_name.contains_key("native"));
         assert!(by_name.contains_key("proj"));
         assert!(by_name.contains_key("off-server"));
+        assert!(by_name.contains_key("hard-off"));
+        // disabled_mcp_servers must NOT mark servers permanently disabled —
+        // Jean rewrites that list per-session and would hide MCP from the UI.
         assert!(!by_name["native"].disabled);
+        assert!(!by_name["off-server"].disabled);
+        assert!(by_name["hard-off"].disabled);
     }
 
     #[test]

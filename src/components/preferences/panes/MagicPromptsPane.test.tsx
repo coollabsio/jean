@@ -23,6 +23,7 @@ vi.mock('@/services/preferences', () => ({
         investigate_advisory_mode: 'plan',
         investigate_linear_issue_mode: 'plan',
         investigate_sentry_issue_mode: 'plan',
+        code_review_fix_mode: 'plan',
         review_comments_mode: 'plan',
         final_review_mode: 'yolo',
         resolve_conflicts_mode: 'yolo',
@@ -61,6 +62,7 @@ vi.mock('@/services/model-catalog', () => ({
     backend === 'claude'
       ? [
           { value: 'claude-fable-5', label: 'Claude Fable 5' },
+          { value: 'claude-opus-5', label: 'Claude Opus 5' },
           { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
         ]
       : [],
@@ -403,6 +405,7 @@ describe('MagicPromptsPane', () => {
             backend: 'codex',
             model: 'gpt-5.6-luna-fast',
             reasoning_effort: 'low',
+            fix_mode: 'plan',
           },
         ],
       })
@@ -453,6 +456,7 @@ describe('MagicPromptsPane', () => {
           investigate_advisory_mode: 'yolo',
           investigate_linear_issue_mode: 'yolo',
           investigate_sentry_issue_mode: 'yolo',
+          code_review_fix_mode: 'plan',
           review_comments_mode: 'plan',
         }),
       })
@@ -484,11 +488,13 @@ describe('MagicPromptsPane', () => {
           backend: 'codex',
           model: 'gpt-5.6-sol',
           reasoning_effort: 'low',
+          fix_mode: 'plan',
         },
         {
           backend: 'claude',
           model: 'claude-fable-5',
           reasoning_effort: 'high',
+          fix_mode: 'yolo',
         },
       ],
     }
@@ -514,6 +520,47 @@ describe('MagicPromptsPane', () => {
         magic_code_review_configs: [
           expect.objectContaining({ reasoning_effort: 'low' }),
           expect.objectContaining({ reasoning_effort: 'low' }),
+        ],
+      })
+    )
+  })
+
+  it('configures plan/yolo mode separately for each code review model', async () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      magic_code_review_configs: [
+        {
+          backend: 'codex',
+          model: 'gpt-5.6-sol',
+          fix_mode: 'plan',
+        },
+        {
+          backend: 'claude',
+          model: 'claude-fable-5',
+          fix_mode: 'plan',
+        },
+      ],
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Code Review' }))
+
+    expect(
+      screen.getByRole('combobox', { name: 'Review 1 mode' })
+    ).toHaveTextContent('Plan')
+    expect(
+      screen.getByRole('combobox', { name: 'Review 2 mode' })
+    ).toHaveTextContent('Plan')
+
+    await user.click(screen.getByRole('combobox', { name: 'Review 2 mode' }))
+    await user.click(screen.getByRole('option', { name: 'Yolo' }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_code_review_configs: [
+          expect.objectContaining({ fix_mode: 'plan' }),
+          expect.objectContaining({ fix_mode: 'yolo' }),
         ],
       })
     )
@@ -572,6 +619,7 @@ describe('MagicPromptsPane', () => {
     const review = screen.getByTestId('magic-code-review-config-0')
     expect(review).toHaveClass('flex-col')
     expect(within(review).getByText('Backend')).toBeInTheDocument()
+    expect(within(review).getByText('Mode')).toBeInTheDocument()
     expect(within(review).getByText('Model')).toBeInTheDocument()
     expect(within(review).getByText('Reasoning')).toBeInTheDocument()
     expect(

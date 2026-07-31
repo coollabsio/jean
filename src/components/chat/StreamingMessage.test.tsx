@@ -113,6 +113,38 @@ describe('StreamingMessage', () => {
     expect(screen.getByText('Plan body')).toBeVisible()
   })
 
+  it('renders YOLO narration as normal text between tools, not a Plan card', () => {
+    const narration =
+      "I'll find the mobile search layout and make the search full-width with the type selector stacked below it."
+
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[
+          { type: 'tool_use', tool_call_id: 'grep-1' },
+          { type: 'text', text: narration },
+          { type: 'tool_use', tool_call_id: 'bash-1' },
+        ]}
+        toolCalls={[
+          {
+            id: 'grep-1',
+            name: 'Grep',
+            input: { pattern: 'input-sticky' },
+          },
+          {
+            id: 'bash-1',
+            name: 'Bash',
+            input: { command: 'ls' },
+          },
+        ]}
+        streamingContent={narration}
+      />
+    )
+
+    expect(screen.getByText(narration)).toBeVisible()
+    expect(screen.queryByText('Plan')).not.toBeInTheDocument()
+  })
+
   it('renders intro text from streamingContent when content blocks only contain plan tools', () => {
     render(
       <StreamingMessage

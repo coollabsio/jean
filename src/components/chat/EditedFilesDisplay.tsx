@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/tooltip'
 import { MessageDiffModal } from './MessageDiffModal'
 import type { EditTool } from './MessageDiffModal'
+import { CheckpointTurnRestoreButton } from './CheckpointTurnRestoreButton'
 
 function isEditTool(
   toolCall: ToolCall
@@ -81,6 +82,7 @@ function codexDiffToPatch(
 interface EditedFilesDisplayProps {
   toolCalls: ToolCall[] | undefined
   worktreePath?: string
+  worktreeId?: string | null
   /**
    * Stable accessor for the full session message list. Used to compute
    * "subsequent edits" lazily when the user opens a diff. Passing a stable
@@ -90,13 +92,17 @@ interface EditedFilesDisplayProps {
    */
   getMessages?: () => ChatMessage[]
   messageIndex?: number
+  /** User message that started this agent turn — enables per-prompt restore. */
+  userMessageId?: string | null
 }
 
 export const EditedFilesDisplay = memo(function EditedFilesDisplay({
   toolCalls,
   worktreePath,
+  worktreeId,
   getMessages,
   messageIndex,
+  userMessageId,
 }: EditedFilesDisplayProps) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
 
@@ -213,6 +219,15 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
           </Tooltip>
         )
       })}
+
+      {userMessageId && (
+        <CheckpointTurnRestoreButton
+          userMessageId={userMessageId}
+          worktreeId={worktreeId}
+          hasFileEdits
+          variant="inline"
+        />
+      )}
 
       {selectedFilePath && (
         <MessageDiffModal

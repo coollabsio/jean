@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useUIStore } from '@/store/ui-store'
+import { QueryClient } from '@tanstack/react-query'
 import {
   addTerminalTabForShortcut,
+  allowsKeybindingRepeat,
+  applyCacheInvalidationKeys,
+  applySessionRenamedToCaches,
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
   closeFocusedTerminalPaneForShortcut,
@@ -15,34 +20,50 @@ import {
   shouldLetPlanDialogHandleAction,
   splitTerminalForShortcut,
   switchActiveTerminalTabByIndexForShortcut,
+  useWindowKeyboardFocusRestore,
 } from './useMainWindowEventListeners'
 import { collectLeafIds } from '@/lib/terminal-split'
+import { chatQueryKeys } from '@/services/chat'
+import { projectsQueryKeys } from '@/services/projects'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
+import type {
+  AllSessionsResponse,
+  Session,
+  WorktreeSessions,
+} from '@/types/chat'
 
-const { mockInvoke, mockListen, mockDisposeTerminal, isNativeAppMock } =
+const { mockInvoke, mockListen, mockDisposeTerminal, mockEnvironment } =
   vi.hoisted(() => ({
     mockInvoke: vi.fn().mockResolvedValue(undefined),
     mockListen: vi.fn().mockResolvedValue(() => {
       /* noop cleanup */
     }),
     mockDisposeTerminal: vi.fn(),
-    isNativeAppMock: vi.fn(() => true),
+    mockEnvironment: {
+      native: true,
+      mobile: false,
+    },
   }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
   listen: mockListen,
+  listenLocal: mockListen,
+}))
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  isNativeApp: () => mockEnvironment.native,
+}))
+
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => mockEnvironment.mobile,
 }))
 
 vi.mock('@/lib/terminal-instances', () => ({
   disposeTerminal: mockDisposeTerminal,
   startHeadless: vi.fn(),
 }))
-
-vi.mock('@/lib/environment', async importOriginal => {
-  const actual = (await importOriginal()) as Record<string, unknown>
-  return { ...actual, isNativeApp: () => isNativeAppMock() }
-})
 
 function focusTerminal() {
   document.body.innerHTML = ''
@@ -75,6 +96,43 @@ function focusPlainSessionTerminal() {
   input.focus()
   return input
 }
+
+describe('useWindowKeyboardFocusRestore', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockEnvironment.native = true
+    mockEnvironment.mobile = false
+    document.body.innerHTML = ''
+    document.body.tabIndex = -1
+    document.body.focus()
+  })
+
+  it.each([
+    ['mobile', true, true],
+    ['web', false, false],
+  ])(
+    'does not focus the chat input after %s activation',
+    (_, native, mobile) => {
+      mockEnvironment.native = native
+      mockEnvironment.mobile = mobile
+
+      const input = document.createElement('textarea')
+      document.body.appendChild(input)
+      const focusInput = () => input.focus()
+      window.addEventListener('focus-chat-input', focusInput)
+
+      const { unmount } = renderHook(() => useWindowKeyboardFocusRestore())
+      window.dispatchEvent(new Event('focus'))
+      vi.runAllTimers()
+
+      expect(document.activeElement).toBe(document.body)
+
+      unmount()
+      window.removeEventListener('focus-chat-input', focusInput)
+      vi.useRealTimers()
+    }
+  )
+})
 
 describe('useMainWindowEventListeners terminal shortcuts', () => {
   beforeEach(() => {
@@ -291,6 +349,7 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       activeTerminalIds: { 'modal-worktree': 'term-1' },
       modalTerminalOpen: { 'modal-worktree': true },
       terminalVisible: true,
+      runningTerminals: new Set(),
     })
 
     expect(closeActiveTerminalTabForShortcut()).toBe(true)
@@ -303,6 +362,64 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
     expect(
       useTerminalStore.getState().modalTerminalOpen['modal-worktree']
     ).toBe(false)
+  })
+
+  it('asks for confirmation instead of killing a running terminal via shortcut (issue #56)', () => {
+    focusTerminal()
+
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'modal-worktree',
+    })
+    useTerminalStore.setState({
+      terminals: {
+        'modal-worktree': [
+          {
+            id: 'term-running',
+            worktreeId: 'modal-worktree',
+            command: 'bun run dev',
+            label: 'dev',
+          },
+        ],
+      },
+      activeTerminalIds: { 'modal-worktree': 'term-running' },
+      modalTerminalOpen: { 'modal-worktree': true },
+      terminalVisible: true,
+      runningTerminals: new Set(['term-running']),
+    })
+
+    const confirmListener = vi.fn()
+    window.addEventListener('confirm-close-terminal', confirmListener)
+
+    expect(closeActiveTerminalTabForShortcut()).toBe(true)
+
+    expect(confirmListener).toHaveBeenCalledTimes(1)
+    const event = confirmListener.mock.calls[0]?.[0] as CustomEvent | undefined
+    expect(event?.detail).toEqual({
+      worktreeId: 'modal-worktree',
+      terminalId: 'term-running',
+    })
+    expect(mockInvoke).not.toHaveBeenCalledWith('stop_terminal', {
+      terminalId: 'term-running',
+    })
+    expect(mockDisposeTerminal).not.toHaveBeenCalled()
+    expect(
+      useTerminalStore.getState().terminals['modal-worktree']
+    ).toHaveLength(1)
+
+    window.removeEventListener('confirm-close-terminal', confirmListener)
+  })
+
+  it('allows key-repeat only for scroll/navigation actions (issue #56)', () => {
+    expect(allowsKeybindingRepeat('scroll_chat_up')).toBe(true)
+    expect(allowsKeybindingRepeat('scroll_chat_down_small')).toBe(true)
+    expect(allowsKeybindingRepeat('next_session')).toBe(true)
+    expect(allowsKeybindingRepeat('previous_session')).toBe(true)
+
+    expect(allowsKeybindingRepeat('close_session_or_worktree')).toBe(false)
+    expect(allowsKeybindingRepeat('new_session')).toBe(false)
+    expect(allowsKeybindingRepeat('cancel_prompt')).toBe(false)
+    expect(allowsKeybindingRepeat('approve_plan')).toBe(false)
   })
 
   it('switches the active terminal tab by index for the modal worktree', () => {
@@ -466,7 +583,7 @@ describe('terminal split-pane shortcuts', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    isNativeAppMock.mockReturnValue(true)
+    mockEnvironment.native = true
     document.body.innerHTML = ''
 
     useChatStore.setState({ activeWorktreeId: 'w1' })
@@ -498,7 +615,7 @@ describe('terminal split-pane shortcuts', () => {
   })
 
   it('does not split on web access (non-native)', () => {
-    isNativeAppMock.mockReturnValue(false)
+    mockEnvironment.native = false
     useTerminalStore.getState().addTerminal('w1')
 
     expect(splitTerminalForShortcut('horizontal')).toBe(false)
@@ -553,5 +670,125 @@ describe('terminal split-pane shortcuts', () => {
     useTerminalStore.getState().addTerminal('w1')
     expect(closeFocusedTerminalPaneForShortcut()).toBe(false)
     expect(mockDisposeTerminal).not.toHaveBeenCalled()
+  })
+})
+
+describe('applySessionRenamedToCaches', () => {
+  const worktreeId = 'wt-1'
+  const sessionId = 'sess-1'
+
+  function seedSessionCaches(queryClient: QueryClient) {
+    const sessions: WorktreeSessions = {
+      worktree_id: worktreeId,
+      sessions: [
+        {
+          id: sessionId,
+          name: 'Session 1',
+          order: 0,
+          created_at: 0,
+          updated_at: 0,
+          messages: [],
+        } as Session,
+      ],
+      active_session_id: sessionId,
+      version: 2,
+    }
+    queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
+    queryClient.setQueryData(
+      [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+      sessions
+    )
+    queryClient.setQueryData(
+      chatQueryKeys.session(sessionId),
+      sessions.sessions[0]
+    )
+    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], {
+      entries: [
+        {
+          project_id: 'p1',
+          project_name: 'Project',
+          worktree_id: worktreeId,
+          worktree_name: 'main',
+          worktree_path: '/tmp/wt',
+          sessions: sessions.sessions,
+        },
+      ],
+    })
+  }
+
+  it('updates base sessions, with-counts, session detail, and all-sessions caches', () => {
+    const queryClient = new QueryClient()
+    seedSessionCaches(queryClient)
+
+    applySessionRenamedToCaches(
+      queryClient,
+      worktreeId,
+      sessionId,
+      'Fix auto naming'
+    )
+
+    const base = queryClient.getQueryData<WorktreeSessions>(
+      chatQueryKeys.sessions(worktreeId)
+    )
+    const withCounts = queryClient.getQueryData<WorktreeSessions>([
+      ...chatQueryKeys.sessions(worktreeId),
+      'with-counts',
+    ])
+    const detail = queryClient.getQueryData<Session>(
+      chatQueryKeys.session(sessionId)
+    )
+    const all = queryClient.getQueryData<AllSessionsResponse>(['all-sessions'])
+
+    expect(base?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(withCounts?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(detail?.name).toBe('Fix auto naming')
+    expect(all?.entries[0]?.sessions[0]?.name).toBe('Fix auto naming')
+  })
+})
+
+describe('applyCacheInvalidationKeys', () => {
+  it('invalidates chat queries and all-sessions for sessions keys', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['sessions'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.all,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['all-sessions'],
+    })
+  })
+
+  it('invalidates projects queries for projects keys', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['projects'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: projectsQueryKeys.all,
+    })
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ['all-sessions'],
+    })
+  })
+
+  it('invalidates both chat and all-sessions when sessions is among multiple keys', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['preferences', 'sessions'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['preferences'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.all,
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['all-sessions'],
+    })
   })
 })

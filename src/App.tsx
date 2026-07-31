@@ -14,11 +14,19 @@ import {
   usesWebSocketBackend,
   type InitialData,
 } from '@/lib/transport'
-import { isNativeApp } from '@/lib/environment'
+import {
+  isLocalBackend,
+  isNativeApp,
+  setNativeOpenAllowed,
+} from '@/lib/environment'
+import { useNativeWindowCloseGuard } from '@/hooks/useNativeWindowCloseGuard'
+import { QuitConfirmationDialog } from '@/components/layout/QuitConfirmationDialog'
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
+import type { Worktree } from '@/types/projects'
 import { initializeCommandSystem } from './lib/commands'
 import { logger } from './lib/logger'
 import { toast } from 'sonner'
@@ -39,6 +47,10 @@ import {
   useOpencodeCliAuth,
 } from './services/opencode-cli'
 import { useUIStore } from './store/ui-store'
+import {
+  resolveInstallPendingAction,
+  shouldOfferUpdateCheck,
+} from './lib/app-update'
 import type { AppPreferences } from './types/preferences'
 import { useChatStore } from './store/chat-store'
 import { useProjectsStore } from './store/projects-store'
@@ -46,6 +58,7 @@ import { useFontSettings } from './hooks/use-font-settings'
 import { usePreventFileDropNavigation } from './hooks/usePreventFileDropNavigation'
 import { useLinuxFileDrop } from './hooks/useLinuxFileDrop'
 import { useZoom } from './hooks/use-zoom'
+import { useExternalDisplayZoomTip } from './hooks/use-external-display-zoom-tip'
 import { useImmediateSessionStateSave } from './hooks/useImmediateSessionStateSave'
 import { useCliVersionCheck } from './hooks/useCliVersionCheck'
 import { useServerUpdateCheck } from './hooks/useServerUpdateCheck'
@@ -141,6 +154,11 @@ function App() {
   const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const hasStartedTransportRef = useRef(false)
 
+  // Keep quit working during preloading and server-switch overlays (MainWindow
+  // may be unmounted). Production-only; uses destroy() so Windows cannot
+  // silently ignore close while an async handler is registered.
+  useNativeWindowCloseGuard()
+
   const captureWebReloadState = useCallback(() => {
     const { sessionChatModalOpen, sessionChatModalWorktreeId } =
       useUIStore.getState()
@@ -198,19 +216,38 @@ function App() {
     return () => unlisten?.()
   }, [])
 
+  const relaunchApp = useCallback(async () => {
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
+  }, [])
+
   const installAppUpdate = useCallback(
     async (update: {
       version: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       downloadAndInstall: (cb: (event: any) => void) => Promise<void>
     }) => {
+      const ui = useUIStore.getState()
+
+      // Already installed this session — only relaunch is needed (#507).
+      if (ui.updateReadyVersion) {
+        await relaunchApp()
+        return
+      }
+      if (ui.isUpdateInstalling) {
+        return
+      }
+
       let totalBytes = 0
       let downloadedBytes = 0
       const toastId = toast.loading(`Downloading update ${update.version}...`)
 
-      // Clear the pending indicator since we're installing now
-      useUIStore.getState().setPendingUpdateVersion(null)
-      pendingUpdateRef.current = null
+      // Mark in-progress so auto-check cannot re-open the modal mid-download.
+      // Keep pendingUpdateRef + version badge until success so retries work and
+      // the title bar still shows progress (#507).
+      ui.setIsUpdateInstalling(true)
+      ui.setPendingUpdateVersion(update.version)
+      ui.setUpdateModalVersion(null)
 
       try {
         await update.downloadAndInstall(event => {
@@ -235,20 +272,32 @@ function App() {
           }
         })
 
+        // Package is on disk; app must relaunch. Clear the download handle and
+        // record ready state so further UI actions relaunch instead of re-downloading.
+        pendingUpdateRef.current = null
+        const store = useUIStore.getState()
+        store.setIsUpdateInstalling(false)
+        store.setUpdateReadyVersion(update.version)
+        store.setUpdateModalVersion(null)
+        store.setPendingUpdateVersion(null)
+
         toast.success(`Update ${update.version} installed!`, {
           id: toastId,
           duration: Infinity,
           action: {
             label: 'Restart',
-            onClick: async () => {
-              const { relaunch } = await import('@tauri-apps/plugin-process')
-              await relaunch()
+            onClick: () => {
+              void relaunchApp()
             },
           },
         })
       } catch (updateError) {
         const errorStr = String(updateError)
         logger.error(`Update installation failed: ${errorStr}`)
+        const store = useUIStore.getState()
+        store.setIsUpdateInstalling(false)
+        // Restore title-bar badge so the user can retry without waiting for re-check
+        store.setPendingUpdateVersion(update.version)
         if (errorStr.includes('invalid updater binary format')) {
           toast.error(
             `Auto-update not supported for this installation type. Please update manually.`,
@@ -262,8 +311,32 @@ function App() {
         }
       }
     },
-    []
+    [relaunchApp]
   )
+
+  /** Native shell: run Tauri updater when a web client requests desktop install. */
+  const runNativeDesktopUpdateInstall = useCallback(async () => {
+    if (!isNativeApp()) return
+    try {
+      if (pendingUpdateRef.current) {
+        await installAppUpdate(pendingUpdateRef.current)
+        return
+      }
+      const { check } = await import('@tauri-apps/plugin-updater')
+      const update = await check()
+      if (!update) {
+        toast.success('You are running the latest version')
+        useUIStore.getState().setPendingUpdateVersion(null)
+        useUIStore.getState().setUpdateModalVersion(null)
+        return
+      }
+      pendingUpdateRef.current = update
+      await installAppUpdate(update)
+    } catch (error) {
+      logger.error('Host-requested desktop update failed', { error })
+      toast.error(`Update failed: ${String(error)}`, { duration: 8000 })
+    }
+  }, [installAppUpdate])
 
   // Seed TanStack Query cache and Zustand state from bulk initial data.
   const seedCache = useCallback(
@@ -275,6 +348,13 @@ function App() {
 
       if (data.serverPlatform) {
         setServerPlatform(data.serverPlatform)
+      }
+      if (typeof data.nativeOpenAllowed === 'boolean') {
+        setNativeOpenAllowed(data.nativeOpenAllowed)
+      }
+      // Force a re-render so non-reactive environment helpers (platform,
+      // canOpenNativeApps) update UI after /api/init.
+      if (data.serverPlatform || typeof data.nativeOpenAllowed === 'boolean') {
         setPlatformVersion(version => version + 1)
       }
 
@@ -282,14 +362,20 @@ function App() {
       if (data.projects) {
         queryClient.setQueryData(projectsQueryKeys.list(), data.projects)
       }
-      // Seed worktrees for each project
+      // Seed worktrees for each project (preserve in-flight pending/deleting)
       if (data.worktreesByProject) {
         for (const [projectId, worktrees] of Object.entries(
           data.worktreesByProject
         )) {
+          const previous = queryClient.getQueryData<Worktree[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
           queryClient.setQueryData(
             projectsQueryKeys.worktrees(projectId),
-            worktrees
+            mergeWorktreesPreservingOptimistic(
+              worktrees as Worktree[],
+              previous
+            )
           )
         }
       }
@@ -325,6 +411,10 @@ function App() {
       // Also restore Zustand state for reviewing/waiting status
       if (data.sessionsByWorktree) {
         const reviewingUpdates: Record<string, boolean> = {}
+        const statusOverrideUpdates: Record<
+          string,
+          'idle' | 'review' | 'completed' | 'cancelled'
+        > = {}
         const waitingUpdates: Record<string, boolean> = {}
         const sessionMappings: Record<string, string> = {}
 
@@ -347,8 +437,20 @@ function App() {
           const wts = sessionsData as WorktreeSessions
           for (const session of wts.sessions) {
             sessionMappings[session.id] = worktreeId
-            if (session.is_reviewing) {
+            const override = session.status_override
+            if (
+              override === 'idle' ||
+              override === 'review' ||
+              override === 'completed' ||
+              override === 'cancelled'
+            ) {
+              statusOverrideUpdates[session.id] = override
+              if (override === 'review') {
+                reviewingUpdates[session.id] = true
+              }
+            } else if (session.is_reviewing) {
               reviewingUpdates[session.id] = true
+              statusOverrideUpdates[session.id] = 'review'
             }
             if (session.waiting_for_input) {
               waitingUpdates[session.id] = true
@@ -380,15 +482,22 @@ function App() {
               ([sessionId]) => !runningSessionIds.has(sessionId)
             )
           )
+          const filteredStatusOverrideUpdates = Object.fromEntries(
+            Object.entries(statusOverrideUpdates).filter(
+              ([sessionId]) => !runningSessionIds.has(sessionId)
+            )
+          )
           const filteredWaitingUpdates = Object.fromEntries(
             Object.entries(waitingUpdates).filter(
               ([sessionId]) => !runningSessionIds.has(sessionId)
             )
           )
           storeUpdates.reviewingSessions = filteredReviewingUpdates
+          storeUpdates.sessionStatusOverrides = filteredStatusOverrideUpdates
           storeUpdates.waitingForInputSessionIds = filteredWaitingUpdates
         } else {
           storeUpdates.reviewingSessions = reviewingUpdates
+          storeUpdates.sessionStatusOverrides = statusOverrideUpdates
           storeUpdates.waitingForInputSessionIds = waitingUpdates
         }
         // Replace (not merge) reviewing/waiting state — server is source of truth.
@@ -407,14 +516,30 @@ function App() {
       // more messages from an event or query response racing the bootstrap.
       if (data.activeSessions) {
         const activeReviewingUpdates: Record<string, boolean> = {}
+        const activeStatusOverrideUpdates: Record<
+          string,
+          'idle' | 'review' | 'completed' | 'cancelled'
+        > = {}
         const activeWaitingUpdates: Record<string, boolean> = {}
 
         for (const [sessionId, initSession] of Object.entries(
           data.activeSessions
         )) {
           const session = initSession as Session
-          if (session.is_reviewing) {
+          const override = session.status_override
+          if (
+            override === 'idle' ||
+            override === 'review' ||
+            override === 'completed' ||
+            override === 'cancelled'
+          ) {
+            activeStatusOverrideUpdates[sessionId] = override
+            if (override === 'review') {
+              activeReviewingUpdates[sessionId] = true
+            }
+          } else if (session.is_reviewing) {
             activeReviewingUpdates[sessionId] = true
+            activeStatusOverrideUpdates[sessionId] = 'review'
           }
           if (session.waiting_for_input) {
             activeWaitingUpdates[sessionId] = true
@@ -451,6 +576,7 @@ function App() {
 
         if (
           Object.keys(activeReviewingUpdates).length > 0 ||
+          Object.keys(activeStatusOverrideUpdates).length > 0 ||
           Object.keys(activeWaitingUpdates).length > 0
         ) {
           beginSessionStateHydration()
@@ -460,6 +586,10 @@ function App() {
                 data.sessionsByWorktree === undefined
                   ? activeReviewingUpdates
                   : state.reviewingSessions,
+              sessionStatusOverrides:
+                data.sessionsByWorktree === undefined
+                  ? activeStatusOverrideUpdates
+                  : state.sessionStatusOverrides,
               waitingForInputSessionIds:
                 data.sessionsByWorktree === undefined
                   ? activeWaitingUpdates
@@ -676,6 +806,9 @@ function App() {
 
   // Apply zoom level from preferences + keyboard shortcuts
   useZoom()
+
+  // One-time tip when non-100% zoom is used on a 1× external-style display
+  useExternalDisplayZoomTip()
 
   // Save reviewing/waiting state immediately (no debounce) to ensure persistence on reload
   useImmediateSessionStateSave()
@@ -1001,16 +1134,43 @@ function App() {
     })
 
     // Auto-updater logic - check for updates 5 seconds after app loads
+    // (native shell only; web clients use useServerUpdateCheck → host check)
     const checkForUpdates = async () => {
       if (!isNativeApp()) return
-      // Don't re-show modal if user already dismissed an update
-      if (useUIStore.getState().pendingUpdateVersion) return
+      const ui = useUIStore.getState()
+      // Don't re-offer while deferred, downloading, or already installed (#507)
+      if (
+        !shouldOfferUpdateCheck({
+          pendingUpdateVersion: ui.pendingUpdateVersion,
+          updateReadyVersion: ui.updateReadyVersion,
+          isUpdateInstalling: ui.isUpdateInstalling,
+        })
+      ) {
+        return
+      }
 
       try {
         const { check } = await import('@tauri-apps/plugin-updater')
 
         const update = await check()
         if (update) {
+          // Re-check guards after the async network call — install may have started
+          const after = useUIStore.getState()
+          if (
+            !shouldOfferUpdateCheck({
+              pendingUpdateVersion: after.pendingUpdateVersion,
+              updateReadyVersion: after.updateReadyVersion,
+              isUpdateInstalling: after.isUpdateInstalling,
+            })
+          ) {
+            try {
+              await update.close?.()
+            } catch {
+              // Resource may already be released
+            }
+            return
+          }
+
           logger.info(`Update available: ${update.version}`)
           pendingUpdateRef.current = update
           useUIStore.getState().setUpdateModalVersion(update.version)
@@ -1021,11 +1181,37 @@ function App() {
       }
     }
 
-    // Listen for install trigger from title bar indicator
+    // Listen for install trigger from title bar indicator / modal
     const handleInstallPending = () => {
-      if (pendingUpdateRef.current) {
-        installAppUpdate(pendingUpdateRef.current)
+      const ui = useUIStore.getState()
+      const action = resolveInstallPendingAction({
+        updateReadyVersion: ui.updateReadyVersion,
+        isUpdateInstalling: ui.isUpdateInstalling,
+        hasPendingUpdateObject: Boolean(pendingUpdateRef.current),
+      })
+      if (action === 'relaunch') {
+        void relaunchApp()
+        return
       }
+      if (action === 'install' && pendingUpdateRef.current) {
+        void installAppUpdate(pendingUpdateRef.current)
+        return
+      }
+      // Already downloading — ignore duplicate install triggers (#507)
+      if (ui.isUpdateInstalling) return
+
+      // Web / remote: ask the host to install (desktop event or jean-server binary)
+      const version =
+        ui.pendingUpdateVersion || ui.updateModalVersion
+      if (!version) {
+        logger.warn(
+          'install-pending-update fired with no version or update object'
+        )
+        return
+      }
+      void import('@/hooks/useServerUpdateCheck').then(({ applyServerUpdate }) =>
+        applyServerUpdate(version)
+      )
     }
     window.addEventListener('install-pending-update', handleInstallPending)
 
@@ -1186,9 +1372,12 @@ function App() {
                 }
               }
 
+              // All backends need snapshot dedupe: Grok/Pi/Kimi re-emit tool
+              // updates and resume tails from the start of the run log. Without
+              // this, web reconnect while a turn is running doubles the stream.
               hydrateRunningSnapshot(session.session_id, lastMsg, {
                 allowWhileSending: true,
-                dedupeReplayedOutput: sessionSnapshot?.backend === 'claude',
+                dedupeReplayedOutput: true,
               })
 
               queryClient.setQueryData<Session>(
@@ -1238,11 +1427,33 @@ function App() {
       window.removeEventListener('install-pending-update', handleInstallPending)
       window.removeEventListener('update-available', handleUpdateAvailable)
     }
-  }, [installAppUpdate, webBackend])
+  }, [installAppUpdate, relaunchApp, webBackend])
 
-  // Show loading screen while preloading initial data (web view only)
+  // Web clients request desktop install via apply_server_update → this event.
+  // Only the *host* native shell should run Tauri's updater (not a remote client
+  // that happens to receive the same event over the WebSocket).
+  useEffect(() => {
+    if (!isNativeApp()) return
+    let unlisten: (() => void) | undefined
+    listen<{ version?: string }>('host:install-desktop-update', () => {
+      if (!isLocalBackend()) return
+      void runNativeDesktopUpdateInstall()
+    }).then(fn => {
+      unlisten = fn
+    })
+    return () => unlisten?.()
+  }, [runNativeDesktopUpdateInstall])
+
+  // Show loading screen while preloading initial data (web view only).
+  // QuitConfirmationDialog stays mounted so X/quit can still confirm or
+  // destroy the native window while the overlay is up.
   if (isPreloading) {
-    return <WebLoadingScreen label="Loading Jean..." />
+    return (
+      <>
+        <WebLoadingScreen label="Loading Jean..." />
+        {isNativeApp() && <QuitConfirmationDialog />}
+      </>
+    )
   }
 
   return (
@@ -1253,6 +1464,9 @@ function App() {
           <WebLoadingScreen label="Loading Jean..." />
         )}
         {webBackend && <WsAuthErrorOverlay />}
+        {/* App-level dialog so quit confirmation wins over loading overlay
+            even if MainWindow's copy is covered / not yet mounted. */}
+        {isNativeApp() && <QuitConfirmationDialog />}
       </ThemeProvider>
     </ErrorBoundary>
   )

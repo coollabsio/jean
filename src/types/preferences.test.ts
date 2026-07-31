@@ -29,10 +29,17 @@ describe('magic prompt preference resolvers', () => {
     expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Fixes #')
     expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Markdown table')
     expect(defaultPreferences.magic_prompt_modes.final_review_mode).toBe('yolo')
+    expect(defaultPreferences.magic_prompt_modes.code_review_fix_mode).toBe(
+      'plan'
+    )
   })
 
   it('enables web access sounds by default for backwards compatibility', () => {
     expect(defaultPreferences.web_access_sounds_enabled).toBe(true)
+  })
+
+  it('enables finished session animation by default', () => {
+    expect(defaultPreferences.finished_session_animation_enabled).toBe(true)
   })
 
   it('uses Jean-managed Command Code CLI by default', () => {
@@ -102,6 +109,7 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.selected_opencode_model).toBe(
       'opencode/gpt-5.6-sol'
     )
+    expect(defaultPreferences.default_codex_model_verbosity).toBe('medium')
   })
 
   it('provides magic prompt defaults for Kimi Code', () => {
@@ -121,16 +129,26 @@ describe('magic prompt preference resolvers', () => {
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryContext}')
   })
 
-  it('tells investigation prompts to apply fixes in yolo mode', () => {
-    const yoloApply =
-      'If you are in yolo mode, also apply the fix(es)'
-    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_PR_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).toContain(yoloApply)
-    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain(yoloApply)
+  it('keeps investigation default prompts free of weak yolo conditionals', () => {
+    // YOLO fix-after-investigate is applied programmatically when mode is yolo
+    // (see applyYoloInvestigationFixDirective) — do not embed unreliable
+    // "if you are in yolo mode" wording in the default templates.
+    const yoloConditional = 'If you are in yolo mode'
+    expect(DEFAULT_INVESTIGATE_ISSUE_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_PR_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_ADVISORY_PROMPT).not.toContain(yoloConditional)
+    expect(DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT).not.toContain(
+      yoloConditional
+    )
+    expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).not.toContain(
+      yoloConditional
+    )
   })
 
   it('keeps automatic recaps on by default', () => {

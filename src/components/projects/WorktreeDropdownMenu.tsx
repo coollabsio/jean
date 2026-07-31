@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   AlertDialog,
@@ -52,10 +52,11 @@ import {
   useWorkflowRuns,
 } from '@/services/github'
 import { useHasAiPipelineAccess } from '@/services/ai-pipeline'
-import { isLocalBackend } from '@/lib/environment'
+import { canOpenInEditor, canOpenNativeApps } from '@/lib/environment'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
 import type { GhAuthStatus } from '@/types/gh-cli'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
@@ -128,6 +129,9 @@ export function WorktreeDropdownMenu({
     enabled: isGitHubAuthenticated,
     staleTime: BADGE_STALE_TIME,
   })
+  const seenFailedWorkflowRunIds = useUIStore(
+    state => state.seenFailedWorkflowRunIds
+  )
   const issueCount = issueResult?.totalCount ?? 0
   const prCount = prs?.length ?? 0
   const securityCount =
@@ -135,7 +139,14 @@ export function WorktreeDropdownMenu({
     (advisories?.filter(a => a.state === 'draft' || a.state === 'triage')
       .length ?? 0)
   const workflowRunCount = workflowRuns?.runs?.length ?? 0
-  const failedWorkflowCount = workflowRuns?.failedCount ?? 0
+  const failedWorkflowCount = useMemo(
+    () =>
+      countUnreadFailedWorkflowRuns(
+        workflowRuns?.runs ?? [],
+        seenFailedWorkflowRunIds
+      ),
+    [workflowRuns?.runs, seenFailedWorkflowRunIds]
+  )
   const hasDiff = uncommittedAdded > 0 || uncommittedRemoved > 0
   const hasBranchDiff = branchDiffAdded > 0 || branchDiffRemoved > 0
   const showMobileGitHubItems = isMobile
@@ -319,23 +330,25 @@ export function WorktreeDropdownMenu({
             </DropdownMenuItem>
           )}
 
-          {isLocalBackend() && <DropdownMenuSeparator />}
+          {(canOpenInEditor() || canOpenNativeApps()) && (
+            <DropdownMenuSeparator />
+          )}
 
-          {isLocalBackend() && (
+          {canOpenInEditor() && (
             <DropdownMenuItem onClick={handleOpenInEditor}>
               <Code className="mr-2 h-4 w-4" />
               Open in {getEditorLabel(preferences?.editor)}
             </DropdownMenuItem>
           )}
 
-          {isLocalBackend() && (
+          {canOpenNativeApps() && (
             <DropdownMenuItem onClick={handleOpenInFinder}>
               <FolderOpen className="mr-2 h-4 w-4" />
               Open in Finder
             </DropdownMenuItem>
           )}
 
-          {isLocalBackend() && (
+          {canOpenNativeApps() && (
             <DropdownMenuItem onClick={handleOpenInTerminal}>
               <Terminal className="mr-2 h-4 w-4" />
               Open in {getTerminalLabel(preferences?.terminal)}

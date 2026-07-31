@@ -1,4 +1,5 @@
 use super::coalesce::ChunkCoalescer;
+use super::run_log::tool_result_content_to_string;
 use super::types::{
     is_claude_compaction_summary_text, CompactMetadata, ContentBlock, EffortLevel,
     PermissionDenial, PermissionDeniedEvent, ThinkingLevel, ToolCall, UsageData,
@@ -23,11 +24,11 @@ const DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = "\
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing\n\
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.\n\
 - Write detailed specs upfront to reduce ambiguity\n\
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.\n\
-- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.\n\
+- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.\n\
+- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.\n\
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/`--print` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.\n\
-- For Codex specifically, when the current execution mode is plan: after the user answers native `request_user_input`/open questions, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.\n\
-- Every Codex response that contains or revises a plan while the current execution mode is plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.\n\
+- For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.\n\
+- Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete `<proposed_plan>` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.\n\
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.\n\
 \n\
 ### 2. Documentation First\n\
@@ -543,20 +544,25 @@ fn build_claude_args(
                 );
             }
         }
-        // If Off, don't send any thinking/effort settings (but still send custom profile if present)
+        // Off / Adaptive: omit thinking/effort settings so the model decides
+        // (still send custom profile / other settings if present)
     } else {
         // Traditional thinking levels (Sonnet, Haiku)
         if let Some(level) = thinking_level {
-            let obj = settings_json.get_or_insert_with(|| serde_json::json!({}));
-            if let Some(map) = obj.as_object_mut() {
-                map.insert(
-                    "alwaysThinkingEnabled".to_string(),
-                    serde_json::Value::Bool(level.is_enabled()),
-                );
-            }
+            // Adaptive: omit alwaysThinkingEnabled / MAX_THINKING_TOKENS so
+            // models that support adaptive thinking can choose depth.
+            if !level.omits_thinking_settings() {
+                let obj = settings_json.get_or_insert_with(|| serde_json::json!({}));
+                if let Some(map) = obj.as_object_mut() {
+                    map.insert(
+                        "alwaysThinkingEnabled".to_string(),
+                        serde_json::Value::Bool(level.is_enabled()),
+                    );
+                }
 
-            if let Some(tokens) = level.thinking_tokens() {
-                env_vars.push(("MAX_THINKING_TOKENS".to_string(), tokens.to_string()));
+                if let Some(tokens) = level.thinking_tokens() {
+                    env_vars.push(("MAX_THINKING_TOKENS".to_string(), tokens.to_string()));
+                }
             }
         }
     }
@@ -1297,6 +1303,40 @@ fn flush_pending_chunks(
     }
 }
 
+fn startup_failure_message(
+    startup_failed: bool,
+    user_cancelled: bool,
+    full_content: &str,
+    error_lines: &[String],
+) -> Option<String> {
+    if !startup_failed || user_cancelled || !full_content.is_empty() {
+        return None;
+    }
+
+    if !error_lines.is_empty() {
+        return Some(format!("Claude CLI failed: {}", error_lines.join("\n")));
+    }
+
+    Some(
+        "Claude CLI produced no output and was stopped. It may have failed to start; \
+         check the Claude CLI installation and, in WSL mode, the distro configuration."
+            .to_string(),
+    )
+}
+
+fn terminate_failed_startup(pid: u32) {
+    if pid <= 1 {
+        return;
+    }
+
+    if let Err(tree_error) = crate::platform::kill_process_tree(pid) {
+        log::warn!("Failed to terminate startup process group {pid}: {tree_error}");
+        if let Err(process_error) = crate::platform::kill_process(pid) {
+            log::warn!("Failed to terminate startup process {pid}: {process_error}");
+        }
+    }
+}
+
 /// Tail an NDJSON output file and emit events as new lines appear.
 ///
 /// This is used for detached Claude CLI processes where the CLI writes
@@ -1343,6 +1383,7 @@ pub fn tail_claude_output(
     let mut completed = false;
     let mut cancelled = false;
     let mut user_cancelled = false; // True only for explicit user cancel (not process death)
+    let mut startup_failed = false; // True when Claude produced no output before the startup timeout / died starting up
     let mut usage: Option<UsageData> = None;
     let mut error_lines: Vec<String> = Vec::new();
 
@@ -1978,30 +2019,10 @@ pub fn tail_claude_output(
                                         continue;
                                     }
                                     // Content can be a string OR an array of content blocks
+                                    // (Task/Agent subagent reports use the array shape).
                                     let output = block
                                         .get("content")
-                                        .map(|v| {
-                                            if let Some(s) = v.as_str() {
-                                                s.to_string()
-                                            } else if let Some(arr) = v.as_array() {
-                                                arr.iter()
-                                                    .filter_map(|item| {
-                                                        if item.get("type").and_then(|t| t.as_str())
-                                                            == Some("text")
-                                                        {
-                                                            item.get("text")
-                                                                .and_then(|t| t.as_str())
-                                                                .map(|s| s.to_string())
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                    .join("\n")
-                                            } else {
-                                                String::new()
-                                            }
-                                        })
+                                        .map(tool_result_content_to_string)
                                         .unwrap_or_default();
 
                                     // Update matching tool call's output
@@ -2363,6 +2384,7 @@ pub fn tail_claude_output(
                     elapsed.as_secs_f64()
                 );
                 cancelled = true;
+                startup_failed = true;
                 break;
             }
 
@@ -2372,6 +2394,7 @@ pub fn tail_claude_output(
                     startup_timeout
                 );
                 cancelled = true;
+                startup_failed = true;
                 break;
             }
 
@@ -2442,6 +2465,26 @@ pub fn tail_claude_output(
         }
     }
 
+    if let Some(error) =
+        startup_failure_message(startup_failed, user_cancelled, &full_content, &error_lines)
+    {
+        // A startup timeout can leave a live process behind. End the complete
+        // process group before returning the terminal error to the caller.
+        if is_process_alive(pid) {
+            terminate_failed_startup(pid);
+        }
+        log::warn!("Claude CLI startup failed for session {session_id}: {error}");
+        let _ = app.emit_all(
+            "chat:error",
+            &ErrorEvent {
+                session_id: session_id.to_string(),
+                worktree_id: worktree_id.to_string(),
+                error: error.clone(),
+            },
+        );
+        return Err(error);
+    }
+
     if !error_lines.is_empty() && full_content.is_empty() {
         let error_text = error_lines.join("\n");
         log::warn!("CLI error output for session {session_id}: {error_text}");
@@ -2490,6 +2533,32 @@ pub fn tail_claude_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_failure_uses_cli_output_when_available() {
+        let lines = vec!["claude: command not found".to_string()];
+
+        assert_eq!(
+            startup_failure_message(true, false, "", &lines),
+            Some("Claude CLI failed: claude: command not found".to_string())
+        );
+    }
+
+    #[test]
+    fn startup_failure_without_output_has_actionable_message() {
+        let message = startup_failure_message(true, false, "", &[])
+            .expect("startup failure should be terminal");
+
+        assert!(message.contains("produced no output"));
+        assert!(message.contains("WSL"));
+    }
+
+    #[test]
+    fn startup_failure_message_ignores_user_cancel_and_completed_content() {
+        assert_eq!(startup_failure_message(true, true, "", &[]), None);
+        assert_eq!(startup_failure_message(true, false, "done", &[]), None);
+        assert_eq!(startup_failure_message(false, false, "", &[]), None);
+    }
 
     #[test]
     fn compact_metadata_accepts_snake_case_from_claude_cli() {
@@ -2558,7 +2627,8 @@ mod tests {
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Claude AskUserQuestion"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Codex request_user_input"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
-            .contains("when the current execution mode is plan: after the user answers native `request_user_input`"));
+            .contains("when the current execution mode is plan: do not write plan files or code"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("<proposed_plan>"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("OpenCode question"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean Worktree Policy"));

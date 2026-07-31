@@ -143,10 +143,12 @@ import {
   getCatalogModelReasoning,
   useModelCatalog,
 } from '@/services/model-catalog'
+import { withAdaptiveEffortOption } from '@/components/chat/toolbar/toolbar-options'
 import type { AppPreferences } from '@/types/preferences'
 import {
   effortLevelOptions,
   codexReasoningOptions,
+  codexModelVerbosityOptions,
   grokReasoningOptions,
   backendOptions,
   getTerminalOptions,
@@ -158,9 +160,11 @@ import {
   notificationSoundOptions,
   type RemovalBehavior,
   type ClaudeModel,
+  getClaudeModelOptionsForProvider,
   type CodexModel,
   type CodexGoalExecutionMode,
   type CodexReasoningEffort,
+  type CodexModelVerbosity,
   type GrokReasoningEffort,
   type CursorModel,
   type PiModel,
@@ -203,6 +207,7 @@ import {
 } from '@/services/git-status'
 import { getPathUpdateAction } from '@/lib/cli-update'
 import { BackendPaneHeader, SettingsSection } from '../SettingsSection'
+import { AiLanguageField } from './AiLanguageField'
 import {
   resolveDefaultModelForBackend,
   resolvePiDefaultModel,
@@ -294,24 +299,35 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     'codex',
     preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   )
-  const selectedCodexReasoningOptions =
+  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+  const selectedCodexReasoningOptions = withAdaptiveEffortOption(
     codexReasoning?.type === 'effort'
       ? codexReasoning.levels
-      : codexReasoningOptions
+      : codexReasoningOptions,
+    selectedCodexModel
+  )
   const grokReasoning = getCatalogModelReasoning(
     modelCatalog,
     'grok',
     preferences?.selected_grok_model ?? 'grok/grok-4.5'
   )
-  const selectedGrokReasoningOptions =
+  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  const selectedGrokReasoningOptions = withAdaptiveEffortOption(
     grokReasoning?.type === 'effort'
       ? grokReasoning.levels
-      : grokReasoningOptions
+      : grokReasoningOptions,
+    selectedGrokModel
+  )
+  const selectedClaudeModel =
+    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
   const claudeReasoning = getCatalogModelReasoning(
     modelCatalog,
     'claude',
-    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+    selectedClaudeModel
   )
+  const selectedClaudeReasoningOptions = claudeReasoning
+    ? withAdaptiveEffortOption(claudeReasoning.levels, selectedClaudeModel)
+    : []
   const patchPreferences = usePatchPreferences()
   const isWebAccessView = !isNativeApp()
   const webAccessSoundsEnabled = preferences?.web_access_sounds_enabled ?? true
@@ -332,10 +348,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
 
-  const remoteClaudeModelOptions = useMemo(
-    () => getCatalogModelOptions(modelCatalog, 'claude'),
-    [modelCatalog]
+  const customCliProfiles = useMemo(
+    () => preferences?.custom_cli_profiles ?? [],
+    [preferences?.custom_cli_profiles]
   )
+  const defaultClaudeProvider = preferences?.default_provider ?? null
+  const remoteClaudeModelOptions = useMemo(() => {
+    // When a custom CLI provider is the global default, surface the
+    // provider-routed opus/sonnet/haiku aliases so Settings → Claude can set
+    // a matching default model (issue #418).
+    const options = defaultClaudeProvider
+      ? getClaudeModelOptionsForProvider(
+          defaultClaudeProvider,
+          customCliProfiles
+        )
+      : getCatalogModelOptions(modelCatalog, 'claude')
+    const selected = preferences?.selected_model
+    if (selected && !options.some(option => option.value === selected)) {
+      return [...options, { value: selected as ClaudeModel, label: selected }]
+    }
+    return options
+  }, [
+    modelCatalog,
+    defaultClaudeProvider,
+    customCliProfiles,
+    preferences?.selected_model,
+  ])
   const remoteCodexDefaultModelOptions = useMemo(
     () => getCatalogDefaultModelOptions(modelCatalog, 'codex'),
     [modelCatalog]
@@ -948,73 +986,75 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
-  // If stored default_backend isn't installed, fall back to the first installed one
+  // Default backend: only installed AND authenticated backends are selectable.
   const stored = preferences?.default_backend ?? 'claude'
-  const claudeInstalled = cliStatus?.installed
-  const codexInstalled = codexStatus?.installed
-  const opencodeInstalled = opencodeStatus?.installed
-  const cursorInstalled = cursorStatus?.installed
-  const piInstalled = piStatus?.installed
-  const commandcodeInstalled = commandcodeStatus?.installed
-  const grokInstalled = grokStatus?.installed
-  const kimiInstalled = kimiStatus?.installed
+  const claudeUsable = !!cliStatus?.installed && !!claudeAuth?.authenticated
+  const codexUsable = !!codexStatus?.installed && !!codexAuth?.authenticated
+  const opencodeUsable =
+    !!opencodeStatus?.installed && !!opencodeAuth?.authenticated
+  const cursorUsable = !!cursorStatus?.installed && !!cursorAuth?.authenticated
+  const piUsable = !!piStatus?.installed && !!piAuth?.authenticated
+  const commandcodeUsable =
+    !!commandcodeStatus?.installed && !!commandcodeAuth?.authenticated
+  const grokUsable = !!grokStatus?.installed && !!grokAuth?.authenticated
+  const kimiUsable = !!kimiStatus?.installed && !!kimiAuth?.authenticated
   const installedBackendOptions = useMemo(
     () =>
       backendOptions.filter(option =>
         option.value === 'claude'
-          ? cliStatus?.installed
+          ? claudeUsable
           : option.value === 'codex'
-            ? codexStatus?.installed
+            ? codexUsable
             : option.value === 'opencode'
-              ? opencodeStatus?.installed
+              ? opencodeUsable
               : option.value === 'cursor'
-                ? cursorStatus?.installed
+                ? cursorUsable
                 : option.value === 'pi'
-                  ? piStatus?.installed
+                  ? piUsable
                   : option.value === 'commandcode'
-                    ? commandcodeStatus?.installed
+                    ? commandcodeUsable
                     : option.value === 'grok'
-                      ? grokStatus?.installed
+                      ? grokUsable
                       : option.value === 'kimi'
-                        ? kimiStatus?.installed
+                        ? kimiUsable
                         : false
       ),
     [
-      cliStatus?.installed,
-      codexStatus?.installed,
-      opencodeStatus?.installed,
-      cursorStatus?.installed,
-      piStatus?.installed,
-      commandcodeStatus?.installed,
-      grokStatus?.installed,
-      kimiStatus?.installed,
+      claudeUsable,
+      codexUsable,
+      opencodeUsable,
+      cursorUsable,
+      piUsable,
+      commandcodeUsable,
+      grokUsable,
+      kimiUsable,
     ]
   )
 
   const effectiveBackend = useMemo(() => {
-    const installed: Record<string, boolean | undefined> = {
-      claude: claudeInstalled,
-      codex: codexInstalled,
-      opencode: opencodeInstalled,
-      cursor: cursorInstalled,
-      pi: piInstalled,
-      commandcode: commandcodeInstalled,
-      grok: grokInstalled,
-      kimi: kimiInstalled,
+    const usable: Record<string, boolean | undefined> = {
+      claude: claudeUsable,
+      codex: codexUsable,
+      opencode: opencodeUsable,
+      cursor: cursorUsable,
+      pi: piUsable,
+      commandcode: commandcodeUsable,
+      grok: grokUsable,
+      kimi: kimiUsable,
     }
-    if (installed[stored]) return stored
+    if (usable[stored]) return stored
     const first = installedBackendOptions[0]
     return first?.value ?? stored
   }, [
     stored,
-    claudeInstalled,
-    codexInstalled,
-    opencodeInstalled,
-    cursorInstalled,
-    piInstalled,
-    commandcodeInstalled,
-    grokInstalled,
-    kimiInstalled,
+    claudeUsable,
+    codexUsable,
+    opencodeUsable,
+    cursorUsable,
+    piUsable,
+    commandcodeUsable,
+    grokUsable,
+    kimiUsable,
     installedBackendOptions,
   ])
 
@@ -1028,6 +1068,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     if (preferences) {
       patchPreferences.mutate({
         default_codex_reasoning_effort: value,
+      })
+    }
+  }
+
+  const handleCodexModelVerbosityChange = (value: CodexModelVerbosity) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        default_codex_model_verbosity: value,
       })
     }
   }
@@ -1120,8 +1168,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedCursorModelLabel =
     cursorModelOptions.find(option => option.value === selectedCursorModel)
       ?.label ?? formatCursorModelLabel(selectedCursorModel)
-  const selectedGrokModel =
-    preferences?.selected_grok_model ?? 'grok/grok-4.5'
   const grokModelOptions: { value: GrokModel; label: string }[] = (
     availableGrokModels?.length
       ? availableGrokModels.map(model => ({
@@ -1196,7 +1242,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       preferences,
       piModelOptions
     )
-  const buildReasoning =
+  const buildReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveBuildBackend, buildModel) ??
     (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveBuildBackend)
       ? {
@@ -1210,7 +1256,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 : effortLevelOptions,
         }
       : null)
-  const yoloReasoning =
+  const buildReasoning = buildReasoningRaw
+    ? {
+        ...buildReasoningRaw,
+        levels: withAdaptiveEffortOption(buildReasoningRaw.levels, buildModel),
+      }
+    : null
+  const yoloReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveYoloBackend, yoloModel) ??
     (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveYoloBackend)
       ? {
@@ -1224,6 +1276,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 : effortLevelOptions,
         }
       : null)
+  const yoloReasoning = yoloReasoningRaw
+    ? {
+        ...yoloReasoningRaw,
+        levels: withAdaptiveEffortOption(yoloReasoningRaw.levels, yoloModel),
+      }
+    : null
   const piAuthMessage = piAuth?.error
 
   const selectedCommandCodeModel =
@@ -2942,7 +3000,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <div className="space-y-4">
             <InlineField
               label="Model"
-              description="Claude model for AI assistance"
+              description={
+                defaultClaudeProvider
+                  ? `Claude model for AI assistance (routed via ${defaultClaudeProvider}). Change the default provider under Settings → Providers.`
+                  : 'Claude model for AI assistance. Custom CLI providers are configured under Settings → Providers.'
+              }
             >
               <Select
                 value={preferences?.selected_model ?? 'claude-opus-4-8[1m]'}
@@ -2976,7 +3038,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {claudeReasoning.levels.map(option => (
+                    {selectedClaudeReasoningOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -3003,7 +3065,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {claudeReasoning.levels.map(option => (
+                    {selectedClaudeReasoningOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -3073,6 +3135,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </SelectTrigger>
                 <SelectContent>
                   {selectedCodexReasoningOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
+              label="Model verbosity"
+              description="How much intermediate text Codex writes during chat (low is terse; high is more detailed)"
+            >
+              <Select
+                value={preferences?.default_codex_model_verbosity ?? 'medium'}
+                onValueChange={handleCodexModelVerbosityChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {codexModelVerbosityOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -4356,10 +4439,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </div>
             </InlineField>
 
-            <AiLanguageField
-              preferences={preferences}
-              patchPreferences={patchPreferences}
-            />
+            <AiLanguageField preferences={preferences} />
 
             <InlineField
               label="Allow web tools in plan mode"
@@ -5032,46 +5112,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-const AiLanguageField: FC<{
-  preferences: AppPreferences | undefined
-  patchPreferences: ReturnType<typeof usePatchPreferences>
-}> = ({ preferences, patchPreferences }) => {
-  const [localValue, setLocalValue] = useState(preferences?.ai_language ?? '')
-
-  const hasChanges = localValue !== (preferences?.ai_language ?? '')
-
-  const handleSave = useCallback(() => {
-    if (!preferences) return
-    patchPreferences.mutate({ ai_language: localValue })
-  }, [preferences, patchPreferences, localValue])
-
-  return (
-    <InlineField
-      label="AI Language"
-      description="Language for AI responses (e.g. French, 日本語)"
-    >
-      <div className="flex items-center gap-2">
-        <Input
-          className="w-full sm:w-40"
-          placeholder="Default"
-          value={localValue}
-          onChange={e => setLocalValue(e.target.value)}
-        />
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!hasChanges || patchPreferences.isPending}
-        >
-          {patchPreferences.isPending && (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          )}
-          Save
-        </Button>
-      </div>
-    </InlineField>
   )
 }
 

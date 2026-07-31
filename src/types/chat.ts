@@ -9,12 +9,14 @@ export type MessageRole = 'user' | 'assistant'
  * Thinking level for Claude responses
  * Controls --settings alwaysThinkingEnabled and MAX_THINKING_TOKENS env var
  * - off: Thinking disabled
+ * - adaptive: Omit thinking settings so the model chooses depth
  * - think: 4K tokens budget
  * - megathink: 10K tokens budget
  * - ultrathink: 32K tokens budget (default)
  */
 export type ThinkingLevel =
   | 'off'
+  | 'adaptive'
   | 'think'
   | 'megathink'
   | 'ultrathink'
@@ -24,6 +26,7 @@ export type ThinkingLevel =
  * Effort level for Opus adaptive thinking
  * Controls --settings {"effort": "<level>"} via CLI
  * Replaces ThinkingLevel when model is Opus (latest) on CLI >= 2.1.32
+ * - adaptive: Omit effort so the model chooses depth (token-efficient for simple prompts)
  * - low: Minimal thinking, skips for simple tasks
  * - medium: Moderate thinking, may skip for very simple queries
  * - high: Deep reasoning (default), almost always thinks
@@ -34,6 +37,7 @@ export type ThinkingLevel =
  */
 export type EffortLevel =
   | 'off'
+  | 'adaptive'
   | 'minimal'
   | 'low'
   | 'medium'
@@ -278,8 +282,14 @@ export interface Session {
   denied_message_context?: DeniedMessageContext
   /** AI code review results for this session */
   review_results?: StoredReviewResults
-  /** Whether this session is marked for review */
+  /** Whether this session is marked for review (legacy; prefer status_override) */
   is_reviewing?: boolean
+  /**
+   * User-forced session status. Applied when the session is not in a live
+   * automatic state (running, waiting for input, permissions, …).
+   * Values: 'idle' | 'review' | 'completed' | 'cancelled'
+   */
+  status_override?: 'idle' | 'review' | 'completed' | 'cancelled' | null
   /** Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode) */
   waiting_for_input?: boolean
   /** Type of waiting: 'question' for AskUserQuestion, 'plan' for ExitPlanMode */
@@ -1132,7 +1142,7 @@ export interface CodexAgent {
   /** The prompt given to the agent (truncated for display) */
   prompt: string
   /** Agent lifecycle status */
-  status: 'in_progress' | 'completed' | 'errored'
+  status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
 }

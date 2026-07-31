@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,7 +17,7 @@ use super::run_log;
 use super::storage::{
     cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
     get_index_path, get_session_dir, load_metadata, load_sessions, save_metadata,
-    with_existing_metadata_mut, with_sessions_mut,
+    with_existing_metadata_mut, with_metadata_mut, with_sessions_mut,
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
@@ -33,6 +34,22 @@ use crate::projects::types::{SessionType, Worktree};
 const QUEUE_DEFAULT_ALLOWED_TOOLS: [&str; 4] = ["Bash(git:*)", "Read", "Glob", "Grep"];
 const IMAGE_ONLY_DEFAULT_PROMPT: &str = "Please check this image and tell me what is wrong.";
 const TEXT_ONLY_DEFAULT_PROMPT: &str = "Please check the attached text as reference.";
+
+fn resumed_grok_tail_error_event(
+    session_id: &str,
+    worktree_id: &str,
+    error: &str,
+) -> (&'static str, super::grok::ErrorEvent) {
+    (
+        "chat:error",
+        super::grok::ErrorEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            error: error.to_string(),
+        },
+    )
+}
+
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 ## Not Plan Mode
 
@@ -51,10 +68,22 @@ const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 ## Plan Mode
 
 - You are in PLAN MODE. Do not implement yet.
-- Inspect the project as needed, then present the plan with the native Codex plan tool (`update_plan` / `CodexPlan`) so Jean can show the approval UI.
-- Every plan-mode response that contains or revises a plan must use `update_plan` / `CodexPlan`; do not provide a plain-text-only plan.
-- If questions block the plan, prefer Codex `request_user_input`; after the user answers, call `update_plan` / `CodexPlan` again with the revised plan.
-- Do not call implementation tools or make file changes until the user approves the plan.";
+- Explore with non-mutating tools only. Do not edit or write files (including `plan.md`, `.ai/todo.md`, or code) until the user approves the plan.
+- When the plan is decision-complete, present it with Codex native plan finalization: wrap the plan in a `<proposed_plan>...</proposed_plan>` block (Jean maps this to the approval UI / CodexPlan).
+- Do not use the `update_plan` checklist tool while in plan mode — it errors in collaboration Plan mode and is not Jean's plan approval flow.
+- Every plan-mode response that contains or revises a plan must use a complete `<proposed_plan>` block; do not provide a plain-text-only plan.
+- If questions block the plan, prefer Codex `request_user_input`; after the user answers, emit a revised complete `<proposed_plan>` block with the **full revised plan**, not only short step titles.
+- Do not call implementation tools or make file changes until the user approves the plan.
+
+### Plan quality (required for YOLO/Build handoff)
+
+Jean may hand this plan to a zero-context agent in a new worktree. Status lines like \"Plan created and ready for approval.\" are not a plan.
+
+- Checklist-style step titles (if any) are a short checklist only (a few words each is fine).
+- The authoritative plan body inside `<proposed_plan>` must be detailed enough to implement without re-scanning the repo or re-asking answered questions.
+- Include: goal/outcome, key decisions from the interview, concrete files/areas to touch, ordered implementation steps with enough approach detail, risks/edge cases, and how to verify.
+- Prefer a structured body (headings/bullets). Concise writing is good; incomplete handoff plans are not.
+- After answering questions, re-emit the full detailed body in a complete `<proposed_plan>` block — never end on explanation-only or checklist-only content.";
 const DEFAULT_PARALLEL_EXECUTION_PROMPT: &str = r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
@@ -76,8 +105,33 @@ static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
 /// process/turn is registered, leaving a window where two concurrent sends
 /// (frontend queue processor vs backend queue drain vs another client) both
 /// pass the check and spawn duplicate runs. This claim is taken atomically at
-/// `send_chat_message` entry and held for the whole call.
-static ACTIVE_SENDS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+/// `send_chat_message` entry and held for the whole call — unless cancel
+/// releases it early so a follow-up send is not stuck (#329).
+///
+/// Values are generation tokens so an early cancel release cannot be clobbered
+/// by a later `Drop` from the cancelled claim after a new claim was acquired.
+static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Whether a session has no prior user messages for auto-naming purposes.
+///
+/// After the NDJSON migration, `Session.messages` is always empty (messages are
+/// loaded on demand from run logs). Prefer `message_count` / `total_runs` from
+/// metadata, falling back to in-memory messages for tests / legacy paths.
+pub(crate) fn session_has_no_prior_user_messages(session: &Session) -> bool {
+    if let Some(count) = session.message_count {
+        return count == 0;
+    }
+    if session.total_runs > 0 {
+        return false;
+    }
+    session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .count()
+        == 0
+}
 
 fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
     worktree
@@ -92,33 +146,56 @@ fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
 }
 
 /// RAII claim on a session's send slot — released on drop (any return path).
-struct SendClaim(String);
+struct SendClaim {
+    session_id: String,
+    generation: u64,
+}
 
 impl SendClaim {
     fn try_acquire(session_id: &str) -> Option<Self> {
         let mut active = ACTIVE_SENDS.lock().unwrap();
-        if active.insert(session_id.to_string()) {
-            Some(Self(session_id.to_string()))
-        } else {
-            None
+        if active.contains_key(session_id) {
+            return None;
         }
+        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
+        active.insert(session_id.to_string(), generation);
+        Some(Self {
+            session_id: session_id.to_string(),
+            generation,
+        })
     }
 }
 
 impl Drop for SendClaim {
     fn drop(&mut self) {
-        ACTIVE_SENDS.lock().unwrap().remove(&self.0);
+        let mut active = ACTIVE_SENDS.lock().unwrap();
+        // Only clear if we still own the slot — cancel may have released early
+        // and a newer send may already hold a different generation.
+        if active.get(&self.session_id) == Some(&self.generation) {
+            active.remove(&self.session_id);
+        }
     }
 }
 
+/// Release the in-flight send claim for a session after cancel so a follow-up
+/// prompt is not rejected with "Session already has an active request" while
+/// the cancelled worker finishes teardown (#329).
+fn release_active_send(session_id: &str) {
+    if ACTIVE_SENDS.lock().unwrap().remove(session_id).is_some() {
+        log::info!("[SendChat] released active send claim after cancel session={session_id}");
+    }
+}
+
+fn has_active_send(session_id: &str) -> bool {
+    ACTIVE_SENDS.lock().unwrap().contains_key(session_id)
+}
+
 fn should_forward_cancel_request(session_id: &str) -> bool {
-    ACTIVE_SENDS.lock().unwrap().contains(session_id)
-        || super::registry::is_session_actively_managed(session_id)
+    has_active_send(session_id) || super::registry::is_session_actively_managed(session_id)
 }
 
 fn clear_stale_pending_cancel_before_send(session_id: &str) {
-    let has_active_send = ACTIVE_SENDS.lock().unwrap().contains(session_id);
-    if !has_active_send
+    if !has_active_send(session_id)
         && !super::registry::is_session_actively_managed(session_id)
         && super::registry::clear_pending_cancel(session_id)
     {
@@ -133,19 +210,19 @@ fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'st
              This current BUILD MODE instruction supersedes any earlier plan-mode \
              instructions remembered from conversation history; treat the approved plan \
              as authorization to implement now. \
-             Do NOT call update_plan/emit CodexPlan unless the user explicitly asks \
-             for a new plan. If a required decision is missing, use request_user_input \
-             instead of switching back to plan mode.",
+             Do NOT emit <proposed_plan> blocks or wait for plan approval unless the user \
+             explicitly asks for a new plan. If a required decision is missing, use \
+             request_user_input instead of switching back to plan mode.",
         ),
         "yolo" => Some(
             "You are in YOLO EXECUTION MODE. Start implementing immediately. \
              This current YOLO EXECUTION MODE instruction supersedes any earlier plan-mode \
              instructions remembered from conversation history; treat the approved plan \
              as authorization to implement now. \
-             Do NOT call update_plan/emit CodexPlan unless the user explicitly asks \
-             for a new plan. Do not ask for confirmation before routine implementation steps. \
-             If a required decision is missing, use request_user_input instead of \
-             switching back to plan mode.",
+             Do NOT emit <proposed_plan> blocks or wait for plan approval unless the user \
+             explicitly asks for a new plan. Do not ask for confirmation before routine \
+             implementation steps. If a required decision is missing, use request_user_input \
+             instead of switching back to plan mode.",
         ),
         _ => None,
     }
@@ -300,7 +377,7 @@ fn codex_reasoning_effort<'a>(effort: &'a EffortLevel, model: Option<&str>) -> O
         )
     );
     match effort {
-        EffortLevel::Off => None,
+        EffortLevel::Off | EffortLevel::Adaptive => None,
         EffortLevel::Minimal => Some("low"),
         // Migrate GPT 5.6 sessions persisted before the Codex-native value was fixed.
         EffortLevel::Ultracode if supports_ultra => Some("ultra"),
@@ -352,6 +429,42 @@ fn default_model_for_backend(
     } else {
         Some(model.clone())
     }
+}
+
+/// Trim and drop empty optional strings (MCP/UI may send `""` or whitespace).
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Resolve the model used for a send.
+///
+/// Precedence:
+/// 1. Explicit `model` on the send (one-shot override, e.g. MCP `send_chat_message`)
+/// 2. Session `selected_model` (set via UI or MCP `set_session_model`)
+/// 3. Backend default from preferences (when available)
+///
+/// Without (2), Jean MCP agents that call `set_session_model` then send without
+/// `model` would fall through to the CLI default (often Opus) instead of the
+/// session's chosen model.
+fn resolve_send_model(
+    explicit_model: Option<String>,
+    session_selected_model: Option<String>,
+    backend_default_model: Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit_model)
+        .or_else(|| normalize_optional_string(session_selected_model))
+        .or_else(|| normalize_optional_string(backend_default_model))
+}
+
+/// Resolve execution mode for a send: explicit override → session selection.
+fn resolve_send_execution_mode(
+    explicit_mode: Option<String>,
+    session_selected_mode: Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit_mode)
+        .or_else(|| normalize_optional_string(session_selected_mode))
 }
 
 fn build_kimi_system_prompt(
@@ -460,6 +573,17 @@ pub(crate) fn emit_sessions_cache_invalidation(app: &AppHandle) {
     ) {
         log::error!("Failed to emit cache:invalidate for sessions: {e}");
     }
+}
+
+fn finish_bulk_update<T, E>(
+    updated: bool,
+    result: Result<T, E>,
+    invalidate: impl FnOnce(),
+) -> Result<T, E> {
+    if updated {
+        invalidate();
+    }
+    result
 }
 
 // ============================================================================
@@ -779,6 +903,9 @@ pub async fn create_session(
         return Err("Native session IDs are only valid for terminal sessions".to_string());
     }
 
+    // Archived worktrees must be restored before creating new sessions.
+    ensure_worktree_not_archived(&worktree_id, worktree_archived_at(&app, &worktree_id))?;
+
     let preferences = crate::load_preferences(app.clone()).await.ok();
 
     // Resolve backend: explicit param → project default → global preference → Claude
@@ -1088,10 +1215,14 @@ async fn queued_message_to_send_request(
     let custom_profile_name = json_string(queued, "customProfileName").or_else(|| {
         provider.filter(|provider| {
             provider != "__anthropic__"
+                && provider != "__default__"
                 && prefs.as_ref().is_some_and(|p| {
                     p.custom_cli_profiles
                         .iter()
                         .any(|profile| profile.name == *provider)
+                        || p.custom_codex_providers
+                            .iter()
+                            .any(|profile| profile.name == *provider)
                 })
         })
     });
@@ -1513,6 +1644,7 @@ pub async fn update_session_state(
     >,
     denied_message_context: Option<Option<super::types::DeniedMessageContext>>,
     is_reviewing: Option<bool>,
+    status_override: Option<Option<String>>,
     waiting_for_input: Option<bool>,
     waiting_for_input_type: Option<Option<String>>,
     plan_file_path: Option<Option<String>>,
@@ -1560,6 +1692,28 @@ pub async fn update_session_state(
             }
             if let Some(v) = is_reviewing {
                 session.is_reviewing = v;
+                // Keep status_override in sync with legacy reviewing flag when
+                // callers only touch is_reviewing (e.g. cancel/fail completion).
+                if v {
+                    if session.status_override.as_deref() != Some("review") {
+                        session.status_override = Some("review".to_string());
+                    }
+                } else if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
+            }
+            if let Some(v) = status_override {
+                match &v {
+                    Some(status) if !matches!(status.as_str(), "idle" | "review" | "completed" | "cancelled") => {
+                        return Err(format!(
+                            "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
+                        ));
+                    }
+                    _ => {}
+                }
+                session.status_override = v;
+                // Keep legacy is_reviewing flag aligned with the override
+                session.is_reviewing = session.status_override.as_deref() == Some("review");
             }
             if let Some(v) = waiting_for_input {
                 session.waiting_for_input = v;
@@ -1589,6 +1743,13 @@ pub async fn update_session_state(
                 session.enabled_mcp_servers = v;
             }
             if let Some(v) = selected_execution_mode {
+                // Keep mid-turn Codex auto-approve in sync with Jean's mode
+                // (issue #328). Approve (yolo) sets this immediately so residual
+                // "retry without sandbox?" prompts stop for the active turn.
+                super::registry::set_codex_yolo_auto_approve(
+                    &session_id,
+                    v.as_deref() == Some("yolo"),
+                );
                 session.selected_execution_mode = v;
             }
             if let Some(v) = table_checked_rows {
@@ -1659,6 +1820,9 @@ fn queued_prompt_skips_plan_wait(
 fn apply_non_waiting_completion_state(session: &mut Session) {
     session.waiting_for_input = false;
     session.is_reviewing = false;
+    if session.status_override.as_deref() == Some("review") {
+        session.status_override = None;
+    }
     session.waiting_for_input_type = None;
 }
 
@@ -1725,9 +1889,6 @@ pub async fn close_session(
     // Clean up combined-context files for this session
     cleanup_combined_context_files(&app, &session_id);
 
-    // Resolve default backend for fallback session creation
-    let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
-
     // Now atomically modify the sessions file
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Find index before removal to support deterministic neighbor selection.
@@ -1748,16 +1909,19 @@ pub async fn close_session(
             };
         }
 
-        // Ensure at least one non-archived session exists
-        let non_archived_count = sessions
+        // When the last non-archived session is closed, leave the worktree empty
+        // (active_session_id = None). Frontend navigates to the project picker
+        // (issue #501) instead of auto-creating a fallback "Session 1".
+        // If non-archived sessions remain but active is unset, pick the first.
+        let first_non_archived = sessions
             .sessions
             .iter()
-            .filter(|s| s.archived_at.is_none())
-            .count();
-        if non_archived_count == 0 {
-            let default_session = Session::default_session_with_backend(fallback_backend.clone());
-            sessions.active_session_id = Some(default_session.id.clone());
-            sessions.sessions.push(default_session);
+            .find(|s| s.archived_at.is_none())
+            .map(|s| s.id.clone());
+        if first_non_archived.is_none() {
+            sessions.active_session_id = None;
+        } else if sessions.active_session_id.is_none() {
+            sessions.active_session_id = first_non_archived;
         }
 
         log::trace!(
@@ -1789,9 +1953,6 @@ pub async fn archive_session(
     // Load messages from NDJSON to check if session has content (outside lock - read-only)
     let messages = run_log::load_session_messages(&app, &session_id).unwrap_or_default();
     let should_delete = messages.is_empty();
-
-    // Resolve default backend for fallback session creation
-    let fallback_backend = resolve_default_backend(&app, Some(&worktree_id));
 
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         // Find the index before archiving/deleting
@@ -1865,16 +2026,19 @@ pub async fn archive_session(
         };
         sessions.active_session_id = new_active;
 
-        // Ensure at least one session exists if all are archived or deleted
-        let non_archived_count = sessions
+        // When the last non-archived session is archived/deleted, leave the worktree
+        // empty (active_session_id = None). Frontend navigates to the project picker
+        // (issue #501) instead of auto-creating a fallback "Session 1".
+        // If non-archived sessions remain but active is unset, pick the first.
+        let first_non_archived = sessions
             .sessions
             .iter()
-            .filter(|s| s.archived_at.is_none())
-            .count();
-        if non_archived_count == 0 {
-            let default_session = Session::default_session_with_backend(fallback_backend.clone());
-            sessions.active_session_id = Some(default_session.id.clone());
-            sessions.sessions.push(default_session);
+            .find(|s| s.archived_at.is_none())
+            .map(|s| s.id.clone());
+        if first_non_archived.is_none() {
+            sessions.active_session_id = None;
+        } else if sessions.active_session_id.is_none() {
+            sessions.active_session_id = first_non_archived;
         }
 
         if should_delete {
@@ -1919,6 +2083,49 @@ pub async fn unarchive_session(
         log::trace!("Session unarchived: {session_id}");
         Ok(restored_session)
     })
+}
+
+/// Reject execution against an archived session or its parent worktree.
+///
+/// Archived workspaces may have incomplete post-cleanup state (missing scripts,
+/// removed paths), so agents/UI must unarchive explicitly before running again.
+pub fn ensure_session_can_run(
+    session_id: &str,
+    session_archived_at: Option<u64>,
+    worktree_id: &str,
+    worktree_archived_at: Option<u64>,
+) -> Result<(), String> {
+    if session_archived_at.is_some() {
+        return Err(format!(
+            "Session is archived and cannot run. Unarchive the session first (sessionId: {session_id})."
+        ));
+    }
+    if worktree_archived_at.is_some() {
+        return Err(format!(
+            "Worktree is archived and cannot run sessions. Unarchive the worktree first (worktreeId: {worktree_id})."
+        ));
+    }
+    Ok(())
+}
+
+/// Reject mutations that require an active (non-archived) worktree.
+pub fn ensure_worktree_not_archived(
+    worktree_id: &str,
+    worktree_archived_at: Option<u64>,
+) -> Result<(), String> {
+    if worktree_archived_at.is_some() {
+        return Err(format!(
+            "Worktree is archived. Unarchive it first (worktreeId: {worktree_id})."
+        ));
+    }
+    Ok(())
+}
+
+/// Look up a worktree's `archived_at` timestamp (if the worktree record exists).
+pub fn worktree_archived_at(app: &AppHandle, worktree_id: &str) -> Option<u64> {
+    load_projects_data(app)
+        .ok()
+        .and_then(|data| data.find_worktree(worktree_id).and_then(|w| w.archived_at))
 }
 
 /// Response from restoring a session with base session recreation
@@ -2287,6 +2494,9 @@ pub async fn set_active_session(
 /// Update the last_opened_at timestamp on a session's metadata.
 /// View-only: never mutates waiting/review state — explicit user actions
 /// (approve/reject/answer) are the only path out of waiting.
+///
+/// Emits `cache:invalidate` for sessions so native + web clients refresh
+/// unread/finished-session state (e.g. web marks read → native bell clears).
 pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Result<(), String> {
     log::trace!("Setting last_opened_at for session: {session_id}");
 
@@ -2298,11 +2508,10 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
         metadata.last_opened_at = Some(now);
         // Viewing a native-terminal Claude session means the user has dealt with
         // the "needs attention" signal → clear it so the bell/badge resets.
-        let cleared = clear_terminal_waiting(&mut metadata);
+        clear_terminal_waiting(&mut metadata);
         save_metadata(&app, &metadata)?;
-        if cleared {
-            emit_sessions_cache_invalidation(&app);
-        }
+        // Broadcast so other clients (native ↔ web) drop stale last_opened_at.
+        emit_sessions_cache_invalidation(&app);
     }
 
     Ok(())
@@ -2322,6 +2531,9 @@ fn clear_terminal_waiting(metadata: &mut super::types::SessionMetadata) -> bool 
 }
 
 /// Bulk-update last_opened_at for multiple sessions in a single call.
+///
+/// Emits a single `cache:invalidate` after updates so multi-client unread
+/// counts stay in sync (mark all read from web or native).
 pub async fn set_sessions_last_opened_bulk(
     app: AppHandle,
     session_ids: Vec<String>,
@@ -2336,19 +2548,23 @@ pub async fn set_sessions_last_opened_bulk(
         .unwrap_or_default()
         .as_secs();
 
-    let mut any_cleared = false;
+    let mut updated = false;
+    let mut result = Ok(());
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
-            any_cleared |= clear_terminal_waiting(&mut metadata);
-            save_metadata(&app, &metadata)?;
+            // Same as the single-session path: viewing a native-terminal session
+            // means the user dealt with the "needs attention" signal.
+            clear_terminal_waiting(&mut metadata);
+            if let Err(error) = save_metadata(&app, &metadata) {
+                result = Err(error);
+                break;
+            }
+            updated = true;
         }
     }
-    if any_cleared {
-        emit_sessions_cache_invalidation(&app);
-    }
 
-    Ok(())
+    finish_bulk_update(updated, result, || emit_sessions_cache_invalidation(&app))
 }
 
 /// Auto-name a native-terminal Claude session (and its git branch) from the
@@ -2547,105 +2763,131 @@ pub async fn send_chat_message(
         sessions.sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
     );
 
-    // Check if we should trigger automatic naming (session and/or branch)
-    // Branch naming: first user message ever AND not already attempted
-    // Session naming: first user message in THIS session AND not already attempted
+    // Guard: never execute against archived sessions/worktrees (MCP, UI, queue).
+    // Check before any side effects (naming tasks, chat:sending events).
+    if let Some(session) = sessions.find_session(&session_id) {
+        if let Err(e) = ensure_session_can_run(
+            &session_id,
+            session.archived_at,
+            &worktree_id,
+            worktree_archived_at(&app, &worktree_id),
+        ) {
+            log::warn!("[SendChat] REJECTED session={session_id} — {e}");
+            let error_event = super::claude::ErrorEvent {
+                session_id: session_id.clone(),
+                worktree_id: worktree_id.clone(),
+                error: e.clone(),
+            };
+            if let Err(emit_err) = app.emit_all("chat:error", &error_event) {
+                log::error!("Failed to emit chat:error event: {emit_err}");
+            }
+            return Err(e);
+        }
+    }
+
+    // Check if we should trigger automatic naming (session and/or branch).
+    // Branch naming: first user message ever AND not already attempted.
+    // Session naming: first user message in THIS session AND not already attempted.
+    //
+    // IMPORTANT: `Session.messages` is always empty after the NDJSON migration
+    // (messages load on demand from run logs). Use message_count / total_runs
+    // instead of scanning `messages`.
     let is_first_worktree_message = !sessions.branch_naming_completed
         && sessions
             .sessions
             .iter()
-            .flat_map(|s| &s.messages)
-            .filter(|m| m.role == MessageRole::User)
-            .count()
-            == 0;
+            .all(session_has_no_prior_user_messages);
 
     let session_for_naming = sessions.find_session(&session_id).cloned();
     let is_first_session_message = session_for_naming
         .as_ref()
-        .map(|sess| {
-            !sess.session_naming_completed
-                && sess
-                    .messages
-                    .iter()
-                    .filter(|m| m.role == MessageRole::User)
-                    .count()
-                    == 0
-        })
+        .map(|sess| !sess.session_naming_completed && session_has_no_prior_user_messages(sess))
         .unwrap_or(false);
 
     // Spawn unified naming task if either condition is met
     if is_first_worktree_message || is_first_session_message {
-        if let Ok(prefs) = crate::load_preferences(app.clone()).await {
-            // Preserve branches selected by the user, base sessions, and PR worktrees.
-            let worktree_record = load_projects_data(&app)
-                .ok()
-                .and_then(|data| data.find_worktree(&worktree_id).cloned());
-            let generate_branch = is_first_worktree_message
-                && prefs.auto_branch_naming
-                && should_auto_name_branch(worktree_record.as_ref());
-            let generate_session = is_first_session_message && prefs.auto_session_naming;
+        match crate::load_preferences(app.clone()).await {
+            Ok(prefs) => {
+                // Preserve branches selected by the user, base sessions, and PR worktrees.
+                let worktree_record = load_projects_data(&app)
+                    .ok()
+                    .and_then(|data| data.find_worktree(&worktree_id).cloned());
+                let generate_branch = is_first_worktree_message
+                    && prefs.auto_branch_naming
+                    && should_auto_name_branch(worktree_record.as_ref());
+                let generate_session = is_first_session_message && prefs.auto_session_naming;
 
-            if generate_branch || generate_session {
-                log::trace!(
-                    "Spawning naming task (session: {generate_session}, branch: {generate_branch})"
+                if generate_branch || generate_session {
+                    log::info!(
+                        "[Naming] Spawning naming task session={session_id} worktree={worktree_id} (session: {generate_session}, branch: {generate_branch})"
+                    );
+
+                    // Get existing worktree names to avoid duplicates (only needed for branch naming)
+                    let existing_names = if generate_branch {
+                        load_projects_data(&app)
+                            .map(|data| data.worktrees.iter().map(|w| w.name.clone()).collect())
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let custom_session_prompt = if generate_session {
+                        prefs.magic_prompts.session_naming.clone()
+                    } else {
+                        None
+                    };
+
+                    let request = NamingRequest {
+                        session_id: session_id.clone(),
+                        worktree_id: worktree_id.clone(),
+                        worktree_path: PathBuf::from(&worktree_path),
+                        first_message: message.clone(),
+                        model: prefs.magic_prompt_models.session_naming_model.clone(),
+                        existing_branch_names: existing_names,
+                        generate_session_name: generate_session,
+                        generate_branch_name: generate_branch,
+                        custom_session_prompt,
+                        // Keep provider semantics consistent with manual regeneration:
+                        // session_naming_provider = None means Anthropic (no custom profile),
+                        // not fallback to global default_provider.
+                        custom_profile_name: prefs
+                            .magic_prompt_providers
+                            .session_naming_provider
+                            .clone(),
+                        backend_override: prefs
+                            .magic_prompt_backends
+                            .session_naming_backend
+                            .clone(),
+                        reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
+                    };
+
+                    // Spawn in background - does not block chat
+                    spawn_naming_task(app.clone(), request);
+                }
+
+                // Mark as completed only after prefs loaded successfully so a
+                // transient prefs failure does not permanently skip auto-naming.
+                with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+                    if is_first_worktree_message {
+                        sessions.branch_naming_completed = true;
+                    }
+                    if is_first_session_message {
+                        if let Some(session) = sessions.find_session_mut(&session_id) {
+                            session.session_naming_completed = true;
+                        }
+                    }
+                    Ok(())
+                })?;
+
+                // Reload sessions to get fresh state after save
+                sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
+            }
+            Err(e) => {
+                log::warn!(
+                    "[Naming] Skipping auto-naming for session={session_id}: failed to load preferences: {e}"
                 );
-
-                // Get existing worktree names to avoid duplicates (only needed for branch naming)
-                let existing_names = if generate_branch {
-                    load_projects_data(&app)
-                        .map(|data| data.worktrees.iter().map(|w| w.name.clone()).collect())
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-
-                let custom_session_prompt = if generate_session {
-                    prefs.magic_prompts.session_naming.clone()
-                } else {
-                    None
-                };
-
-                let request = NamingRequest {
-                    session_id: session_id.clone(),
-                    worktree_id: worktree_id.clone(),
-                    worktree_path: PathBuf::from(&worktree_path),
-                    first_message: message.clone(),
-                    model: prefs.magic_prompt_models.session_naming_model.clone(),
-                    existing_branch_names: existing_names,
-                    generate_session_name: generate_session,
-                    generate_branch_name: generate_branch,
-                    custom_session_prompt,
-                    // Keep provider semantics consistent with manual regeneration:
-                    // session_naming_provider = None means Anthropic (no custom profile),
-                    // not fallback to global default_provider.
-                    custom_profile_name: prefs
-                        .magic_prompt_providers
-                        .session_naming_provider
-                        .clone(),
-                    backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
-                    reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
-                };
-
-                // Spawn in background - does not block chat
-                spawn_naming_task(app.clone(), request);
             }
         }
-
-        // Mark as completed to prevent re-triggering (atomic update)
-        with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-            if is_first_worktree_message {
-                sessions.branch_naming_completed = true;
-            }
-            if is_first_session_message {
-                if let Some(session) = sessions.find_session_mut(&session_id) {
-                    session.session_naming_completed = true;
-                }
-            }
-            Ok(())
-        })?;
-
-        // Reload sessions to get fresh state after save
-        sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
     }
 
     // Notify all clients that a message is being sent (for real-time sync).
@@ -2695,15 +2937,33 @@ pub async fn send_chat_message(
     // Capture session info for run log before borrowing session mutably
     let session_name = session.name.clone();
     let session_order = session.order;
+    let session_backend = session.backend.clone();
+    let session_selected_model = session.selected_model.clone();
+    let session_selected_execution_mode = session.selected_execution_mode.clone();
+    let session_selected_thinking_level = session.selected_thinking_level.clone();
+    let session_selected_effort_level = session.selected_effort_level.clone();
+    let session_selected_provider = session.selected_provider.clone();
 
     // Note: User message is stored in NDJSON run entry (run.user_message),
     // not in sessions JSON. Messages are loaded from NDJSON on demand.
 
+    // MCP (and other non-UI callers) often omit per-turn settings. Fall back to
+    // the session's persisted choices so `set_session_model` / toolbar selection
+    // are respected when `model` / `executionMode` are not passed on the send.
+    // Explicit non-empty values remain one-shot overrides.
+    let mut model = resolve_send_model(model, session_selected_model, None);
+    let execution_mode =
+        resolve_send_execution_mode(execution_mode, session_selected_execution_mode);
+    let thinking_level = thinking_level.or(session_selected_thinking_level);
+    let effort_level = effort_level.or(session_selected_effort_level);
+    // selected_provider may be a sentinel (__anthropic__/__default__) rather than
+    // a real custom profile name — only use it when it looks like a profile id.
+    let custom_profile_name = normalize_optional_string(custom_profile_name).or_else(|| {
+        normalize_optional_string(session_selected_provider)
+            .filter(|provider| provider != "__anthropic__" && provider != "__default__")
+    });
+
     // Determine backend from session (or explicit param, or default to claude)
-    let session_backend = sessions
-        .find_session(&session_id)
-        .map(|s| s.backend.clone())
-        .unwrap_or_default();
     let effective_backend = match backend.as_deref() {
         Some("codex") => Backend::Codex,
         Some("opencode") => Backend::Opencode,
@@ -2721,6 +2981,18 @@ pub async fn send_chat_message(
     } else {
         effective_backend
     };
+
+    // Final model fallback: preferences default for the resolved backend.
+    // Covers sessions created before selected_model was persisted, or when
+    // create_session could not load preferences.
+    if model.is_none() {
+        if let Ok(prefs) = crate::load_preferences(app.clone()).await {
+            model = default_model_for_backend(&effective_backend, &prefs);
+        }
+    }
+    log::info!(
+        "[SendChat] resolved session={session_id} model={model:?} backend={effective_backend:?} execution_mode={execution_mode:?}"
+    );
 
     // Sync session.backend when model-based resolution overrides it
     // (e.g. user switched from Claude model to Codex model mid-session).
@@ -2740,6 +3012,9 @@ pub async fn send_chat_message(
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.waiting_for_input = false;
             session.is_reviewing = false;
+            if session.status_override.as_deref() == Some("review") {
+                session.status_override = None;
+            }
             session.waiting_for_input_type = None;
         }
         Ok(())
@@ -2808,18 +3083,34 @@ pub async fn send_chat_message(
     let claude_profile_changed = effective_backend == Backend::Claude
         && claude_session_id.is_some()
         && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
+    // Custom Codex providers bind model_provider on the thread — switching
+    // mid-session requires a new thread (mirrors Claude profile resume clear).
+    let codex_profile_changed = effective_backend == Backend::Codex
+        && codex_thread_id.is_some()
+        && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
     let profile_handoff = super::handoff::should_inject_claude_profile_handoff(
         &effective_backend,
         previous_backend.as_ref(),
         previous_custom_profile.as_deref(),
         custom_profile_name.as_deref(),
     );
+    // On provider switch, always start a fresh native session for the *target*
+    // backend. The previous provider's history is injected via handoff; resuming
+    // an old OpenCode/Codex/etc. session would omit that Jean-local context.
+    let clear_target_resume = backend_handoff || profile_handoff;
     let message_for_backend = if backend_handoff || profile_handoff {
-        let history = run_log::load_session_messages_window(&app, &session_id, Some(20), None)
-            .map(|loaded| super::handoff::format_handoff_history(&loaded.messages, 30_000))
-            .unwrap_or_default();
+        let history = super::handoff::build_handoff_history_text(
+            &app,
+            &session_id,
+            previous_metadata.as_ref(),
+        );
 
-        if let Some(previous_backend) = previous_backend.as_ref().filter(|_| !history.is_empty()) {
+        if history.trim().is_empty() {
+            log::warn!(
+                "[SendChat] provider-switch handoff requested but history empty session={session_id} previous={previous_backend:?} current={effective_backend:?}"
+            );
+            message.clone()
+        } else if let Some(previous_backend) = previous_backend.as_ref() {
             let template = crate::load_preferences(app.clone())
                 .await
                 .ok()
@@ -2842,7 +3133,8 @@ pub async fn send_chat_message(
                 )
             };
             log::info!(
-                "[SendChat] injecting hidden provider-switch handoff session={session_id} previous={previous_backend:?} current={effective_backend:?}"
+                "[SendChat] injecting hidden provider-switch handoff session={session_id} previous={previous_backend:?} current={effective_backend:?} history_chars={}",
+                history.chars().count()
             );
             super::handoff::prepend_hidden_handoff(&message, &handoff_prompt)
         } else {
@@ -2851,10 +3143,52 @@ pub async fn send_chat_message(
     } else {
         message.clone()
     };
-    let claude_session_id = if claude_profile_changed {
+    let claude_session_id = if claude_profile_changed
+        || (clear_target_resume && effective_backend == Backend::Claude)
+    {
         None
     } else {
         claude_session_id
+    };
+    let codex_thread_id = if codex_profile_changed
+        || (clear_target_resume && effective_backend == Backend::Codex)
+    {
+        if codex_profile_changed || clear_target_resume {
+            log::info!(
+                "[SendChat] Codex starting new thread session={session_id} (profile_changed={codex_profile_changed} handoff={clear_target_resume})"
+            );
+        }
+        None
+    } else {
+        codex_thread_id
+    };
+    let opencode_session_id = if clear_target_resume && effective_backend == Backend::Opencode {
+        log::info!(
+            "[SendChat] OpenCode starting new session for provider handoff session={session_id}"
+        );
+        None
+    } else {
+        opencode_session_id
+    };
+    let cursor_chat_id = if clear_target_resume && effective_backend == Backend::Cursor {
+        None
+    } else {
+        cursor_chat_id
+    };
+    let pi_session_id = if clear_target_resume && effective_backend == Backend::Pi {
+        None
+    } else {
+        pi_session_id
+    };
+    let grok_session_id = if clear_target_resume && effective_backend == Backend::Grok {
+        None
+    } else {
+        grok_session_id
+    };
+    let kimi_session_id = if clear_target_resume && effective_backend == Backend::Kimi {
+        None
+    } else {
+        kimi_session_id
     };
 
     // Cursor CLI doesn't support thinking/effort levels
@@ -2868,14 +3202,16 @@ pub async fn send_chat_message(
     };
     let run_effort_level = match effective_backend {
         Backend::Cursor | Backend::Commandcode => None,
-        Backend::Pi => effort_level.as_ref().map(|e| match e {
-            EffortLevel::Off => "off",
-            EffortLevel::Minimal => "minimal",
-            EffortLevel::Low => "low",
-            EffortLevel::Medium => "medium",
-            EffortLevel::High => "high",
-            EffortLevel::Xhigh | EffortLevel::Max | EffortLevel::Ultracode => "xhigh",
-            EffortLevel::Other(value) => value.as_str(),
+        Backend::Pi => effort_level.as_ref().and_then(|e| match e {
+            // Adaptive omits the flag so PI can choose its own depth.
+            EffortLevel::Adaptive => None,
+            EffortLevel::Off => Some("off"),
+            EffortLevel::Minimal => Some("minimal"),
+            EffortLevel::Low => Some("low"),
+            EffortLevel::Medium => Some("medium"),
+            EffortLevel::High => Some("high"),
+            EffortLevel::Xhigh | EffortLevel::Max | EffortLevel::Ultracode => Some("xhigh"),
+            EffortLevel::Other(value) => Some(value.as_str()),
         }),
         _ => effort_level.as_ref().and_then(|e| e.effort_value()),
     };
@@ -2901,6 +3237,59 @@ pub async fn send_chat_message(
     let input_file = run_log_writer.input_file_path()?;
     let output_file = run_log_writer.output_file_path()?;
     let run_id = run_log_writer.run_id().to_string();
+
+    // Snapshot the worktree before the agent can modify files so the user can
+    // review AI changes and restore individual files or the whole tree later.
+    // Failures are non-fatal — chat should still proceed.
+    let checkpoint_id = match crate::projects::checkpoints::create_checkpoint(
+        &app,
+        crate::projects::checkpoints::CreateCheckpointArgs {
+            worktree_id: worktree_id.clone(),
+            worktree_path: worktree_path.clone(),
+            session_id: session_id.clone(),
+            run_id: Some(run_id.clone()),
+            user_message_id: Some(user_message_id.clone()),
+            user_message: message.clone(),
+        },
+    ) {
+        Ok(cp) => {
+            let cp_id = cp.id.clone();
+            if let Err(e) = with_metadata_mut(
+                &app,
+                &session_id,
+                &worktree_id,
+                &session_name,
+                session_order,
+                |metadata| {
+                    if let Some(run) = metadata.find_run_mut(&run_id) {
+                        run.checkpoint_id = Some(cp_id.clone());
+                    }
+                    Ok(())
+                },
+            ) {
+                log::warn!("[Checkpoint] failed to attach id to run {run_id}: {e}");
+            }
+            // Emit so clients can show restore affordances immediately.
+            if let Err(e) = app.emit_all(
+                "checkpoint:created",
+                &serde_json::json!({
+                    "worktree_id": worktree_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "checkpoint_id": cp_id,
+                    "user_message_id": user_message_id,
+                }),
+            ) {
+                log::warn!("[Checkpoint] failed to emit checkpoint:created: {e}");
+            }
+            Some(cp_id)
+        }
+        Err(e) => {
+            log::warn!("[Checkpoint] create failed session={session_id} run={run_id}: {e}");
+            None
+        }
+    };
+    let _ = checkpoint_id;
 
     // Write input file with the effective backend prompt. Hidden handoff context
     // is intentionally not stored as the visible user message in metadata.
@@ -2996,14 +3385,34 @@ pub async fn send_chat_message(
     let thread_allowed_tools = allowed_tools_for_cli.clone();
     let thread_parallel_prompt = parallel_execution_prompt.clone();
     let thread_ai_language = ai_language.clone();
-    let thread_mcp_config = if effective_backend == Backend::Claude {
-        super::jean_mcp::merge_into_mcp_config(&app, &session_id, mcp_config.as_deref())
-            .await
-            .or_else(|| mcp_config.clone())
-    } else {
-        mcp_config.clone()
+    // Always inject Jean MCP for backends that honor runtime mcp_config.
+    // Claude uses --mcp-config/--strict-mcp-config; Grok/Cursor use the same
+    // JSON to decide which servers (including jean) stay enabled for the turn.
+    // Without this, fire-and-forget magic sends that omit frontend mcpConfig
+    // would leave Jean MCP disabled (especially Grok, which disables all
+    // discovered servers when the enabled set is empty).
+    let thread_mcp_config = match effective_backend {
+        Backend::Claude | Backend::Grok | Backend::Cursor => {
+            super::jean_mcp::merge_into_mcp_config(&app, &session_id, mcp_config.as_deref())
+                .await
+                .or_else(|| mcp_config.clone())
+        }
+        _ => mcp_config.clone(),
     };
     let thread_custom_profile = custom_profile_name.clone();
+    let thread_codex_provider = if effective_backend == Backend::Codex {
+        let prefs_for_codex = crate::load_preferences(app.clone()).await.ok();
+        custom_profile_name.as_ref().and_then(|name| {
+            prefs_for_codex.as_ref().and_then(|p| {
+                p.custom_codex_providers
+                    .iter()
+                    .find(|profile| profile.name == *name)
+                    .cloned()
+            })
+        })
+    } else {
+        None
+    };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
     let thread_codex_search = codex_search_enabled;
@@ -3587,6 +3996,7 @@ pub async fn send_chat_message(
                     codex_base_instructions_content.as_deref(),
                     thread_codex_multi_agent,
                     thread_codex_max_threads,
+                    thread_codex_provider.as_ref(),
                 ) {
                     Ok(response) => Ok((
                         0, // No PID for app-server sessions
@@ -3639,7 +4049,10 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("xhigh".to_string()),
                         super::types::EffortLevel::Ultracode => Some("xhigh".to_string()),
-                        super::types::EffortLevel::Off => None,
+                        // Off / Adaptive: omit so the model can choose depth
+                        super::types::EffortLevel::Off | super::types::EffortLevel::Adaptive => {
+                            None
+                        }
                         super::types::EffortLevel::Other(value) => Some(value.clone()),
                     });
 
@@ -4441,7 +4854,10 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("max".to_string()),
                         super::types::EffortLevel::Ultracode => Some("max".to_string()),
-                        super::types::EffortLevel::Off => None,
+                        // Off / Adaptive: omit --effort so Grok can choose depth
+                        super::types::EffortLevel::Off | super::types::EffortLevel::Adaptive => {
+                            None
+                        }
                         super::types::EffortLevel::Other(value) => Some(value.clone()),
                     });
 
@@ -4526,12 +4942,18 @@ pub async fn send_chat_message(
         let _ = tx.send(result);
     });
 
-    let (_pid, unified_response) = match rx.await {
+    let (pid, unified_response) = match rx.await {
         Ok(Ok(result)) => result,
         Ok(Err(e)) => {
-            // Thread completed with an error — clean up all registrations.
+            // Thread completed with an error — clean up registrations owned by
+            // this send. Prefer ownership-aware cleanup so a follow-up send that
+            // started after cancel is not clobbered (#329).
             log::info!("[SendChat] EXIT session={session_id} reason=thread_error error={e}");
-            super::registry::cleanup_session_registrations(&session_id);
+            super::registry::cleanup_owned_session_registrations(
+                &session_id,
+                None,
+                opencode_cancel_flag.as_ref(),
+            );
             if let Some(ref flag) = opencode_cancel_flag {
                 if !flag.load(std::sync::atomic::Ordering::SeqCst) {
                     // Mark run as crashed so it doesn't stay in Running forever
@@ -4603,7 +5025,11 @@ pub async fn send_chat_message(
         }
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
-            super::registry::cleanup_session_registrations(&session_id);
+            super::registry::cleanup_owned_session_registrations(
+                &session_id,
+                None,
+                opencode_cancel_flag.as_ref(),
+            );
             // Check if CLI completed despite thread panic (#209)
             let partial_sid = run_log::extract_session_id_from_jsonl(&app, &session_id, &run_id);
             if run_log::jsonl_has_result_line(&app, &session_id, &run_id) {
@@ -4647,8 +5073,14 @@ pub async fn send_chat_message(
         }
     };
 
-    // Clear any stale pending cancel entry and unregister OpenCode cancel flag now that we have a result.
-    super::registry::cleanup_session_registrations(&session_id);
+    // Clear registry state owned by this send. After cancel, a newer send may
+    // already own ACTIVE_SENDS / CANCEL_FLAGS / PROCESS_REGISTRY for this session,
+    // so only remove entries that still match this run (#329).
+    super::registry::cleanup_owned_session_registrations(
+        &session_id,
+        Some(pid),
+        opencode_cancel_flag.as_ref(),
+    );
 
     // PID is now persisted via pid_callback immediately after spawn (before tailing).
     // No need to set_pid here — it was already saved for crash recovery.
@@ -5040,6 +5472,9 @@ pub async fn send_chat_message(
             } else if has_blocking_tool {
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some(
                     if has_question_tool {
                         "question"
@@ -5052,6 +5487,9 @@ pub async fn send_chat_message(
                 // Codex/OpenCode plan-mode with content → waiting for plan approval
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some("plan".to_string());
             } else {
                 // Normal completion
@@ -5443,7 +5881,13 @@ pub async fn cancel_chat_message(
         super::registry::cleanup_session_registrations(&session_id);
         return Ok(false);
     }
-    cancel_process(&app, &session_id, &worktree_id)
+    let cancelled = cancel_process(&app, &session_id, &worktree_id)?;
+    if cancelled {
+        // Free the send slot immediately so a follow-up prompt is not rejected
+        // while the cancelled worker finishes teardown (issue #329).
+        release_active_send(&session_id);
+    }
+    Ok(cancelled)
 }
 
 /// Check if any sessions have running Claude processes
@@ -6170,7 +6614,7 @@ fn editor_file_args(
     column: Option<u32>,
 ) -> Vec<String> {
     match editor {
-        "vscode" | "cursor" => {
+        "vscode" | "vscodium" | "cursor" => {
             if line.is_some() {
                 vec!["-g".to_string(), editor_location(path, line, column)]
             } else {
@@ -6221,7 +6665,7 @@ fn macos_open_app_args(
 
 /// Open a file in the user's preferred editor
 ///
-/// Uses the editor preference (zed, vscode, cursor, xcode, intellij) to open files.
+/// Uses the editor preference (zed, vscode, vscodium, cursor, xcode, intellij) to open files.
 pub async fn open_file_in_default_app(
     path: String,
     editor: Option<String>,
@@ -6233,6 +6677,7 @@ pub async fn open_file_in_default_app(
 
     let friendly_name = match editor_app.as_str() {
         "vscode" => "VS Code ('code')",
+        "vscodium" => "VSCodium ('codium')",
         "cursor" => "Cursor ('cursor')",
         "zed" => "Zed ('zed')",
         "xcode" => "Xcode ('xed')",
@@ -6283,6 +6728,20 @@ pub async fn open_file_in_default_app(
                             &path,
                             line,
                             column,
+                        ))
+                        .spawn()
+                }
+                Err(e) => Err(e),
+            },
+            "vscodium" => match std::process::Command::new("codium")
+                .args(editor_file_args("vscodium", &path, line, column))
+                .spawn()
+            {
+                Ok(child) => Ok(child),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::process::Command::new("open")
+                        .args(macos_open_app_args(
+                            "VSCodium", "vscodium", &path, line, column,
                         ))
                         .spawn()
                 }
@@ -6340,6 +6799,11 @@ pub async fn open_file_in_default_app(
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn(),
             "xcode" => return Err("Xcode is only available on macOS".to_string()),
+            "vscodium" => std::process::Command::new("cmd")
+                .args(["/c", "codium"])
+                .args(editor_file_args("vscodium", &path, line, column))
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
             _ => std::process::Command::new("cmd")
                 .args(["/c", "code"])
                 .args(editor_file_args("vscode", &path, line, column))
@@ -6369,6 +6833,9 @@ pub async fn open_file_in_default_app(
                 .args(editor_file_args("intellij", &path, line, column))
                 .spawn(),
             "xcode" => return Err("Xcode is only available on macOS".to_string()),
+            "vscodium" => std::process::Command::new("codium")
+                .args(editor_file_args("vscodium", &path, line, column))
+                .spawn(),
             _ => std::process::Command::new("code")
                 .args(editor_file_args("vscode", &path, line, column))
                 .spawn(),
@@ -7798,7 +8265,12 @@ pub async fn resume_session(
                                 log::error!("Failed to mark Grok run as crashed: {e}");
                             }
                         }
-                        emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
+                        let (event_name, event) = resumed_grok_tail_error_event(
+                            &session_id_clone,
+                            &worktree_id_clone,
+                            &e,
+                        );
+                        let _ = app_clone.emit_all(event_name, &event);
                         return;
                     }
                 };
@@ -8282,18 +8754,31 @@ fn send_codex_response(rpc_id: u64, payload: serde_json::Value) -> Result<(), St
 
 /// Backward-compatible wrapper for legacy frontend callers.
 pub fn approve_codex_command(
-    _session_id: String,
+    session_id: String,
     rpc_id: u64,
     decision: String,
 ) -> Result<(), String> {
+    // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
+    // prompts for the rest of this session without waiting for the next turn
+    // (issue #328).
+    if decision == "acceptForSession" {
+        super::registry::set_codex_yolo_auto_approve(&session_id, true);
+    }
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
 pub fn respond_codex_command_approval(
-    _session_id: String,
+    session_id: String,
     rpc_id: u64,
     response: serde_json::Value,
 ) -> Result<(), String> {
+    let is_accept_for_session = response
+        .get("decision")
+        .and_then(|d| d.as_str())
+        .is_some_and(|d| d == "acceptForSession");
+    if is_accept_for_session {
+        super::registry::set_codex_yolo_auto_approve(&session_id, true);
+    }
     send_codex_response(rpc_id, response)
 }
 
@@ -9384,6 +9869,17 @@ pub async fn answer_opencode_question(
 mod tests {
     use super::*;
 
+    #[test]
+    fn resumed_grok_host_error_uses_chat_error_event() {
+        let (event_name, event) =
+            resumed_grok_tail_error_event("session-1", "worktree-1", "rate limit reached");
+
+        assert_eq!(event_name, "chat:error");
+        assert_eq!(event.session_id, "session-1");
+        assert_eq!(event.worktree_id, "worktree-1");
+        assert_eq!(event.error, "rate limit reached");
+    }
+
     fn naming_test_worktree(branch: &str, base_branch: Option<&str>) -> Worktree {
         serde_json::from_value(serde_json::json!({
             "id": "worktree-id",
@@ -9411,6 +9907,44 @@ mod tests {
         let worktree = naming_test_worktree("random-workspace", Some("main"));
 
         assert!(should_auto_name_branch(Some(&worktree)));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_uses_message_count() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = Some(0);
+        session.messages = vec![]; // NDJSON path: messages always empty
+        assert!(session_has_no_prior_user_messages(&session));
+
+        session.message_count = Some(2);
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_falls_back_to_total_runs() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = None;
+        session.total_runs = 0;
+        assert!(session_has_no_prior_user_messages(&session));
+
+        session.total_runs = 1;
+        assert!(!session_has_no_prior_user_messages(&session));
+    }
+
+    #[test]
+    fn session_has_no_prior_user_messages_falls_back_to_in_memory_messages() {
+        let mut session = Session::new("Session 1".to_string(), 0, Backend::Claude);
+        session.message_count = None;
+        session.total_runs = 0;
+        session.messages = vec![ChatMessage {
+            id: "m1".to_string(),
+            session_id: session.id.clone(),
+            role: MessageRole::User,
+            content: "hello".to_string(),
+            timestamp: 0,
+            ..Default::default()
+        }];
+        assert!(!session_has_no_prior_user_messages(&session));
     }
 
     #[test]
@@ -9475,6 +10009,37 @@ mod tests {
         assert_eq!(
             editor_file_args("cursor", "/tmp/main.ts", Some(42), None),
             vec!["-g".to_string(), "/tmp/main.ts:42".to_string()]
+        );
+        assert_eq!(
+            editor_file_args("vscodium", "/tmp/main.ts", Some(42), Some(3)),
+            vec!["-g".to_string(), "/tmp/main.ts:42:3".to_string()]
+        );
+        // Path-only opens omit -g for VS Code forks.
+        assert_eq!(
+            editor_file_args("vscodium", "/tmp/main.ts", None, None),
+            vec!["/tmp/main.ts".to_string()]
+        );
+    }
+
+    #[test]
+    fn macos_open_app_args_uses_vscodium_app_name_and_goto_args() {
+        assert_eq!(
+            macos_open_app_args("VSCodium", "vscodium", "/tmp/main.ts", None, None),
+            vec![
+                "-a".to_string(),
+                "VSCodium".to_string(),
+                "/tmp/main.ts".to_string()
+            ]
+        );
+        assert_eq!(
+            macos_open_app_args("VSCodium", "vscodium", "/tmp/main.ts", Some(10), Some(2)),
+            vec![
+                "-a".to_string(),
+                "VSCodium".to_string(),
+                "--args".to_string(),
+                "-g".to_string(),
+                "/tmp/main.ts:10:2".to_string()
+            ]
         );
     }
 
@@ -9721,6 +10286,27 @@ mod tests {
     }
 
     #[test]
+    fn release_active_send_allows_new_claim_without_drop_clobber() {
+        // Regression for #329: cancel releases the claim while the cancelled
+        // send is still alive; Drop of the old claim must not free the new one.
+        let old = SendClaim::try_acquire("race-session").expect("first claim");
+        assert!(SendClaim::try_acquire("race-session").is_none());
+
+        release_active_send("race-session");
+        let new = SendClaim::try_acquire("race-session").expect("claim after cancel release");
+        assert!(has_active_send("race-session"));
+
+        drop(old);
+        assert!(
+            has_active_send("race-session"),
+            "old claim Drop must not remove newer generation"
+        );
+
+        drop(new);
+        assert!(!has_active_send("race-session"));
+    }
+
+    #[test]
     fn default_model_for_commandcode_backend_uses_commandcode_preference() {
         let prefs = crate::AppPreferences {
             selected_model: "claude-sonnet-4-6[1m]".to_string(),
@@ -9735,18 +10321,82 @@ mod tests {
     }
 
     #[test]
+    fn resolve_send_model_prefers_explicit_over_session_and_prefs() {
+        assert_eq!(
+            resolve_send_model(
+                Some("claude-fable-5".to_string()),
+                Some("claude-opus-4-8[1m]".to_string()),
+                Some("claude-sonnet-4-6[1m]".to_string()),
+            ),
+            Some("claude-fable-5".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_falls_back_to_session_selected_model() {
+        // MCP set_session_model then send_chat_message without model
+        assert_eq!(
+            resolve_send_model(
+                None,
+                Some("claude-fable-5".to_string()),
+                Some("claude-opus-4-8[1m]".to_string()),
+            ),
+            Some("claude-fable-5".to_string())
+        );
+        // Empty / whitespace explicit model is treated as omitted
+        assert_eq!(
+            resolve_send_model(
+                Some("   ".to_string()),
+                Some("claude-fable-5".to_string()),
+                None,
+            ),
+            Some("claude-fable-5".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_falls_back_to_preferences_default() {
+        assert_eq!(
+            resolve_send_model(None, None, Some("claude-sonnet-4-6[1m]".to_string())),
+            Some("claude-sonnet-4-6[1m]".to_string())
+        );
+        assert_eq!(resolve_send_model(None, Some("".to_string()), None), None);
+    }
+
+    #[test]
+    fn resolve_send_execution_mode_falls_back_to_session() {
+        assert_eq!(
+            resolve_send_execution_mode(Some("yolo".to_string()), Some("plan".to_string())),
+            Some("yolo".to_string())
+        );
+        assert_eq!(
+            resolve_send_execution_mode(None, Some("build".to_string())),
+            Some("build".to_string())
+        );
+        assert_eq!(
+            resolve_send_execution_mode(Some("".to_string()), Some("plan".to_string())),
+            Some("plan".to_string())
+        );
+    }
+
+    #[test]
     fn test_codex_default_prompt_injects_plan_rules_only_in_plan_mode() {
         let plan_prompt = codex_default_global_system_prompt(Some("plan"));
         assert!(plan_prompt.contains("## Plan Mode"));
         assert!(plan_prompt.contains("PLAN MODE"));
-        assert!(plan_prompt.contains("update_plan"));
-        assert!(plan_prompt.contains("CodexPlan"));
+        assert!(plan_prompt.contains("<proposed_plan>"));
         assert!(plan_prompt.contains("approval UI"));
+        assert!(plan_prompt.contains("Do not use the `update_plan` checklist tool"));
+        assert!(plan_prompt.contains("Do not edit or write files"));
+        assert!(plan_prompt.contains("Plan quality"));
+        assert!(plan_prompt.contains("zero-context"));
+        assert!(plan_prompt.contains("Plan created and ready for approval"));
+        assert!(plan_prompt.contains("full revised plan"));
         assert!(!plan_prompt.contains("## Not Plan Mode"));
 
         let build_prompt = codex_default_global_system_prompt(Some("build"));
         assert!(!build_prompt.contains("## Plan Mode"));
-        assert!(!build_prompt.contains("update_plan"));
+        assert!(!build_prompt.contains("<proposed_plan>"));
         assert!(!build_prompt.contains("CodexPlan"));
         assert!(build_prompt.contains("## Not Plan Mode"));
         assert!(build_prompt.contains("Jean Worktree Policy"));
@@ -9759,7 +10409,7 @@ mod tests {
 
         let yolo_prompt = codex_default_global_system_prompt(Some("yolo"));
         assert!(!yolo_prompt.contains("## Plan Mode"));
-        assert!(!yolo_prompt.contains("update_plan"));
+        assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
         assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
@@ -9781,7 +10431,7 @@ mod tests {
 
         let plan_prompt = resolve_codex_global_system_prompt(Some(legacy_default), Some("plan"));
         assert!(plan_prompt.contains("## Plan Mode"));
-        assert!(plan_prompt.contains("CodexPlan"));
+        assert!(plan_prompt.contains("<proposed_plan>"));
     }
 
     #[test]
@@ -9796,7 +10446,8 @@ mod tests {
     #[test]
     fn test_codex_execution_mode_instruction_is_last_authoritative_part() {
         let mut parts = vec![
-            "Custom prompt still says Every Codex plan-mode response must use update_plan/CodexPlan.".to_string(),
+            "Custom prompt still says Every Codex plan-mode response must use STALE_PLAN_MARKER."
+                .to_string(),
             crate::chat::RECAP_INSTRUCTION.to_string(),
         ];
 
@@ -9804,7 +10455,7 @@ mod tests {
         let combined = parts.join("\n");
 
         let stale_plan_rule = combined
-            .rfind("update_plan/CodexPlan")
+            .rfind("STALE_PLAN_MARKER")
             .expect("stale plan rule is present in custom prompt");
         let mode_override = combined
             .rfind("YOLO EXECUTION MODE")
@@ -9826,14 +10477,14 @@ mod tests {
         let build = codex_execution_mode_instruction(Some("build")).unwrap();
         assert!(build.contains("BUILD MODE"));
         assert!(build.contains("Start implementing immediately"));
-        assert!(build.contains("Do NOT call update_plan/emit CodexPlan"));
+        assert!(build.contains("Do NOT emit <proposed_plan>"));
         assert!(build.contains("supersedes any earlier plan-mode"));
         assert!(build.contains("approved plan"));
 
         let yolo = codex_execution_mode_instruction(Some("yolo")).unwrap();
         assert!(yolo.contains("YOLO EXECUTION MODE"));
         assert!(yolo.contains("Start implementing immediately"));
-        assert!(yolo.contains("Do NOT call update_plan/emit CodexPlan"));
+        assert!(yolo.contains("Do NOT emit <proposed_plan>"));
         assert!(yolo.contains("Do not ask for confirmation"));
         assert!(yolo.contains("supersedes any earlier plan-mode"));
         assert!(yolo.contains("approved plan"));
@@ -10209,6 +10860,54 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let remaining = vec![s2, s3];
         let selected = find_neighbor_non_archived_session_id(&remaining, 0);
         assert_eq!(selected.as_deref(), Some("s3"));
+    }
+
+    #[test]
+    fn ensure_session_can_run_allows_active_session_and_worktree() {
+        assert!(ensure_session_can_run("sess-1", None, "wt-1", None).is_ok());
+    }
+
+    #[test]
+    fn ensure_session_can_run_rejects_archived_session() {
+        let err = ensure_session_can_run("sess-1", Some(123), "wt-1", None).unwrap_err();
+        assert!(err.contains("Session is archived"));
+        assert!(err.contains("sess-1"));
+        assert!(err.contains("Unarchive"));
+    }
+
+    #[test]
+    fn ensure_session_can_run_rejects_archived_worktree() {
+        let err = ensure_session_can_run("sess-1", None, "wt-1", Some(456)).unwrap_err();
+        assert!(err.contains("Worktree is archived"));
+        assert!(err.contains("wt-1"));
+        assert!(err.contains("Unarchive"));
+    }
+
+    #[test]
+    fn ensure_session_can_run_prefers_session_archive_error() {
+        // When both are archived, surface the session-level error first so the
+        // caller knows which unarchive tool to use.
+        let err = ensure_session_can_run("sess-1", Some(1), "wt-1", Some(2)).unwrap_err();
+        assert!(err.contains("Session is archived"));
+        assert!(!err.contains("Worktree is archived"));
+    }
+
+    #[test]
+    fn ensure_worktree_not_archived_rejects_archived() {
+        let err = ensure_worktree_not_archived("wt-1", Some(99)).unwrap_err();
+        assert!(err.contains("Worktree is archived"));
+        assert!(err.contains("wt-1"));
+        assert!(ensure_worktree_not_archived("wt-1", None).is_ok());
+    }
+
+    #[test]
+    fn bulk_update_invalidates_before_returning_partial_failure() {
+        let mut invalidated = false;
+        let result: Result<(), &str> =
+            finish_bulk_update(true, Err("save failed"), || invalidated = true);
+
+        assert!(invalidated);
+        assert_eq!(result, Err("save failed"));
     }
 
     #[test]

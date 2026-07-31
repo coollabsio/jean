@@ -19,10 +19,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
-import { useWorktrees } from '@/services/projects'
+import { useProjects, useWorktrees } from '@/services/projects'
 import { useChatStore } from '@/store/chat-store'
 import { useCreateSession, useSendMessage } from '@/services/chat'
 import { buildReleaseNotesSessionPrompt } from '@/lib/release-notes-prompt'
+import { resolveMcpConfigForSend } from '@/services/mcp'
+import { usePreferences } from '@/services/preferences'
+import type { CliBackend } from '@/types/preferences'
 
 interface DetectPrResponse {
   pr_number: number
@@ -44,6 +47,11 @@ export function UpdatePrDialog() {
 
   const createSession = useCreateSession()
   const sendMessage = useSendMessage()
+  const { data: preferences } = usePreferences()
+  const { data: projects } = useProjects()
+  const project = worktree
+    ? projects?.find(p => p.id === worktree.project_id)
+    : null
 
   const [branchPr, setBranchPr] = useState<DetectPrResponse | null>(null)
   const [isDetectingBranchPr, setIsDetectingBranchPr] = useState(false)
@@ -152,6 +160,23 @@ export function UpdatePrDialog() {
 
         setActiveSession(worktreeId, session.id)
 
+        const resolvedBackend = (backend ?? 'claude') as CliBackend
+        const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
+          worktreePath,
+          backend: resolvedBackend,
+          projectEnabled: project?.enabled_mcp_servers,
+          globalEnabled: preferences?.default_enabled_mcp_servers,
+          knownServers:
+            project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+        })
+        store.setEnabledMcpServers(session.id, enabledServers)
+        invoke('update_session_state', {
+          worktreeId,
+          worktreePath,
+          sessionId: session.id,
+          enabledMcpServers: enabledServers,
+        }).catch(() => undefined)
+
         // Open the session and close this modal immediately — the send below is
         // fire-and-forget (send_chat_message only resolves once the run finishes).
         window.dispatchEvent(
@@ -170,6 +195,7 @@ export function UpdatePrDialog() {
           backend,
           model,
           customProfileName: provider,
+          mcpConfig,
         })
       } catch (error) {
         setErrorMessage(String(error))
@@ -183,6 +209,10 @@ export function UpdatePrDialog() {
       createSession,
       sendMessage,
       setUpdatePrModalOpen,
+      project?.enabled_mcp_servers,
+      project?.known_mcp_servers,
+      preferences?.default_enabled_mcp_servers,
+      preferences?.known_mcp_servers,
     ]
   )
 

@@ -29,6 +29,7 @@ import { listen } from '@/lib/transport'
 import { queryClient } from '@/lib/query-client'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
+import { isModKeyEvent } from '@/types/keybindings'
 import {
   defaultPreferences,
   type AppPreferences,
@@ -528,6 +529,7 @@ function getThemeFromCss(): ResolvedTerminalTheme {
 }
 
 function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
+  // Mod+Shift+Escape: unfocus terminal (platform mod, or either key as escape hatch)
   if (
     (event.metaKey || event.ctrlKey) &&
     event.shiftKey &&
@@ -545,25 +547,28 @@ function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
     return false
   }
 
-  if (!event.metaKey) return false
+  // Only the platform primary mod (Cmd on macOS native, Ctrl elsewhere) is
+  // reserved for app shortcuts. Control on macOS native must reach the PTY
+  // (issue #615: Ctrl+T must not open a new terminal tab).
+  if (!isModKeyEvent(event)) return false
   const code = event.code
-  // CMD+` → toggle terminal panel
+  // Mod+` → toggle terminal panel
   if (code === 'Backquote') return true
-  // CMD+T → new terminal tab
+  // Mod+T → new terminal tab
   if (!event.shiftKey && !event.altKey && code === 'KeyT') return true
-  // CMD+W → close terminal tab
+  // Mod+W → close terminal tab
   if (!event.shiftKey && !event.altKey && code === 'KeyW') return true
-  // CMD+1..9 → switch terminal tab
+  // Mod+1..9 → switch terminal tab
   if (!event.shiftKey && !event.altKey && /^Digit[1-9]$/.test(code)) {
     return true
   }
-  // CMD+\ / CMD+Shift+\ → split terminal pane (right / down)
+  // Mod+\ / Mod+Shift+\ → split terminal pane (right / down)
   if (!event.altKey && code === 'Backslash') return true
-  // CMD+Shift+W → close focused split pane
+  // Mod+Shift+W → close focused split pane
   if (event.shiftKey && !event.altKey && code === 'KeyW') return true
-  // CMD+] → focus next split pane
+  // Mod+] → focus next split pane
   if (!event.shiftKey && !event.altKey && code === 'BracketRight') return true
-  // CMD+Alt+Backspace → cancel prompt
+  // Mod+Alt+Backspace → cancel prompt
   return event.altKey && (code === 'Backspace' || code === 'Delete')
 }
 

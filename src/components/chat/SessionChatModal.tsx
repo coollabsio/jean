@@ -13,8 +13,6 @@ import {
   Archive,
   ChevronDown,
   Copy,
-  Eye,
-  EyeOff,
   GitBranchPlus,
   GitPullRequestArrow,
   Pencil,
@@ -95,9 +93,12 @@ import {
   buildNativeClientSessionInput,
   computeSessionCardData,
   getResumeCommand,
+  isActionableWaitingStatus,
   statusConfig,
+  type ManualSessionStatus,
   type SessionCardData,
 } from './session-card-utils'
+import { SessionStatusMenu } from './SessionStatusMenu'
 import {
   buildReorderedSessionIdsWithinStatus,
   resolveModalSessionId,
@@ -128,7 +129,10 @@ import {
   MODAL_TERMINAL_PRIMARY_ROW_CLASS,
   MODAL_TERMINAL_SECONDARY_ROW_CLASS,
 } from './modal-terminal-layout'
-import { getStackedBaseBranch } from './worktree-branch-badge'
+import {
+  getStackedBaseBranch,
+  resolveStackedOnPr,
+} from './worktree-branch-badge'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -143,7 +147,7 @@ function useOffScreenWaiting(
     if (!viewport) return
 
     const waitingIds = sortedCards
-      .filter(c => c.status === 'waiting')
+      .filter(c => isActionableWaitingStatus(c.status))
       .map(c => c.session.id)
 
     if (waitingIds.length === 0) {
@@ -365,9 +369,11 @@ export function SessionChatModal({
     worktree?.base_remote
   )
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open')
-  const stackedOnPR = stackedBaseBranch
-    ? openPRs?.find(pr => pr.headRefName === stackedBaseBranch)
-    : undefined
+  const stackedOnPR = resolveStackedOnPr(
+    stackedBaseBranch,
+    openPRs,
+    project?.default_branch
+  )
   const isBase = worktree ? isBaseSession(worktree) : false
   const { data: gitStatus } = useGitStatus(worktreeId)
   const behindCount =
@@ -540,20 +546,26 @@ export function SessionChatModal({
   const removeSessionTab = useCallback(
     (session: Session) => {
       const activeSessions = sessions.filter(s => !s.archived_at)
-      if (activeSessions.length <= 1) {
-        const action = () => {
-          handleDeleteSession(session.id)
+      const sessionIsEmpty = !session.message_count
+      // Confirm any non-empty session when preference is on (default). Only
+      // confirming the last tab allowed held/cascade closes to wipe chats
+      // without a prompt (issue #56). Empty sessions close immediately.
+      const needsConfirm =
+        preferences?.confirm_session_close !== false && !sessionIsEmpty
+
+      const action = () => {
+        if (activeSessions.length > 1) {
+          selectVisualNeighbor(session.id)
         }
-        const sessionIsEmpty = !session.message_count
-        if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
-          pendingCloseAction.current = action
-          setCloseConfirmOpen(true)
-        } else {
-          action()
-        }
-      } else {
-        selectVisualNeighbor(session.id)
+        // The mutation navigates after success when this was the last session.
         handleDeleteSession(session.id)
+      }
+
+      if (needsConfirm) {
+        pendingCloseAction.current = action
+        setCloseConfirmOpen(true)
+      } else {
+        action()
       }
     },
     [
@@ -584,7 +596,6 @@ export function SessionChatModal({
           if (currentSessionId) {
             handleDeleteSession(currentSessionId)
           }
-          onClose()
         } else if (currentSessionId) {
           selectVisualNeighbor(currentSessionId)
           handleDeleteSession(currentSessionId)
@@ -610,7 +621,6 @@ export function SessionChatModal({
     isOpen,
     sessions,
     currentSessionId,
-    onClose,
     handleDeleteSession,
     selectVisualNeighbor,
     preferences?.confirm_session_close,
@@ -772,7 +782,7 @@ export function SessionChatModal({
       if (!viewport) return
       const { scrollLeft, clientWidth } = viewport
       for (const card of sortedCards) {
-        if (card.status !== 'waiting') continue
+        if (!isActionableWaitingStatus(card.status)) continue
         const el = viewport.querySelector(
           `[data-session-id="${card.session.id}"]`
         ) as HTMLElement | null
@@ -838,11 +848,19 @@ export function SessionChatModal({
       await performGitPull({
         worktreeId,
         worktreePath,
-        baseBranch: defaultBranch,
+        baseBranch: worktree?.base_branch ?? defaultBranch,
         projectId: project?.id,
+        remote: worktree?.base_remote,
       })
     },
-    [worktreeId, worktreePath, defaultBranch, project?.id]
+    [
+      worktreeId,
+      worktreePath,
+      worktree?.base_branch,
+      worktree?.base_remote,
+      defaultBranch,
+      project?.id,
+    ]
   )
 
   const pickRemoteOrRun = useRemotePicker(worktreePath)
@@ -1356,13 +1374,15 @@ export function SessionChatModal({
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                               draggedSessionId === session.id && 'opacity-60',
-                              status === 'waiting' &&
+                              isActionableWaitingStatus(status) &&
                                 'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
                             )}
                           >
                             <StatusIndicator
                               status={config.indicatorStatus}
                               variant={config.indicatorVariant}
+                              shape={config.indicatorShape}
+                              label={config.label}
                               className="h-1.5 w-1.5"
                             />
                             {idx < 9 && (
@@ -1432,35 +1452,17 @@ export function SessionChatModal({
                             <Tag className="mr-2 h-4 w-4" />
                             {sessionLabel ? 'Remove Label' : 'Add Label'}
                           </ContextMenuItem>
-                          <ContextMenuItem
-                            // "Mark as Idle" only clears the manual reviewing
-                            // flag. When review is driven by AI review_results,
-                            // clearing the flag leaves the session in review —
-                            // no effect — so disable it there.
-                            disabled={
-                              status === 'review' && !!session.review_results
-                            }
-                            onSelect={() => {
-                              const { reviewingSessions, setSessionReviewing } =
-                                useChatStore.getState()
-                              const isReviewing =
-                                reviewingSessions[session.id] ||
-                                !!session.review_results
-                              setSessionReviewing(session.id, !isReviewing)
+                          <SessionStatusMenu
+                            statusOverride={card.statusOverride}
+                            automaticStatus={card.automaticStatus}
+                            onSetStatusOverride={(
+                              next: ManualSessionStatus | null
+                            ) => {
+                              useChatStore
+                                .getState()
+                                .setSessionStatusOverride(session.id, next)
                             }}
-                          >
-                            {status === 'review' ? (
-                              <>
-                                <EyeOff className="mr-2 h-4 w-4" />
-                                Mark as Idle
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="mr-2 h-4 w-4" />
-                                Mark for Review
-                              </>
-                            )}
-                          </ContextMenuItem>
+                          />
                           {resumeCommand && (
                             <>
                               <ContextMenuItem
@@ -1509,6 +1511,18 @@ export function SessionChatModal({
                           >
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => {
+                              void copyToClipboard(session.id)
+                                .then(() => toast.success('Session ID copied'))
+                                .catch(() =>
+                                  toast.error('Failed to copy session ID')
+                                )
+                            }}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy Session ID
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem

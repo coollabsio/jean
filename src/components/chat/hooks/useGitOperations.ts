@@ -12,7 +12,11 @@ import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import { startCommitJob } from '@/services/commit-jobs'
 import { buildMcpConfigJson } from '@/services/mcp'
-import { saveWorktreePr, projectsQueryKeys } from '@/services/projects'
+import {
+  saveWorktreePr,
+  linkWorktreePr,
+  projectsQueryKeys,
+} from '@/services/projects'
 import {
   gitPush,
   triggerImmediateGitPoll,
@@ -659,7 +663,9 @@ export function useGitOperations({
     ]
   )
 
-  // Handle Pull - pulls changes from remote
+  // Handle Pull - merges the worktree's base branch into HEAD.
+  // Prefer the remote/branch the worktree was started from so a session
+  // branched off fork/main does not pull origin/main by default.
   const handlePull = useCallback(
     async (remote?: string) => {
       if (!activeWorktreePath || !activeWorktreeId) return
@@ -667,9 +673,10 @@ export function useGitOperations({
       await performGitPull({
         worktreeId: activeWorktreeId,
         worktreePath: activeWorktreePath,
-        baseBranch: project?.default_branch ?? 'main',
+        baseBranch:
+          worktree?.base_branch ?? project?.default_branch ?? 'main',
         branchLabel: worktree?.branch,
-        remote,
+        remote: remote ?? worktree?.base_remote,
         onMergeConflict: () => {
           window.dispatchEvent(
             new CustomEvent('magic-command', {
@@ -683,6 +690,8 @@ export function useGitOperations({
       activeWorktreeId,
       activeWorktreePath,
       worktree?.branch,
+      worktree?.base_branch,
+      worktree?.base_remote,
       project?.default_branch,
     ]
   )
@@ -762,9 +771,36 @@ export function useGitOperations({
     }
   }, [activeWorktreeId, activeWorktreePath, worktree?.project_id])
 
-  // Handle Open PR - creates PR with AI-generated title and description in background
+  // Handle Open PR - opens linked PR, or creates one with AI-generated content
   const handleOpenPr = useCallback(async () => {
     if (!activeWorktreeId || !activeWorktreePath || !worktree) return
+
+    // Already linked: open in browser (same as create-PR flow after success)
+    if (worktree.pr_url) {
+      await openExternal(worktree.pr_url)
+      return
+    }
+
+    // Number without URL (e.g. older checkout_pr): resolve URL then open
+    if (worktree.pr_number) {
+      try {
+        const linked = await linkWorktreePr(
+          activeWorktreeId,
+          activeWorktreePath,
+          worktree.pr_number
+        )
+        queryClient.invalidateQueries({
+          queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+        })
+        queryClient.invalidateQueries({
+          queryKey: [...projectsQueryKeys.all, 'worktree', activeWorktreeId],
+        })
+        await openExternal(linked.pr_url)
+      } catch (error) {
+        toast.error(`Failed to open PR #${worktree.pr_number}: ${error}`)
+      }
+      return
+    }
 
     const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
     setWorktreeLoading(activeWorktreeId, 'pr')
@@ -1000,11 +1036,11 @@ export function useGitOperations({
           })
         }
 
+        // Sonner ignores `duration` for loading toasts — dismiss explicitly.
         toast.loading(
           `${reviewLabel} running for ${projectName}/${worktreeName}...`,
           {
             id: toastId,
-            duration: 5000,
             cancel: {
               label: 'Cancel',
               onClick: () => {
@@ -1019,6 +1055,9 @@ export function useGitOperations({
             },
           }
         )
+        const autoDismissTimer = window.setTimeout(() => {
+          toast.dismiss(toastId)
+        }, 5000)
 
         let unlistenReviewJob: (() => void) | null = null
         let handledTerminalReviewJob = false
@@ -1028,6 +1067,7 @@ export function useGitOperations({
           if (handledTerminalReviewJob) return
 
           handledTerminalReviewJob = true
+          window.clearTimeout(autoDismissTimer)
           unlistenReviewJob?.()
           if (reviewJob.status === 'completed') {
             const completedSessionId = reviewJob.sessionId
@@ -1162,8 +1202,8 @@ export function useGitOperations({
       return
     }
 
-    // Validate: no open PR
-    if (worktreeData.pr_url) {
+    // Validate: no open PR (number or URL — checkouts may have only a number)
+    if (worktreeData.pr_number || worktreeData.pr_url) {
       toast.error(
         'Cannot merge locally while a PR is open. Close or merge the PR on GitHub first.'
       )
@@ -1280,12 +1320,14 @@ export function useGitOperations({
           const diffSection = prResult.conflict_diff
             ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
             : ''
-          const baseBranch = project?.default_branch || 'main'
+          const baseBranch =
+            worktree.base_branch || project?.default_branch || 'main'
+          const baseRemote = worktree.base_remote || 'origin'
           const resolveInstructions =
             preferences?.magic_prompts?.resolve_conflicts ??
             DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-          const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+          const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}
@@ -1467,12 +1509,14 @@ ${resolveInstructions}`
           ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
           : ''
 
-        const baseBranch = project?.default_branch || 'main'
+        const baseBranch =
+          worktree.base_branch || project?.default_branch || 'main'
+        const baseRemote = worktree.base_remote || 'origin'
         const resolveInstructions =
           preferences?.magic_prompts?.resolve_conflicts ??
           DEFAULT_RESOLVE_CONFLICTS_PROMPT
 
-        const conflictPrompt = `I merged \`origin/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
+        const conflictPrompt = `I merged \`${baseRemote}/${baseBranch}\` into this branch to resolve PR conflicts, but there are merge conflicts.
 
 Conflicts in these files:
 - ${conflictFiles}${diffSection}

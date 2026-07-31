@@ -349,7 +349,8 @@ const PROMPT_SECTIONS: PromptSection[] = [
         providerKey: 'code_review_provider',
         backendKey: 'code_review_backend',
         label: 'Code Review',
-        description: 'Prompt for AI-powered code review of your changes.',
+        description:
+          'Prompt for AI-powered code review of your changes. Each reviewer row has its own Mode for sessions created when sending that reviewer’s findings to chat.',
         variables: [
           {
             name: '{branch_info}',
@@ -672,6 +673,7 @@ function makeCodeReviewConfig(
     reasoning_effort:
       getMagicPromptModelReasoning(catalog, backend, model, null, [])
         ?.default ?? null,
+    fix_mode: DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
   }
 }
 
@@ -846,7 +848,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const selectedConfig = PROMPT_CONFIGS.find(c => c.key === selectedKey)!
   const currentValue =
     currentPrompts[selectedKey] ?? selectedConfig.defaultValue
-  const currentModel = selectedConfig.modelKey
+  const rawCurrentModel = selectedConfig.modelKey
     ? (currentModels[selectedConfig.modelKey] ?? selectedConfig.defaultModel)
     : undefined
   const currentProvider = selectedConfig.providerKey
@@ -862,6 +864,50 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   // Resolve effective backend for model filtering: per-operation override > global default_backend
   const effectiveBackend =
     currentBackend ?? preferences?.default_backend ?? 'claude'
+  const modelMatchesEffectiveBackend = (model: string | undefined): boolean => {
+    if (!model) return false
+    switch (effectiveBackend) {
+      case 'codex':
+        return isCodexModel(model)
+      case 'opencode':
+        return model.startsWith('opencode/')
+      case 'cursor':
+        return isCursorModel(model)
+      case 'pi':
+        return isPiModel(model)
+      case 'commandcode':
+        return isCommandCodeModel(model)
+      case 'grok':
+        return isGrokModel(model)
+      case 'kimi':
+        return isKimiModel(model)
+      case 'claude':
+        return (
+          !isCodexModel(model) &&
+          !model.startsWith('opencode/') &&
+          !isCursorModel(model) &&
+          !isPiModel(model) &&
+          !isCommandCodeModel(model) &&
+          !isGrokModel(model) &&
+          !isKimiModel(model)
+        )
+      default:
+        return true
+    }
+  }
+  const currentModel = (() => {
+    if (!rawCurrentModel) return undefined
+    if (modelMatchesEffectiveBackend(rawCurrentModel)) return rawCurrentModel
+    if (effectiveBackend === 'codex') return CODEX_MODEL_OPTIONS[0]?.value
+    if (effectiveBackend === 'opencode') return opencodeModelOptions[0]?.value
+    if (effectiveBackend === 'cursor') return cursorModelOptions[0]?.value
+    if (effectiveBackend === 'pi') return piModelOptions[0]?.value
+    if (effectiveBackend === 'commandcode')
+      return commandCodeModelOptions[0]?.value
+    if (effectiveBackend === 'grok') return grokModelOptions[0]?.value
+    if (effectiveBackend === 'kimi') return kimiModelOptions[0]?.value
+    return selectedConfig.defaultModel ?? rawCurrentModel
+  })()
   const modelReasoning = currentModel
     ? getMagicPromptModelReasoning(
         modelCatalog,
@@ -892,6 +938,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const currentModelIsPi = currentModel ? isPiModel(currentModel) : false
   const currentModelIsGrok = currentModel ? isGrokModel(currentModel) : false
   const currentModelIsKimi = currentModel ? isKimiModel(currentModel) : false
+
   const filteredClaudeOptions = useMemo(() => {
     if (
       !currentProvider ||
@@ -1076,6 +1123,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             model,
             reasoning_effort:
               getReviewReasoning({ backend, model })?.default ?? null,
+            fix_mode: DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
           },
         ])
         return
@@ -1864,6 +1912,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                                 reasoning_effort:
                                   getReviewReasoning({ backend, model })
                                     ?.default ?? null,
+                                fix_mode:
+                                  config.fix_mode ??
+                                  DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
                               })
                             }
                           }}
@@ -1962,6 +2013,35 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                                 {level.label}
                               </SelectItem>
                             ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          Mode
+                        </span>
+                        <Select
+                          value={
+                            config.fix_mode ??
+                            DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode
+                          }
+                          onValueChange={mode =>
+                            updateCodeReviewConfig(index, {
+                              ...config,
+                              fix_mode: mode as MagicPromptExecutionMode,
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label={`Review ${index + 1} mode`}
+                            size="sm"
+                            className="w-full min-w-0 text-xs"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="plan">Plan</SelectItem>
+                            <SelectItem value="yolo">Yolo</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

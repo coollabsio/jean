@@ -280,7 +280,10 @@ export function NewWorktreeModal() {
                 projectId={data.selectedProjectId}
                 jeanConfig={data.jeanConfig}
                 remotes={data.remotes}
+                projectPath={data.selectedProject?.path}
                 defaultBranch={defaultBranch}
+                branches={data.branches}
+                isLoadingBranches={data.isLoadingBranches}
               />
             )}
 
@@ -300,8 +303,10 @@ export function NewWorktreeModal() {
                 setSelectedIndex={setSelectedItemIndex}
                 onSelectIssue={handlers.handleSelectIssue}
                 onInvestigateIssue={handlers.handleSelectIssueAndInvestigate}
+                onBulkInvestigateIssues={handlers.handleBulkInvestigateIssues}
                 onPreviewIssue={handlePreviewIssue}
                 creatingFromNumber={handlers.creatingFromNumber}
+                isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
                 onGhLogin={triggerGhLogin}
                 isGhInstalled={isGhInstalled}
@@ -324,10 +329,12 @@ export function NewWorktreeModal() {
                 setSelectedIndex={setSelectedItemIndex}
                 onSelectPR={handlers.handleSelectPR}
                 onInvestigatePR={handlers.handleSelectPRAndInvestigate}
+                onBulkInvestigatePRs={handlers.handleBulkInvestigatePRs}
                 onStackPR={handlers.handleStackOnPR}
                 onPreviewPR={handlePreviewPR}
                 creatingFromNumber={handlers.creatingFromNumber}
                 stackingFromPR={handlers.stackingFromPR}
+                isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
                 onGhLogin={triggerGhLogin}
                 isGhInstalled={isGhInstalled}
@@ -368,6 +375,10 @@ export function NewWorktreeModal() {
                 }
                 onPreviewAdvisory={handlePreviewAdvisory}
                 creatingFromGhsaId={handlers.creatingFromGhsaId}
+                onBulkInvestigateSecurity={
+                  handlers.handleBulkInvestigateSecurity
+                }
+                isBulkInvestigating={handlers.isBulkInvestigating}
               />
             )}
 
@@ -387,7 +398,11 @@ export function NewWorktreeModal() {
                 onInvestigateIssue={
                   handlers.handleSelectLinearIssueAndInvestigate
                 }
+                onBulkInvestigateIssues={
+                  handlers.handleBulkInvestigateLinearIssues
+                }
                 creatingFromId={handlers.creatingFromLinearId}
+                isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
               />
             )}
@@ -413,7 +428,11 @@ export function NewWorktreeModal() {
                 onInvestigateIssue={
                   handlers.handleSelectSentryIssueAndInvestigate
                 }
+                onBulkInvestigateIssues={
+                  handlers.handleBulkInvestigateSentryIssues
+                }
                 creatingFromId={handlers.creatingFromSentryId}
+                isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
               />
             )}

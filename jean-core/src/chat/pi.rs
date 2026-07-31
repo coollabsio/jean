@@ -495,6 +495,8 @@ fn raw_pi_model(model: Option<&str>) -> Option<&str> {
 
 fn pi_thinking_level(effort: Option<&super::types::EffortLevel>) -> Option<&str> {
     match effort {
+        // Adaptive: omit --thinking so PI chooses its own depth.
+        Some(super::types::EffortLevel::Adaptive) => None,
         Some(super::types::EffortLevel::Off) => Some("off"),
         Some(super::types::EffortLevel::Minimal) => Some("minimal"),
         Some(super::types::EffortLevel::Low) => Some("low"),
@@ -695,7 +697,7 @@ fn spawn_pi_rpc_host(
     std::fs::create_dir_all(&log_dir)
         .map_err(|e| format!("Failed to create PI RPC host log dir: {e}"))?;
     let log_file = log_dir.join(format!("{session_id}-{run_id}.log"));
-    let exe = std::env::current_exe().map_err(|e| format!("Failed to get Jean executable: {e}"))?;
+    let exe = super::detached::current_executable_for_detached_host()?;
 
     let mut args = vec![
         PI_RPC_HOST_ARG.to_string(),
@@ -1790,6 +1792,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let lines = vec![
@@ -1952,6 +1955,7 @@ mod tests {
         use super::super::types::EffortLevel;
 
         assert_eq!(pi_thinking_level(Some(&EffortLevel::Off)), Some("off"));
+        assert_eq!(pi_thinking_level(Some(&EffortLevel::Adaptive)), None);
         assert_eq!(
             pi_thinking_level(Some(&EffortLevel::Minimal)),
             Some("minimal")

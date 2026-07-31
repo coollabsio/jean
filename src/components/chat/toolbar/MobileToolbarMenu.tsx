@@ -80,7 +80,10 @@ export function MobileToolbarMenu({
           <Wand2 className="h-4 w-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={isMobile ? 'end' : 'start'} className="w-56">
+      <DropdownMenuContent
+        align={isMobile ? 'end' : 'start'}
+        className="w-56 max-h-[min(80vh,640px)] overflow-y-auto"
+      >
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Context
         </div>

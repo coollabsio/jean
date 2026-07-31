@@ -1,9 +1,15 @@
 /**
- * Headless jean-server self-update (remote / Web Access, user-triggered).
+ * Host update check for remote / Web Access clients (user-triggered install).
  *
- * Checks for a newer jean-server binary after connecting. The offer is sticky
- * in the title bar (pendingServerUpdate) so dismissing the toast never loses
- * it for the session. Install only happens when the user confirms.
+ * Two channels from `check_server_update`:
+ * - **desktop**: host is native Jean (incl. macOS/Windows). Present the same
+ *   modal + sticky title-bar badge as the local Tauri updater. Install asks
+ *   the host desktop shell via `apply_server_update` → `host:install-desktop-update`.
+ * - **server**: headless jean-server. Sticky title-bar control + toast; apply
+ *   replaces the binary and restarts the server.
+ *
+ * Checks after connecting. Dismissing the toast/modal never loses the sticky
+ * badge for the session.
  */
 
 import { useCallback, useEffect, useRef } from 'react'
@@ -13,6 +19,8 @@ import { isLocalBackend } from '@/lib/environment'
 import { logger } from '@/lib/logger'
 import { useUIStore } from '@/store/ui-store'
 
+export type HostUpdateChannel = 'server' | 'desktop'
+
 export interface ServerUpdateStatus {
   updateAvailable: boolean
   currentVersion: string
@@ -20,6 +28,7 @@ export interface ServerUpdateStatus {
   notes?: string | null
   canUpdate: boolean
   reason?: string | null
+  channel?: HostUpdateChannel | null
 }
 
 interface ServerUpdateApplyResult {
@@ -27,6 +36,11 @@ interface ServerUpdateApplyResult {
   version: string
   message: string
   restartScheduled: boolean
+}
+
+function normalizeChannel(raw: unknown): HostUpdateChannel {
+  const value = String(raw ?? 'server').toLowerCase()
+  return value === 'desktop' ? 'desktop' : 'server'
 }
 
 function normalizeStatus(raw: Record<string, unknown>): ServerUpdateStatus {
@@ -39,18 +53,21 @@ function normalizeStatus(raw: Record<string, unknown>): ServerUpdateStatus {
     notes: (raw.notes ?? null) as string | null,
     canUpdate: Boolean(raw.canUpdate ?? raw.can_update),
     reason: (raw.reason ?? null) as string | null,
+    channel: normalizeChannel(raw.channel),
   }
 }
 
-/** Apply a pending jean-server update (title bar or toast action). */
+/** Apply a pending host update (title bar, modal, or toast action). */
 export async function applyServerUpdate(version: string): Promise<void> {
-  const toastId = toast.loading(`Installing jean-server ${version}...`)
+  const toastId = toast.loading(`Installing update ${version}...`)
   try {
     const result = await invoke<ServerUpdateApplyResult>('apply_server_update')
-    // Clear sticky indicator once install succeeded / already latest.
+    // Clear sticky indicators once install succeeded / already latest.
     useUIStore.getState().setPendingServerUpdate(null)
+    useUIStore.getState().setPendingUpdateVersion(null)
+    useUIStore.getState().setUpdateModalVersion(null)
     toast.dismiss('server-update-available')
-    toast.success(result.message || `Installed jean-server ${result.version}`, {
+    toast.success(result.message || `Installed update ${result.version}`, {
       id: toastId,
       description: result.restartScheduled
         ? 'The server is restarting. This page will reconnect automatically.'
@@ -58,8 +75,8 @@ export async function applyServerUpdate(version: string): Promise<void> {
       duration: 12_000,
     })
   } catch (error) {
-    logger.error('Failed to apply jean-server update', { error })
-    // Keep pendingServerUpdate so the title-bar control stays for retry.
+    logger.error('Failed to apply host update', { error })
+    // Keep sticky indicators so the title-bar control stays for retry.
     toast.error(`Update failed: ${String(error)}`, {
       id: toastId,
       duration: 10_000,
@@ -77,7 +94,22 @@ export function useServerUpdateCheck() {
     }
 
     const version = status.latestVersion
-    // Sticky title-bar state — survives toast dismiss for the whole session.
+    const channel = status.channel ?? 'server'
+
+    // Desktop host: reuse native update modal + "Update available" badge.
+    if (channel === 'desktop') {
+      useUIStore.getState().setPendingServerUpdate(null)
+      // Modal on first offer; sticky badge when user dismisses (handleLater).
+      if (
+        !useUIStore.getState().pendingUpdateVersion &&
+        useUIStore.getState().updateModalVersion !== version
+      ) {
+        useUIStore.getState().setUpdateModalVersion(version)
+      }
+      return
+    }
+
+    // Headless jean-server: sticky title-bar state + toast.
     useUIStore.getState().setPendingServerUpdate({
       latestVersion: version,
       currentVersion: status.currentVersion,

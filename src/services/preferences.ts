@@ -81,7 +81,11 @@ export function usePreferences() {
         }
         return {
           ...preferences,
-          selected_model: normalizeClaudeModel(preferences.selected_model),
+          selected_model: normalizeClaudeModel(preferences.selected_model, {
+            // Keep opus/sonnet/haiku when a custom CLI provider is the default
+            // so Settings → Claude can show/persist provider-routed models.
+            preserveProviderAliases: Boolean(preferences.default_provider),
+          }),
           selected_codex_model: normalizeCodexModel(
             preferences.selected_codex_model
           ),

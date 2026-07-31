@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a problem with Jean
+title: "[Bug]: "
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+      description: Tell us what happened and what you expected to happen.
+      placeholder: Please describe the issue and what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: replication
+    attributes:
+      label: Replication
+      description: What steps can we follow to reproduce the issue?
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+
+  - type: dropdown
+    id: running_mode
+    attributes:
+      label: How are you running Jean?
+      options:
+        - App
+        - Headless
+    validations:
+      required: true
+
+  - type: input
+    id: operating_system
+    attributes:
+      label: Operating system
+      description: If you are running the app, which OS are you using?
+      placeholder: macOS 15, Windows 11, Ubuntu 24.04, etc.
+
+  - type: input
+    id: jean_version
+    attributes:
+      label: Jean version
+      placeholder: 0.1.68
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interaction_method
+    attributes:
+      label: How are you interacting with Jean?
+      options:
+        - Via the app
+        - Via the web
+        - Remotely via another Jean app
+    validations:
+      required: true

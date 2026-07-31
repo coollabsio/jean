@@ -89,6 +89,21 @@ fn parse_open_worktree_in_editor_args(args: &Value) -> Result<OpenWorktreeInEdit
     })
 }
 
+#[derive(Debug, PartialEq)]
+struct OpenWorktreeInTerminalArgs {
+    worktree_path: String,
+    terminal: Option<String>,
+}
+
+fn parse_open_worktree_in_terminal_args(
+    args: &Value,
+) -> Result<OpenWorktreeInTerminalArgs, String> {
+    Ok(OpenWorktreeInTerminalArgs {
+        worktree_path: field(args, "worktreePath", "worktree_path")?,
+        terminal: from_field_opt(args, "terminal")?,
+    })
+}
+
 /// Dispatch a command by name to the corresponding Rust handler.
 /// This mirrors Tauri's invoke system but routes through WebSocket.
 ///
@@ -160,6 +175,7 @@ pub async fn dispatch_command(
             let path: String = from_field(&args, "path")?;
             let parent_id: Option<String> = field_opt(&args, "parentId", "parent_id")?;
             let result = crate::projects::add_project(app.clone(), path, parent_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "remove_project" => {
@@ -331,11 +347,13 @@ pub async fn dispatch_command(
         "archive_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::archive_worktree(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             Ok(Value::Null)
         }
         "unarchive_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let result = crate::projects::unarchive_worktree(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "rename_worktree" => {
@@ -343,6 +361,7 @@ pub async fn dispatch_command(
             let new_name: String = field(&args, "newName", "new_name")?;
             let result =
                 crate::projects::rename_worktree(app.clone(), worktree_id, new_name).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "update_worktree_label" => {
@@ -1279,6 +1298,14 @@ pub async fn dispatch_command(
             {
                 None => None,
                 Some("off") => Some(crate::chat::types::ThinkingLevel::Off),
+                // Adaptive: omit forced thinking settings. Also map to effort
+                // Adaptive when no explicit effort was provided.
+                Some("adaptive") => {
+                    if effort_level.is_none() {
+                        effort_level = Some(crate::chat::types::EffortLevel::Adaptive);
+                    }
+                    Some(crate::chat::types::ThinkingLevel::Adaptive)
+                }
                 Some("think") => Some(crate::chat::types::ThinkingLevel::Think),
                 Some("megathink") => Some(crate::chat::types::ThinkingLevel::Megathink),
                 Some("ultrathink") => Some(crate::chat::types::ThinkingLevel::Ultrathink),
@@ -1383,6 +1410,7 @@ pub async fn dispatch_command(
                 model,
             )
             .await?;
+            emit_cache_invalidation(app, &["session", "sessions"]);
             Ok(Value::Null)
         }
         "set_session_thinking_level" => {
@@ -1675,6 +1703,7 @@ pub async fn dispatch_command(
             let path: String = from_field(&args, "path")?;
             let parent_id: Option<String> = field_opt(&args, "parentId", "parent_id")?;
             let result = crate::projects::init_project(app.clone(), path, parent_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "create_worktree_from_existing_branch" => {
@@ -1738,11 +1767,13 @@ pub async fn dispatch_command(
             let project_id: String = field(&args, "projectId", "project_id")?;
             let path: String = from_field(&args, "path")?;
             let result = crate::projects::import_worktree(app.clone(), project_id, path).await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "permanently_delete_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::permanently_delete_worktree(app.clone(), worktree_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
             Ok(Value::Null)
         }
         "delete_all_archives" => {
@@ -1750,16 +1781,29 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "open_worktree_in_finder" => {
-            Err("Opening a file manager is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a file manager")?;
+            let parsed = parse_worktree_path_args(&args)?;
+            crate::projects::open_worktree_in_finder(parsed.worktree_path).await?;
+            Ok(Value::Null)
         }
         "open_project_worktrees_folder" => {
-            Err("Opening a file manager is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a file manager")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::open_project_worktrees_folder(app.clone(), project_id).await?;
+            Ok(Value::Null)
         }
         "open_worktree_in_terminal" => {
-            Err("Opening a terminal is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a terminal")?;
+            let parsed = parse_open_worktree_in_terminal_args(&args)?;
+            crate::projects::open_worktree_in_terminal(parsed.worktree_path, parsed.terminal)
+                .await?;
+            Ok(Value::Null)
         }
         "open_worktree_in_editor" => {
-            Err("Opening an editor is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("an editor")?;
+            let parsed = parse_open_worktree_in_editor_args(&args)?;
+            crate::projects::open_worktree_in_editor(parsed.worktree_path, parsed.editor).await?;
+            Ok(Value::Null)
         }
         "open_pull_request" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
@@ -2087,6 +2131,18 @@ pub async fn dispatch_command(
             let denied_message_context: Option<Option<crate::chat::types::DeniedMessageContext>> =
                 field_opt(&args, "deniedMessageContext", "denied_message_context")?;
             let is_reviewing: Option<bool> = field_opt(&args, "isReviewing", "is_reviewing")?;
+            // Special handling for status_override: missing vs null (clear) vs string
+            let status_override: Option<Option<String>> = match args
+                .get("statusOverride")
+                .or_else(|| args.get("status_override"))
+            {
+                None => None,
+                Some(Value::Null) => Some(None),
+                Some(v) => match v.as_str() {
+                    Some(s) => Some(Some(s.to_string())),
+                    None => return Err("Invalid status_override: expected string or null".into()),
+                },
+            };
             let waiting_for_input: Option<bool> =
                 field_opt(&args, "waitingForInput", "waiting_for_input")?;
             let waiting_for_input_type: Option<Option<String>> =
@@ -2133,6 +2189,7 @@ pub async fn dispatch_command(
                 pending_codex_dynamic_tool_call_requests,
                 denied_message_context,
                 is_reviewing,
+                status_override,
                 waiting_for_input,
                 waiting_for_input_type,
                 plan_file_path,
@@ -2555,6 +2612,10 @@ pub async fn dispatch_command(
         }
         "list_opencode_models" => {
             let result = crate::opencode_cli::list_opencode_models(app.clone()).await?;
+            to_value(result)
+        }
+        "refresh_opencode_models" => {
+            let result = crate::opencode_cli::refresh_opencode_models(app.clone()).await?;
             to_value(result)
         }
         "check_gh_cli_installed" => {
@@ -3086,7 +3147,9 @@ pub async fn dispatch_command(
             Err("Opening a browser is only available in the desktop app".to_string())
         }
         "open_log_directory" => {
-            Err("Opening a file manager is only available in the desktop app".to_string())
+            crate::platform::ensure_native_open_allowed("a file manager")?;
+            crate::projects::open_log_directory(app.clone()).await?;
+            Ok(Value::Null)
         }
         "remove_git_remote" => {
             let repo_path: String = field(&args, "repoPath", "repo_path")?;
@@ -3111,6 +3174,150 @@ pub async fn dispatch_command(
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::set_worktree_last_opened(app.clone(), worktree_id).await?;
             Ok(Value::Null)
+        }
+        "create_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let run_id: Option<String> = field_opt(&args, "runId", "run_id")?;
+            let user_message_id: Option<String> =
+                field_opt(&args, "userMessageId", "user_message_id")?;
+            let user_message: String = field(&args, "userMessage", "user_message")?;
+            let result = crate::projects::create_ai_checkpoint(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                run_id,
+                user_message_id,
+                user_message,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_ai_checkpoints" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::list_ai_checkpoints(app.clone(), worktree_id).await?;
+            to_value(result)
+        }
+        "get_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result =
+                crate::projects::get_ai_checkpoint(app.clone(), worktree_id, checkpoint_id).await?;
+            to_value(result)
+        }
+        "get_ai_checkpoint_diff" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let scope: Option<String> = from_field_opt(&args, "scope")?;
+            let result = crate::projects::get_ai_checkpoint_diff(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                scope,
+            )
+            .await?;
+            to_value(result)
+        }
+        "restore_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result =
+                crate::projects::restore_ai_checkpoint(app.clone(), worktree_id, checkpoint_id)
+                    .await?;
+            emit_cache_invalidation(app, &["git-status"]);
+            to_value(result)
+        }
+        "restore_ai_checkpoint_file" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let file_path: String = field(&args, "filePath", "file_path")?;
+            crate::projects::restore_ai_checkpoint_file(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                file_path,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["git-status"]);
+            Ok(Value::Null)
+        }
+        "delete_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            crate::projects::delete_ai_checkpoint(app.clone(), worktree_id, checkpoint_id).await?;
+            Ok(Value::Null)
+        }
+        "finalize_ai_checkpoint" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result =
+                crate::projects::finalize_ai_checkpoint(app.clone(), worktree_id, checkpoint_id)
+                    .await?;
+            to_value(result)
+        }
+        "analyze_ai_checkpoint_restore" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let result = crate::projects::analyze_ai_checkpoint_restore(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "restore_ai_checkpoint_turn" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let mode: String = from_field_opt(&args, "mode")?.unwrap_or_else(|| "cleanOnly".into());
+            let result = crate::projects::restore_ai_checkpoint_turn(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                mode,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["git-status"]);
+            to_value(result)
+        }
+        "propose_ai_checkpoint_restore" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let model: Option<String> = from_field_opt(&args, "model")?;
+            let reasoning_effort: Option<String> =
+                field_opt(&args, "reasoningEffort", "reasoning_effort")?;
+            let result = crate::projects::propose_ai_checkpoint_restore(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                model,
+                reasoning_effort,
+            )
+            .await?;
+            to_value(result)
+        }
+        "apply_ai_checkpoint_restore_proposal" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
+            let files: Vec<crate::projects::checkpoints::RestoreFileProposal> =
+                from_field(&args, "files")?;
+            let also_restore_clean_paths: Option<Vec<String>> = field_opt(
+                &args,
+                "alsoRestoreCleanPaths",
+                "also_restore_clean_paths",
+            )?;
+            let result = crate::projects::apply_ai_checkpoint_restore_proposal(
+                app.clone(),
+                worktree_id,
+                checkpoint_id,
+                files,
+                also_restore_clean_paths,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["git-status"]);
+            to_value(result)
         }
         "git_stash" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
@@ -3424,6 +3631,16 @@ pub async fn dispatch_command(
             crate::delete_cli_profile(name).await?;
             Ok(Value::Null)
         }
+        "upsert_pi_provider" => {
+            let profile: crate::PiProviderProfile = from_field(&args, "profile")?;
+            crate::pi_cli::upsert_pi_provider(profile).await?;
+            Ok(Value::Null)
+        }
+        "delete_pi_provider" => {
+            let name: String = from_field(&args, "name")?;
+            crate::pi_cli::delete_pi_provider(name).await?;
+            Ok(Value::Null)
+        }
 
         // =====================================================================
         // Background Tasks (additional)
@@ -3735,19 +3952,85 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[tokio::test]
-    async fn headless_dispatch_rejects_desktop_only_commands() {
-        let temp = tempfile::tempdir().unwrap();
-        let app = AppHandle::new(temp.path().into(), temp.path().into()).unwrap();
+    #[test]
+    fn headless_dispatch_rejects_native_open_when_not_allowed() {
+        crate::platform::with_native_open_flag_lock(|| {
+            let previous = crate::platform::allow_native_open_enabled();
+            crate::platform::set_allow_native_open(false);
 
-        for (command, args) in [
-            ("open_worktree_in_finder", json!({ "worktreePath": "/tmp" })),
-            ("open_worktree_in_editor", json!({ "worktreePath": "/tmp" })),
-            ("open_file_in_default_app", json!({ "path": "/tmp/file" })),
-        ] {
-            let error = dispatch_command(&app, command, args).await.unwrap_err();
-            assert!(error.contains("desktop app"), "{command}: {error}");
-        }
+            // When not under WSL and without the opt-in flag, native open stays blocked.
+            if crate::platform::is_running_in_wsl() {
+                crate::platform::set_allow_native_open(previous);
+                return;
+            }
+
+            let temp = tempfile::tempdir().unwrap();
+            let app = AppHandle::new(temp.path().into(), temp.path().into()).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            for (command, args) in [
+                ("open_worktree_in_finder", json!({ "worktreePath": "/tmp" })),
+                ("open_worktree_in_editor", json!({ "worktreePath": "/tmp" })),
+                (
+                    "open_worktree_in_terminal",
+                    json!({ "worktreePath": "/tmp" }),
+                ),
+                ("open_file_in_default_app", json!({ "path": "/tmp/file" })),
+            ] {
+                let error = runtime
+                    .block_on(dispatch_command(&app, command, args))
+                    .unwrap_err();
+                assert!(error.contains("desktop app"), "{command}: {error}");
+            }
+
+            crate::platform::set_allow_native_open(previous);
+        });
+    }
+
+    #[test]
+    fn headless_dispatch_routes_native_open_when_allowed() {
+        crate::platform::with_native_open_flag_lock(|| {
+            let previous = crate::platform::allow_native_open_enabled();
+            crate::platform::set_allow_native_open(true);
+
+            let temp = tempfile::tempdir().unwrap();
+            let app = AppHandle::new(temp.path().into(), temp.path().into()).unwrap();
+            let worktree = temp.path().join("wt");
+            std::fs::create_dir_all(&worktree).unwrap();
+            let worktree_path = worktree.to_string_lossy().to_string();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            // Should not short-circuit with the desktop-app error. Spawn may still fail
+            // on headless CI (missing GUI tools); either success or a non-desktop error is OK.
+            for (command, args) in [
+                (
+                    "open_worktree_in_finder",
+                    json!({ "worktreePath": worktree_path }),
+                ),
+                (
+                    "open_worktree_in_editor",
+                    json!({ "worktreePath": worktree_path, "editor": "code" }),
+                ),
+            ] {
+                match runtime.block_on(dispatch_command(&app, command, args)) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        assert!(
+                            !error.contains("desktop app"),
+                            "{command} should not be blocked as desktop-only when native open is allowed: {error}"
+                        );
+                    }
+                }
+            }
+
+            crate::platform::set_allow_native_open(previous);
+        });
     }
 
     #[test]
@@ -3906,6 +4189,31 @@ mod tests {
             OpenWorktreeInEditorArgs {
                 worktree_path: "/tmp/b".to_string(),
                 editor: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_open_worktree_in_terminal_args_accepts_web_transport_fields() {
+        assert_eq!(
+            parse_open_worktree_in_terminal_args(&json!({
+                "worktreePath": "/tmp/a",
+                "terminal": "ghostty"
+            }))
+            .unwrap(),
+            OpenWorktreeInTerminalArgs {
+                worktree_path: "/tmp/a".to_string(),
+                terminal: Some("ghostty".to_string()),
+            }
+        );
+        assert_eq!(
+            parse_open_worktree_in_terminal_args(&json!({
+                "worktree_path": "/tmp/b"
+            }))
+            .unwrap(),
+            OpenWorktreeInTerminalArgs {
+                worktree_path: "/tmp/b".to_string(),
+                terminal: None,
             }
         );
     }

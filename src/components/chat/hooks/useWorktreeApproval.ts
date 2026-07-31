@@ -34,6 +34,7 @@ import type { CliBackend } from '@/types/preferences'
 
 const THINKING_LEVEL_VALUES = new Set<ThinkingLevel>([
   'off',
+  'adaptive',
   'think',
   'megathink',
   'ultrathink',
@@ -50,6 +51,8 @@ function mapCodexReasoningToEffort(
   value: string | null | undefined
 ): EffortLevel | undefined {
   switch (value) {
+    case 'adaptive':
+      return 'adaptive'
     case 'low':
       return 'low'
     case 'medium':
@@ -201,7 +204,7 @@ export function useWorktreeApproval({
       }
 
       // Clear waiting state on original session. Codex keeps plan tasks in its
-      // native update_plan/CodexPlan state, so preserve those tool calls.
+      // native proposed_plan / CodexPlan state, so preserve those tool calls.
       clearWorktreeApprovalUiState(sessionId, {
         preserveToolCalls: card.session.backend === 'codex',
       })

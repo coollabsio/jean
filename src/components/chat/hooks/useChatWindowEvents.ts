@@ -8,6 +8,7 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { cancelChatMessage } from '@/services/chat'
 import { logger } from '@/lib/logger'
 import type { ContentBlock, QueuedMessage, Session } from '@/types/chat'
+import type { DiffRequest } from '@/types/git-diff'
 
 interface UseChatWindowEventsParams {
   inputRef: RefObject<HTMLTextAreaElement | null>
@@ -25,23 +26,9 @@ interface UseChatWindowEventsParams {
   gitStatus: { base_branch?: string; base_remote?: string } | null | undefined
   setDiffRequest: (
     req:
-      | {
-          type: 'uncommitted' | 'branch'
-          worktreePath: string
-          baseBranch: string
-        }
+      | DiffRequest
       | null
-      | ((
-          prev: {
-            type: 'uncommitted' | 'branch'
-            worktreePath: string
-            baseBranch: string
-          } | null
-        ) => {
-          type: 'uncommitted' | 'branch'
-          worktreePath: string
-          baseBranch: string
-        } | null)
+      | ((prev: DiffRequest | null) => DiffRequest | null)
   ) => void
   // Auto-scroll
   isAtBottom: boolean
@@ -262,6 +249,7 @@ export function useChatWindowEvents({
       const requestedType = (e as CustomEvent).detail?.type as
         | 'uncommitted'
         | 'branch'
+        | 'checkpoints'
         | undefined
 
       setDiffRequest(prev => {
@@ -270,20 +258,29 @@ export function useChatWindowEvents({
           return {
             type: requestedType,
             worktreePath: activeWorktreePath,
+            worktreeId: activeWorktreeId ?? undefined,
             baseBranch,
             baseRemote,
           }
         }
         if (prev) {
           // CMD+G toggle between types
+          const nextType =
+            prev.type === 'uncommitted'
+              ? 'branch'
+              : prev.type === 'branch'
+                ? 'uncommitted'
+                : 'uncommitted'
           return {
             ...prev,
-            type: prev.type === 'uncommitted' ? 'branch' : 'uncommitted',
+            worktreeId: prev.worktreeId ?? activeWorktreeId ?? undefined,
+            type: nextType,
           }
         }
         return {
           type: 'uncommitted',
           worktreePath: activeWorktreePath,
+          worktreeId: activeWorktreeId ?? undefined,
           baseBranch,
           baseRemote,
         }
@@ -293,6 +290,7 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('open-git-diff', handler)
   }, [
     activeWorktreePath,
+    activeWorktreeId,
     gitStatus?.base_branch,
     gitStatus?.base_remote,
     setDiffRequest,

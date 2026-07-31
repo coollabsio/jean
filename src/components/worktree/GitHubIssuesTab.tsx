@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
@@ -11,6 +12,9 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { IssueItem } from './NewWorktreeItems'
+import { BulkInvestigateBar } from './BulkInvestigateBar'
+import { SelectAllControl } from './ItemSelectCheckbox'
+import { useMultiSelect } from './hooks/useMultiSelect'
 import type { GitHubIssue } from '@/types/github'
 
 export interface GitHubIssuesTabProps {
@@ -28,12 +32,16 @@ export interface GitHubIssuesTabProps {
   setSelectedIndex: (index: number) => void
   onSelectIssue: (issue: GitHubIssue, background?: boolean) => void
   onInvestigateIssue: (issue: GitHubIssue, background?: boolean) => void
+  onBulkInvestigateIssues?: (issues: GitHubIssue[]) => void | Promise<void>
   onPreviewIssue: (issue: GitHubIssue) => void
   creatingFromNumber: number | null
+  isBulkInvestigating?: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
   onGhLogin: () => void
   isGhInstalled: boolean
 }
+
+const getIssueKey = (issue: GitHubIssue) => issue.number
 
 export function GitHubIssuesTab({
   searchQuery,
@@ -50,12 +58,22 @@ export function GitHubIssuesTab({
   setSelectedIndex,
   onSelectIssue,
   onInvestigateIssue,
+  onBulkInvestigateIssues,
   onPreviewIssue,
   creatingFromNumber,
+  isBulkInvestigating = false,
   searchInputRef,
   onGhLogin,
   isGhInstalled,
 }: GitHubIssuesTabProps) {
+  const multi = useMultiSelect(issues, getIssueKey)
+
+  const handleBulkInvestigate = useCallback(async () => {
+    if (!onBulkInvestigateIssues || multi.selectedItems.length < 1) return
+    await onBulkInvestigateIssues(multi.selectedItems)
+    multi.clear()
+  }, [onBulkInvestigateIssues, multi])
+
   const handleLabelClick = (labelName: string) => {
     const token = `label:"${labelName}"`
     if (!searchQuery.includes(token)) {
@@ -65,7 +83,6 @@ export function GitHubIssuesTab({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Search and filters */}
       <div className="p-3 space-y-2 border-b border-border">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -102,7 +119,7 @@ export function GitHubIssuesTab({
             <TooltipContent>Refresh issues</TooltipContent>
           </Tooltip>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Checkbox
             id="include-closed"
             checked={includeClosed}
@@ -114,10 +131,18 @@ export function GitHubIssuesTab({
           >
             Include closed issues
           </label>
+          {!isLoading && !error && issues.length > 0 && (
+            <SelectAllControl
+              id="select-all-issues"
+              allChecked={multi.allVisibleChecked}
+              someChecked={multi.someVisibleChecked}
+              onToggleAll={multi.toggleAllVisible}
+              ariaLabel="Select all visible issues"
+            />
+          )}
         </div>
       </div>
 
-      {/* Issues list */}
       <ScrollArea className="flex-1">
         {isLoading && (
           <div className="flex items-center justify-center py-8">
@@ -168,6 +193,8 @@ export function GitHubIssuesTab({
                 index={index}
                 isSelected={index === selectedIndex}
                 isCreating={creatingFromNumber === issue.number}
+                isChecked={multi.isChecked(issue.number)}
+                onCheckedChange={checked => multi.toggle(issue.number, checked)}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={bg => onSelectIssue(issue, bg)}
                 onInvestigate={bg => onInvestigateIssue(issue, bg)}
@@ -186,6 +213,16 @@ export function GitHubIssuesTab({
           </div>
         )}
       </ScrollArea>
+
+      {multi.showBulkBar && onBulkInvestigateIssues && (
+        <BulkInvestigateBar
+          count={multi.checkedCount}
+          isLoading={isBulkInvestigating}
+          noun={multi.checkedCount === 1 ? 'issue' : 'issues'}
+          onClear={multi.clear}
+          onInvestigate={() => void handleBulkInvestigate()}
+        />
+      )}
     </div>
   )
 }

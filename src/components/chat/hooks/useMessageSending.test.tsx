@@ -13,18 +13,36 @@ import {
 import type { ExecutionMode, Session } from '@/types/chat'
 import type * as ChatService from '@/services/chat'
 
-const { mockInvoke } = vi.hoisted(() => ({
+const { mockInvoke, mockInstalledBackends } = vi.hoisted(() => ({
   mockInvoke: vi.fn().mockResolvedValue(undefined),
+  mockInstalledBackends: {
+    installedBackends: [
+      'claude',
+      'codex',
+      'opencode',
+      'cursor',
+      'pi',
+      'commandcode',
+      'grok',
+      'kimi',
+    ] as string[],
+    isLoading: false,
+  },
 }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
 }))
 
+vi.mock('@/hooks/useInstalledBackends', () => ({
+  useInstalledBackends: () => mockInstalledBackends,
+}))
+
 vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),
     message: vi.fn(),
+    success: vi.fn(),
   },
 }))
 
@@ -126,10 +144,36 @@ function renderUseMessageSending({
   return { ...hook, sendMessage, executionModeRef, createSession }
 }
 
+vi.mock('@/lib/cli-auth', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/cli-auth')>()
+  return {
+    ...actual,
+    handleCliAuthError: vi.fn((error: string) => error),
+    openBackendLoginModal: vi.fn().mockResolvedValue(true),
+  }
+})
+
+import { handleCliAuthError } from '@/lib/cli-auth'
+
+function resetInstalledBackendsMock() {
+  mockInstalledBackends.installedBackends = [
+    'claude',
+    'codex',
+    'opencode',
+    'cursor',
+    'pi',
+    'commandcode',
+    'grok',
+    'kimi',
+  ]
+  mockInstalledBackends.isLoading = false
+}
+
 describe('useMessageSending Codex /goal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
     useChatStore.setState({
       inputDrafts: {},
       pendingImages: {},
@@ -151,6 +195,26 @@ describe('useMessageSending Codex /goal', () => {
       streamingContentBlocks: {},
       streamingThinkingContent: {},
     })
+  })
+
+  it('blocks send when the selected backend is not authenticated', async () => {
+    mockInstalledBackends.installedBackends = ['claude']
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: 'hello',
+      selectedBackend: 'codex',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(handleCliAuthError).toHaveBeenCalledWith(
+      expect.stringContaining('codex'),
+      'codex'
+    )
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
   })
 
   it('starts goals in build mode by default', async () => {
@@ -207,6 +271,7 @@ describe('useMessageSending Grok /goal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
     useChatStore.setState({
       inputDrafts: {},
       pendingImages: {},
@@ -263,6 +328,7 @@ describe('useMessageSending PI effort', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
     useChatStore.setState({
       inputDrafts: {},
       pendingImages: {},
@@ -315,6 +381,7 @@ describe('useMessageSending git diff Add to prompt', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
     useChatStore.setState({
       activeSessionIds: { 'worktree-1': 'session-1' },
       inputDrafts: { 'session-1': 'existing draft' },
@@ -365,6 +432,7 @@ describe('useMessageSending Codex auto-steer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
     useChatStore.setState({
       inputDrafts: {},
       pendingImages: {},

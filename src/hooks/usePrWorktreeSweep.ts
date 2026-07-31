@@ -15,6 +15,14 @@ import {
 import { projectsQueryKeys, isTauri } from '@/services/projects'
 import type { Project, Worktree } from '@/types/projects'
 
+/** Resolve the base branch used for git status sweep of one worktree. */
+export function resolveSweepBaseBranch(
+  worktree: Pick<Worktree, 'base_branch'>,
+  project: Pick<Project, 'default_branch'>
+): string {
+  return worktree.base_branch || project.default_branch || 'main'
+}
+
 /**
  * Hook that pushes all non-archived worktrees with open PRs to the backend
  * for background sweep polling. Should be mounted at the app root level.
@@ -52,10 +60,14 @@ export function usePrWorktreeSweep(projects: Project[] | undefined) {
         )
         if (!worktrees) continue
 
-        const baseBranch = project.default_branch ?? 'main'
+        const projectDefault = project.default_branch ?? 'main'
 
         for (const w of worktrees) {
           if (w.archived_at) continue
+
+          const baseBranch = resolveSweepBaseBranch(w, {
+            default_branch: projectDefault,
+          })
 
           // All non-archived worktrees for git status sweep
           allWorktrees.push({
