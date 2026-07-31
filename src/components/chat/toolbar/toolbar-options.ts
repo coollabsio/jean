@@ -4,6 +4,7 @@ import {
   type ClaudeModel,
 } from '@/types/preferences'
 import type { EffortLevel, ThinkingLevel } from '@/types/chat'
+import { isGeminiModel } from '@/lib/model-utils'
 
 export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] =
   modelOptions.map(option => ({
@@ -124,11 +125,6 @@ export const THINKING_LEVEL_OPTIONS: {
   label: string
   tokens: string
 }[] = [
-  {
-    value: 'adaptive',
-    label: 'Adaptive/Default',
-    tokens: 'Model default',
-  },
   { value: 'off', label: 'Off', tokens: 'Disabled' },
   { value: 'think', label: 'Think', tokens: '4K' },
   { value: 'megathink', label: 'Megathink', tokens: '10K' },
@@ -140,7 +136,6 @@ export const EFFORT_LEVEL_OPTIONS: {
   label: string
   description: string
 }[] = [
-  ADAPTIVE_EFFORT_OPTION,
   { value: 'low', label: 'Low', description: 'Minimal' },
   { value: 'medium', label: 'Medium', description: 'Moderate' },
   { value: 'high', label: 'High', description: 'Deep' },
@@ -162,7 +157,6 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
   label: string
   description: string
 }[] = [
-  ADAPTIVE_EFFORT_OPTION,
   { value: 'off', label: 'Off', description: 'Disabled' },
   { value: 'minimal', label: 'Minimal', description: 'Minimal' },
   { value: 'low', label: 'Low', description: 'Low' },
@@ -171,10 +165,17 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
   { value: 'xhigh', label: 'xHigh', description: 'Extra high' },
 ]
 
-/** Prepend Adaptive when catalog/backend levels omit it. */
+/**
+ * Prepend Adaptive/Default only for Gemini models (native adaptive thinking
+ * when no level is forced). Non-Gemini levels are returned unchanged.
+ */
 export function withAdaptiveEffortOption<
   T extends { value: string; label: string; description?: string },
->(levels: T[]): Array<T | typeof ADAPTIVE_EFFORT_OPTION> {
+>(
+  levels: T[],
+  model?: string | null
+): Array<T | typeof ADAPTIVE_EFFORT_OPTION> {
+  if (!isGeminiModel(model)) return levels
   if (levels.some(level => level.value === 'adaptive')) return levels
   return [ADAPTIVE_EFFORT_OPTION, ...levels]
 }

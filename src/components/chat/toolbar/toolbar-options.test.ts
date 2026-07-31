@@ -7,9 +7,8 @@ import {
 } from './toolbar-options'
 
 describe('PI_EFFORT_LEVEL_OPTIONS', () => {
-  it('exposes Adaptive/Default plus every PI CLI thinking level in CLI order', () => {
+  it('exposes every PI CLI thinking level in CLI order', () => {
     expect(PI_EFFORT_LEVEL_OPTIONS.map(option => option.value)).toEqual([
-      'adaptive',
       'off',
       'minimal',
       'low',
@@ -20,44 +19,48 @@ describe('PI_EFFORT_LEVEL_OPTIONS', () => {
   })
 })
 
-describe('Adaptive/Default thinking/effort option', () => {
-  it('includes Adaptive/Default in default effort and thinking dropdowns', () => {
-    expect(EFFORT_LEVEL_OPTIONS.map(option => option.value)).toContain(
+describe('Adaptive/Default thinking/effort option (Gemini only)', () => {
+  it('does not include Adaptive/Default in default non-Gemini option lists', () => {
+    expect(EFFORT_LEVEL_OPTIONS.map(option => option.value)).not.toContain(
       'adaptive'
     )
-    expect(THINKING_LEVEL_OPTIONS.map(option => option.value)).toContain(
+    expect(THINKING_LEVEL_OPTIONS.map(option => option.value)).not.toContain(
       'adaptive'
     )
-    expect(
-      EFFORT_LEVEL_OPTIONS.find(option => option.value === 'adaptive')?.label
-    ).toBe('Adaptive/Default')
-    expect(
-      THINKING_LEVEL_OPTIONS.find(option => option.value === 'adaptive')?.label
-    ).toBe('Adaptive/Default')
   })
 
-  it('prepends Adaptive/Default when catalog levels omit it', () => {
-    const levels = withAdaptiveEffortOption([
+  it('prepends Adaptive/Default only for Gemini models', () => {
+    const base = [
       { value: 'medium', label: 'Medium', description: 'Balanced' },
       { value: 'high', label: 'High', description: 'Deep' },
-    ])
-    expect(levels.map(level => level.value)).toEqual([
+    ]
+    expect(
+      withAdaptiveEffortOption(base, 'claude-opus-4-8').map(level => level.value)
+    ).toEqual(['medium', 'high'])
+    const geminiLevels = withAdaptiveEffortOption(
+      base,
+      'commandcode/google/gemini-3.5-flash'
+    )
+    expect(geminiLevels.map(level => level.value)).toEqual([
       'adaptive',
       'medium',
       'high',
     ])
-    expect(levels[0]?.label).toBe('Adaptive/Default')
+    expect(geminiLevels[0]?.label).toBe('Adaptive/Default')
   })
 
-  it('does not duplicate Adaptive/Default when already present', () => {
-    const levels = withAdaptiveEffortOption([
-      {
-        value: 'adaptive',
-        label: 'Adaptive/Default',
-        description: 'Model default (no forced level)',
-      },
-      { value: 'high', label: 'High', description: 'Deep' },
-    ])
+  it('does not duplicate Adaptive/Default when already present for Gemini', () => {
+    const levels = withAdaptiveEffortOption(
+      [
+        {
+          value: 'adaptive',
+          label: 'Adaptive/Default',
+          description: 'Model default (no forced level)',
+        },
+        { value: 'high', label: 'High', description: 'Deep' },
+      ],
+      'opencode/google/gemini-3.5-flash'
+    )
     expect(levels.map(level => level.value)).toEqual(['adaptive', 'high'])
   })
 })

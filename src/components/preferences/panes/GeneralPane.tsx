@@ -298,28 +298,34 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     'codex',
     preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   )
+  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   const selectedCodexReasoningOptions = withAdaptiveEffortOption(
     codexReasoning?.type === 'effort'
       ? codexReasoning.levels
-      : codexReasoningOptions
+      : codexReasoningOptions,
+    selectedCodexModel
   )
   const grokReasoning = getCatalogModelReasoning(
     modelCatalog,
     'grok',
     preferences?.selected_grok_model ?? 'grok/grok-4.5'
   )
+  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
   const selectedGrokReasoningOptions = withAdaptiveEffortOption(
     grokReasoning?.type === 'effort'
       ? grokReasoning.levels
-      : grokReasoningOptions
+      : grokReasoningOptions,
+    selectedGrokModel
   )
+  const selectedClaudeModel =
+    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
   const claudeReasoning = getCatalogModelReasoning(
     modelCatalog,
     'claude',
-    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+    selectedClaudeModel
   )
   const selectedClaudeReasoningOptions = claudeReasoning
-    ? withAdaptiveEffortOption(claudeReasoning.levels)
+    ? withAdaptiveEffortOption(claudeReasoning.levels, selectedClaudeModel)
     : []
   const patchPreferences = usePatchPreferences()
   const isWebAccessView = !isNativeApp()
@@ -1231,7 +1237,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const buildReasoning = buildReasoningRaw
     ? {
         ...buildReasoningRaw,
-        levels: withAdaptiveEffortOption(buildReasoningRaw.levels),
+        levels: withAdaptiveEffortOption(buildReasoningRaw.levels, buildModel),
       }
     : null
   const yoloReasoningRaw =
@@ -1251,7 +1257,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const yoloReasoning = yoloReasoningRaw
     ? {
         ...yoloReasoningRaw,
-        levels: withAdaptiveEffortOption(yoloReasoningRaw.levels),
+        levels: withAdaptiveEffortOption(yoloReasoningRaw.levels, yoloModel),
       }
     : null
   const piAuthMessage = piAuth?.error

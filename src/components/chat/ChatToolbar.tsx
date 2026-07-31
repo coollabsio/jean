@@ -230,9 +230,10 @@ export const ChatToolbar = memo(function ChatToolbar({
     const values = new Set(
       selectedModelReasoning.levels.map(level => level.value)
     )
-    // Adaptive is always valid: Jean injects it into every effort/thinking
-    // dropdown and omits the forced level on send.
-    values.add('adaptive')
+    // Adaptive/Default is only valid for Gemini models.
+    if (selectedModel?.toLowerCase().includes('gemini')) {
+      values.add('adaptive')
+    }
     if (selectedModelReasoning.type === 'effort') {
       if (!values.has(selectedEffortLevel)) {
         onEffortLevelChange(selectedModelReasoning.default as EffortLevel)
@@ -244,6 +245,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     onEffortLevelChange,
     onThinkingLevelChange,
     selectedEffortLevel,
+    selectedModel,
     selectedModelReasoning,
     selectedThinkingLevel,
   ])
@@ -464,6 +466,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             isDisabled={false}
             providerLocked={providerLocked}
             selectedBackend={selectedBackend}
+            selectedModel={selectedModel}
             selectedProvider={selectedProvider}
             backendModelLabel={backendModelLabel}
             backendModelLabelText={backendModelLabelText}

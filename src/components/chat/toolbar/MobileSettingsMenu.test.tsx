@@ -78,6 +78,7 @@ beforeEach(() => {
 const baseProps = {
   isDisabled: false,
   selectedBackend: 'claude' as const,
+  selectedModel: 'claude-sonnet-4-6',
   selectedProvider: null,
   backendModelLabel: 'Claude · Sonnet',
   backendModelLabelText: 'Claude · Sonnet',

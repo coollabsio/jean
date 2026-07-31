@@ -109,6 +109,7 @@ interface MobileSettingsMenuProps {
   isDisabled: boolean
   providerLocked?: boolean
   selectedBackend: CliBackend
+  selectedModel: string
   selectedProvider: string | null
   backendModelLabel: ReactNode
   backendModelLabelText: string
@@ -163,6 +164,7 @@ interface MobileSettingsMenuProps {
 export function MobileSettingsMenu({
   isDisabled,
   selectedBackend,
+  selectedModel,
   selectedProvider,
   backendModelLabel,
   backendModelLabelText,
@@ -231,24 +233,25 @@ export function MobileSettingsMenu({
       (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
-      ? withAdaptiveEffortOption(modelReasoning.levels)
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
       : isPi
-        ? PI_EFFORT_LEVEL_OPTIONS
+        ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
         : isCodex
-          ? CODEX_EFFORT_LEVEL_OPTIONS
+          ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)
           : isKimi
-            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS)
+            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS, selectedModel)
             : isGrok
-              ? GROK_EFFORT_LEVEL_OPTIONS
-              : EFFORT_LEVEL_OPTIONS
+              ? withAdaptiveEffortOption(GROK_EFFORT_LEVEL_OPTIONS, selectedModel)
+              : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
-      ? withAdaptiveEffortOption(modelReasoning.levels)
-      : THINKING_LEVEL_OPTIONS
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
+      : withAdaptiveEffortOption(THINKING_LEVEL_OPTIONS, selectedModel)
+  const effortOptionValues = new Set(effortLevelOptions.map(o => o.value))
+  const thinkingOptionValues = new Set(thinkingLevelOptions.map(o => o.value))
   const displayedEffortLevel =
     modelReasoning?.type === 'effort'
-      ? selectedEffortLevel === 'adaptive' ||
-        modelReasoning.levels.some(o => o.value === selectedEffortLevel)
+      ? effortOptionValues.has(selectedEffortLevel)
         ? selectedEffortLevel
         : modelReasoning.default
       : isCodex || isPi
@@ -263,13 +266,11 @@ export function MobileSettingsMenu({
   const displayedEffortLabel =
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
-  const displayedThinkingLevel =
-    selectedThinkingLevel === 'adaptive'
-      ? selectedThinkingLevel
-      : modelReasoning?.type === 'thinking' &&
-          !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
-        ? modelReasoning.default
-        : selectedThinkingLevel
+  const displayedThinkingLevel = thinkingOptionValues.has(selectedThinkingLevel)
+    ? selectedThinkingLevel
+    : modelReasoning?.type === 'thinking'
+      ? modelReasoning.default
+      : selectedThinkingLevel
   const displayedThinkingLabel =
     thinkingLevelOptions.find(o => o.value === displayedThinkingLevel)?.label ??
     displayedThinkingLevel
