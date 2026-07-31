@@ -1037,6 +1037,26 @@ pub async fn dispatch_command(
                     .await?;
             to_value(result)
         }
+        "attach_session_reference" => {
+            let target_session_id: String =
+                field(&args, "targetSessionId", "target_session_id")?;
+            let source_session_id: String =
+                field(&args, "sourceSessionId", "source_session_id")?;
+            let session_name: String = field(&args, "sessionName", "session_name")?;
+            let project_name: String = field(&args, "projectName", "project_name")?;
+            let worktree_name: String = field(&args, "worktreeName", "worktree_name")?;
+            let result = crate::projects::attach_session_reference(
+                app.clone(),
+                target_session_id,
+                source_session_id,
+                session_name,
+                project_name,
+                worktree_name,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["contexts"]);
+            to_value(result)
+        }
 
         // =====================================================================
         // Chat Sessions
@@ -1505,9 +1525,15 @@ pub async fn dispatch_command(
         "generate_context_from_session" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let session_id: String = field(&args, "sessionId", "session_id")?;
+            // Frontend sends sourceSessionId; accept sessionId as a fallback alias.
+            let source_session_id: String = field(&args, "sourceSessionId", "source_session_id")
+                .or_else(|_| field(&args, "sessionId", "session_id"))?;
             let project_name: String = field(&args, "projectName", "project_name")?;
-            let custom_prompt: Option<String> = field_opt(&args, "magicPrompt", "magic_prompt")?;
+            let custom_prompt: Option<String> = match field_opt(&args, "customPrompt", "custom_prompt")?
+            {
+                Some(v) => Some(v),
+                None => field_opt(&args, "magicPrompt", "magic_prompt")?,
+            };
             let model: Option<String> = from_field_opt(&args, "model")?;
             let custom_profile_name: Option<String> =
                 field_opt(&args, "customProfileName", "custom_profile_name")?;
@@ -1517,7 +1543,7 @@ pub async fn dispatch_command(
                 app.clone(),
                 worktree_path,
                 worktree_id,
-                session_id,
+                source_session_id,
                 project_name,
                 custom_prompt,
                 model,

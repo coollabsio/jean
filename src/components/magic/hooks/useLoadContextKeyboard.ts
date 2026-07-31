@@ -254,6 +254,7 @@ export function useLoadContextKeyboard({
                       session,
                       worktreeId: entry.worktree_id,
                       worktreePath: entry.worktree_path,
+                      worktreeName: entry.worktree_name,
                       projectName: entry.project_name,
                     })
                   }
