@@ -48,4 +48,6 @@ export interface ClickUpConfig {
   projectTokens: Record<string, string>
   planexpoListId?: string
   sprintListId?: string
+  /** Endpoint returning the full Git SHA currently served in production. */
+  productionVersionUrl?: string
 }

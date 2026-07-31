@@ -15,6 +15,7 @@ import { ProjectTree } from './ProjectTree'
 import { MissionControlSidebarButton } from '@/components/mission-control/MissionControlSidebarButton'
 // --- perso/ai-pipeline ---
 import { AiPipelineSidebarButton } from '@/components/ai-pipeline/AiPipelineSidebarButton'
+import { DeploymentSidebarButton } from '@/components/deployment/DeploymentSidebarButton'
 // --- /perso/ai-pipeline ---
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
@@ -59,6 +60,7 @@ export function ProjectsSidebar() {
         <MissionControlSidebarButton isNarrow={isNarrow} />
         {/* --- perso/ai-pipeline --- */}
         <AiPipelineSidebarButton isNarrow={isNarrow} />
+        <DeploymentSidebarButton isNarrow={isNarrow} />
         {/* --- /perso/ai-pipeline --- */}
       </div>
 

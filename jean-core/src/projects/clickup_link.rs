@@ -47,6 +47,19 @@ fn load_clickup_links(app: &AppHandle) -> Result<ClickUpLinks, String> {
     load_sidecar(app, "links.json")
 }
 
+/// Resolve a task id from a worktree record without another projects.json read.
+pub fn clickup_task_id_for_worktree(
+    app: &AppHandle,
+    worktree: &super::types::Worktree,
+) -> Result<Option<String>, String> {
+    let links = load_clickup_links(app)?;
+    Ok(links
+        .links
+        .get(&worktree.id)
+        .cloned()
+        .or_else(|| parse_clickup_task_id_from_branch(&worktree.branch)))
+}
+
 fn save_clickup_links(app: &AppHandle, links: &ClickUpLinks) -> Result<(), String> {
     save_sidecar(app, "links.json", links)
 }
@@ -61,14 +74,9 @@ pub async fn resolve_clickup_task_for_worktree(
     app: AppHandle,
     worktree_id: String,
 ) -> Result<Option<String>, String> {
-    let links = load_clickup_links(&app)?;
-    if let Some(task_id) = links.links.get(&worktree_id) {
-        return Ok(Some(task_id.clone()));
-    }
-
     let data = load_projects_data(&app)?;
     if let Some(worktree) = data.find_worktree(&worktree_id) {
-        return Ok(parse_clickup_task_id_from_branch(&worktree.branch));
+        return clickup_task_id_for_worktree(&app, worktree);
     }
 
     Ok(None)

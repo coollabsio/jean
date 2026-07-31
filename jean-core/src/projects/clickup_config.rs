@@ -27,6 +27,9 @@ pub struct ClickUpConfig {
     /// Secondary list id (the Sprint list) used to browse/pick tasks.
     #[serde(default)]
     pub sprint_list_id: Option<String>,
+    /// Endpoint returning the full Git SHA currently served in production.
+    #[serde(default)]
+    pub production_version_url: Option<String>,
 }
 
 /// Directory holding the ClickUp sidecar files.
@@ -124,11 +127,13 @@ pub async fn set_clickup_config(
     token: Option<String>,
     planexpo_list_id: Option<String>,
     sprint_list_id: Option<String>,
+    production_version_url: Option<String>,
 ) -> Result<(), String> {
     let mut config = load_clickup_config(&app)?;
     config.token = token.filter(|t| !t.trim().is_empty());
     config.planexpo_list_id = planexpo_list_id.filter(|t| !t.trim().is_empty());
     config.sprint_list_id = sprint_list_id.filter(|t| !t.trim().is_empty());
+    config.production_version_url = production_version_url.filter(|t| !t.trim().is_empty());
     save_clickup_config(&app, &config)
 }
 
@@ -145,6 +150,7 @@ mod tests {
                 .collect(),
             planexpo_list_id: None,
             sprint_list_id: None,
+            production_version_url: None,
         }
     }
 

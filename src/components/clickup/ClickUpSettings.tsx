@@ -35,24 +35,33 @@ export const ClickUpSettings: React.FC = () => {
   const [localToken, setLocalToken] = useState<string | null>(null)
   const [localPlanexpo, setLocalPlanexpo] = useState<string | null>(null)
   const [localSprint, setLocalSprint] = useState<string | null>(null)
+  const [localProductionVersionUrl, setLocalProductionVersionUrl] = useState<
+    string | null
+  >(null)
 
   const currentToken = config?.token ?? ''
   const currentPlanexpo = config?.planexpoListId ?? ''
   const currentSprint = config?.sprintListId ?? ''
+  const currentProductionVersionUrl = config?.productionVersionUrl ?? ''
 
   const token = localToken ?? currentToken
   const planexpo = localPlanexpo ?? currentPlanexpo
   const sprint = localSprint ?? currentSprint
+  const productionVersionUrl =
+    localProductionVersionUrl ?? currentProductionVersionUrl
 
   const changed =
     (localToken !== null && localToken !== currentToken) ||
     (localPlanexpo !== null && localPlanexpo !== currentPlanexpo) ||
-    (localSprint !== null && localSprint !== currentSprint)
+    (localSprint !== null && localSprint !== currentSprint) ||
+    (localProductionVersionUrl !== null &&
+      localProductionVersionUrl !== currentProductionVersionUrl)
 
   const resetLocal = () => {
     setLocalToken(null)
     setLocalPlanexpo(null)
     setLocalSprint(null)
+    setLocalProductionVersionUrl(null)
   }
 
   const handleSave = () => {
@@ -61,6 +70,7 @@ export const ClickUpSettings: React.FC = () => {
         token: token.trim() || undefined,
         planexpoListId: planexpo.trim() || undefined,
         sprintListId: sprint.trim() || undefined,
+        productionVersionUrl: productionVersionUrl.trim() || undefined,
       },
       {
         onSuccess: () => {
@@ -78,6 +88,7 @@ export const ClickUpSettings: React.FC = () => {
         token: undefined,
         planexpoListId: planexpo.trim() || undefined,
         sprintListId: sprint.trim() || undefined,
+        productionVersionUrl: productionVersionUrl.trim() || undefined,
       },
       {
         onSuccess: () => {
@@ -149,6 +160,19 @@ export const ClickUpSettings: React.FC = () => {
           placeholder="987654321"
           value={sprint}
           onChange={e => setLocalSprint(e.target.value)}
+          className="text-base md:text-sm font-mono"
+        />
+      </Field>
+
+      <Field
+        label="Version de production (URL)"
+        description="Endpoint HTTP retournant le SHA Git complet actuellement servi en production. Active le cockpit Déploiement."
+      >
+        <Input
+          type="url"
+          placeholder="https://example.com/version"
+          value={productionVersionUrl}
+          onChange={e => setLocalProductionVersionUrl(e.target.value)}
           className="text-base md:text-sm font-mono"
         />
       </Field>

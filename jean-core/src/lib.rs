@@ -47,6 +47,9 @@ mod coderabbit_cli;
 mod codex_cli;
 mod commandcode_cli;
 mod cursor_cli;
+// --- perso/deployment ---
+pub mod deployment;
+// --- /perso/deployment ---
 mod gh_cli;
 mod grok_cli;
 pub mod http_server;

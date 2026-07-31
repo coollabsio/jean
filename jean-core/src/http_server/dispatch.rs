@@ -3571,11 +3571,14 @@ pub async fn dispatch_command(
                 field_opt(&args, "planexpoListId", "planexpo_list_id")?;
             let sprint_list_id: Option<String> =
                 field_opt(&args, "sprintListId", "sprint_list_id")?;
+            let production_version_url: Option<String> =
+                field_opt(&args, "productionVersionUrl", "production_version_url")?;
             crate::projects::set_clickup_config(
                 app.clone(),
                 token,
                 planexpo_list_id,
                 sprint_list_id,
+                production_version_url,
             )
             .await?;
             Ok(Value::Null)
@@ -3642,6 +3645,30 @@ pub async fn dispatch_command(
             crate::projects::clear_clickup_link(app.clone(), worktree_id).await?;
             Ok(Value::Null)
         }
+
+        // --- perso/deployment ---
+        "get_deployment_overview" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result =
+                crate::deployment::get_deployment_overview(app.clone(), project_id).await?;
+            to_value(result)
+        }
+        "close_deployed_task" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let task_id: String = field(&args, "taskId", "task_id")?;
+            let result =
+                crate::deployment::close_deployed_task(app.clone(), project_id, task_id).await?;
+            emit_cache_invalidation(app, &["projects", "clickup", "deployment"]);
+            to_value(result)
+        }
+        "close_all_deployed_tasks" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result =
+                crate::deployment::close_all_deployed_tasks(app.clone(), project_id).await?;
+            emit_cache_invalidation(app, &["projects", "clickup", "deployment"]);
+            to_value(result)
+        }
+        // --- /perso/deployment ---
 
         // =====================================================================
         // CLI Profiles
