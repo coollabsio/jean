@@ -243,11 +243,13 @@ export function useSaveClickUpConfig() {
       token?: string
       planexpoListId?: string
       sprintListId?: string
+      productionVersionUrl?: string
     }) => {
       await invoke('set_clickup_config', {
         token: vars.token,
         planexpoListId: vars.planexpoListId,
         sprintListId: vars.sprintListId,
+        productionVersionUrl: vars.productionVersionUrl,
       })
     },
     onSuccess: () => {

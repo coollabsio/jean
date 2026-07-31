@@ -46,6 +46,12 @@ const MissionControlView = lazy(() =>
   }))
 )
 
+const DeploymentView = lazy(() =>
+  import('@/components/deployment/DeploymentView').then(mod => ({
+    default: mod.DeploymentView,
+  }))
+)
+
 interface MainWindowContentProps {
   children?: React.ReactNode
   className?: string
@@ -60,6 +66,7 @@ export function MainWindowContent({
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const missionControlOpen = useUIStore(state => state.missionControlOpen)
+  const deploymentOpen = useUIStore(state => state.deploymentOpen)
   // Any project/worktree navigation dismisses Mission Control (perso/jenkins).
   useCloseMissionControlOnNavigate()
   const isMobile = useIsMobile()
@@ -228,7 +235,17 @@ export function MainWindowContent({
         className
       )}
     >
-      {missionControlOpen ? (
+      {deploymentOpen ? (
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Chargement du déploiement…
+            </div>
+          }
+        >
+          <DeploymentView />
+        </Suspense>
+      ) : missionControlOpen ? (
         <Suspense
           fallback={
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

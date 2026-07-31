@@ -322,6 +322,9 @@ interface UIState {
   /** Full-page Jenkins "Mission Control" view (all PRs across all projects). */
   missionControlOpen: boolean
   setMissionControlOpen: (open: boolean) => void
+  /** Full-page production deployment cockpit (fork-only). */
+  deploymentOpen: boolean
+  setDeploymentOpen: (open: boolean) => void
 }
 
 // Store callback outside Zustand state to avoid serialization issues with
@@ -406,6 +409,7 @@ export const useUIStore = create<UIState>()(
       chatSearchOpen: false,
       githubDashboardOpen: false,
       missionControlOpen: false,
+      deploymentOpen: false,
       toggleLeftSidebar: () =>
         set(
           state => ({ leftSidebarVisible: !state.leftSidebarVisible }),
@@ -1299,11 +1303,23 @@ export const useUIStore = create<UIState>()(
       setMissionControlOpen: (open: boolean) =>
         set(
           state =>
-            state.missionControlOpen === open
+            state.missionControlOpen === open &&
+            (!open || !state.deploymentOpen)
               ? state
-              : { missionControlOpen: open },
+              : { missionControlOpen: open, deploymentOpen: false },
           undefined,
           'setMissionControlOpen'
+        ),
+
+      setDeploymentOpen: (open: boolean) =>
+        set(
+          state =>
+            state.deploymentOpen === open &&
+            (!open || !state.missionControlOpen)
+              ? state
+              : { deploymentOpen: open, missionControlOpen: false },
+          undefined,
+          'setDeploymentOpen'
         ),
     }),
     {
