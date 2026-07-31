@@ -2096,6 +2096,14 @@ pub async fn create_worktree(
                 actual_branch_name
             };
 
+            // Remember fork remotes added by `gh pr checkout` so clearing/deleting
+            // the PR can remove them from git later.
+            let (detected_pr_push_remote, detected_pr_push_branch) = if pr_context_clone.is_some() {
+                detect_ephemeral_pr_push_target(&project_path, &final_branch)
+            } else {
+                (None, None)
+            };
+
             // Write issue context file if provided (to shared git-context directory)
             if let Some(ctx) = &issue_context_clone {
                 log::trace!(
@@ -2395,8 +2403,8 @@ pub async fn create_worktree(
                     cached_base_branch_behind_count: None,
                     cached_worktree_ahead_count: None,
                     cached_unpushed_count: None,
-                    pr_push_remote: None,
-                    pr_push_branch: None,
+                    pr_push_remote: detected_pr_push_remote,
+                    pr_push_branch: detected_pr_push_branch,
                     order: max_order + 1,
                     origin: worktree_origin_clone.clone(),
                     archived_at: None,
@@ -3663,6 +3671,11 @@ pub async fn checkout_pr(
                 "Background: Git worktree ready with PR #{pr_number} on branch {actual_branch}"
             );
 
+            // Remember fork remotes added by `gh pr checkout` so clearing/deleting
+            // the PR can remove them from git later.
+            let (detected_pr_push_remote, detected_pr_push_branch) =
+                detect_ephemeral_pr_push_target(&project_path, &actual_branch);
+
             // Check for jean.json and run setup script
             let (setup_output, setup_script, setup_success) =
                 if let Some(config) = git::read_jean_config(&worktree_path_clone) {
@@ -3800,8 +3813,8 @@ pub async fn checkout_pr(
                     cached_base_branch_behind_count: None,
                     cached_worktree_ahead_count: None,
                     cached_unpushed_count: None,
-                    pr_push_remote: None,
-                    pr_push_branch: None,
+                    pr_push_remote: detected_pr_push_remote,
+                    pr_push_branch: detected_pr_push_branch,
                     order: max_order + 1,
                     origin: None,
                     archived_at: None,
@@ -3925,6 +3938,16 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
     data.remove_worktree(&worktree_id);
     save_projects_data(&app, &data)?;
     log::trace!("Worktree removed from storage: {worktree_id}");
+
+    // Drop Jean-managed fork remotes for this PR when nothing else needs them.
+    // Done after storage removal so reference checks see the updated worktree list.
+    cleanup_unused_pr_remotes(
+        &data,
+        &worktree_id,
+        &project.path,
+        worktree.pr_push_remote.as_deref(),
+        Some(worktree.branch.as_str()),
+    );
 
     // Emit deleting event immediately
     let deleting_event = WorktreeDeletingEvent {
@@ -4608,6 +4631,15 @@ pub async fn permanently_delete_worktree(
     data.remove_worktree(&worktree_id);
     save_projects_data(&app, &data)?;
     log::trace!("Worktree removed from storage: {worktree_id}");
+
+    // Drop Jean-managed fork remotes for this PR when nothing else needs them.
+    cleanup_unused_pr_remotes(
+        &data,
+        &worktree_id,
+        &project.path,
+        worktree.pr_push_remote.as_deref(),
+        Some(worktree.branch.as_str()),
+    );
 
     // Collect session IDs for cleanup before the index file is deleted
     let session_ids: Vec<String> =
@@ -6559,9 +6591,180 @@ pub async fn trigger_coderabbit_pr_review(
     })
 }
 
+/// Whether any worktree (other than `exclude_worktree_id`) still references `remote`
+/// as a PR push target or base remote. Used so we don't drop a fork remote while
+/// another session still depends on it.
+fn remote_still_referenced_by_other_worktrees(
+    data: &super::types::ProjectsData,
+    exclude_worktree_id: &str,
+    remote: &str,
+) -> bool {
+    data.worktrees.iter().any(|w| {
+        w.id != exclude_worktree_id
+            && (w.pr_push_remote.as_deref() == Some(remote)
+                || w.base_remote.as_deref() == Some(remote))
+    })
+}
+
+/// Remove Jean-managed PR/fork remotes that are no longer needed after a PR is
+/// cleared or a worktree is deleted.
+///
+/// Candidates: remembered `pr_push_remote` plus the branch's configured remote
+/// (what `gh pr checkout` often adds for cross-repo forks). Never removes
+/// `origin`. Skips remotes still referenced by other worktrees.
+fn cleanup_unused_pr_remotes(
+    data: &super::types::ProjectsData,
+    exclude_worktree_id: &str,
+    repo_path: &str,
+    pr_push_remote: Option<&str>,
+    branch: Option<&str>,
+) {
+    let mut candidates: Vec<String> = Vec::new();
+
+    if let Some(remote) = pr_push_remote {
+        if git::is_ephemeral_pr_remote(remote) {
+            candidates.push(remote.to_string());
+        }
+    }
+
+    if let Some(branch) = branch {
+        if let Some(configured) = git::configured_branch_remote(repo_path, branch) {
+            if git::is_ephemeral_pr_remote(&configured)
+                && !candidates.iter().any(|c| c == &configured)
+            {
+                candidates.push(configured);
+            }
+        }
+    }
+
+    for remote in candidates {
+        if remote_still_referenced_by_other_worktrees(data, exclude_worktree_id, &remote) {
+            log::trace!(
+                "Keeping remote '{remote}' — still referenced by another worktree"
+            );
+            continue;
+        }
+        git::try_remove_ephemeral_remote(repo_path, &remote);
+    }
+}
+
+/// After `gh pr checkout` (or a manual PR fetch), remember the branch's
+/// configured remote when it is a non-origin fork remote so later PR cleanup
+/// can remove it from git.
+fn detect_ephemeral_pr_push_target(
+    repo_path: &str,
+    branch: &str,
+) -> (Option<String>, Option<String>) {
+    match git::configured_branch_remote(repo_path, branch) {
+        Some(remote) if git::is_ephemeral_pr_remote(&remote) => {
+            (Some(remote), Some(branch.to_string()))
+        }
+        _ => (None, None),
+    }
+}
+
+#[cfg(test)]
+mod pr_remote_cleanup_tests {
+    use super::*;
+    use super::super::types::ProjectsData;
+
+    fn minimal_worktree(
+        id: &str,
+        pr_push_remote: Option<&str>,
+        base_remote: Option<&str>,
+    ) -> Worktree {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "project_id": "proj",
+            "name": id,
+            "path": format!("/tmp/{id}"),
+            "branch": "feature",
+            "created_at": 0,
+            "pr_push_remote": pr_push_remote,
+            "base_remote": base_remote,
+        }))
+        .expect("minimal worktree")
+    }
+
+    #[test]
+    fn remote_still_referenced_checks_other_worktrees_only() {
+        let data = ProjectsData {
+            projects: vec![],
+            worktrees: vec![
+                minimal_worktree("a", Some("fork-a"), None),
+                minimal_worktree("b", Some("fork-b"), None),
+                minimal_worktree("c", None, Some("fork-a")),
+            ],
+        };
+
+        // Excluding `a` — still referenced as base_remote by `c`
+        assert!(remote_still_referenced_by_other_worktrees(
+            &data, "a", "fork-a"
+        ));
+        // Excluding `b` — nobody else uses fork-b
+        assert!(!remote_still_referenced_by_other_worktrees(
+            &data, "b", "fork-b"
+        ));
+        // Excluding `c` — `a` still has pr_push_remote fork-a
+        assert!(remote_still_referenced_by_other_worktrees(
+            &data, "c", "fork-a"
+        ));
+    }
+
+    #[test]
+    fn cleanup_unused_pr_remotes_removes_only_unreferenced_forks() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let path = repo.to_str().unwrap();
+
+        // Minimal git repo with two fork remotes + origin
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "--initial-branch", "main"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        std::fs::write(repo.join("f.txt"), "x").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-m", "init"]);
+        run(&["remote", "add", "origin", "https://example.com/origin.git"]);
+        run(&["remote", "add", "fork-keep", "https://example.com/keep.git"]);
+        run(&["remote", "add", "fork-drop", "https://example.com/drop.git"]);
+        run(&["config", "branch.main.remote", "fork-drop"]);
+
+        let data = ProjectsData {
+            projects: vec![],
+            worktrees: vec![
+                // Being cleared
+                minimal_worktree("clearing", Some("fork-drop"), None),
+                // Still uses fork-keep
+                minimal_worktree("other", Some("fork-keep"), None),
+            ],
+        };
+
+        cleanup_unused_pr_remotes(
+            &data,
+            "clearing",
+            path,
+            Some("fork-drop"),
+            Some("main"),
+        );
+
+        assert!(!git::remote_exists(path, "fork-drop"));
+        assert!(git::remote_exists(path, "fork-keep"));
+        assert!(git::remote_exists(path, "origin"));
+    }
+}
+
 /// Clear PR information from a worktree
 ///
 /// Called when a PR is closed or merged and the user wants to create a new one.
+/// Also removes Jean-managed fork remotes that were added for that PR when no
+/// other worktree still references them.
 pub async fn clear_worktree_pr(app: AppHandle, worktree_id: String) -> Result<(), String> {
     log::trace!("Clearing PR info for worktree {worktree_id}");
 
@@ -6573,6 +6776,11 @@ pub async fn clear_worktree_pr(app: AppHandle, worktree_id: String) -> Result<()
         .find(|w| w.id == worktree_id)
         .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
 
+    let project_id = worktree.project_id.clone();
+    let worktree_path = worktree.path.clone();
+    let branch = worktree.branch.clone();
+    let pr_push_remote = worktree.pr_push_remote.clone();
+
     worktree.pr_number = None;
     worktree.pr_url = None;
     worktree.pr_push_remote = None;
@@ -6581,6 +6789,21 @@ pub async fn clear_worktree_pr(app: AppHandle, worktree_id: String) -> Result<()
     worktree.cached_check_status = None;
 
     save_projects_data(&app, &data)?;
+
+    // Prefer the main project path (shared gitdir / remotes); fall back to the
+    // worktree path if the project record is missing.
+    let repo_path = data
+        .find_project(&project_id)
+        .map(|p| p.path.as_str())
+        .unwrap_or(worktree_path.as_str());
+
+    cleanup_unused_pr_remotes(
+        &data,
+        &worktree_id,
+        repo_path,
+        pr_push_remote.as_deref(),
+        Some(branch.as_str()),
+    );
 
     log::trace!("Successfully cleared PR info for worktree {worktree_id}");
     Ok(())

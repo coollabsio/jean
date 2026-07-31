@@ -504,8 +504,8 @@ export function MainWindow() {
     reviewCommentsModalOpen
   )
   const shouldRenderWorkflowRunsModal = useRetainedMount(workflowRunsModalOpen)
-  // Always mount MagicModal so automation event listeners (mobile toolbar
-  // magic-command dispatches) work even when the dialog has never been opened.
+  // Always mount MagicModal so canvas/mobile magic-command dispatches and
+  // prompt-session starters work even when the dialog has never been opened.
   const shouldRenderMagicModal = true
   const shouldRenderResolveConflictsDialog = useRetainedMount(
     resolveConflictsDialogOpen

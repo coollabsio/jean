@@ -23,6 +23,7 @@ import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
 import {
   eventToShortcutString,
+  isModKeyEvent,
   DEFAULT_KEYBINDINGS,
   type KeybindingAction,
   type KeybindingsMap,
@@ -823,7 +824,7 @@ export function useMainWindowEventListeners() {
           const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
 
           if (
-            (e.metaKey || e.ctrlKey) &&
+            isModKeyEvent(e) &&
             !e.shiftKey &&
             !e.altKey &&
             digit >= 1 &&
@@ -861,8 +862,9 @@ export function useMainWindowEventListeners() {
         }
       }
 
-      // CMD/Ctrl+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      // Mod+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
+      // Use platform mod (Cmd on macOS native, Ctrl elsewhere) so Ctrl+digit reaches terminals.
+      if (isModKeyEvent(e) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
         const digitMatch = e.code.match(/^Digit(\d)$/)
         const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN

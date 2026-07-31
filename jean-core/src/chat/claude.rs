@@ -544,20 +544,25 @@ fn build_claude_args(
                 );
             }
         }
-        // If Off, don't send any thinking/effort settings (but still send custom profile if present)
+        // Off / Adaptive: omit thinking/effort settings so the model decides
+        // (still send custom profile / other settings if present)
     } else {
         // Traditional thinking levels (Sonnet, Haiku)
         if let Some(level) = thinking_level {
-            let obj = settings_json.get_or_insert_with(|| serde_json::json!({}));
-            if let Some(map) = obj.as_object_mut() {
-                map.insert(
-                    "alwaysThinkingEnabled".to_string(),
-                    serde_json::Value::Bool(level.is_enabled()),
-                );
-            }
+            // Adaptive: omit alwaysThinkingEnabled / MAX_THINKING_TOKENS so
+            // models that support adaptive thinking can choose depth.
+            if !level.omits_thinking_settings() {
+                let obj = settings_json.get_or_insert_with(|| serde_json::json!({}));
+                if let Some(map) = obj.as_object_mut() {
+                    map.insert(
+                        "alwaysThinkingEnabled".to_string(),
+                        serde_json::Value::Bool(level.is_enabled()),
+                    );
+                }
 
-            if let Some(tokens) = level.thinking_tokens() {
-                env_vars.push(("MAX_THINKING_TOKENS".to_string(), tokens.to_string()));
+                if let Some(tokens) = level.thinking_tokens() {
+                    env_vars.push(("MAX_THINKING_TOKENS".to_string(), tokens.to_string()));
+                }
             }
         }
     }

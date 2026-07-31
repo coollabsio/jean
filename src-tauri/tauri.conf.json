@@ -26,14 +26,12 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "alwaysOnTop": false,
-        "transparent": true,
+        "transparent": false,
         "shadow": true,
         "dragDropEnabled": false,
         "windowEffects": {
-          "effects": [
-            "sidebar"
-          ],
-          "radius": 12,
+          "effects": [],
+          "radius": 0,
           "state": "active"
         }
       }

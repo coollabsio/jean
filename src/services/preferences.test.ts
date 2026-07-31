@@ -1340,7 +1340,7 @@ describe('preferences service', () => {
 
       await waitFor(() => {
         expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { mobile_zoom_level: 100 },
+          patch: { mobile_zoom_level: 110 },
         })
       })
     })

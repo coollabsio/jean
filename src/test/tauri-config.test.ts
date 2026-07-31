@@ -91,4 +91,13 @@ describe('Tauri Windows configuration', () => {
       readMainWindowConfig('src-tauri/tauri.conf.dev.json')?.transparent
     ).toBe(false)
   })
+
+  it('starts the production main window opaque (vibrancy is opt-in)', () => {
+    const main = readMainWindowConfig('src-tauri/tauri.conf.json') as {
+      transparent?: boolean
+      windowEffects?: { effects?: unknown[] }
+    }
+    expect(main?.transparent).toBe(false)
+    expect(main?.windowEffects?.effects ?? []).toEqual([])
+  })
 })

@@ -183,6 +183,49 @@ export GALLIUM_DRIVER=softpipe
 
 ---
 
+---
+
+## macOS: Blurry text on external monitors
+
+**Symptoms:**
+- Jean text looks soft/fuzzy on an external display but sharp on the built-in Retina panel
+- Blurriness appears or worsens after dragging Jean between displays
+- Other native apps may look fine while Jean looks soft
+
+**Common causes (layered):**
+
+1. **App zoom ≠ 100%** — Non-100% webview zoom on a 1× external LCD produces non-integer glyph rasterization and soft text. Jean defaults to 100%.
+2. **macOS display scaling** — “Looks like” resolutions that aren’t true HiDPI force the whole desktop (including WKWebView) through fractional scaling.
+3. **Font smoothing** — Forced grayscale anti-aliasing is softer on low-PPI external LCDs than on Retina.
+4. **Window transparency / vibrancy** — Translucent + blur materials can add an extra soft pass over content.
+
+**What to try in Jean (quickest first):**
+
+1. **Settings → Appearance → Desktop zoom level → 100%** (or `Cmd+0`). Prefer 100% on external monitors; use UI/chat font scaling if you need larger text without page zoom. Jean may show a one-time toast on 1× displays when zoom ≠ 100% with a **Use 100%** action.
+2. Turn **Window transparency** off (same pane) if it is enabled. Jean starts **opaque by default**; vibrancy is opt-in only.
+3. Move Jean fully onto the external display, then toggle zoom 100% → 90% → 100% once so the webview rebuilds its backing store after a display change (Jean also re-applies zoom on scale-factor changes automatically).
+
+**macOS system checks:**
+
+1. **System Settings → Displays** for the external monitor: prefer native resolution or a labeled **HiDPI** option when available. Avoid odd scaled “Looks like” sizes when possible.
+2. Confirm cable/adapter is driving the full resolution (some hubs force lower modes).
+3. Optional system font smoothing (logout required; affects all apps):
+
+```bash
+# Stronger smoothing (try 1–3). 0 disables.
+defaults -currentHost write -g AppleFontSmoothing -int 2
+```
+
+**Engineering notes:**
+
+- Native zoom is applied via `getCurrentWebview().setZoom()` in `src/hooks/use-zoom.ts`.
+- On display scale changes, Jean re-applies zoom (bounce through 1.0 when target ≠ 100%) so WKWebView refreshes its layer after multi-monitor moves.
+- CSS uses `-webkit-font-smoothing: antialiased` on HiDPI, and `auto` on 1× displays (`src/App.css`).
+- Main window config is opaque with empty `windowEffects` (`src-tauri/tauri.conf.json`); `set_window_vibrancy` enables translucency only when the Appearance preference is on.
+- Soft-text tip: `useExternalDisplayZoomTip` + `has_seen_external_display_zoom_tip` preference.
+
+---
+
 ## Related Issues
 
 **Tauri Core Issues:**

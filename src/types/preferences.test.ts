@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
-  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
@@ -145,33 +143,6 @@ describe('magic prompt preference resolvers', () => {
     ).toBe('plan')
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryRefs}')
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).toContain('{sentryContext}')
-  })
-
-  it('provides automation magic prompts for GitHub bugs and security advisories', () => {
-    expect(
-      defaultPreferences.magic_prompt_modes.automate_github_bugs_mode
-    ).toBe('yolo')
-    expect(
-      defaultPreferences.magic_prompt_modes.automate_security_advisories_mode
-    ).toBe('yolo')
-    expect(
-      defaultPreferences.magic_prompt_models.automate_github_bugs_model
-    ).toBe('claude-opus-4-8[1m]')
-    expect(
-      defaultPreferences.magic_prompt_models.automate_security_advisories_model
-    ).toBe('claude-opus-4-8[1m]')
-    expect(DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT).toContain('list_github_issues')
-    expect(DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT).toContain(
-      'start_autoinvestigating'
-    )
-    expect(DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT).toContain('{projectId}')
-    expect(DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT).toContain(
-      'list_security_advisories'
-    )
-    expect(DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT).toContain('ghsaId')
-    expect(DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT).toContain(
-      'start_autoinvestigating'
-    )
   })
 
   it('keeps investigation default prompts free of weak yolo conditionals', () => {

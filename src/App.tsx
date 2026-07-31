@@ -58,6 +58,7 @@ import { useFontSettings } from './hooks/use-font-settings'
 import { usePreventFileDropNavigation } from './hooks/usePreventFileDropNavigation'
 import { useLinuxFileDrop } from './hooks/useLinuxFileDrop'
 import { useZoom } from './hooks/use-zoom'
+import { useExternalDisplayZoomTip } from './hooks/use-external-display-zoom-tip'
 import { useImmediateSessionStateSave } from './hooks/useImmediateSessionStateSave'
 import { useCliVersionCheck } from './hooks/useCliVersionCheck'
 import { useServerUpdateCheck } from './hooks/useServerUpdateCheck'
@@ -805,6 +806,9 @@ function App() {
 
   // Apply zoom level from preferences + keyboard shortcuts
   useZoom()
+
+  // One-time tip when non-100% zoom is used on a 1× external-style display
+  useExternalDisplayZoomTip()
 
   // Save reviewing/waiting state immediately (no debounce) to ensure persistence on reload
   useImmediateSessionStateSave()

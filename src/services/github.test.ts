@@ -11,9 +11,11 @@ vi.mock('./projects', () => ({
 }))
 
 import {
+  attachSessionReference,
   getAdvisoryContextContent,
   isGhAuthError,
   isUnsupportedGitHubRepoError,
+  sessionReferenceSlug,
 } from './github'
 
 describe('GitHub service error classification', () => {
@@ -66,6 +68,41 @@ describe('github advisory context service', () => {
       ghsaId: 'GHSA-892v-qq52-xprh',
       projectPath: '/repo/worktree',
       worktreeId: 'wt-1',
+    })
+  })
+})
+
+describe('session reference injection', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+  })
+
+  it('builds stable session-ref slugs', () => {
+    expect(sessionReferenceSlug('abc-123')).toBe('session-ref-abc-123')
+  })
+
+  it('invokes attach_session_reference with camelCase args', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      slug: 'session-ref-src-1',
+      name: 'Session: Fix login',
+      size: 100,
+      createdAt: 1,
+    })
+
+    await attachSessionReference(
+      'target-session',
+      'src-1',
+      'Fix login',
+      'jean',
+      'issue-596'
+    )
+
+    expect(mockInvoke).toHaveBeenCalledWith('attach_session_reference', {
+      targetSessionId: 'target-session',
+      sourceSessionId: 'src-1',
+      sessionName: 'Fix login',
+      projectName: 'jean',
+      worktreeName: 'issue-596',
     })
   })
 })

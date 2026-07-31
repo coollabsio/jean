@@ -19,8 +19,6 @@ import {
   Link2,
   ShieldAlert,
   Loader2,
-  Bot,
-  Shield,
 } from 'lucide-react'
 import {
   Dialog,
@@ -89,8 +87,6 @@ import type {
 import type { Session } from '@/types/chat'
 import {
   type CliBackend,
-  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
@@ -130,6 +126,7 @@ import { resolveMcpConfigForSend } from '@/services/mcp'
 type MagicOption =
   | 'save-context'
   | 'load-context'
+  | 'inject-session'
   | 'linked-projects'
   | 'fork-session'
   | 'commit'
@@ -146,8 +143,6 @@ type MagicOption =
   | 'investigate-issue'
   | 'investigate-pr'
   | 'investigate-advisory'
-  | 'automate-github-bugs'
-  | 'automate-security-advisories'
   | 'merge-pr'
   | 'review-comments'
   | 'revert-last-commit'
@@ -175,8 +170,6 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge-pr',
   'resolve-conflicts',
   'linked-projects',
-  'automate-github-bugs',
-  'automate-security-advisories',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
@@ -258,6 +251,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           key: 'L',
         },
         {
+          id: 'inject-session',
+          label: 'Inject Session',
+          icon: MessageSquare,
+          key: 'J',
+        },
+        {
           id: 'linked-projects',
           label: 'Linked Projects',
           icon: Link2,
@@ -268,23 +267,6 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           label: 'Fork Session',
           icon: GitBranchPlus,
           key: 'W',
-        },
-      ],
-    },
-    {
-      header: 'Automation',
-      options: [
-        {
-          id: 'automate-github-bugs',
-          label: 'GitHub Bugs',
-          icon: Bot,
-          key: 'H',
-        },
-        {
-          id: 'automate-security-advisories',
-          label: 'Security Advisories',
-          icon: Shield,
-          key: 'X',
         },
       ],
     },
@@ -397,6 +379,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
 const KEY_TO_OPTION: Record<string, MagicOption> = {
   s: 'save-context',
   l: 'load-context',
+  j: 'inject-session',
   k: 'linked-projects',
   w: 'fork-session',
   c: 'commit',
@@ -414,8 +397,6 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   i: 'investigate-issue',
   a: 'investigate-pr',
   y: 'investigate-advisory',
-  h: 'automate-github-bugs',
-  x: 'automate-security-advisories',
   n: 'merge-pr',
   z: 'revert-last-commit',
 }
@@ -701,8 +682,8 @@ export function MagicModal() {
       : null
 
   /**
-   * Resolve the worktree to run a new prompt-session in.
-   * Prefer store snapshots over React Query so automation still works when
+   * Resolve the worktree to run a new prompt session in.
+   * Prefer store snapshots over React Query so prompt sessions still work when
    * useWorktree() has not loaded yet (common right after opening Magic).
    */
   const resolvePromptSessionWorktree = useCallback(async (): Promise<{
@@ -769,26 +750,11 @@ export function MagicModal() {
       errorLabel,
     }: {
       sessionName: string
-      backendKey:
-        | 'final_review_backend'
-        | 'automate_github_bugs_backend'
-        | 'automate_security_advisories_backend'
-      modelKey:
-        | 'final_review_model'
-        | 'automate_github_bugs_model'
-        | 'automate_security_advisories_model'
-      providerKey:
-        | 'final_review_provider'
-        | 'automate_github_bugs_provider'
-        | 'automate_security_advisories_provider'
-      modeKey:
-        | 'final_review_mode'
-        | 'automate_github_bugs_mode'
-        | 'automate_security_advisories_mode'
-      effortKey:
-        | 'final_review_effort'
-        | 'automate_github_bugs_effort'
-        | 'automate_security_advisories_effort'
+      backendKey: 'final_review_backend'
+      modelKey: 'final_review_model'
+      providerKey: 'final_review_provider'
+      modeKey: 'final_review_mode'
+      effortKey: 'final_review_effort'
       prompt: string
       errorLabel: string
     }) => {
@@ -855,7 +821,7 @@ export function MagicModal() {
 
       try {
         // Resolve MCP the same way ChatWindow does so Jean MCP and other
-        // enabled servers are available on the first automation turn.
+        // enabled servers are available on the first prompt-session turn.
         const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
           worktreePath,
           backend,
@@ -989,84 +955,6 @@ export function MagicModal() {
       errorLabel: 'final review',
     })
   }, [preferences?.magic_prompts?.final_review, startPromptSession])
-
-  const startAutomation = useCallback(
-    async (kind: 'github-bugs' | 'security-advisories') => {
-      const resolved = await resolvePromptSessionWorktree()
-      if (!resolved) {
-        toast.error('No worktree selected')
-        notify('No worktree selected', undefined, { type: 'error' })
-        return
-      }
-
-      const projectId =
-        resolved.projectId ??
-        worktree?.project_id ??
-        selectedProjectId ??
-        '{projectId}'
-      const isBugs = kind === 'github-bugs'
-      const promptTemplate = isBugs
-        ? (preferences?.magic_prompts?.automate_github_bugs ??
-          DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT)
-        : (preferences?.magic_prompts?.automate_security_advisories ??
-          DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT)
-      const prompt = promptTemplate.replaceAll('{projectId}', projectId)
-
-      await startPromptSession({
-        sessionName: isBugs
-          ? 'Automate GitHub bugs'
-          : 'Automate security advisories',
-        backendKey: isBugs
-          ? 'automate_github_bugs_backend'
-          : 'automate_security_advisories_backend',
-        modelKey: isBugs
-          ? 'automate_github_bugs_model'
-          : 'automate_security_advisories_model',
-        providerKey: isBugs
-          ? 'automate_github_bugs_provider'
-          : 'automate_security_advisories_provider',
-        modeKey: isBugs
-          ? 'automate_github_bugs_mode'
-          : 'automate_security_advisories_mode',
-        effortKey: isBugs
-          ? 'automate_github_bugs_effort'
-          : 'automate_security_advisories_effort',
-        prompt,
-        errorLabel: isBugs
-          ? 'GitHub bugs automation'
-          : 'security advisories automation',
-      })
-    },
-    [
-      preferences?.magic_prompts?.automate_github_bugs,
-      preferences?.magic_prompts?.automate_security_advisories,
-      resolvePromptSessionWorktree,
-      selectedProjectId,
-      startPromptSession,
-      worktree?.project_id,
-    ]
-  )
-
-  // Mobile toolbar (and other surfaces) dispatch automation via magic-command
-  // while MagicModal stays closed — still handle them from the always-mounted modal.
-  useEffect(() => {
-    const handleAutomationCommand = (
-      e: Event
-    ) => {
-      const detail = (e as CustomEvent<{ command?: string }>).detail
-      const command = detail?.command
-      if (command === 'automate-github-bugs') {
-        void startAutomation('github-bugs')
-      } else if (command === 'automate-security-advisories') {
-        void startAutomation('security-advisories')
-      }
-    }
-
-    window.addEventListener('magic-command', handleAutomationCommand)
-    return () => {
-      window.removeEventListener('magic-command', handleAutomationCommand)
-    }
-  }, [startAutomation])
 
   const investigateClaudeModelOptions = useMemo(
     () => getClaudeModelOptionsForProvider(investigateClaudeProvider),
@@ -2537,22 +2425,6 @@ ${resolveInstructions}`
         return
       }
 
-      // Automation: create a new session in the current worktree and run the orchestration prompt
-      if (
-        option === 'automate-github-bugs' ||
-        option === 'automate-security-advisories'
-      ) {
-        setMagicModalOpen(false)
-        // Resolve worktree inside startAutomation (store path / get_worktree fallback)
-        // so a slow useWorktree() query does not block the click.
-        void startAutomation(
-          option === 'automate-github-bugs'
-            ? 'github-bugs'
-            : 'security-advisories'
-        )
-        return
-      }
-
       // Investigate options: guard against missing contexts
       if (
         option === 'investigate-issue' ||
@@ -2686,7 +2558,6 @@ ${resolveInstructions}`
       worktree?.path,
       worktree?.pr_number,
       detectLinkPrForCurrentBranch,
-      startAutomation,
     ]
   )
 

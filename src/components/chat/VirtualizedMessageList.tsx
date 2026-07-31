@@ -17,6 +17,8 @@ import type {
   ReviewFinding,
 } from '@/types/chat'
 import { MessageItem } from './MessageItem'
+import { getProviderChangeBeforeMessage } from './message-settings-labels'
+import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { getAssistantDurationMs } from './time-utils'
 import {
   capturePrependScrollAnchor,
@@ -61,6 +63,8 @@ interface VirtualizedMessageListProps {
   sessionId: string
   /** Worktree path for resolving file mentions */
   worktreePath: string
+  /** Worktree id for checkpoint restore */
+  worktreeId?: string | null
   /** Keyboard shortcut for approve button */
   approveShortcut: string
   /** Keyboard shortcut for approve yolo button */
@@ -147,6 +151,7 @@ export const VirtualizedMessageList = memo(
         lastPlanMessageIndex,
         sessionId,
         worktreePath,
+        worktreeId = null,
         approveShortcut,
         approveShortcutYolo,
         approveShortcutClearContext,
@@ -249,6 +254,19 @@ export const VirtualizedMessageList = memo(
           if (messages[i]?.role === 'user') {
             foundUserMessage = true
           }
+        }
+        return map
+      }, [messages])
+
+      // Pre-compute provider switches between consecutive user prompts
+      const providerChangeMap = useMemo(() => {
+        const map = new Map<
+          number,
+          ReturnType<typeof getProviderChangeBeforeMessage>
+        >()
+        for (let i = 0; i < messages.length; i++) {
+          const change = getProviderChangeBeforeMessage(messages, i)
+          if (change) map.set(i, change)
         }
         return map
       }, [messages])
@@ -434,6 +452,7 @@ export const VirtualizedMessageList = memo(
               globalIndex,
               completedDurationMs
             )
+            const providerChange = providerChangeMap.get(globalIndex) ?? null
 
             return (
               <div
@@ -447,6 +466,9 @@ export const VirtualizedMessageList = memo(
                   globalIndex === messages.length - 1 && isSending ? '' : 'pb-4'
                 }
               >
+                {providerChange && (
+                  <ProviderChangeSeparator change={providerChange} />
+                )}
                 <MessageItem
                   message={message}
                   getMessages={getMessages}
@@ -456,6 +478,7 @@ export const VirtualizedMessageList = memo(
                   hasFollowUpMessage={hasFollowUpMessage}
                   sessionId={sessionId}
                   worktreePath={worktreePath}
+                  worktreeId={worktreeId}
                   approveShortcut={approveShortcut}
                   approveShortcutYolo={approveShortcutYolo}
                   approveShortcutClearContext={approveShortcutClearContext}

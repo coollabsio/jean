@@ -275,12 +275,14 @@ pub struct AppPreferences {
     pub has_seen_jean_config_wizard: bool, // Whether user has seen the jean.json setup wizard
     #[serde(default)]
     pub has_seen_jean_mcp_intro: bool, // Whether user has seen the Jean MCP server announcement
+    #[serde(default)]
+    pub has_seen_external_display_zoom_tip: bool, // Soft-text tip on 1× displays when zoom ≠ 100%
     #[serde(default = "default_chrome_enabled")]
     pub chrome_enabled: bool, // Enable browser automation via Chrome extension
     #[serde(default = "default_zoom_level")]
-    pub zoom_level: u32, // Desktop zoom level percentage (50-200, default 90)
+    pub zoom_level: u32, // Desktop zoom level percentage (50-200, default 100)
     #[serde(default = "default_zoom_level")]
-    pub mobile_zoom_level: u32, // Mobile zoom level percentage (50-200, default 90)
+    pub mobile_zoom_level: u32, // Mobile zoom level percentage (50-200, default 100)
     #[serde(default = "default_sync_zoom_levels")]
     pub sync_zoom_levels: bool, // Keep desktop and mobile zoom levels in sync
     #[serde(default)]
@@ -817,7 +819,7 @@ fn default_codex_max_agent_threads() -> u32 {
 }
 
 fn default_zoom_level() -> u32 {
-    90 // 90% = slightly smaller default
+    100 // 100% = sharpest default (esp. external 1× displays)
 }
 
 fn default_sync_zoom_levels() -> bool {
@@ -1151,7 +1153,7 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
-        assert_eq!(prefs.mobile_zoom_level, 90);
+        assert_eq!(prefs.mobile_zoom_level, 100);
         assert!(prefs.sync_zoom_levels);
     }
 
@@ -1167,6 +1169,20 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!prefs.has_seen_jean_mcp_intro);
+    }
+
+    #[test]
+    fn app_preferences_external_display_zoom_tip_unseen_for_existing_prefs() {
+        assert!(!AppPreferences::default().has_seen_external_display_zoom_tip);
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json
+            .as_object_mut()
+            .unwrap()
+            .remove("has_seen_external_display_zoom_tip");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(!prefs.has_seen_external_display_zoom_tip);
     }
 
     #[test]
@@ -1380,10 +1396,6 @@ pub struct MagicPrompts {
     pub investigate_sentry_issue: Option<String>,
     #[serde(default)]
     pub review_comments: Option<String>,
-    #[serde(default)]
-    pub automate_github_bugs: Option<String>,
-    #[serde(default)]
-    pub automate_security_advisories: Option<String>,
 }
 
 pub(crate) fn default_investigate_issue_prompt() -> String {
@@ -1940,136 +1952,6 @@ Address the following review comments from PR #{prNumber}
         .to_string()
 }
 
-pub(crate) fn default_automate_github_bugs_prompt() -> String {
-    r#"<task>
-
-Automate triage of the latest open GitHub bug/fix issues for this project using Jean's MCP tools, then start autoinvestigation for each valid issue in its own worktree.
-
-</task>
-
-
-<context>
-
-- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
-- Scope: bugs and fixes only — not feature requests, enhancements, or pure DX chores
-- You are the orchestrator in this session. Do not implement fixes here.
-
-</context>
-
-
-<instructions>
-
-1. Resolve context
-   - Prefer projectId from context above
-   - If missing or uncertain, call Jean MCP get_current_context
-   - Optionally call list_worktrees with projectId so you can detect issues that already have worktrees
-
-2. Fetch candidates
-   - Call list_github_issues with projectId and state="open"
-   - Sort by newest first and inspect enough issues to select up to 5 bug/fix candidates
-   - Prefer labels such as bug, fix, defect, regression, crash
-   - Exclude clear feature/enhancement requests (labels like feature, enhancement, or titles/bodies that only request new capabilities)
-   - If labels are missing, use title + body to decide
-
-3. Validate each candidate before acting
-   - Still open/valid (not closed, not obsolete)
-   - Not an obvious duplicate of another open issue (or of an issue you are already starting)
-   - No existing Jean worktree already linked to this issue number (check list_worktrees / worktree metadata)
-   - Skip anything already under active investigation
-
-4. Act on each remaining valid issue (up to 5 total)
-   - Call create_worktree with:
-     - projectId
-     - issueNumber
-     - action="start_autoinvestigating"
-   - Create a separate worktree per issue
-   - Do not open/switch Jean UI unless the tool requires it
-
-5. Report results in this session
-   - Table of started issues (number, title, worktree/session if returned)
-   - Table of skipped issues with reasons (not a bug, duplicate, already has worktree, invalid, etc.)
-   - Any MCP/tool errors
-
-</instructions>
-
-
-<guidelines>
-
-- Be systematic and stop at 5 autoinvestigations maximum
-- Prefer high-confidence bug/fix issues over ambiguous ones
-- If fewer than 5 valid bugs exist, process only the valid ones
-- Do not implement code changes in this orchestration session
-
-</guidelines>"#
-        .to_string()
-}
-
-pub(crate) fn default_automate_security_advisories_prompt() -> String {
-    r#"<task>
-
-Automate triage of the latest repository security advisories for this project using Jean's MCP tools, then start autoinvestigation for each valid advisory in its own worktree.
-
-</task>
-
-
-<context>
-
-- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
-- Scope: repository security advisories (GHSA), not Dependabot dependency alerts unless they clearly map to a repo advisory
-- You are the orchestrator in this session. Do not implement fixes here.
-
-</context>
-
-
-<instructions>
-
-1. Resolve context
-   - Prefer projectId from context above
-   - If missing or uncertain, call Jean MCP get_current_context
-   - Optionally call list_worktrees with projectId so you can detect advisories that already have worktrees
-
-2. Fetch candidates
-   - Call list_security_advisories with projectId and state="all"
-   - Sort by newest first and inspect enough advisories to select up to 5 candidates that still need investigation
-   - Prefer advisories that are actively open for work
-   - Skip advisories already closed when they no longer need investigation
-
-3. Validate each candidate before acting
-   - Still valid (not obsolete / not already resolved)
-   - Not a duplicate of another advisory (same GHSA family / clearly same vulnerability already covered)
-   - Carefully check state: draft, triage, published/released, closed
-     - Skip if already released/published and no longer needs investigation, or if draft/triage work is already covered by an existing investigation/worktree
-     - Prefer ones that still need investigation and do not already have an in-progress worktree
-   - No existing Jean worktree already linked to this GHSA id
-   - No duplicated open GitHub issue that already tracks the same advisory investigation
-
-4. Act on each remaining valid advisory (up to 5 total)
-   - Call create_worktree with:
-     - projectId
-     - ghsaId (e.g. "GHSA-xxxx-xxxx-xxxx")
-     - action="start_autoinvestigating"
-   - Create a separate worktree per advisory
-   - Do not open/switch Jean UI unless the tool requires it
-
-5. Report results in this session
-   - Table of started advisories (GHSA id, title/severity, state, worktree/session if returned)
-   - Table of skipped advisories with reasons (state, duplicate, already has worktree, invalid, etc.)
-   - Any MCP/tool errors
-
-</instructions>
-
-
-<guidelines>
-
-- Be systematic and stop at 5 autoinvestigations maximum
-- Prefer high-confidence, still-actionable advisories
-- If fewer than 5 valid advisories exist, process only the valid ones
-- Do not implement code changes in this orchestration session
-
-</guidelines>"#
-        .to_string()
-}
-
 pub(crate) fn default_parallel_execution_prompt() -> String {
     r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
@@ -2207,10 +2089,6 @@ pub struct MagicPromptModels {
     pub investigate_sentry_issue_model: String,
     #[serde(default = "default_model")]
     pub review_comments_model: String,
-    #[serde(default = "default_model")]
-    pub automate_github_bugs_model: String,
-    #[serde(default = "default_model")]
-    pub automate_security_advisories_model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2248,8 +2126,6 @@ impl Default for MagicPromptModels {
             investigate_linear_issue_model: default_model(),
             investigate_sentry_issue_model: default_model(),
             review_comments_model: default_model(),
-            automate_github_bugs_model: default_model(),
-            automate_security_advisories_model: default_model(),
         }
     }
 }
@@ -2260,7 +2136,7 @@ impl MagicPromptModels {
     /// default models are untouched. Returns true if any field changed.
     fn migrate_legacy_defaults(&mut self) -> bool {
         let new_opus = default_model();
-        let opus_fields: [&mut String; 14] = [
+        let opus_fields: [&mut String; 12] = [
             &mut self.investigate_issue_model,
             &mut self.investigate_pr_model,
             &mut self.investigate_workflow_run_model,
@@ -2273,8 +2149,6 @@ impl MagicPromptModels {
             &mut self.investigate_linear_issue_model,
             &mut self.investigate_sentry_issue_model,
             &mut self.review_comments_model,
-            &mut self.automate_github_bugs_model,
-            &mut self.automate_security_advisories_model,
         ];
         let mut changed = false;
         for field in opus_fields {
@@ -2366,10 +2240,6 @@ pub struct MagicPromptProviders {
     pub investigate_sentry_issue_provider: Option<String>,
     #[serde(default)]
     pub review_comments_provider: Option<String>,
-    #[serde(default)]
-    pub automate_github_bugs_provider: Option<String>,
-    #[serde(default)]
-    pub automate_security_advisories_provider: Option<String>,
 }
 
 /// Per-prompt backend overrides for magic prompts (None = use project/global default_backend)
@@ -2407,10 +2277,6 @@ pub struct MagicPromptBackends {
     pub investigate_sentry_issue_backend: Option<String>,
     #[serde(default)]
     pub review_comments_backend: Option<String>,
-    #[serde(default)]
-    pub automate_github_bugs_backend: Option<String>,
-    #[serde(default)]
-    pub automate_security_advisories_backend: Option<String>,
 }
 
 /// Per-prompt reasoning effort overrides for magic prompts (None = use model default)
@@ -2448,10 +2314,6 @@ pub struct MagicPromptReasoningEfforts {
     pub investigate_sentry_issue_effort: Option<String>,
     #[serde(default)]
     pub review_comments_effort: Option<String>,
-    #[serde(default)]
-    pub automate_github_bugs_effort: Option<String>,
-    #[serde(default)]
-    pub automate_security_advisories_effort: Option<String>,
 }
 
 fn default_magic_prompt_plan_mode() -> String {
@@ -2488,10 +2350,6 @@ pub struct MagicPromptModes {
     pub final_review_mode: String,
     #[serde(default = "default_magic_prompt_yolo_mode")]
     pub resolve_conflicts_mode: String,
-    #[serde(default = "default_magic_prompt_yolo_mode")]
-    pub automate_github_bugs_mode: String,
-    #[serde(default = "default_magic_prompt_yolo_mode")]
-    pub automate_security_advisories_mode: String,
 }
 
 impl Default for MagicPromptModes {
@@ -2508,8 +2366,6 @@ impl Default for MagicPromptModes {
             review_comments_mode: default_magic_prompt_plan_mode(),
             final_review_mode: default_magic_prompt_yolo_mode(),
             resolve_conflicts_mode: default_magic_prompt_yolo_mode(),
-            automate_github_bugs_mode: default_magic_prompt_yolo_mode(),
-            automate_security_advisories_mode: default_magic_prompt_yolo_mode(),
         }
     }
 }
@@ -2578,165 +2434,12 @@ fn migrate_final_review_preferences(
     true
 }
 
-/// Align newly-added automation magic-prompt fields with investigation defaults.
-/// Existing installs often have Grok/Codex investigation models while new automation
-/// fields deserialize to Claude Opus defaults — fix the Grok+Opus mismatch.
-fn migrate_automation_magic_prompt_preferences(
-    preferences: &mut AppPreferences,
-    raw_preferences: &Value,
-) -> bool {
-    let models_raw = raw_preferences
-        .get("magic_prompt_models")
-        .and_then(Value::as_object);
-    let backends_raw = raw_preferences
-        .get("magic_prompt_backends")
-        .and_then(Value::as_object);
-    let providers_raw = raw_preferences
-        .get("magic_prompt_providers")
-        .and_then(Value::as_object);
-    let efforts_raw = raw_preferences
-        .get("magic_prompt_efforts")
-        .and_then(Value::as_object);
-    let modes_raw = raw_preferences
-        .get("magic_prompt_modes")
-        .and_then(Value::as_object);
-
-    let mut changed = false;
-
-    // GitHub bugs automation mirrors investigate_issue
-    {
-        let backend_missing =
-            backends_raw.is_none_or(|b| !b.contains_key("automate_github_bugs_backend"));
-        if backend_missing {
-            preferences
-                .magic_prompt_backends
-                .automate_github_bugs_backend = preferences
-                .magic_prompt_backends
-                .investigate_issue_backend
-                .clone();
-            changed = true;
-        }
-        let provider_missing =
-            providers_raw.is_none_or(|p| !p.contains_key("automate_github_bugs_provider"));
-        if provider_missing {
-            preferences
-                .magic_prompt_providers
-                .automate_github_bugs_provider = preferences
-                .magic_prompt_providers
-                .investigate_issue_provider
-                .clone();
-            changed = true;
-        }
-        let effort_missing =
-            efforts_raw.is_none_or(|e| !e.contains_key("automate_github_bugs_effort"));
-        if effort_missing {
-            preferences.magic_prompt_efforts.automate_github_bugs_effort = preferences
-                .magic_prompt_efforts
-                .investigate_issue_effort
-                .clone();
-            changed = true;
-        }
-        // Mode stays at default yolo for orchestration (not investigation plan mode).
-        let _mode_missing_bugs =
-            modes_raw.is_none_or(|m| !m.contains_key("automate_github_bugs_mode"));
-
-        let model_missing =
-            models_raw.is_none_or(|m| !m.contains_key("automate_github_bugs_model"));
-        let backend = preferences
-            .magic_prompt_backends
-            .automate_github_bugs_backend
-            .as_deref()
-            .unwrap_or(&preferences.default_backend);
-        let investigate_model = &preferences.magic_prompt_models.investigate_issue_model;
-        let model_matches = magic_prompt_model_matches_backend(
-            &preferences.magic_prompt_models.automate_github_bugs_model,
-            backend,
-        );
-        if model_missing || !model_matches {
-            preferences.magic_prompt_models.automate_github_bugs_model =
-                if magic_prompt_model_matches_backend(investigate_model, backend) {
-                    investigate_model.clone()
-                } else {
-                    selected_model_for_backend(preferences, backend)
-                };
-            changed = true;
-        }
-    }
-
-    // Security advisories automation mirrors investigate_advisory
-    {
-        let backend_missing =
-            backends_raw.is_none_or(|b| !b.contains_key("automate_security_advisories_backend"));
-        if backend_missing {
-            preferences
-                .magic_prompt_backends
-                .automate_security_advisories_backend = preferences
-                .magic_prompt_backends
-                .investigate_advisory_backend
-                .clone();
-            changed = true;
-        }
-        let provider_missing =
-            providers_raw.is_none_or(|p| !p.contains_key("automate_security_advisories_provider"));
-        if provider_missing {
-            preferences
-                .magic_prompt_providers
-                .automate_security_advisories_provider = preferences
-                .magic_prompt_providers
-                .investigate_advisory_provider
-                .clone();
-            changed = true;
-        }
-        let effort_missing =
-            efforts_raw.is_none_or(|e| !e.contains_key("automate_security_advisories_effort"));
-        if effort_missing {
-            preferences
-                .magic_prompt_efforts
-                .automate_security_advisories_effort = preferences
-                .magic_prompt_efforts
-                .investigate_advisory_effort
-                .clone();
-            changed = true;
-        }
-        let _mode_missing =
-            modes_raw.is_none_or(|m| !m.contains_key("automate_security_advisories_mode"));
-
-        let model_missing =
-            models_raw.is_none_or(|m| !m.contains_key("automate_security_advisories_model"));
-        let backend = preferences
-            .magic_prompt_backends
-            .automate_security_advisories_backend
-            .as_deref()
-            .unwrap_or(&preferences.default_backend);
-        let investigate_model = &preferences.magic_prompt_models.investigate_advisory_model;
-        let model_matches = magic_prompt_model_matches_backend(
-            &preferences
-                .magic_prompt_models
-                .automate_security_advisories_model,
-            backend,
-        );
-        if model_missing || !model_matches {
-            preferences
-                .magic_prompt_models
-                .automate_security_advisories_model =
-                if magic_prompt_model_matches_backend(investigate_model, backend) {
-                    investigate_model.clone()
-                } else {
-                    selected_model_for_backend(preferences, backend)
-                };
-            changed = true;
-        }
-    }
-
-    changed
-}
-
 impl MagicPrompts {
     /// Migrate prompts that match the current default to None.
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 20] = [
+        let defaults: [DefaultEntry; 18] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -2782,14 +2485,6 @@ impl MagicPrompts {
                 &mut self.investigate_sentry_issue,
             ),
             (default_review_comments_prompt, &mut self.review_comments),
-            (
-                default_automate_github_bugs_prompt,
-                &mut self.automate_github_bugs,
-            ),
-            (
-                default_automate_security_advisories_prompt,
-                &mut self.automate_security_advisories,
-            ),
         ];
 
         for (default_fn, field) in defaults {
@@ -2873,6 +2568,7 @@ impl Default for AppPreferences {
             has_seen_feature_tour: false,
             has_seen_jean_config_wizard: false,
             has_seen_jean_mcp_intro: false,
+            has_seen_external_display_zoom_tip: false,
             chrome_enabled: default_chrome_enabled(),
             zoom_level: default_zoom_level(),
             mobile_zoom_level: default_zoom_level(),
@@ -3270,7 +2966,6 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let mut preferences: AppPreferences = serde_json::from_value(raw_preferences.clone())
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
-    migrate_automation_magic_prompt_preferences(&mut preferences, &raw_preferences);
     normalize_parallel_execution_preferences(&mut preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3314,7 +3009,6 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     // Migrate legacy default Claude model names to the 1M variants where
     // available so hidden non-1M defaults do not render blank in settings.
     let mut needs_resave = migrate_final_review_preferences(&mut preferences, &raw_preferences);
-    needs_resave |= migrate_automation_magic_prompt_preferences(&mut preferences, &raw_preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;

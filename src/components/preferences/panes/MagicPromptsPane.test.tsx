@@ -27,8 +27,6 @@ vi.mock('@/services/preferences', () => ({
         review_comments_mode: 'plan',
         final_review_mode: 'yolo',
         resolve_conflicts_mode: 'yolo',
-        automate_github_bugs_mode: 'yolo',
-        automate_security_advisories_mode: 'yolo',
       },
     },
   }),

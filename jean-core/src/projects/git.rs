@@ -404,6 +404,56 @@ pub fn remove_git_remote(repo_path: &str, remote_name: &str) -> Result<(), Strin
     Ok(())
 }
 
+/// Remotes Jean may auto-remove when a PR is cleared/deleted.
+///
+/// Never treat `origin` (or empty names) as ephemeral — those are permanent
+/// project remotes the user expects to keep.
+pub fn is_ephemeral_pr_remote(remote_name: &str) -> bool {
+    let name = remote_name.trim();
+    !name.is_empty() && name != "origin"
+}
+
+/// Best-effort remove of a Jean-managed PR/fork remote.
+///
+/// No-ops for `origin`, missing remotes, and empty names. Logs failures rather
+/// than propagating them so PR cleanup can still complete.
+pub fn try_remove_ephemeral_remote(repo_path: &str, remote_name: &str) {
+    if !is_ephemeral_pr_remote(remote_name) {
+        return;
+    }
+    if !remote_exists(repo_path, remote_name) {
+        return;
+    }
+    match remove_git_remote(repo_path, remote_name) {
+        Ok(()) => {
+            log::info!("Removed ephemeral PR remote '{remote_name}' from {repo_path}");
+        }
+        Err(e) => {
+            log::warn!("Failed to remove ephemeral PR remote '{remote_name}': {e}");
+        }
+    }
+}
+
+/// Configured remote for a local branch (`branch.<name>.remote`), if any.
+pub fn configured_branch_remote(repo_path: &str, branch: &str) -> Option<String> {
+    if branch.is_empty() {
+        return None;
+    }
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["config", "--get", &format!("branch.{branch}.remote")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let remote = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if remote.is_empty() {
+        None
+    } else {
+        Some(remote)
+    }
+}
+
 /// Get all git remotes for a repository (not filtered to GitHub)
 pub fn get_git_remotes(repo_path: &str) -> Result<Vec<GitRemote>, String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
@@ -2890,6 +2940,52 @@ mod tests {
         let path = dir.path().to_str().unwrap();
         assert!(remote_exists(path, "fork"));
         assert!(!remote_exists(path, "upstream"));
+    }
+
+    #[test]
+    fn test_is_ephemeral_pr_remote_skips_origin_and_empty() {
+        assert!(!is_ephemeral_pr_remote("origin"));
+        assert!(!is_ephemeral_pr_remote(""));
+        assert!(!is_ephemeral_pr_remote("   "));
+        assert!(is_ephemeral_pr_remote("fork"));
+        assert!(is_ephemeral_pr_remote("some-contributor"));
+    }
+
+    #[test]
+    fn test_try_remove_ephemeral_remote_removes_fork_keeps_origin() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", "https://example.com/origin.git"],
+        );
+
+        try_remove_ephemeral_remote(path, "origin");
+        assert!(remote_exists(path, "origin"));
+
+        try_remove_ephemeral_remote(path, "fork");
+        assert!(!remote_exists(path, "fork"));
+        assert!(remote_exists(path, "origin"));
+
+        // Missing remotes and empty names are no-ops
+        try_remove_ephemeral_remote(path, "already-gone");
+        try_remove_ephemeral_remote(path, "");
+    }
+
+    #[test]
+    fn test_configured_branch_remote_reads_branch_config() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["config", "branch.main.remote", "fork"],
+        );
+        assert_eq!(
+            configured_branch_remote(path, "main").as_deref(),
+            Some("fork")
+        );
+        assert_eq!(configured_branch_remote(path, "missing"), None);
+        assert_eq!(configured_branch_remote(path, ""), None);
     }
 
     #[test]

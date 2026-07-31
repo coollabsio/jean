@@ -25,6 +25,12 @@ fn open_url(url: String) -> Result<(), String> {
     jean_core::open_url_in_browser(&url)
 }
 
+/// Toggle macOS window vibrancy (translucent sidebar material).
+///
+/// Jean starts **opaque by default** (`transparent: false`, no window effects
+/// in `tauri.conf.json`) so text stays sharp on external monitors. Enabling
+/// vibrancy is an explicit Appearance preference that opts into translucent
+/// compositing at runtime.
 #[tauri::command]
 pub async fn set_window_vibrancy(app: AppHandle, enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]

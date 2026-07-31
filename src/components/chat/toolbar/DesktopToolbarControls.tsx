@@ -62,6 +62,7 @@ import {
   KIMI_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  withAdaptiveEffortOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   getPrStatusDisplay,
@@ -206,23 +207,25 @@ export function DesktopToolbarControls({
       (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
       : isPi
-        ? PI_EFFORT_LEVEL_OPTIONS
+        ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
         : isCodex
-          ? CODEX_EFFORT_LEVEL_OPTIONS
+          ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)
           : isKimi
-            ? KIMI_EFFORT_LEVEL_OPTIONS
+            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS, selectedModel)
             : isGrok
-              ? GROK_EFFORT_LEVEL_OPTIONS
-              : EFFORT_LEVEL_OPTIONS
+              ? withAdaptiveEffortOption(GROK_EFFORT_LEVEL_OPTIONS, selectedModel)
+              : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
-      ? modelReasoning.levels
-      : THINKING_LEVEL_OPTIONS
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
+      : withAdaptiveEffortOption(THINKING_LEVEL_OPTIONS, selectedModel)
+  const effortOptionValues = new Set(effortLevelOptions.map(o => o.value))
+  const thinkingOptionValues = new Set(thinkingLevelOptions.map(o => o.value))
   const displayedEffortLevel =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels.some(o => o.value === selectedEffortLevel)
+      ? effortOptionValues.has(selectedEffortLevel)
         ? selectedEffortLevel
         : modelReasoning.default
       : isCodex || isPi
@@ -238,10 +241,11 @@ export function DesktopToolbarControls({
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
   const displayedThinkingLevel =
-    modelReasoning?.type === 'thinking' &&
-    !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
-      ? modelReasoning.default
-      : selectedThinkingLevel
+    thinkingOptionValues.has(selectedThinkingLevel)
+      ? selectedThinkingLevel
+      : modelReasoning?.type === 'thinking'
+        ? modelReasoning.default
+        : selectedThinkingLevel
   const displayedThinkingLabel =
     thinkingLevelOptions.find(o => o.value === displayedThinkingLevel)?.label ??
     displayedThinkingLevel

@@ -77,8 +77,6 @@ import {
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_RELEASE_NOTES_PROMPT,
   DEFAULT_REVIEW_COMMENTS_PROMPT,
-  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_SESSION_NAMING_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_GLOBAL_SYSTEM_PROMPT,
@@ -161,49 +159,6 @@ interface PromptSection {
 }
 
 const PROMPT_SECTIONS: PromptSection[] = [
-  {
-    label: 'Automation',
-    configs: [
-      {
-        key: 'automate_github_bugs',
-        modelKey: 'automate_github_bugs_model',
-        effortKey: 'automate_github_bugs_effort',
-        providerKey: 'automate_github_bugs_provider',
-        backendKey: 'automate_github_bugs_backend',
-        modeKey: 'automate_github_bugs_mode',
-        label: 'Automate GitHub Bugs',
-        description:
-          'Orchestration prompt that triages the latest open GitHub bug/fix issues via Jean MCP, creates worktrees, and starts autoinvestigation.',
-        variables: [
-          {
-            name: '{projectId}',
-            description: 'Current project id (injected when the automation runs)',
-          },
-        ],
-        defaultValue: DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
-      },
-      {
-        key: 'automate_security_advisories',
-        modelKey: 'automate_security_advisories_model',
-        effortKey: 'automate_security_advisories_effort',
-        providerKey: 'automate_security_advisories_provider',
-        backendKey: 'automate_security_advisories_backend',
-        modeKey: 'automate_security_advisories_mode',
-        label: 'Automate Security Advisories',
-        description:
-          'Orchestration prompt that triages repository security advisories via Jean MCP, creates worktrees, and starts autoinvestigation.',
-        variables: [
-          {
-            name: '{projectId}',
-            description: 'Current project id (injected when the automation runs)',
-          },
-        ],
-        defaultValue: DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
-      },
-    ],
-  },
   {
     label: 'Investigation',
     configs: [
@@ -915,14 +870,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     currentBackend ?? preferences?.default_backend ?? 'claude'
   const effectiveBackend =
     rawEffectiveBackend === 'devin' ? 'claude' : rawEffectiveBackend
-  // Prefer investigation models when a newly-added prompt still has a Claude
-  // default that does not match the effective backend (e.g. Grok + Opus).
-  const investigationFallbackModel =
-    selectedKey === 'automate_github_bugs'
-      ? currentModels.investigate_issue_model
-      : selectedKey === 'automate_security_advisories'
-        ? currentModels.investigate_advisory_model
-        : undefined
   const modelMatchesEffectiveBackend = (model: string | undefined): boolean => {
     if (!model) return false
     switch (effectiveBackend) {
@@ -957,12 +904,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const currentModel = (() => {
     if (!rawCurrentModel) return undefined
     if (modelMatchesEffectiveBackend(rawCurrentModel)) return rawCurrentModel
-    if (
-      investigationFallbackModel &&
-      modelMatchesEffectiveBackend(investigationFallbackModel)
-    ) {
-      return investigationFallbackModel
-    }
     if (effectiveBackend === 'codex') return CODEX_MODEL_OPTIONS[0]?.value
     if (effectiveBackend === 'opencode') return opencodeModelOptions[0]?.value
     if (effectiveBackend === 'cursor') return cursorModelOptions[0]?.value
@@ -1003,49 +944,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const currentModelIsPi = currentModel ? isPiModel(currentModel) : false
   const currentModelIsGrok = currentModel ? isGrokModel(currentModel) : false
   const currentModelIsKimi = currentModel ? isKimiModel(currentModel) : false
-
-  // Persist corrected automation models so Grok+Opus (and similar) mismatches
-  // don't stick after the user opens Magic Prompts.
-  useEffect(() => {
-    if (!preferences || !selectedConfig.modelKey || !currentModel) return
-    if (
-      selectedKey !== 'automate_github_bugs' &&
-      selectedKey !== 'automate_security_advisories'
-    ) {
-      return
-    }
-    if (rawCurrentModel === currentModel) return
-    if (!modelMatchesEffectiveBackend(rawCurrentModel)) {
-      patchPreferences.mutate({
-        magic_prompt_models: {
-          ...currentModels,
-          [selectedConfig.modelKey]: currentModel,
-        },
-        ...(selectedConfig.backendKey &&
-        currentBackends[selectedConfig.backendKey] === undefined
-          ? {
-              magic_prompt_backends: {
-                ...currentBackends,
-                [selectedConfig.backendKey]:
-                  selectedKey === 'automate_github_bugs'
-                    ? (currentBackends.investigate_issue_backend ?? null)
-                    : (currentBackends.investigate_advisory_backend ?? null),
-              },
-            }
-          : {}),
-      })
-    }
-  }, [
-    preferences,
-    selectedKey,
-    selectedConfig.modelKey,
-    selectedConfig.backendKey,
-    rawCurrentModel,
-    currentModel,
-    currentModels,
-    currentBackends,
-    patchPreferences,
-  ])
 
   const filteredClaudeOptions = useMemo(() => {
     if (

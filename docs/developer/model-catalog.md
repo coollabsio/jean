@@ -51,6 +51,13 @@ Each model can declare at most one reasoning control:
 - Traditional Claude thinking uses `off`, `think`, `megathink`, and
   `ultrathink`. A numeric value such as `16000` defines a custom
   `MAX_THINKING_TOKENS` budget.
+- Jean injects an `adaptive` option (UI label **Adaptive/Default**) only for
+  **Gemini** model ids (name contains `gemini`). When selected, Jean omits the
+  thinking/effort parameter so Gemini can use its native adaptive/default depth
+  (e.g. Gemini 3.5 Flash). The wire value remains `adaptive`. Non-Gemini models
+  never show this option. Note: Command Code and Cursor hide the reasoning
+  control entirely, so Adaptive/Default is only visible when a Gemini model is
+  used on a backend that shows effort/thinking (e.g. OpenCode).
 - Omit `reasoning` for models without a control. Set `reasoning` to `null` to
   explicitly remove a bundled capability.
 

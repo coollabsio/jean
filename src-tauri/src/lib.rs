@@ -283,6 +283,9 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         }
     });
 
+    // Window materials: production config starts opaque (no sidebar effects).
+    // Apply the saved window_vibrancy preference once prefs load. Default is
+    // false so text stays sharp; vibrancy remains an explicit opt-in.
     let http = core.clone();
     let desktop_app = app.handle().clone();
     tauri::async_runtime::spawn(async move {

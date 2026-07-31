@@ -2583,8 +2583,9 @@ export async function linkWorktreePr(
 }
 
 /**
- * Clear PR information from a worktree
+ * Clear PR information from a worktree.
  * Called when a PR is closed/merged and the user wants to remove the link.
+ * Backend also removes Jean-managed fork remotes for that PR when unused.
  */
 export async function clearWorktreePr(worktreeId: string): Promise<void> {
   if (!isTauri()) {

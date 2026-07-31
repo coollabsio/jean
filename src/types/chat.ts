@@ -9,12 +9,14 @@ export type MessageRole = 'user' | 'assistant'
  * Thinking level for Claude responses
  * Controls --settings alwaysThinkingEnabled and MAX_THINKING_TOKENS env var
  * - off: Thinking disabled
+ * - adaptive: Omit thinking settings so the model chooses depth
  * - think: 4K tokens budget
  * - megathink: 10K tokens budget
  * - ultrathink: 32K tokens budget (default)
  */
 export type ThinkingLevel =
   | 'off'
+  | 'adaptive'
   | 'think'
   | 'megathink'
   | 'ultrathink'
@@ -24,6 +26,7 @@ export type ThinkingLevel =
  * Effort level for Opus adaptive thinking
  * Controls --settings {"effort": "<level>"} via CLI
  * Replaces ThinkingLevel when model is Opus (latest) on CLI >= 2.1.32
+ * - adaptive: Omit effort so the model chooses depth (token-efficient for simple prompts)
  * - low: Minimal thinking, skips for simple tasks
  * - medium: Moderate thinking, may skip for very simple queries
  * - high: Deep reasoning (default), almost always thinks
@@ -34,6 +37,7 @@ export type ThinkingLevel =
  */
 export type EffortLevel =
   | 'off'
+  | 'adaptive'
   | 'minimal'
   | 'low'
   | 'medium'

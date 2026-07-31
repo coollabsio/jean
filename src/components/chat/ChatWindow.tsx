@@ -3022,6 +3022,7 @@ export function ChatWindow({
                                     }
                                     sessionId={deferredSessionId ?? ''}
                                     worktreePath={activeWorktreePath ?? ''}
+                                    worktreeId={activeWorktreeId ?? null}
                                     approveShortcut={approveShortcut}
                                     approveShortcutYolo={approveShortcutYolo}
                                     approveShortcutClearContext={
@@ -3097,6 +3098,7 @@ export function ChatWindow({
                                     lastPlanMessageIndex={lastPlanMessageIndex}
                                     sessionId={deferredSessionId ?? ''}
                                     worktreePath={activeWorktreePath ?? ''}
+                                    worktreeId={activeWorktreeId ?? null}
                                     approveShortcut={approveShortcut}
                                     approveShortcutYolo={approveShortcutYolo}
                                     approveShortcutClearContext={

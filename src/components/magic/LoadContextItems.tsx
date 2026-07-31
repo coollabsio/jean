@@ -1,6 +1,7 @@
 import {
   CircleDot,
   Eye,
+  FileText,
   FolderOpen,
   GitPullRequest,
   Loader2,
@@ -37,6 +38,7 @@ export interface SessionWithContext {
   session: Session
   worktreeId: string
   worktreePath: string
+  worktreeName: string
   projectName: string
 }
 
@@ -1090,6 +1092,7 @@ interface SessionGroupProps {
   entry: AllSessionsEntry
   generatingSessionId: string | null
   onSessionClick: (sessionWithContext: SessionWithContext) => void
+  onGenerateSessionContext?: (sessionWithContext: SessionWithContext) => void
   selectedIndex: number
   sessionStartIndex: number
   setSelectedIndex: (index: number) => void
@@ -1099,6 +1102,7 @@ export function SessionGroup({
   entry,
   generatingSessionId,
   onSessionClick,
+  onGenerateSessionContext,
   selectedIndex,
   sessionStartIndex,
   setSelectedIndex,
@@ -1119,44 +1123,77 @@ export function SessionGroup({
           const isDisabled = !hasMessages || generatingSessionId !== null
           const isGenerating = generatingSessionId === session.id
           const flatIndex = sessionStartIndex + idx
+          const sessionWithContext: SessionWithContext = {
+            session,
+            worktreeId: entry.worktree_id,
+            worktreePath: entry.worktree_path,
+            worktreeName: entry.worktree_name,
+            projectName: entry.project_name,
+          }
 
           return (
-            <button
+            <div
               key={session.id}
               data-load-item-index={flatIndex}
               className={cn(
                 'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
-                'hover:bg-accent focus:outline-none',
+                'hover:bg-accent',
                 flatIndex === selectedIndex && 'bg-accent',
-                isDisabled && 'opacity-50 cursor-not-allowed'
+                isDisabled && 'opacity-50'
               )}
-              onClick={() =>
-                onSessionClick({
-                  session,
-                  worktreeId: entry.worktree_id,
-                  worktreePath: entry.worktree_path,
-                  projectName: entry.project_name,
-                })
-              }
               onMouseEnter={() => setSelectedIndex(flatIndex)}
-              disabled={isDisabled}
             >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
-              ) : (
-                <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+              <button
+                type="button"
+                className={cn(
+                  'flex flex-1 items-start gap-3 min-w-0 text-left focus:outline-none',
+                  isDisabled && 'cursor-not-allowed'
+                )}
+                onClick={() => onSessionClick(sessionWithContext)}
+                disabled={isDisabled}
+                title="Inject session as MCP context pointer"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">
+                    {session.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {hasMessages
+                      ? `${session.messages.length} messages · inject pointer`
+                      : 'No messages'}
+                  </div>
+                </div>
+              </button>
+              {onGenerateSessionContext && hasMessages && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        'p-1 rounded hover:bg-background/80 text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5',
+                        isDisabled && 'cursor-not-allowed opacity-50'
+                      )}
+                      onClick={e => {
+                        e.stopPropagation()
+                        onGenerateSessionContext(sessionWithContext)
+                      }}
+                      disabled={isDisabled}
+                      aria-label="Generate full context summary"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    Generate full context summary (AI)
+                  </TooltipContent>
+                </Tooltip>
               )}
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">
-                  {session.name}
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {hasMessages
-                    ? `${session.messages.length} messages`
-                    : 'No messages'}
-                </div>
-              </div>
-            </button>
+            </div>
           )
         })}
       </div>

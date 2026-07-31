@@ -2227,13 +2227,27 @@ export default function useStreamingEvents({
         case 'thinkingLevel':
           store.setThinkingLevel(
             session_id,
-            value as 'off' | 'think' | 'megathink' | 'ultrathink'
+            value as
+              | 'off'
+              | 'adaptive'
+              | 'think'
+              | 'megathink'
+              | 'ultrathink'
           )
           break
         case 'effortLevel':
           store.setEffortLevel(
             session_id,
-            value as 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'ultracode'
+            value as
+              | 'off'
+              | 'adaptive'
+              | 'low'
+              | 'medium'
+              | 'high'
+              | 'xhigh'
+              | 'max'
+              | 'ultra'
+              | 'ultracode'
           )
           break
         case 'executionMode':

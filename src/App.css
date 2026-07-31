@@ -401,11 +401,23 @@
 
   body {
     @apply text-foreground;
+    /* Grayscale AA looks cleaner on HiDPI / Retina. On 1x external LCDs it
+       often makes text look soft — see max-resolution override below. */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100dvh;
     min-width: 100vw;
     position: relative;
+  }
+
+  /* Non-retina / 1× displays (typical external monitors): let the platform
+     use its default anti-aliasing. Forced grayscale AA is a common source of
+     "blurry Jean text" on macOS multi-monitor setups. */
+  @media (-webkit-max-device-pixel-ratio: 1), (max-resolution: 1dppx) {
+    body {
+      -webkit-font-smoothing: auto;
+      -moz-osx-font-smoothing: auto;
+    }
   }
 
   #root {

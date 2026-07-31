@@ -25,7 +25,8 @@ function message(
   id: string,
   role: ChatMessage['role'],
   timestamp: number,
-  content: string
+  content: string,
+  model?: string
 ): ChatMessage {
   return {
     id,
@@ -35,6 +36,7 @@ function message(
     timestamp,
     tool_calls: [],
     content_blocks: [],
+    model,
   }
 }
 
@@ -85,5 +87,51 @@ describe('MessageList durations', () => {
     )
 
     expect(screen.getByText('23s')).toBeVisible()
+  })
+})
+
+describe('MessageList provider change separator', () => {
+  it('renders a separator when consecutive user prompts use different backends', () => {
+    render(
+      <MessageList
+        {...baseProps}
+        totalMessages={4}
+        messages={[
+          message(
+            'user-1',
+            'user',
+            100,
+            'Claude prompt',
+            'claude-sonnet-4-6[1m]'
+          ),
+          message('assistant-1', 'assistant', 101, 'Claude reply'),
+          message('user-2', 'user', 102, 'Codex prompt', 'gpt-5.4'),
+          message('assistant-2', 'assistant', 103, 'Codex reply'),
+        ]}
+      />
+    )
+
+    const separator = screen.getByTestId('provider-change-separator')
+    expect(separator).toBeVisible()
+    expect(separator).toHaveAttribute('data-from-provider', 'claude')
+    expect(separator).toHaveAttribute('data-to-provider', 'codex')
+    expect(screen.getByText('Claude → Codex')).toBeVisible()
+  })
+
+  it('does not render a separator when the backend stays the same', () => {
+    render(
+      <MessageList
+        {...baseProps}
+        totalMessages={4}
+        messages={[
+          message('user-1', 'user', 100, 'First', 'claude-sonnet-4-6[1m]'),
+          message('assistant-1', 'assistant', 101, 'Reply 1'),
+          message('user-2', 'user', 102, 'Second', 'claude-opus-4-8[1m]'),
+          message('assistant-2', 'assistant', 103, 'Reply 2'),
+        ]}
+      />
+    )
+
+    expect(screen.queryByTestId('provider-change-separator')).toBeNull()
   })
 })

@@ -356,7 +356,7 @@ export const AppearancePane: React.FC = () => {
           {isClientMacOS && (
             <InlineField
               label="Window transparency"
-              description="Translucent window with desktop blur (uses significant GPU)"
+              description="Translucent window with desktop blur (uses significant GPU; can soften text on external monitors)"
             >
               <Switch
                 aria-label="Window transparency"
@@ -545,7 +545,9 @@ export const AppearancePane: React.FC = () => {
             />
             <p className="text-xs text-muted-foreground">
               You can change the zoom level with {modKey} +/- and reset to the
-              default zoom with {modKey}+0.
+              default zoom with {modKey}+0. On external monitors, prefer 100%
+              for the sharpest text; non-100% zoom can look soft on 1×
+              displays.
             </p>
           </ScalingField>
 

@@ -39,6 +39,16 @@ export function getModelImpliedBackend(
 }
 
 /**
+ * Gemini models that support native adaptive thinking when no effort/thinking
+ * level is forced (e.g. Gemini 3.5 Flash). Jean only surfaces Adaptive/Default
+ * for these models.
+ */
+export function isGeminiModel(model: string | null | undefined): boolean {
+  if (!model) return false
+  return model.toLowerCase().includes('gemini')
+}
+
+/**
  * Check if the current model + CLI version combination uses effort levels
  * instead of traditional thinking levels.
  *
@@ -47,6 +57,9 @@ export function getModelImpliedBackend(
  * - CLI version is >= 2.1.32
  *
  * Sonnet models use traditional thinking levels, not effort levels.
+ *
+ * Note: this is Claude "effort mode", not Jean's Gemini-only Adaptive/Default
+ * option (see `isGeminiModel`).
  */
 export function supportsAdaptiveThinking(
   model: string,

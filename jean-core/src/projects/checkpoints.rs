@@ -795,6 +795,583 @@ pub fn restore_checkpoint_file(
     Ok(())
 }
 
+// ============================================================================
+// Turn-scoped restore + overlap analysis
+// ============================================================================
+
+/// Classification of a path when restoring one agent turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RestorePathStatus {
+    /// Safe to restore deterministically from start_commit.
+    Clean,
+    /// Another checkpoint after this one also touched the path.
+    ConflictedLaterActivity,
+    /// Working tree no longer matches this turn's end snapshot.
+    ConflictedWorkingTree,
+    /// Binary or non-UTF8; skip AI, allow deterministic restore only.
+    BinaryOrUnreadable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RestoreTurnMode {
+    /// Only restore paths classified as clean.
+    CleanOnly,
+    /// Restore every path this turn changed (may clobber later edits).
+    AllTurnFiles,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePathInfo {
+    pub path: String,
+    pub status: RestorePathStatus,
+    /// Turn-level status at finalize time ("added" | "modified" | …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_status: Option<String>,
+    /// Later sessions that also touched this path (if any).
+    #[serde(default)]
+    pub later_session_ids: Vec<String>,
+    /// Human-readable reason for conflict classification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointRestoreAnalysis {
+    pub checkpoint_id: String,
+    pub session_id: String,
+    pub worktree_id: String,
+    /// Paths this turn changed (from finalize stats or start→end diff).
+    pub turn_paths: Vec<String>,
+    pub paths: Vec<RestorePathInfo>,
+    pub clean_count: u32,
+    pub conflict_count: u32,
+    /// Distinct other session ids that overlap on conflicted paths.
+    pub overlapping_session_ids: Vec<String>,
+    /// True when the turn never finalized and we had to invent paths.
+    pub open_checkpoint: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreTurnResult {
+    pub checkpoint_id: String,
+    pub mode: RestoreTurnMode,
+    pub restored_paths: Vec<String>,
+    pub skipped_paths: Vec<String>,
+    pub analysis: CheckpointRestoreAnalysis,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RestoreFileAction {
+    Write,
+    Delete,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreFileProposal {
+    pub path: String,
+    pub action: RestoreFileAction,
+    /// Full file content when action is Write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointRestoreProposal {
+    pub checkpoint_id: String,
+    pub summary: String,
+    /// Proposed resolutions for conflicted paths (AI or heuristic).
+    pub files: Vec<RestoreFileProposal>,
+    /// Clean paths that can be restored deterministically without AI.
+    pub clean_paths: Vec<String>,
+    pub analysis: CheckpointRestoreAnalysis,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyRestoreProposalResult {
+    pub checkpoint_id: String,
+    pub applied_paths: Vec<String>,
+    pub skipped_paths: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Max characters of file content embedded in an AI restore prompt (per file).
+const AI_RESTORE_MAX_FILE_CHARS: usize = 24_000;
+/// Cap how many conflicted files we send to the model in one shot.
+const AI_RESTORE_MAX_FILES: usize = 8;
+
+fn file_blob_at_commit(repo: &str, commit: &str, path: &str) -> Option<Vec<u8>> {
+    let mut cmd = wsl_aware_command("git", Some(Path::new(repo)));
+    let output = cmd
+        .args(["show", &format!("{commit}:{path}")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(output.stdout)
+}
+
+fn file_text_at_commit(repo: &str, commit: &str, path: &str) -> Option<String> {
+    let bytes = file_blob_at_commit(repo, commit, path)?;
+    String::from_utf8(bytes).ok()
+}
+
+fn file_text_at_wd(repo: &str, path: &str) -> Option<String> {
+    let full = Path::new(repo).join(path);
+    if !full.exists() {
+        return None;
+    }
+    fs::read_to_string(full).ok()
+}
+
+fn file_bytes_at_wd(repo: &str, path: &str) -> Option<Vec<u8>> {
+    let full = Path::new(repo).join(path);
+    if !full.exists() {
+        return None;
+    }
+    fs::read(full).ok()
+}
+
+fn turn_paths_for_checkpoint(checkpoint: &AiCheckpoint) -> Vec<String> {
+    if !checkpoint.files_changed.is_empty() {
+        return checkpoint
+            .files_changed
+            .iter()
+            .map(|f| f.path.clone())
+            .collect();
+    }
+    // Fall back to start→end (or start→WD) when finalize stats are missing.
+    let to = checkpoint.end_commit.as_deref();
+    match diff_commits(&checkpoint.worktree_path, &checkpoint.start_commit, to) {
+        Ok(diff) => diff.files.into_iter().map(|f| f.path).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn turn_status_map(checkpoint: &AiCheckpoint) -> HashMap<String, String> {
+    checkpoint
+        .files_changed
+        .iter()
+        .map(|f| (f.path.clone(), f.status.clone()))
+        .collect()
+}
+
+/// Analyze whether restoring this turn would collide with later work.
+pub fn analyze_checkpoint_restore(
+    app: &AppHandle,
+    worktree_id: &str,
+    checkpoint_id: &str,
+) -> Result<CheckpointRestoreAnalysis, String> {
+    let store = load_store(app, worktree_id)?;
+    let checkpoint = store
+        .checkpoints
+        .iter()
+        .find(|c| c.id == checkpoint_id)
+        .ok_or_else(|| format!("Checkpoint not found: {checkpoint_id}"))?
+        .clone();
+
+    let turn_paths = turn_paths_for_checkpoint(&checkpoint);
+    let status_map = turn_status_map(&checkpoint);
+    let open_checkpoint = checkpoint.status == CheckpointStatus::Open;
+
+    // path -> session ids of later checkpoints that also touched it
+    let mut later_touches: HashMap<String, Vec<String>> = HashMap::new();
+    for other in &store.checkpoints {
+        if other.id == checkpoint.id {
+            continue;
+        }
+        if other.created_at < checkpoint.created_at {
+            continue;
+        }
+        // Same timestamp: still treat as later if id differs and created after
+        // or equal — include equal so concurrent turns are visible.
+        if other.created_at == checkpoint.created_at && other.id <= checkpoint.id {
+            continue;
+        }
+        for path in turn_paths_for_checkpoint(other) {
+            if !turn_paths.iter().any(|p| p == &path) {
+                continue;
+            }
+            later_touches
+                .entry(path)
+                .or_default()
+                .push(other.session_id.clone());
+        }
+    }
+    for sessions in later_touches.values_mut() {
+        sessions.sort();
+        sessions.dedup();
+    }
+
+    let repo = &checkpoint.worktree_path;
+    let mut paths = Vec::with_capacity(turn_paths.len());
+    let mut overlapping_session_ids: Vec<String> = Vec::new();
+
+    for path in &turn_paths {
+        let later_sessions = later_touches.get(path).cloned().unwrap_or_default();
+        let turn_status = status_map.get(path).cloned();
+
+        // Detect unreadable/binary current or end content.
+        let end_bytes = checkpoint
+            .end_commit
+            .as_ref()
+            .and_then(|end| file_blob_at_commit(repo, end, path));
+        let wd_bytes = file_bytes_at_wd(repo, path);
+        let end_text_ok = end_bytes
+            .as_ref()
+            .map(|b| String::from_utf8(b.clone()).is_ok())
+            .unwrap_or(true);
+        let wd_text_ok = wd_bytes
+            .as_ref()
+            .map(|b| String::from_utf8(b.clone()).is_ok())
+            .unwrap_or(true);
+
+        if !end_text_ok || !wd_text_ok {
+            paths.push(RestorePathInfo {
+                path: path.clone(),
+                status: RestorePathStatus::BinaryOrUnreadable,
+                turn_status,
+                later_session_ids: later_sessions.clone(),
+                reason: Some("Binary or non-UTF8 content — use deterministic restore only".into()),
+            });
+            continue;
+        }
+
+        if !later_sessions.is_empty() {
+            for s in &later_sessions {
+                if s != &checkpoint.session_id {
+                    overlapping_session_ids.push(s.clone());
+                }
+            }
+            paths.push(RestorePathInfo {
+                path: path.clone(),
+                status: RestorePathStatus::ConflictedLaterActivity,
+                turn_status,
+                later_session_ids: later_sessions,
+                reason: Some(
+                    "Later agent turn(s) in this worktree also modified this file".into(),
+                ),
+            });
+            continue;
+        }
+
+        // Working tree drifted from end-of-turn snapshot?
+        if checkpoint.end_commit.is_some() {
+            let end_blob = end_bytes.unwrap_or_default();
+            let wd_blob = wd_bytes.unwrap_or_default();
+            // Normalize: missing both ends as empty is clean (deleted & still gone).
+            if end_blob != wd_blob {
+                paths.push(RestorePathInfo {
+                    path: path.clone(),
+                    status: RestorePathStatus::ConflictedWorkingTree,
+                    turn_status,
+                    later_session_ids: Vec::new(),
+                    reason: Some(
+                        "Working tree no longer matches this turn's end state".into(),
+                    ),
+                });
+                continue;
+            }
+        }
+
+        paths.push(RestorePathInfo {
+            path: path.clone(),
+            status: RestorePathStatus::Clean,
+            turn_status,
+            later_session_ids: Vec::new(),
+            reason: None,
+        });
+    }
+
+    overlapping_session_ids.sort();
+    overlapping_session_ids.dedup();
+
+    let clean_count = paths
+        .iter()
+        .filter(|p| p.status == RestorePathStatus::Clean)
+        .count() as u32;
+    let conflict_count = paths.len() as u32 - clean_count;
+
+    Ok(CheckpointRestoreAnalysis {
+        checkpoint_id: checkpoint.id,
+        session_id: checkpoint.session_id,
+        worktree_id: checkpoint.worktree_id,
+        turn_paths,
+        paths,
+        clean_count,
+        conflict_count,
+        overlapping_session_ids,
+        open_checkpoint,
+    })
+}
+
+fn restore_paths_from_start(
+    app: &AppHandle,
+    worktree_id: &str,
+    checkpoint_id: &str,
+    paths: &[String],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let mut restored = Vec::new();
+    let mut skipped = Vec::new();
+    for path in paths {
+        match restore_checkpoint_file(app, worktree_id, checkpoint_id, path) {
+            Ok(()) => restored.push(path.clone()),
+            Err(e) => {
+                log::warn!("[Checkpoint] turn restore failed for {path}: {e}");
+                skipped.push(path.clone());
+            }
+        }
+    }
+    Ok((restored, skipped))
+}
+
+/// Restore only the files this turn changed (optionally clean-only).
+pub fn restore_checkpoint_turn(
+    app: &AppHandle,
+    worktree_id: &str,
+    checkpoint_id: &str,
+    mode: RestoreTurnMode,
+) -> Result<RestoreTurnResult, String> {
+    let analysis = analyze_checkpoint_restore(app, worktree_id, checkpoint_id)?;
+    if analysis.turn_paths.is_empty() {
+        return Err(
+            "No turn file list available for this checkpoint (empty or not finalized)".into(),
+        );
+    }
+
+    let paths_to_restore: Vec<String> = match mode {
+        RestoreTurnMode::CleanOnly => analysis
+            .paths
+            .iter()
+            .filter(|p| p.status == RestorePathStatus::Clean)
+            .map(|p| p.path.clone())
+            .collect(),
+        RestoreTurnMode::AllTurnFiles => analysis.turn_paths.clone(),
+    };
+
+    let skipped: Vec<String> = match mode {
+        RestoreTurnMode::CleanOnly => analysis
+            .paths
+            .iter()
+            .filter(|p| p.status != RestorePathStatus::Clean)
+            .map(|p| p.path.clone())
+            .collect(),
+        RestoreTurnMode::AllTurnFiles => Vec::new(),
+    };
+
+    let (restored_paths, failed) =
+        restore_paths_from_start(app, worktree_id, checkpoint_id, &paths_to_restore)?;
+    let mut skipped_paths = skipped;
+    skipped_paths.extend(failed);
+
+    // Mark checkpoint restored only when we actually wrote something.
+    if !restored_paths.is_empty() {
+        let store_lock = checkpoint_store_lock(worktree_id);
+        let _store_guard = store_lock.lock().unwrap();
+        let mut store = load_store(app, worktree_id)?;
+        if let Some(cp) = store.checkpoints.iter_mut().find(|c| c.id == checkpoint_id) {
+            cp.status = CheckpointStatus::Restored;
+            save_store(app, worktree_id, &store)?;
+        }
+    }
+
+    log::info!(
+        "[Checkpoint] turn restore id={checkpoint_id} mode={mode:?} restored={} skipped={}",
+        restored_paths.len(),
+        skipped_paths.len()
+    );
+
+    Ok(RestoreTurnResult {
+        checkpoint_id: checkpoint_id.to_string(),
+        mode,
+        restored_paths,
+        skipped_paths,
+        analysis,
+    })
+}
+
+/// Apply accepted restore proposals (write/delete paths). Optionally also
+/// restores listed clean paths from the checkpoint start tree.
+pub fn apply_checkpoint_restore_proposal(
+    app: &AppHandle,
+    worktree_id: &str,
+    checkpoint_id: &str,
+    files: &[RestoreFileProposal],
+    also_restore_clean_paths: &[String],
+) -> Result<ApplyRestoreProposalResult, String> {
+    let checkpoint = get_checkpoint(app, worktree_id, checkpoint_id)?;
+    let repo = Path::new(&checkpoint.worktree_path);
+
+    let mut applied = Vec::new();
+    let mut skipped = Vec::new();
+    let mut errors = Vec::new();
+
+    // Deterministic clean restores first.
+    let (clean_ok, clean_fail) =
+        restore_paths_from_start(app, worktree_id, checkpoint_id, also_restore_clean_paths)?;
+    applied.extend(clean_ok);
+    skipped.extend(clean_fail);
+
+    for file in files {
+        match file.action {
+            RestoreFileAction::Skip => {
+                skipped.push(file.path.clone());
+            }
+            RestoreFileAction::Delete => {
+                match validated_restore_path(repo, Path::new(&file.path)) {
+                    Ok(full) => {
+                        if full.exists() {
+                            let remove = if full.is_dir() {
+                                fs::remove_dir_all(&full)
+                            } else {
+                                fs::remove_file(&full)
+                            };
+                            if let Err(e) = remove {
+                                errors.push(format!("{}: {e}", file.path));
+                                continue;
+                            }
+                        }
+                        let _ = git_output(
+                            &checkpoint.worktree_path,
+                            &["rm", "-f", "--cached", "--ignore-unmatch", &file.path],
+                            None,
+                        );
+                        applied.push(file.path.clone());
+                    }
+                    Err(e) => errors.push(format!("{}: {e}", file.path)),
+                }
+            }
+            RestoreFileAction::Write => {
+                let Some(content) = file.content.as_ref() else {
+                    errors.push(format!("{}: write action missing content", file.path));
+                    continue;
+                };
+                match validated_restore_path(repo, Path::new(&file.path)) {
+                    Ok(full) => {
+                        if let Some(parent) = full.parent() {
+                            if let Err(e) = fs::create_dir_all(parent) {
+                                errors.push(format!("{}: {e}", file.path));
+                                continue;
+                            }
+                        }
+                        if let Err(e) = fs::write(&full, content) {
+                            errors.push(format!("{}: {e}", file.path));
+                            continue;
+                        }
+                        applied.push(file.path.clone());
+                    }
+                    Err(e) => errors.push(format!("{}: {e}", file.path)),
+                }
+            }
+        }
+    }
+
+    if !applied.is_empty() {
+        let store_lock = checkpoint_store_lock(worktree_id);
+        let _store_guard = store_lock.lock().unwrap();
+        let mut store = load_store(app, worktree_id)?;
+        if let Some(cp) = store.checkpoints.iter_mut().find(|c| c.id == checkpoint_id) {
+            cp.status = CheckpointStatus::Restored;
+            save_store(app, worktree_id, &store)?;
+        }
+    }
+
+    log::info!(
+        "[Checkpoint] apply proposal id={checkpoint_id} applied={} skipped={} errors={}",
+        applied.len(),
+        skipped.len(),
+        errors.len()
+    );
+
+    Ok(ApplyRestoreProposalResult {
+        checkpoint_id: checkpoint_id.to_string(),
+        applied_paths: applied,
+        skipped_paths: skipped,
+        errors,
+    })
+}
+
+/// Build 3-way context for conflicted paths used by AI restore.
+pub fn build_conflict_file_contexts(
+    app: &AppHandle,
+    worktree_id: &str,
+    checkpoint_id: &str,
+) -> Result<(CheckpointRestoreAnalysis, Vec<ConflictFileContext>), String> {
+    let analysis = analyze_checkpoint_restore(app, worktree_id, checkpoint_id)?;
+    let checkpoint = get_checkpoint(app, worktree_id, checkpoint_id)?;
+    let repo = &checkpoint.worktree_path;
+
+    let mut contexts = Vec::new();
+    for info in &analysis.paths {
+        if info.status == RestorePathStatus::Clean {
+            continue;
+        }
+        if info.status == RestorePathStatus::BinaryOrUnreadable {
+            continue;
+        }
+        if contexts.len() >= AI_RESTORE_MAX_FILES {
+            break;
+        }
+
+        let base = file_text_at_commit(repo, &checkpoint.start_commit, &info.path);
+        let a_end = checkpoint
+            .end_commit
+            .as_ref()
+            .and_then(|end| file_text_at_commit(repo, end, &info.path));
+        let current = file_text_at_wd(repo, &info.path);
+
+        contexts.push(ConflictFileContext {
+            path: info.path.clone(),
+            status: info.status.clone(),
+            reason: info.reason.clone(),
+            base: truncate_for_ai(base.as_deref()),
+            a_end: truncate_for_ai(a_end.as_deref()),
+            current: truncate_for_ai(current.as_deref()),
+            base_missing: base.is_none(),
+            a_end_missing: a_end.is_none(),
+            current_missing: current.is_none(),
+        });
+    }
+
+    Ok((analysis, contexts))
+}
+
+#[derive(Debug, Clone)]
+pub struct ConflictFileContext {
+    pub path: String,
+    pub status: RestorePathStatus,
+    pub reason: Option<String>,
+    pub base: String,
+    pub a_end: String,
+    pub current: String,
+    pub base_missing: bool,
+    pub a_end_missing: bool,
+    pub current_missing: bool,
+}
+
+fn truncate_for_ai(content: Option<&str>) -> String {
+    let Some(text) = content else {
+        return String::new();
+    };
+    if text.chars().count() <= AI_RESTORE_MAX_FILE_CHARS {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(AI_RESTORE_MAX_FILE_CHARS).collect();
+    format!("{truncated}\n\n… [truncated for AI restore prompt]")
+}
+
 /// Delete a checkpoint and its git ref.
 pub fn delete_checkpoint(
     app: &AppHandle,
@@ -909,6 +1486,417 @@ pub async fn finalize_ai_checkpoint(
     checkpoint_id: String,
 ) -> Result<AiCheckpoint, String> {
     finalize_checkpoint(&app, &worktree_id, &checkpoint_id)
+}
+
+pub async fn analyze_ai_checkpoint_restore(
+    app: AppHandle,
+    worktree_id: String,
+    checkpoint_id: String,
+) -> Result<CheckpointRestoreAnalysis, String> {
+    analyze_checkpoint_restore(&app, &worktree_id, &checkpoint_id)
+}
+
+pub async fn restore_ai_checkpoint_turn(
+    app: AppHandle,
+    worktree_id: String,
+    checkpoint_id: String,
+    mode: String,
+) -> Result<RestoreTurnResult, String> {
+    let mode = match mode.as_str() {
+        "allTurnFiles" | "all_turn_files" | "all" => RestoreTurnMode::AllTurnFiles,
+        "cleanOnly" | "clean_only" | "clean" | _ => RestoreTurnMode::CleanOnly,
+    };
+    restore_checkpoint_turn(&app, &worktree_id, &checkpoint_id, mode)
+}
+
+pub async fn apply_ai_checkpoint_restore_proposal(
+    app: AppHandle,
+    worktree_id: String,
+    checkpoint_id: String,
+    files: Vec<RestoreFileProposal>,
+    also_restore_clean_paths: Option<Vec<String>>,
+) -> Result<ApplyRestoreProposalResult, String> {
+    let clean = also_restore_clean_paths.unwrap_or_default();
+    apply_checkpoint_restore_proposal(&app, &worktree_id, &checkpoint_id, &files, &clean)
+}
+
+const CHECKPOINT_RESTORE_SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string","description":"Brief summary of the proposed undo"},"files":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"action":{"type":"string","enum":["write","delete","skip"]},"content":{"type":"string","description":"Full file content when action is write; omit or empty for delete/skip"},"reason":{"type":"string"}},"required":["path","action"],"additionalProperties":false}}},"required":["summary","files"],"additionalProperties":false}"#;
+
+const CHECKPOINT_RESTORE_PROMPT: &str = r#"You are undoing one AI agent turn in a shared git worktree while preserving later work from other sessions or the user.
+
+For each conflicted file you receive three versions:
+- BASE: file content before the agent turn we want to undo
+- A_END: file content right after that agent turn
+- CURRENT: working tree now (may include later edits we must keep)
+
+Goal: produce the file as if the target agent turn never happened, but keep later intent from CURRENT when it is not part of A_END's changes.
+
+Rules:
+1. Prefer surgical undo of the turn's intent over wholesale rewrite.
+2. If CURRENT equals A_END, restoring to BASE (or delete if BASE missing) is correct.
+3. If later edits clearly layered on top of A_END, keep those later edits while removing the turn's contribution when possible.
+4. If you cannot safely merge, action=skip and explain why in reason.
+5. action=delete only when the turn added the file and CURRENT should not keep it.
+6. action=write requires the COMPLETE file content (not a patch).
+7. Only include the conflicted paths listed below. Do not invent paths.
+8. Return JSON matching the schema exactly.
+
+User message that started the turn to undo:
+{user_message}
+
+Conflicted files:
+{files_block}
+"#;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiRestoreResponse {
+    summary: String,
+    files: Vec<AiRestoreFileResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiRestoreFileResponse {
+    path: String,
+    action: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn format_conflict_files_block(contexts: &[ConflictFileContext]) -> String {
+    let mut out = String::new();
+    for (i, ctx) in contexts.iter().enumerate() {
+        out.push_str(&format!(
+            "\n### File {} — `{}`\nStatus: {:?}\nReason: {}\nMissing: base={} a_end={} current={}\n\n<<<<BASE\n{}\nBASE>>>>\n\n<<<<A_END\n{}\nA_END>>>>\n\n<<<<CURRENT\n{}\nCURRENT>>>>\n",
+            i + 1,
+            ctx.path,
+            ctx.status,
+            ctx.reason.as_deref().unwrap_or(""),
+            ctx.base_missing,
+            ctx.a_end_missing,
+            ctx.current_missing,
+            if ctx.base_missing {
+                "(file did not exist)"
+            } else {
+                &ctx.base
+            },
+            if ctx.a_end_missing {
+                "(file did not exist at end of turn)"
+            } else {
+                &ctx.a_end
+            },
+            if ctx.current_missing {
+                "(file missing in working tree)"
+            } else {
+                &ctx.current
+            },
+        ));
+    }
+    out
+}
+
+fn map_ai_restore_files(
+    raw: Vec<AiRestoreFileResponse>,
+    allowed_paths: &[String],
+) -> Vec<RestoreFileProposal> {
+    let allowed: std::collections::HashSet<&str> =
+        allowed_paths.iter().map(|p| p.as_str()).collect();
+    raw.into_iter()
+        .filter(|f| allowed.contains(f.path.as_str()))
+        .map(|f| {
+            let action = match f.action.to_ascii_lowercase().as_str() {
+                "delete" => RestoreFileAction::Delete,
+                "skip" => RestoreFileAction::Skip,
+                _ => RestoreFileAction::Write,
+            };
+            RestoreFileProposal {
+                path: f.path,
+                action,
+                content: f.content,
+                reason: f.reason,
+            }
+        })
+        .collect()
+}
+
+fn extract_structured_json_from_stream(output: &str) -> Result<String, String> {
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parsed: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if parsed.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+            if let Some(content) = parsed
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for block in content {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+                        && block.get("name").and_then(|n| n.as_str()) == Some("StructuredOutput")
+                    {
+                        if let Some(input) = block.get("input") {
+                            return Ok(input.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        if parsed.get("type").and_then(|t| t.as_str()) == Some("result") {
+            if let Some(result) = parsed.get("result") {
+                if result.is_object() {
+                    return Ok(result.to_string());
+                }
+            }
+        }
+    }
+    // Fallback: first balanced JSON object in text.
+    extract_json_object(output)
+}
+
+fn extract_json_object(text: &str) -> Result<String, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("Empty response from backend".to_string());
+    }
+    let mut start: Option<usize> = None;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in trimmed.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => {
+                if depth == 0 {
+                    start = Some(idx);
+                }
+                depth += 1;
+            }
+            '}' => {
+                if depth == 0 {
+                    continue;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(s) = start {
+                        return Ok(trimmed[s..=idx].to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Err("No JSON object found in response".to_string())
+}
+
+fn generate_checkpoint_restore_json(
+    app: &AppHandle,
+    prompt: &str,
+    model: Option<&str>,
+    worktree_id: Option<&str>,
+    working_dir: Option<&std::path::Path>,
+    reasoning_effort: Option<&str>,
+) -> Result<String, String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let model_str = model.unwrap_or("sonnet");
+    let backend = crate::chat::resolve_magic_prompt_backend(app, None, worktree_id);
+
+    if backend == crate::chat::types::Backend::Opencode {
+        let json_str = crate::chat::opencode::execute_one_shot_opencode(
+            app,
+            prompt,
+            model_str,
+            Some(CHECKPOINT_RESTORE_SCHEMA),
+            working_dir,
+            reasoning_effort,
+        )?;
+        return Ok(json_str);
+    }
+    if backend == crate::chat::types::Backend::Codex {
+        let json_str = crate::chat::codex::execute_one_shot_codex(
+            app,
+            prompt,
+            model_str,
+            CHECKPOINT_RESTORE_SCHEMA,
+            working_dir,
+            reasoning_effort,
+        )?;
+        return Ok(json_str);
+    }
+    if backend == crate::chat::types::Backend::Cursor {
+        let json_str =
+            crate::chat::cursor::execute_one_shot_cursor(app, prompt, model_str, working_dir)?;
+        return extract_json_object(&json_str);
+    }
+    if backend == crate::chat::types::Backend::Pi {
+        let json_str = crate::chat::pi::execute_one_shot_pi(
+            app,
+            prompt,
+            model_str,
+            working_dir,
+            reasoning_effort,
+        )?;
+        return extract_json_object(&json_str);
+    }
+    if backend == crate::chat::types::Backend::Grok {
+        let json_str = crate::chat::grok::execute_one_shot_grok(
+            app,
+            prompt,
+            model_str,
+            Some(CHECKPOINT_RESTORE_SCHEMA),
+            working_dir,
+            reasoning_effort,
+        )?;
+        return extract_json_object(&json_str);
+    }
+    if backend == crate::chat::types::Backend::Kimi {
+        let json_str = crate::chat::kimi::execute_one_shot_kimi(
+            app,
+            prompt,
+            model_str,
+            Some(CHECKPOINT_RESTORE_SCHEMA),
+            working_dir,
+        )?;
+        return Ok(json_str);
+    }
+
+    // Default: Claude CLI structured output
+    let cli_path = crate::claude_cli::resolve_cli_binary(app);
+    if !cli_path.exists() {
+        return Err("Claude CLI not installed".to_string());
+    }
+
+    let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
+    cmd.args([
+        "--print",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--model",
+        model_str,
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--max-turns",
+        "3",
+        "--json-schema",
+        CHECKPOINT_RESTORE_SCHEMA,
+    ]);
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
+    {
+        let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
+        let input_message = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": prompt
+            }
+        });
+        writeln!(stdin, "{input_message}").map_err(|e| format!("Failed to write to stdin: {e}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for Claude CLI: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Claude CLI failed: {stderr}"));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    extract_structured_json_from_stream(&stdout)
+}
+
+/// Propose an AI-assisted restore for conflicted turn paths (does not write files).
+pub async fn propose_ai_checkpoint_restore(
+    app: AppHandle,
+    worktree_id: String,
+    checkpoint_id: String,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+) -> Result<CheckpointRestoreProposal, String> {
+    let (analysis, contexts) =
+        build_conflict_file_contexts(&app, &worktree_id, &checkpoint_id)?;
+    let clean_paths: Vec<String> = analysis
+        .paths
+        .iter()
+        .filter(|p| p.status == RestorePathStatus::Clean)
+        .map(|p| p.path.clone())
+        .collect();
+
+    if contexts.is_empty() {
+        return Ok(CheckpointRestoreProposal {
+            checkpoint_id,
+            summary: if analysis.clean_count > 0 {
+                "No conflicted files — clean paths can be restored deterministically.".into()
+            } else {
+                "No files to restore for this turn.".into()
+            },
+            files: Vec::new(),
+            clean_paths,
+            analysis,
+        });
+    }
+
+    let checkpoint = get_checkpoint(&app, &worktree_id, &checkpoint_id)?;
+    let files_block = format_conflict_files_block(&contexts);
+    let prompt = CHECKPOINT_RESTORE_PROMPT
+        .replace(
+            "{user_message}",
+            &checkpoint.user_message_preview,
+        )
+        .replace("{files_block}", &files_block);
+
+    let working_dir = Some(Path::new(checkpoint.worktree_path.as_str()));
+    let json_str = generate_checkpoint_restore_json(
+        &app,
+        &prompt,
+        model.as_deref(),
+        Some(worktree_id.as_str()),
+        working_dir,
+        reasoning_effort.as_deref(),
+    )?;
+
+    let parsed: AiRestoreResponse = serde_json::from_str(&json_str).map_err(|e| {
+        log::error!("[Checkpoint] AI restore parse failed: {e}; raw={json_str}");
+        format!("Failed to parse AI restore proposal: {e}")
+    })?;
+
+    let allowed: Vec<String> = contexts.iter().map(|c| c.path.clone()).collect();
+    let files = map_ai_restore_files(parsed.files, &allowed);
+
+    Ok(CheckpointRestoreProposal {
+        checkpoint_id,
+        summary: parsed.summary,
+        files,
+        clean_paths,
+        analysis,
+    })
 }
 
 // ============================================================================
@@ -1078,6 +2066,62 @@ mod tests {
         let paths: Vec<_> = diff.files.iter().map(|f| f.path.as_str()).collect();
         assert!(paths.contains(&"README.md") || paths.iter().any(|p| p.contains("README")));
         assert!(paths.iter().any(|p| p.contains("ai-new")));
+    }
+
+    #[test]
+    fn extract_json_object_finds_balanced_object() {
+        let text = "Sure!\n{\"summary\":\"ok\",\"files\":[]}\n";
+        let json = extract_json_object(text).unwrap();
+        assert!(json.contains("\"summary\""));
+    }
+
+    #[test]
+    fn map_ai_restore_files_filters_unknown_paths() {
+        let raw = vec![
+            AiRestoreFileResponse {
+                path: "a.ts".into(),
+                action: "write".into(),
+                content: Some("x".into()),
+                reason: None,
+            },
+            AiRestoreFileResponse {
+                path: "evil/../b.ts".into(),
+                action: "delete".into(),
+                content: None,
+                reason: None,
+            },
+        ];
+        let mapped = map_ai_restore_files(raw, &["a.ts".into()]);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].path, "a.ts");
+        assert!(matches!(mapped[0].action, RestoreFileAction::Write));
+    }
+
+    #[test]
+    fn restore_turn_mode_clean_only_skips_conflicted_paths_logic() {
+        // Classification: clean vs conflicted is pure on status tags.
+        let paths = [
+            RestorePathInfo {
+                path: "a.ts".into(),
+                status: RestorePathStatus::Clean,
+                turn_status: Some("modified".into()),
+                later_session_ids: vec![],
+                reason: None,
+            },
+            RestorePathInfo {
+                path: "b.ts".into(),
+                status: RestorePathStatus::ConflictedLaterActivity,
+                turn_status: Some("modified".into()),
+                later_session_ids: vec!["other-session".into()],
+                reason: Some("later".into()),
+            },
+        ];
+        let clean: Vec<_> = paths
+            .iter()
+            .filter(|p| p.status == RestorePathStatus::Clean)
+            .map(|p| p.path.as_str())
+            .collect();
+        assert_eq!(clean, vec!["a.ts"]);
     }
 
     #[test]

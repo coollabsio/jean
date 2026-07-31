@@ -88,10 +88,6 @@ export interface MagicPrompts {
   investigate_sentry_issue: string | null
   /** Prompt for addressing inline PR review comments */
   review_comments: string | null
-  /** Prompt for automating triage of GitHub bug issues (not features) */
-  automate_github_bugs: string | null
-  /** Prompt for automating triage of repository security advisories */
-  automate_security_advisories: string | null
 }
 
 /** Default prompt for investigating GitHub issues */
@@ -299,132 +295,6 @@ Approval status:
 - needs_discussion if product or design clarification is required before judging the change.
 - approved if no blocking findings remain.
 </instructions>`
-
-/** Default prompt for automating GitHub bug issue triage + autoinvestigation */
-export const DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT = `<task>
-
-Automate triage of the latest open GitHub bug/fix issues for this project using Jean's MCP tools, then start autoinvestigation for each valid issue in its own worktree.
-
-</task>
-
-
-<context>
-
-- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
-- Scope: bugs and fixes only — not feature requests, enhancements, or pure DX chores
-- You are the orchestrator in this session. Do not implement fixes here.
-
-</context>
-
-
-<instructions>
-
-1. Resolve context
-   - Prefer projectId from context above
-   - If missing or uncertain, call Jean MCP get_current_context
-   - Optionally call list_worktrees with projectId so you can detect issues that already have worktrees
-
-2. Fetch candidates
-   - Call list_github_issues with projectId and state="open"
-   - Sort by newest first and inspect enough issues to select up to 5 bug/fix candidates
-   - Prefer labels such as bug, fix, defect, regression, crash
-   - Exclude clear feature/enhancement requests (labels like feature, enhancement, or titles/bodies that only request new capabilities)
-   - If labels are missing, use title + body to decide
-
-3. Validate each candidate before acting
-   - Still open/valid (not closed, not obsolete)
-   - Not an obvious duplicate of another open issue (or of an issue you are already starting)
-   - No existing Jean worktree already linked to this issue number (check list_worktrees / worktree metadata)
-   - Skip anything already under active investigation
-
-4. Act on each remaining valid issue (up to 5 total)
-   - Call create_worktree with:
-     - projectId
-     - issueNumber
-     - action="start_autoinvestigating"
-   - Create a separate worktree per issue
-   - Do not open/switch Jean UI unless the tool requires it
-
-5. Report results in this session
-   - Table of started issues (number, title, worktree/session if returned)
-   - Table of skipped issues with reasons (not a bug, duplicate, already has worktree, invalid, etc.)
-   - Any MCP/tool errors
-
-</instructions>
-
-
-<guidelines>
-
-- Be systematic and stop at 5 autoinvestigations maximum
-- Prefer high-confidence bug/fix issues over ambiguous ones
-- If fewer than 5 valid bugs exist, process only the valid ones
-- Do not implement code changes in this orchestration session
-
-</guidelines>`
-
-/** Default prompt for automating security advisory triage + autoinvestigation */
-export const DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT = `<task>
-
-Automate triage of the latest repository security advisories for this project using Jean's MCP tools, then start autoinvestigation for each valid advisory in its own worktree.
-
-</task>
-
-
-<context>
-
-- Current projectId (use this; call get_current_context if you need to reconfirm): {projectId}
-- Scope: repository security advisories (GHSA), not Dependabot dependency alerts unless they clearly map to a repo advisory
-- You are the orchestrator in this session. Do not implement fixes here.
-
-</context>
-
-
-<instructions>
-
-1. Resolve context
-   - Prefer projectId from context above
-   - If missing or uncertain, call Jean MCP get_current_context
-   - Optionally call list_worktrees with projectId so you can detect advisories that already have worktrees
-
-2. Fetch candidates
-   - Call list_security_advisories with projectId and state="all"
-   - Sort by newest first and inspect enough advisories to select up to 5 candidates that still need investigation
-   - Prefer advisories that are actively open for work
-   - Skip advisories already closed when they no longer need investigation
-
-3. Validate each candidate before acting
-   - Still valid (not obsolete / not already resolved)
-   - Not a duplicate of another advisory (same GHSA family / clearly same vulnerability already covered)
-   - Carefully check state: draft, triage, published/released, closed
-     - Skip if already released/published and no longer needs investigation, or if draft/triage work is already covered by an existing investigation/worktree
-     - Prefer ones that still need investigation and do not already have an in-progress worktree
-   - No existing Jean worktree already linked to this GHSA id
-   - No duplicated open GitHub issue that already tracks the same advisory investigation
-
-4. Act on each remaining valid advisory (up to 5 total)
-   - Call create_worktree with:
-     - projectId
-     - ghsaId (e.g. "GHSA-xxxx-xxxx-xxxx")
-     - action="start_autoinvestigating"
-   - Create a separate worktree per advisory
-   - Do not open/switch Jean UI unless the tool requires it
-
-5. Report results in this session
-   - Table of started advisories (GHSA id, title/severity, state, worktree/session if returned)
-   - Table of skipped advisories with reasons (state, duplicate, already has worktree, invalid, etc.)
-   - Any MCP/tool errors
-
-</instructions>
-
-
-<guidelines>
-
-- Be systematic and stop at 5 autoinvestigations maximum
-- Prefer high-confidence, still-actionable advisories
-- If fewer than 5 valid advisories exist, process only the valid ones
-- Do not implement code changes in this orchestration session
-
-</guidelines>`
 
 /** Default prompt for the audit-only final review session */
 export const DEFAULT_FINAL_REVIEW_PROMPT = `<task>Perform a final pre-merge audit of the current branch or linked pull request.</task>
@@ -913,8 +783,6 @@ export const DEFAULT_MAGIC_PROMPTS: MagicPrompts = {
   investigate_linear_issue: null,
   investigate_sentry_issue: null,
   review_comments: null,
-  automate_github_bugs: null,
-  automate_security_advisories: null,
 }
 
 /**
@@ -937,8 +805,6 @@ export interface MagicPromptModels {
   investigate_linear_issue_model: MagicPromptModel
   investigate_sentry_issue_model: MagicPromptModel
   review_comments_model: MagicPromptModel
-  automate_github_bugs_model: MagicPromptModel
-  automate_security_advisories_model: MagicPromptModel
 }
 
 /**
@@ -962,8 +828,6 @@ export interface MagicPromptReasoningEfforts {
   investigate_linear_issue_effort: MagicPromptReasoningEffort
   investigate_sentry_issue_effort: MagicPromptReasoningEffort
   review_comments_effort: MagicPromptReasoningEffort
-  automate_github_bugs_effort: MagicPromptReasoningEffort
-  automate_security_advisories_effort: MagicPromptReasoningEffort
 }
 
 /** Default models for each magic prompt */
@@ -984,8 +848,6 @@ export const DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels = {
   investigate_linear_issue_model: 'claude-opus-4-8[1m]',
   investigate_sentry_issue_model: 'claude-opus-4-8[1m]',
   review_comments_model: 'claude-opus-4-8[1m]',
-  automate_github_bugs_model: 'claude-opus-4-8[1m]',
-  automate_security_advisories_model: 'claude-opus-4-8[1m]',
 }
 
 function makeMagicPromptModelsPreset(
@@ -1008,8 +870,6 @@ function makeMagicPromptModelsPreset(
     investigate_linear_issue_model: model,
     investigate_sentry_issue_model: model,
     review_comments_model: model,
-    automate_github_bugs_model: model,
-    automate_security_advisories_model: model,
   }
 }
 
@@ -1075,8 +935,6 @@ export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_linear_issue_effort: null,
   investigate_sentry_issue_effort: null,
   review_comments_effort: null,
-  automate_github_bugs_effort: null,
-  automate_security_advisories_effort: null,
 }
 
 export type MagicPromptExecutionMode = Extract<ExecutionMode, 'plan' | 'yolo'>
@@ -1098,8 +956,6 @@ export interface MagicPromptModes {
   review_comments_mode: MagicPromptExecutionMode
   final_review_mode: MagicPromptExecutionMode
   resolve_conflicts_mode: MagicPromptExecutionMode
-  automate_github_bugs_mode: MagicPromptExecutionMode
-  automate_security_advisories_mode: MagicPromptExecutionMode
 }
 
 /** Default execution modes for chat-style magic prompts */
@@ -1115,8 +971,6 @@ export const DEFAULT_MAGIC_PROMPT_MODES: MagicPromptModes = {
   review_comments_mode: 'plan',
   final_review_mode: 'yolo',
   resolve_conflicts_mode: 'yolo',
-  automate_github_bugs_mode: 'yolo',
-  automate_security_advisories_mode: 'yolo',
 }
 
 /**
@@ -1132,8 +986,6 @@ export const GROK_DEFAULT_MAGIC_PROMPT_MODES: MagicPromptModes = {
   investigate_advisory_mode: 'yolo',
   investigate_linear_issue_mode: 'yolo',
   investigate_sentry_issue_mode: 'yolo',
-  automate_github_bugs_mode: 'yolo',
-  automate_security_advisories_mode: 'yolo',
 }
 
 /** Codex preset: heavier reasoning for investigations, lighter for simple generation */
@@ -1154,8 +1006,6 @@ export const CODEX_DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_linear_issue_effort: 'medium',
   investigate_sentry_issue_effort: 'medium',
   review_comments_effort: 'medium',
-  automate_github_bugs_effort: 'medium',
-  automate_security_advisories_effort: 'medium',
 }
 
 /** OpenCode preset: same as Codex */
@@ -1185,8 +1035,6 @@ export interface MagicPromptProviders {
   investigate_linear_issue_provider: string | null
   investigate_sentry_issue_provider: string | null
   review_comments_provider: string | null
-  automate_github_bugs_provider: string | null
-  automate_security_advisories_provider: string | null
 }
 
 /** Default providers for each magic prompt (null = use global default_provider) */
@@ -1207,8 +1055,6 @@ export const DEFAULT_MAGIC_PROMPT_PROVIDERS: MagicPromptProviders = {
   investigate_linear_issue_provider: null,
   investigate_sentry_issue_provider: null,
   review_comments_provider: null,
-  automate_github_bugs_provider: null,
-  automate_security_advisories_provider: null,
 }
 
 /**
@@ -1233,8 +1079,6 @@ export interface MagicPromptBackends {
   investigate_linear_issue_backend: string | null
   investigate_sentry_issue_backend: string | null
   review_comments_backend: string | null
-  automate_github_bugs_backend: string | null
-  automate_security_advisories_backend: string | null
 }
 
 /** Default backends for each magic prompt (null = use project/global default_backend) */
@@ -1255,8 +1099,6 @@ export const DEFAULT_MAGIC_PROMPT_BACKENDS: MagicPromptBackends = {
   investigate_linear_issue_backend: null,
   investigate_sentry_issue_backend: null,
   review_comments_backend: null,
-  automate_github_bugs_backend: null,
-  automate_security_advisories_backend: null,
 }
 
 function makeBackendsPreset(backend: string): MagicPromptBackends {
@@ -1277,8 +1119,6 @@ function makeBackendsPreset(backend: string): MagicPromptBackends {
     investigate_linear_issue_backend: backend,
     investigate_sentry_issue_backend: backend,
     review_comments_backend: backend,
-    automate_github_bugs_backend: backend,
-    automate_security_advisories_backend: backend,
   }
 }
 
@@ -1394,9 +1234,11 @@ export interface AppPreferences {
   has_seen_feature_tour: boolean // Whether user has seen the feature tour onboarding
   has_seen_jean_config_wizard: boolean // Whether user has seen the jean.json setup wizard
   has_seen_jean_mcp_intro: boolean // Whether user has seen the Jean MCP server announcement
+  /** One-time tip: soft text on 1× displays when zoom ≠ 100% (default false = not dismissed) */
+  has_seen_external_display_zoom_tip?: boolean
   chrome_enabled: boolean // Enable browser automation via Chrome extension
-  zoom_level: number // Desktop zoom level percentage (50-200, default 90)
-  mobile_zoom_level?: number // Mobile zoom level percentage (50-200, default 90)
+  zoom_level: number // Desktop zoom level percentage (50-200, default 100)
+  mobile_zoom_level?: number // Mobile zoom level percentage (50-200, default 100)
   sync_zoom_levels?: boolean // Keep desktop and mobile zoom levels in sync (default true)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
   default_provider: string | null // Default Claude provider profile name (null = Anthropic direct)
@@ -2250,7 +2092,7 @@ export function getOpenInDefaultLabel(
 export type FontSize = number
 
 export const FONT_SIZE_DEFAULT = 16
-export const ZOOM_LEVEL_DEFAULT = 90
+export const ZOOM_LEVEL_DEFAULT = 100
 
 export const uiFontScaleTicks = [
   { value: 12, label: '12px' },
@@ -2493,6 +2335,7 @@ export const defaultPreferences: AppPreferences = {
   has_seen_feature_tour: false, // Default: not seen
   has_seen_jean_config_wizard: false, // Default: not seen
   has_seen_jean_mcp_intro: false, // Default: not seen
+  has_seen_external_display_zoom_tip: false, // Default: show tip once on 1× + non-100% zoom
   chrome_enabled: true, // Default: enabled
   zoom_level: ZOOM_LEVEL_DEFAULT,
   mobile_zoom_level: ZOOM_LEVEL_DEFAULT,
