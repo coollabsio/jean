@@ -2486,6 +2486,22 @@ pub async fn dispatch_command(
             let result = crate::cursor_cli::get_cursor_install_command(app.clone()).await?;
             to_value(result)
         }
+        "check_antigravity_cli_installed" => {
+            let result = crate::antigravity_cli::check_antigravity_cli_installed(app.clone()).await?;
+            to_value(result)
+        }
+        "detect_antigravity_in_path" => {
+            let result = crate::antigravity_cli::detect_antigravity_in_path(app.clone()).await?;
+            to_value(result)
+        }
+        "check_antigravity_cli_auth" => {
+            let result = crate::antigravity_cli::check_antigravity_cli_auth(app.clone()).await?;
+            to_value(result)
+        }
+        "list_antigravity_models" => {
+            let result = crate::antigravity_cli::list_antigravity_models(app.clone()).await?;
+            to_value(result)
+        }
         "check_grok_cli_installed" => {
             let result = crate::grok_cli::check_grok_cli_installed(app.clone()).await?;
             to_value(result)
