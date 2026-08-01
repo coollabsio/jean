@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
 import { QuickActionsTab } from './QuickActionsTab'
 import type { ProjectRemote } from '@/services/projects'
+import type * as ProjectsModule from '@/services/projects'
 
 const onCreateWorktree = vi.fn()
 const onBaseSession = vi.fn()
@@ -20,7 +21,7 @@ vi.mock('@/services/preferences', () => ({
 }))
 
 vi.mock('@/services/projects', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/services/projects')>()
+  const actual = await importOriginal<typeof ProjectsModule>()
   return {
     ...actual,
     // Remotes for the selected base are loaded inside the tab; tests pass

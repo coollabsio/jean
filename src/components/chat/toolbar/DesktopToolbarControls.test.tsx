@@ -30,6 +30,18 @@ vi.mock('@/lib/platform', async () => {
   }
 })
 
+vi.mock('@/components/chat/toolbar/UsageIndicator', () => ({
+  UsageIndicator: ({
+    selectedBackend,
+  }: {
+    selectedBackend?: string | null
+  }) => (
+    <button type="button" aria-label={`${selectedBackend ?? 'unknown'} usage`}>
+      usage
+    </button>
+  ),
+}))
+
 type DesktopToolbarControlsProps = ComponentProps<typeof DesktopToolbarControls>
 
 function renderDesktopToolbarControls(
@@ -135,6 +147,24 @@ describe('DesktopToolbarControls', () => {
     await user.click(screen.getByRole('button', { name: /magic/i }))
 
     expect(onOpenMagicModal).toHaveBeenCalledTimes(1)
+  })
+
+  it('places usage indicator after the backend/model picker', () => {
+    renderDesktopToolbarControls({
+      selectedBackend: 'claude',
+      selectedModel: 'sonnet',
+      isCodex: false,
+    })
+
+    const modelPicker = screen.getByRole('button', {
+      name: /choose backend and model/i,
+    })
+    const usage = screen.getByRole('button', { name: /claude usage/i })
+
+    expect(
+      modelPicker.compareDocumentPosition(usage) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 
   it('shows a desktop Attachments button after Magic that opens file picker', async () => {

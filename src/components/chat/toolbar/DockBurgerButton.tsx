@@ -44,19 +44,11 @@ import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
 import { CodexIcon } from '@/components/icons/CodexIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
+import { formatUsagePair } from '@/components/chat/toolbar/usage-indicator-utils'
 
 interface DockBurgerButtonProps {
   /** Extra classes merged onto the trigger button (e.g. responsive visibility). */
   className?: string
-}
-
-function formatUsagePair(
-  session: number | null | undefined,
-  weekly: number | null | undefined
-) {
-  const sessionText = session == null ? '--' : `${Math.round(session)}`
-  const weeklyText = weekly == null ? '--' : `${Math.round(weekly)}`
-  return `${sessionText}|${weeklyText}%`
 }
 
 export function DockBurgerButton({

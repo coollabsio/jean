@@ -71,6 +71,7 @@ import {
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import { UsageIndicator } from '@/components/chat/toolbar/UsageIndicator'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
 
 interface DesktopToolbarControlsProps {
@@ -690,6 +691,15 @@ export function DesktopToolbarControls({
         customCliProfiles={customCliProfiles}
         onModelChange={handleModelChange}
         onBackendModelChange={handleBackendModelChange}
+      />
+
+      {/* Usage for the session backend — sits with model / effort / mode row */}
+      <UsageIndicator
+        selectedBackend={selectedBackend}
+        variant="toolbar"
+        className="hidden @xl:inline-flex shrink-0"
+        side="top"
+        align="start"
       />
 
       {!hideReasoningControl && (

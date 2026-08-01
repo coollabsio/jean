@@ -24,6 +24,7 @@ import { MobileSettingsMenu } from '@/components/chat/toolbar/MobileSettingsMenu
 import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import { UsageIndicator } from '@/components/chat/toolbar/UsageIndicator'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
@@ -542,6 +543,15 @@ export const ChatToolbar = memo(function ChatToolbar({
               onAfterModelSelect={handleAfterMobileModelSelect}
             />
           )}
+
+          {/* Mobile: usage sits with model/mode controls, not the left menu cluster */}
+          <UsageIndicator
+            selectedBackend={selectedBackend}
+            variant="toolbar"
+            className="inline-flex @xl:hidden shrink-0"
+            side="top"
+            align="start"
+          />
 
           <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
 
