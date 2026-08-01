@@ -421,6 +421,7 @@ fn default_model_for_backend(
         Backend::Commandcode => &preferences.selected_commandcode_model,
         Backend::Grok => &preferences.selected_grok_model,
         Backend::Kimi => &preferences.selected_kimi_model,
+        Backend::Antigravity => &preferences.selected_antigravity_model,
         Backend::Claude => &preferences.selected_model,
     };
 
@@ -2675,6 +2676,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Commandcode => session.commandcode_session_id = Some(sid.to_string()),
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
         Backend::Kimi => session.kimi_session_id = Some(sid.to_string()),
+        Backend::Antigravity => session.antigravity_session_id = Some(sid.to_string()),
     }
 }
 
@@ -3036,6 +3038,9 @@ pub async fn send_chat_message(
     let kimi_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.kimi_session_id.clone());
+    let antigravity_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.antigravity_session_id.clone());
     // Command Code has no native resume id; a non-empty sentinel marks that a
     // prior Command Code turn completed in this worktree, so the next run can
     // pass `-c` (cwd-scoped continue) to resume the conversation.
@@ -3181,6 +3186,12 @@ pub async fn send_chat_message(
     } else {
         kimi_session_id
     };
+    let antigravity_session_id =
+        if clear_target_resume && effective_backend == Backend::Antigravity {
+            None
+        } else {
+            antigravity_session_id
+        };
 
     // Cursor CLI doesn't support thinking/effort levels
     let run_thinking_level = if matches!(
@@ -3316,6 +3327,7 @@ pub async fn send_chat_message(
                     Backend::Commandcode => {}
                     Backend::Grok => {}
                     Backend::Kimi => {}
+                    Backend::Antigravity => {}
                 }
             }
         }
@@ -3368,6 +3380,7 @@ pub async fn send_chat_message(
     let thread_pi_session_id = pi_session_id.clone();
     let thread_grok_session_id = grok_session_id.clone();
     let thread_kimi_session_id = kimi_session_id.clone();
+    let thread_antigravity_session_id = antigravity_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
@@ -4935,6 +4948,50 @@ pub async fn send_chat_message(
                     Err(error) => Err(error),
                 }
             }
+            Backend::Antigravity => {
+                let system_context =
+                    super::context_instructions::build_combined_terminal_context_content(
+                        &thread_app,
+                        &thread_session_id,
+                        &thread_worktree_id,
+                    );
+                let effort = thread_effort_level
+                    .as_ref()
+                    .and_then(|value| value.effort_value());
+                match super::antigravity::execute_antigravity_headless(
+                    &thread_app,
+                    &thread_session_id,
+                    &thread_worktree_id,
+                    &thread_run_id,
+                    std::path::Path::new(&thread_working_dir),
+                    thread_execution_mode.as_deref(),
+                    thread_model.as_deref(),
+                    effort,
+                    &thread_message,
+                    Some(&system_context),
+                    thread_antigravity_session_id.as_deref(),
+                    Some(make_pid_callback()),
+                ) {
+                    Ok((_pid, response)) => Ok((
+                        0,
+                        UnifiedResponse {
+                            content: response.content,
+                            resume_id: response.session_id,
+                            tool_calls: response.tool_calls,
+                            content_blocks: response.content_blocks,
+                            cancelled: response.cancelled,
+                            waiting_for_plan: false,
+                            error_emitted: false,
+                            usage: response.usage,
+                            backend: Backend::Antigravity,
+                        },
+                    )),
+                    Err(e) => {
+                        log::error!("execute_antigravity_headless FAILED: {e}");
+                        Err(e)
+                    }
+                }
+            }
         };
 
         let _ = tx.send(result);
@@ -5299,6 +5356,9 @@ pub async fn send_chat_message(
                         Backend::Kimi => {
                             session.kimi_session_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::Antigravity => {
+                            session.antigravity_session_id = Some(resume_id_for_log.clone());
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -5448,6 +5508,9 @@ pub async fn send_chat_message(
                     Backend::Kimi => {
                         session.kimi_session_id = Some(resume_id_for_log.clone());
                     }
+                    Backend::Antigravity => {
+                        session.antigravity_session_id = Some(resume_id_for_log.clone());
+                    }
                 }
             }
 
@@ -5553,6 +5616,7 @@ pub async fn clear_session_history(
             session.commandcode_session_id = None;
             session.grok_session_id = None;
             session.kimi_session_id = None;
+            session.antigravity_session_id = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_effort_level = selected_effort_level;
@@ -7922,6 +7986,7 @@ pub async fn get_session_debug_info(
         commandcode_session_id: None,
         grok_session_id,
         kimi_session_id: session.and_then(|s| s.kimi_session_id.clone()),
+        antigravity_session_id: session.and_then(|s| s.antigravity_session_id.clone()),
         claude_jsonl_file,
         run_log_files,
         total_usage,
