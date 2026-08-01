@@ -4,29 +4,32 @@ Branch: `feat/antigravity-backend`. Approach: full **chat backend** (streaming C
 `agy -p --output-format stream-json`), NOT orca's TUI-observe. Template = Command Code
 (headless streaming CLI).
 
-## Rust (jean-core) — compile-verified with `cargo check -p jean-core`
-- [ ] P1 `chat/types.rs`: `Backend::Antigravity` enum + Deserialize arm + `antigravity_session_id`
-      field threaded through Session (struct/new/to_session/update_from_session) + test
-- [ ] P1b Fix all non-exhaustive `match Backend` sites the compiler reports
-      (naming.rs, handoff.rs, registry.rs, run_log.rs, commands.rs, projects/*.rs)
-- [ ] P2 `antigravity_cli/` module (mod/config/commands/mcp) — binary `agy`, detect/auth,
-      `antigravity_cli_source` pref; declare `mod antigravity_cli;` in lib.rs
-- [ ] P3 `chat/antigravity.rs`: `execute_antigravity_headless` streaming stream-json parser
-      (init/step_update/result → chat:chunk/tool/done); export in `chat/mod.rs`
-- [ ] P3b Wire into `chat/commands.rs` send dispatch: resume-id plumbing, thread var,
-      model select (417), session-id persist (2558/2566), clear_target_resume (3064),
-      match arm (after Kimi ~4820), post-run persist (5180/5330)
-- [ ] P4 `http_server/dispatch.rs`: command arms for antigravity CLI commands
-- [ ] P5 register CLI commands in `src-tauri/src/lib.rs` generate_handler + AppPreferences fields
+## Rust (jean-core + src-tauri) — VERIFIED: `cargo check` clean, 989 lib tests pass
+- [x] P1 `chat/types.rs`: `Backend::Antigravity` enum + Deserialize + `antigravity_session_id`
+      threaded through Session/SessionMetadata/RunEntry/session-info + test
+- [x] P1b All non-exhaustive `match Backend` sites fixed (handoff x2, commands.rs x6,
+      projects fork-clear); most other matches had wildcards/defaults
+- [x] P2 `antigravity_cli/` module (mod/config/commands) — `agy`, PATH-first detect/auth
+      (credential heuristic)/models; `antigravity_cli_source` pref; `mod` in lib.rs
+- [x] P3 `chat/antigravity.rs`: `execute_antigravity_headless` streaming stream-json parser
+      + `execute_one_shot_antigravity` (magic prompts); exported in `chat/mod.rs`; 4 tests
+- [x] P3b Wired into `chat/commands.rs` send dispatch (resume plumbing, model select,
+      persist, clear, dispatch arm, post-run persist x2)
+- [x] P4 `http_server/dispatch.rs`: 4 antigravity CLI command arms
+- [x] P5 AppPreferences: `selected_antigravity_model` + `antigravity_cli_source` +
+      `is_antigravity_model` + magic-prompt/model-select routing
+      (src-tauri needs no per-command generate_handler — uses generic dispatcher)
 
-## Frontend (src) — needs `bun run check:all` (bun not on PATH here; note for user)
-- [ ] TS `types/chat.ts`: `Backend` union + `antigravity_session_id`
-- [ ] TS `types/preferences.ts`: `CliBackend` + `backendOptions` + `antigravity_cli_source` + `selected_antigravity_model`
-- [ ] UI `components/icons/AntigravityIcon.tsx`
-- [ ] UI `components/ui/backend-label.tsx`: icon/label/beta
-- [ ] UI toolbar model options + `useInstalledBackends`
-- [ ] Services/types `services/antigravity-cli.ts` + `types/antigravity-cli.ts`
-- [ ] UI `GeneralPane.tsx` auth/login section
+## Frontend (src) — wired, NOT typecheck-verified (no bun/node_modules here)
+- [x] TS `types/chat.ts`: `Backend` union + `antigravity_session_id`
+- [x] TS `types/preferences.ts`: `CliBackend` + `backendOptions` + prefs + defaults
+- [x] UI `components/icons/AntigravityIcon.tsx`
+- [x] UI `components/ui/backend-label.tsx`: icon/label/beta (only exhaustive switch)
+- [x] `useInstalledBackends` detection; `services/antigravity-cli.ts` + types; cli-auth status
+- [~] Magic-prompt panes / NewSessionModeModal / toolbar model-options: fall through to
+      defaults (functional, not compile errors) — per-backend model lists = follow-up
+- [ ] `GeneralPane.tsx` login button — follow-up (agy login is Google-account/browser)
+- [ ] REQUIRED before merge: `bun install && bun run typecheck && bun run lint`
 
 ## Commits at milestones
 1. P1+P1b Rust enum plumbing (compiles)
