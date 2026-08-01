@@ -13,6 +13,7 @@ const BACKEND_LABELS: Record<string, string> = {
   pi: 'PI',
   grok: 'Grok',
   kimi: 'Kimi Code',
+  antigravity: 'Antigravity',
 }
 
 function formatBackendLabel(backend: string): string {

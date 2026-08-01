@@ -13,6 +13,10 @@ import {
 } from '@/services/commandcode-cli'
 import { useGrokCliStatus, useGrokCliAuth } from '@/services/grok-cli'
 import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
+import {
+  useAntigravityCliStatus,
+  useAntigravityCliAuth,
+} from '@/services/antigravity-cli'
 import type { CliBackend } from '@/types/preferences'
 
 /**
@@ -45,6 +49,7 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
   const commandcode = useCommandCodeCliStatus({ enabled })
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
+  const antigravity = useAntigravityCliStatus({ enabled })
 
   const claudeAuth = useClaudeCliAuth({
     enabled: enabled && !!claude.data?.installed,
@@ -69,6 +74,9 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
   })
   const kimiAuth = useKimiCliAuth({
     enabled: enabled && !!kimi.data?.installed,
+  })
+  const antigravityAuth = useAntigravityCliAuth({
+    enabled: enabled && !!antigravity.data?.installed,
   })
 
   const installedBackends = useMemo(() => {
@@ -103,6 +111,13 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
       backends.push('grok')
     if (isBackendUsable(kimi.data?.installed, kimiAuth.data?.authenticated))
       backends.push('kimi')
+    if (
+      isBackendUsable(
+        antigravity.data?.installed,
+        antigravityAuth.data?.authenticated
+      )
+    )
+      backends.push('antigravity')
     return backends
   }, [
     claude.data?.installed,
@@ -121,6 +136,8 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     grokAuth.data?.authenticated,
     kimi.data?.installed,
     kimiAuth.data?.authenticated,
+    antigravity.data?.installed,
+    antigravityAuth.data?.authenticated,
   ])
 
   const isStatusLoading =
@@ -131,7 +148,8 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     pi.isLoading ||
     commandcode.isLoading ||
     grok.isLoading ||
-    kimi.isLoading
+    kimi.isLoading ||
+    antigravity.isLoading
 
   // Auth queries are only enabled when installed; count their loading too.
   const isAuthLoading =
@@ -142,7 +160,8 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     (!!pi.data?.installed && piAuth.isLoading) ||
     (!!commandcode.data?.installed && commandcodeAuth.isLoading) ||
     (!!grok.data?.installed && grokAuth.isLoading) ||
-    (!!kimi.data?.installed && kimiAuth.isLoading)
+    (!!kimi.data?.installed && kimiAuth.isLoading) ||
+    (!!antigravity.data?.installed && antigravityAuth.isLoading)
 
   return {
     installedBackends,
