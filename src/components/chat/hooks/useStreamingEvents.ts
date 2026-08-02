@@ -307,9 +307,10 @@ export default function useStreamingEvents({
         preferencesQueryKeys.preferences()
       )
       if (prefs?.desktop_notifications_enabled === false) return
-      const name = queryClient.getQueryData<Session>(
-        chatQueryKeys.session(sessionId)
-      )?.name
+      const name =
+        queryClient
+          .getQueryData<Session>(chatQueryKeys.session(sessionId))
+          ?.name?.trim() || `Session ${sessionId.slice(0, 8)}`
       notifyIfBackground(title, name)
     }
 

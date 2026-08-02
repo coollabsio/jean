@@ -4615,15 +4615,17 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             anchorId="pref-general-section-notifications"
           >
             <div className="space-y-4">
-              <InlineField
-                label="Desktop notifications"
-                description="Show a native system banner when a session needs your input or finishes, but only while Jean is in the background."
-              >
-                <Switch
-                  checked={preferences?.desktop_notifications_enabled ?? true}
-                  onCheckedChange={handleDesktopNotificationsEnabledChange}
-                />
-              </InlineField>
+              {isNativeApp() && (
+                <InlineField
+                  label="Desktop notifications"
+                  description="Show a native system banner when a session needs your input or finishes, but only while Jean is in the background."
+                >
+                  <Switch
+                    checked={preferences?.desktop_notifications_enabled ?? true}
+                    onCheckedChange={handleDesktopNotificationsEnabledChange}
+                  />
+                </InlineField>
+              )}
 
               <InlineField
                 label="Web access sounds"
