@@ -111,6 +111,7 @@ type AIBackend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'antigravity'
 type CliType = AIBackend | 'gh'
 
 /** Static CLI login arg arrays (module scope — avoid recreating each render) */
@@ -127,6 +128,7 @@ export const AI_BACKENDS: AIBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'antigravity',
 ]
 
 type OnboardingStep =
@@ -239,10 +241,17 @@ const backendLabel: Record<CliType, string> = {
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
   kimi: 'Kimi Code CLI',
+  antigravity: 'Antigravity CLI',
   gh: 'GitHub CLI',
 }
 
-const BETA_BACKENDS = new Set<AIBackend>(['pi', 'commandcode', 'grok', 'kimi'])
+const BETA_BACKENDS = new Set<AIBackend>([
+  'pi',
+  'commandcode',
+  'grok',
+  'kimi',
+  'antigravity',
+])
 
 function magicDefaultsForBackend(
   backend: AIBackend
@@ -295,6 +304,7 @@ function stepToBackend(step: OnboardingStep): AIBackend | null {
   if (step.startsWith('commandcode-')) return 'commandcode'
   if (step.startsWith('grok-')) return 'grok'
   if (step.startsWith('kimi-')) return 'kimi'
+  if (step.startsWith('antigravity-')) return 'antigravity'
   return null
 }
 
