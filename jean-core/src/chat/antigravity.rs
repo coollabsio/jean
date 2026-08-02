@@ -482,24 +482,50 @@ pub fn execute_one_shot_antigravity(
             stderr
         });
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // JSON envelope: prefer structured_output, then response, else raw stdout.
+    Ok(parse_one_shot_output(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Extract the useful payload from a `--output-format json` envelope.
+///
+/// Verified against agy 1.1.9: the envelope is a single top-level object with
+/// keys `{conversation_id, status, response, structured_output, json_schema,
+/// usage, ...}` — `structured_output` and `response` are TOP-LEVEL (unlike the
+/// stream-json `result` event, which nests them). Prefer structured output,
+/// then the response text, else the raw stdout.
+fn parse_one_shot_output(stdout: &str) -> String {
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
         if let Some(structured) = value.get("structured_output") {
             if !structured.is_null() {
-                return Ok(structured.to_string());
+                return structured.to_string();
             }
         }
         if let Some(response) = value.get("response").and_then(|v| v.as_str()) {
-            return Ok(response.trim().to_string());
+            return response.trim().to_string();
         }
     }
-    Ok(stdout.trim().to_string())
+    stdout.trim().to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_shot_extracts_structured_output_then_response() {
+        // Real agy `--output-format json` envelope: fields are TOP-LEVEL.
+        let with_schema = r#"{"conversation_id":"c","status":"SUCCESS","response":"v2.14.3","structured_output":{"major":2,"minor":14,"patch":3},"json_schema":{},"usage":{}}"#;
+        assert_eq!(
+            parse_one_shot_output(with_schema),
+            r#"{"major":2,"minor":14,"patch":3}"#
+        );
+        let text_only =
+            r#"{"conversation_id":"c","status":"SUCCESS","response":"a title","usage":{}}"#;
+        assert_eq!(parse_one_shot_output(text_only), "a title");
+        // Non-JSON / plain text falls through to raw stdout.
+        assert_eq!(parse_one_shot_output("  hello  "), "hello");
+    }
 
     #[test]
     fn normalize_model_strips_prefix_and_default() {

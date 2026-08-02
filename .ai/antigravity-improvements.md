@@ -90,7 +90,24 @@ Verified in-env: `bun install` + `bun run typecheck` (0 errors), `bun run lint`
 (clean), `bun run test:run` (6 PRE-EXISTING GitDiffModal/MessageDiffModal failures
 only — unrelated), `cargo check`/`cargo test` clean.
 
+### Runtime-verified against real agy 1.1.9 (live-run)
+- stream-json schema: `event` discriminator + payload nested under event-name key;
+  tool input=`tool_info.parameters`, no id (correlate by step_index). Parser REWRITTEN.
+- Models: real ids from `agy models` (gemini-3.6-flash-high default, 3.1-pro-high,
+  3.5-flash-medium, claude-sonnet-4-6). `gemini-3-pro` did NOT exist — fixed.
+- `--effort` only low|medium|high → clamp_effort added.
+- Native `--mode plan|accept-edits` used (verified flag) + `--new-project`; `--sandbox` is boolean.
+- `--json-schema` → `structured_output` is TOP-LEVEL of the json envelope (one-shot correct); locked with parse_one_shot_output test.
+- resume `--conversation <id>` verified across 2 turns (recall confirmed).
+- MCP: path `~/.gemini/config/mcp_config.json` + `{"mcpServers":{...}}` confirmed from
+  agy's own docs (builtin/skills/agy-customizations/docs/mcp_servers.md); sync writes exactly this.
+- auth heuristic files (google_accounts.json) + auto_trust trustedWorkspaces shape confirmed present.
+- install URL https://antigravity.google/cli/install.sh → HTTP 200 (valid).
+
 ### Remaining optional polish (functional via defaults today)
 - Per-dialog magic-prompt model PICKERS (MagicModal/ResolveConflictsDialog) don't
   yet list antigravity models (fall back to defaults). Backend recognition is wired.
 - Usage pill (per-run tokens only; no subscription quota from headless).
+- MCP remote servers use `serverUrl` (Antigravity) vs `url` (Claude/Jean); Jean's
+  managed `jean` server is stdio (command/args) so unaffected — only matters if
+  forwarding remote user servers (not done; users configure those directly).
