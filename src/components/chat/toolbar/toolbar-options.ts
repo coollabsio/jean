@@ -101,6 +101,14 @@ export const KIMI_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'kimi/default', label: 'Configured default' },
 ]
 
+export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'antigravity/gemini-3-pro', label: 'Gemini 3 Pro' },
+  {
+    value: 'antigravity/gemini-3.5-flash-medium',
+    label: 'Gemini 3.5 Flash (Medium)',
+  },
+]
+
 export const KIMI_EFFORT_LEVEL_OPTIONS: {
   value: EffortLevel
   label: string
