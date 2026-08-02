@@ -2389,7 +2389,7 @@ export const defaultPreferences: AppPreferences = {
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
   selected_grok_model: 'grok/grok-4.5', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
-  selected_antigravity_model: 'antigravity/gemini-3-pro', // Default Antigravity model
+  selected_antigravity_model: 'antigravity/gemini-3.6-flash-high', // Default Antigravity model (real agy default)
   default_codex_reasoning_effort: 'high', // Default: high reasoning
   default_codex_model_verbosity: 'medium', // Default: medium verbosity (not low — Jean #535)
   default_grok_reasoning_effort: 'high', // Default: high reasoning

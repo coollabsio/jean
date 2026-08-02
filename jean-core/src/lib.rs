@@ -793,7 +793,8 @@ fn default_kimi_model() -> String {
 }
 
 fn default_antigravity_model() -> String {
-    "antigravity/gemini-3-pro".to_string()
+    // Real agy default (verified via `agy models` on 1.1.9).
+    "antigravity/gemini-3.6-flash-high".to_string()
 }
 
 fn default_grok_cli_source() -> String {

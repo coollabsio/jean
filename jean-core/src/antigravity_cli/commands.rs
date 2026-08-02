@@ -96,16 +96,55 @@ fn antigravity_credentials_present() -> bool {
         || gemini.join("google_accounts.json").exists()
 }
 
+/// Turn a raw `agy` model id (e.g. `gemini-3.6-flash-high`) into a display label
+/// ("Gemini 3.6 Flash (High)").
+fn label_for_model(id: &str) -> String {
+    let mut parts: Vec<String> = id
+        .split('-')
+        .map(|seg| {
+            if seg.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                seg.to_string()
+            } else {
+                let mut chars = seg.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            }
+        })
+        .collect();
+    // Treat a trailing effort suffix (low/medium/high) as a parenthesized level.
+    if let Some(last) = parts.last().cloned() {
+        if ["Low", "Medium", "High"].contains(&last.as_str()) {
+            parts.pop();
+            return format!("{} ({last})", parts.join(" "));
+        }
+    }
+    parts.join(" ")
+}
+
+/// Fallback models when `agy models` can't be run. Real ids verified against
+/// agy 1.1.9 (`gemini-3.6-flash-high` is the CLI's own default).
 pub fn fallback_models() -> Vec<AntigravityModelInfo> {
     vec![
         AntigravityModelInfo {
-            id: "antigravity/gemini-3-pro".to_string(),
-            label: "Gemini 3 Pro".to_string(),
+            id: "antigravity/gemini-3.6-flash-high".to_string(),
+            label: "Gemini 3.6 Flash (High)".to_string(),
             is_default: true,
+        },
+        AntigravityModelInfo {
+            id: "antigravity/gemini-3.1-pro-high".to_string(),
+            label: "Gemini 3.1 Pro (High)".to_string(),
+            is_default: false,
         },
         AntigravityModelInfo {
             id: "antigravity/gemini-3.5-flash-medium".to_string(),
             label: "Gemini 3.5 Flash (Medium)".to_string(),
+            is_default: false,
+        },
+        AntigravityModelInfo {
+            id: "antigravity/claude-sonnet-4-6".to_string(),
+            label: "Claude Sonnet 4.6".to_string(),
             is_default: false,
         },
     ]
@@ -184,8 +223,42 @@ pub async fn check_antigravity_cli_auth(app: AppHandle) -> Result<AntigravityAut
     }
 }
 
-pub async fn list_antigravity_models(_app: AppHandle) -> Result<Vec<AntigravityModelInfo>, String> {
-    Ok(fallback_models())
+/// List available models via `agy models` (one id per line), prefixed with
+/// `antigravity/` and labeled. Falls back to a static set if the CLI is
+/// unavailable or returns nothing.
+pub async fn list_antigravity_models(app: AppHandle) -> Result<Vec<AntigravityModelInfo>, String> {
+    let binary_path = resolve_cli_binary(&app);
+    if !binary_exists(&binary_path) {
+        return Ok(fallback_models());
+    }
+    let output = crate::platform::cli_command(&binary_path.to_string_lossy(), None)
+        .arg("models")
+        .output();
+    let Ok(output) = output else {
+        return Ok(fallback_models());
+    };
+    if !output.status.success() {
+        return Ok(fallback_models());
+    }
+    let text = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let mut models: Vec<AntigravityModelInfo> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.contains(' '))
+        .map(|id| AntigravityModelInfo {
+            label: label_for_model(id),
+            id: format!("antigravity/{id}"),
+            is_default: false,
+        })
+        .collect();
+    if models.is_empty() {
+        return Ok(fallback_models());
+    }
+    // `agy models` lists the CLI's default first.
+    if let Some(first) = models.first_mut() {
+        first.is_default = true;
+    }
+    Ok(models)
 }
 
 /// Install the Antigravity CLI into Jean's managed app-data directory via the

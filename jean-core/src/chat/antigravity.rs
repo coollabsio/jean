@@ -61,6 +61,17 @@ fn normalize_model_for_cli(model: Option<&str>) -> Option<String> {
     Some(stripped.to_string())
 }
 
+/// `agy --effort` accepts only low|medium|high. Map Jean's richer effort levels
+/// down (minimal→low, xhigh/max/ultracode→high); anything else omits the flag.
+fn clamp_effort(effort: Option<&str>) -> Option<&'static str> {
+    match effort.map(str::trim)? {
+        "low" | "minimal" => Some("low"),
+        "medium" => Some("medium"),
+        "high" | "xhigh" | "max" | "ultracode" => Some("high"),
+        _ => None,
+    }
+}
+
 fn build_prompt(system_context: Option<&str>, message: &str) -> String {
     let mut prompt = String::new();
     if let Some(ctx) = system_context.map(str::trim).filter(|s| !s.is_empty()) {
@@ -125,49 +136,56 @@ impl StreamState {
 
 /// Parse a single stream-json line, mutating accumulated state and returning any
 /// text delta that should be streamed to the frontend as a `chat:chunk`.
+///
+/// Real `agy` stream-json shape (verified against agy 1.1.9): each line is
+/// `{"event":"<name>", "<name>":{...payload...}}` — the discriminator is `event`
+/// and the fields are nested under the event-named key (NOT top-level). Events:
+/// `init` (`conversation_id` at top level), `step_update` (payload has
+/// `step_index`, `state`, `step_type`, `text_delta?`, `tool_name?`, `tool_info?`,
+/// `usage?`), and `result` (`status`, `response`, `usage`). Tool steps carry
+/// `tool_info = {name, parameters, output}` — the tool input is `parameters` and
+/// there is no id, so calls are correlated by `step_index`.
 fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let event = value.get("event").and_then(|v| v.as_str()).unwrap_or("");
+    // conversation_id lives at top level (init/result) or inside the payload.
     state.capture_conversation_id(&value);
-    let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let payload = value.get(event);
+    if let Some(p) = payload {
+        state.capture_conversation_id(p);
+    }
 
-    match event_type {
+    match event {
         "step_update" => {
-            let step_type = value
-                .get("step_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if let Some(delta) = value.get("text_delta").and_then(|v| v.as_str()) {
+            let p = payload?;
+            let step_type = p.get("step_type").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(delta) = p.get("text_delta").and_then(|v| v.as_str()) {
                 if !delta.is_empty() {
                     state.push_text(delta);
                     return Some(delta.to_string());
                 }
             }
             if step_type == "tool" {
-                let state_field = value.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                let step_index = value
-                    .get("step_index")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let tool_name = value
+                let state_field = p.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                let step_index = p.get("step_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                let tool_info = p.get("tool_info");
+                let tool_name = p
                     .get("tool_name")
+                    .or_else(|| tool_info.and_then(|t| t.get("name")))
                     .and_then(|v| v.as_str())
                     .unwrap_or("tool")
                     .to_string();
-                let tool_info = value.get("tool_info").cloned();
-                let id = tool_info
-                    .as_ref()
-                    .and_then(|info| info.get("id"))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| format!("agy_tool_{step_index}"));
+                // `agy` tool steps carry no id; the step_index is stable across the
+                // ACTIVE→DONE pair, so use it to correlate call + output.
+                let id = format!("agy_tool_{step_index}");
                 if state_field == "DONE" {
-                    let output = tool_info
-                        .as_ref()
-                        .and_then(|info| info.get("output").or_else(|| info.get("result")))
-                        .map(|v| match v.as_str() {
-                            Some(s) => s.to_string(),
-                            None => v.to_string(),
-                        });
+                    let output =
+                        tool_info
+                            .and_then(|t| t.get("output"))
+                            .map(|v| match v.as_str() {
+                                Some(s) => s.to_string(),
+                                None => v.to_string(),
+                            });
                     if let Some(existing) = state.tool_calls.iter_mut().find(|tc| tc.id == id) {
                         if existing.output.is_none() {
                             existing.output = output;
@@ -177,8 +195,7 @@ fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
                 }
                 if !state.tool_calls.iter().any(|tc| tc.id == id) {
                     let input = tool_info
-                        .as_ref()
-                        .and_then(|info| info.get("input").cloned())
+                        .and_then(|t| t.get("parameters").cloned())
                         .unwrap_or(serde_json::Value::Null);
                     state.tool_calls.push(ToolCall {
                         id: id.clone(),
@@ -195,12 +212,14 @@ fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
             }
         }
         "result" => {
-            if let Some(usage) = usage_from_event(&value) {
+            let p = payload.unwrap_or(&value);
+            if let Some(usage) = usage_from_event(p) {
                 state.usage = Some(usage);
             }
-            let status = value.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let status = p.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            // CANCELED/INTERRUPTED are handled via the process exit code (130).
             if status == "ERROR" || status == "INVALID" {
-                state.error = value
+                state.error = p
                     .get("error")
                     .and_then(|v| v.as_str())
                     .map(str::to_string)
@@ -208,7 +227,7 @@ fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
             }
             // If no streamed text arrived, fall back to the final `response` field.
             if state.content.is_empty() {
-                if let Some(response) = value.get("response").and_then(|v| v.as_str()) {
+                if let Some(response) = p.get("response").and_then(|v| v.as_str()) {
                     if !response.is_empty() {
                         state.push_text(response);
                         return Some(response.to_string());
@@ -280,21 +299,33 @@ pub fn execute_antigravity_headless(
     if let Some(cli_model) = normalize_model_for_cli(model) {
         command.arg("--model").arg(cli_model);
     }
-    if let Some(effort) = effort.map(str::trim).filter(|e| !e.is_empty()) {
+    // `agy --effort` only accepts low|medium|high — clamp Jean's richer levels.
+    if let Some(effort) = clamp_effort(effort) {
         command.arg("--effort").arg(effort);
     }
     if let Some(resume_id) = resume_conversation_id.filter(|id| !id.is_empty()) {
         command.arg("--conversation").arg(resume_id);
-    }
-    // Headless mode cannot request interactive approval; map execution mode to a
-    // permission posture. build/yolo auto-approve tools so edits actually apply;
-    // plan enables the terminal sandbox (read-only-ish; write tools are
-    // soft-denied) so the run can inspect the repo without mutating it.
-    // NOTE: `--sandbox` is a boolean flag (no value) per `agy` headless docs.
-    if mode == "build" || mode == "yolo" {
-        command.arg("--dangerously-skip-permissions");
     } else {
-        command.arg("--sandbox");
+        // No prior conversation for this Jean session → start a fresh project so
+        // `agy` doesn't silently continue the most-recent unrelated conversation.
+        command.arg("--new-project");
+    }
+    // Headless mode cannot request interactive approval; map Jean execution mode
+    // to `agy`'s native controls (verified flags: `--mode accept-edits|plan`,
+    // `--dangerously-skip-permissions`):
+    // - plan → `--mode plan` (read-only planning; native)
+    // - build → `--mode accept-edits` (auto-apply edits; commands still gated)
+    // - yolo → `--dangerously-skip-permissions` (auto-approve everything)
+    match mode {
+        "yolo" => {
+            command.arg("--dangerously-skip-permissions");
+        }
+        "build" => {
+            command.args(["--mode", "accept-edits"]);
+        }
+        _ => {
+            command.args(["--mode", "plan"]);
+        }
     }
     command
         .stdin(Stdio::null())
@@ -481,13 +512,26 @@ mod tests {
     }
 
     #[test]
+    fn clamp_effort_maps_to_agy_levels() {
+        assert_eq!(clamp_effort(Some("minimal")), Some("low"));
+        assert_eq!(clamp_effort(Some("low")), Some("low"));
+        assert_eq!(clamp_effort(Some("medium")), Some("medium"));
+        assert_eq!(clamp_effort(Some("high")), Some("high"));
+        assert_eq!(clamp_effort(Some("xhigh")), Some("high"));
+        assert_eq!(clamp_effort(Some("max")), Some("high"));
+        assert_eq!(clamp_effort(Some("adaptive")), None);
+        assert_eq!(clamp_effort(None), None);
+    }
+
+    #[test]
     fn stream_parses_text_deltas_and_conversation_id() {
+        // Verified against agy 1.1.9: `event` discriminator + nested payload.
         let mut state = StreamState::default();
         let lines = [
-            r#"{"type":"init","cwd":"/tmp","permission_mode":"default"}"#,
-            r#"{"type":"step_update","conversation_id":"conv-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello"}"#,
-            r#"{"type":"step_update","conversation_id":"conv-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":" world"}"#,
-            r#"{"type":"result","conversation_id":"conv-1","status":"SUCCESS","usage":{"input_tokens":10,"output_tokens":5,"thinking_tokens":2,"cache_read_tokens":1,"total_tokens":18}}"#,
+            r#"{"event":"init","conversation_id":"conv-1","init":{"model":"gemini-3.5-flash-low","cwd":"/tmp","permission_mode":"always-proceed"}}"#,
+            r#"{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello"}}"#,
+            r#"{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":" world"}}"#,
+            r#"{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","usage":{"input_tokens":10,"output_tokens":5,"thinking_tokens":2,"cache_read_tokens":1,"total_tokens":18}}}"#,
         ];
         let mut deltas = Vec::new();
         for line in lines {
@@ -507,21 +551,26 @@ mod tests {
 
     #[test]
     fn stream_captures_tool_call_and_output() {
+        // Verified tool shape: tool_info={name,parameters,output}, no id (keyed by step_index).
         let mut state = StreamState::default();
         let lines = [
-            r#"{"type":"step_update","conversation_id":"c","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"read_file","tool_info":{"id":"t1","input":{"path":"/tmp/x"}}}"#,
-            r#"{"type":"step_update","conversation_id":"c","step_index":2,"state":"DONE","step_type":"tool","tool_name":"read_file","tool_info":{"id":"t1","output":"file contents"}}"#,
+            r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ACTIVE","step_type":"tool","tool_name":"list_dir","tool_info":{"name":"list_dir","parameters":{"DirectoryPath":"/tmp"}}}}"#,
+            r#"{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"DONE","step_type":"tool","tool_name":"list_dir","tool_info":{"name":"list_dir","parameters":{"DirectoryPath":"/tmp"},"output":".git/\njean/"}}}"#,
         ];
         for line in lines {
             handle_line(&mut state, line);
         }
         assert_eq!(state.tool_calls.len(), 1);
-        assert_eq!(state.tool_calls[0].id, "t1");
-        assert_eq!(state.tool_calls[0].name, "read_file");
-        assert_eq!(state.tool_calls[0].output.as_deref(), Some("file contents"));
+        assert_eq!(state.tool_calls[0].id, "agy_tool_3");
+        assert_eq!(state.tool_calls[0].name, "list_dir");
+        assert_eq!(
+            state.tool_calls[0].input,
+            serde_json::json!({"DirectoryPath": "/tmp"})
+        );
+        assert_eq!(state.tool_calls[0].output.as_deref(), Some(".git/\njean/"));
         assert!(matches!(
             state.content_blocks.as_slice(),
-            [ContentBlock::ToolUse { tool_call_id }] if tool_call_id == "t1"
+            [ContentBlock::ToolUse { tool_call_id }] if tool_call_id == "agy_tool_3"
         ));
     }
 
@@ -530,7 +579,7 @@ mod tests {
         let mut state = StreamState::default();
         let delta = handle_line(
             &mut state,
-            r#"{"type":"result","conversation_id":"c","status":"SUCCESS","response":"final answer","usage":{"input_tokens":1,"output_tokens":1}}"#,
+            r#"{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"final answer","usage":{"input_tokens":1,"output_tokens":1}}}"#,
         );
         assert_eq!(delta.as_deref(), Some("final answer"));
         assert_eq!(state.content, "final answer");
