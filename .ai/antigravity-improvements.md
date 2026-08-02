@@ -71,3 +71,26 @@ File: `jean-core/src/chat/antigravity.rs` (+ `antigravity_cli/`)
 - system_context (RECAP + system prompt already included).
 
 ## Suggested order: P0 → P1 → P2 → P5, then P3/P4 if wanted.
+
+---
+
+## STATUS (implemented + verified)
+- ✅ P0 executor robustness (auto_trust, env_remove, --sandbox) — cargo
+- ✅ P1 toolbar model options (static fallback) — typecheck
+- ✅ P2 settings pane (AntigravityPane + GeneralPane scope) + PreferencesDialog nav
+      + new-session (NewSessionModeModal) + onboarding (AI_BACKENDS) — typecheck + tests
+- ✅ P3 managed install (install/uninstall + jean|path source) — cargo
+- ✅ P4 Rust MCP sync (~/.gemini/config/mcp_config.json) + magic-prompt data layer
+      (isAntigravityModel, ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS, MagicPromptsPane
+      recognition + effort fallback) — cargo + typecheck
+- ✅ P5 tests: useInstalledBackends/OnboardingDialog/PreferencesDialog updated;
+      1840 frontend tests pass, jean-core 989+ tests pass; typecheck + lint clean.
+
+Verified in-env: `bun install` + `bun run typecheck` (0 errors), `bun run lint`
+(clean), `bun run test:run` (6 PRE-EXISTING GitDiffModal/MessageDiffModal failures
+only — unrelated), `cargo check`/`cargo test` clean.
+
+### Remaining optional polish (functional via defaults today)
+- Per-dialog magic-prompt model PICKERS (MagicModal/ResolveConflictsDialog) don't
+  yet list antigravity models (fall back to defaults). Backend recognition is wired.
+- Usage pill (per-run tokens only; no subscription quota from headless).

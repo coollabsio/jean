@@ -1128,6 +1128,8 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('commandcode')
 export const GROK_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('grok')
 export const KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('kimi')
+export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS =
+  makeBackendsPreset('antigravity')
 
 /**
  * Resolve a magic prompt provider for a given key.
@@ -1867,6 +1869,10 @@ export function isGrokModel(model: string): model is GrokModel {
 /** Check if a model string identifies a Kimi Code model */
 export function isKimiModel(model: string): model is KimiModel {
   return model.startsWith('kimi/')
+}
+/** Check if a model string identifies an Antigravity model */
+export function isAntigravityModel(model: string): boolean {
+  return model.startsWith('antigravity/')
 }
 
 /** Check if a model string identifies a Codex model */
