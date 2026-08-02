@@ -3186,12 +3186,12 @@ pub async fn send_chat_message(
     } else {
         kimi_session_id
     };
-    let antigravity_session_id =
-        if clear_target_resume && effective_backend == Backend::Antigravity {
-            None
-        } else {
-            antigravity_session_id
-        };
+    let antigravity_session_id = if clear_target_resume && effective_backend == Backend::Antigravity
+    {
+        None
+    } else {
+        antigravity_session_id
+    };
 
     // Cursor CLI doesn't support thinking/effort levels
     let run_thinking_level = if matches!(

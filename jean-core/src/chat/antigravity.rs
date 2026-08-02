@@ -15,7 +15,8 @@
 //! - No separate thinking/reasoning stream (only `thinking_tokens` counted).
 //! - Usage is per-run token counts, not subscription quota.
 //! - System prompt is embedded into the prompt (no per-invocation flag).
-//! Docs: https://antigravity.google/docs/cli/headless
+//!
+//! Docs: <https://antigravity.google/docs/cli/headless>
 
 use super::types::{ContentBlock, ToolCall, UsageData};
 use crate::http_server::EmitExt;
@@ -131,7 +132,10 @@ fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
 
     match event_type {
         "step_update" => {
-            let step_type = value.get("step_type").and_then(|v| v.as_str()).unwrap_or("");
+            let step_type = value
+                .get("step_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if let Some(delta) = value.get("text_delta").and_then(|v| v.as_str()) {
                 if !delta.is_empty() {
                     state.push_text(delta);
@@ -140,7 +144,10 @@ fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
             }
             if step_type == "tool" {
                 let state_field = value.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                let step_index = value.get("step_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                let step_index = value
+                    .get("step_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let tool_name = value
                     .get("tool_name")
                     .and_then(|v| v.as_str())
@@ -180,9 +187,9 @@ fn handle_line(state: &mut StreamState, line: &str) -> Option<String> {
                         output: None,
                         parent_tool_use_id: None,
                     });
-                    state.content_blocks.push(ContentBlock::ToolUse {
-                        tool_call_id: id,
-                    });
+                    state
+                        .content_blocks
+                        .push(ContentBlock::ToolUse { tool_call_id: id });
                     state.open_text_block = false;
                 }
             }
@@ -254,7 +261,8 @@ pub fn execute_antigravity_headless(
     // `agy` can load it for this turn (or removes it when session-disabled).
     crate::antigravity_cli::mcp::sync_jean_mcp_config(mcp_config);
 
-    let mut command = crate::platform::cli_command(&binary_path.to_string_lossy(), Some(working_dir));
+    let mut command =
+        crate::platform::cli_command(&binary_path.to_string_lossy(), Some(working_dir));
     // Clear parent-agent workspace env so `agy` resolves cwd/conversation itself
     // (Jean may itself be launched from within an Antigravity session).
     command
@@ -337,12 +345,11 @@ pub fn execute_antigravity_headless(
         .wait()
         .map_err(|e| format!("Failed to wait for Antigravity CLI: {e}"))?;
 
-    let conversation_id = state
-        .conversation_id
-        .clone()
-        .is_empty()
-        .then(|| resume_conversation_id.unwrap_or_default().to_string())
-        .unwrap_or_else(|| state.conversation_id.clone());
+    let conversation_id = if state.conversation_id.is_empty() {
+        resume_conversation_id.unwrap_or_default().to_string()
+    } else {
+        state.conversation_id.clone()
+    };
 
     // Exit 130 = SIGINT (user cancellation).
     if !status.success() && status.code() == Some(130) {

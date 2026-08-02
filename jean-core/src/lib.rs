@@ -36,11 +36,11 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
+mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
 mod chat;
 mod claude_cli;
-mod antigravity_cli;
 mod cli_update;
 mod coderabbit_cli;
 mod codex_cli;

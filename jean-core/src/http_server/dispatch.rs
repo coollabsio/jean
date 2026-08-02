@@ -2487,7 +2487,8 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "check_antigravity_cli_installed" => {
-            let result = crate::antigravity_cli::check_antigravity_cli_installed(app.clone()).await?;
+            let result =
+                crate::antigravity_cli::check_antigravity_cli_installed(app.clone()).await?;
             to_value(result)
         }
         "detect_antigravity_in_path" => {

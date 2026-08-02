@@ -111,7 +111,9 @@ pub fn fallback_models() -> Vec<AntigravityModelInfo> {
     ]
 }
 
-pub async fn check_antigravity_cli_installed(app: AppHandle) -> Result<AntigravityCliStatus, String> {
+pub async fn check_antigravity_cli_installed(
+    app: AppHandle,
+) -> Result<AntigravityCliStatus, String> {
     let binary_path = resolve_cli_binary(&app);
     if !binary_exists(&binary_path) {
         return Ok(AntigravityCliStatus {
@@ -134,7 +136,9 @@ pub async fn check_antigravity_cli_installed(app: AppHandle) -> Result<Antigravi
     })
 }
 
-pub async fn detect_antigravity_in_path(app: AppHandle) -> Result<AntigravityPathDetection, String> {
+pub async fn detect_antigravity_in_path(
+    app: AppHandle,
+) -> Result<AntigravityPathDetection, String> {
     let Some(path) = find_system_antigravity_binary(&app) else {
         return Ok(AntigravityPathDetection {
             found: false,
@@ -240,7 +244,10 @@ mod tests {
 
     #[test]
     fn parse_version_extracts_semver_token() {
-        assert_eq!(parse_version(b"agy version 1.4.2"), Some("1.4.2".to_string()));
+        assert_eq!(
+            parse_version(b"agy version 1.4.2"),
+            Some("1.4.2".to_string())
+        );
         assert_eq!(parse_version(b"v0.9.0"), Some("0.9.0".to_string()));
     }
 

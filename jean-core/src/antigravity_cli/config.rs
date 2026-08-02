@@ -77,11 +77,10 @@ fn read_source_preference(app: &AppHandle) -> AntigravitySourcePreference {
 /// Locate `agy` on the system PATH (or inside WSL when enabled). Ignores the
 /// managed binary so PATH detection stays independent of the source preference.
 pub fn find_system_antigravity_binary(app: &AppHandle) -> Option<PathBuf> {
-    let managed = find_managed_antigravity_binary(app)
-        .and_then(|path| std::fs::canonicalize(path).ok());
+    let managed =
+        find_managed_antigravity_binary(app).and_then(|path| std::fs::canonicalize(path).ok());
     for candidate in CLI_TOOL_CANDIDATES {
-        let detection =
-            crate::platform::detect_cli_in_path(candidate, managed.as_deref(), None);
+        let detection = crate::platform::detect_cli_in_path(candidate, managed.as_deref(), None);
         if detection.found {
             if let Some(path) = detection.path {
                 return Some(PathBuf::from(path));
@@ -142,7 +141,10 @@ pub fn auto_trust_workspace(working_dir: &std::path::Path) {
         return;
     };
     let mut changed = false;
-    match obj.get_mut("trustedWorkspaces").and_then(Value::as_array_mut) {
+    match obj
+        .get_mut("trustedWorkspaces")
+        .and_then(Value::as_array_mut)
+    {
         Some(trusted) => {
             if !trusted.iter().any(|v| v.as_str() == Some(&dir_str)) {
                 trusted.push(Value::String(dir_str));
