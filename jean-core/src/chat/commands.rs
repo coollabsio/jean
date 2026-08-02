@@ -3396,7 +3396,7 @@ pub async fn send_chat_message(
     // would leave Jean MCP disabled (especially Grok, which disables all
     // discovered servers when the enabled set is empty).
     let thread_mcp_config = match effective_backend {
-        Backend::Claude | Backend::Grok | Backend::Cursor => {
+        Backend::Claude | Backend::Grok | Backend::Cursor | Backend::Antigravity => {
             super::jean_mcp::merge_into_mcp_config(&app, &session_id, mcp_config.as_deref())
                 .await
                 .or_else(|| mcp_config.clone())
@@ -4970,6 +4970,7 @@ pub async fn send_chat_message(
                     &thread_message,
                     Some(&system_context),
                     thread_antigravity_session_id.as_deref(),
+                    thread_mcp_config.as_deref(),
                     Some(make_pid_callback()),
                 ) {
                     Ok((_pid, response)) => Ok((

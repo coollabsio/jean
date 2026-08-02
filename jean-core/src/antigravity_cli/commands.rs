@@ -8,7 +8,16 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use super::config::{binary_exists, find_system_antigravity_binary, resolve_cli_binary};
+use super::config::{
+    binary_exists, ensure_cli_dir, find_system_antigravity_binary, get_cli_binary_path,
+    get_cli_dir, resolve_cli_binary,
+};
+use crate::platform::silent_command;
+
+/// Official Antigravity CLI installer (referenced from PR #469). The bootstrapper
+/// downloads the `agy` binary into `--dir`. Verify against antigravity.google docs
+/// if installs fail.
+const ANTIGRAVITY_INSTALL_URL: &str = "https://antigravity.google/cli/install.sh";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AntigravityCliStatus {
@@ -173,6 +182,56 @@ pub async fn check_antigravity_cli_auth(app: AppHandle) -> Result<AntigravityAut
 
 pub async fn list_antigravity_models(_app: AppHandle) -> Result<Vec<AntigravityModelInfo>, String> {
     Ok(fallback_models())
+}
+
+/// Install the Antigravity CLI into Jean's managed app-data directory via the
+/// official installer script (`curl … | bash -s -- --dir <cli_dir>/bin`).
+/// Requires `curl` + `bash`; the user still signs in with `agy` afterwards.
+pub async fn install_antigravity_cli(
+    app: AppHandle,
+    _version: Option<String>,
+) -> Result<(), String> {
+    let cli_dir = ensure_cli_dir(&app)?;
+    let bin_dir = cli_dir.join("bin");
+    std::fs::create_dir_all(&bin_dir)
+        .map_err(|e| format!("Failed to create Antigravity bin directory: {e}"))?;
+
+    let script = format!(
+        "curl -fsSL {ANTIGRAVITY_INSTALL_URL} | bash -s -- --dir {}",
+        bin_dir.to_string_lossy()
+    );
+    let output = silent_command("bash")
+        .arg("-c")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to run Antigravity installer: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(format!(
+            "Antigravity CLI install failed: {}",
+            if stderr.is_empty() { stdout } else { stderr }
+        ));
+    }
+
+    let binary_path = get_cli_binary_path(&app)?;
+    if !binary_path.exists() {
+        return Err(format!(
+            "Antigravity install completed but binary was not found at {}",
+            binary_path.display()
+        ));
+    }
+    Ok(())
+}
+
+pub async fn uninstall_antigravity_cli(app: AppHandle) -> Result<(), String> {
+    let cli_dir = get_cli_dir(&app)?;
+    if cli_dir.exists() {
+        std::fs::remove_dir_all(&cli_dir)
+            .map_err(|e| format!("Failed to remove Antigravity CLI directory: {e}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

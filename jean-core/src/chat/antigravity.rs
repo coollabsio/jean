@@ -227,6 +227,7 @@ pub fn execute_antigravity_headless(
     message: &str,
     system_context: Option<&str>,
     resume_conversation_id: Option<&str>,
+    mcp_config: Option<&str>,
     pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, AntigravityResponse), String> {
     let binary_path = crate::antigravity_cli::resolve_cli_binary(app);
@@ -246,7 +247,23 @@ pub fn execute_antigravity_headless(
     let mode = execution_mode.unwrap_or("build");
     let prompt = build_prompt(system_context, message);
 
+    // Trust the workspace up front so a headless run never blocks on the
+    // interactive trust prompt.
+    crate::antigravity_cli::auto_trust_workspace(working_dir);
+    // Sync Jean's managed MCP server into ~/.gemini/config/mcp_config.json so
+    // `agy` can load it for this turn (or removes it when session-disabled).
+    crate::antigravity_cli::mcp::sync_jean_mcp_config(mcp_config);
+
     let mut command = crate::platform::cli_command(&binary_path.to_string_lossy(), Some(working_dir));
+    // Clear parent-agent workspace env so `agy` resolves cwd/conversation itself
+    // (Jean may itself be launched from within an Antigravity session).
+    command
+        .env_remove("ANTIGRAVITY_PROJECT_ID")
+        .env_remove("ANTIGRAVITY_CONVERSATION_ID")
+        .env_remove("ANTIGRAVITY_LS_ADDRESS")
+        .env_remove("ANTIGRAVITY_TRAJECTORY_ID")
+        .env_remove("ANTIGRAVITY_AGENT")
+        .env_remove("ANTIGRAVITY_SOURCE_METADATA");
     command
         .arg("-p")
         .arg(&prompt)
@@ -263,9 +280,13 @@ pub fn execute_antigravity_headless(
     }
     // Headless mode cannot request interactive approval; map execution mode to a
     // permission posture. build/yolo auto-approve tools so edits actually apply;
-    // plan relies on the CLI's default policy (write tools are soft-denied).
+    // plan enables the terminal sandbox (read-only-ish; write tools are
+    // soft-denied) so the run can inspect the repo without mutating it.
+    // NOTE: `--sandbox` is a boolean flag (no value) per `agy` headless docs.
     if mode == "build" || mode == "yolo" {
         command.arg("--dangerously-skip-permissions");
+    } else {
+        command.arg("--sandbox");
     }
     command
         .stdin(Stdio::null())

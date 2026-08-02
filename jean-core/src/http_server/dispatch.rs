@@ -2502,6 +2502,15 @@ pub async fn dispatch_command(
             let result = crate::antigravity_cli::list_antigravity_models(app.clone()).await?;
             to_value(result)
         }
+        "install_antigravity_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::antigravity_cli::install_antigravity_cli(app.clone(), version).await?;
+            Ok(serde_json::Value::Null)
+        }
+        "uninstall_antigravity_cli" => {
+            crate::antigravity_cli::uninstall_antigravity_cli(app.clone()).await?;
+            Ok(serde_json::Value::Null)
+        }
         "check_grok_cli_installed" => {
             let result = crate::grok_cli::check_grok_cli_installed(app.clone()).await?;
             to_value(result)
