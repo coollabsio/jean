@@ -111,6 +111,28 @@ describe('WorktreeCiStatus', () => {
     expect(getByText('Preview périmée')).toBeInTheDocument()
   })
 
+  it('shows a single Testable state when CI and preview are both current', () => {
+    mockUseJenkinsStatusCached.mockReturnValue({
+      data: statusWith({
+        overallStatus: 'SUCCESS',
+        previewUrl: 'https://42.preview.example.com',
+        previewFreshness: {
+          status: 'UP_TO_DATE',
+          previewSha: 'abc',
+          shaSource: 'preview',
+          prHeadSha: 'abc',
+          behindBy: 0,
+        },
+      }),
+    })
+    const { getByText, queryByText } = render(
+      <WorktreeCiStatus projectId="p1" worktreeId="wt-1" prId="42" />
+    )
+    expect(getByText('Testable')).toBeInTheDocument()
+    expect(queryByText('CI OK')).toBeNull()
+    expect(queryByText('Preview à jour')).toBeNull()
+  })
+
   it('shows the "CI non configuré" pill for a PR worktree whose project lacks config', () => {
     mockUseJenkinsStatusCached.mockReturnValue({ data: undefined })
     mockUseProjects.mockReturnValue({ data: [{ id: 'p1' }] })

@@ -80,4 +80,12 @@ describe('buildFailurePrompt', () => {
     const prompt = buildFailurePrompt(report({ logExcerpt: 'boom' }), context)
     expect(prompt).toMatch(/flaky/i)
   })
+
+  it('requires a deterministic fix to be tested, committed and pushed', () => {
+    const prompt = buildFailurePrompt(report({ logExcerpt: 'boom' }), context)
+    expect(prompt).toMatch(/tests pertinents/i)
+    expect(prompt).toMatch(/commit/i)
+    expect(prompt).toMatch(/push/i)
+    expect(prompt).toMatch(/force-push/i)
+  })
 })

@@ -132,6 +132,22 @@ function previewPill(status: JenkinsWorktreeStatus): PillSpec | null {
   }
 }
 
+function testablePill(status: JenkinsWorktreeStatus): PillSpec | null {
+  if (
+    status.overallStatus !== 'SUCCESS' ||
+    status.previewFreshness?.status !== 'UP_TO_DATE'
+  ) {
+    return null
+  }
+  return {
+    key: 'testable',
+    icon: <CheckCircle2 className={ICON} />,
+    label: 'Testable',
+    tone: TONE.green,
+    tooltip: 'CI réussie et preview à jour avec le dernier commit de la PR',
+  }
+}
+
 function Pill({ spec }: { spec: PillSpec }) {
   return (
     <Tooltip>
@@ -174,11 +190,14 @@ export function WorktreeCiStatus({
 
   if (!prId) return null
 
-  const pills = status
-    ? [verdictPill(status.overallStatus), previewPill(status)].filter(
-        (p): p is PillSpec => p !== null
-      )
-    : []
+  const ready = status ? testablePill(status) : null
+  const pills = ready
+    ? [ready]
+    : status
+      ? [verdictPill(status.overallStatus), previewPill(status)].filter(
+          (p): p is PillSpec => p !== null
+        )
+      : []
 
   if (pills.length > 0) {
     const note = status?.verdictSource === 'github' ? GITHUB_SOURCE_NOTE : ''

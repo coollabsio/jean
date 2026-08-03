@@ -206,6 +206,7 @@ import {
   type WorktreePollingInfo,
 } from '@/services/git-status'
 import { useJenkinsStatusEvents } from '@/services/jenkins'
+import { useAutomaticJenkinsRecovery } from '@/components/jenkins/useAutomaticJenkinsRecovery'
 import { useNotificationPermission } from '@/hooks/useNotificationPermission'
 import { useJenkinsFocusRefresh } from '@/hooks/useJenkinsFocusRefresh'
 import {
@@ -337,8 +338,7 @@ export function MainWindow() {
     return {
       worktreeId: worktree.id,
       worktreePath: worktree.path,
-      baseBranch:
-        worktree.base_branch ?? project.default_branch ?? 'main',
+      baseBranch: worktree.base_branch ?? project.default_branch ?? 'main',
       prNumber: worktree.pr_number,
       prUrl: worktree.pr_url,
     }
@@ -414,6 +414,9 @@ export function MainWindow() {
 
   // Listen for Jenkins status updates pushed from the backend
   useJenkinsStatusEvents()
+
+  // New Jenkins failures are handed to the worktree's agent automatically.
+  useAutomaticJenkinsRecovery()
 
   // Resolve the OS notification permission once at startup so the poller's
   // native notifications are not silently dropped (notif-diagnostic).

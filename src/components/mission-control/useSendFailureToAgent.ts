@@ -33,6 +33,7 @@ import { resolveBackend } from '@/lib/model-utils'
 import type { WorktreeSessions } from '@/types/chat'
 import type { JenkinsFailureReport } from '@/types/jenkins'
 import type { Project, Worktree } from '@/types/projects'
+import { selectRecoverySessionId } from '@/components/jenkins/automatic-recovery'
 
 /** Log lines kept in the prompt — enough for a stack trace, not a whole build. */
 const PROMPT_LOG_LINES = 80
@@ -99,8 +100,10 @@ ${tests}${log}
 
 1. Analyse le log et les tests en échec ci-dessus — ils viennent du build Jenkins, tu n'as rien à récupérer.
 2. Localise la cause dans le code du worktree courant.
-3. Si c'est un vrai bug ou une erreur de compilation : corrige-le.
-4. Si c'est un test instable (flaky) ou un problème d'infra CI : dis-le explicitement et propose la fiabilisation, ne bricole pas le test pour le faire passer.
+3. Si c'est un vrai bug ou une erreur de compilation : corrige-le, puis lance les tests pertinents.
+4. Si les tests passent, crée un commit clair et pousse-le sur la branche courante afin de relancer la CI.
+5. N'utilise jamais force-push et ne pousse jamais sur main/master. Si la branche distante a avancé de manière incompatible, arrête-toi et explique le blocage.
+6. Si c'est un test instable (flaky) ou un problème d'infra CI : dis-le explicitement et propose la fiabilisation, ne bricole pas le test pour le faire passer et ne crée pas de commit vide.
 
 </instructions>`
 }
@@ -121,8 +124,17 @@ export function useSendFailureToAgent() {
       worktree: Worktree
       prId: string
       report: JenkinsFailureReport
+      navigate?: boolean
+      reuseMostRecent?: boolean
     }) => {
-      const { project, worktree, prId, report } = params
+      const {
+        project,
+        worktree,
+        prId,
+        report,
+        navigate = true,
+        reuseMostRecent = false,
+      } = params
       const prompt = buildFailurePrompt(report, {
         branch: worktree.branch,
         prId,
@@ -172,13 +184,15 @@ export function useSendFailureToAgent() {
           aiLanguage: preferences?.ai_language,
         })
 
-        // Navigate last: the message is already in flight, so the chat opens
-        // with the run started (and Mission Control closes on the way).
-        useUIStore.getState().setMissionControlOpen(false)
-        useProjectsStore.getState().selectProject(project.id)
-        useProjectsStore.getState().expandProject(project.id)
-        useProjectsStore.getState().selectWorktree(worktree.id)
-        setActiveWorktree(worktree.id, worktree.path)
+        if (navigate) {
+          // Navigate last: the message is already in flight, so the chat opens
+          // with the run started (and Mission Control closes on the way).
+          useUIStore.getState().setMissionControlOpen(false)
+          useProjectsStore.getState().selectProject(project.id)
+          useProjectsStore.getState().expandProject(project.id)
+          useProjectsStore.getState().selectWorktree(worktree.id)
+          setActiveWorktree(worktree.id, worktree.path)
+        }
       }
 
       try {
@@ -194,7 +208,23 @@ export function useSendFailureToAgent() {
           })
           .catch(() => null)
 
-        // Reuse a blank session rather than piling onto a conversation.
+        if (reuseMostRecent) {
+          const activeId = useChatStore.getState().getActiveSession(worktree.id)
+          const targetId = selectRecoverySessionId(
+            activeId,
+            (existing?.sessions ?? []).map(session => ({
+              id: session.id,
+              updatedAt: session.updated_at,
+              archived: Boolean(session.archived_at),
+            }))
+          )
+          if (targetId) {
+            send(targetId)
+            return
+          }
+        }
+
+        // Manual action keeps its historical behavior: reuse a blank session.
         const empty = existing?.sessions?.find(
           s => !s.archived_at && !s.message_count
         )

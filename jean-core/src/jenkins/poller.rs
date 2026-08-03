@@ -275,20 +275,26 @@ fn track_preview_freshness(
         .preview_freshness
         .insert(key, freshness.status.clone());
 
-    // Only a real STALE/DOWN → UP_TO_DATE flip notifies: the first observation
-    // is a baseline (same anti-spam rule as build transitions).
+    // Only a real known-not-ready → UP_TO_DATE flip notifies: the first
+    // observation is a baseline (same anti-spam rule as build transitions).
     if freshness.status != "UP_TO_DATE" {
         return;
     }
-    if !matches!(previous.as_deref(), Some("STALE" | "DOWN")) {
+    if status.overall_status != STATUS_SUCCESS {
+        return;
+    }
+    if previous
+        .as_deref()
+        .is_none_or(|value| value == "UP_TO_DATE")
+    {
         return;
     }
 
-    log::info!("Jenkins notification (PR #{pr_id}): preview up to date");
+    log::info!("Jenkins notification (PR #{pr_id}): testable");
     notify_desktop(
         app,
-        format!("🌐 Preview à jour — PR #{pr_id}"),
-        "La preview sert maintenant le dernier commit de la PR".to_string(),
+        format!("✅ PR #{pr_id} testable"),
+        "CI verte et preview à jour sur le dernier commit".to_string(),
     );
 }
 
