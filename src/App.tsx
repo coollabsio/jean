@@ -105,6 +105,7 @@ import {
 } from './lib/remote-connections'
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
+import { dismissTransientUi } from './lib/dismiss-transient-ui'
 
 interface AutoFixStoppedEvent {
   projectId: string
@@ -842,10 +843,17 @@ function App() {
 
   // Browser mode: only open WebSocket after preload + listener registration.
   // This lets us replay buffered server events before live events start arriving.
+  // Native remote clients keep the shell and show RemoteConnectionRecovery —
+  // dismiss open overlays so they cannot trap pointer events (issue #623).
+  // Pure web-access reloads so in-memory UI state is rebuilt cleanly.
   useEffect(() => {
-    if (!webBackend || isNativeApp()) return
+    if (!webBackend) return
 
     return onEstablishedWsDisconnect(() => {
+      if (isNativeApp()) {
+        dismissTransientUi()
+        return
+      }
       logger.info('WebSocket disconnected, reloading web app')
       captureWebReloadState()
       window.location.reload()
