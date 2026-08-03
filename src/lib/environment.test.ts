@@ -78,6 +78,26 @@ describe('environment detection', () => {
     expect(canOpenInEditor()).toBe(true)
   })
 
+  it('prefers host-native open over local ssh:// remap when remote allows it', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke: vi.fn() },
+    })
+    const remote = addRemoteConnection({
+      name: 'WSL Jean',
+      url: 'http://127.0.0.1:3456',
+      token: 'test-token',
+    })
+    selectConnection(remote.id)
+    setNativeOpenAllowed(true)
+
+    expect(isLocalBackend()).toBe(false)
+    expect(canOpenNativeApps()).toBe(true)
+    // ssh:// local remap is disabled when the backend can open apps itself
+    expect(canOpenRemoteEditorLocally()).toBe(false)
+    expect(canOpenInEditor()).toBe(true)
+  })
+
   it('treats WebSocket connection as browser backend', () => {
     setWsConnected(true)
 
