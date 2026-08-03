@@ -25,8 +25,8 @@ use crate::projects::storage::load_projects_data;
 use crate::projects::types::Worktree;
 use crate::projects::{
     assign_clickup_task_to_me, checkout_pr, create_worktree, get_clickup_me, get_clickup_task,
-    load_clickup_config, merge_github_pr, parse_clickup_task_id_from_branch, resolve_clickup_token,
-    update_clickup_task_status, ClickUpTask,
+    load_clickup_config, merge_github_pr, parse_clickup_task_id_from_branch,
+    prepare_github_pr_for_merge, resolve_clickup_token, update_clickup_task_status, ClickUpTask,
 };
 
 /// ClickUp statuses that mark a ticket ready to pick up for review/merge.
@@ -913,6 +913,15 @@ pub async fn finish_ai_pipeline_pr(
     project_id: String,
     task_id: Option<String>,
 ) -> Result<FinishResult, String> {
+    log::info!("[FinishPipeline] start project={project_id} task={task_id:?} path={worktree_path}");
+
+    // Prepare GitHub before mutating ClickUp. Draft PRs are marked ready first,
+    // so a preparation failure cannot strand the task in TO DEPLOY.
+    if let Err(error) = prepare_github_pr_for_merge(&app, &worktree_path) {
+        log::warn!("[FinishPipeline] preflight failed: {error}");
+        return Err(error);
+    }
+
     // 1. ClickUp → TO DEPLOY (skipped with a message when no task is linked).
     let clickup = match &task_id {
         Some(id) => match update_clickup_task_status(
@@ -934,6 +943,20 @@ pub async fn finish_ai_pipeline_pr(
         Ok(r) => StepResult::ok(r.message),
         Err(e) => StepResult::fail(e),
     };
+
+    if clickup.ok && merge.ok {
+        log::info!(
+            "[FinishPipeline] completed: {} / {}",
+            clickup.message,
+            merge.message
+        );
+    } else {
+        log::warn!(
+            "[FinishPipeline] partial failure: {} / {}",
+            clickup.message,
+            merge.message
+        );
+    }
 
     Ok(FinishResult { clickup, merge })
 }
