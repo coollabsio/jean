@@ -28,6 +28,7 @@ export interface PersistedTerminalInstance {
   command_args?: string[] | null
   label: string
   kind?: 'panel' | 'session'
+  session_id?: string | null
 }
 
 export interface BrowserTabPersisted {

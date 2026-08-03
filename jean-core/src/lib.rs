@@ -2834,6 +2834,8 @@ pub struct TerminalInstancePersisted {
     pub label: String,
     #[serde(default)]
     pub kind: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

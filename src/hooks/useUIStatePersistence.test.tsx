@@ -335,6 +335,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
               command_args: null,
               label: 'Shell',
               kind: 'panel',
+              session_id: null,
             },
             {
               id: 'persisted-2',
@@ -520,6 +521,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
               command_args: null,
               label: 'Shell',
               kind: 'panel',
+              session_id: null,
             },
             {
               id: 'fallback-session',
@@ -527,6 +529,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
               command_args: ['resume', 'abc123'],
               label: 'Codex',
               kind: 'session',
+              session_id: 'session-1',
             },
           ],
         },
@@ -576,6 +579,10 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     expect(terminalState.activeTerminalIds['worktree-1']).toBe('fallback-panel')
     expect(terminalState.runningTerminals.has('fallback-panel')).toBe(true)
     expect(terminalState.runningTerminals.has('fallback-session')).toBe(true)
+    expect(terminalState.terminals['worktree-1']?.[0]?.sessionId).toBeUndefined()
+    expect(terminalState.terminals['worktree-1']?.[1]?.sessionId).toBe(
+      'session-1'
+    )
     expect(terminalState.terminalPanelOpen['worktree-1']).toBe(true)
     expect(terminalState.terminalVisible).toBe(true)
     expect(useUIStore.getState().sessionTerminalIds['session-1']).toBe(

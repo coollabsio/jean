@@ -173,6 +173,7 @@ export function useUIStatePersistence() {
                 command_args: terminal.commandArgs ?? null,
                 label: terminal.label,
                 kind: terminal.kind ?? 'panel',
+                session_id: terminal.sessionId,
               })),
             ])
             .filter(([, list]) => (list as unknown[]).length > 0)
@@ -723,6 +724,7 @@ export function useUIStatePersistence() {
             commandArgs: terminal.command_args ?? null,
             label: terminal.label,
             kind: terminal.kind ?? 'panel',
+            sessionId: terminal.session_id ?? undefined,
           })) satisfies TerminalInstance[]
 
         if (liveList.length === 0) {

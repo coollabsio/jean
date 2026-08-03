@@ -44,7 +44,7 @@ pub async fn start_terminal(
     command: Option<String>,
     command_args: Option<Vec<String>>,
     // Jean session id this terminal backs (when opened as a native CLI session).
-    // Used to wire Claude Code "needs attention" hooks; None for plain shells.
+    // Used to wire native CLI attention hooks; None for plain shells.
     session_id: Option<String>,
 ) -> Result<(), String> {
     log::trace!("start_terminal called for terminal: {terminal_id}");
@@ -61,18 +61,29 @@ pub async fn start_terminal(
         return Err("Terminal already exists".to_string());
     }
 
-    // For a native-terminal Claude session, inject Claude Code hooks so Jean can
-    // detect turn completion / attention requests (parity with Jean Chat).
+    // Inject the lifecycle integration supported by the launched native CLI.
     let (command_args, signal) = match (command.as_deref(), session_id.as_deref()) {
-        (Some(cmd), Some(sid)) => {
+        (Some(command), Some(session_id)) => {
             let had_args = command_args.is_some();
-            let base = command_args.unwrap_or_default();
-            let (args, path) = super::hooks::inject_claude_hooks(&app, sid, cmd, base);
-            match path {
-                Some(p) => (Some(args), Some((sid.to_string(), p))),
-                // Not injected: restore original Option semantics so spawn_terminal
-                // still distinguishes "shell-wrapped" from "direct binary".
-                None => (if had_args { Some(args) } else { None }, None),
+            let args = command_args.unwrap_or_default();
+            if super::hooks::is_claude_command(command) {
+                let (args, path) =
+                    super::hooks::inject_claude_hooks(&app, session_id, command, args);
+                let args = if path.is_some() || had_args {
+                    Some(args)
+                } else {
+                    None
+                };
+                (args, path.map(|path| (session_id.to_string(), path, false)))
+            } else {
+                let (args, path) =
+                    super::attention::inject_codex_notify(&app, session_id, command, args);
+                let args = if path.is_some() || had_args {
+                    Some(args)
+                } else {
+                    None
+                };
+                (args, path.map(|path| (session_id.to_string(), path, true)))
             }
         }
         _ => (command_args, None),
@@ -87,9 +98,12 @@ pub async fn start_terminal(
         command,
         command_args,
     )?;
-
-    if let Some((sid, path)) = signal {
-        super::hooks::spawn_signal_tailer(app, sid, terminal_id, path);
+    if let Some((session_id, signal_path, is_codex)) = signal {
+        if is_codex {
+            super::attention::spawn_signal_tailer(app, session_id, terminal_id, signal_path);
+        } else {
+            super::hooks::spawn_signal_tailer(app, session_id, terminal_id, signal_path);
+        }
     }
     Ok(())
 }
@@ -188,7 +202,9 @@ pub async fn get_ports(worktree_path: String) -> Vec<crate::projects::types::Por
 
 /// Write data to a terminal (stdin)
 pub async fn terminal_write(terminal_id: String, data: String) -> Result<(), String> {
-    write_to_terminal(&terminal_id, &data)
+    write_to_terminal(&terminal_id, &data)?;
+    super::attention::clear_attention_on_input(&terminal_id, &data);
+    Ok(())
 }
 
 /// Resize a terminal

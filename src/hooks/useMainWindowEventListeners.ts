@@ -1059,6 +1059,16 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
+        listen<{ sessionId: string }>('terminal:working', event => {
+          const sessionId = event.payload?.sessionId
+          if (sessionId) useChatStore.getState().addSendingSession(sessionId)
+        }),
+
+        listen<{ sessionId: string }>('terminal:attention', event => {
+          const sessionId = event.payload?.sessionId
+          if (sessionId) useChatStore.getState().removeSendingSession(sessionId)
+        }),
+
         listenLocal('menu-about', async () => {
           logger.debug('About menu event received')
           if (!isNativeApp()) return
