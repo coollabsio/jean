@@ -4777,13 +4777,14 @@ mod tests {
 
     #[test]
     fn plan_mode_allows_terminal_create() {
+        let cwd = std::env::temp_dir();
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 10,
             "method": "terminal/create",
             "params": {
                 "command": "echo research-ok",
-                "cwd": "/tmp",
+                "cwd": cwd.to_string_lossy(),
             },
         });
         let mut output = Vec::new();

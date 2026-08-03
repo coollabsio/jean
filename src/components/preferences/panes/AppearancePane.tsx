@@ -17,7 +17,6 @@ import {
   chatFontOptions,
   syntaxThemeDarkOptions,
   syntaxThemeLightOptions,
-  fileEditModeOptions,
   terminalBackgroundOptions,
   FONT_SIZE_DEFAULT,
   ZOOM_LEVEL_DEFAULT,
@@ -27,7 +26,6 @@ import {
   type UIFont,
   type ChatFont,
   type SyntaxTheme,
-  type FileEditMode,
   type TerminalBackgroundMode,
 } from '@/types/preferences'
 import { getModifierSymbol, isClientMacOS } from '@/lib/platform'
@@ -231,13 +229,6 @@ export const AppearancePane: React.FC = () => {
     // Resync the field to the persisted value (discards invalid drafts).
     setCustomColorDraft(null)
   }, [customColorDraft, patchPreferences])
-
-  const handleFileEditModeChange = useCallback(
-    (value: FileEditMode) => {
-      patchPreferences.mutate({ file_edit_mode: value })
-    },
-    [patchPreferences]
-  )
 
   const handleVibrancyChange = useCallback(
     async (checked: boolean) => {
@@ -546,8 +537,7 @@ export const AppearancePane: React.FC = () => {
             <p className="text-xs text-muted-foreground">
               You can change the zoom level with {modKey} +/- and reset to the
               default zoom with {modKey}+0. On external monitors, prefer 100%
-              for the sharpest text; non-100% zoom can look soft on 1×
-              displays.
+              for the sharpest text; non-100% zoom can look soft on 1× displays.
             </p>
           </ScalingField>
 
@@ -567,37 +557,6 @@ export const AppearancePane: React.FC = () => {
               disabled={syncZoomLevels || patchPreferences.isPending}
             />
           </ScalingField>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection
-        title="File Viewer"
-        anchorId="pref-appearance-section-file-viewer"
-      >
-        <div className="space-y-4">
-          <InlineField
-            label="Edit files in"
-            description="How to edit files when viewing them in Jean"
-          >
-            <Select
-              value={preferences?.file_edit_mode ?? 'inline'}
-              onValueChange={value =>
-                handleFileEditModeChange(value as FileEditMode)
-              }
-              disabled={patchPreferences.isPending}
-            >
-              <SelectTrigger className="w-full sm:w-80">
-                <SelectValue placeholder="Select mode" />
-              </SelectTrigger>
-              <SelectContent>
-                {fileEditModeOptions.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </InlineField>
         </div>
       </SettingsSection>
     </div>

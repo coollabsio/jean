@@ -174,7 +174,7 @@ export function withAdaptiveEffortOption<
 >(
   levels: T[],
   model?: string | null
-): Array<T | typeof ADAPTIVE_EFFORT_OPTION> {
+): (T | typeof ADAPTIVE_EFFORT_OPTION)[] {
   if (!isGeminiModel(model)) return levels
   if (levels.some(level => level.value === 'adaptive')) return levels
   return [ADAPTIVE_EFFORT_OPTION, ...levels]

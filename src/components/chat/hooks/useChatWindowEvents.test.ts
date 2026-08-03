@@ -179,7 +179,9 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
 
   it('re-asserts focus inside an open dialog without focusing chat input', () => {
     const params = renderUseChatWindowEvents()
-    const chatFocusSpy = vi.spyOn(params.inputRef.current!, 'focus')
+    const chatInput = params.inputRef.current
+    if (!chatInput) throw new Error('expected chat input ref')
+    const chatFocusSpy = vi.spyOn(chatInput, 'focus')
     chatFocusSpy.mockClear()
 
     const dialog = document.createElement('div')

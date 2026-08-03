@@ -92,7 +92,8 @@ describe('buildMcpConfigJson', () => {
       'claude'
     )
     expect(json).toBeDefined()
-    const parsed = JSON.parse(json!)
+    if (!json) throw new Error('expected MCP config JSON')
+    const parsed = JSON.parse(json)
     expect(Object.keys(parsed.mcpServers)).toEqual(['jean'])
     expect(parsed.mcpServers.jean.command).toBe('jean')
   })

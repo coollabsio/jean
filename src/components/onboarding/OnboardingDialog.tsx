@@ -9,6 +9,7 @@
 const dbg = (...args: unknown[]) => console.debug('[ONBOARDING]', ...args)
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { loginArgsForBackend } from '@/lib/cli-auth'
 import {
   Dialog,
   DialogContent,
@@ -2106,7 +2107,7 @@ function OnboardingDialogContent() {
     codexPathSelected && codexPathDetection.data?.path
       ? codexPathDetection.data.path
       : (codexSetup.status?.path ?? '')
-  const codexLoginArgs = ['login']
+  const codexLoginArgs = loginArgsForBackend('codex')
   const opencodeLoginCommand =
     opencodePathSelected && opencodePathDetection.data?.path
       ? opencodePathDetection.data.path

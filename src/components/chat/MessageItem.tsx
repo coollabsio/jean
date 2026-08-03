@@ -297,7 +297,8 @@ export const MessageItem = memo(function MessageItem({
     if (message.role !== 'assistant' || !getMessages) return null
     const msgs = getMessages()
     for (let i = messageIndex - 1; i >= 0; i--) {
-      if (msgs[i]?.role === 'user') return msgs[i]!.id
+      const candidate = msgs[i]
+      if (candidate?.role === 'user') return candidate.id
     }
     return null
   }, [message.role, getMessages, messageIndex])
@@ -819,7 +820,7 @@ export const MessageItem = memo(function MessageItem({
                   {!fallbackPrePlanText && durationBadge}
                 </>
               ) : message.role === 'user' ? (
-                <div className="whitespace-pre-wrap break-words">
+                <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                   {displayContent}
                 </div>
               ) : (
@@ -892,8 +893,8 @@ export const MessageItem = memo(function MessageItem({
       )}
     >
       {message.role === 'user' ? (
-        <div className="group flex max-w-[85%] flex-col items-end gap-1 sm:max-w-[70%]">
-          <div className="min-w-0 break-words rounded-lg border border-border bg-muted/20 px-3 py-2 text-foreground">
+        <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
+          <div className="min-w-0 max-w-full break-words [overflow-wrap:anywhere] rounded-lg border border-border bg-muted/20 px-3 py-2 text-foreground">
             {messageBoxContent}
             {message.model && (
               <div className="mt-1.5">

@@ -10,7 +10,12 @@ vi.mock('./transport', () => ({
   invoke: invokeMock,
 }))
 
-const { copyToClipboard, copyHtmlToClipboard } = await import('./clipboard')
+const {
+  copyToClipboard,
+  copyHtmlToClipboard,
+  normalizeClipboardForTerminal,
+  readFromClipboard,
+} = await import('./clipboard')
 
 function setSecureContext(secure: boolean) {
   Object.defineProperty(window, 'isSecureContext', {
@@ -99,5 +104,51 @@ describe('copyHtmlToClipboard', () => {
 
     expect(write).not.toHaveBeenCalled()
     expect(document.execCommand).toHaveBeenCalledWith('copy')
+  })
+})
+
+describe('readFromClipboard', () => {
+  beforeEach(() => {
+    invokeMock.mockReset()
+    invokeMock.mockResolvedValue('')
+    setSecureContext(true)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    })
+  })
+
+  it('uses navigator.clipboard.readText on secure contexts', async () => {
+    const readText = vi.fn().mockResolvedValue('pasted text')
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { readText },
+    })
+
+    await expect(readFromClipboard()).resolves.toBe('pasted text')
+    expect(readText).toHaveBeenCalled()
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to backend clipboard when browser read is unavailable', async () => {
+    invokeMock.mockResolvedValue('host paste')
+
+    await expect(readFromClipboard()).resolves.toBe('host paste')
+    expect(invokeMock).toHaveBeenCalledWith('read_clipboard_text')
+  })
+
+  it('explains HTTPS requirement when insecure paste fully fails', async () => {
+    setSecureContext(false)
+    invokeMock.mockRejectedValue(
+      new Error('Native clipboard access is only available in the desktop app')
+    )
+
+    await expect(readFromClipboard()).rejects.toThrow(/HTTPS|localhost/i)
+  })
+})
+
+describe('normalizeClipboardForTerminal', () => {
+  it('converts CRLF and CR to LF', () => {
+    expect(normalizeClipboardForTerminal('a\r\nb\rc')).toBe('a\nb\nc')
   })
 })

@@ -52,7 +52,7 @@ vi.mock('@/lib/transport', () => ({
 }))
 
 vi.mock('@/lib/environment', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  ...((await importOriginal()) as object),
   isNativeApp: () => mockEnvironment.native,
 }))
 

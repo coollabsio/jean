@@ -1032,13 +1032,14 @@ export const useChatStore = create<ChatUIState>()(
               return state
             }
 
-            const nextOverrides = { ...state.sessionStatusOverrides }
+            let nextOverrides = { ...state.sessionStatusOverrides }
             let reviewingSessions = state.reviewingSessions
             let waitingForInputSessionIds = state.waitingForInputSessionIds
             let pendingPlanMessageIds = state.pendingPlanMessageIds
 
             if (status === null) {
-              delete nextOverrides[sessionId]
+              const { [sessionId]: _removed, ...restOverrides } = nextOverrides
+              nextOverrides = restOverrides
             } else {
               nextOverrides[sessionId] = status
             }
@@ -3179,9 +3180,11 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _reviewing, ...reviewingSessions } =
               state.reviewingSessions
-            const nextStatusOverrides = { ...state.sessionStatusOverrides }
+            let nextStatusOverrides = { ...state.sessionStatusOverrides }
             if (nextStatusOverrides[sessionId] === 'review') {
-              delete nextStatusOverrides[sessionId]
+              const { [sessionId]: _status, ...restStatusOverrides } =
+                nextStatusOverrides
+              nextStatusOverrides = restStatusOverrides
             }
             const { [sessionId]: _sp, ...streamingPlanApprovals } =
               state.streamingPlanApprovals

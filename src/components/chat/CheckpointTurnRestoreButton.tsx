@@ -110,7 +110,12 @@ export const CheckpointTurnRestoreButton = memo(
 
     const { data: checkpoints = [], isFetched } = useQuery({
       queryKey: checkpointQueryKeys.worktree(worktreeId ?? ''),
-      queryFn: () => listAiCheckpoints(worktreeId!),
+      queryFn: () => {
+        if (!worktreeId) {
+          throw new Error('worktreeId is required to list AI checkpoints')
+        }
+        return listAiCheckpoints(worktreeId)
+      },
       enabled: !!worktreeId,
       staleTime: 10_000,
     })

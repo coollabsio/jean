@@ -61,6 +61,52 @@ export async function copyToClipboard(text: string): Promise<void> {
 }
 
 /**
+ * Read text from the clipboard.
+ *
+ * Fallback chain:
+ * 1. Native app → Tauri clipboard plugin
+ * 2. Secure context → navigator.clipboard.readText()
+ * 3. Same-machine backend clipboard (desktop host OS)
+ */
+export async function readFromClipboard(): Promise<string> {
+  if (isNativeApp()) {
+    const { readText } = await import('@tauri-apps/plugin-clipboard-manager')
+    const text = await readText()
+    return typeof text === 'string' ? text : ''
+  }
+
+  const insecure = isInsecureWebContext()
+
+  if (!insecure && navigator.clipboard?.readText) {
+    try {
+      const text = await navigator.clipboard.readText()
+      return typeof text === 'string' ? text : ''
+    } catch {
+      // Permission denied or empty — try host fallback below.
+    }
+  }
+
+  try {
+    const text = await invoke<string>('read_clipboard_text')
+    return typeof text === 'string' ? text : ''
+  } catch (error) {
+    if (insecure) {
+      throw new Error(
+        'Paste failed: browsers block clipboard read on plain HTTP except localhost. Open Jean via HTTPS (Tailscale Serve or a reverse proxy), or use http://localhost on this machine.'
+      )
+    }
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+/**
+ * Normalize clipboard text for PTY paste (CRLF/CR → LF).
+ */
+export function normalizeClipboardForTerminal(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+/**
  * Copy rich content (HTML + plain text) to clipboard.
  * Falls back to plain text copy if ClipboardItem API is unavailable.
  */

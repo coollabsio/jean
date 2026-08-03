@@ -432,7 +432,9 @@ export function useScrollManagement({
   // useEffectEvent reads the latest activeSessionId / contentReady /
   // applySessionScrollState without re-subscribing the ResizeObserver, and
   // without render-time ref writes (react-hooks/refs).
-  const onViewportSizeChange = useEffectEvent(() => {
+  // Named function expression so the pending-restore retry can re-enter without
+  // reading the const binding before it is initialized (react-hooks/immutability).
+  const onViewportSizeChange = useEffectEvent(function onViewportSizeChange() {
     const viewport = scrollViewportRef.current
     if (!viewport) return
 

@@ -56,7 +56,9 @@ import { CheckpointRestoreDialog } from './CheckpointRestoreDialog'
 import type { AiCheckpoint } from '@/types/checkpoints'
 import type { GitDiff } from '@/types/git-diff'
 
+// eslint-disable-next-line @typescript-eslint/no-empty-function
 const NOOP_LINE_SELECTED = (_range: SelectedLineRange | null) => {}
+// eslint-disable-next-line @typescript-eslint/no-empty-function
 const NOOP_REMOVE_COMMENT = (_id: string) => {}
 const EMPTY_ANNOTATIONS: never[] = []
 

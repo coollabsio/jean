@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useTerminal } from '@/hooks/useTerminal'
+import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 
 interface CliVersionInfo {
@@ -415,24 +415,14 @@ export function AuthLoginState({
   onSkip,
 }: AuthLoginStateProps) {
   const actionLabel = action === 'install' ? 'Installation' : 'Login'
-  const observerRef = useRef<ResizeObserver | null>(null)
   const completionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   )
   const completionStartedRef = useRef(false)
-  const initialized = useRef(false)
   const [exitStatus, setExitStatus] = useState<{
     exitCode: number | null
     signal: string | null
   } | null>(null)
-
-  const { initTerminal, fit } = useTerminal({
-    terminalId,
-    worktreeId: 'cli-login',
-    worktreePath: '/tmp',
-    command,
-    commandArgs,
-  })
 
   const handleCompleteOnce = useCallback(() => {
     if (completionStartedRef.current) return
@@ -443,39 +433,6 @@ export function AuthLoginState({
     }
     onComplete()
   }, [onComplete])
-
-  const containerCallbackRef = useCallback(
-    (container: HTMLDivElement | null) => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-        observerRef.current = null
-      }
-
-      if (!container) return
-
-      const observer = new ResizeObserver(entries => {
-        const entry = entries[0]
-        if (
-          !entry ||
-          entry.contentRect.width === 0 ||
-          entry.contentRect.height === 0
-        )
-          return
-
-        if (!initialized.current) {
-          initialized.current = true
-          initTerminal(container)
-          return
-        }
-
-        fit()
-      })
-
-      observer.observe(container)
-      observerRef.current = observer
-    },
-    [initTerminal, fit]
-  )
 
   useEffect(() => {
     dbg(
@@ -522,12 +479,9 @@ export function AuthLoginState({
     setExitStatus(null)
   }, [terminalId])
 
-  // Cleanup observer and terminal on unmount
+  // Cleanup terminal on unmount
   useEffect(() => {
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-      }
       if (completionTimeoutRef.current) {
         clearTimeout(completionTimeoutRef.current)
       }
@@ -551,9 +505,12 @@ export function AuthLoginState({
         </p>
       </div>
 
-      <div className="h-[300px] w-full overflow-hidden rounded-md border border-border bg-background p-3 sm:p-4">
-        <div ref={containerCallbackRef} className="h-full w-full" />
-      </div>
+      <StandaloneTerminalSurface
+        terminalId={terminalId}
+        command={command}
+        commandArgs={commandArgs}
+        className="h-[min(50dvh,380px)] sm:h-[360px]"
+      />
 
       {exitStatus && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">

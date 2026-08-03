@@ -36,7 +36,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   if (texts.length === 0) return null
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] sm:max-w-[70%] min-w-0 rounded-lg border border-border bg-muted/20 divide-y divide-border/60">
+      <div className="max-w-[85%] min-w-0 sm:max-w-[70%] rounded-lg border border-border bg-muted/20 divide-y divide-border/60">
         {texts.map((text, i) => {
           const imagePaths = extractImagePaths(text)
           const textFilePaths = extractTextFilePaths(text)
@@ -48,7 +48,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
           return (
             <div
               key={i}
-              className="relative group/steered px-3 py-2 text-foreground break-words"
+              className="relative group/steered min-w-0 px-3 py-2 text-foreground break-words [overflow-wrap:anywhere]"
             >
               {onCopyText && (
                 <Tooltip>
@@ -137,7 +137,9 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
               )}
 
               {displayText && (
-                <div className="whitespace-pre-wrap">{displayText}</div>
+                <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                  {displayText}
+                </div>
               )}
             </div>
           )

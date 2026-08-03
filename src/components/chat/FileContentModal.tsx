@@ -137,39 +137,34 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
       ? (preferences?.syntax_theme_dark ?? 'vitesse-black')
       : (preferences?.syntax_theme_light ?? 'github-light')
 
-  // Get file edit mode from preferences (default: Jean CodeMirror inline)
-  const fileEditMode = preferences?.file_edit_mode ?? 'inline'
-  // Inline when preferred, or when no external editor is available (web/mobile)
-  const preferInlineEdit = fileEditMode === 'inline' || !canOpenInEditor()
+  // Always use Jean's CodeMirror editor for in-app file viewing — same on
+  // desktop and mobile. External editors stay available via "Open in Editor".
 
-  const loadFileContent = useCallback(
-    async (path: string, openInEditMode: boolean) => {
-      setIsLoading(true)
-      setError(null)
-      setContent(null)
-      setEditedContent(null)
-      setIsEditing(false)
+  const loadFileContent = useCallback(async (path: string) => {
+    setIsLoading(true)
+    setError(null)
+    setContent(null)
+    setEditedContent(null)
+    setIsEditing(false)
 
-      try {
-        const fileContent = await invoke<string>('read_file_content', { path })
-        setContent(fileContent)
-        setEditedContent(fileContent)
-        // Open in edit mode by default for inline editing
-        setIsEditing(openInEditMode)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    []
-  )
+    try {
+      const fileContent = await invoke<string>('read_file_content', { path })
+      setContent(fileContent)
+      setEditedContent(fileContent)
+      // Open in edit mode by default (matches mobile file browser)
+      setIsEditing(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     setImageError(false)
     setImageLoaded(false)
     if (filePath && !isImageFile(filePath)) {
-      void loadFileContent(filePath, preferInlineEdit)
+      void loadFileContent(filePath)
     } else {
       // Reset state when modal closes or for image files
       setContent(null)
@@ -178,7 +173,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
       setIsLoading(false)
       setIsEditing(false)
     }
-  }, [filePath, loadFileContent, preferInlineEdit])
+  }, [filePath, loadFileContent])
 
   const filename = filePath ? getFilename(filePath) : filePath
 
@@ -271,45 +266,37 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
             {/* Action buttons - only for non-image files */}
             {!isImage && content !== null && (
               <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-                {preferInlineEdit ? (
+                {isEditing ? (
                   <>
-                    {isEditing ? (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleToggleEdit}
-                          disabled={isSaving}
-                        >
-                          <Eye className="h-4 w-4 sm:mr-1" />
-                          <span className="hidden sm:inline">View</span>
-                        </Button>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={handleSave}
-                          disabled={!hasChanges || isSaving}
-                        >
-                          {isSaving ? (
-                            <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
-                          ) : (
-                            <Save className="h-4 w-4 sm:mr-1" />
-                          )}
-                          <span className="hidden sm:inline">Save</span>
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleToggleEdit}
-                      >
-                        <Pencil className="h-4 w-4 sm:mr-1" />
-                        <span className="hidden sm:inline">Edit</span>
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleToggleEdit}
+                      disabled={isSaving}
+                    >
+                      <Eye className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">View</span>
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={handleSave}
+                      disabled={!hasChanges || isSaving}
+                    >
+                      {isSaving ? (
+                        <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4 sm:mr-1" />
+                      )}
+                      <span className="hidden sm:inline">Save</span>
+                    </Button>
                   </>
-                ) : null}
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={handleToggleEdit}>
+                    <Pencil className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Edit</span>
+                  </Button>
+                )}
                 {canOpenInEditor() && (
                   <Button
                     variant="ghost"
@@ -347,12 +334,8 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
           </div>
         )}
 
-        {/* CodeMirror editor (default for inline edit mode) */}
-        {!isLoading &&
-        !error &&
-        isEditing &&
-        preferInlineEdit &&
-        content !== null ? (
+        {/* CodeMirror editor (default — same on desktop and mobile) */}
+        {!isLoading && !error && isEditing && content !== null ? (
           <div className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0 min-w-0">
             <Suspense
               fallback={

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   isCliAuthError,
+  isCodexBubblewrapError,
   isLoginSlashCommand,
   loginArgsForBackend,
   rewriteCliAuthErrorMessage,
+  rewriteCodexBubblewrapErrorMessage,
 } from './cli-auth'
 
 describe('isCliAuthError', () => {
@@ -56,8 +58,32 @@ describe('loginArgsForBackend', () => {
     expect(loginArgsForBackend('claude', false)).toEqual(['login'])
   })
 
-  it('uses expected args for codex and opencode', () => {
-    expect(loginArgsForBackend('codex')).toEqual(['login'])
+  it('uses device-auth for codex and auth login for opencode', () => {
+    expect(loginArgsForBackend('codex')).toEqual(['login', '--device-auth'])
     expect(loginArgsForBackend('opencode')).toEqual(['auth', 'login'])
+  })
+})
+
+describe('isCodexBubblewrapError', () => {
+  it('detects missing bubblewrap / bwrap sandbox errors', () => {
+    expect(
+      isCodexBubblewrapError(
+        'bubblewrap is unavailable: no system bwrap was found on PATH'
+      )
+    ).toBe(true)
+    expect(
+      isCodexBubblewrapError(
+        'Codex could not find bubblewrap on PATH. Install bubblewrap'
+      )
+    ).toBe(true)
+    expect(isCodexBubblewrapError('network timeout')).toBe(false)
+  })
+})
+
+describe('rewriteCodexBubblewrapErrorMessage', () => {
+  it('suggests installing bubblewrap', () => {
+    const msg = rewriteCodexBubblewrapErrorMessage('bwrap not found')
+    expect(msg.toLowerCase()).toContain('bubblewrap')
+    expect(msg).toContain('sudo apt install bubblewrap')
   })
 })

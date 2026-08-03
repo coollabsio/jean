@@ -6,11 +6,12 @@ import { useUIStore } from '@/store/ui-store'
 import { invoke } from '@/lib/transport'
 import { SingleTerminalView, TerminalView } from './TerminalView'
 
-const { mockInvoke, initTerminal, fit, focus } = vi.hoisted(() => ({
+const { mockInvoke, initTerminal, fit, focus, isNativeApp } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   initTerminal: vi.fn().mockResolvedValue(undefined),
   fit: vi.fn(),
   focus: vi.fn(),
+  isNativeApp: vi.fn(() => false),
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -29,9 +30,19 @@ vi.mock('@/hooks/useTerminalThemeSync', () => ({
   useTerminalBackgroundColor: () => '#000000',
 }))
 
+vi.mock('@/lib/environment', () => ({
+  isNativeApp: () => isNativeApp(),
+}))
+
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => false,
+}))
+
 vi.mock('@/lib/terminal-instances', () => ({
   disposeTerminal: vi.fn(),
   disposePanelWorktreeTerminals: vi.fn(),
+  writeTerminalInput: vi.fn(),
+  focusTerminal: vi.fn(),
 }))
 
 // Native-desktop / viewport gating is toggled per test.
@@ -217,6 +228,38 @@ describe('SingleTerminalView', () => {
     )
 
     await waitFor(() => expect(initTerminal).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows the special-keys bar on web access', async () => {
+    isNativeApp.mockReturnValue(false)
+
+    render(
+      <SingleTerminalView
+        terminalId="terminal-1"
+        worktreeId="worktree-1"
+        worktreePath="/tmp/worktree-1"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId('terminal-extra-keys-bar')).toBeTruthy()
+    )
+  })
+
+  it('hides the special-keys bar on native desktop', () => {
+    isNativeApp.mockReturnValue(true)
+
+    render(
+      <SingleTerminalView
+        terminalId="terminal-1"
+        worktreeId="worktree-1"
+        worktreePath="/tmp/worktree-1"
+        isActive
+      />
+    )
+
+    expect(screen.queryByTestId('terminal-extra-keys-bar')).toBeNull()
   })
 })
 

@@ -13,6 +13,7 @@ import { middleClickClose } from '@/lib/middle-click'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useVisualViewportBottomInset } from '@/hooks/useVisualViewportBottomInset'
 import { isNativeApp } from '@/lib/environment'
 import {
   isPanelTerminal,
@@ -47,6 +48,8 @@ import { cn } from '@/lib/utils'
 import { useTerminalImageDrop } from './hooks/useTerminalImageDrop'
 import { MODAL_TERMINAL_SECONDARY_ROW_CLASS } from './modal-terminal-layout'
 import { TerminalSplitLayout } from './TerminalSplitLayout'
+import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
+import { TerminalArrowGesture } from './TerminalArrowGesture'
 import '@xterm/xterm/css/xterm.css'
 
 const EMPTY_TERMINALS: TerminalInstance[] = []
@@ -126,8 +129,17 @@ export const TerminalTabContent = memo(function TerminalTabContent({
   isCollapsed?: boolean
   isWorktreeActive?: boolean
 }) {
+  const rootRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const terminalBg = useTerminalBackgroundColor()
+  const isMobile = useIsMobile()
+  // Soft-keyboard special keys + arrow gesture: web access always, plus narrow viewports.
+  const showExtraKeys = !isNativeApp() || isMobile
+  const keyboardInset = useVisualViewportBottomInset(
+    rootRef,
+    showExtraKeys && isVisible
+  )
   const { isDraggingImage, dropHandlers } = useTerminalImageDrop(terminal.id)
   const { initTerminal, fit, focus } = useTerminal({
     terminalId: terminal.id,
@@ -186,21 +198,61 @@ export const TerminalTabContent = memo(function TerminalTabContent({
     }
   }, [canAttach, isFocused, focus])
 
+  // Soft keyboard open/close changes our padding → re-fit the emulator.
+  useEffect(() => {
+    if (!canAttach || !initialized.current) return
+    const timeoutId = setTimeout(() => fit(), 50)
+    return () => clearTimeout(timeoutId)
+  }, [keyboardInset, canAttach, fit])
+
   return (
     <div
+      ref={rootRef}
       data-terminal-id={terminal.id}
-      className={cn('relative h-full w-full p-2', !isVisible && 'hidden')}
-      style={{ backgroundColor: terminalBg }}
+      data-keyboard-inset={keyboardInset > 0 ? keyboardInset : undefined}
+      className={cn(
+        'relative flex h-full w-full flex-col',
+        !isVisible && 'hidden'
+      )}
+      style={{
+        backgroundColor: terminalBg,
+        // Lift the extra-keys bar (and shrink the emulator) above the soft keyboard.
+        // box-sizing:border-box is global — padding reduces content box, not outer size.
+        paddingBottom: keyboardInset > 0 ? keyboardInset : undefined,
+      }}
       onDragOver={dropHandlers.onDragOver}
       onDragLeave={dropHandlers.onDragLeave}
       onDrop={dropHandlers.onDrop}
     >
-      <div ref={containerRef} className="h-full w-full overflow-hidden" />
-      {isDraggingImage && (
-        <div className="pointer-events-none absolute inset-2 z-10 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-foreground">
-          <Terminal className="h-5 w-5" aria-hidden />
-          <span>Drop image to insert its path</span>
-        </div>
+      {/* Pad chrome sits above the emulator so long-press arrows never cover text. */}
+      {showExtraKeys && isVisible && (
+        <TerminalArrowGesture
+          terminalId={terminal.id}
+          surfaceRef={surfaceRef}
+          enabled={canAttach}
+        />
+      )}
+      <div
+        ref={surfaceRef}
+        className={cn(
+          'relative min-h-0 flex-1 touch-manipulation p-2',
+          // Avoid iOS callout / accidental selection while using the long-press pad.
+          isMobile && 'select-none [-webkit-touch-callout:none]'
+        )}
+      >
+        <div ref={containerRef} className="h-full w-full overflow-hidden" />
+        {isDraggingImage && (
+          <div className="pointer-events-none absolute inset-2 z-10 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-foreground">
+            <Terminal className="h-5 w-5" aria-hidden />
+            <span>Drop image to insert its path</span>
+          </div>
+        )}
+      </div>
+      {showExtraKeys && isVisible && (
+        <TerminalExtraKeysBar
+          terminalId={terminal.id}
+          keyboardOpen={keyboardInset > 0}
+        />
       )}
     </div>
   )

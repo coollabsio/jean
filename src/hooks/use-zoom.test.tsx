@@ -13,7 +13,9 @@ let mockIsMobile = false
 const mockSetZoom = vi.fn()
 const mockMutate = vi.fn()
 const mockOnScaleChanged = vi.fn()
-type ScaleChangedEvent = { payload: { scaleFactor: number } }
+interface ScaleChangedEvent {
+  payload: { scaleFactor: number }
+}
 let scaleChangedHandler: ((event: ScaleChangedEvent) => void) | null = null
 
 vi.mock('@/services/preferences', () => ({

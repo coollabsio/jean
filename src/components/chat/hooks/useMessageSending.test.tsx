@@ -145,9 +145,9 @@ function renderUseMessageSending({
 }
 
 vi.mock('@/lib/cli-auth', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/lib/cli-auth')>()
+  const actual = await importOriginal()
   return {
-    ...actual,
+    ...(actual as object),
     handleCliAuthError: vi.fn((error: string) => error),
     openBackendLoginModal: vi.fn().mockResolvedValue(true),
   }

@@ -15,8 +15,11 @@ declare module 'ghostty-web' {
       customKeyEventHandler: (event: KeyboardEvent) => boolean
     ): void
     clear(): void
+    clearSelection(): void
     dispose(): void
     focus(): void
+    getSelection(): string
+    hasSelection(): boolean
     loadAddon(addon: { activate?: (terminal: Terminal) => void }): void
     onData(callback: (data: string) => void): void
     open(parent: HTMLElement): void

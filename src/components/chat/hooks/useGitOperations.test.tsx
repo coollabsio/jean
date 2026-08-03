@@ -41,11 +41,9 @@ vi.mock('sonner', () => ({
   },
 }))
 vi.mock('@/services/projects', async () => {
-  const actual = await vi.importActual<typeof import('@/services/projects')>(
-    '@/services/projects'
-  )
+  const actual = await vi.importActual('@/services/projects')
   return {
-    ...actual,
+    ...(actual as object),
     isTauri: () => true,
     linkWorktreePr: mocks.linkWorktreePr,
     saveWorktreePr: mocks.saveWorktreePr,
