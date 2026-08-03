@@ -30,6 +30,7 @@ describe('buildFailurePrompt', () => {
     expect(prompt).toContain('elm-tests #6377')
     expect(prompt).toContain('PR #4143')
     expect(prompt).toContain('feat-widget')
+    expect(prompt).not.toContain('jenkins.example.internal')
   })
 
   it('lists failing tests with their messages', () => {

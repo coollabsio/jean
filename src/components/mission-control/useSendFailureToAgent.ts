@@ -53,7 +53,6 @@ export function buildFailurePrompt(
     report.downstreamJob &&
       `Job Jenkins : ${report.downstreamJob} #${report.downstreamNumber}`,
     `PR #${context.prId} · branche \`${context.branch}\``,
-    report.consoleUrl && `Console : ${report.consoleUrl}`,
   ]
     .filter(Boolean)
     .join('\n- ')
@@ -181,6 +180,9 @@ export function useSendFailureToAgent() {
           executionMode,
           backend: resolveBackend(model),
           customProfileName,
+          // The failure evidence is already embedded in the prompt. Never let
+          // an automatic recovery run drive the user's Chrome session.
+          chromeEnabled: false,
           aiLanguage: preferences?.ai_language,
         })
 
