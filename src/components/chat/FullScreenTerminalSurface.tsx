@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { MessageSquare, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { invoke, listen } from '@/lib/transport'
 import { useUIStore } from '@/store/ui-store'
 import { SingleTerminalView } from './TerminalView'
 
@@ -23,6 +25,42 @@ export function FullScreenTerminalSurface({
   className,
   showHeader = false,
 }: FullScreenTerminalSurfaceProps) {
+  useEffect(() => {
+    if (!sessionId || !isActive) return
+    let pendingAttention = false
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    const markViewed = () => {
+      void invoke('set_session_last_opened', { sessionId }).catch(
+        () => undefined
+      )
+    }
+    if (document.hasFocus()) markViewed()
+    void listen<{ sessionId: string }>('terminal:attention', event => {
+      if (event.payload?.sessionId !== sessionId) return
+      if (document.hasFocus()) markViewed()
+      else pendingAttention = true
+    })
+      .then(dispose => {
+        if (cancelled) dispose()
+        else unlisten = dispose
+      })
+      .catch(() => undefined)
+
+    const onFocus = () => {
+      if (!pendingAttention) return
+      pendingAttention = false
+      markViewed()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      cancelled = true
+      unlisten?.()
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [isActive, sessionId])
+
   const switchToChat = () => {
     if (sessionId) {
       useUIStore.getState().setSessionPrimarySurface(sessionId, 'chat')

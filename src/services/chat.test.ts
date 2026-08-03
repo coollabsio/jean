@@ -275,6 +275,17 @@ describe('reconnectNativeCliSession', () => {
     })
   })
 
+  it('keeps the Jean session id when reconnecting a native CLI terminal', async () => {
+    await reconnectNativeCliSession(terminalSession, 'wt-1', {
+      openModal: false,
+      showToast: false,
+    })
+
+    expect(useTerminalStore.getState().terminals['wt-1']?.[0]?.sessionId).toBe(
+      'session-1'
+    )
+  })
+
   it('continues reconnecting when old terminal disposal fails', async () => {
     useUIStore.setState({
       sessionPrimarySurface: {},

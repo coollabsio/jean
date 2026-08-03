@@ -566,7 +566,7 @@ fn find_neighbor_non_archived_session_id(
     None
 }
 
-fn emit_sessions_cache_invalidation(app: &AppHandle) {
+pub(crate) fn emit_sessions_cache_invalidation(app: &AppHandle) {
     if let Err(e) = app.emit_all(
         "cache:invalidate",
         &serde_json::json!({ "keys": ["sessions"] }),
@@ -2490,8 +2490,8 @@ pub async fn set_active_session(
 }
 
 /// Update the last_opened_at timestamp on a session's metadata.
-/// View-only: never mutates waiting/review state — explicit user actions
-/// (approve/reject/answer) are the only path out of waiting.
+/// Viewing a native-terminal session acknowledges its attention signal. Chat
+/// sessions keep their actionable waiting state until the user answers it.
 ///
 /// Emits `cache:invalidate` for sessions so native + web clients refresh
 /// unread/finished-session state (e.g. web marks read → native bell clears).
@@ -2504,6 +2504,10 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
             .unwrap_or_default()
             .as_secs();
         metadata.last_opened_at = Some(now);
+        if metadata.primary_surface.as_deref() == Some("terminal") {
+            metadata.waiting_for_input = false;
+            metadata.waiting_for_input_type = None;
+        }
         save_metadata(&app, &metadata)?;
         // Broadcast so other clients (native ↔ web) drop stale last_opened_at.
         emit_sessions_cache_invalidation(&app);
@@ -2535,6 +2539,10 @@ pub async fn set_sessions_last_opened_bulk(
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
+            if metadata.primary_surface.as_deref() == Some("terminal") {
+                metadata.waiting_for_input = false;
+                metadata.waiting_for_input_type = None;
+            }
             if let Err(error) = save_metadata(&app, &metadata) {
                 result = Err(error);
                 break;
@@ -2544,6 +2552,99 @@ pub async fn set_sessions_last_opened_bulk(
     }
 
     finish_bulk_update(updated, result, || emit_sessions_cache_invalidation(&app))
+}
+
+/// Auto-name a native terminal session from its first prompt. Terminal
+/// sessions do not have Jean run messages, so the backend lifecycle signal is
+/// their naming entry point.
+pub async fn trigger_terminal_session_naming(
+    app: AppHandle,
+    session_id: String,
+    first_prompt: String,
+) {
+    if first_prompt.trim().is_empty() {
+        return;
+    }
+    let Ok(Some(metadata)) = load_metadata(&app, &session_id) else {
+        return;
+    };
+    let worktree_id = metadata.worktree_id;
+    let Ok(projects) = load_projects_data(&app) else {
+        return;
+    };
+    let Some(worktree) = projects.find_worktree(&worktree_id).cloned() else {
+        return;
+    };
+    let worktree_path = worktree.path.clone();
+    let Ok(sessions) = load_sessions(&app, &worktree_path, &worktree_id) else {
+        return;
+    };
+    let generate_branch_candidate = !sessions.branch_naming_completed;
+    let generate_session_candidate = sessions
+        .find_session(&session_id)
+        .is_some_and(|session| !session.session_naming_completed);
+    if !generate_branch_candidate && !generate_session_candidate {
+        return;
+    }
+
+    let Ok(preferences) = crate::load_preferences(app.clone()).await else {
+        return;
+    };
+    let generate_branch = generate_branch_candidate
+        && preferences.auto_branch_naming
+        && should_auto_name_branch(Some(&worktree));
+    let generate_session = generate_session_candidate && preferences.auto_session_naming;
+    if generate_branch || generate_session {
+        let existing_branch_names = if generate_branch {
+            projects
+                .worktrees
+                .iter()
+                .map(|worktree| worktree.name.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        spawn_naming_task(
+            app.clone(),
+            NamingRequest {
+                session_id: session_id.clone(),
+                worktree_id: worktree_id.clone(),
+                worktree_path: PathBuf::from(&worktree_path),
+                first_message: first_prompt,
+                model: preferences.magic_prompt_models.session_naming_model.clone(),
+                existing_branch_names,
+                generate_session_name: generate_session,
+                generate_branch_name: generate_branch,
+                custom_session_prompt: generate_session
+                    .then(|| preferences.magic_prompts.session_naming.clone())
+                    .flatten(),
+                custom_profile_name: preferences
+                    .magic_prompt_providers
+                    .session_naming_provider
+                    .clone(),
+                backend_override: preferences
+                    .magic_prompt_backends
+                    .session_naming_backend
+                    .clone(),
+                reasoning_effort: preferences
+                    .magic_prompt_efforts
+                    .session_naming_effort
+                    .clone(),
+            },
+        );
+    }
+
+    let _ = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if generate_branch_candidate {
+            sessions.branch_naming_completed = true;
+        }
+        if generate_session_candidate {
+            if let Some(session) = sessions.find_session_mut(&session_id) {
+                session.session_naming_completed = true;
+            }
+        }
+        Ok(())
+    });
 }
 
 // ============================================================================

@@ -1113,7 +1113,8 @@ impl SessionMetadata {
             .runs
             .last()
             .map(|r| r.ended_at.unwrap_or(r.started_at))
-            .unwrap_or(self.created_at);
+            .unwrap_or(self.created_at)
+            .max(self.terminal_activity_at.unwrap_or(0));
         let last_message_at = self.runs.last().map(|r| r.ended_at.unwrap_or(r.started_at));
         Session {
             id: self.id.clone(),
@@ -1672,6 +1673,10 @@ pub struct SessionMetadata {
     /// Display label for the terminal tab/session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_label: Option<String>,
+    /// Last lifecycle signal from a native terminal backend. Native terminal
+    /// sessions have no Jean run entries, so this drives their freshness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_activity_at: Option<u64>,
 
     /// Run history - each entry corresponds to one Claude CLI execution
     #[serde(default)]
@@ -1799,6 +1804,7 @@ impl SessionMetadata {
             terminal_command: None,
             terminal_command_args: vec![],
             terminal_label: None,
+            terminal_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
             version: 1,
@@ -2222,6 +2228,20 @@ mod tests {
             session.terminal_command_args
         );
         assert_eq!(restored.terminal_label.as_deref(), Some("Codex"));
+    }
+
+    #[test]
+    fn native_terminal_activity_drives_session_freshness_without_runs() {
+        let mut metadata = SessionMetadata::new(
+            "session-1".to_string(),
+            "wt-1".to_string(),
+            "Codex".to_string(),
+            0,
+        );
+        metadata.created_at = 100;
+        metadata.terminal_activity_at = Some(200);
+
+        assert_eq!(metadata.to_session().updated_at, 200);
     }
 
     #[test]

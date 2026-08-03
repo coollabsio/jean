@@ -66,6 +66,7 @@ interface PersistentTerminal {
   worktreePath: string
   command: string | null
   commandArgs: string[] | null
+  sessionId: string | null
   initialized: boolean // PTY has been started
   replayRequested: boolean // Buffered web replay has been requested for an existing PTY
   opened: boolean // Terminal UI has been opened into hostElement
@@ -919,6 +920,7 @@ export function getOrCreateTerminal(
     worktreePath: string
     command?: string | null
     commandArgs?: string[] | null
+    sessionId?: string | null
   }
 ): PersistentTerminal {
   const existing = instances.get(terminalId)
@@ -934,6 +936,7 @@ export function getOrCreateTerminal(
     worktreePath,
     command = null,
     commandArgs = null,
+    sessionId = null,
   } = options
 
   // Ensure the visibility/focus wake handler is running.
@@ -954,6 +957,7 @@ export function getOrCreateTerminal(
     worktreePath,
     command,
     commandArgs,
+    sessionId,
     initialized: false,
     replayRequested: false,
     opened: false,
@@ -1011,7 +1015,7 @@ export async function attachToContainer(
     return
   }
 
-  const { worktreePath, command, commandArgs } = instance
+  const { worktreePath, command, commandArgs, sessionId } = instance
 
   terminal.options.theme = getTerminalTheme()
 
@@ -1104,6 +1108,7 @@ export async function attachToContainer(
           rows,
           command,
           commandArgs,
+          sessionId,
         }).catch(error => {
           console.error('[terminal-instances] start_terminal failed:', error)
           terminal.writeln(`\x1b[31mFailed to start terminal: ${error}\x1b[0m`)
@@ -1136,6 +1141,7 @@ export function startHeadless(
     worktreePath: string
     command: string
     commandArgs?: string[] | null
+    sessionId?: string | null
   }
 ): void {
   const instance = getOrCreateTerminal(terminalId, options)
@@ -1153,6 +1159,7 @@ export function startHeadless(
         rows: 24,
         command: options.command,
         commandArgs: options.commandArgs ?? null,
+        sessionId: options.sessionId ?? null,
       })
     })
     .catch(error => {
