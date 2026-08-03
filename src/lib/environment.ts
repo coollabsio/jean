@@ -46,10 +46,13 @@ export const canOpenNativeApps = (): boolean =>
 
 /**
  * Native desktop shell connected to a remote Jean can open remote paths in the
- * local Zed CLI via `ssh://` (see `prepareRemoteEditorOpenArgs`).
+ * local Zed CLI via `ssh://` when the remote cannot open apps itself
+ * (see `prepareRemoteEditorOpenArgs` and transport invoke routing).
  */
 export const canOpenRemoteEditorLocally = (): boolean =>
-  isNativeApp() && getActiveRemoteConnection() !== null
+  isNativeApp() &&
+  getActiveRemoteConnection() !== null &&
+  !isNativeOpenAllowed()
 
 /**
  * Show Open in Editor: full host-native open, or remote Jean + local Zed CLI.

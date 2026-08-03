@@ -3224,11 +3224,13 @@ Please apply this fix to the file.`
         chatQueryKeys.sessions(worktreeId)
       )
       const allContent =
-        cachedSessionsData?.sessions
-          ?.find((s: Session) => s.id === sessionId)
-          ?.messages?.filter((m: { role: string }) => m.role === 'assistant')
-          ?.map((m: { content: string }) => m.content)
-          ?.join('\n') ?? ''
+        (
+          cachedSessionsData?.sessions
+            ?.find((s: Session) => s.id === sessionId)
+            ?.messages?.flatMap((m: { role: string; content: string }) =>
+              m.role === 'assistant' ? [m.content] : []
+            ) ?? []
+        ).join('\n')
       const findings = parseReviewFindings(allContent)
       const findingIndex = findings.findIndex(
         f =>
@@ -3361,11 +3363,13 @@ Please apply all these fixes to the respective files.`
         chatQueryKeys.sessions(worktreeId)
       )
       const allContent =
-        cachedSessionsData?.sessions
-          ?.find((s: Session) => s.id === sessionId)
-          ?.messages?.filter((m: { role: string }) => m.role === 'assistant')
-          ?.map((m: { content: string }) => m.content)
-          ?.join('\n') ?? ''
+        (
+          cachedSessionsData?.sessions
+            ?.find((s: Session) => s.id === sessionId)
+            ?.messages?.flatMap((m: { role: string; content: string }) =>
+              m.role === 'assistant' ? [m.content] : []
+            ) ?? []
+        ).join('\n')
       const allFindings = parseReviewFindings(allContent)
 
       for (const { finding } of findingsWithSuggestions) {

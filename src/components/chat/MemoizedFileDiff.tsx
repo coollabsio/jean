@@ -108,6 +108,7 @@ export const MemoizedFileDiff = memo(
             onClick={() =>
               annotation.metadata && onRemoveComment(annotation.metadata.id)
             }
+            aria-label="Remove comment"
             className="ml-auto p-0.5 text-muted-foreground hover:text-foreground"
           >
             <X className="h-3 w-3" />

@@ -164,8 +164,7 @@ function splitMessageAtSteeredInputs(
       current.flatMap(b => (b.type === 'tool_use' ? [b.tool_call_id] : []))
     )
     const text = current
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
+      .flatMap(b => (b.type === 'text' ? [b.text] : []))
       .join('')
     segments.push({
       kind: 'blocks',
@@ -213,8 +212,7 @@ function isPureTextAssistantMessage(message: ChatMessage): boolean {
   if (blocks.some(block => block.type !== 'text')) return false
 
   const blockText = blocks
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
+    .flatMap(block => (block.type === 'text' ? [block.text] : []))
     .join('')
 
   return Boolean(blockText.trim() || message.content?.trim())
@@ -261,9 +259,9 @@ function findLatestAssistantText(
  */
 function stripQuestionsFromMessage(message: ChatMessage): ChatMessage {
   const questionIds = new Set(
-    (message.tool_calls ?? [])
-      .filter(tc => isAskUserQuestion(tc))
-      .map(tc => tc.id)
+    (message.tool_calls ?? []).flatMap(tc =>
+      isAskUserQuestion(tc) ? [tc.id] : []
+    )
   )
   if (questionIds.size === 0) return message
   return {
@@ -692,7 +690,10 @@ export const CompactMessageList = memo(
       },
       ref
     ) {
-      const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+      const messageRefs = useRef<Map<number, HTMLDivElement>>(null!)
+      if (!messageRefs.current) {
+        messageRefs.current = new Map()
+      }
       const pendingPrependAnchorRef = useRef<PrependScrollAnchor | null>(null)
       const pendingPrependMessagesLengthRef = useRef<number | null>(null)
 
@@ -1224,7 +1225,6 @@ export const CompactMessageList = memo(
                       <EditedFilesDisplay
                         toolCalls={surfacedLatestToolCalls}
                         worktreePath={worktreePath}
-                        worktreeId={worktreeId}
                       />
                     )}
                   </div>

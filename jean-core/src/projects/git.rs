@@ -3001,10 +3001,7 @@ mod tests {
     fn test_configured_branch_remote_reads_branch_config() {
         let dir = repo_with_fork_remote();
         let path = dir.path().to_str().unwrap();
-        run_git(
-            dir.path(),
-            &["config", "branch.main.remote", "fork"],
-        );
+        run_git(dir.path(), &["config", "branch.main.remote", "fork"]);
         assert_eq!(
             configured_branch_remote(path, "main").as_deref(),
             Some("fork")

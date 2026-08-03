@@ -27,28 +27,47 @@ const TERMINAL_BUFFER_MAX_EVENTS: usize = 12000;
 /// small-event guard.
 const TERMINAL_BUFFER_MAX_BYTES: usize = 3 * 1024 * 1024;
 
-/// Events that are worth buffering for bootstrap replay after a page refresh.
-const REPLAYABLE_EVENTS: &[&str] = &[
-    "chat:sending",
-    "chat:chunk",
-    "chat:tool_use",
-    "chat:tool_block",
-    "chat:tool_result",
-    "chat:thinking",
-    "chat:permission_denied",
-    "chat:codex_command_approval_request",
-    "chat:codex_permission_request",
-    "chat:codex_user_input_request",
-    "chat:codex_mcp_elicitation_request",
-    "chat:codex_dynamic_tool_call_request",
-    "chat:done",
-    "chat:cancelled",
-    "chat:error",
-];
+/// Chat events worth buffering for bootstrap replay after a page refresh.
+/// Uses `matches!` instead of a linear slice scan — this runs on every emit
+/// including the high-frequency `chat:chunk` streaming path.
+#[inline]
+fn is_replayable_chat_event(event: &str) -> bool {
+    matches!(
+        event,
+        "chat:sending"
+            | "chat:chunk"
+            | "chat:tool_use"
+            | "chat:tool_block"
+            | "chat:tool_result"
+            | "chat:thinking"
+            | "chat:permission_denied"
+            | "chat:codex_command_approval_request"
+            | "chat:codex_permission_request"
+            | "chat:codex_user_input_request"
+            | "chat:codex_mcp_elicitation_request"
+            | "chat:codex_dynamic_tool_call_request"
+            | "chat:done"
+            | "chat:cancelled"
+            | "chat:error"
+    )
+}
 
 /// Terminal events buffered for replay after a page refresh.
 /// Keyed by `terminal_id` field in payload.
-const TERMINAL_REPLAYABLE_EVENTS: &[&str] = &["terminal:output", "terminal:started"];
+#[inline]
+fn is_replayable_terminal_event(event: &str) -> bool {
+    matches!(event, "terminal:output" | "terminal:started")
+}
+
+#[inline]
+fn is_session_buffer_cleanup_event(event: &str) -> bool {
+    matches!(event, "chat:done" | "chat:cancelled")
+}
+
+#[inline]
+fn is_terminal_buffer_cleanup_event(event: &str) -> bool {
+    event == "terminal:stopped"
+}
 
 /// Broadcast channel for sending events to all connected WebSocket clients.
 /// Managed as Tauri state so any code with an AppHandle can broadcast.
@@ -170,25 +189,67 @@ impl WsBroadcaster {
             return;
         }
         let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
-        let envelope = WsEnvelope {
-            msg_type: "event",
-            event,
-            payload,
-            seq,
-        };
-        let json = match serde_json::to_string(&envelope) {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("Failed to serialize WS event '{event}': {e}");
-                return;
-            }
-        };
-        let json_arc: Arc<str> = Arc::from(json);
 
-        // Buffer replayable events per session
-        if REPLAYABLE_EVENTS.contains(&event) {
-            // Try to extract session_id from the payload
-            if let Ok(val) = serde_json::to_value(payload) {
+        let needs_session_buffer = is_replayable_chat_event(event);
+        let needs_terminal_buffer = is_replayable_terminal_event(event);
+        let needs_session_cleanup = is_session_buffer_cleanup_event(event);
+        let needs_terminal_cleanup = is_terminal_buffer_cleanup_event(event);
+        // Only materialize a `Value` when we need field extraction for buffers
+        // or cleanup. Non-replayable events (cache invalidation, etc.) stay on
+        // the single envelope-serialize fast path — no second `to_value`.
+        let needs_payload_value = needs_session_buffer
+            || needs_terminal_buffer
+            || needs_session_cleanup
+            || needs_terminal_cleanup;
+
+        let (json_arc, payload_value): (Arc<str>, Option<serde_json::Value>) =
+            if needs_payload_value {
+                // Serialize payload once to Value, extract ids from it, and
+                // build the wire envelope from that same Value (avoids the
+                // prior double-serialize on chat:chunk / terminal:output).
+                let val = match serde_json::to_value(payload) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::error!("Failed to serialize WS event '{event}' payload: {e}");
+                        return;
+                    }
+                };
+                let envelope = WsEnvelope {
+                    msg_type: "event",
+                    event,
+                    payload: &val,
+                    seq,
+                };
+                let json = match serde_json::to_string(&envelope) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to serialize WS event '{event}': {e}");
+                        return;
+                    }
+                };
+                (Arc::from(json), Some(val))
+            } else {
+                let envelope = WsEnvelope {
+                    msg_type: "event",
+                    event,
+                    payload,
+                    seq,
+                };
+                let json = match serde_json::to_string(&envelope) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to serialize WS event '{event}': {e}");
+                        return;
+                    }
+                };
+                (Arc::from(json), None)
+            };
+
+        if let Some(ref val) = payload_value {
+            // Buffer replayable chat events per session. Cleanup events
+            // (`chat:done` / `chat:cancelled`) clear the buffer in this same
+            // call, so a push would be immediately discarded — skip it.
+            if needs_session_buffer && !needs_session_cleanup {
                 if let Some(sid) = val.get("session_id").and_then(|v| v.as_str()) {
                     if let Ok(mut buffers) = self.session_buffers.lock() {
                         let buf = buffers
@@ -201,22 +262,17 @@ impl WsBroadcaster {
                     }
                 }
             }
-        }
 
-        // Clean up session buffer on chat:done or chat:cancelled
-        if event == "chat:done" || event == "chat:cancelled" {
-            if let Ok(val) = serde_json::to_value(payload) {
+            if needs_session_cleanup {
                 if let Some(sid) = val.get("session_id").and_then(|v| v.as_str()) {
                     if let Ok(mut buffers) = self.session_buffers.lock() {
                         buffers.remove(sid);
                     }
                 }
             }
-        }
 
-        // Buffer replayable terminal events keyed by terminal_id
-        if TERMINAL_REPLAYABLE_EVENTS.contains(&event) {
-            if let Ok(val) = serde_json::to_value(payload) {
+            // Buffer replayable terminal events keyed by terminal_id
+            if needs_terminal_buffer {
                 if let Some(tid) = val.get("terminal_id").and_then(|v| v.as_str()) {
                     if let Ok(mut buffers) = self.terminal_buffers.lock() {
                         buffers
@@ -226,11 +282,9 @@ impl WsBroadcaster {
                     }
                 }
             }
-        }
 
-        // Drop terminal buffer on terminal:stopped — no further output expected
-        if event == "terminal:stopped" {
-            if let Ok(val) = serde_json::to_value(payload) {
+            // Drop terminal buffer on terminal:stopped — no further output expected
+            if needs_terminal_cleanup {
                 if let Some(tid) = val.get("terminal_id").and_then(|v| v.as_str()) {
                     if let Ok(mut buffers) = self.terminal_buffers.lock() {
                         buffers.remove(tid);

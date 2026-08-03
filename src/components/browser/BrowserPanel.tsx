@@ -69,6 +69,10 @@ export const BrowserPanel = memo(function BrowserPanel() {
     >
       {/* Resize handle (top edge) */}
       <div
+        role="separator"
+        tabIndex={-1}
+        aria-orientation="horizontal"
+        aria-label="Resize browser panel"
         className="absolute left-0 right-0 top-0 z-10 h-1 cursor-ns-resize hover:bg-blue-500/50"
         onMouseDown={handleResizeStart}
       />

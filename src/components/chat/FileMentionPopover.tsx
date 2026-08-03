@@ -103,14 +103,18 @@ export function FileMentionPopover({
       : []
 
     const linkedIds = new Set(currentProject?.linked_project_ids ?? [])
-    const linkedScopes = projects
-      .filter(p => linkedIds.has(p.id) && !isFolder(p) && p.path)
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        rootPath: p.path,
-        isCurrent: false,
-      }))
+    const linkedScopes = projects.flatMap(p =>
+      linkedIds.has(p.id) && !isFolder(p) && p.path
+        ? [
+            {
+              id: p.id,
+              name: p.name,
+              rootPath: p.path,
+              isCurrent: false,
+            },
+          ]
+        : []
+    )
 
     return [...currentScopes, ...linkedScopes]
   }, [currentProject, projects, worktreePath])
@@ -125,21 +129,18 @@ export function FileMentionPopover({
     [scopes, selectedRootPath]
   )
 
+  // On open, reset scope and invalidate so newly added files appear.
+  // Invalidate in the same place we set selectedRootPath to avoid effect chains.
   useEffect(() => {
-    if (open) {
-      setSelectedRootPath(worktreePath)
-      setSelectedIndex(0)
-    }
-  }, [open, worktreePath])
-
-  // Refetch file list each time the popover opens so newly added files appear
-  useEffect(() => {
-    if (open && selectedRootPath) {
+    if (!open) return
+    setSelectedRootPath(worktreePath)
+    setSelectedIndex(0)
+    if (worktreePath) {
       queryClient.invalidateQueries({
-        queryKey: fileQueryKeys.worktreeFiles(selectedRootPath),
+        queryKey: fileQueryKeys.worktreeFiles(worktreePath),
       })
     }
-  }, [open, selectedRootPath, queryClient])
+  }, [open, worktreePath, queryClient])
 
   // Filter files based on search query (fuzzy match)
   const filteredFiles = useMemo(
@@ -153,10 +154,16 @@ export function FileMentionPopover({
     Math.max(0, filteredFiles.length - 1)
   )
 
-  const handleScopeSelect = useCallback((scope: FileMentionScope) => {
-    setSelectedRootPath(scope.rootPath)
-    setSelectedIndex(0)
-  }, [])
+  const handleScopeSelect = useCallback(
+    (scope: FileMentionScope) => {
+      setSelectedRootPath(scope.rootPath)
+      setSelectedIndex(0)
+      queryClient.invalidateQueries({
+        queryKey: fileQueryKeys.worktreeFiles(scope.rootPath),
+      })
+    },
+    [queryClient]
+  )
 
   const handleScopeCycle = useCallback(
     (direction: -1 | 1) => {

@@ -60,6 +60,7 @@ export function CheckStatusButton({
         <button
           type="button"
           onClick={handleClick}
+          aria-label={tooltip}
           className={cn(
             'ml-1 shrink-0 rounded px-1.5 py-1 transition-colors',
             className

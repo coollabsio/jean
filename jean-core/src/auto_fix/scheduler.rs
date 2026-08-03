@@ -1498,9 +1498,6 @@ mod tests {
             normalize_claude_provider("claude", Some("__anthropic__")),
             None
         );
-        assert_eq!(
-            normalize_claude_provider("codex", Some("OpenRouter")),
-            None
-        );
+        assert_eq!(normalize_claude_provider("codex", Some("OpenRouter")), None);
     }
 }

@@ -2656,9 +2656,10 @@ export function formatAnswersAsNaturalLanguage(
     const question = questions[answer.questionIndex]
     if (!question) continue
 
-    const selectedLabels = answer.selectedOptions
-      .map(idx => question.options[idx]?.label)
-      .filter(Boolean)
+    const selectedLabels = answer.selectedOptions.flatMap(idx => {
+      const label = question.options[idx]?.label
+      return label ? [label] : []
+    })
 
     if (selectedLabels.length > 0 || answer.customText) {
       let text = `For "${question.question}"`

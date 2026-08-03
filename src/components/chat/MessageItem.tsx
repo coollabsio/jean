@@ -293,16 +293,6 @@ export const MessageItem = memo(function MessageItem({
     return turnHasFileEdits(getMessages(), messageIndex)
   }, [message.role, getMessages, messageIndex])
 
-  const precedingUserMessageId = useMemo(() => {
-    if (message.role !== 'assistant' || !getMessages) return null
-    const msgs = getMessages()
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      const candidate = msgs[i]
-      if (candidate?.role === 'user') return candidate.id
-    }
-    return null
-  }, [message.role, getMessages, messageIndex])
-
   const handleCopyAssistantResponse = useCallback(() => {
     if (!assistantResponse) return
 
@@ -870,10 +860,8 @@ export const MessageItem = memo(function MessageItem({
           <EditedFilesDisplay
             toolCalls={message.tool_calls}
             worktreePath={worktreePath}
-            worktreeId={worktreeId}
             getMessages={getMessages}
             messageIndex={messageIndex}
-            userMessageId={precedingUserMessageId}
           />
         )}
 

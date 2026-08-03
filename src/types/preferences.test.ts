@@ -42,6 +42,10 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.finished_session_animation_enabled).toBe(true)
   })
 
+  it('defaults font weight to normal', () => {
+    expect(defaultPreferences.font_weight).toBe('normal')
+  })
+
   it('uses Jean-managed Command Code CLI by default', () => {
     expect(defaultPreferences.commandcode_cli_source).toBe('jean')
   })

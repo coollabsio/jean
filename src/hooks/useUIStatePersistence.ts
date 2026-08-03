@@ -32,9 +32,11 @@ function serializePendingImages(
 ): Record<string, PendingImageDraft[]> {
   const out: Record<string, PendingImageDraft[]> = {}
   for (const [sessionId, images] of Object.entries(pendingImages)) {
-    const ready = images
-      .filter(img => !img.loading && !!img.path)
-      .map(({ id, path, filename }) => ({ id, path, filename }))
+    const ready = images.flatMap(img =>
+      !img.loading && img.path
+        ? [{ id: img.id, path: img.path, filename: img.filename }]
+        : []
+    )
     if (ready.length > 0) {
       out[sessionId] = ready
     }
@@ -164,18 +166,21 @@ export function useUIStatePersistence() {
     const shouldPersistTerminalRuntime = !isLocalBackend()
     const terminalInstancesForPersist = shouldPersistTerminalRuntime
       ? Object.fromEntries(
-          Object.entries(terminals)
-            .map(([worktreeId, list]) => [
-              worktreeId,
-              list.map(terminal => ({
-                id: terminal.id,
-                command: terminal.command,
-                command_args: terminal.commandArgs ?? null,
-                label: terminal.label,
-                kind: terminal.kind ?? 'panel',
-              })),
-            ])
-            .filter(([, list]) => (list as unknown[]).length > 0)
+          Object.entries(terminals).flatMap(([worktreeId, list]) => {
+            if (list.length === 0) return []
+            return [
+              [
+                worktreeId,
+                list.map(terminal => ({
+                  id: terminal.id,
+                  command: terminal.command,
+                  command_args: terminal.commandArgs ?? null,
+                  label: terminal.label,
+                  kind: terminal.kind ?? 'panel',
+                })),
+              ] as const,
+            ]
+          })
         )
       : {}
     const browserState = useBrowserStore.getState()
@@ -424,13 +429,11 @@ export function useUIStatePersistence() {
     if (Object.keys(pendingImagesDraft).length > 0) {
       const restoredImages: Record<string, PendingImage[]> = {}
       for (const [sessionId, images] of Object.entries(pendingImagesDraft)) {
-        const valid = images
-          .filter(img => img.id && img.path && img.filename)
-          .map(img => ({
-            id: img.id,
-            path: img.path,
-            filename: img.filename,
-          }))
+        const valid = images.flatMap(img =>
+          img.id && img.path && img.filename
+            ? [{ id: img.id, path: img.path, filename: img.filename }]
+            : []
+        )
         if (valid.length > 0) restoredImages[sessionId] = valid
       }
       if (Object.keys(restoredImages).length > 0) {
@@ -486,8 +489,10 @@ export function useUIStatePersistence() {
       }
 
       if (needsContentHydration.length > 0) {
-        void (async () => {
-          for (const item of needsContentHydration) {
+        // Independent per-file disk reads; Zustand functional updates are safe
+        // when completions interleave.
+        void Promise.all(
+          needsContentHydration.map(async item => {
             try {
               const result = await invoke<ReadTextResponse>(
                 'read_pasted_text',
@@ -513,8 +518,8 @@ export function useUIStatePersistence() {
                 .getState()
                 .removePendingTextFile(item.sessionId, item.id)
             }
-          }
-        })()
+          })
+        )
       }
     }
 
@@ -694,10 +699,10 @@ export function useUIStatePersistence() {
         if (shouldCancel()) return
         const { disposeTerminal } = await import('@/lib/terminal-instances')
         if (shouldCancel()) return
-        for (const id of staleInstanceIds) {
-          if (shouldCancel()) return
-          await disposeTerminal(id).catch(() => undefined)
-        }
+        // Independent terminal dispose; order does not matter
+        await Promise.all(
+          staleInstanceIds.map(id => disposeTerminal(id).catch(() => undefined))
+        )
         return
       }
 
@@ -714,16 +719,20 @@ export function useUIStatePersistence() {
       }
 
       for (const [worktreeId, list] of Object.entries(persistedTerminals)) {
-        const liveList = list
-          .filter(terminal => liveTerminalIds.has(terminal.id))
-          .map(terminal => ({
-            id: terminal.id,
-            worktreeId,
-            command: terminal.command ?? null,
-            commandArgs: terminal.command_args ?? null,
-            label: terminal.label,
-            kind: terminal.kind ?? 'panel',
-          })) satisfies TerminalInstance[]
+        const liveList = list.flatMap(terminal =>
+          liveTerminalIds.has(terminal.id)
+            ? [
+                {
+                  id: terminal.id,
+                  worktreeId,
+                  command: terminal.command ?? null,
+                  commandArgs: terminal.command_args ?? null,
+                  label: terminal.label,
+                  kind: terminal.kind ?? 'panel',
+                },
+              ]
+            : []
+        ) satisfies TerminalInstance[]
 
         if (liveList.length === 0) {
           restoredModalOpen[worktreeId] = false
@@ -731,7 +740,9 @@ export function useUIStatePersistence() {
         }
 
         restoredTerminals[worktreeId] = liveList
-        const livePanelIds = liveList.filter(isPanelTerminal).map(t => t.id)
+        const livePanelIds = liveList.flatMap(t =>
+          isPanelTerminal(t) ? [t.id] : []
+        )
         const persistedActiveId = uiState.terminal_active_ids?.[worktreeId]
         if (persistedActiveId && livePanelIds.includes(persistedActiveId)) {
           restoredActiveIds[worktreeId] = persistedActiveId

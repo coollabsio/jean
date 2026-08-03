@@ -338,7 +338,7 @@ export function TerminalView({
   )
 
   const handleTerminalDragStart = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, terminalId: string) => {
+    (e: React.DragEvent<HTMLElement>, terminalId: string) => {
       setDraggedTerminalId(terminalId)
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', terminalId)
@@ -347,7 +347,7 @@ export function TerminalView({
   )
 
   const handleTerminalDragOver = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>) => {
+    (e: React.DragEvent<HTMLElement>) => {
       if (!draggedTerminalId) return
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
@@ -356,7 +356,7 @@ export function TerminalView({
   )
 
   const handleTerminalDrop = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, targetTerminalId: string) => {
+    (e: React.DragEvent<HTMLElement>, targetTerminalId: string) => {
       e.preventDefault()
       const sourceId =
         draggedTerminalId || e.dataTransfer.getData('text/plain') || null
@@ -513,9 +513,8 @@ export function TerminalView({
               index < 9 ? formatShortcutDisplay(`mod+${index + 1}`) : null
 
             return (
-              <button
+              <div
                 key={terminal.id}
-                type="button"
                 draggable
                 onDragStart={e => handleTerminalDragStart(e, terminal.id)}
                 onDragOver={handleTerminalDragOver}
@@ -524,7 +523,7 @@ export function TerminalView({
                 onClick={() => handleSelectTerminal(terminal.id)}
                 {...middleClickClose(e => void handleCloseTerminal(e, terminal.id))}
                 className={cn(
-                  'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors',
+                  'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors cursor-pointer',
                   isActive
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
@@ -549,26 +548,18 @@ export function TerminalView({
                   </Kbd>
                 )}
                 {/* Close button - always visible */}
-                <span
-                  role="button"
-                  tabIndex={0}
+                <button
+                  type="button"
+                  aria-label="Close terminal"
                   onClick={e => handleCloseTerminal(e, terminal.id)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      handleCloseTerminal(
-                        e as unknown as React.MouseEvent,
-                        terminal.id
-                      )
-                    }
-                  }}
                   className={cn(
                     'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100',
                     isActive && 'opacity-50'
                   )}
                 >
                   <X className="h-3 w-3" />
-                </span>
-              </button>
+                </button>
+              </div>
             )
           })}
         </div>

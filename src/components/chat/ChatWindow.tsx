@@ -2,6 +2,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -536,7 +537,12 @@ export function ChatWindow({
   // the terminal (e.g. `claude --resume <id>`) lazily for the active session so
   // the conversation reappears in its terminal surface. The ref guards against
   // a duplicate spawn while the async relaunch is in flight.
-  const autoReconnectingRef = useRef<Set<string>>(new Set())
+  // Lazy init so we don't allocate a new Set on every render.
+  const autoReconnectingRef = useRef<Set<string> | null>(null)
+  if (autoReconnectingRef.current === null) {
+    autoReconnectingRef.current = new Set()
+  }
+  const autoReconnecting = autoReconnectingRef.current
   const [terminalReconnectError, setTerminalReconnectError] = useState<
     string | null
   >(null)
@@ -554,10 +560,10 @@ export function ChatWindow({
       session.primary_surface === 'terminal' || primarySurface === 'terminal'
     if (!shouldRestoreTerminal || sessionTerminalId) return
     if (!canReconnectSession(session)) return
-    if (autoReconnectingRef.current.has(deferredSessionId)) return
+    if (autoReconnecting.has(deferredSessionId)) return
 
     const sessionId = deferredSessionId
-    autoReconnectingRef.current.add(sessionId)
+    autoReconnecting.add(sessionId)
     setTerminalReconnectError(null)
     void reconnectNativeCliSession(session, activeWorktreeId, {
       openModal: false,
@@ -571,7 +577,7 @@ export function ChatWindow({
         )
       })
       .finally(() => {
-        autoReconnectingRef.current.delete(sessionId)
+        autoReconnecting.delete(sessionId)
       })
   }, [
     deferredSessionId,
@@ -732,9 +738,9 @@ export function ChatWindow({
     const projectId = worktree?.project_id
     if (!projectId) return []
     const prefix = `${projectId}:`
-    return (preferences?.favorite_package_scripts ?? [])
-      .filter(key => key.startsWith(prefix))
-      .map(key => key.slice(prefix.length))
+    return (preferences?.favorite_package_scripts ?? []).flatMap(key =>
+      key.startsWith(prefix) ? [key.slice(prefix.length)] : []
+    )
   }, [preferences?.favorite_package_scripts, worktree?.project_id])
   const handleToggleFavoritePackageScript = useCallback(
     (scriptName: string) => {
@@ -767,9 +773,7 @@ export function ChatWindow({
   // Prefer in-memory toolbar selection when present so mid-session provider
   // switches apply immediately (session query can lag until invalidate).
   const sessionProvider =
-    zustandProvider !== undefined
-      ? zustandProvider
-      : session?.selected_provider
+    zustandProvider !== undefined ? zustandProvider : session?.selected_provider
 
   // Installed backends (only these should be selectable)
   const { installedBackends } = useInstalledBackends()
@@ -825,14 +829,12 @@ export function ChatWindow({
         ? (projectDefaultProvider ?? globalDefaultProvider)
         : null
   const selectedProvider =
-    sessionProvider !== undefined
-      ? sessionProvider
-      : defaultProviderForBackend
+    sessionProvider !== undefined ? sessionProvider : defaultProviderForBackend
   // Sentinels mean "use backend default" — treat as non-custom for feature detection
   const isCustomProvider = Boolean(
     selectedProvider &&
-      selectedProvider !== '__anthropic__' &&
-      selectedProvider !== '__default__'
+    selectedProvider !== '__anthropic__' &&
+    selectedProvider !== '__default__'
   )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
@@ -1192,29 +1194,31 @@ export function ChatWindow({
   const mcpServersDataRef = useRef<McpServerInfo[]>(availableMcpServers)
   const selectedBackendRef = useRef(selectedBackend)
 
-  // Keep refs in sync with current values (runs on every render, but cheap)
-  activeSessionIdRef.current = activeSessionId
-  activeWorktreeIdRef.current = activeWorktreeId
-  activeWorktreePathRef.current = activeWorktreePath
-  selectedModelRef.current = selectedModel
-  buildModelRef.current = preferences?.build_model ?? null
-  yoloModelRef.current = preferences?.yolo_model ?? null
-  buildBackendRef.current = preferences?.build_backend ?? null
-  buildThinkingLevelRef.current = preferences?.build_thinking_level ?? null
-  buildEffortLevelRef.current = preferences?.build_effort_level ?? null
-  yoloBackendRef.current = preferences?.yolo_backend ?? null
-  yoloThinkingLevelRef.current = preferences?.yolo_thinking_level ?? null
-  yoloEffortLevelRef.current = preferences?.yolo_effort_level ?? null
-  selectedProviderRef.current = selectedProvider
-  selectedThinkingLevelRef.current = selectedThinkingLevel
-  selectedEffortLevelRef.current = selectedEffortLevel
-  useAdaptiveThinkingRef.current = useAdaptiveThinkingFlag
-  isCodexBackendRef.current = isCodexBackend
-  executionModeRef.current = executionMode
-  projectIdRef.current = worktree?.project_id ?? null
-  enabledMcpServersRef.current = enabledMcpServers
-  mcpServersDataRef.current = availableMcpServers
-  selectedBackendRef.current = selectedBackend
+  // Keep refs in sync with current values (layout effect keeps render pure)
+  useLayoutEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+    activeWorktreeIdRef.current = activeWorktreeId
+    activeWorktreePathRef.current = activeWorktreePath
+    selectedModelRef.current = selectedModel
+    buildModelRef.current = preferences?.build_model ?? null
+    yoloModelRef.current = preferences?.yolo_model ?? null
+    buildBackendRef.current = preferences?.build_backend ?? null
+    buildThinkingLevelRef.current = preferences?.build_thinking_level ?? null
+    buildEffortLevelRef.current = preferences?.build_effort_level ?? null
+    yoloBackendRef.current = preferences?.yolo_backend ?? null
+    yoloThinkingLevelRef.current = preferences?.yolo_thinking_level ?? null
+    yoloEffortLevelRef.current = preferences?.yolo_effort_level ?? null
+    selectedProviderRef.current = selectedProvider
+    selectedThinkingLevelRef.current = selectedThinkingLevel
+    selectedEffortLevelRef.current = selectedEffortLevel
+    useAdaptiveThinkingRef.current = useAdaptiveThinkingFlag
+    isCodexBackendRef.current = isCodexBackend
+    executionModeRef.current = executionMode
+    projectIdRef.current = worktree?.project_id ?? null
+    enabledMcpServersRef.current = enabledMcpServers
+    mcpServersDataRef.current = availableMcpServers
+    selectedBackendRef.current = selectedBackend
+  })
 
   // Stable callback for useMessageHandlers to build MCP config from current refs
   const getMcpConfig = useCallback(
@@ -2041,9 +2045,9 @@ export function ChatWindow({
         preferences?.magic_prompt_models?.code_review_model ??
         selectedModelRef.current
 
-      // Create one session per message. Use mutateAsync in a loop so each
-      // session is fully created before the next (TanStack Query per-call
-      // onSuccess is unreliable across consecutive mutate() calls).
+      // Sequential on purpose: each session must fully create before the next
+      // (TanStack Query per-call onSuccess is unreliable across consecutive
+      // mutate() calls). Do not Promise.all — order and store setup matter.
       for (const message of messages) {
         let newSession: Session
         try {
@@ -3570,7 +3574,8 @@ export function ChatWindow({
                                   'main'
                                 }
                                 baseRemote={
-                                  gitStatus?.base_remote ?? worktree?.base_remote
+                                  gitStatus?.base_remote ??
+                                  worktree?.base_remote
                                 }
                                 uncommittedAdded={uncommittedAdded}
                                 uncommittedRemoved={uncommittedRemoved}

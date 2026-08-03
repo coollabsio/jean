@@ -332,6 +332,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  type="button"
                   onClick={handleBasePull}
                   className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
                 >
@@ -348,6 +349,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  type="button"
                   onClick={handleBasePush}
                   className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
                 >
@@ -380,10 +382,12 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={e => {
                   e.stopPropagation()
                   openProjectSettings(project.id)
                 }}
+                aria-label="Project settings"
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
               >
                 <MoreHorizontal className="size-3.5" />
@@ -396,7 +400,9 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={handleAddWorktree}
+                aria-label="New worktree"
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
               >
                 <Plus className="size-3.5" />

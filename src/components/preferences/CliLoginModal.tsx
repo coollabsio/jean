@@ -6,7 +6,13 @@
  * interactive terminal access.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from 'react'
 import { toast } from 'sonner'
 import { invoke, listen } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
@@ -221,6 +227,10 @@ function CliLoginModalContent({
   )
 
   // Auto-close modal on success, show error on failure
+  const onLoginSuccessClose = useEffectEvent(() => {
+    handleOpenChange(false)
+  })
+
   useEffect(() => {
     setOnStopped(terminalId, (exitCode, signal) => {
       const output = outputBufferRef.current.join('\n').trim()
@@ -233,14 +243,14 @@ function CliLoginModalContent({
 
       if (exitCode === 0) {
         logger.debug(logBase + logOutput)
-        setTimeout(() => handleOpenChange(false), 1500)
+        setTimeout(() => onLoginSuccessClose(), 1500)
       } else {
         logger.error(logBase + logOutput)
         setExitStatus({ exitCode, signal })
       }
     })
     return () => setOnStopped(terminalId, undefined)
-  }, [terminalId, handleOpenChange, cliName, command, commandArgs])
+  }, [terminalId, cliName, command, commandArgs])
 
   return (
     <Dialog open={true} onOpenChange={handleOpenChange}>

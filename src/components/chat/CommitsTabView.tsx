@@ -374,6 +374,8 @@ export function CommitsTabView({
           {/* Commit list */}
           <div
             ref={commitListRef}
+            role="listbox"
+            aria-label="Commits"
             className="flex-1 overflow-y-auto"
             onKeyDown={handleCommitListKeyDown}
             tabIndex={0}
@@ -397,15 +399,7 @@ export function CommitsTabView({
                 {commits.map(commit => (
                   <div
                     key={commit.sha}
-                    role="button"
-                    tabIndex={0}
                     onClick={() => handleSelectCommit(commit.sha)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        handleSelectCommit(commit.sha)
-                      }
-                    }}
                     className={cn(
                       'w-full text-left px-3 py-2.5 border-b border-border transition-colors hover:bg-muted/50 group cursor-pointer',
                       selectedCommitSha === commit.sha && 'bg-accent'
@@ -427,6 +421,7 @@ export function CommitsTabView({
                                 e.stopPropagation()
                                 handleReviewCommit(commit)
                               }}
+                              aria-label="Ask AI to review this commit"
                               className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-primary/10 transition-opacity shrink-0"
                             >
                               <Sparkles className="h-3.5 w-3.5 text-primary" />
@@ -525,6 +520,7 @@ export function CommitsTabView({
                           setSelectedFileIndex(0)
                         }}
                         placeholder="Filter files..."
+                        aria-label="Filter files"
                         className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
                       />
                     </div>

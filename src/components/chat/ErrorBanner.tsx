@@ -13,11 +13,18 @@ const URL_REGEX = /(https?:\/\/[^\s<>"'`)]+[^\s<>"'`).,;:!?])/g
 
 function renderWithLinks(text: string): ReactNode {
   const segments = text.split(URL_REGEX)
-  return segments.map((segment, idx) => {
-    if (idx % 2 === 1) {
+  const seen = new Map<string, number>()
+  return segments.map(segment => {
+    const isUrl = /^https?:\/\//.test(segment)
+    const baseKey = isUrl ? `url:${segment}` : `text:${segment}`
+    const n = seen.get(baseKey) ?? 0
+    seen.set(baseKey, n + 1)
+    const key = n === 0 ? baseKey : `${baseKey}#${n}`
+
+    if (isUrl) {
       return (
         <button
-          key={idx}
+          key={key}
           type="button"
           onClick={() => openExternal(segment)}
           className="break-all underline underline-offset-2 hover:text-destructive"
@@ -26,7 +33,7 @@ function renderWithLinks(text: string): ReactNode {
         </button>
       )
     }
-    return <span key={idx}>{segment}</span>
+    return <span key={key}>{segment}</span>
   })
 }
 

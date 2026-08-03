@@ -342,14 +342,12 @@ export function FloatingDock() {
   )
 
   const toggleMenu = useCallback(() => {
-    setMenuOpen(prev => {
-      const next = !prev
-      if (next) {
-        setResumeCommand(getActiveResumeCommand())
-      }
-      return next
-    })
-  }, [getActiveResumeCommand])
+    const next = !menuOpen
+    setMenuOpen(next)
+    if (next) {
+      setResumeCommand(getActiveResumeCommand())
+    }
+  }, [menuOpen, getActiveResumeCommand])
 
   const handleCopyResumeCommand = useCallback(() => {
     const commandToCopy = getActiveResumeCommand() ?? resumeCommand

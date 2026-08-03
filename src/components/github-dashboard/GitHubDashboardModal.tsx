@@ -136,6 +136,7 @@ function DashboardTabBar({
     <div className="flex border-b border-border flex-shrink-0">
       {TABS.map((tab, idx) => (
         <button
+          type="button"
           key={tab.id}
           onClick={() => onTabChange(tab.id)}
           tabIndex={-1}
@@ -219,11 +220,13 @@ export function InvestigateButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={e => {
             e.stopPropagation()
             onInvestigate(e.metaKey || e.ctrlKey)
           }}
           disabled={isCreating}
+          aria-label={tooltip}
           className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
         >
           {isCreating ? (
@@ -279,47 +282,59 @@ function IssueRow({
           )}
         />
       )}
-      <button
-        onClick={onClick}
-        disabled={isCreating}
-        className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">#{issue.number}</span>
-          <span className="text-sm font-medium whitespace-normal break-words sm:truncate">
-            {issue.title}
-          </span>
-        </div>
+      <div className="flex-1 min-w-0">
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={isCreating}
+          className="w-full min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              #{issue.number}
+            </span>
+            <span className="text-sm font-medium whitespace-normal break-words sm:truncate">
+              {issue.title}
+            </span>
+          </div>
+        </button>
         {issue.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
-            {issue.labels.slice(0, 3).map(label => (
-              <span
-                key={label.name}
-                className={cn(
-                  'px-1.5 py-0.5 text-xs rounded-full',
-                  onLabelClick &&
-                    'cursor-pointer hover:opacity-75 transition-opacity'
-                )}
-                style={{
-                  backgroundColor: `#${label.color}20`,
-                  color: `#${label.color}`,
-                  border: `1px solid #${label.color}40`,
-                }}
-                onClick={
-                  onLabelClick
-                    ? e => {
-                        e.stopPropagation()
-                        onLabelClick(label.name)
-                      }
-                    : undefined
-                }
-              >
-                {label.name}
-              </span>
-            ))}
+            {issue.labels.slice(0, 3).map(label =>
+              onLabelClick ? (
+                <button
+                  key={label.name}
+                  type="button"
+                  className="px-1.5 py-0.5 text-xs rounded-full cursor-pointer hover:opacity-75 transition-opacity"
+                  style={{
+                    backgroundColor: `#${label.color}20`,
+                    color: `#${label.color}`,
+                    border: `1px solid #${label.color}40`,
+                  }}
+                  onClick={e => {
+                    e.stopPropagation()
+                    onLabelClick(label.name)
+                  }}
+                >
+                  {label.name}
+                </button>
+              ) : (
+                <span
+                  key={label.name}
+                  className="px-1.5 py-0.5 text-xs rounded-full"
+                  style={{
+                    backgroundColor: `#${label.color}20`,
+                    color: `#${label.color}`,
+                    border: `1px solid #${label.color}40`,
+                  }}
+                >
+                  {label.name}
+                </span>
+              )
+            )}
           </div>
         )}
-      </button>
+      </div>
       <div className="shrink-0 self-center">
         <InvestigateButton
           label="Issue"
@@ -367,55 +382,65 @@ function PRRow({
           )}
         />
       )}
-      <button
-        onClick={onClick}
-        disabled={isCreating}
-        className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">#{pr.number}</span>
-          <span className="text-sm font-medium whitespace-normal break-words sm:truncate">
-            {pr.title}
-          </span>
-          {pr.isDraft && (
-            <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
-              Draft
+      <div className="flex-1 min-w-0">
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={isCreating}
+          className="w-full min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">#{pr.number}</span>
+            <span className="text-sm font-medium whitespace-normal break-words sm:truncate">
+              {pr.title}
             </span>
-          )}
-        </div>
-        <span className="text-xs text-muted-foreground">
-          {pr.headRefName} → {pr.baseRefName}
-        </span>
+            {pr.isDraft && (
+              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                Draft
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {pr.headRefName} → {pr.baseRefName}
+          </span>
+        </button>
         {pr.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
-            {pr.labels.slice(0, 3).map(label => (
-              <span
-                key={label.name}
-                className={cn(
-                  'px-1.5 py-0.5 text-xs rounded-full',
-                  onLabelClick &&
-                    'cursor-pointer hover:opacity-75 transition-opacity'
-                )}
-                style={{
-                  backgroundColor: `#${label.color}20`,
-                  color: `#${label.color}`,
-                  border: `1px solid #${label.color}40`,
-                }}
-                onClick={
-                  onLabelClick
-                    ? e => {
-                        e.stopPropagation()
-                        onLabelClick(label.name)
-                      }
-                    : undefined
-                }
-              >
-                {label.name}
-              </span>
-            ))}
+            {pr.labels.slice(0, 3).map(label =>
+              onLabelClick ? (
+                <button
+                  key={label.name}
+                  type="button"
+                  className="px-1.5 py-0.5 text-xs rounded-full cursor-pointer hover:opacity-75 transition-opacity"
+                  style={{
+                    backgroundColor: `#${label.color}20`,
+                    color: `#${label.color}`,
+                    border: `1px solid #${label.color}40`,
+                  }}
+                  onClick={e => {
+                    e.stopPropagation()
+                    onLabelClick(label.name)
+                  }}
+                >
+                  {label.name}
+                </button>
+              ) : (
+                <span
+                  key={label.name}
+                  className="px-1.5 py-0.5 text-xs rounded-full"
+                  style={{
+                    backgroundColor: `#${label.color}20`,
+                    color: `#${label.color}`,
+                    border: `1px solid #${label.color}40`,
+                  }}
+                >
+                  {label.name}
+                </span>
+              )
+            )}
           </div>
         )}
-      </button>
+      </div>
       <div className="shrink-0 self-center">
         <InvestigateButton
           label="PR"
@@ -462,6 +487,7 @@ function SecurityAlertRow({
         />
       )}
       <button
+        type="button"
         onClick={onClick}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
@@ -532,6 +558,7 @@ function AdvisoryRow({
         />
       )}
       <button
+        type="button"
         onClick={onClick}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
@@ -610,6 +637,10 @@ export function GitHubDashboardModal() {
   const [projectPickerSearch, setProjectPickerSearch] = useState('')
   const githubDashboardFavoriteProjectIds = useProjectsStore(
     state => state.githubDashboardFavoriteProjectIds
+  )
+  const favoriteProjectIdSet = useMemo(
+    () => new Set(githubDashboardFavoriteProjectIds),
+    [githubDashboardFavoriteProjectIds]
   )
   const toggleGitHubDashboardFavoriteProject = useProjectsStore(
     state => state.toggleGitHubDashboardFavoriteProject
@@ -805,13 +836,17 @@ export function GitHubDashboardModal() {
           number: detail.number,
           title: detail.title,
           body: detail.body,
-          comments: (detail.comments ?? [])
-            .filter(c => c && c.created_at && c.author)
-            .map(c => ({
-              body: c.body ?? '',
-              author: { login: c.author.login ?? '' },
-              createdAt: c.created_at,
-            })),
+          comments: (detail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
         }
 
         if (background)
@@ -862,21 +897,29 @@ export function GitHubDashboardModal() {
           body: detail.body,
           headRefName: detail.headRefName,
           baseRefName: detail.baseRefName,
-          comments: (detail.comments ?? [])
-            .filter(c => c && c.created_at && c.author)
-            .map(c => ({
-              body: c.body ?? '',
-              author: { login: c.author.login ?? '' },
-              createdAt: c.created_at,
-            })),
-          reviews: (detail.reviews ?? [])
-            .filter(r => r && r.author)
-            .map(r => ({
-              body: r.body ?? '',
-              state: r.state,
-              author: { login: r.author.login ?? '' },
-              submittedAt: r.submittedAt,
-            })),
+          comments: (detail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
+          reviews: (detail.reviews ?? []).flatMap(r =>
+            r && r.author
+              ? [
+                  {
+                    body: r.body ?? '',
+                    state: r.state,
+                    author: { login: r.author.login ?? '' },
+                    submittedAt: r.submittedAt,
+                  },
+                ]
+              : []
+          ),
         }
 
         if (background)
@@ -1152,6 +1195,7 @@ export function GitHubDashboardModal() {
                       type="button"
                       role="combobox"
                       aria-expanded={projectPickerOpen}
+                      aria-controls="github-dashboard-project-list"
                       aria-label="Select GitHub Dashboard project"
                       className="border-input focus-visible:border-ring focus-visible:ring-ring/50 flex h-7 w-full shrink-0 items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-0 text-xs whitespace-nowrap shadow-xs outline-none transition-[color,box-shadow] hover:bg-accent focus-visible:ring-[3px] sm:w-44"
                     >
@@ -1162,6 +1206,7 @@ export function GitHubDashboardModal() {
                     </button>
                   </PopoverTrigger>
                   <PopoverContent
+                    id="github-dashboard-project-list"
                     align="start"
                     className="w-80 max-w-[80vw] p-0"
                   >
@@ -1178,8 +1223,7 @@ export function GitHubDashboardModal() {
                       className="max-h-[50dvh] overflow-y-auto p-1"
                     >
                       {projectPickerResults.map(project => {
-                        const isFavorite =
-                          githubDashboardFavoriteProjectIds.includes(project.id)
+                        const isFavorite = favoriteProjectIdSet.has(project.id)
                         const isSelected = projectFilter === project.id
                         return (
                           <div
@@ -1281,14 +1325,15 @@ export function GitHubDashboardModal() {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {projectData
-                .filter(({ items }) => items.length > 0)
-                .map(({ project, items }) => (
-                  <ProjectSection
-                    key={project.id}
-                    project={project}
-                    count={items.length}
-                  >
+              {projectData.flatMap(({ project, items }) =>
+                items.length === 0
+                  ? []
+                  : [
+                      <ProjectSection
+                        key={project.id}
+                        project={project}
+                        count={items.length}
+                      >
                     {activeTab === 'issues' &&
                       (items as GitHubIssue[]).map(issue => (
                         <IssueRow
@@ -1386,8 +1431,9 @@ export function GitHubDashboardModal() {
                           }
                         />
                       ))}
-                  </ProjectSection>
-                ))}
+                      </ProjectSection>,
+                    ]
+              )}
             </div>
           )}
         </ScrollArea>

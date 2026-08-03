@@ -12,8 +12,10 @@ export const fileQueryKeys = {
 }
 
 /**
- * Hook to get all files in a worktree (for @ mentions)
- * Results are cached and only refetched when worktree changes
+ * Hook to get all files in a worktree (file browser + @ mentions).
+ * Includes hidden and gitignored files (e.g. `.env`); heavy trees like
+ * `node_modules`/`target` are pruned server-side.
+ * Results are cached and only refetched when worktree changes.
  */
 export function useWorktreeFiles(worktreePath: string | null) {
   return useQuery({

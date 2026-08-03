@@ -42,6 +42,8 @@ interface PreparedBackendTerminalContext {
 
 export type NativeCliSessionKind = 'terminal' | CliBackend
 const RECENT_SESSION_LIMIT = 5
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_COMMAND_ARGS: string[] = []
 
 interface NativeCliSessionsModalProps {
   open: boolean
@@ -114,7 +116,7 @@ export function NativeCliSessionsModal({
   worktreeId,
   worktreePath,
   command,
-  initialCommandArgs = [],
+  initialCommandArgs = EMPTY_COMMAND_ARGS,
   onBack,
   onClose,
   onOpenSessionModal,
@@ -167,16 +169,17 @@ export function NativeCliSessionsModal({
   const nativeSessions = useMemo(() => {
     if (!backend) return []
     const existingResumeIds = new Set(
-      sessions
-        .flatMap(session => [
+      sessions.flatMap(session => {
+        const values = [
           session.codex_thread_id,
           session.claude_session_id,
           session.opencode_session_id,
           session.cursor_chat_id,
           session.pi_session_id,
           ...(session.terminal_command_args ?? []),
-        ])
-        .filter((value): value is string => Boolean(value))
+        ]
+        return values.filter((value): value is string => Boolean(value))
+      })
     )
     return (nativeSessionsQuery.data ?? [])
       .filter(session => !existingResumeIds.has(session.id))
@@ -263,8 +266,9 @@ export function NativeCliSessionsModal({
     (commandArgs: string[]): boolean => {
       if (!backend || commandArgs.length === 0) return false
       if (hasInitialCommandArgs) {
-        return commandArgs.every(
-          (arg, index) => arg === initialCommandArgs[index]
+        return (
+          commandArgs.length === initialCommandArgs.length &&
+          commandArgs.every((arg, index) => arg === initialCommandArgs[index])
         )
       }
       if (

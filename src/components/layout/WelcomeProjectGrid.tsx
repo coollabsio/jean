@@ -35,6 +35,7 @@ function ProjectCard({
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className="flex items-center gap-3 rounded-md border bg-muted/30 p-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/50"
     >

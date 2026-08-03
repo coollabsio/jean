@@ -73,46 +73,46 @@ describe('QueuedPromptsPanel', () => {
 
   it('moves selection with ArrowDown/ArrowUp', () => {
     renderPanel()
-    const list = screen.getByRole('listbox')
+    const list = screen.getByRole('list', { name: 'Queued prompts' })
 
-    const options = screen.getAllByRole('option')
-    expect(options[0]).toHaveAttribute('aria-selected', 'true')
+    const items = screen.getAllByRole('listitem')
+    expect(items[0]).toHaveAttribute('aria-current', 'true')
 
     fireEvent.keyDown(list, { key: 'ArrowDown' })
-    expect(screen.getAllByRole('option')[1]).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getAllByRole('listitem')[1]).toHaveAttribute(
+      'aria-current',
       'true'
     )
 
     fireEvent.keyDown(list, { key: 'ArrowUp' })
-    expect(screen.getAllByRole('option')[0]).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getAllByRole('listitem')[0]).toHaveAttribute(
+      'aria-current',
       'true'
     )
   })
 
   it('clamps selection at list bounds', () => {
     renderPanel()
-    const list = screen.getByRole('listbox')
+    const list = screen.getByRole('list', { name: 'Queued prompts' })
 
     fireEvent.keyDown(list, { key: 'ArrowUp' })
-    expect(screen.getAllByRole('option')[0]).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getAllByRole('listitem')[0]).toHaveAttribute(
+      'aria-current',
       'true'
     )
 
     fireEvent.keyDown(list, { key: 'ArrowDown' })
     fireEvent.keyDown(list, { key: 'ArrowDown' })
     fireEvent.keyDown(list, { key: 'ArrowDown' })
-    expect(screen.getAllByRole('option')[2]).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getAllByRole('listitem')[2]).toHaveAttribute(
+      'aria-current',
       'true'
     )
   })
 
   it('sends the selected prompt with Enter', () => {
     const { onSendNow } = renderPanel()
-    const list = screen.getByRole('listbox')
+    const list = screen.getByRole('list', { name: 'Queued prompts' })
 
     fireEvent.keyDown(list, { key: 'ArrowDown' })
     fireEvent.keyDown(list, { key: 'Enter' })
@@ -122,7 +122,7 @@ describe('QueuedPromptsPanel', () => {
 
   it('removes the selected prompt with Backspace', () => {
     const { onRemove } = renderPanel()
-    const list = screen.getByRole('listbox')
+    const list = screen.getByRole('list', { name: 'Queued prompts' })
 
     fireEvent.keyDown(list, { key: 'Backspace' })
 
@@ -131,7 +131,7 @@ describe('QueuedPromptsPanel', () => {
 
   it('clamps selection when the queue shrinks', () => {
     const { rerender, onSendNow } = renderPanel()
-    const list = screen.getByRole('listbox')
+    const list = screen.getByRole('list', { name: 'Queued prompts' })
 
     fireEvent.keyDown(list, { key: 'ArrowDown' })
     fireEvent.keyDown(list, { key: 'ArrowDown' })
@@ -147,17 +147,22 @@ describe('QueuedPromptsPanel', () => {
       />
     )
 
-    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Enter' })
+    fireEvent.keyDown(
+      screen.getByRole('list', { name: 'Queued prompts' }),
+      { key: 'Enter' }
+    )
     expect(onSendNow).toHaveBeenCalledWith('session-1', 'msg-1')
   })
 
   it('collapses the panel with Escape', () => {
     renderPanel()
-    const list = screen.getByRole('listbox')
+    const list = screen.getByRole('list', { name: 'Queued prompts' })
 
     fireEvent.keyDown(list, { key: 'Escape' })
 
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('list', { name: 'Queued prompts' })
+    ).not.toBeInTheDocument()
     // Header stays visible
     expect(screen.getByText('Queued prompts')).toBeInTheDocument()
   })

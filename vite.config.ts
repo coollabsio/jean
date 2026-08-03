@@ -83,6 +83,10 @@ export default defineConfig(async () => ({
           ) {
             return 'markdown'
           }
+          // CodeMirror is only needed when a code editor opens — keep it out of the main chunk.
+          if (id.includes('@codemirror') || id.includes('/codemirror/')) {
+            return 'codemirror'
+          }
           if (id.includes('@tauri-apps')) return 'tauri'
 
           return undefined

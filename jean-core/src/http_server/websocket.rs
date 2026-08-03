@@ -303,12 +303,12 @@ pub async fn handle_ws_connection(
                             }
                             Ok(WsClientMessage::TerminalReplay { terminal_id, last_seq }) => {
                                 // Restore terminal output after a full page refresh.
+                                // Batch feed+single flush (same coalescing as live
+                                // event delivery) instead of one flush per event.
                                 if let Some(broadcaster) = app.try_state::<WsBroadcaster>() {
                                     let events = broadcaster.replay_terminal_events(&terminal_id, last_seq);
-                                    for (_seq, json) in events {
-                                        if ws_tx.send(Message::Text(json.to_string().into())).await.is_err() {
-                                            break;
-                                        }
+                                    if feed_terminal_replay(&mut ws_tx, events).await.is_err() {
+                                        break;
                                     }
                                 }
                             }
@@ -421,6 +421,27 @@ async fn feed_and_drain(
         }
     }
 
+    ws_tx.flush().await?;
+    Ok(())
+}
+
+/// Batch-send pre-serialized terminal replay events with a single flush.
+///
+/// Full-refresh terminal replay can be thousands of `terminal:output` frames;
+/// flushing once per frame multiplies syscalls. `Message::Text` still needs
+/// an owned string (axum/tungstenite), so `Arc<str>::to_string()` is
+/// unavoidable here — the win is write coalescing, not allocation avoidance.
+async fn feed_terminal_replay(
+    ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    events: Vec<(u64, std::sync::Arc<str>)>,
+) -> Result<(), axum::Error> {
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    for (_seq, json) in events {
+        ws_tx.feed(Message::Text(json.to_string().into())).await?;
+    }
     ws_tx.flush().await?;
     Ok(())
 }

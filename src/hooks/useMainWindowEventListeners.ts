@@ -960,8 +960,10 @@ export function useMainWindowEventListeners() {
         listenLocal('menu-about', async () => {
           logger.debug('About menu event received')
           if (!isNativeApp()) return
-          const { getVersion } = await import('@tauri-apps/api/app')
-          const { message } = await import('@tauri-apps/plugin-dialog')
+          const [{ getVersion }, { message }] = await Promise.all([
+            import('@tauri-apps/api/app'),
+            import('@tauri-apps/plugin-dialog'),
+          ])
           // Show simple about dialog with dynamic version
           const appVersion = await getVersion()
           await message(

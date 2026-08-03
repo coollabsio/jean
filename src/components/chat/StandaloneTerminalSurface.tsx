@@ -5,7 +5,7 @@
  * emulator and Termius-style extra-keys bar below, with soft-keyboard inset.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -43,8 +43,9 @@ export function StandaloneTerminalSurface({
 }: StandaloneTerminalSurfaceProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const observerRef = useRef<ResizeObserver | null>(null)
   const initialized = useRef(false)
+  // Callback-as-state: dialogs/portals often mount at 0×0; observer waits for a real size.
+  const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const isMobile = useIsMobile()
   // Soft-keyboard special keys + arrow gesture: web access always, plus narrow viewports.
   const showExtraKeys =
@@ -61,47 +62,32 @@ export function StandaloneTerminalSurface({
     commandArgs,
   })
 
-  // Callback ref: dialogs/portals often mount at 0×0, so wait for a real size.
-  const containerCallbackRef = useCallback(
-    (container: HTMLDivElement | null) => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-        observerRef.current = null
-      }
-
-      if (!container) return
-
-      const observer = new ResizeObserver(entries => {
-        const entry = entries[0]
-        const { width, height } = entry?.contentRect ?? { width: 0, height: 0 }
-
-        if (!entry || width === 0 || height === 0) {
-          return
-        }
-
-        if (!initialized.current) {
-          initialized.current = true
-          void initTerminal(container)
-          return
-        }
-
-        fit()
-      })
-
-      observer.observe(container)
-      observerRef.current = observer
-    },
-    [initTerminal, fit]
-  )
-
+  // ResizeObserver owns init + fit; disconnect on container change / unmount.
   useEffect(() => {
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-        observerRef.current = null
+    if (!container) return
+
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0]
+      const { width, height } = entry?.contentRect ?? { width: 0, height: 0 }
+
+      if (!entry || width === 0 || height === 0) {
+        return
       }
+
+      if (!initialized.current) {
+        initialized.current = true
+        void initTerminal(container)
+        return
+      }
+
+      fit()
+    })
+
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
     }
-  }, [])
+  }, [container, initTerminal, fit])
 
   // Soft keyboard open/close changes padding → re-fit the emulator.
   useEffect(() => {
@@ -147,7 +133,7 @@ export function StandaloneTerminalSurface({
           isMobile && 'select-none [-webkit-touch-callout:none]'
         )}
       >
-        <div ref={containerCallbackRef} className="h-full w-full overflow-hidden" />
+        <div ref={setContainer} className="h-full w-full overflow-hidden" />
       </div>
       {showExtraKeys && (
         <TerminalExtraKeysBar

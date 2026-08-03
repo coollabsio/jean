@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useEffectEvent } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -218,26 +218,28 @@ function FeatureTourDialogContent() {
   }, [stepIndex, handleClose])
 
   // Keyboard navigation: arrows, Enter, S
+  const onTourKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setStepIndex(i => Math.min(i + 1, steps.length - 1))
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setStepIndex(i => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      handleNext()
+    } else if (e.key === 's' || e.key === 'S') {
+      e.preventDefault()
+      handleClose()
+    }
+  })
+
   useEffect(() => {
     if (!featureTourOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        setStepIndex(i => Math.min(i + 1, steps.length - 1))
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        setStepIndex(i => Math.max(i - 1, 0))
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        handleNext()
-      } else if (e.key === 's' || e.key === 'S') {
-        e.preventDefault()
-        handleClose()
-      }
-    }
+    const handleKeyDown = (e: KeyboardEvent) => onTourKeyDown(e)
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [featureTourOpen, handleNext, handleClose])
+  }, [featureTourOpen])
 
   const step = steps[stepIndex] as (typeof steps)[number]
   const isLastStep = stepIndex === steps.length - 1

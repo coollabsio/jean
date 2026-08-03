@@ -220,8 +220,10 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
     remote,
     onMergeConflict,
   } = opts
-  const { toast } = await import('sonner')
-  const { useChatStore } = await import('@/store/chat-store')
+  const [{ toast }, { useChatStore }] = await Promise.all([
+    import('sonner'),
+    import('@/store/chat-store'),
+  ])
 
   const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
 

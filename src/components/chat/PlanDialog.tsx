@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Pencil, RotateCcw } from 'lucide-react'
 import { invoke } from '@/lib/transport'
@@ -215,87 +215,75 @@ export function PlanDialog({
     [editedContent, onWorktreeYoloApprove, onClose]
   )
 
-  // Keyboard shortcuts for approve actions
+  // Keyboard shortcuts for approve actions. useEffectEvent keeps latest
+  // handlers/props without re-subscribing the keydown listener.
+  const onPlanKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    const isMod = e.metaKey || e.ctrlKey
+
+    // Check most specific combos first to avoid matching simpler patterns
+
+    // Mod+Alt+Enter = Worktree Build
+    if (isMod && e.altKey && e.key === 'Enter') {
+      e.preventDefault()
+      if (canApprove && onWorktreeBuildApprove) {
+        handleWorktreeBuildApprove()
+      }
+      return
+    }
+
+    // Mod+Shift+Enter = Clear Context and build
+    if (isMod && e.shiftKey && e.key === 'Enter') {
+      e.preventDefault()
+      if (canApprove && onClearContextBuildApprove) {
+        handleClearContextBuildApprove()
+      }
+      return
+    }
+
+    // Mod+Enter = Approve (no shift, no alt)
+    if (isMod && e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      if (canApprove) {
+        handleApprove()
+      }
+      return
+    }
+
+    // Mod+Alt+Y = Worktree Yolo
+    if (isMod && e.altKey && (e.key === 'Y' || e.key === 'y')) {
+      e.preventDefault()
+      if (canApprove && onWorktreeYoloApprove) {
+        handleWorktreeYoloApprove()
+      }
+      return
+    }
+
+    // Mod+Shift+Y = Clear Context and yolo
+    if (isMod && e.shiftKey && (e.key === 'Y' || e.key === 'y')) {
+      e.preventDefault()
+      if (canApprove && onClearContextApprove) {
+        handleClearContextApprove()
+      }
+      return
+    }
+
+    // Mod+Y = Approve Yolo (no shift, no alt)
+    if (isMod && e.key === 'y' && !e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      if (canApprove) {
+        handleApproveYolo()
+      }
+      return
+    }
+  })
+
   useEffect(() => {
     if (!isOpen || !editable) return
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey
-
-      // Check most specific combos first to avoid matching simpler patterns
-
-      // Mod+Alt+Enter = Worktree Build
-      if (isMod && e.altKey && e.key === 'Enter') {
-        e.preventDefault()
-        if (canApprove && onWorktreeBuildApprove) {
-          handleWorktreeBuildApprove()
-        }
-        return
-      }
-
-      // Mod+Shift+Enter = Clear Context and build
-      if (isMod && e.shiftKey && e.key === 'Enter') {
-        e.preventDefault()
-        if (canApprove && onClearContextBuildApprove) {
-          handleClearContextBuildApprove()
-        }
-        return
-      }
-
-      // Mod+Enter = Approve (no shift, no alt)
-      if (isMod && e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        if (canApprove) {
-          handleApprove()
-        }
-        return
-      }
-
-      // Mod+Alt+Y = Worktree Yolo
-      if (isMod && e.altKey && (e.key === 'Y' || e.key === 'y')) {
-        e.preventDefault()
-        if (canApprove && onWorktreeYoloApprove) {
-          handleWorktreeYoloApprove()
-        }
-        return
-      }
-
-      // Mod+Shift+Y = Clear Context and yolo
-      if (isMod && e.shiftKey && (e.key === 'Y' || e.key === 'y')) {
-        e.preventDefault()
-        if (canApprove && onClearContextApprove) {
-          handleClearContextApprove()
-        }
-        return
-      }
-
-      // Mod+Y = Approve Yolo (no shift, no alt)
-      if (isMod && e.key === 'y' && !e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        if (canApprove) {
-          handleApproveYolo()
-        }
-        return
-      }
-    }
-
+    const handleKeyDown = (e: KeyboardEvent) => onPlanKeyDown(e)
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    isOpen,
-    editable,
-    canApprove,
-    handleApprove,
-    handleApproveYolo,
-    onClearContextApprove,
-    handleClearContextApprove,
-    onClearContextBuildApprove,
-    handleClearContextBuildApprove,
-    onWorktreeBuildApprove,
-    handleWorktreeBuildApprove,
-    onWorktreeYoloApprove,
-    handleWorktreeYoloApprove,
-  ])
+  }, [isOpen, editable])
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>

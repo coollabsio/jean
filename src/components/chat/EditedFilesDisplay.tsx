@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/tooltip'
 import { MessageDiffModal } from './MessageDiffModal'
 import type { EditTool } from './MessageDiffModal'
-import { CheckpointTurnRestoreButton } from './CheckpointTurnRestoreButton'
 
 function isEditTool(
   toolCall: ToolCall
@@ -82,7 +81,6 @@ function codexDiffToPatch(
 interface EditedFilesDisplayProps {
   toolCalls: ToolCall[] | undefined
   worktreePath?: string
-  worktreeId?: string | null
   /**
    * Stable accessor for the full session message list. Used to compute
    * "subsequent edits" lazily when the user opens a diff. Passing a stable
@@ -92,17 +90,13 @@ interface EditedFilesDisplayProps {
    */
   getMessages?: () => ChatMessage[]
   messageIndex?: number
-  /** User message that started this agent turn — enables per-prompt restore. */
-  userMessageId?: string | null
 }
 
 export const EditedFilesDisplay = memo(function EditedFilesDisplay({
   toolCalls,
   worktreePath,
-  worktreeId,
   getMessages,
   messageIndex,
-  userMessageId,
 }: EditedFilesDisplayProps) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
 
@@ -162,10 +156,11 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
 
   const selectedCodexPatch = useMemo(() => {
     if (!selectedFilePath) return null
-    const patches = codexChanges
-      .filter(change => change.path === selectedFilePath)
-      .map(change => codexDiffToPatch(change.path, change.diff))
-      .filter((patch): patch is string => Boolean(patch))
+    const patches = codexChanges.flatMap(change => {
+      if (change.path !== selectedFilePath) return []
+      const patch = codexDiffToPatch(change.path, change.diff)
+      return patch ? [patch] : []
+    })
     return patches.length > 0 ? patches.join('\n') : null
   }, [codexChanges, selectedFilePath])
 
@@ -176,8 +171,11 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
     if (!selectedFilePath || !getMessages || messageIndex == null) return []
     return getMessages()
       .slice(messageIndex + 1)
-      .flatMap(msg => (msg.tool_calls ?? []).filter(isEditTool))
-      .filter(t => t.input.file_path === selectedFilePath)
+      .flatMap(msg =>
+        (msg.tool_calls ?? []).flatMap(tc =>
+          isEditTool(tc) && tc.input.file_path === selectedFilePath ? [tc] : []
+        )
+      )
   }, [selectedFilePath, getMessages, messageIndex])
 
   if (uniqueFilePaths.length === 0) return null
@@ -225,17 +223,6 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
           )
         })}
       </div>
-
-      {userMessageId && (
-        <div className="flex items-center gap-1">
-          <CheckpointTurnRestoreButton
-            userMessageId={userMessageId}
-            worktreeId={worktreeId}
-            hasFileEdits
-            variant="inline"
-          />
-        </div>
-      )}
 
       {selectedFilePath && (
         <MessageDiffModal

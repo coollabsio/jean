@@ -292,10 +292,20 @@ export function useSessionStatePersistence() {
 
   // Load session state from Session object when session changes
   useEffect(() => {
-    if (!activeSessionId || !sessionsData) return
+    let loadingUnlockTimer: ReturnType<typeof setTimeout> | null = null
+
+    if (!activeSessionId || !sessionsData) {
+      return () => {
+        if (loadingUnlockTimer != null) clearTimeout(loadingUnlockTimer)
+      }
+    }
 
     const session = sessionsData.sessions.find(s => s.id === activeSessionId)
-    if (!session) return
+    if (!session) {
+      return () => {
+        if (loadingUnlockTimer != null) clearTimeout(loadingUnlockTimer)
+      }
+    }
 
     // Always resync authoritative status fields from backend refetches.
     // Other session UI state is loaded once below to avoid overwriting local edits,
@@ -348,233 +358,245 @@ export function useSessionStatePersistence() {
     // Re-loading on every sessionsData refetch would overwrite in-memory
     // Zustand state with stale on-disk data (due to 500ms debounced saves),
     // causing answered questions / fixed findings to flicker.
-    if (loadedSessionRef.current === activeSessionId) return
+    if (loadedSessionRef.current !== activeSessionId) {
+      // Mark as loaded only after finding the session (retry on next refetch if not found)
+      loadedSessionRef.current = activeSessionId
 
-    // Mark as loaded only after finding the session (retry on next refetch if not found)
-    loadedSessionRef.current = activeSessionId
+      isLoadingRef.current = true
 
-    isLoadingRef.current = true
+      logger.debug('Loading session state from session file', {
+        sessionId: activeSessionId,
+      })
 
-    logger.debug('Loading session state from session file', {
-      sessionId: activeSessionId,
-    })
+      const currentState = useChatStore.getState()
 
-    const currentState = useChatStore.getState()
+      // Build updated state
+      const updates: Partial<typeof currentState> = {}
 
-    // Build updated state
-    const updates: Partial<typeof currentState> = {}
-
-    // Load answered questions
-    if (session.answered_questions && session.answered_questions.length > 0) {
-      updates.answeredQuestions = {
-        ...currentState.answeredQuestions,
-        [activeSessionId]: new Set(session.answered_questions),
+      // Load answered questions
+      if (session.answered_questions && session.answered_questions.length > 0) {
+        updates.answeredQuestions = {
+          ...currentState.answeredQuestions,
+          [activeSessionId]: new Set(session.answered_questions),
+        }
       }
+
+      // Load submitted answers
+      if (
+        session.submitted_answers &&
+        Object.keys(session.submitted_answers).length > 0
+      ) {
+        updates.submittedAnswers = {
+          ...currentState.submittedAnswers,
+          [activeSessionId]: session.submitted_answers,
+        }
+      }
+
+      // Load fixed findings
+      if (session.fixed_findings && session.fixed_findings.length > 0) {
+        updates.fixedFindings = {
+          ...currentState.fixedFindings,
+          [activeSessionId]: new Set(session.fixed_findings),
+        }
+      }
+
+      // Load pending permission denials
+      if (
+        session.pending_permission_denials &&
+        session.pending_permission_denials.length > 0
+      ) {
+        updates.pendingPermissionDenials = {
+          ...currentState.pendingPermissionDenials,
+          [activeSessionId]: session.pending_permission_denials,
+        }
+      }
+
+      if (
+        session.pending_codex_command_approval_requests &&
+        session.pending_codex_command_approval_requests.length > 0
+      ) {
+        updates.pendingCodexCommandApprovalRequests = {
+          ...currentState.pendingCodexCommandApprovalRequests,
+          [activeSessionId]: session.pending_codex_command_approval_requests,
+        }
+      }
+
+      if (
+        session.pending_codex_permission_requests &&
+        session.pending_codex_permission_requests.length > 0
+      ) {
+        updates.pendingCodexPermissionRequests = {
+          ...currentState.pendingCodexPermissionRequests,
+          [activeSessionId]: session.pending_codex_permission_requests,
+        }
+      }
+
+      if (
+        session.pending_codex_user_input_requests &&
+        session.pending_codex_user_input_requests.length > 0
+      ) {
+        updates.pendingCodexUserInputRequests = {
+          ...currentState.pendingCodexUserInputRequests,
+          [activeSessionId]: session.pending_codex_user_input_requests,
+        }
+      }
+
+      if (
+        session.pending_codex_mcp_elicitation_requests &&
+        session.pending_codex_mcp_elicitation_requests.length > 0
+      ) {
+        updates.pendingCodexMcpElicitationRequests = {
+          ...currentState.pendingCodexMcpElicitationRequests,
+          [activeSessionId]: session.pending_codex_mcp_elicitation_requests,
+        }
+      }
+
+      if (
+        session.pending_codex_dynamic_tool_call_requests &&
+        session.pending_codex_dynamic_tool_call_requests.length > 0
+      ) {
+        updates.pendingCodexDynamicToolCallRequests = {
+          ...currentState.pendingCodexDynamicToolCallRequests,
+          [activeSessionId]: session.pending_codex_dynamic_tool_call_requests,
+        }
+      }
+
+      // Load denied message context
+      if (session.denied_message_context) {
+        updates.deniedMessageContext = {
+          ...currentState.deniedMessageContext,
+          [activeSessionId]: {
+            message: session.denied_message_context.message,
+            model: session.denied_message_context.model,
+            thinkingLevel: session.denied_message_context.thinking_level as
+              | 'off'
+              | 'think'
+              | 'megathink'
+              | 'ultrathink',
+          },
+        }
+      }
+
+      // Load reviewing status (handle both true and false to fix asymmetry bug)
+      const isReviewing = session.is_reviewing ?? false
+      const currentReviewing =
+        currentState.reviewingSessions[activeSessionId] ?? false
+      if (currentReviewing !== isReviewing) {
+        updates.reviewingSessions = {
+          ...currentState.reviewingSessions,
+          [activeSessionId]: isReviewing,
+        }
+      }
+
+      // Load review results from session data into Zustand store
+      if (session.review_results) {
+        updates.reviewResults = {
+          ...currentState.reviewResults,
+          [activeSessionId]: session.review_results,
+        }
+      }
+
+      // Load fixed review findings from session data
+      if (session.fixed_findings && session.fixed_findings.length > 0) {
+        updates.fixedReviewFindings = {
+          ...currentState.fixedReviewFindings,
+          [activeSessionId]: new Set(session.fixed_findings),
+        }
+      }
+
+      // Load waiting for input status
+      const waitingForInput =
+        sessionCanBeWaiting(session) && (session.waiting_for_input ?? false)
+      const currentWaiting =
+        currentState.waitingForInputSessionIds[activeSessionId] ?? false
+      if (currentWaiting !== waitingForInput) {
+        updates.waitingForInputSessionIds = {
+          ...currentState.waitingForInputSessionIds,
+          [activeSessionId]: waitingForInput,
+        }
+      }
+
+      // Load plan file path
+      if (session.plan_file_path) {
+        updates.planFilePaths = {
+          ...currentState.planFilePaths,
+          [activeSessionId]: session.plan_file_path,
+        }
+      }
+
+      // Load pending plan message ID
+      if (session.pending_plan_message_id) {
+        updates.pendingPlanMessageIds = {
+          ...currentState.pendingPlanMessageIds,
+          [activeSessionId]: session.pending_plan_message_id,
+        }
+      }
+
+      // Load enabled MCP servers override
+      if (session.enabled_mcp_servers !== undefined) {
+        updates.enabledMcpServers = {
+          ...currentState.enabledMcpServers,
+          [activeSessionId]: session.enabled_mcp_servers,
+        }
+      }
+
+      // Load selected execution mode
+      if (session.selected_execution_mode) {
+        updates.executionModes = {
+          ...currentState.executionModes,
+          [activeSessionId]: session.selected_execution_mode,
+        }
+      }
+
+      // Load per-table checklist state (tableKey -> Set of checked row indices)
+      if (
+        session.table_checked_rows &&
+        Object.keys(session.table_checked_rows).length > 0
+      ) {
+        const hydrated: Record<string, Set<number>> = {}
+        for (const [tableKey, rows] of Object.entries(
+          session.table_checked_rows
+        )) {
+          hydrated[tableKey] = new Set(rows)
+        }
+        updates.tableCheckedRows = {
+          ...currentState.tableCheckedRows,
+          [activeSessionId]: hydrated,
+        }
+      }
+
+      // NOTE: Do NOT load queued_messages from session data into Zustand here.
+      // Queue state is synced in real-time via the queue:updated Tauri event
+      // (useMainWindowEventListeners). Loading from TanStack cache is redundant
+      // and can restore stale data, causing double execution.
+
+      // Apply all updates at once
+      if (Object.keys(updates).length > 0) {
+        useChatStore.setState(updates)
+      }
+
+      // Store initial state as last saved to avoid immediate re-save
+      lastSavedStateRef.current = getCurrentSessionState(activeSessionId)
+
+      // Allow saves after a short delay — clear on unmount / re-run so a
+      // superseded load cannot unlock isLoadingRef after a newer session started.
+      loadingUnlockTimer = setTimeout(() => {
+        isLoadingRef.current = false
+        loadingUnlockTimer = null
+      }, 100)
+
+      logger.debug('Session state loaded', { sessionId: activeSessionId })
     }
 
-    // Load submitted answers
-    if (
-      session.submitted_answers &&
-      Object.keys(session.submitted_answers).length > 0
-    ) {
-      updates.submittedAnswers = {
-        ...currentState.submittedAnswers,
-        [activeSessionId]: session.submitted_answers,
+    return () => {
+      if (loadingUnlockTimer != null) {
+        clearTimeout(loadingUnlockTimer)
+        loadingUnlockTimer = null
+        // Don't leave the load-guard stuck if this effect re-ran (e.g. sessionsData
+        // refetch) before the timer fired; a subsequent full load sets it again.
+        isLoadingRef.current = false
       }
     }
-
-    // Load fixed findings
-    if (session.fixed_findings && session.fixed_findings.length > 0) {
-      updates.fixedFindings = {
-        ...currentState.fixedFindings,
-        [activeSessionId]: new Set(session.fixed_findings),
-      }
-    }
-
-    // Load pending permission denials
-    if (
-      session.pending_permission_denials &&
-      session.pending_permission_denials.length > 0
-    ) {
-      updates.pendingPermissionDenials = {
-        ...currentState.pendingPermissionDenials,
-        [activeSessionId]: session.pending_permission_denials,
-      }
-    }
-
-    if (
-      session.pending_codex_command_approval_requests &&
-      session.pending_codex_command_approval_requests.length > 0
-    ) {
-      updates.pendingCodexCommandApprovalRequests = {
-        ...currentState.pendingCodexCommandApprovalRequests,
-        [activeSessionId]: session.pending_codex_command_approval_requests,
-      }
-    }
-
-    if (
-      session.pending_codex_permission_requests &&
-      session.pending_codex_permission_requests.length > 0
-    ) {
-      updates.pendingCodexPermissionRequests = {
-        ...currentState.pendingCodexPermissionRequests,
-        [activeSessionId]: session.pending_codex_permission_requests,
-      }
-    }
-
-    if (
-      session.pending_codex_user_input_requests &&
-      session.pending_codex_user_input_requests.length > 0
-    ) {
-      updates.pendingCodexUserInputRequests = {
-        ...currentState.pendingCodexUserInputRequests,
-        [activeSessionId]: session.pending_codex_user_input_requests,
-      }
-    }
-
-    if (
-      session.pending_codex_mcp_elicitation_requests &&
-      session.pending_codex_mcp_elicitation_requests.length > 0
-    ) {
-      updates.pendingCodexMcpElicitationRequests = {
-        ...currentState.pendingCodexMcpElicitationRequests,
-        [activeSessionId]: session.pending_codex_mcp_elicitation_requests,
-      }
-    }
-
-    if (
-      session.pending_codex_dynamic_tool_call_requests &&
-      session.pending_codex_dynamic_tool_call_requests.length > 0
-    ) {
-      updates.pendingCodexDynamicToolCallRequests = {
-        ...currentState.pendingCodexDynamicToolCallRequests,
-        [activeSessionId]: session.pending_codex_dynamic_tool_call_requests,
-      }
-    }
-
-    // Load denied message context
-    if (session.denied_message_context) {
-      updates.deniedMessageContext = {
-        ...currentState.deniedMessageContext,
-        [activeSessionId]: {
-          message: session.denied_message_context.message,
-          model: session.denied_message_context.model,
-          thinkingLevel: session.denied_message_context.thinking_level as
-            | 'off'
-            | 'think'
-            | 'megathink'
-            | 'ultrathink',
-        },
-      }
-    }
-
-    // Load reviewing status (handle both true and false to fix asymmetry bug)
-    const isReviewing = session.is_reviewing ?? false
-    const currentReviewing =
-      currentState.reviewingSessions[activeSessionId] ?? false
-    if (currentReviewing !== isReviewing) {
-      updates.reviewingSessions = {
-        ...currentState.reviewingSessions,
-        [activeSessionId]: isReviewing,
-      }
-    }
-
-    // Load review results from session data into Zustand store
-    if (session.review_results) {
-      updates.reviewResults = {
-        ...currentState.reviewResults,
-        [activeSessionId]: session.review_results,
-      }
-    }
-
-    // Load fixed review findings from session data
-    if (session.fixed_findings && session.fixed_findings.length > 0) {
-      updates.fixedReviewFindings = {
-        ...currentState.fixedReviewFindings,
-        [activeSessionId]: new Set(session.fixed_findings),
-      }
-    }
-
-    // Load waiting for input status
-    const waitingForInput =
-      sessionCanBeWaiting(session) && (session.waiting_for_input ?? false)
-    const currentWaiting =
-      currentState.waitingForInputSessionIds[activeSessionId] ?? false
-    if (currentWaiting !== waitingForInput) {
-      updates.waitingForInputSessionIds = {
-        ...currentState.waitingForInputSessionIds,
-        [activeSessionId]: waitingForInput,
-      }
-    }
-
-    // Load plan file path
-    if (session.plan_file_path) {
-      updates.planFilePaths = {
-        ...currentState.planFilePaths,
-        [activeSessionId]: session.plan_file_path,
-      }
-    }
-
-    // Load pending plan message ID
-    if (session.pending_plan_message_id) {
-      updates.pendingPlanMessageIds = {
-        ...currentState.pendingPlanMessageIds,
-        [activeSessionId]: session.pending_plan_message_id,
-      }
-    }
-
-    // Load enabled MCP servers override
-    if (session.enabled_mcp_servers !== undefined) {
-      updates.enabledMcpServers = {
-        ...currentState.enabledMcpServers,
-        [activeSessionId]: session.enabled_mcp_servers,
-      }
-    }
-
-    // Load selected execution mode
-    if (session.selected_execution_mode) {
-      updates.executionModes = {
-        ...currentState.executionModes,
-        [activeSessionId]: session.selected_execution_mode,
-      }
-    }
-
-    // Load per-table checklist state (tableKey -> Set of checked row indices)
-    if (
-      session.table_checked_rows &&
-      Object.keys(session.table_checked_rows).length > 0
-    ) {
-      const hydrated: Record<string, Set<number>> = {}
-      for (const [tableKey, rows] of Object.entries(
-        session.table_checked_rows
-      )) {
-        hydrated[tableKey] = new Set(rows)
-      }
-      updates.tableCheckedRows = {
-        ...currentState.tableCheckedRows,
-        [activeSessionId]: hydrated,
-      }
-    }
-
-    // NOTE: Do NOT load queued_messages from session data into Zustand here.
-    // Queue state is synced in real-time via the queue:updated Tauri event
-    // (useMainWindowEventListeners). Loading from TanStack cache is redundant
-    // and can restore stale data, causing double execution.
-
-    // Apply all updates at once
-    if (Object.keys(updates).length > 0) {
-      useChatStore.setState(updates)
-    }
-
-    // Store initial state as last saved to avoid immediate re-save
-    lastSavedStateRef.current = getCurrentSessionState(activeSessionId)
-
-    // Allow saves after a short delay
-    setTimeout(() => {
-      isLoadingRef.current = false
-    }, 100)
-
-    logger.debug('Session state loaded', { sessionId: activeSessionId })
   }, [activeSessionId, sessionsData, getCurrentSessionState])
   // Subscribe to Zustand changes and save to session file
   useEffect(() => {

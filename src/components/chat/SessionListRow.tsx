@@ -104,8 +104,6 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
         <ContextMenuTrigger asChild>
           <div
             ref={ref}
-            role="button"
-            tabIndex={-1}
             onClick={onSelect}
             onDoubleClick={() =>
               onRenameStart?.(card.session.id, card.session.name)
@@ -144,6 +142,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                 onKeyDown={handleRenameKeyDown}
                 onClick={e => e.stopPropagation()}
                 onDoubleClick={e => e.stopPropagation()}
+                aria-label="Rename session"
                 className="flex-1 min-w-0 bg-transparent text-base outline-none ring-1 ring-ring rounded px-1 md:text-sm"
               />
             ) : (

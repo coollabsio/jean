@@ -471,7 +471,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   closePanelTerminals: worktreeId => {
     const state = get()
     const terminals = state.terminals[worktreeId] ?? []
-    const panelTerminalIds = terminals.filter(isPanelTerminal).map(t => t.id)
+    const panelTerminalIds = terminals.flatMap(t =>
+      isPanelTerminal(t) ? [t.id] : []
+    )
     const sessionTerminals = terminals.filter(t => !isPanelTerminal(t))
 
     if (

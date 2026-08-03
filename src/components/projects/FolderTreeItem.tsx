@@ -125,6 +125,8 @@ export function FolderTreeItem({
         >
           {/* Folder Icon */}
           <button
+            type="button"
+            aria-label={isExpanded ? 'Collapse folder' : 'Expand folder'}
             className="flex h-4 w-4 shrink-0 items-center justify-center rounded hover:bg-accent-foreground/10"
             onClick={handleChevronClick}
           >
@@ -144,6 +146,7 @@ export function FolderTreeItem({
               onChange={e => setEditName(e.target.value)}
               onBlur={() => handleSubmitRename(true)}
               onKeyDown={handleKeyDown}
+              aria-label="Rename folder"
               className="flex-1 bg-transparent text-base outline-none ring-1 ring-primary/50 rounded px-1 md:text-sm"
               onClick={e => e.stopPropagation()}
               autoFocus

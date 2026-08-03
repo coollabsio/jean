@@ -192,6 +192,8 @@ pub struct AppPreferences {
     pub ui_font: String, // Font family for UI: inter, geist, system
     #[serde(default = "default_chat_font")]
     pub chat_font: String, // Font family for chat: jetbrains-mono, fira-code, source-code-pro, inter, geist, roboto, lato
+    #[serde(default = "default_font_weight")]
+    pub font_weight: String, // Overall font weight: light, normal, medium
     #[serde(default = "default_git_poll_interval")]
     pub git_poll_interval: u64, // Git status polling interval in seconds (10-600)
     #[serde(default = "default_remote_poll_interval")]
@@ -547,6 +549,10 @@ fn default_ui_font() -> String {
 
 fn default_chat_font() -> String {
     "geist".to_string()
+}
+
+fn default_font_weight() -> String {
+    "normal".to_string()
 }
 
 fn default_model() -> String {
@@ -1170,6 +1176,17 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!prefs.has_seen_external_display_zoom_tip);
+    }
+
+    #[test]
+    fn app_preferences_default_font_weight_for_new_and_missing_prefs() {
+        assert_eq!(AppPreferences::default().font_weight, "normal");
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json.as_object_mut().unwrap().remove("font_weight");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert_eq!(prefs.font_weight, "normal");
     }
 
     #[test]
@@ -2504,6 +2521,7 @@ impl Default for AppPreferences {
             chat_font_size: 16,
             ui_font: default_ui_font(),
             chat_font: default_chat_font(),
+            font_weight: default_font_weight(),
             git_poll_interval: default_git_poll_interval(),
             remote_poll_interval: default_remote_poll_interval(),
             keybindings: default_keybindings(),

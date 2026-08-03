@@ -128,6 +128,7 @@ const SidebarItem = forwardRef<
 
   return (
     <button
+      type="button"
       ref={ref}
       onClick={onClick}
       className={`w-full text-left rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-accent ${isSelected || isFocused ? 'bg-accent font-medium' : ''}`}
@@ -215,9 +216,9 @@ export function WorkflowRunsModal() {
 
     const seenSet = new Set(useUIStore.getState().seenFailedWorkflowRunIds)
     const latestFailed = getLatestFailedWorkflowRuns(runs)
-    const unreadRunIds = latestFailed
-      .map(r => r.databaseId)
-      .filter(id => !seenSet.has(id))
+    const unreadRunIds = latestFailed.flatMap(r =>
+      seenSet.has(r.databaseId) ? [] : [r.databaseId]
+    )
     if (unreadRunIds.length === 0) return
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -270,7 +271,19 @@ export function WorkflowRunsModal() {
     return runs.filter(run => run.workflowName === selectedWorkflow)
   }, [runs, selectedWorkflow])
 
-  // Reset focus when modal opens or runs change
+  const scrollFocusedItemIntoView = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      itemRefs.current[index]?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [])
+
+  const scrollSidebarItemIntoView = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      sidebarItemRefs.current[index]?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [])
+
+  // Reset focus when modal opens or runs change (scroll in the same turn)
   useEffect(() => {
     if (workflowRunsModalOpen) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -282,25 +295,15 @@ export function WorkflowRunsModal() {
 
       setSidebarFocusedIndex(0)
       requestAnimationFrame(() => sidebarRef.current?.focus())
+      scrollFocusedItemIntoView(0)
+      scrollSidebarItemIntoView(0)
     }
-  }, [workflowRunsModalOpen, runs.length])
-
-  // Reset focus when filter changes
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFocusedIndex(0)
-  }, [selectedWorkflow])
-
-  // Scroll focused items into view
-  useEffect(() => {
-    itemRefs.current[focusedIndex]?.scrollIntoView({ block: 'nearest' })
-  }, [focusedIndex])
-
-  useEffect(() => {
-    sidebarItemRefs.current[sidebarFocusedIndex]?.scrollIntoView({
-      block: 'nearest',
-    })
-  }, [sidebarFocusedIndex])
+  }, [
+    workflowRunsModalOpen,
+    runs.length,
+    scrollFocusedItemIntoView,
+    scrollSidebarItemIntoView,
+  ])
 
   const title = useMemo(() => {
     if (workflowRunsModalBranch) {
@@ -615,8 +618,12 @@ export function WorkflowRunsModal() {
     (index: number) => {
       setSelectedWorkflow(sidebarItems[index] ?? null)
       setSidebarFocusedIndex(index)
+      scrollSidebarItemIntoView(index)
+      // Reset list focus with the filter change (no chained effect)
+      setFocusedIndex(0)
+      scrollFocusedItemIntoView(0)
     },
-    [sidebarItems]
+    [sidebarItems, scrollFocusedItemIntoView, scrollSidebarItemIntoView]
   )
 
   const handleKeyDown = useCallback(
@@ -650,20 +657,27 @@ export function WorkflowRunsModal() {
             e.preventDefault()
             setFocusedPane('list')
             setFocusedIndex(0)
+            scrollFocusedItemIntoView(0)
             break
         }
       } else {
         switch (e.key) {
           case 'ArrowDown':
-          case 'j':
+          case 'j': {
             e.preventDefault()
-            setFocusedIndex(i => Math.min(i + 1, displayedRuns.length - 1))
+            const next = Math.min(focusedIndex + 1, displayedRuns.length - 1)
+            setFocusedIndex(next)
+            scrollFocusedItemIntoView(next)
             break
+          }
           case 'ArrowUp':
-          case 'k':
+          case 'k': {
             e.preventDefault()
-            setFocusedIndex(i => Math.max(i - 1, 0))
+            const next = Math.max(focusedIndex - 1, 0)
+            setFocusedIndex(next)
+            scrollFocusedItemIntoView(next)
             break
+          }
           case 'ArrowLeft':
           case 'h':
             e.preventDefault()
@@ -694,6 +708,7 @@ export function WorkflowRunsModal() {
       handleRunClick,
       handleInvestigate,
       handleRefresh,
+      scrollFocusedItemIntoView,
     ]
   )
 
@@ -739,6 +754,8 @@ export function WorkflowRunsModal() {
         ) : (
           <div
             ref={sidebarRef}
+            role="group"
+            aria-label="Workflow runs"
             tabIndex={0}
             onKeyDown={handleKeyDown}
             className="flex min-h-0 flex-1 flex-col gap-3 outline-none sm:flex-row sm:gap-4"
@@ -774,6 +791,9 @@ export function WorkflowRunsModal() {
                       onClick={() => {
                         setSelectedWorkflow(workflowName)
                         setSidebarFocusedIndex(idx)
+                        scrollSidebarItemIntoView(idx)
+                        setFocusedIndex(0)
+                        scrollFocusedItemIntoView(0)
                       }}
                     />
                   )
@@ -819,6 +839,7 @@ export function WorkflowRunsModal() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
+                                  type="button"
                                   onClick={e => {
                                     e.stopPropagation()
                                     handleInvestigate(run)

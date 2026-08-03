@@ -617,6 +617,8 @@ export function WorktreeItem({
     <div>
       <WorktreeContextMenu actions={menuActions}>
         <div
+          role="button"
+          tabIndex={0}
           className={cn(
             'group relative flex cursor-pointer items-center gap-1.5 py-1.5 pr-2 overflow-hidden transition-colors duration-150',
             isNarrowSidebar ? 'pl-4' : 'pl-7',
@@ -625,6 +627,12 @@ export function WorktreeItem({
               : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
           )}
           onClick={handleClick}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleClick()
+            }
+          }}
           {...middleClickClose(handleWorktreeMiddleClose)}
           onDoubleClick={handleDoubleClick}
         >
@@ -662,6 +670,7 @@ export function WorktreeItem({
               {/* Chevron for expand/collapse sessions */}
               <button
                 type="button"
+                aria-label={isExpanded ? 'Collapse sessions' : 'Expand sessions'}
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
                 onClick={handleChevronClick}
               >
@@ -768,10 +777,11 @@ export function WorktreeItem({
                 {group.cards.map(card => {
                   const config = statusConfig[card.status]
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={card.session.id}
                       className={cn(
-                        'flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate',
+                        'flex w-full items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate text-left',
                         activeSessionId === card.session.id && isSelected
                           ? 'text-foreground bg-primary/10 font-medium'
                           : activeSessionId === card.session.id
@@ -799,7 +809,7 @@ export function WorktreeItem({
                       >
                         {card.session.name || 'Untitled'}
                       </span>
-                    </div>
+                    </button>
                   )
                 })}
               </div>

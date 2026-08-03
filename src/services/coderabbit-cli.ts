@@ -197,6 +197,10 @@ export function useCodeRabbitInstallProgress(): [
   return [progress, resetProgress]
 }
 
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_coderabbit_cli_version_exists', { version })
+}
+
 export function useCodeRabbitCliSetup() {
   const status = useCodeRabbitCliStatus()
   const versions = useAvailableCodeRabbitVersions()
@@ -230,8 +234,6 @@ export function useCodeRabbitCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_coderabbit_cli_version_exists', { version })
 
   return {
     status: status.data,

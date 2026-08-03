@@ -19,4 +19,16 @@ describe('web reload recovery UI', () => {
     expect(source).toContain('QuitConfirmationDialog')
     expect(source).not.toContain('WebReloadingOverlay')
   })
+
+  it('dismisses stuck overlays on native remote disconnect instead of reloading', () => {
+    // Native remote keeps the shell + recovery UI; pure web still reloads.
+    expect(source).toContain('dismissTransientUi()')
+    expect(source).toMatch(
+      /if \(isNativeApp\(\)\) \{\s*dismissTransientUi\(\)/
+    )
+    // Must not skip the disconnect listener entirely for native clients.
+    expect(source).not.toMatch(
+      /if \(!webBackend \|\| isNativeApp\(\)\) return/
+    )
+  })
 })

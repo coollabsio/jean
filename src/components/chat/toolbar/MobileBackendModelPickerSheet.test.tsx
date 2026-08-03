@@ -39,6 +39,7 @@ vi.mock('@/services/model-catalog', () => ({
 }))
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
   Object.defineProperty(window, 'innerWidth', {
     configurable: true,
     writable: true,

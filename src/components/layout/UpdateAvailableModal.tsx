@@ -10,6 +10,17 @@ import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/store/ui-store'
 import { isNativeApp } from '@/lib/environment'
 
+function handleUpdateLater() {
+  const modalVersion = useUIStore.getState().updateModalVersion
+  useUIStore.getState().setUpdateModalVersion(null)
+  // Don't overwrite ready/installing state with a deferred badge
+  const { updateReadyVersion, isUpdateInstalling } = useUIStore.getState()
+  if (updateReadyVersion || isUpdateInstalling) return
+  if (modalVersion) {
+    useUIStore.getState().setPendingUpdateVersion(modalVersion)
+  }
+}
+
 export function UpdateAvailableModal() {
   const version = useUIStore(state => state.updateModalVersion)
   const readyVersion = useUIStore(state => state.updateReadyVersion)
@@ -29,17 +40,6 @@ export function UpdateAvailableModal() {
     window.dispatchEvent(new Event('install-pending-update'))
   }
 
-  const handleLater = () => {
-    const modalVersion = useUIStore.getState().updateModalVersion
-    useUIStore.getState().setUpdateModalVersion(null)
-    // Don't overwrite ready/installing state with a deferred badge
-    const { updateReadyVersion, isUpdateInstalling } = useUIStore.getState()
-    if (updateReadyVersion || isUpdateInstalling) return
-    if (modalVersion) {
-      useUIStore.getState().setPendingUpdateVersion(modalVersion)
-    }
-  }
-
   const isReady = readyVersion !== null && readyVersion === version
   const primaryLabel = isReady
     ? 'Restart Now'
@@ -57,7 +57,7 @@ export function UpdateAvailableModal() {
     <Dialog
       open={isOpen}
       onOpenChange={open => {
-        if (!open) handleLater()
+        if (!open) handleUpdateLater()
       }}
     >
       <DialogContent className="max-w-sm">
@@ -69,7 +69,7 @@ export function UpdateAvailableModal() {
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={handleLater}>
+          <Button variant="outline" onClick={handleUpdateLater}>
             Later
           </Button>
           <Button onClick={handleUpdate} disabled={isInstalling && !isReady}>

@@ -72,6 +72,7 @@ export function LinearIssueItem({
         />
       )}
       <button
+        type="button"
         onClick={e => onClick(e.metaKey)}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
@@ -122,11 +123,13 @@ export function LinearIssueItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
               onClick={e => {
                 e.stopPropagation()
                 onInvestigate(e.metaKey)
               }}
               disabled={isCreating}
+              aria-label="Investigate"
               className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {isCreating ? (
@@ -143,10 +146,12 @@ export function LinearIssueItem({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  type="button"
                   onClick={e => {
                     e.stopPropagation()
                     onPreview()
                   }}
+                  aria-label="Preview"
                   className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <Eye className="h-3 w-3" />

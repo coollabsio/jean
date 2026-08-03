@@ -112,6 +112,12 @@ import { getResumeCommand } from '@/components/chat/session-card-utils'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
 import { resolvePortUrl } from '@/components/browser/default-tab-url'
 
+/** Stable defaults so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
+const EMPTY_RUN_SCRIPTS: string[] = []
+const EMPTY_PACKAGE_SCRIPTS: PackageScript[] = []
+const EMPTY_FAVORITE_PACKAGE_SCRIPTS: string[] = []
+
 interface MobileSettingsMenuProps {
   isDisabled: boolean
   providerLocked?: boolean
@@ -188,7 +194,7 @@ export function MobileSettingsMenu({
   isCodex,
   modelReasoning,
   customCliProfiles,
-  customCodexProviders = [],
+  customCodexProviders = EMPTY_CODEX_PROVIDERS,
   onOpenBackendModelPicker,
   handleProviderChange,
   handleEffortLevelChange,
@@ -215,10 +221,10 @@ export function MobileSettingsMenu({
   prDisplayStatus,
   worktreeId,
   onAttach,
-  runScripts = [],
+  runScripts = EMPTY_RUN_SCRIPTS,
   onRunCommand,
-  packageScripts = [],
-  favoritePackageScripts = [],
+  packageScripts = EMPTY_PACKAGE_SCRIPTS,
+  favoritePackageScripts = EMPTY_FAVORITE_PACKAGE_SCRIPTS,
   onRunPackageScript,
   onToggleFavoritePackageScript,
 }: MobileSettingsMenuProps) {
@@ -227,6 +233,10 @@ export function MobileSettingsMenu({
   const isKimi = selectedBackend === 'kimi'
   const singleRunScript =
     runScripts.length === 1 ? (runScripts[0] ?? null) : null
+  const enabledMcpServersSet = useMemo(
+    () => new Set(enabledMcpServers),
+    [enabledMcpServers]
+  )
   const favoritePackageScriptSet = useMemo(
     () => new Set(favoritePackageScripts),
     [favoritePackageScripts]
@@ -731,8 +741,7 @@ export function MobileSettingsMenu({
                           <DropdownMenuCheckboxItem
                             key={`${backend}-${server.name}`}
                             checked={
-                              !server.disabled &&
-                              enabledMcpServers.includes(key)
+                              !server.disabled && enabledMcpServersSet.has(key)
                             }
                             onCheckedChange={() => onToggleMcpServer(key)}
                             onSelect={keepMenuOpenOnSelect}
@@ -793,9 +802,9 @@ export function MobileSettingsMenu({
                     Run
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                    {runScripts.map((cmd, i) => (
+                    {runScripts.map(cmd => (
                       <DropdownMenuItem
-                        key={i}
+                        key={cmd}
                         onSelect={() => handleRunCommand(cmd)}
                         className="font-mono text-xs"
                       >
@@ -940,6 +949,8 @@ export function MobileSettingsMenu({
                         #{ctx.number} {ctx.title}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -973,6 +984,8 @@ export function MobileSettingsMenu({
                         #{ctx.number} {ctx.title}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -1007,6 +1020,8 @@ export function MobileSettingsMenu({
                         #{ctx.number} {ctx.packageName} ({ctx.severity})
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -1044,6 +1059,8 @@ export function MobileSettingsMenu({
                         {ctx.ghsaId} — {ctx.summary}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -1083,6 +1100,8 @@ export function MobileSettingsMenu({
                       </span>
                       {ctx.url && (
                         <button
+                          type="button"
+                        aria-label="Open external link"
                           className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                           onClick={e => {
                             e.stopPropagation()
@@ -1296,7 +1315,7 @@ export function MobileSettingsMenu({
                   {(grouped[backend] ?? []).map(server => {
                     const key = mcpKey(backend, server.name)
                     const enabled =
-                      !server.disabled && enabledMcpServers.includes(key)
+                      !server.disabled && enabledMcpServersSet.has(key)
                     return (
                       <button
                         key={key}

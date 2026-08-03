@@ -52,6 +52,7 @@ async function loadTransportModule() {
   vi.resetModules()
   vi.doMock('./environment', () => ({
     isNativeApp: () => false,
+    isNativeOpenAllowed: () => false,
     setWsConnected: setWsConnectedMock,
     setWebAccessEnabled: vi.fn(),
   }))
@@ -64,6 +65,7 @@ async function loadNativeTransportModule(
   vi.resetModules()
   vi.doMock('./environment', () => ({
     isNativeApp: () => true,
+    isNativeOpenAllowed: () => false,
     setWsConnected: setWsConnectedMock,
     setWebAccessEnabled: vi.fn(),
   }))
@@ -81,11 +83,14 @@ async function loadRemoteNativeTransportModule(
     sshHost?: string
     sshPort?: number
   },
-  tauriInvoke?: ReturnType<typeof vi.fn>
+  tauriInvoke?: ReturnType<typeof vi.fn>,
+  options?: { nativeOpenAllowed?: boolean }
 ) {
   vi.resetModules()
+  const nativeOpenAllowed = options?.nativeOpenAllowed ?? false
   vi.doMock('./environment', () => ({
     isNativeApp: () => true,
+    isNativeOpenAllowed: () => nativeOpenAllowed,
     setWsConnected: setWsConnectedMock,
     setWebAccessEnabled: vi.fn(),
   }))
@@ -265,6 +270,43 @@ describe('transport bootstrap', () => {
       worktreePath: 'ssh://ubuntu@192.168.1.50/home/ubuntu/jean/app/feature',
       editor: 'zed',
     })
+  })
+
+  it('prefers backend native-open over ssh:// remap when the remote allows it', async () => {
+    // WSL/--allow-native-open headless: editor must go through WebSocket
+    // dispatch (same as Finder/Terminal), not local Windows-side ssh://.
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'WSL Jean',
+        url: 'http://127.0.0.1:3456',
+        token: 'secret',
+      },
+      tauriInvoke,
+      { nativeOpenAllowed: true }
+    )
+
+    transport.connectTransport()
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
+    await flushAsync()
+    const ws = getWs(0)
+
+    const request = transport.invoke('open_worktree_in_editor', {
+      worktreePath: '/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+    await waitFor(() =>
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"command":"open_worktree_in_editor"')
+      )
+    )
+    // Resolve the pending WS invoke so it does not leak.
+    const sent = JSON.parse(String(ws.send.mock.calls.at(-1)?.[0]))
+    ws.receive({ type: 'response', id: sent.id, data: null })
+    await request
+
+    expect(tauriInvoke).not.toHaveBeenCalled()
   })
 
   it('rejects non-Zed remote editor opens with a clear error', async () => {

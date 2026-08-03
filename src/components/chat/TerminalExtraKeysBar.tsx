@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
@@ -62,38 +62,40 @@ export function TerminalExtraKeysBar({
   }, [])
 
   // When sticky Ctrl/Alt is active, capture the next keystroke and transform it.
+  // useEffectEvent keeps latest sendData/sticky state without re-binding.
+  const onStickyKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    // Only intercept when focus is still in this terminal (or nothing stole it).
+    const terminalRoot = document.querySelector(
+      `[data-terminal-id="${terminalId}"]`
+    )
+    const active = document.activeElement
+    if (
+      active instanceof HTMLElement &&
+      terminalRoot &&
+      !terminalRoot.contains(active) &&
+      (active.tagName === 'INPUT' ||
+        active.tagName === 'TEXTAREA' ||
+        active.isContentEditable)
+    ) {
+      return
+    }
+
+    const data = resolveStickyKeyData(event, stickyCtrl, stickyAlt)
+    if (data === null) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    sendData(data)
+    clearSticky()
+  })
+
   useEffect(() => {
     if (!stickyCtrl && !stickyAlt) return
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      // Only intercept when focus is still in this terminal (or nothing stole it).
-      const terminalRoot = document.querySelector(
-        `[data-terminal-id="${terminalId}"]`
-      )
-      const active = document.activeElement
-      if (
-        active instanceof HTMLElement &&
-        terminalRoot &&
-        !terminalRoot.contains(active) &&
-        (active.tagName === 'INPUT' ||
-          active.tagName === 'TEXTAREA' ||
-          active.isContentEditable)
-      ) {
-        return
-      }
-
-      const data = resolveStickyKeyData(event, stickyCtrl, stickyAlt)
-      if (data === null) return
-
-      event.preventDefault()
-      event.stopPropagation()
-      sendData(data)
-      clearSticky()
-    }
-
+    const onKeyDown = (event: KeyboardEvent) => onStickyKeyDown(event)
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [stickyCtrl, stickyAlt, terminalId, sendData, clearSticky])
+  }, [stickyCtrl, stickyAlt])
 
   // Reset sticky modifiers when switching terminals.
   useEffect(() => {
