@@ -1911,7 +1911,8 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "list_codex_skills" => {
-            let result = crate::projects::list_codex_skills().await?;
+            let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
+            let result = crate::projects::list_codex_skills(worktree_path).await?;
             to_value(result)
         }
         "list_opencode_skills" => {
