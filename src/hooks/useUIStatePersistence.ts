@@ -724,7 +724,7 @@ export function useUIStatePersistence() {
             commandArgs: terminal.command_args ?? null,
             label: terminal.label,
             kind: terminal.kind ?? 'panel',
-            sessionId: terminal.session_id,
+            sessionId: terminal.session_id ?? undefined,
           })) satisfies TerminalInstance[]
 
         if (liveList.length === 0) {

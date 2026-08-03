@@ -39,7 +39,8 @@ fn signal_file(app: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
         .join("terminal-notifications");
     std::fs::create_dir_all(&dir)
         .map_err(|error| format!("Failed to create terminal notification dir: {error}"))?;
-    Ok(dir.join(format!("{session_id}.jsonl")))
+    let safe_session_id = crate::chat::storage::sanitize_filename(session_id);
+    Ok(dir.join(format!("{safe_session_id}.jsonl")))
 }
 
 pub fn is_codex_command(command: &str) -> bool {
@@ -235,6 +236,15 @@ mod tests {
         assert!(is_codex_command("codex.exe"));
         assert!(!is_codex_command("claude"));
         assert!(!is_codex_command(""));
+    }
+
+    #[test]
+    fn terminal_signal_filename_cannot_escape_notification_directory() {
+        let safe_session_id = crate::chat::storage::sanitize_filename("../../session/1");
+
+        assert_eq!(safe_session_id, "------session-1");
+        assert!(!safe_session_id.contains('/'));
+        assert!(!safe_session_id.contains(".."));
     }
 
     #[test]
