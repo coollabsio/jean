@@ -436,7 +436,10 @@ export const ChatInput = memo(function ChatInput({
 
       // Detect / commands and $ skills (only if @/# popovers are not open)
       if (!fileMentionOpen && !contextMentionOpen) {
-        if (prevChar === '/' || prevChar === '$') {
+        if (
+          prevChar === '/' ||
+          (prevChar === '$' && selectedBackend === 'codex')
+        ) {
           // Check that it's at start or preceded by whitespace
           const charBeforeSlash = value[cursorPos - 2]
           if (

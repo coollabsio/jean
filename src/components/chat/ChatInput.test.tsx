@@ -124,6 +124,36 @@ describe('ChatInput attachments', () => {
     )
   })
 
+  it('does not open the skill picker when typing $ for a non-Codex session', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+        selectedBackend="claude"
+        installedBackends={['claude']}
+      />
+    )
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '$', selectionStart: 1 },
+    })
+
+    expect(slashPopoverMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ open: false }),
+      undefined
+    )
+  })
+
   it('registers attach handler and forwards selected files to the processor', async () => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
