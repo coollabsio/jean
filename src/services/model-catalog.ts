@@ -421,9 +421,9 @@ export function getCatalogModelOptions(
       ? []
       : getCatalogModelOptions(fallbackModelCatalog, backend)
   }
-  return models
-    .filter(model => !model.hidden)
-    .map(model => ({ value: model.id, label: model.label }))
+  return models.flatMap(model =>
+    model.hidden ? [] : [{ value: model.id, label: model.label }]
+  )
 }
 
 export function getCatalogDefaultModelOptions(

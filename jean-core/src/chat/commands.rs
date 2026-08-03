@@ -1704,7 +1704,12 @@ pub async fn update_session_state(
             }
             if let Some(v) = status_override {
                 match &v {
-                    Some(status) if !matches!(status.as_str(), "idle" | "review" | "completed" | "cancelled") => {
+                    Some(status)
+                        if !matches!(
+                            status.as_str(),
+                            "idle" | "review" | "completed" | "cancelled"
+                        ) =>
+                    {
                         return Err(format!(
                             "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
                         ));

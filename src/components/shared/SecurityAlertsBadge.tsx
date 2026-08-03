@@ -64,6 +64,7 @@ export function SecurityAlertsBadge({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={handleClick}
           className={cn(
             'shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-600 transition-colors hover:bg-orange-500/20',

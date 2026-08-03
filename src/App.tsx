@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   connectTransport,
@@ -46,6 +52,14 @@ import {
   useOpencodeCliStatus,
   useOpencodeCliAuth,
 } from './services/opencode-cli'
+import { useCursorCliStatus, useCursorCliAuth } from './services/cursor-cli'
+import { usePiCliStatus, usePiCliAuth } from './services/pi-cli'
+import {
+  useCommandCodeCliStatus,
+  useCommandCodeCliAuth,
+} from './services/commandcode-cli'
+import { useGrokCliStatus, useGrokCliAuth } from './services/grok-cli'
+import { useKimiCliStatus, useKimiCliAuth } from './services/kimi-cli'
 import { useUIStore } from './store/ui-store'
 import {
   resolveInstallPendingAction,
@@ -115,6 +129,11 @@ function WebLoadingScreen({ label }: { label: string }) {
   )
 }
 
+function handleWsAuthTokenSubmit(token: string) {
+  localStorage.setItem('jean-http-token', token)
+  window.location.reload()
+}
+
 /** Full-screen auth error overlay for web access mode. */
 function WsAuthErrorOverlay() {
   const authError = useWsAuthError()
@@ -126,16 +145,11 @@ function WsAuthErrorOverlay() {
     return <RemoteConnectionRecovery connection={remote} error={authError} />
   }
 
-  const handleTokenSubmit = (token: string) => {
-    localStorage.setItem('jean-http-token', token)
-    window.location.reload()
-  }
-
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/90">
       <WebAccessAuthScreen
         authError={authError}
-        onTokenSubmit={handleTokenSubmit}
+        onTokenSubmit={handleWsAuthTokenSubmit}
       />
     </div>
   )
@@ -917,46 +931,104 @@ function App() {
   }, [])
 
   // Check CLI installation status after the first paint.
+  // Include every AI backend Jean supports so remote hosts that only have
+  // Grok/Pi/etc. are not treated as "setup incomplete".
+  const nativeCli = cliCheckReady && isNativeApp()
   const { data: claudeStatus, isLoading: isClaudeStatusLoading } =
-    useClaudeCliStatus({ enabled: cliCheckReady && isNativeApp() })
+    useClaudeCliStatus({ enabled: nativeCli })
   const { data: codexStatus, isLoading: isCodexStatusLoading } =
-    useCodexCliStatus({ enabled: cliCheckReady && isNativeApp() })
+    useCodexCliStatus({ enabled: nativeCli })
   const { data: opencodeStatus, isLoading: isOpencodeStatusLoading } =
-    useOpencodeCliStatus({ enabled: cliCheckReady && isNativeApp() })
+    useOpencodeCliStatus({ enabled: nativeCli })
+  const { data: cursorStatus, isLoading: isCursorStatusLoading } =
+    useCursorCliStatus({ enabled: nativeCli })
+  const { data: piStatus, isLoading: isPiStatusLoading } = usePiCliStatus({
+    enabled: nativeCli,
+  })
+  const { data: commandcodeStatus, isLoading: isCommandcodeStatusLoading } =
+    useCommandCodeCliStatus({ enabled: nativeCli })
+  const { data: grokStatus, isLoading: isGrokStatusLoading } =
+    useGrokCliStatus({ enabled: nativeCli })
+  const { data: kimiStatus, isLoading: isKimiStatusLoading } =
+    useKimiCliStatus({ enabled: nativeCli })
   const { data: ghStatus, isLoading: isGhStatusLoading } = useGhCliStatus({
-    enabled: cliCheckReady && isNativeApp(),
+    enabled: nativeCli,
   })
 
   // Check CLI authentication status (only when installed)
   const { data: claudeAuth, isLoading: isClaudeAuthLoading } = useClaudeCliAuth(
-    { enabled: cliCheckReady && !!claudeStatus?.installed && isNativeApp() }
+    { enabled: nativeCli && !!claudeStatus?.installed }
   )
   const { data: codexAuth, isLoading: isCodexAuthLoading } = useCodexCliAuth({
-    enabled: cliCheckReady && !!codexStatus?.installed && isNativeApp(),
+    enabled: nativeCli && !!codexStatus?.installed,
   })
   const { data: opencodeAuth, isLoading: isOpencodeAuthLoading } =
     useOpencodeCliAuth({
-      enabled: cliCheckReady && !!opencodeStatus?.installed && isNativeApp(),
+      enabled: nativeCli && !!opencodeStatus?.installed,
     })
+  const { data: cursorAuth, isLoading: isCursorAuthLoading } =
+    useCursorCliAuth({
+      enabled: nativeCli && !!cursorStatus?.installed,
+    })
+  const { data: piAuth, isLoading: isPiAuthLoading } = usePiCliAuth({
+    enabled: nativeCli && !!piStatus?.installed,
+  })
+  const { data: commandcodeAuth, isLoading: isCommandcodeAuthLoading } =
+    useCommandCodeCliAuth({
+      enabled: nativeCli && !!commandcodeStatus?.installed,
+    })
+  const { data: grokAuth, isLoading: isGrokAuthLoading } = useGrokCliAuth({
+    enabled: nativeCli && !!grokStatus?.installed,
+  })
+  const { data: kimiAuth, isLoading: isKimiAuthLoading } = useKimiCliAuth({
+    enabled: nativeCli && !!kimiStatus?.installed,
+  })
   const { data: ghAuth, isLoading: isGhAuthLoading } = useGhCliAuth({
-    enabled: cliCheckReady && !!ghStatus?.installed && isNativeApp(),
+    enabled: nativeCli && !!ghStatus?.installed,
   })
 
   // Show onboarding if GitHub CLI is not ready, or no AI backend is ready.
-  // Only in native app - web view uses the desktop's CLIs via WebSocket
+  // Only in native app - pure web access uses the host's already-setup CLIs.
   useEffect(() => {
     if (!isNativeApp()) return
     if (!cliCheckReady) return
 
     const onboarding = useUIStore.getState()
     const prefs = queryClient.getQueryData<AppPreferences>(['preferences'])
+    // WSL mode only applies to the local Windows shell, not remote servers.
+    const requiresWslChoice = !!(
+      isLocalBackend() &&
+      isWindows &&
+      prefs &&
+      !prefs.wsl_mode_chosen
+    )
     const action = getStartupOnboardingAction({
-      statuses: [claudeStatus, codexStatus, opencodeStatus, ghStatus],
-      auth: [claudeAuth, codexAuth, opencodeAuth, ghAuth],
+      aiStatuses: [
+        claudeStatus,
+        codexStatus,
+        opencodeStatus,
+        cursorStatus,
+        piStatus,
+        commandcodeStatus,
+        grokStatus,
+        kimiStatus,
+      ],
+      aiAuth: [
+        claudeAuth,
+        codexAuth,
+        opencodeAuth,
+        cursorAuth,
+        piAuth,
+        commandcodeAuth,
+        grokAuth,
+        kimiAuth,
+      ],
+      ghStatus,
+      ghAuth,
       onboardingOpen: onboarding.onboardingOpen,
       onboardingDismissed: onboarding.onboardingDismissed,
       onboardingManuallyTriggered: onboarding.onboardingManuallyTriggered,
-      requiresWslChoice: !!(isWindows && prefs && !prefs.wsl_mode_chosen),
+      requiresWslChoice,
     })
 
     if (action === 'wait' || action === 'none') return
@@ -976,7 +1048,7 @@ function App() {
       return
     }
 
-    if (isWindows && prefs && !prefs.wsl_mode_chosen) {
+    if (requiresWslChoice) {
       logger.info('Windows WSL mode not chosen, showing onboarding')
       onboarding.setOnboardingOpen(true)
       return
@@ -986,10 +1058,20 @@ function App() {
       claudeInstalled: claudeStatus?.installed,
       codexInstalled: codexStatus?.installed,
       opencodeInstalled: opencodeStatus?.installed,
+      cursorInstalled: cursorStatus?.installed,
+      piInstalled: piStatus?.installed,
+      commandcodeInstalled: commandcodeStatus?.installed,
+      grokInstalled: grokStatus?.installed,
+      kimiInstalled: kimiStatus?.installed,
       ghInstalled: ghStatus?.installed,
       claudeAuth: claudeAuth?.authenticated,
       codexAuth: codexAuth?.authenticated,
       opencodeAuth: opencodeAuth?.authenticated,
+      cursorAuth: cursorAuth?.authenticated,
+      piAuth: piAuth?.authenticated,
+      commandcodeAuth: commandcodeAuth?.authenticated,
+      grokAuth: grokAuth?.authenticated,
+      kimiAuth: kimiAuth?.authenticated,
       ghAuth: ghAuth?.authenticated,
     })
     onboarding.setOnboardingOpen(true)
@@ -997,18 +1079,38 @@ function App() {
     claudeStatus,
     codexStatus,
     opencodeStatus,
+    cursorStatus,
+    piStatus,
+    commandcodeStatus,
+    grokStatus,
+    kimiStatus,
     ghStatus,
     claudeAuth,
     codexAuth,
     opencodeAuth,
+    cursorAuth,
+    piAuth,
+    commandcodeAuth,
+    grokAuth,
+    kimiAuth,
     ghAuth,
     isClaudeStatusLoading,
     isCodexStatusLoading,
     isOpencodeStatusLoading,
+    isCursorStatusLoading,
+    isPiStatusLoading,
+    isCommandcodeStatusLoading,
+    isGrokStatusLoading,
+    isKimiStatusLoading,
     isGhStatusLoading,
     isClaudeAuthLoading,
     isCodexAuthLoading,
     isOpencodeAuthLoading,
+    isCursorAuthLoading,
+    isPiAuthLoading,
+    isCommandcodeAuthLoading,
+    isGrokAuthLoading,
+    isKimiAuthLoading,
     isGhAuthLoading,
     cliCheckReady,
     platformVersion,
@@ -1023,25 +1125,54 @@ function App() {
     if (preferences.has_seen_jean_mcp_intro) return
     if (onboardingOpen || featureTourOpen || jeanMcpIntroOpen) return
 
-    if (!claudeStatus || !codexStatus || !opencodeStatus || !ghStatus) return
+    const aiStatuses = [
+      claudeStatus,
+      codexStatus,
+      opencodeStatus,
+      cursorStatus,
+      piStatus,
+      commandcodeStatus,
+      grokStatus,
+      kimiStatus,
+    ]
+    const aiAuth = [
+      claudeAuth,
+      codexAuth,
+      opencodeAuth,
+      cursorAuth,
+      piAuth,
+      commandcodeAuth,
+      grokAuth,
+      kimiAuth,
+    ]
+    if (aiStatuses.some(status => !status) || !ghStatus) return
 
     const isLoading =
       isClaudeStatusLoading ||
       isCodexStatusLoading ||
       isOpencodeStatusLoading ||
+      isCursorStatusLoading ||
+      isPiStatusLoading ||
+      isCommandcodeStatusLoading ||
+      isGrokStatusLoading ||
+      isKimiStatusLoading ||
       isGhStatusLoading ||
       (claudeStatus?.installed && isClaudeAuthLoading) ||
       (codexStatus?.installed && isCodexAuthLoading) ||
       (opencodeStatus?.installed && isOpencodeAuthLoading) ||
+      (cursorStatus?.installed && isCursorAuthLoading) ||
+      (piStatus?.installed && isPiAuthLoading) ||
+      (commandcodeStatus?.installed && isCommandcodeAuthLoading) ||
+      (grokStatus?.installed && isGrokAuthLoading) ||
+      (kimiStatus?.installed && isKimiAuthLoading) ||
       (ghStatus?.installed && isGhAuthLoading)
     if (isLoading) return
 
     const ghReady = !!ghStatus?.installed && !!ghAuth?.authenticated
-    const claudeReady = !!claudeStatus?.installed && !!claudeAuth?.authenticated
-    const codexReady = !!codexStatus?.installed && !!codexAuth?.authenticated
-    const opencodeReady =
-      !!opencodeStatus?.installed && !!opencodeAuth?.authenticated
-    const hasAiBackendReady = claudeReady || codexReady || opencodeReady
+    const hasAiBackendReady = aiStatuses.some(
+      (status, index) =>
+        !!status?.installed && !!aiAuth[index]?.authenticated
+    )
 
     // If setup is incomplete, onboarding owns the startup surface.
     if (!ghReady || !hasAiBackendReady) return
@@ -1059,18 +1190,38 @@ function App() {
     claudeStatus,
     codexStatus,
     opencodeStatus,
+    cursorStatus,
+    piStatus,
+    commandcodeStatus,
+    grokStatus,
+    kimiStatus,
     ghStatus,
     claudeAuth,
     codexAuth,
     opencodeAuth,
+    cursorAuth,
+    piAuth,
+    commandcodeAuth,
+    grokAuth,
+    kimiAuth,
     ghAuth,
     isClaudeStatusLoading,
     isCodexStatusLoading,
     isOpencodeStatusLoading,
+    isCursorStatusLoading,
+    isPiStatusLoading,
+    isCommandcodeStatusLoading,
+    isGrokStatusLoading,
+    isKimiStatusLoading,
     isGhStatusLoading,
     isClaudeAuthLoading,
     isCodexAuthLoading,
     isOpencodeAuthLoading,
+    isCursorAuthLoading,
+    isPiAuthLoading,
+    isCommandcodeAuthLoading,
+    isGrokAuthLoading,
+    isKimiAuthLoading,
     isGhAuthLoading,
     cliCheckReady,
   ])
@@ -1120,6 +1271,16 @@ function App() {
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [webBackend])
+
+  // Stable install/relaunch for event listeners — always latest without re-subscribing.
+  const onInstallAppUpdate = useEffectEvent(
+    (update: NonNullable<typeof pendingUpdateRef.current>) => {
+      void installAppUpdate(update)
+    }
+  )
+  const onRelaunchApp = useEffectEvent(() => {
+    void relaunchApp()
+  })
 
   // Initialize command system and cleanup on app startup
   useEffect(() => {
@@ -1190,11 +1351,11 @@ function App() {
         hasPendingUpdateObject: Boolean(pendingUpdateRef.current),
       })
       if (action === 'relaunch') {
-        void relaunchApp()
+        onRelaunchApp()
         return
       }
       if (action === 'install' && pendingUpdateRef.current) {
-        void installAppUpdate(pendingUpdateRef.current)
+        onInstallAppUpdate(pendingUpdateRef.current)
         return
       }
       // Already downloading — ignore duplicate install triggers (#507)
@@ -1427,7 +1588,7 @@ function App() {
       window.removeEventListener('install-pending-update', handleInstallPending)
       window.removeEventListener('update-available', handleUpdateAvailable)
     }
-  }, [installAppUpdate, relaunchApp, webBackend])
+  }, [webBackend])
 
   // Web clients request desktop install via apply_server_update → this event.
   // Only the *host* native shell should run Tauri's updater (not a remote client

@@ -1857,9 +1857,14 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
         // Best-effort: ship bundled bubblewrap next to the binary so sandboxed
         // shell/apply_patch works without a system `apt install bubblewrap`.
-        if let Err(e) =
-            install_linux_bwrap_helper(&app, &version, target, None, Some((&wsl.distro, &unix_path)))
-                .await
+        if let Err(e) = install_linux_bwrap_helper(
+            &app,
+            &version,
+            target,
+            None,
+            Some((&wsl.distro, &unix_path)),
+        )
+        .await
         {
             log::warn!("Could not install bundled Codex bubblewrap into WSL: {e}");
         }
@@ -2157,9 +2162,8 @@ async fn install_linux_bwrap_helper(
         return Ok(());
     }
 
-    let cli_dir = host_cli_dir.ok_or_else(|| {
-        "Missing host CLI directory for bubblewrap install".to_string()
-    })?;
+    let cli_dir = host_cli_dir
+        .ok_or_else(|| "Missing host CLI directory for bubblewrap install".to_string())?;
     let resources_dir = cli_dir.join("codex-resources");
     std::fs::create_dir_all(&resources_dir)
         .map_err(|e| format!("Failed to create codex-resources directory: {e}"))?;
@@ -2363,16 +2367,22 @@ mod tests {
             header.set_mode(0o755);
             header.set_cksum();
             builder
-                .append_data(&mut header, "bwrap-aarch64-unknown-linux-musl", data.as_slice())
+                .append_data(
+                    &mut header,
+                    "bwrap-aarch64-unknown-linux-musl",
+                    data.as_slice(),
+                )
                 .expect("append");
-            builder.into_inner().expect("finish tar").finish().expect("gzip");
+            builder
+                .into_inner()
+                .expect("finish tar")
+                .finish()
+                .expect("gzip");
         }
 
-        let extracted = extract_tar_gz_entry_by_file_name(
-            &archive_buf,
-            "bwrap-aarch64-unknown-linux-musl",
-        )
-        .expect("extract bwrap");
+        let extracted =
+            extract_tar_gz_entry_by_file_name(&archive_buf, "bwrap-aarch64-unknown-linux-musl")
+                .expect("extract bwrap");
         assert_eq!(extracted, b"BWRAP_BYTES");
     }
 

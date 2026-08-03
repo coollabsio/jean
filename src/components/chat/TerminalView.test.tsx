@@ -440,8 +440,14 @@ describe('TerminalView tab middle-click', () => {
     )
 
   const getTab = (label: string) => {
-    const tab = screen.getByText(label).closest('button')
-    if (!tab) throw new Error(`Tab button for "${label}" not found`)
+    // Tab chrome is a clickable div (sibling of the close button) so nested
+    // interactive a11y rules are satisfied — not a single outer <button>.
+    const labelEl = screen.getByText(label)
+    const tab =
+      labelEl.closest('[draggable="true"]') ??
+      labelEl.closest('.cursor-pointer') ??
+      labelEl.parentElement
+    if (!tab) throw new Error(`Tab for "${label}" not found`)
     return tab
   }
 

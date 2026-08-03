@@ -31,9 +31,10 @@ export function findBackendFileStats(
 
   if (candidates.length === 0) return null
 
+  const candidateSet = new Set(candidates)
   const match = backendFiles.find(file => {
-    if (candidates.includes(file.path)) return true
-    return Boolean(file.old_path && candidates.includes(file.old_path))
+    if (candidateSet.has(file.path)) return true
+    return Boolean(file.old_path && candidateSet.has(file.old_path))
   })
 
   if (!match) return null

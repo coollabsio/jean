@@ -15,16 +15,19 @@ import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import {
   uiFontOptions,
   chatFontOptions,
+  fontWeightOptions,
   syntaxThemeDarkOptions,
   syntaxThemeLightOptions,
   terminalBackgroundOptions,
   FONT_SIZE_DEFAULT,
+  FONT_WEIGHT_DEFAULT,
   ZOOM_LEVEL_DEFAULT,
   uiFontScaleTicks,
   chatFontScaleTicks,
   zoomLevelTicks,
   type UIFont,
   type ChatFont,
+  type FontWeight,
   type SyntaxTheme,
   type TerminalBackgroundMode,
 } from '@/types/preferences'
@@ -141,6 +144,13 @@ export const AppearancePane: React.FC = () => {
   const handleFontChange = useCallback(
     (field: 'ui_font' | 'chat_font', value: UIFont | ChatFont) => {
       patchPreferences.mutate({ [field]: value })
+    },
+    [patchPreferences]
+  )
+
+  const handleFontWeightChange = useCallback(
+    (value: FontWeight) => {
+      patchPreferences.mutate({ font_weight: value })
     },
     [patchPreferences]
   )
@@ -465,6 +475,30 @@ export const AppearancePane: React.FC = () => {
               </SelectTrigger>
               <SelectContent>
                 {chatFontOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </InlineField>
+
+          <InlineField
+            label="Font weight"
+            description="Overall text weight for UI and chat. Light softens emphasis for long reading, especially in dark mode."
+          >
+            <Select
+              value={preferences?.font_weight ?? FONT_WEIGHT_DEFAULT}
+              onValueChange={value =>
+                handleFontWeightChange(value as FontWeight)
+              }
+              disabled={patchPreferences.isPending}
+            >
+              <SelectTrigger className="w-full sm:w-80">
+                <SelectValue placeholder="Select weight" />
+              </SelectTrigger>
+              <SelectContent>
+                {fontWeightOptions.map(option => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

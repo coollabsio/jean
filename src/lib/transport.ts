@@ -663,6 +663,12 @@ class WsTransport {
 
     this.ws.onmessage = event => {
       this._lastInbound = Date.now()
+      // Fast path: server app-level heartbeat is a fixed string every ~20s.
+      // Skip JSON.parse on the idle hot path (browser cannot observe protocol
+      // ping/pong, so these text frames are the liveness signal).
+      if (event.data === '{"type":"heartbeat"}') {
+        return
+      }
       try {
         const msg: WsMessage = JSON.parse(event.data)
         this.handleMessage(msg)

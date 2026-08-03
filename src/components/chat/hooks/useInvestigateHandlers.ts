@@ -1041,10 +1041,10 @@ export function useInvestigateHandlers({
         )
       }
 
-      // Create one session per selected review comment prompt. Use mutateAsync
-      // instead of repeated mutate(..., { onSuccess }) calls because TanStack
-      // Query only guarantees per-call callbacks for the latest consecutive
-      // mutate observer, which can leave earlier/later sessions empty.
+      // Sequential on purpose: each session must fully create + send before
+      // the next. TanStack Query only guarantees per-call callbacks for the
+      // latest consecutive mutate observer; parallel createSession races
+      // leave earlier sessions empty. Do not Promise.all.
       const baseSessionId = useChatStore.getState().activeSessionIds[worktreeId]
       for (const prompt of prompts) {
         let session: Session

@@ -192,6 +192,10 @@ export function useCommandCodeInstallProgress(): [
   return [progress, resetProgress]
 }
 
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_commandcode_cli_version_exists', { version })
+}
+
 export function useCommandCodeCliSetup() {
   const status = useCommandCodeCliStatus()
   const versions = useAvailableCommandCodeVersions()
@@ -209,8 +213,6 @@ export function useCommandCodeCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_commandcode_cli_version_exists', { version })
 
   return {
     status: status.data,

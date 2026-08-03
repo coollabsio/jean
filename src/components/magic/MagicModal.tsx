@@ -1162,19 +1162,7 @@ export function MagicModal() {
     setCustomInvestigateModel(nextModel)
   }, [getInvestigateModelOptions, installedBackends, investigateDefaults])
 
-  useEffect(() => {
-    if (!customInvestigateModelOptions.length) return
-    if (
-      !customInvestigateModelOptions.some(
-        option => option.value === customInvestigateModel
-      )
-    ) {
-      const firstOption = customInvestigateModelOptions[0]
-      if (firstOption) {
-        setCustomInvestigateModel(firstOption.value)
-      }
-    }
-  }, [customInvestigateModel, customInvestigateModelOptions])
+  // Invalid customInvestigateModel is handled by effectiveCustomInvestigateModel
 
   useEffect(() => {
     if (!resolveDialogOpen) {
@@ -1196,19 +1184,7 @@ export function MagicModal() {
     setCustomResolveModel(nextModel)
   }, [getResolveModelOptions, installedBackends, resolveDefaults])
 
-  useEffect(() => {
-    if (!customResolveModelOptions.length) return
-    if (
-      !customResolveModelOptions.some(
-        option => option.value === customResolveModel
-      )
-    ) {
-      const firstOption = customResolveModelOptions[0]
-      if (firstOption) {
-        setCustomResolveModel(firstOption.value)
-      }
-    }
-  }, [customResolveModel, customResolveModelOptions])
+  // Invalid customResolveModel is handled by effectiveCustomResolveModel
 
   // Direct git execution for when ChatWindow isn't rendered (project canvas)
   const executeGitDirectly = useCallback(
@@ -2699,6 +2675,7 @@ ${resolveInstructions}`
 
                         return (
                           <button
+                            type="button"
                             key={option.id}
                             onClick={() =>
                               !isDisabled && executeAction(option.id)

@@ -49,12 +49,18 @@ export function resolveCodeReviewConfigs({
   })
 }
 
+/**
+ * Start multi-backend code reviews one at a time.
+ * Sequential is intentional: callers chain a shared reviewSessionId across
+ * configs (see useGitOperations / MagicModal), so parallel starts would race.
+ */
 export async function startCodeReviewsSequentially<T>(
   configs: T[],
   startReview: (config: T) => Promise<void>
 ): Promise<void> {
   const errors: unknown[] = []
 
+  // Sequential: each startReview may depend on prior session id / job setup
   for (const config of configs) {
     try {
       await startReview(config)

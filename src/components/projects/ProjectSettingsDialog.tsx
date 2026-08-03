@@ -144,6 +144,7 @@ function ProjectSettingsDialogContent({
                           isActive={activePane === item.id}
                         >
                           <button
+                            type="button"
                             onClick={() => setActivePane(item.id)}
                             className="w-full"
                           >

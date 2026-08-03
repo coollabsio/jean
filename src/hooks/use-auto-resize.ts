@@ -10,15 +10,12 @@ import { useCallback, useEffect, useRef } from 'react'
 export function useAutoResize(
   ref: React.RefObject<HTMLTextAreaElement | null>
 ) {
-  const supportsFieldSizing = useRef<boolean | null>(null)
-
-  // Lazily detect support once
-  if (supportsFieldSizing.current === null) {
-    supportsFieldSizing.current =
-      typeof CSS !== 'undefined' &&
+  // Detect once at mount (client-only app; CSS API available in browser)
+  const supportsFieldSizing = useRef(
+    typeof CSS !== 'undefined' &&
       typeof CSS.supports === 'function' &&
       CSS.supports('field-sizing', 'content')
-  }
+  )
 
   const resize = useCallback(() => {
     if (supportsFieldSizing.current) return

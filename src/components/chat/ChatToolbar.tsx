@@ -12,7 +12,11 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import { useAllBackendsMcpHealth } from '@/services/mcp'
-import { getModelFastInfo, type ClaudeModel } from '@/types/preferences'
+import {
+  getModelFastInfo,
+  type ClaudeModel,
+  type CodexProviderProfile,
+} from '@/types/preferences'
 import {
   getSupportedExecutionModes,
   type EffortLevel,
@@ -73,6 +77,9 @@ export {
 }
 export type { ChatToolbarProps }
 
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
+
 /** Tracks concurrent ChatToolbar mounts (remount races during session switch). */
 let chatToolbarMountCount = 0
 
@@ -128,7 +135,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   onBackendModelChange,
   onProviderChange,
   customCliProfiles,
-  customCodexProviders = [],
+  customCodexProviders = EMPTY_CODEX_PROVIDERS,
   onThinkingLevelChange,
   onEffortLevelChange,
   onSetExecutionMode,

@@ -114,6 +114,7 @@ export class ErrorBoundary extends Component<
 
             <div className="space-y-3">
               <button
+                type="button"
                 onClick={this.handleReload}
                 className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
               >
@@ -121,6 +122,7 @@ export class ErrorBoundary extends Component<
               </button>
 
               <button
+                type="button"
                 onClick={this.handleReset}
                 className="w-full px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 transition-colors"
               >
@@ -139,6 +141,7 @@ export class ErrorBoundary extends Component<
                       {this.state.error.name}: {this.state.error.message}
                     </div>
                     <button
+                      type="button"
                       onClick={() => {
                         const err = this.state.error
                         if (!err) return

@@ -1190,6 +1190,8 @@ export interface AppPreferences {
   chat_font_size: FontSize // Font size for chat text
   ui_font: UIFont // Font family for UI text
   chat_font: ChatFont // Font family for chat text
+  /** Overall text weight ladder: light | normal | medium (default normal) */
+  font_weight?: FontWeight
   git_poll_interval: number // Git status polling interval in seconds (10-600)
   remote_poll_interval: number // Remote API polling interval in seconds (30-600)
   keybindings: KeybindingsMap // User-configurable keyboard shortcuts
@@ -2121,6 +2123,33 @@ export type ChatFont =
   | 'roboto'
   | 'lato'
 
+/** Overall app text weight. Light softens emphasis for long dark-mode reading. */
+export type FontWeight = 'light' | 'normal' | 'medium'
+
+export const FONT_WEIGHT_DEFAULT: FontWeight = 'normal'
+
+export const fontWeightOptions: {
+  value: FontWeight
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'light',
+    label: 'Light',
+    description: 'Softer body text and lighter emphasis (easier on dark mode)',
+  },
+  {
+    value: 'normal',
+    label: 'Normal',
+    description: 'Default weight hierarchy',
+  },
+  {
+    value: 'medium',
+    label: 'Medium',
+    description: 'Heavier body text and stronger emphasis',
+  },
+]
+
 export const uiFontOptions: { value: UIFont; label: string }[] = [
   { value: 'inter', label: 'Inter' },
   { value: 'geist', label: 'Geist' },
@@ -2278,6 +2307,7 @@ export const defaultPreferences: AppPreferences = {
   chat_font_size: FONT_SIZE_DEFAULT,
   ui_font: 'geist',
   chat_font: 'geist',
+  font_weight: FONT_WEIGHT_DEFAULT,
   git_poll_interval: 60,
   remote_poll_interval: 60,
   keybindings: DEFAULT_KEYBINDINGS,

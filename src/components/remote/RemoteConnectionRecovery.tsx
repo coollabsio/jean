@@ -7,6 +7,10 @@ import {
   type RemoteConnection,
 } from '@/lib/remote-connections'
 
+function reloadPage() {
+  window.location.reload()
+}
+
 export function RemoteConnectionRecovery({
   connection,
   error,
@@ -14,8 +18,6 @@ export function RemoteConnectionRecovery({
   connection: RemoteConnection
   error: string
 }) {
-  const reload = () => window.location.reload()
-
   return (
     <div className="fixed inset-x-0 bottom-0 top-8 z-[55] flex items-center justify-center bg-background">
       <div className="mx-4 w-full max-w-md rounded-lg border bg-card p-6 shadow-lg">
@@ -30,7 +32,7 @@ export function RemoteConnectionRecovery({
           {connection.url}
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button onClick={reload}>Retry</Button>
+          <Button onClick={reloadPage}>Retry</Button>
           <Button
             variant="outline"
             onClick={() =>
@@ -48,7 +50,7 @@ export function RemoteConnectionRecovery({
             onClick={() => {
               markConnectionSwitch()
               selectConnection(LOCAL_CONNECTION_ID)
-              reload()
+              reloadPage()
             }}
           >
             Switch to Local

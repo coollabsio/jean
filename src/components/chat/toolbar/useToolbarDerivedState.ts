@@ -37,6 +37,24 @@ interface UseToolbarDerivedStateArgs {
   enabledMcpServers?: string[]
 }
 
+/** Stable defaults so omit/undefined doesn't allocate a new [] each call. */
+const EMPTY_MCP_SERVERS: {
+  name: string
+  backend?: string
+  disabled?: boolean
+}[] = []
+const EMPTY_ENABLED_MCP_SERVERS: string[] = []
+const DEFAULT_INSTALLED_BACKENDS: CliBackend[] = [
+  'claude',
+  'codex',
+  'opencode',
+  'cursor',
+  'pi',
+  'commandcode',
+  'grok',
+  'kimi',
+]
+
 function mergeCatalogOptions(
   catalog: Parameters<typeof getCatalogModelOptions>[0],
   backend: CliBackend,
@@ -133,18 +151,9 @@ export function useToolbarDerivedState({
   customCliProfiles,
   grokModelOptions,
   kimiModelOptions,
-  installedBackends = [
-    'claude',
-    'codex',
-    'opencode',
-    'cursor',
-    'pi',
-    'commandcode',
-    'grok',
-    'kimi',
-  ],
-  availableMcpServers = [],
-  enabledMcpServers = [],
+  installedBackends = DEFAULT_INSTALLED_BACKENDS,
+  availableMcpServers = EMPTY_MCP_SERVERS,
+  enabledMcpServers = EMPTY_ENABLED_MCP_SERVERS,
 }: UseToolbarDerivedStateArgs) {
   const isCodex = selectedBackend === 'codex'
   const isOpencode = selectedBackend === 'opencode'

@@ -150,13 +150,17 @@ export function ArchivedModal({ open, onOpenChange }: ArchivedModalProps) {
     }
 
     // Convert to array with project info
-    const result = projects
-      .filter(project => groups.has(project.id))
-      .map(project => ({
-        project,
-        worktrees: groups.get(project.id) || [],
-        isCurrentProject: project.id === selectedProjectId,
-      }))
+    const result = projects.flatMap(project =>
+      groups.has(project.id)
+        ? [
+            {
+              project,
+              worktrees: groups.get(project.id) || [],
+              isCurrentProject: project.id === selectedProjectId,
+            },
+          ]
+        : []
+    )
 
     // Sort: current project first, then alphabetically
     return result.sort((a, b) => {
@@ -212,17 +216,15 @@ export function ArchivedModal({ open, onOpenChange }: ArchivedModalProps) {
 
     const query = searchQuery.toLowerCase()
 
-    return groupedWorktrees
-      .map(group => ({
-        ...group,
-        worktrees: group.worktrees.filter(
-          w =>
-            w.name.toLowerCase().includes(query) ||
-            w.branch.toLowerCase().includes(query) ||
-            group.project.name.toLowerCase().includes(query)
-        ),
-      }))
-      .filter(group => group.worktrees.length > 0)
+    return groupedWorktrees.flatMap(group => {
+      const worktrees = group.worktrees.filter(
+        w =>
+          w.name.toLowerCase().includes(query) ||
+          w.branch.toLowerCase().includes(query) ||
+          group.project.name.toLowerCase().includes(query)
+      )
+      return worktrees.length > 0 ? [{ ...group, worktrees }] : []
+    })
   }, [groupedWorktrees, searchQuery])
 
   // Filter sessions by search query (searches both tabs)
@@ -233,17 +235,15 @@ export function ArchivedModal({ open, onOpenChange }: ArchivedModalProps) {
 
     const query = searchQuery.toLowerCase()
 
-    return groupedSessions
-      .map(group => ({
-        ...group,
-        sessions: group.sessions.filter(
-          s =>
-            s.session.name.toLowerCase().includes(query) ||
-            s.worktree_name.toLowerCase().includes(query) ||
-            s.project_name.toLowerCase().includes(query)
-        ),
-      }))
-      .filter(group => group.sessions.length > 0)
+    return groupedSessions.flatMap(group => {
+      const sessions = group.sessions.filter(
+        s =>
+          s.session.name.toLowerCase().includes(query) ||
+          s.worktree_name.toLowerCase().includes(query) ||
+          s.project_name.toLowerCase().includes(query)
+      )
+      return sessions.length > 0 ? [{ ...group, sessions }] : []
+    })
   }, [groupedSessions, searchQuery])
 
   // Count filtered results for both tabs

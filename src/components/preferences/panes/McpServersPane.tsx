@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { CheckCircle, Loader2, ShieldAlert, XCircle } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -152,6 +152,10 @@ export const McpServersPane: React.FC = () => {
   }, [checkHealth, installedBackends])
 
   const enabledServers = preferences?.default_enabled_mcp_servers ?? []
+  const enabledServersSet = useMemo(
+    () => new Set(preferences?.default_enabled_mcp_servers ?? []),
+    [preferences?.default_enabled_mcp_servers]
+  )
   const knownServers = preferences?.known_mcp_servers ?? []
 
   // Auto-enable newly discovered (non-disabled) servers, but not ones the user has previously disabled
@@ -166,9 +170,9 @@ export const McpServersPane: React.FC = () => {
     if (enabledMigration.changed) currentEnabled = enabledMigration.migrated
     if (knownMigration.changed) currentKnown = knownMigration.migrated
 
-    const allServerKeys = mcpServers
-      .filter(s => !s.disabled)
-      .map(s => mcpKey(s.backend, s.name))
+    const allServerKeys = mcpServers.flatMap(s =>
+      s.disabled ? [] : [mcpKey(s.backend, s.name)]
+    )
     const newServers = getNewServersToAutoEnable(
       mcpServers,
       currentEnabled,
@@ -250,7 +254,7 @@ export const McpServersPane: React.FC = () => {
                       id={`mcp-${backend}-${server.name}`}
                       checked={
                         !server.disabled &&
-                        enabledServers.includes(mcpKey(backend, server.name))
+                        enabledServersSet.has(mcpKey(backend, server.name))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
                       disabled={server.disabled}

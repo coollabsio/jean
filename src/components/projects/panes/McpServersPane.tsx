@@ -156,9 +156,9 @@ export function McpServersPane({
     if (enabledMigration.changed) currentEnabled = enabledMigration.migrated
     if (knownMigration.changed) currentKnown = knownMigration.migrated
 
-    const allServerKeys = mcpServers
-      .filter(s => !s.disabled)
-      .map(s => mcpKey(s.backend, s.name))
+    const allServerKeys = mcpServers.flatMap(s =>
+      s.disabled ? [] : [mcpKey(s.backend, s.name)]
+    )
     const newServers = getNewServersToAutoEnable(
       mcpServers,
       currentEnabled,
@@ -202,7 +202,10 @@ export function McpServersPane({
     updateSettings.mutate({ projectId, enabledMcpServers: updated })
   }
 
-  const selectedServers = project?.enabled_mcp_servers ?? []
+  const selectedServersSet = useMemo(
+    () => new Set(project?.enabled_mcp_servers ?? []),
+    [project?.enabled_mcp_servers]
+  )
   const grouped = groupServersByBackend(mcpServers)
   const backendsWithServers = installedBackends.filter(
     b => grouped[b] && grouped[b].length > 0
@@ -249,7 +252,7 @@ export function McpServersPane({
                       id={`proj-mcp-${backend}-${server.name}`}
                       checked={
                         !server.disabled &&
-                        selectedServers.includes(mcpKey(backend, server.name))
+                        selectedServersSet.has(mcpKey(backend, server.name))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
                       disabled={server.disabled}

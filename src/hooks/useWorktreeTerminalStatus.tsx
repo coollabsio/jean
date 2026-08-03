@@ -45,9 +45,9 @@ export function useWorktreeTerminalStatus(worktreeId: string) {
       if (!isPanelTerminal(t)) continue
       if (!t.command) continue
       if (runningTerminals.has(t.id)) {
-        const ports = (listeningPorts as TerminalPortInfo[])
-          .filter(p => p.terminalId === t.id)
-          .map(p => `:${p.port}`)
+        const ports = (listeningPorts as TerminalPortInfo[]).flatMap(p =>
+          p.terminalId === t.id ? [`:${p.port}`] : []
+        )
         const portSuffix = ports.length > 0 ? ` (${ports.join(', ')})` : ''
         lines.push(`${t.command}${portSuffix}`)
       } else if (failedTerminals.has(t.id)) {
@@ -97,8 +97,8 @@ export function TerminalStatusIndicator({
       </TooltipTrigger>
       <TooltipContent>
         <div className="flex flex-col gap-0.5">
-          {tooltipLines.map((line, i) => (
-            <span key={i} className="text-xs">
+          {tooltipLines.map(line => (
+            <span key={line} className="text-xs">
               {line}
             </span>
           ))}

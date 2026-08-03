@@ -238,6 +238,7 @@ export function TitleBar({
         {appVersion && <UpdateIndicator />}
         {appVersion && (
           <button
+            type="button"
             onClick={() =>
               openExternal(
                 `https://github.com/coollabsio/jean/releases/tag/v${appVersion}`
@@ -300,7 +301,7 @@ function CliUpdatesIndicator() {
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <button className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer">
+            <button type="button" className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer">
               <Download className="size-3" />
               <span>{updates.length}</span>
             </button>
@@ -327,13 +328,16 @@ function CliUpdatesIndicator() {
               </div>
               <div className="flex items-center gap-1 ml-2 shrink-0">
                 <button
+                  type="button"
                   onClick={() => triggerUpdate(update)}
                   className="rounded px-2 py-0.5 text-[0.625rem] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
                 >
                   Update
                 </button>
                 <button
+                  type="button"
                   onClick={() => dismissCliUpdateNotice(update.type)}
+                  aria-label="Dismiss update notice"
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                 >
                   <X className="size-3" />
@@ -369,6 +373,7 @@ function ServerUpdateIndicator() {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={handleClick}
           className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
         >
@@ -412,6 +417,7 @@ function UpdateIndicator() {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={() => {
             if (isInstalling && !readyVersion) return
             window.dispatchEvent(new Event('install-pending-update'))

@@ -64,7 +64,9 @@ export function FileEditsDiffModal({
           ) : (
             <div className="space-y-3">
               {edits.map((edit, idx) => (
-                <div key={idx}>
+                <div
+                  key={`${edit.oldString.length}:${edit.newString.length}:${edit.oldString.slice(0, 96)}→${edit.newString.slice(0, 96)}`}
+                >
                   {edits.length > 1 && (
                     <div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground/60 mb-1">
                       Edit {idx + 1}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
@@ -44,13 +44,22 @@ type InvestigationType =
 export function useBackgroundInvestigation(): void {
   const { data: preferences } = usePreferences()
   const queryClient = useQueryClient()
-  const processingRef = useRef<Set<string>>(new Set())
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Lazy init so we don't allocate a new Set on every render.
+  const processingRef = useRef<Set<string> | null>(null)
+  if (processingRef.current === null) {
+    processingRef.current = new Set()
+  }
+  const processing = processingRef.current
   const [retryTick, setRetryTick] = useState(0)
+  // Separate timer state so the setTimeout lives in its own effect with a
+  // direct cleanup path (avoids nested-callback timer ownership issues).
+  const [retryScheduled, setRetryScheduled] = useState(false)
 
   // Ref for unstable preferences dependency; keeps effect deps stable.
   const preferencesRef = useRef(preferences)
-  preferencesRef.current = preferences
+  useLayoutEffect(() => {
+    preferencesRef.current = preferences
+  })
 
   // Subscribe to auto-investigate flags — re-run effect when they change
   const hasAutoInvestigate = useUIStore(
@@ -70,188 +79,206 @@ export function useBackgroundInvestigation(): void {
     state => Object.keys(state.worktreePaths).length
   )
 
+  // Owns the 2s retry timer exclusively — cleanup is always clearTimeout(id).
   useEffect(() => {
-    if (!hasAutoInvestigate) return
+    if (!retryScheduled) return
+    const id = setTimeout(() => {
+      setRetryScheduled(false)
+      setRetryTick(t => t + 1)
+    }, 2000)
+    return () => {
+      clearTimeout(id)
+    }
+  }, [retryScheduled])
 
-    const {
-      autoInvestigateWorktreeIds,
-      autoInvestigatePRWorktreeIds,
-      autoInvestigateSecurityAlertWorktreeIds,
-      autoInvestigateAdvisoryWorktreeIds,
-      autoInvestigateLinearIssueWorktreeIds,
-      autoInvestigateSentryIssueWorktreeIds,
-    } = useUIStore.getState()
+  useEffect(() => {
+    let disposed = false
 
-    const { worktreePaths } = useChatStore.getState()
-
-    // Client-only `status` is set by worktree event handlers. Backend
-    // get_worktree/list_worktrees never include it, so remote/web refetches
-    // wipe `status: 'ready'` back to undefined. Treat anything other than an
-    // explicit in-flight status as ready once we know about the worktree.
-    const isWorktreeReady = (worktreeId: string): boolean => {
-      const cached = queryClient.getQueryData<Worktree>([
-        ...projectsQueryKeys.all,
-        'worktree',
-        worktreeId,
-      ])
-      if (
-        cached?.status === 'pending' ||
-        cached?.status === 'error' ||
-        cached?.status === 'deleting'
-      ) {
-        return false
-      }
-      if (cached) return true
-
-      // Recovery path: list cache may already have the server-backed worktree
-      // after a missed worktree:created event, while the single-worktree entry
-      // was never promoted off pending / never written.
-      const listQueries = queryClient.getQueriesData<Worktree[]>({
-        queryKey: projectsQueryKeys.all,
-      })
-      for (const [, list] of listQueries) {
-        if (!Array.isArray(list)) continue
-        const found = list.find(w => w.id === worktreeId)
-        if (
-          found &&
-          found.status !== 'pending' &&
-          found.status !== 'error' &&
-          found.status !== 'deleting'
-        ) {
-          queryClient.setQueryData<Worktree>(
-            [...projectsQueryKeys.all, 'worktree', worktreeId],
-            { ...found, status: 'ready' }
-          )
-          if (found.path) {
-            useChatStore.getState().registerWorktreePath(worktreeId, found.path)
-          }
-          return true
-        }
-      }
-      return false
+    const scheduleRetry = () => {
+      if (!disposed) setRetryScheduled(true)
     }
 
-    // Collect all worktree IDs that need background investigation
-    const candidates: { worktreeId: string; type: InvestigationType }[] = []
-    let skippedWaiting = 0
+    if (hasAutoInvestigate) {
+      const {
+        autoInvestigateWorktreeIds,
+        autoInvestigatePRWorktreeIds,
+        autoInvestigateSecurityAlertWorktreeIds,
+        autoInvestigateAdvisoryWorktreeIds,
+        autoInvestigateLinearIssueWorktreeIds,
+        autoInvestigateSentryIssueWorktreeIds,
+      } = useUIStore.getState()
 
-    // Always handle auto-investigate headlessly — do not skip active or
-    // auto-opening worktrees. ChatWindow used to own those cases, but remote
-    // Jean clients can open the worktree without reliably sending the prompt.
-    const resolveWorktreePath = (worktreeId: string): string | undefined => {
-      if (worktreePaths[worktreeId]) return worktreePaths[worktreeId]
+      const { worktreePaths } = useChatStore.getState()
 
-      // List/single caches often already know the path after a recovery
-      // refetch even when worktreePaths was never registered (missed
-      // worktree:created on remote).
-      const cached =
-        queryClient.getQueryData<Worktree>([
+      // Client-only `status` is set by worktree event handlers. Backend
+      // get_worktree/list_worktrees never include it, so remote/web refetches
+      // wipe `status: 'ready'` back to undefined. Treat anything other than an
+      // explicit in-flight status as ready once we know about the worktree.
+      const isWorktreeReady = (worktreeId: string): boolean => {
+        const cached = queryClient.getQueryData<Worktree>([
           ...projectsQueryKeys.all,
           'worktree',
           worktreeId,
-        ]) ??
-        queryClient
-          .getQueriesData<Worktree[]>({ queryKey: projectsQueryKeys.all })
-          .flatMap(([, list]) => (Array.isArray(list) ? list : []))
-          .find(w => w.id === worktreeId)
-      if (!cached?.path) return undefined
-
-      useChatStore.getState().registerWorktreePath(worktreeId, cached.path)
-      return cached.path
-    }
-
-    const checkCandidate = (worktreeId: string): boolean => {
-      // Missing path and not-ready both need retries. Previously only the
-      // not-ready branch scheduled a timer; a missing path with no later
-      // worktreePathCount bump (e.g. missed worktree:created on remote) left
-      // the investigation flag stuck forever.
-      if (!resolveWorktreePath(worktreeId)) {
-        skippedWaiting++
-        return false
-      }
-      if (!isWorktreeReady(worktreeId)) {
-        skippedWaiting++
-        return false
-      }
-      if (processingRef.current.has(worktreeId)) return false
-      return true
-    }
-
-    const sources: { ids: Set<string>; type: InvestigationType }[] = [
-      { ids: autoInvestigateWorktreeIds, type: 'issue' },
-      { ids: autoInvestigatePRWorktreeIds, type: 'pr' },
-      { ids: autoInvestigateSecurityAlertWorktreeIds, type: 'security-alert' },
-      { ids: autoInvestigateAdvisoryWorktreeIds, type: 'advisory' },
-      { ids: autoInvestigateLinearIssueWorktreeIds, type: 'linear-issue' },
-      { ids: autoInvestigateSentryIssueWorktreeIds, type: 'sentry-issue' },
-    ]
-
-    const queuedWorktreeIds = new Set<string>()
-    for (const { ids, type } of sources) {
-      for (const worktreeId of ids) {
-        if (queuedWorktreeIds.has(worktreeId) || !checkCandidate(worktreeId)) {
-          continue
+        ])
+        if (
+          cached?.status === 'pending' ||
+          cached?.status === 'error' ||
+          cached?.status === 'deleting'
+        ) {
+          return false
         }
-        queuedWorktreeIds.add(worktreeId)
-        candidates.push({ worktreeId, type })
+        if (cached) return true
+
+        // Recovery path: list cache may already have the server-backed worktree
+        // after a missed worktree:created event, while the single-worktree entry
+        // was never promoted off pending / never written.
+        const listQueries = queryClient.getQueriesData<Worktree[]>({
+          queryKey: projectsQueryKeys.all,
+        })
+        for (const [, list] of listQueries) {
+          if (!Array.isArray(list)) continue
+          const found = list.find(w => w.id === worktreeId)
+          if (
+            found &&
+            found.status !== 'pending' &&
+            found.status !== 'error' &&
+            found.status !== 'deleting'
+          ) {
+            queryClient.setQueryData<Worktree>(
+              [...projectsQueryKeys.all, 'worktree', worktreeId],
+              { ...found, status: 'ready' }
+            )
+            if (found.path) {
+              useChatStore
+                .getState()
+                .registerWorktreePath(worktreeId, found.path)
+            }
+            return true
+          }
+        }
+        return false
+      }
+
+      // Collect all worktree IDs that need background investigation
+      const candidates: { worktreeId: string; type: InvestigationType }[] = []
+      let skippedWaiting = 0
+
+      // Always handle auto-investigate headlessly — do not skip active or
+      // auto-opening worktrees. ChatWindow used to own those cases, but remote
+      // Jean clients can open the worktree without reliably sending the prompt.
+      const resolveWorktreePath = (worktreeId: string): string | undefined => {
+        if (worktreePaths[worktreeId]) return worktreePaths[worktreeId]
+
+        // List/single caches often already know the path after a recovery
+        // refetch even when worktreePaths was never registered (missed
+        // worktree:created on remote).
+        const cached =
+          queryClient.getQueryData<Worktree>([
+            ...projectsQueryKeys.all,
+            'worktree',
+            worktreeId,
+          ]) ??
+          queryClient
+            .getQueriesData<Worktree[]>({ queryKey: projectsQueryKeys.all })
+            .flatMap(([, list]) => (Array.isArray(list) ? list : []))
+            .find(w => w.id === worktreeId)
+        if (!cached?.path) return undefined
+
+        useChatStore.getState().registerWorktreePath(worktreeId, cached.path)
+        return cached.path
+      }
+
+      const checkCandidate = (worktreeId: string): boolean => {
+        // Missing path and not-ready both need retries. Previously only the
+        // not-ready branch scheduled a timer; a missing path with no later
+        // worktreePathCount bump (e.g. missed worktree:created on remote) left
+        // the investigation flag stuck forever.
+        if (!resolveWorktreePath(worktreeId)) {
+          skippedWaiting++
+          return false
+        }
+        if (!isWorktreeReady(worktreeId)) {
+          skippedWaiting++
+          return false
+        }
+        if (processing.has(worktreeId)) return false
+        return true
+      }
+
+      const sources: { ids: Set<string>; type: InvestigationType }[] = [
+        { ids: autoInvestigateWorktreeIds, type: 'issue' },
+        { ids: autoInvestigatePRWorktreeIds, type: 'pr' },
+        {
+          ids: autoInvestigateSecurityAlertWorktreeIds,
+          type: 'security-alert',
+        },
+        { ids: autoInvestigateAdvisoryWorktreeIds, type: 'advisory' },
+        { ids: autoInvestigateLinearIssueWorktreeIds, type: 'linear-issue' },
+        { ids: autoInvestigateSentryIssueWorktreeIds, type: 'sentry-issue' },
+      ]
+
+      const queuedWorktreeIds = new Set<string>()
+      for (const { ids, type } of sources) {
+        for (const worktreeId of ids) {
+          if (
+            queuedWorktreeIds.has(worktreeId) ||
+            !checkCandidate(worktreeId)
+          ) {
+            continue
+          }
+          queuedWorktreeIds.add(worktreeId)
+          candidates.push({ worktreeId, type })
+        }
+      }
+
+      // If worktrees are flagged but path/status aren't ready yet, retry after 2s.
+      // The effect has no dependency that changes when worktree status goes
+      // from pending → ready (and path registration can be missed on remote),
+      // so without this retry the effect would never re-fire for those worktrees.
+      if (skippedWaiting > 0) {
+        scheduleRetry()
+      }
+
+      // Process each candidate
+      for (const { worktreeId, type } of candidates) {
+        processing.add(worktreeId)
+
+        // Keep the flag until the backend has durably accepted the prompt. If
+        // prompt construction or the start command fails, the retry below can
+        // try again instead of silently leaving an empty session behind.
+        const uiStore = useUIStore.getState()
+        const consumeByType = {
+          issue: uiStore.consumeAutoInvestigate,
+          pr: uiStore.consumeAutoInvestigatePR,
+          'security-alert': uiStore.consumeAutoInvestigateSecurityAlert,
+          advisory: uiStore.consumeAutoInvestigateAdvisory,
+          'linear-issue': uiStore.consumeAutoInvestigateLinearIssue,
+          'sentry-issue': uiStore.consumeAutoInvestigateSentryIssue,
+        } satisfies Record<InvestigationType, (worktreeId: string) => void>
+
+        processBackgroundInvestigation(
+          worktreeId,
+          type,
+          preferencesRef.current,
+          null,
+          queryClient
+        )
+          .then(() => {
+            if (!disposed) consumeByType[type](worktreeId)
+          })
+          .catch(err => {
+            logger.error('Background investigation failed', { worktreeId, err })
+            if (disposed) return
+            scheduleRetry()
+          })
+          .finally(() => {
+            processing.delete(worktreeId)
+          })
       }
     }
 
-    // Clear any pending retry timer
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current)
-      retryTimerRef.current = null
-    }
-
-    // If worktrees are flagged but path/status aren't ready yet, retry after 2s.
-    // The effect has no dependency that changes when worktree status goes
-    // from pending → ready (and path registration can be missed on remote),
-    // so without this retry the effect would never re-fire for those worktrees.
-    if (skippedWaiting > 0) {
-      retryTimerRef.current = setTimeout(() => setRetryTick(t => t + 1), 2000)
-    }
-
-    if (candidates.length === 0) return
-
-    // Process each candidate
-    for (const { worktreeId, type } of candidates) {
-      processingRef.current.add(worktreeId)
-
-      // Keep the flag until the backend has durably accepted the prompt. If
-      // prompt construction or the start command fails, the retry below can
-      // try again instead of silently leaving an empty session behind.
-      const uiStore = useUIStore.getState()
-      const consumeByType = {
-        issue: uiStore.consumeAutoInvestigate,
-        pr: uiStore.consumeAutoInvestigatePR,
-        'security-alert': uiStore.consumeAutoInvestigateSecurityAlert,
-        advisory: uiStore.consumeAutoInvestigateAdvisory,
-        'linear-issue': uiStore.consumeAutoInvestigateLinearIssue,
-        'sentry-issue': uiStore.consumeAutoInvestigateSentryIssue,
-      } satisfies Record<InvestigationType, (worktreeId: string) => void>
-
-      processBackgroundInvestigation(
-        worktreeId,
-        type,
-        preferencesRef.current,
-        null,
-        queryClient
-      )
-        .then(() => {
-          consumeByType[type](worktreeId)
-        })
-        .catch(err => {
-          logger.error('Background investigation failed', { worktreeId, err })
-          if (!retryTimerRef.current) {
-            retryTimerRef.current = setTimeout(() => {
-              retryTimerRef.current = null
-              setRetryTick(t => t + 1)
-            }, 2000)
-          }
-        })
-        .finally(() => {
-          processingRef.current.delete(worktreeId)
-        })
+    return () => {
+      disposed = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAutoInvestigate, worktreePathCount, queryClient, retryTick])

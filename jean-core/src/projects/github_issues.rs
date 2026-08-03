@@ -3203,8 +3203,8 @@ mod tests {
 
     #[test]
     fn test_review_comment_conversion_preserves_fields() {
-        let comment = graphql_review_comment("Please update this.")
-            .into_github_comment(false, true);
+        let comment =
+            graphql_review_comment("Please update this.").into_github_comment(false, true);
 
         assert_eq!(comment.author.login, "reviewer");
         assert_eq!(comment.body, "Please update this.");

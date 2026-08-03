@@ -13,7 +13,10 @@ let mockIsMobile = false
 const mockSetZoom = vi.fn()
 const mockMutate = vi.fn()
 const mockOnScaleChanged = vi.fn()
-let scaleChangedHandler: (() => void) | null = null
+interface ScaleChangedEvent {
+  payload: { scaleFactor: number }
+}
+let scaleChangedHandler: ((event: ScaleChangedEvent) => void) | null = null
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({ data: mockPreferences }),
@@ -41,7 +44,7 @@ vi.mock('@tauri-apps/api/webview', () => ({
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
-    onScaleChanged: (handler: () => void) => {
+    onScaleChanged: (handler: (event: ScaleChangedEvent) => void) => {
       scaleChangedHandler = handler
       mockOnScaleChanged(handler)
       return Promise.resolve(() => {
@@ -51,7 +54,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 
-import { useZoom } from './use-zoom'
+import { DISPLAY_SCALE_ZOOM_SETTLE_MS, useZoom } from './use-zoom'
 
 describe('useZoom', () => {
   beforeEach(() => {
@@ -69,6 +72,7 @@ describe('useZoom', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     document.documentElement.style.zoom = ''
     document.documentElement.style.fontSize = ''
     document.documentElement.style.removeProperty('--app-zoom')
@@ -103,29 +107,7 @@ describe('useZoom', () => {
     expect(document.documentElement.style.fontSize).toBe('')
   })
 
-  it('re-applies native zoom (bounce through 1) when display scale changes', async () => {
-    mockIsNativeApp = true
-    mockPreferences = { zoom_level: 90 }
-
-    renderHook(() => useZoom())
-
-    await waitFor(() => {
-      expect(mockSetZoom).toHaveBeenCalledWith(0.9)
-    })
-    await waitFor(() => {
-      expect(mockOnScaleChanged).toHaveBeenCalled()
-    })
-
-    mockSetZoom.mockClear()
-    scaleChangedHandler?.()
-
-    await waitFor(() => {
-      expect(mockSetZoom).toHaveBeenCalledWith(1)
-      expect(mockSetZoom).toHaveBeenCalledWith(0.9)
-    })
-  })
-
-  it('does not bounce through 1 when already at 100% zoom on scale change', async () => {
+  it('does not re-apply native zoom at 100% when display scale changes', async () => {
     mockIsNativeApp = true
     mockPreferences = { zoom_level: 100 }
 
@@ -133,18 +115,88 @@ describe('useZoom', () => {
 
     await waitFor(() => {
       expect(mockSetZoom).toHaveBeenCalledWith(1)
-    })
-    await waitFor(() => {
-      expect(mockOnScaleChanged).toHaveBeenCalled()
+      expect(mockOnScaleChanged).toHaveBeenCalledOnce()
     })
 
     mockSetZoom.mockClear()
-    scaleChangedHandler?.()
+    scaleChangedHandler?.({ payload: { scaleFactor: 2 } })
+
+    expect(mockSetZoom).not.toHaveBeenCalled()
+  })
+
+  it('refreshes a custom native zoom once when display scale changes', async () => {
+    mockIsNativeApp = true
+    mockPreferences = { zoom_level: 90 }
+
+    renderHook(() => useZoom())
 
     await waitFor(() => {
-      expect(mockSetZoom).toHaveBeenCalledWith(1)
+      expect(mockOnScaleChanged).toHaveBeenCalledOnce()
     })
-    expect(mockSetZoom).toHaveBeenCalledTimes(1)
+    mockSetZoom.mockClear()
+
+    scaleChangedHandler?.({ payload: { scaleFactor: 2 } })
+
+    await waitFor(() => {
+      expect(mockSetZoom.mock.calls).toEqual([[1], [0.9]])
+    })
+  })
+
+  it('ignores scale events caused while refreshing custom native zoom', async () => {
+    mockIsNativeApp = true
+    mockPreferences = { zoom_level: 90 }
+
+    renderHook(() => useZoom())
+
+    await waitFor(() => {
+      expect(mockOnScaleChanged).toHaveBeenCalledOnce()
+    })
+    mockSetZoom.mockClear()
+    mockSetZoom.mockImplementation(async zoom => {
+      if (zoom === 1) {
+        scaleChangedHandler?.({ payload: { scaleFactor: 1.8 } })
+      }
+    })
+
+    scaleChangedHandler?.({ payload: { scaleFactor: 2 } })
+
+    await waitFor(() => {
+      expect(mockSetZoom.mock.calls).toEqual([[1], [0.9]])
+    })
+  })
+
+  it('ignores delayed scale side-effects after the zoom bounce settles', async () => {
+    vi.useFakeTimers()
+    mockIsNativeApp = true
+    mockPreferences = { zoom_level: 90 }
+
+    renderHook(() => useZoom())
+
+    await vi.runAllTimersAsync()
+    expect(mockOnScaleChanged).toHaveBeenCalledOnce()
+    mockSetZoom.mockClear()
+
+    mockSetZoom.mockImplementation(async zoom => {
+      if (zoom === 0.9) {
+        // Side-effect after the bounce, still inside the settle window.
+        scaleChangedHandler?.({ payload: { scaleFactor: 1.75 } })
+      }
+    })
+
+    scaleChangedHandler?.({ payload: { scaleFactor: 2 } })
+    await vi.runAllTimersAsync()
+
+    expect(mockSetZoom.mock.calls).toEqual([[1], [0.9]])
+
+    // Settle window ends; absorbed scale must not re-fire.
+    await vi.advanceTimersByTimeAsync(DISPLAY_SCALE_ZOOM_SETTLE_MS)
+    scaleChangedHandler?.({ payload: { scaleFactor: 1.75 } })
+    expect(mockSetZoom).toHaveBeenCalledTimes(2)
+
+    // A real later monitor change still refreshes once.
+    scaleChangedHandler?.({ payload: { scaleFactor: 1 } })
+    await vi.runAllTimersAsync()
+    expect(mockSetZoom.mock.calls).toEqual([[1], [0.9], [1], [0.9]])
   })
 
   it('uses the separate mobile zoom when syncing is disabled', async () => {

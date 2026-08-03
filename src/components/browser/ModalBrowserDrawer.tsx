@@ -170,7 +170,13 @@ export const ModalBrowserDrawer = memo(function ModalBrowserDrawer({
 
   const content = (
     <div className="relative flex h-full min-h-0 min-w-0 flex-col bg-background">
-      <div className={resizeHandleClass} onMouseDown={handleResizeStart} />
+      <div
+        role="separator"
+        tabIndex={-1}
+        aria-label="Resize browser drawer"
+        className={resizeHandleClass}
+        onMouseDown={handleResizeStart}
+      />
       {header}
       <div
         className={cn(

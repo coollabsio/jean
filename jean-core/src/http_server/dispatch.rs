@@ -1040,10 +1040,8 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "attach_session_reference" => {
-            let target_session_id: String =
-                field(&args, "targetSessionId", "target_session_id")?;
-            let source_session_id: String =
-                field(&args, "sourceSessionId", "source_session_id")?;
+            let target_session_id: String = field(&args, "targetSessionId", "target_session_id")?;
+            let source_session_id: String = field(&args, "sourceSessionId", "source_session_id")?;
             let session_name: String = field(&args, "sessionName", "session_name")?;
             let project_name: String = field(&args, "projectName", "project_name")?;
             let worktree_name: String = field(&args, "worktreeName", "worktree_name")?;
@@ -1531,11 +1529,11 @@ pub async fn dispatch_command(
             let source_session_id: String = field(&args, "sourceSessionId", "source_session_id")
                 .or_else(|_| field(&args, "sessionId", "session_id"))?;
             let project_name: String = field(&args, "projectName", "project_name")?;
-            let custom_prompt: Option<String> = match field_opt(&args, "customPrompt", "custom_prompt")?
-            {
-                Some(v) => Some(v),
-                None => field_opt(&args, "magicPrompt", "magic_prompt")?,
-            };
+            let custom_prompt: Option<String> =
+                match field_opt(&args, "customPrompt", "custom_prompt")? {
+                    Some(v) => Some(v),
+                    None => field_opt(&args, "magicPrompt", "magic_prompt")?,
+                };
             let model: Option<String> = from_field_opt(&args, "model")?;
             let custom_profile_name: Option<String> =
                 field_opt(&args, "customProfileName", "custom_profile_name")?;
@@ -3319,11 +3317,8 @@ pub async fn dispatch_command(
             let checkpoint_id: String = field(&args, "checkpointId", "checkpoint_id")?;
             let files: Vec<crate::projects::checkpoints::RestoreFileProposal> =
                 from_field(&args, "files")?;
-            let also_restore_clean_paths: Option<Vec<String>> = field_opt(
-                &args,
-                "alsoRestoreCleanPaths",
-                "also_restore_clean_paths",
-            )?;
+            let also_restore_clean_paths: Option<Vec<String>> =
+                field_opt(&args, "alsoRestoreCleanPaths", "also_restore_clean_paths")?;
             let result = crate::projects::apply_ai_checkpoint_restore_proposal(
                 app.clone(),
                 worktree_id,

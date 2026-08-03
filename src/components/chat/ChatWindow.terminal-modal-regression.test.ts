@@ -55,15 +55,12 @@ describe('terminal primary surface modal regression', () => {
     const source = readSource('src/components/chat/ChatWindow.tsx')
 
     expect(source).toMatch(/if\s*\(\s*isSessionSwitching\s*\)\s*return/)
+    // Guard uses a local `autoReconnecting` alias of the lazy-init ref set.
     expect(source).toMatch(
-      /if\s*\(\s*autoReconnectingRef\.current\.has\s*\(\s*deferredSessionId\s*\)\s*\)\s*return/
+      /if\s*\(\s*autoReconnecting\.has\s*\(\s*deferredSessionId\s*\)\s*\)\s*return/
     )
-    expect(source).toMatch(
-      /autoReconnectingRef\.current\.add\s*\(\s*sessionId\s*\)/
-    )
-    expect(source).toMatch(
-      /autoReconnectingRef\.current\.delete\s*\(\s*sessionId\s*\)/
-    )
+    expect(source).toMatch(/autoReconnecting\.add\s*\(\s*sessionId\s*\)/)
+    expect(source).toMatch(/autoReconnecting\.delete\s*\(\s*sessionId\s*\)/)
   })
 
   it('shows a safe recovery state instead of an empty chat for legacy sessions', () => {

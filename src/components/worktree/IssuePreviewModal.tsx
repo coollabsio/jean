@@ -110,36 +110,37 @@ function CommentItem({ comment }: { comment: GitHubComment }) {
   )
 }
 
-function ReviewItem({ review }: { review: GitHubReview }) {
-  const defaultConfig = {
-    icon: MessageSquare,
-    color: 'text-muted-foreground',
-    label: 'Reviewed',
-  }
-  const stateConfig: Record<
-    string,
-    { icon: typeof CheckCircle2; color: string; label: string }
-  > = {
-    APPROVED: {
-      icon: CheckCircle2,
-      color: 'text-green-500',
-      label: 'Approved',
-    },
-    CHANGES_REQUESTED: {
-      icon: XCircle,
-      color: 'text-red-500',
-      label: 'Changes requested',
-    },
-    COMMENTED: defaultConfig,
-    DISMISSED: {
-      icon: AlertCircle,
-      color: 'text-yellow-500',
-      label: 'Dismissed',
-    },
-    PENDING: { icon: Clock, color: 'text-yellow-500', label: 'Pending' },
-  }
+const REVIEW_DEFAULT_CONFIG = {
+  icon: MessageSquare,
+  color: 'text-muted-foreground',
+  label: 'Reviewed',
+}
 
-  const config = stateConfig[review.state] ?? defaultConfig
+const REVIEW_STATE_CONFIG: Record<
+  string,
+  { icon: typeof CheckCircle2; color: string; label: string }
+> = {
+  APPROVED: {
+    icon: CheckCircle2,
+    color: 'text-green-500',
+    label: 'Approved',
+  },
+  CHANGES_REQUESTED: {
+    icon: XCircle,
+    color: 'text-red-500',
+    label: 'Changes requested',
+  },
+  COMMENTED: REVIEW_DEFAULT_CONFIG,
+  DISMISSED: {
+    icon: AlertCircle,
+    color: 'text-yellow-500',
+    label: 'Dismissed',
+  },
+  PENDING: { icon: Clock, color: 'text-yellow-500', label: 'Pending' },
+}
+
+function ReviewItem({ review }: { review: GitHubReview }) {
+  const config = REVIEW_STATE_CONFIG[review.state] ?? REVIEW_DEFAULT_CONFIG
   const Icon = config.icon
 
   return (
@@ -219,9 +220,9 @@ function IssueContent({ detail }: { detail: GitHubIssueDetail }) {
               {detail.comments.length !== 1 && 's'}
             </span>
           </div>
-          {detail.comments.map((comment, i) => (
+          {detail.comments.map(comment => (
             <CommentItem
-              key={`comment-${comment.author.login}-${comment.created_at}-${i}`}
+              key={`comment:${comment.author.login}:${comment.created_at}:${comment.body.slice(0, 80)}`}
               comment={comment}
             />
           ))}
@@ -305,9 +306,9 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
               {detail.reviews.length} review{detail.reviews.length !== 1 && 's'}
             </span>
           </div>
-          {detail.reviews.map((review, i) => (
+          {detail.reviews.map(review => (
             <ReviewItem
-              key={`review-${review.author.login}-${review.submittedAt ?? i}`}
+              key={`review:${review.author.login}:${review.submittedAt ?? ''}:${review.state}:${(review.body ?? '').slice(0, 80)}`}
               review={review}
             />
           ))}
@@ -324,9 +325,9 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
               {detail.comments.length !== 1 && 's'}
             </span>
           </div>
-          {detail.comments.map((comment, i) => (
+          {detail.comments.map(comment => (
             <CommentItem
-              key={`comment-${comment.author.login}-${comment.created_at}-${i}`}
+              key={`comment:${comment.author.login}:${comment.created_at}:${comment.body.slice(0, 80)}`}
               comment={comment}
             />
           ))}
@@ -343,6 +344,20 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: 'bg-blue-500/15 text-blue-600 border-blue-500/30',
 }
 
+const SECURITY_ALERT_STATE_COLORS: Record<string, string> = {
+  open: 'text-red-500',
+  fixed: 'text-green-500',
+  dismissed: 'text-muted-foreground',
+  auto_dismissed: 'text-muted-foreground',
+}
+
+const ADVISORY_STATE_COLORS: Record<string, string> = {
+  published: 'text-orange-500',
+  closed: 'text-green-500',
+  draft: 'text-muted-foreground',
+  triage: 'text-yellow-500',
+}
+
 function SecurityAlertContent({ alert }: { alert: DependabotAlert }) {
   const severityClass =
     SEVERITY_COLORS[alert.severity] ??
@@ -350,12 +365,6 @@ function SecurityAlertContent({ alert }: { alert: DependabotAlert }) {
 
   const stateLabel =
     alert.state === 'auto_dismissed' ? 'Auto-dismissed' : alert.state
-  const stateColors: Record<string, string> = {
-    open: 'text-red-500',
-    fixed: 'text-green-500',
-    dismissed: 'text-muted-foreground',
-    auto_dismissed: 'text-muted-foreground',
-  }
 
   return (
     <>
@@ -382,7 +391,7 @@ function SecurityAlertContent({ alert }: { alert: DependabotAlert }) {
         <span
           className={cn(
             'text-sm font-medium capitalize',
-            stateColors[alert.state] ?? 'text-muted-foreground'
+            SECURITY_ALERT_STATE_COLORS[alert.state] ?? 'text-muted-foreground'
           )}
         >
           {stateLabel}
@@ -443,13 +452,6 @@ function AdvisoryContent({ advisory }: { advisory: RepositoryAdvisory }) {
     SEVERITY_COLORS[advisory.severity] ??
     'bg-muted text-muted-foreground border-border'
 
-  const stateColors: Record<string, string> = {
-    published: 'text-orange-500',
-    closed: 'text-green-500',
-    draft: 'text-muted-foreground',
-    triage: 'text-yellow-500',
-  }
-
   return (
     <>
       {/* Header */}
@@ -476,7 +478,7 @@ function AdvisoryContent({ advisory }: { advisory: RepositoryAdvisory }) {
         <span
           className={cn(
             'text-sm font-medium capitalize',
-            stateColors[advisory.state] ?? 'text-muted-foreground'
+            ADVISORY_STATE_COLORS[advisory.state] ?? 'text-muted-foreground'
           )}
         >
           {advisory.state}
@@ -524,9 +526,9 @@ function AdvisoryContent({ advisory }: { advisory: RepositoryAdvisory }) {
               {advisory.vulnerabilities.length !== 1 && 's'}
             </span>
           </div>
-          {advisory.vulnerabilities.map((vuln, i) => (
+          {advisory.vulnerabilities.map(vuln => (
             <div
-              key={`vuln-${vuln.packageName}-${i}`}
+              key={`vuln:${vuln.packageName}:${vuln.packageEcosystem}:${vuln.vulnerableVersionRange ?? ''}`}
               className="border border-border rounded-lg overflow-hidden"
             >
               <div className="px-4 py-2.5 bg-muted/50 border-b border-border">

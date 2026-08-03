@@ -1072,9 +1072,7 @@ pub fn analyze_checkpoint_restore(
                 status: RestorePathStatus::ConflictedLaterActivity,
                 turn_status,
                 later_session_ids: later_sessions,
-                reason: Some(
-                    "Later agent turn(s) in this worktree also modified this file".into(),
-                ),
+                reason: Some("Later agent turn(s) in this worktree also modified this file".into()),
             });
             continue;
         }
@@ -1090,9 +1088,7 @@ pub fn analyze_checkpoint_restore(
                     status: RestorePathStatus::ConflictedWorkingTree,
                     turn_status,
                     later_session_ids: Vec::new(),
-                    reason: Some(
-                        "Working tree no longer matches this turn's end state".into(),
-                    ),
+                    reason: Some("Working tree no longer matches this turn's end state".into()),
                 });
                 continue;
             }
@@ -1853,8 +1849,7 @@ pub async fn propose_ai_checkpoint_restore(
     model: Option<String>,
     reasoning_effort: Option<String>,
 ) -> Result<CheckpointRestoreProposal, String> {
-    let (analysis, contexts) =
-        build_conflict_file_contexts(&app, &worktree_id, &checkpoint_id)?;
+    let (analysis, contexts) = build_conflict_file_contexts(&app, &worktree_id, &checkpoint_id)?;
     let clean_paths: Vec<String> = analysis
         .paths
         .iter()
@@ -1879,10 +1874,7 @@ pub async fn propose_ai_checkpoint_restore(
     let checkpoint = get_checkpoint(&app, &worktree_id, &checkpoint_id)?;
     let files_block = format_conflict_files_block(&contexts);
     let prompt = CHECKPOINT_RESTORE_PROMPT
-        .replace(
-            "{user_message}",
-            &checkpoint.user_message_preview,
-        )
+        .replace("{user_message}", &checkpoint.user_message_preview)
         .replace("{files_block}", &files_block);
 
     let working_dir = Some(Path::new(checkpoint.worktree_path.as_str()));

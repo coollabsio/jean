@@ -581,6 +581,10 @@ export function MainWindow() {
         {/* Desktop: custom resize handle for left sidebar */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize left sidebar"
             className="relative h-full w-px bg-border"
             onMouseDown={handleResizeStart}
           >
@@ -605,6 +609,10 @@ export function MainWindow() {
         {/* Desktop: resize handle for file browser */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize file browser"
             className="relative h-full w-px bg-border"
             onMouseDown={handleFileBrowserResizeStart}
           >

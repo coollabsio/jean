@@ -29,6 +29,7 @@ import {
   addRemoteConnection,
   getActiveConnectionId,
   markConnectionSwitch,
+  parseOptionalSshPort,
   parseRemoteConnectionInput,
   removeRemoteConnection,
   selectConnection,
@@ -236,16 +237,6 @@ export function RemoteConnectionsDialog({
     setError(null)
     setProgress(null)
     setInstalling(false)
-  }
-
-  const parseOptionalSshPort = (raw: string): number | undefined => {
-    const trimmed = raw.trim()
-    if (!trimmed) return undefined
-    const port = Number(trimmed)
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error('SSH port must be an integer between 1 and 65535.')
-    }
-    return port
   }
 
   const connectionInputFromUrlForm = () => {

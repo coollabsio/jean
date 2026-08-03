@@ -55,6 +55,7 @@ export function NewIssuesBadge({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={handleClick}
           className={cn(
             'shrink-0 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] font-medium text-green-600 transition-colors hover:bg-green-500/20',

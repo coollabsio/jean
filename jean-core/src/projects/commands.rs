@@ -5483,8 +5483,36 @@ pub struct WorktreeFile {
     pub is_dir: bool,
 }
 
-/// List files in a worktree, respecting .gitignore
-/// Returns files sorted alphabetically, limited to prevent performance issues
+/// Directory names skipped while listing worktree files.
+///
+/// Gitignored files (e.g. `.env`) are intentionally included so the file
+/// browser can open them. Heavy dependency/build trees are still skipped so
+/// listing stays usable under the max-files cap.
+fn is_skipped_file_browser_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | ".turbo"
+            | ".cache"
+            | "coverage"
+            | "__pycache__"
+            | ".venv"
+            | "venv"
+            | "elm-stuff"
+    )
+}
+
+/// List files in a worktree for the file browser and @-mentions.
+///
+/// Includes hidden and gitignored files (e.g. `.env`) so users can open them
+/// from the sidebar. Skips `.git` and common heavy dependency/build directories.
+/// Returns files sorted alphabetically, limited to prevent performance issues.
 pub async fn list_worktree_files(
     worktree_path: String,
     max_files: Option<usize>,
@@ -5494,13 +5522,18 @@ pub async fn list_worktree_files(
     let max = max_files.unwrap_or(5000);
     let mut files = Vec::new();
 
-    // Use ignore crate's WalkBuilder which respects .gitignore by default
+    // Do not apply .gitignore — the file browser should show local secrets and
+    // other ignored config files. filter_entry still prunes heavy trees.
     let walker = WalkBuilder::new(&worktree_path)
-        .hidden(false) // Include hidden files (user may want .env.example etc)
-        .git_ignore(true) // Respect .gitignore
-        .git_global(true) // Respect global gitignore
-        .git_exclude(true) // Respect .git/info/exclude
+        .hidden(false) // Include hidden files (.env, .env.example, etc.)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
         .require_git(false) // Work even if not a git repo
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !is_skipped_file_browser_dir(name.as_ref())
+        })
         .build();
 
     let worktree_path_ref = Path::new(&worktree_path);
@@ -5522,11 +5555,6 @@ pub async fn list_worktree_files(
 
         // Skip the root directory itself
         if path == worktree_path_ref {
-            continue;
-        }
-
-        // Skip .git directory and its contents
-        if path.components().any(|c| c.as_os_str() == ".git") {
             continue;
         }
 
@@ -6659,9 +6687,7 @@ fn cleanup_unused_pr_remotes(
 
     for remote in candidates {
         if remote_still_referenced_by_other_worktrees(data, exclude_worktree_id, &remote) {
-            log::trace!(
-                "Keeping remote '{remote}' — still referenced by another worktree"
-            );
+            log::trace!("Keeping remote '{remote}' — still referenced by another worktree");
             continue;
         }
         git::try_remove_ephemeral_remote(repo_path, &remote);
@@ -6685,8 +6711,8 @@ fn detect_ephemeral_pr_push_target(
 
 #[cfg(test)]
 mod pr_remote_cleanup_tests {
-    use super::*;
     use super::super::types::ProjectsData;
+    use super::*;
 
     fn minimal_worktree(
         id: &str,
@@ -6766,13 +6792,7 @@ mod pr_remote_cleanup_tests {
             ],
         };
 
-        cleanup_unused_pr_remotes(
-            &data,
-            "clearing",
-            path,
-            Some("fork-drop"),
-            Some("main"),
-        );
+        cleanup_unused_pr_remotes(&data, "clearing", path, Some("fork-drop"), Some("main"));
 
         assert!(!git::remote_exists(path, "fork-drop"));
         assert!(git::remote_exists(path, "fork-keep"));
@@ -13429,6 +13449,81 @@ mod tests {
         let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
         assert!(format_open_error("vscodium", &other)
             .starts_with("Failed to open VSCodium ('codium'):"));
+    }
+
+    #[test]
+    fn is_skipped_file_browser_dir_covers_heavy_trees() {
+        assert!(is_skipped_file_browser_dir(".git"));
+        assert!(is_skipped_file_browser_dir("node_modules"));
+        assert!(is_skipped_file_browser_dir("target"));
+        assert!(!is_skipped_file_browser_dir(".env"));
+        assert!(!is_skipped_file_browser_dir("src"));
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_includes_gitignored_env_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        std::fs::write(root.join(".gitignore"), ".env\nnode_modules/\n").expect("gitignore");
+        std::fs::write(root.join(".env"), "SECRET=1\n").expect(".env");
+        std::fs::write(root.join(".env.example"), "SECRET=\n").expect(".env.example");
+        std::fs::write(root.join("README.md"), "hi\n").expect("readme");
+        std::fs::create_dir_all(root.join("node_modules/pkg")).expect("node_modules");
+        std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports=1\n")
+            .expect("nested node_modules file");
+        std::fs::create_dir_all(root.join("src")).expect("src");
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("main");
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), None)
+            .await
+            .expect("list files");
+        let paths: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+
+        assert!(
+            paths.contains(&".env"),
+            "gitignored .env should be listed: {paths:?}"
+        );
+        assert!(
+            paths.contains(&".env.example"),
+            "hidden .env.example should be listed: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"README.md"),
+            "tracked file missing: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"src/main.rs"),
+            "nested file missing: {paths:?}"
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|p| *p == "node_modules" || p.starts_with("node_modules/")),
+            "node_modules should be pruned: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| *p == ".git" || p.starts_with(".git/")),
+            ".git directory should be pruned: {paths:?}"
+        );
+        assert!(
+            paths.contains(&".gitignore"),
+            ".gitignore itself should still be listed: {paths:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_respects_max_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        for i in 0..10 {
+            std::fs::write(root.join(format!("f{i}.txt")), "x\n").expect("write file");
+        }
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), Some(3))
+            .await
+            .expect("list files");
+        assert_eq!(files.len(), 3);
     }
 
     #[test]

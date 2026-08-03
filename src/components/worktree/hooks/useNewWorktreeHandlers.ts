@@ -254,13 +254,17 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           number: issueDetail.number,
           title: issueDetail.title,
           body: issueDetail.body,
-          comments: (issueDetail.comments ?? [])
-            .filter(c => c && c.created_at && c.author)
-            .map(c => ({
-              body: c.body ?? '',
-              author: { login: c.author.login ?? '' },
-              createdAt: c.created_at,
-            })),
+          comments: (issueDetail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
         }
 
         if (background)
@@ -312,13 +316,17 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           number: issueDetail.number,
           title: issueDetail.title,
           body: issueDetail.body,
-          comments: (issueDetail.comments ?? [])
-            .filter(c => c && c.created_at && c.author)
-            .map(c => ({
-              body: c.body ?? '',
-              author: { login: c.author.login ?? '' },
-              createdAt: c.created_at,
-            })),
+          comments: (issueDetail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
         }
 
         if (background)
@@ -378,13 +386,17 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
             number: issueDetail.number,
             title: issueDetail.title,
             body: issueDetail.body,
-            comments: (issueDetail.comments ?? [])
-              .filter(c => c && c.created_at && c.author)
-              .map(c => ({
-                body: c.body ?? '',
-                author: { login: c.author.login ?? '' },
-                createdAt: c.created_at,
-              })),
+            comments: (issueDetail.comments ?? []).flatMap(c =>
+              c && c.created_at && c.author
+                ? [
+                    {
+                      body: c.body ?? '',
+                      author: { login: c.author.login ?? '' },
+                      createdAt: c.created_at,
+                    },
+                  ]
+                : []
+            ),
           }
 
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -452,21 +464,29 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
             body: prDetail.body,
             headRefName: prDetail.headRefName,
             baseRefName: prDetail.baseRefName,
-            comments: (prDetail.comments ?? [])
-              .filter(c => c && c.created_at && c.author)
-              .map(c => ({
-                body: c.body ?? '',
-                author: { login: c.author.login ?? '' },
-                createdAt: c.created_at,
-              })),
-            reviews: (prDetail.reviews ?? [])
-              .filter(r => r && r.author)
-              .map(r => ({
-                body: r.body ?? '',
-                state: r.state,
-                author: { login: r.author.login ?? '' },
-                submittedAt: r.submittedAt,
-              })),
+            comments: (prDetail.comments ?? []).flatMap(c =>
+              c && c.created_at && c.author
+                ? [
+                    {
+                      body: c.body ?? '',
+                      author: { login: c.author.login ?? '' },
+                      createdAt: c.created_at,
+                    },
+                  ]
+                : []
+            ),
+            reviews: (prDetail.reviews ?? []).flatMap(r =>
+              r && r.author
+                ? [
+                    {
+                      body: r.body ?? '',
+                      state: r.state,
+                      author: { login: r.author.login ?? '' },
+                      submittedAt: r.submittedAt,
+                    },
+                  ]
+                : []
+            ),
           }
 
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -721,21 +741,29 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           body: prDetail.body,
           headRefName: prDetail.headRefName,
           baseRefName: prDetail.baseRefName,
-          comments: (prDetail.comments ?? [])
-            .filter(c => c && c.created_at && c.author)
-            .map(c => ({
-              body: c.body ?? '',
-              author: { login: c.author.login ?? '' },
-              createdAt: c.created_at,
-            })),
-          reviews: (prDetail.reviews ?? [])
-            .filter(r => r && r.author)
-            .map(r => ({
-              body: r.body ?? '',
-              state: r.state,
-              author: { login: r.author.login ?? '' },
-              submittedAt: r.submittedAt,
-            })),
+          comments: (prDetail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
+          reviews: (prDetail.reviews ?? []).flatMap(r =>
+            r && r.author
+              ? [
+                  {
+                    body: r.body ?? '',
+                    state: r.state,
+                    author: { login: r.author.login ?? '' },
+                    submittedAt: r.submittedAt,
+                  },
+                ]
+              : []
+          ),
         }
 
         if (background)
@@ -795,21 +823,29 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           body: prDetail.body,
           headRefName: prDetail.headRefName,
           baseRefName: prDetail.baseRefName,
-          comments: (prDetail.comments ?? [])
-            .filter(c => c && c.created_at && c.author)
-            .map(c => ({
-              body: c.body ?? '',
-              author: { login: c.author.login ?? '' },
-              createdAt: c.created_at,
-            })),
-          reviews: (prDetail.reviews ?? [])
-            .filter(r => r && r.author)
-            .map(r => ({
-              body: r.body ?? '',
-              state: r.state,
-              author: { login: r.author.login ?? '' },
-              submittedAt: r.submittedAt,
-            })),
+          comments: (prDetail.comments ?? []).flatMap(c =>
+            c && c.created_at && c.author
+              ? [
+                  {
+                    body: c.body ?? '',
+                    author: { login: c.author.login ?? '' },
+                    createdAt: c.created_at,
+                  },
+                ]
+              : []
+          ),
+          reviews: (prDetail.reviews ?? []).flatMap(r =>
+            r && r.author
+              ? [
+                  {
+                    body: r.body ?? '',
+                    state: r.state,
+                    author: { login: r.author.login ?? '' },
+                    submittedAt: r.submittedAt,
+                  },
+                ]
+              : []
+          ),
         }
 
         if (background)

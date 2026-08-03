@@ -23,16 +23,15 @@ function getStatusText(worktree: Worktree): string {
  * Card shown in canvas views while a worktree is being set up (jean.json setup script running).
  */
 export const WorktreeSetupCard = forwardRef<
-  HTMLDivElement,
+  HTMLButtonElement,
   WorktreeSetupCardProps
 >(function WorktreeSetupCard({ worktree, isSelected, onSelect }, ref) {
   const statusText = getStatusText(worktree)
 
   return (
-    <div
+    <button
+      type="button"
       ref={ref}
-      role="button"
-      tabIndex={-1}
       onClick={onSelect}
       className={cn(
         'group flex w-full items-center gap-3 rounded-md px-3 py-1.5 border border-transparent transition-colors text-left cursor-pointer scroll-mt-28 scroll-mb-20',
@@ -53,6 +52,6 @@ export const WorktreeSetupCard = forwardRef<
       <span className="text-xs text-muted-foreground shrink-0">
         {statusText}
       </span>
-    </div>
+    </button>
   )
 })

@@ -342,6 +342,8 @@ export function useInitGitInFolder() {
       logger.info('Git initialized successfully', { path: result })
       return result
     },
+    // No query invalidation: git init is a pre-project filesystem step; the
+    // caller continues project creation and owns subsequent cache updates.
     onError: error => {
       const message =
         typeof error === 'string'
@@ -1000,7 +1002,9 @@ export function useWorktreeEvents() {
               // worktree is now on the server. Promote single-worktree cache
               // and register the path so auto-investigate can start.
               const serverWorktree = queryClient
-                .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(projectId))
+                .getQueryData<
+                  Worktree[]
+                >(projectsQueryKeys.worktrees(projectId))
                 ?.find(w => w.id === worktreeId && w.status !== 'pending')
               if (serverWorktree) {
                 handleWorktreeReady(serverWorktree, queryClient, false)
@@ -2022,6 +2026,7 @@ export function useOpenBranchOnGitHub() {
 
       logger.info('Opened branch on GitHub')
     },
+    // No query invalidation: opens external browser only (no app state change)
     onError: error => {
       const message =
         error instanceof Error
@@ -2128,6 +2133,7 @@ export function useOpenWorktreeInFinder() {
       await invoke('open_worktree_in_finder', { worktreePath })
       logger.info(`Opened worktree in ${getFileManagerName()}`)
     },
+    // No query invalidation: OS file manager side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2157,6 +2163,7 @@ export function useOpenProjectWorktreesFolder() {
       await invoke('open_project_worktrees_folder', { projectId })
       logger.info('Opened project worktrees folder')
     },
+    // No query invalidation: OS file manager side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2190,6 +2197,7 @@ export function useOpenWorktreeInTerminal() {
       await invoke('open_worktree_in_terminal', { worktreePath, terminal })
       logger.info('Opened worktree in Terminal')
     },
+    // No query invalidation: OS terminal side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2223,6 +2231,7 @@ export function useOpenWorktreeInEditor() {
       await invoke('open_worktree_in_editor', { worktreePath, editor })
       logger.info('Opened worktree in Editor')
     },
+    // No query invalidation: OS editor side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2406,6 +2415,8 @@ export function useTerminalListeningPorts(enabled: boolean) {
  * Hook to commit changes in a worktree
  */
 export function useCommitChanges() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: async ({
       worktreeId,
@@ -2429,9 +2440,19 @@ export function useCommitChanges() {
       logger.info('Changes committed successfully', { commitHash })
       return commitHash
     },
-    onSuccess: commitHash => {
+    onSuccess: (commitHash, { worktreeId }) => {
       const shortHash = commitHash.slice(0, 7)
       toast.success(`Changes committed`, { description: shortHash })
+      // Refresh git status after commit (dynamic import avoids circular dep
+      // with git-status → projects)
+      void import('@/services/git-status').then(
+        ({ gitStatusQueryKeys, triggerImmediateGitPoll }) => {
+          queryClient.invalidateQueries({
+            queryKey: gitStatusQueryKeys.worktree(worktreeId),
+          })
+          void triggerImmediateGitPoll()
+        }
+      )
     },
     onError: error => {
       // Tauri invoke errors come as strings directly
@@ -2486,6 +2507,7 @@ export function useOpenProjectOnGitHub() {
 
       logger.info('Opened project on GitHub')
     },
+    // No query invalidation: opens external browser only
     onError: error => {
       const message =
         error instanceof Error
@@ -2869,10 +2891,11 @@ export function useReorderWorktrees() {
 
       // Optimistically update the cache
       if (previousWorktrees) {
+        const worktreeById = new Map(previousWorktrees.map(w => [w.id, w]))
         const orderById = new Map<string, number>()
         let nextOrder = 1
         for (const worktreeId of worktreeIds) {
-          const worktree = previousWorktrees.find(w => w.id === worktreeId)
+          const worktree = worktreeById.get(worktreeId)
           if (worktree && worktree.session_type !== 'base') {
             orderById.set(worktreeId, nextOrder)
             nextOrder += 1

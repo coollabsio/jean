@@ -36,12 +36,8 @@ import { cn } from '@/lib/utils'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
 
-// Lazy load CodeEditor since it's heavy
-const CodeEditor = lazy(() =>
-  import('@/components/ui/code-editor').then(mod => ({
-    default: mod.CodeEditor,
-  }))
-)
+// Lazy load CodeEditor since it's heavy (CodeMirror + language packs)
+const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
 
 function isMarkdownFile(filename: string | null | undefined): boolean {
   if (!filename) return false

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -114,8 +115,16 @@ export function FileBrowserSidebar({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  // Remember user-expanded dirs so search clear restores them
-  const userExpandedRef = useRef<Set<string>>(new Set())
+  // Remember user-expanded dirs so search clear restores them (lazy init)
+  const userExpandedRef = useRef<Set<string> | null>(null)
+  if (userExpandedRef.current === null) {
+    userExpandedRef.current = new Set()
+  }
+  // Mirror expanded for pure toggles (avoid writing refs inside setState updaters)
+  const expandedRef = useRef(expanded)
+  useLayoutEffect(() => {
+    expandedRef.current = expanded
+  })
 
   // Reset expansion when root path changes
   useEffect(() => {
@@ -129,7 +138,7 @@ export function FileBrowserSidebar({
   useEffect(() => {
     const q = search.trim()
     if (!q) {
-      setExpanded(new Set(userExpandedRef.current))
+      setExpanded(new Set(userExpandedRef.current ?? []))
       return
     }
     setExpanded(pathsToExpandForMatches(files, q))
@@ -172,15 +181,13 @@ export function FileBrowserSidebar({
   }, [queryClient, rootPath])
 
   const toggleDir = useCallback((relativePath: string) => {
-    setExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(relativePath)) next.delete(relativePath)
-      else next.add(relativePath)
-      if (!search.trim()) {
-        userExpandedRef.current = next
-      }
-      return next
-    })
+    const next = new Set(expandedRef.current)
+    if (next.has(relativePath)) next.delete(relativePath)
+    else next.add(relativePath)
+    setExpanded(next)
+    if (!search.trim()) {
+      userExpandedRef.current = next
+    }
   }, [search])
 
   const openFile = useCallback(

@@ -241,8 +241,7 @@ export function useClearContextApproval({
           sessionId,
         })
         allUserContent = fullSession.messages
-          .filter(m => m.role === 'user')
-          .map(m => m.content)
+          .flatMap(m => (m.role === 'user' ? [m.content] : []))
           .join('\n')
         console.log('[useClearContextApproval] Fetched session messages:', {
           sessionId,

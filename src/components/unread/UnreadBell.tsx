@@ -238,6 +238,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const markSessionsReadOptimistically = useCallback(
     (sessionIds: string[]) => {
       const now = Math.floor(Date.now() / 1000)
+      const sessionIdSet = new Set(sessionIds)
       queryClient.setQueryData(['all-sessions'], old => {
         if (!old) return old
         const data = old as { entries?: { sessions?: Session[] }[] }
@@ -247,7 +248,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           entries: data.entries.map(entry => ({
             ...entry,
             sessions: (entry.sessions ?? []).map(session =>
-              sessionIds.includes(session.id)
+              sessionIdSet.has(session.id)
                 ? { ...session, last_opened_at: now }
                 : session
             ),

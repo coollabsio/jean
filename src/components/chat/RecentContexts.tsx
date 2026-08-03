@@ -60,12 +60,13 @@ export function RecentContexts({
   // Collect display names of linked projects (e.g., "royal-camel", "other-repo")
   const linkedProjectNames = useMemo(() => {
     if (!projectId || !projects) return new Set<string>()
-    const currentProject = projects.find(p => p.id === projectId)
+    const projectById = new Map(projects.map(p => [p.id, p]))
+    const currentProject = projectById.get(projectId)
     if (!currentProject?.linked_project_ids?.length) return new Set<string>()
 
     const names = new Set<string>()
     for (const linkedId of currentProject.linked_project_ids) {
-      const linkedProject = projects.find(p => p.id === linkedId)
+      const linkedProject = projectById.get(linkedId)
       if (linkedProject) {
         // Sanitize to match the filename format (e.g., "undead.coollabs.io" → "undead-coollabs-io")
         names.add(sanitizeForFilename(linkedProject.name))
@@ -166,6 +167,7 @@ export function RecentContexts({
         className="flex items-center w-[200px] rounded-md border border-border bg-muted/50 text-xs text-muted-foreground transition-colors"
       >
         <button
+          type="button"
           onClick={() => handleToggle(ctx)}
           disabled={isLoading}
           className="flex-1 min-w-0 inline-flex items-center gap-1.5 px-3 py-1.5 hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 cursor-pointer rounded-l-md"
@@ -180,10 +182,12 @@ export function RecentContexts({
           <span className="truncate">{ctx.name || ctx.slug}</span>
         </button>
         <button
+          type="button"
           onClick={e => {
             e.stopPropagation()
             handlePreview(ctx)
           }}
+          aria-label="Preview context"
           className="px-1.5 py-1.5 border-l border-border hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer rounded-r-md text-muted-foreground"
         >
           <Eye className="h-3 w-3" />
@@ -210,6 +214,8 @@ export function RecentContexts({
           <span className="text-xs text-muted-foreground text-center items-center justify-center flex gap-2">
             Recent contexts{' '}
             <button
+              type="button"
+              aria-label="Browse all contexts"
               onClick={() =>
                 useUIStore.getState().setLoadContextModalOpen(true)
               }

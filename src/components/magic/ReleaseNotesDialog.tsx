@@ -242,7 +242,9 @@ export function ReleaseNotesDialog() {
           <DialogTitle className="flex items-center gap-2">
             {phase !== 'select' && (
               <button
+                type="button"
                 onClick={handleBack}
+                aria-label="Back"
                 className="p-0.5 rounded hover:bg-accent transition-colors"
                 disabled={isGenerating}
               >
@@ -261,8 +263,10 @@ export function ReleaseNotesDialog() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
+                    type="button"
                     onClick={fetchReleases}
                     disabled={isLoadingReleases}
+                    aria-label="Refresh releases"
                     className={cn(
                       'inline-flex h-7 w-7 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 hover:bg-accent',
                       'focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-hidden',
@@ -371,10 +375,14 @@ export function ReleaseNotesDialog() {
         {phase === 'result' && (
           <div className="flex flex-col flex-1 min-h-0 px-4 pb-4 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <label
+                htmlFor="release-notes-title"
+                className="text-xs font-medium text-muted-foreground mb-1 block"
+              >
                 Title
               </label>
               <Input
+                id="release-notes-title"
                 value={generatedTitle}
                 onChange={e => setGeneratedTitle(e.target.value)}
                 className="text-base md:text-sm"
@@ -382,10 +390,14 @@ export function ReleaseNotesDialog() {
             </div>
 
             <div className="flex-1 flex flex-col min-h-0">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <label
+                htmlFor="release-notes-body"
+                className="text-xs font-medium text-muted-foreground mb-1 block"
+              >
                 Body
               </label>
               <Textarea
+                id="release-notes-body"
                 value={generatedBody}
                 onChange={e => setGeneratedBody(e.target.value)}
                 className="flex-1 min-h-0 text-base resize-none font-mono md:text-sm"
@@ -462,6 +474,7 @@ function ReleaseItem({
 
   return (
     <button
+      type="button"
       data-release-item-index={index}
       onMouseEnter={onMouseEnter}
       onClick={onClick}

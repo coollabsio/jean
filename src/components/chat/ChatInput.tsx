@@ -805,24 +805,26 @@ export const ChatInput = memo(function ChatInput({
           })
         }
 
-        // Restore text files (read content from disk)
-        for (const path of copiedPromptMetadata.textFiles) {
-          try {
-            const response = await invoke<ReadTextResponse>(
-              'read_pasted_text',
-              { path }
-            )
-            addPendingTextFile(activeSessionId, {
-              id: generateId(),
-              path,
-              filename: getFilename(path),
-              size: response.size,
-              content: response.content,
-            })
-          } catch {
-            // File may no longer exist, skip
-          }
-        }
+        // Restore text files (read content from disk) — independent reads
+        await Promise.all(
+          copiedPromptMetadata.textFiles.map(async path => {
+            try {
+              const response = await invoke<ReadTextResponse>(
+                'read_pasted_text',
+                { path }
+              )
+              addPendingTextFile(activeSessionId, {
+                id: generateId(),
+                path,
+                filename: getFilename(path),
+                size: response.size,
+                content: response.content,
+              })
+            } catch {
+              // File may no longer exist, skip
+            }
+          })
+        )
 
         // Restore file and directory mentions
         for (const file of copiedPromptMetadata.files) {
@@ -849,18 +851,23 @@ export const ChatInput = memo(function ChatInput({
       if (!items) return
 
       // First, check for image items in the clipboard
-      let hasImage = false
+      const imageFiles: File[] = []
       for (const item of items) {
         if (!item.type.startsWith('image/')) continue
-        hasImage = true
         // Prevent the browser from also inserting any text/html fallback for
         // image clipboard entries; mixed text is handled explicitly below.
         e.preventDefault()
 
         const file = item.getAsFile()
         if (!file) continue
-
-        await processAttachmentFile(file, activeSessionId)
+        imageFiles.push(file)
+      }
+      const hasImage = imageFiles.length > 0
+      // Independent per-image save; process in parallel
+      if (imageFiles.length > 0) {
+        await Promise.all(
+          imageFiles.map(file => processAttachmentFile(file, activeSessionId))
+        )
       }
 
       // Mixed image+text paste should preserve both parts. Because image paste
@@ -935,9 +942,10 @@ export const ChatInput = memo(function ChatInput({
       const files = e.target.files
       if (!files || files.length === 0) return
 
-      for (const file of Array.from(files)) {
-        await processAttachmentFile(file, activeSessionId)
-      }
+      // Independent per-file attachment processing
+      await Promise.all(
+        Array.from(files, file => processAttachmentFile(file, activeSessionId))
+      )
 
       e.target.value = ''
       inputRef.current?.focus()
@@ -1211,6 +1219,7 @@ export const ChatInput = memo(function ChatInput({
         multiple
         tabIndex={-1}
         className="sr-only"
+        aria-label="Attach images"
         onChange={handleFileInputChange}
       />
       <Textarea

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { usePreferences } from '@/services/preferences'
-import type { UIFont, ChatFont } from '@/types/preferences'
-import { FONT_SIZE_DEFAULT } from '@/types/preferences'
+import type { UIFont, ChatFont, FontWeight } from '@/types/preferences'
+import { FONT_SIZE_DEFAULT, FONT_WEIGHT_DEFAULT } from '@/types/preferences'
 
 // Calculate line height based on font size
 function getLineHeight(fontSize: number): string {
@@ -44,16 +44,37 @@ const chatFontFamilyMap: Record<ChatFont, string> = {
   lato: "'Lato', -apple-system, 'Segoe UI', sans-serif",
 }
 
+/** Weight ladders stay within bundled faces (400–700). */
+const fontWeightLadder: Record<
+  FontWeight,
+  { normal: number; medium: number; semibold: number; bold: number }
+> = {
+  // Soften emphasis for long dark-mode reading without needing a 300 face
+  light: { normal: 400, medium: 400, semibold: 500, bold: 600 },
+  normal: { normal: 400, medium: 500, semibold: 600, bold: 700 },
+  medium: { normal: 500, medium: 600, semibold: 700, bold: 700 },
+}
+
+function validateFontWeight(weight: string | undefined): FontWeight {
+  if (weight === 'light' || weight === 'normal' || weight === 'medium') {
+    return weight
+  }
+  return FONT_WEIGHT_DEFAULT
+}
+
 function applyFontSettings(
   uiFontSize?: number,
   chatFontSize?: number,
   uiFont?: string,
-  chatFont?: string
+  chatFont?: string,
+  fontWeight?: string
 ) {
   const validUiSize = validateFontSize(uiFontSize)
   const validChatSize = validateFontSize(chatFontSize)
   const uiFontFamily = (uiFont ?? 'inter') as UIFont
   const chatFontFamily = (chatFont ?? 'jetbrains-mono') as ChatFont
+  const validWeight = validateFontWeight(fontWeight)
+  const weights = fontWeightLadder[validWeight]
 
   const validUiFont = uiFontFamilyMap[uiFontFamily] ? uiFontFamily : 'inter'
   const validChatFont = chatFontFamilyMap[chatFontFamily]
@@ -67,6 +88,15 @@ function applyFontSettings(
   root.style.setProperty('--chat-line-height', getLineHeight(validChatSize))
   root.style.setProperty('--font-family-sans', uiFontFamilyMap[validUiFont])
   root.style.setProperty('--font-family-chat', chatFontFamilyMap[validChatFont])
+
+  // Remap Tailwind weight tokens + body/chat base weight
+  root.style.setProperty('--font-weight-normal', String(weights.normal))
+  root.style.setProperty('--font-weight-medium', String(weights.medium))
+  root.style.setProperty('--font-weight-semibold', String(weights.semibold))
+  root.style.setProperty('--font-weight-bold', String(weights.bold))
+  root.style.setProperty('--ui-font-weight', String(weights.normal))
+  root.style.setProperty('--chat-font-weight', String(weights.normal))
+  root.dataset.fontWeight = validWeight
 }
 
 export function useFontSettings() {
@@ -84,7 +114,8 @@ export function useFontSettings() {
         preferences.ui_font_size,
         preferences.chat_font_size,
         preferences.ui_font,
-        preferences.chat_font
+        preferences.chat_font,
+        preferences.font_weight
       )
     }
   }, [preferences])

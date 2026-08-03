@@ -3,6 +3,7 @@ import { MessageSquare, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { invoke, listen } from '@/lib/transport'
+import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { SingleTerminalView } from './TerminalView'
 
@@ -32,6 +33,9 @@ export function FullScreenTerminalSurface({
     let unlisten: (() => void) | undefined
 
     const markViewed = () => {
+      // Viewing acknowledges terminal attention; clear local waiting immediately
+      // so a focused session does not flash "waiting" after terminal:attention.
+      useChatStore.getState().setWaitingForInput(sessionId, false)
       void invoke('set_session_last_opened', { sessionId }).catch(
         () => undefined
       )
@@ -39,8 +43,13 @@ export function FullScreenTerminalSurface({
     if (document.hasFocus()) markViewed()
     void listen<{ sessionId: string }>('terminal:attention', event => {
       if (event.payload?.sessionId !== sessionId) return
-      if (document.hasFocus()) markViewed()
-      else pendingAttention = true
+      if (document.hasFocus()) {
+        // Run after the global terminal:attention handler (which sets waiting)
+        // so a focused terminal stays acknowledged.
+        queueMicrotask(markViewed)
+      } else {
+        pendingAttention = true
+      }
     })
       .then(dispose => {
         if (cancelled) dispose()

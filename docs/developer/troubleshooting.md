@@ -219,7 +219,8 @@ defaults -currentHost write -g AppleFontSmoothing -int 2
 **Engineering notes:**
 
 - Native zoom is applied via `getCurrentWebview().setZoom()` in `src/hooks/use-zoom.ts`.
-- On display scale changes, Jean re-applies zoom (bounce through 1.0 when target ≠ 100%) so WKWebView refreshes its layer after multi-monitor moves.
+- On Tauri `onScaleChanged` only (not resize/`devicePixelRatio`), Jean re-applies custom zoom by bouncing through 1.0 so WKWebView refreshes its layer after multi-monitor moves. At 100% zoom the bounce is skipped entirely.
+- Do not re-listen to resize/DPR for this: `setZoom()` can change both and feed back into another refresh (UI jumps continuously). Re-entry is also guarded with a short settle window after each bounce.
 - CSS uses `-webkit-font-smoothing: antialiased` on HiDPI, and `auto` on 1× displays (`src/App.css`).
 - Main window config is opaque with empty `windowEffects` (`src-tauri/tauri.conf.json`); `set_window_vibrancy` enables translucency only when the Appearance preference is on.
 - Soft-text tip: `useExternalDisplayZoomTip` + `has_seen_external_display_zoom_tip` preference.

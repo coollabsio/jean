@@ -19,19 +19,22 @@ export function useNativeWindowCloseGuard(): void {
     let unlisten: (() => void) | null = null
     let cleaned = false
 
-    const setup = async () => {
+    // Skip async setup entirely on the cheap guard path (DEV/non-native already
+    // returned above). Only import/register when we still need the handler.
+    void (async () => {
+      if (cleaned) return
+
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        const { checkHasRunningSessions, destroyAppWindow } =
-          await import('@/lib/window-close')
-
-        if (cleaned) return
-
+        // Always register, then tear down immediately if unmounted during await
+        // (avoids an early-return path that would leave the import unused).
         const fn = await getCurrentWindow().onCloseRequested(async event => {
           // MUST be synchronous — preventDefault after await is unreliable.
           event.preventDefault()
 
           try {
+            const { checkHasRunningSessions, destroyAppWindow } =
+              await import('@/lib/window-close')
             const hasRunning = await checkHasRunningSessions()
             if (hasRunning) {
               window.dispatchEvent(
@@ -43,6 +46,7 @@ export function useNativeWindowCloseGuard(): void {
           } catch (error) {
             logger.error('Failed to handle close request', { error })
             try {
+              const { destroyAppWindow } = await import('@/lib/window-close')
               await destroyAppWindow()
             } catch (destroyError) {
               logger.error('Failed to destroy window after close error', {
@@ -60,9 +64,7 @@ export function useNativeWindowCloseGuard(): void {
       } catch (error) {
         logger.error('Failed to setup close listener', { error })
       }
-    }
-
-    setup()
+    })()
 
     return () => {
       cleaned = true

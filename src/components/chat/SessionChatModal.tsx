@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -143,9 +144,9 @@ function useOffScreenWaiting(
     const viewport = viewportRef.current
     if (!viewport) return
 
-    const waitingIds = sortedCards
-      .filter(c => isActionableWaitingStatus(c.status))
-      .map(c => c.session.id)
+    const waitingIds = sortedCards.flatMap(c =>
+      isActionableWaitingStatus(c.status) ? [c.session.id] : []
+    )
 
     if (waitingIds.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -942,39 +943,38 @@ export function SessionChatModal({
   )
 
   // Close on Escape key
+  const onEscapeClose = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return
+    const target = e.target as HTMLElement
+    const portalAncestor = target?.closest?.(
+      '[data-slot="dialog-portal"], [data-slot="alert-dialog-portal"], [data-slot="sheet-portal"]'
+    )
+    const terminalAncestor = target?.closest?.('[data-terminal-root="true"]')
+    const { planDialogOpen, gitDiffModalOpen, contextViewerOpen } =
+      useUIStore.getState()
+
+    // Don't close if PlanDialog is open — let it handle ESC
+    if (planDialogOpen) return
+    // Don't close if GitDiffModal is open — let it handle ESC
+    if (gitDiffModalOpen) return
+    // Don't close if ContextViewerDialog is open — let it handle ESC
+    if (contextViewerOpen) return
+    // Don't close if CloseWorktreeDialog is open — let it handle ESC
+    if (closeConfirmOpen) return
+    // Don't close if ESC originated inside a child dialog/sheet portal
+    if (portalAncestor) return
+    // Don't close if ESC originated inside the pinned terminal
+    if (terminalAncestor) return
+
+    handleClose()
+  })
+
   useEffect(() => {
     if (!isOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const target = e.target as HTMLElement
-        const portalAncestor = target?.closest?.(
-          '[data-slot="dialog-portal"], [data-slot="alert-dialog-portal"], [data-slot="sheet-portal"]'
-        )
-        const terminalAncestor = target?.closest?.(
-          '[data-terminal-root="true"]'
-        )
-        const { planDialogOpen, gitDiffModalOpen, contextViewerOpen } =
-          useUIStore.getState()
-
-        // Don't close if PlanDialog is open — let it handle ESC
-        if (planDialogOpen) return
-        // Don't close if GitDiffModal is open — let it handle ESC
-        if (gitDiffModalOpen) return
-        // Don't close if ContextViewerDialog is open — let it handle ESC
-        if (contextViewerOpen) return
-        // Don't close if CloseWorktreeDialog is open — let it handle ESC
-        if (closeConfirmOpen) return
-        // Don't close if ESC originated inside a child dialog/sheet portal
-        if (portalAncestor) return
-        // Don't close if ESC originated inside the pinned terminal
-        if (terminalAncestor) return
-
-        handleClose()
-      }
-    }
+    const handleKeyDown = (e: KeyboardEvent) => onEscapeClose(e)
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, handleClose, closeConfirmOpen])
+  }, [isOpen])
 
   if (!isOpen || !worktreeId) return null
 
@@ -1244,9 +1244,9 @@ export function SessionChatModal({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {runScripts.map((cmd, i) => (
+                          {runScripts.map(cmd => (
                             <DropdownMenuItem
-                              key={i}
+                              key={cmd}
                               onSelect={() => handleRunCommand(cmd)}
                               className="font-mono text-xs"
                             >
@@ -1306,8 +1306,6 @@ export function SessionChatModal({
                         <ContextMenuTrigger asChild>
                           <div
                             data-session-id={session.id}
-                            role="button"
-                            tabIndex={0}
                             draggable={renamingSessionId !== session.id}
                             onDragStart={e =>
                               handleSessionDragStart(e, session.id)
@@ -1319,13 +1317,6 @@ export function SessionChatModal({
                             onDragEnd={() => setDraggedSessionId(null)}
                             onClick={() => handleTabClick(session.id)}
                             onAuxClick={e => handleTabAuxClick(e, session)}
-                            onKeyDown={e => {
-                              if (renamingSessionId === session.id) return
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                handleTabClick(session.id)
-                              }
-                            }}
                             onDoubleClick={() =>
                               handleStartRenameImmediate(
                                 session.id,
@@ -1333,7 +1324,7 @@ export function SessionChatModal({
                               )
                             }
                             className={cn(
-                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors whitespace-nowrap',
+                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors whitespace-nowrap cursor-pointer',
                               isActive
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
@@ -1366,6 +1357,7 @@ export function SessionChatModal({
                                 }
                                 onPointerDown={e => e.stopPropagation()}
                                 onClick={e => e.stopPropagation()}
+                                aria-label="Rename session"
                                 className="w-full min-w-0 bg-transparent text-base outline-none md:text-xs"
                               />
                             ) : (

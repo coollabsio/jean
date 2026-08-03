@@ -113,6 +113,11 @@ type AIBackend =
   | 'kimi'
 type CliType = AIBackend | 'gh'
 
+/** Static CLI login arg arrays (module scope — avoid recreating each render) */
+const AUTH_LOGIN_ARGS = ['auth', 'login']
+const SIMPLE_LOGIN_ARGS = ['login']
+const EMPTY_LOGIN_ARGS: string[] = []
+
 export const AI_BACKENDS: AIBackend[] = [
   'claude',
   'codex',
@@ -473,42 +478,42 @@ function OnboardingDialogContent() {
       return
     }
 
-    setHistoryStack(h => {
-      const prev = h.at(-1)
-      if (!prev) return h
-      dbg('step: BACK', stepRef.current, '→', prev)
-      // Reset transient per-CLI state so the user lands on a fresh screen
-      // (re-shows the path/Jean-managed picker, clears any prior install error).
-      if (prev === 'claude-setup') {
-        setClaudePathSelected(false)
-        setClaudeInstallFailed(false)
-      } else if (prev === 'codex-setup') {
-        setCodexPathSelected(false)
-        setCodexInstallFailed(false)
-      } else if (prev === 'opencode-setup') {
-        setOpencodePathSelected(false)
-        setOpencodeInstallFailed(false)
-      } else if (prev === 'pi-setup') {
-        setPiPathSelected(false)
-        setPiInstallFailed(false)
-      } else if (prev === 'commandcode-setup') {
-        setCommandcodePathSelected(false)
-        setCommandcodeInstallFailed(false)
-      } else if (prev === 'grok-setup') {
-        setGrokPathSelected(false)
-        setGrokInstallFailed(false)
-      } else if (prev === 'kimi-setup') {
-        setKimiPathSelected(false)
-        setKimiInstallFailed(false)
-      } else if (prev === 'gh-setup') {
-        setGhPathSelected(false)
-        setGhInstallFailed(false)
-      }
-      stepRef.current = prev
-      _setStepRaw(prev)
-      return h.slice(0, -1)
-    })
+    const prev = historyStack.at(-1)
+    if (!prev) return
+
+    dbg('step: BACK', stepRef.current, '→', prev)
+    // Reset transient per-CLI state so the user lands on a fresh screen
+    // (re-shows the path/Jean-managed picker, clears any prior install error).
+    if (prev === 'claude-setup') {
+      setClaudePathSelected(false)
+      setClaudeInstallFailed(false)
+    } else if (prev === 'codex-setup') {
+      setCodexPathSelected(false)
+      setCodexInstallFailed(false)
+    } else if (prev === 'opencode-setup') {
+      setOpencodePathSelected(false)
+      setOpencodeInstallFailed(false)
+    } else if (prev === 'pi-setup') {
+      setPiPathSelected(false)
+      setPiInstallFailed(false)
+    } else if (prev === 'commandcode-setup') {
+      setCommandcodePathSelected(false)
+      setCommandcodeInstallFailed(false)
+    } else if (prev === 'grok-setup') {
+      setGrokPathSelected(false)
+      setGrokInstallFailed(false)
+    } else if (prev === 'kimi-setup') {
+      setKimiPathSelected(false)
+      setKimiInstallFailed(false)
+    } else if (prev === 'gh-setup') {
+      setGhPathSelected(false)
+      setGhInstallFailed(false)
+    }
+    stepRef.current = prev
+    _setStepRaw(prev)
+    setHistoryStack(h => h.slice(0, -1))
   }, [
+    historyStack,
     claudePathSelected,
     codexPathSelected,
     opencodePathSelected,
@@ -908,6 +913,18 @@ function OnboardingDialogContent() {
     // WSL mode only applies to local Windows development.
     if (remoteActive) {
       if (ghReady && readyBackends.length > 0) {
+        // Auto-opened with tools already ready (e.g. reconnecting to a remote
+        // that was set up earlier). Don't force the "Setup Complete" screen —
+        // that was reappearing on every remote session open.
+        if (!onboardingManuallyTriggered) {
+          dbg('init effect: remote all ready → auto-dismiss')
+          useUIStore.setState({
+            onboardingOpen: false,
+            onboardingStartStep: null,
+            onboardingDismissed: true,
+          })
+          return
+        }
         dbg('init effect: remote all ready → complete')
         queueMicrotask(() => setStep('complete', { replace: true }))
         return
@@ -930,6 +947,15 @@ function OnboardingDialogContent() {
 
     // Local tools already ready and environment chosen → finish.
     if (ghReady && readyBackends.length > 0 && !needsWslChoice) {
+      if (!onboardingManuallyTriggered) {
+        dbg('init effect: all ready → auto-dismiss')
+        useUIStore.setState({
+          onboardingOpen: false,
+          onboardingStartStep: null,
+          onboardingDismissed: true,
+        })
+        return
+      }
       dbg('init effect: all ready → complete')
       queueMicrotask(() => setStep('complete', { replace: true }))
       return
@@ -2101,8 +2127,8 @@ function OnboardingDialogContent() {
       ? pathDetection.data.path
       : (claudeSetup.status?.path ?? '')
   const claudeLoginArgs = claudeSetup.status?.supports_auth_command
-    ? ['auth', 'login']
-    : ['login']
+    ? AUTH_LOGIN_ARGS
+    : SIMPLE_LOGIN_ARGS
   const codexLoginCommand =
     codexPathSelected && codexPathDetection.data?.path
       ? codexPathDetection.data.path
@@ -2112,35 +2138,35 @@ function OnboardingDialogContent() {
     opencodePathSelected && opencodePathDetection.data?.path
       ? opencodePathDetection.data.path
       : (opencodeSetup.status?.path ?? '')
-  const opencodeLoginArgs = ['auth', 'login']
+  const opencodeLoginArgs = AUTH_LOGIN_ARGS
   const cursorLoginCommand =
     cursorStatus.data?.path ?? cursorPathDetection.data?.path ?? ''
-  const cursorLoginArgs = ['login']
+  const cursorLoginArgs = SIMPLE_LOGIN_ARGS
   const piLoginCommand =
     piPathSelected && piPathDetection.data?.path
       ? piPathDetection.data.path
       : (piSetup.status?.path ?? '')
-  const piLoginArgs: string[] = []
+  const piLoginArgs = EMPTY_LOGIN_ARGS
   const commandcodeLoginCommand =
     commandcodePathSelected && commandcodePathDetection.data?.path
       ? commandcodePathDetection.data.path
       : (commandcodeSetup.status?.path ?? '')
-  const commandcodeLoginArgs = ['login']
+  const commandcodeLoginArgs = SIMPLE_LOGIN_ARGS
   const grokLoginCommand =
     grokPathSelected && grokPathDetection.data?.path
       ? grokPathDetection.data.path
       : (grokSetup.status?.path ?? '')
-  const grokLoginArgs = ['login']
+  const grokLoginArgs = SIMPLE_LOGIN_ARGS
   const kimiLoginCommand =
     kimiPathSelected && kimiPathDetection.data?.path
       ? kimiPathDetection.data.path
       : (kimiSetup.status?.path ?? '')
-  const kimiLoginArgs = ['login']
+  const kimiLoginArgs = SIMPLE_LOGIN_ARGS
   const ghLoginCommand =
     ghPathSelected && ghPathDetection.data?.path
       ? ghPathDetection.data.path
       : (ghSetup.status?.path ?? '')
-  const ghLoginArgs = ['auth', 'login']
+  const ghLoginArgs = AUTH_LOGIN_ARGS
 
   dbg('login commands:', {
     claude: {

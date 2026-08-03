@@ -60,8 +60,10 @@ export function CodexCommandApprovalRequestCard({
           <div>
             <div className="font-medium text-foreground">Detected actions</div>
             <ul className="list-disc space-y-1 pl-4">
-              {request.command_actions.map((action, index) => (
-                <li key={`${action.command}-${index}`}>
+              {request.command_actions.map(action => (
+                <li
+                  key={`${action.type}:${action.command}:${action.path ?? ''}:${action.query ?? ''}`}
+                >
                   {action.type}
                   {action.path ? ` · ${action.path}` : ''}
                   {action.query ? ` · ${action.query}` : ''}

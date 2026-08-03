@@ -754,6 +754,7 @@ export function PreferencesDialog() {
                             isActive={activePane === entry.id}
                           >
                             <button
+                              type="button"
                               onClick={() => handlePaneSelect(entry.id)}
                               className="w-full"
                             >

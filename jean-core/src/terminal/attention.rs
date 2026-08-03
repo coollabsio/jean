@@ -123,22 +123,17 @@ fn set_waiting(app: &AppHandle, session_id: &str, waiting: bool, codex_thread_id
         .unwrap_or_default()
         .as_secs();
     let result = with_existing_metadata_mut(app, session_id, |metadata| {
-        let changed = metadata.waiting_for_input != waiting
-            || codex_thread_id
-                .is_some_and(|thread_id| metadata.codex_thread_id.as_deref() != Some(thread_id));
         metadata.waiting_for_input = waiting;
         metadata.waiting_for_input_type = waiting.then(|| "question".to_string());
         if let Some(thread_id) = codex_thread_id {
             metadata.codex_thread_id = Some(thread_id.to_string());
         }
-        if waiting {
-            metadata.terminal_activity_at = Some(now);
-        }
-        changed || waiting
+        // Both prompt submit and turn-complete count as terminal activity so
+        // session ordering stays fresh without Jean run history.
+        metadata.terminal_activity_at = Some(now);
     });
     match result {
-        Ok(true) => crate::chat::emit_sessions_cache_invalidation(app),
-        Ok(false) => {}
+        Ok(()) => crate::chat::emit_sessions_cache_invalidation(app),
         Err(error) => {
             log::debug!("terminal notifications: cannot update {session_id}: {error}");
         }
