@@ -8038,9 +8038,110 @@ fn resolve_merge_flag_from_repo_settings(settings: &serde_json::Value) -> &'stat
     "--merge"
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum MergePreparation {
+    Ready,
+    MarkReady,
+}
+
+fn merge_preparation(pr_info: &serde_json::Value) -> Result<MergePreparation, String> {
+    let state = pr_info["state"].as_str().unwrap_or("");
+    if state != "OPEN" {
+        return Err(format!("PR is not open (state: {state})"));
+    }
+
+    let mergeable = pr_info["mergeable"].as_str().unwrap_or("UNKNOWN");
+    if mergeable == "CONFLICTING" {
+        return Err("PR has merge conflicts that must be resolved first".to_string());
+    }
+
+    let merge_state = pr_info["mergeStateStatus"].as_str().unwrap_or("UNKNOWN");
+    if merge_state == "BLOCKED" {
+        return Err("PR is blocked (required checks or reviews may be pending)".to_string());
+    }
+
+    if pr_info["isDraft"].as_bool().unwrap_or(false) {
+        Ok(MergePreparation::MarkReady)
+    } else {
+        Ok(MergePreparation::Ready)
+    }
+}
+
+fn load_pr_for_merge(gh: &Path, worktree_path: &str) -> Result<serde_json::Value, String> {
+    let view_output = gh_command(gh, worktree_path)
+        .args([
+            "pr",
+            "view",
+            "--json",
+            "number,state,isDraft,mergeable,mergeStateStatus,url,title",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
+
+    if !view_output.status.success() {
+        let stderr = String::from_utf8_lossy(&view_output.stderr);
+        return Err(format!("No PR found for this branch: {stderr}"));
+    }
+
+    serde_json::from_slice(&view_output.stdout).map_err(|e| format!("Failed to parse PR info: {e}"))
+}
+
+/// Mark a draft PR ready for review, then validate that it can be merged.
+pub fn prepare_github_pr_for_merge(
+    app: &AppHandle,
+    worktree_path: &str,
+) -> Result<serde_json::Value, String> {
+    let gh = resolve_gh_binary(app);
+    let mut pr_info = load_pr_for_merge(&gh, worktree_path)?;
+
+    if merge_preparation(&pr_info)? == MergePreparation::MarkReady {
+        let ready_output = gh_command(&gh, worktree_path)
+            .args(["pr", "ready"])
+            .output()
+            .map_err(|e| format!("Failed to run gh pr ready: {e}"))?;
+        if !ready_output.status.success() {
+            let stderr = String::from_utf8_lossy(&ready_output.stderr);
+            return Err(format!("Failed to mark PR ready for review: {stderr}"));
+        }
+        log::info!("Marked draft PR ready for review");
+        pr_info = load_pr_for_merge(&gh, worktree_path)?;
+    }
+
+    match merge_preparation(&pr_info)? {
+        MergePreparation::Ready => Ok(pr_info),
+        MergePreparation::MarkReady => {
+            Err("PR is still a draft after marking it ready for review".to_string())
+        }
+    }
+}
+
 #[cfg(test)]
 mod merge_pr_tests {
     use super::*;
+
+    #[test]
+    fn draft_pr_requires_ready_transition_before_merge() {
+        let pr = serde_json::json!({
+            "state": "OPEN",
+            "isDraft": true,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN"
+        });
+
+        assert_eq!(merge_preparation(&pr), Ok(MergePreparation::MarkReady));
+    }
+
+    #[test]
+    fn accepts_ready_mergeable_pr() {
+        let pr = serde_json::json!({
+            "state": "OPEN",
+            "isDraft": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN"
+        });
+
+        assert_eq!(merge_preparation(&pr), Ok(MergePreparation::Ready));
+    }
 
     #[test]
     fn selects_squash_when_allowed() {
@@ -8096,40 +8197,8 @@ pub async fn merge_github_pr(
 ) -> Result<MergePrResponse, String> {
     let gh = resolve_gh_binary(&app);
 
-    // 1. Check PR status and mergeability
-    let view_output = gh_command(&gh, &worktree_path)
-        .args([
-            "pr",
-            "view",
-            "--json",
-            "number,state,mergeable,mergeStateStatus,url,title",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
-
-    if !view_output.status.success() {
-        let stderr = String::from_utf8_lossy(&view_output.stderr);
-        return Err(format!("No PR found for this branch: {stderr}"));
-    }
-
-    let pr_info: serde_json::Value = serde_json::from_slice(&view_output.stdout)
-        .map_err(|e| format!("Failed to parse PR info: {e}"))?;
-
-    let state = pr_info["state"].as_str().unwrap_or("");
-    if state != "OPEN" {
-        return Err(format!("PR is not open (state: {state})"));
-    }
-
-    let mergeable = pr_info["mergeable"].as_str().unwrap_or("UNKNOWN");
-    let merge_state = pr_info["mergeStateStatus"].as_str().unwrap_or("UNKNOWN");
-
-    if mergeable == "CONFLICTING" {
-        return Err("PR has merge conflicts that must be resolved first".to_string());
-    }
-
-    if merge_state == "BLOCKED" {
-        return Err("PR is blocked (required checks or reviews may be pending)".to_string());
-    }
+    // 1. Check PR status, draft state and mergeability.
+    let pr_info = prepare_github_pr_for_merge(&app, &worktree_path)?;
 
     let title = pr_info["title"].as_str().unwrap_or("").to_string();
 
