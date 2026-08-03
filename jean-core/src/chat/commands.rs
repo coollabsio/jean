@@ -3500,10 +3500,17 @@ pub async fn send_chat_message(
                         );
                     }
                 }
+                // Skill badge attachments inject absolute SKILL.md paths that
+                // Codex must be able to read. Include current + legacy skill roots.
                 if let Some(home) = dirs::home_dir() {
-                    let codex_skills_dir = home.join(".codex").join("skills");
-                    if codex_skills_dir.exists() {
-                        codex_add_dirs.push(codex_skills_dir.to_string_lossy().to_string());
+                    for skills_dir in [
+                        home.join(".agents").join("skills"),
+                        home.join(".codex").join("skills"),
+                        home.join(".jean").join("skills").join("codex"),
+                    ] {
+                        if skills_dir.exists() {
+                            codex_add_dirs.push(skills_dir.to_string_lossy().to_string());
+                        }
                     }
                 }
 

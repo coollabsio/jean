@@ -314,7 +314,12 @@ export function SlashPopover({
                           )}
                           <div className="flex flex-col min-w-0">
                             <span className="truncate text-sm font-medium">
-                              {isCommand ? '/' : '$'}
+                              {/* Codex skills use $name; other backends keep /name */}
+                              {isCommand
+                                ? '/'
+                                : item.backend === 'codex'
+                                  ? '$'
+                                  : '/'}
                               {item.data.name}
                             </span>
                             {item.data.description && (
