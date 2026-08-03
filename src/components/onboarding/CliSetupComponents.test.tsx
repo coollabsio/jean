@@ -6,6 +6,16 @@ import {
   SetupState,
 } from './CliSetupComponents'
 
+vi.mock('@/components/chat/StandaloneTerminalSurface', () => ({
+  StandaloneTerminalSurface: ({
+    terminalId,
+  }: {
+    terminalId: string
+  }) => (
+    <div data-testid="standalone-terminal-surface" data-terminal-id={terminalId} />
+  ),
+}))
+
 describe('manual CLI version helpers', () => {
   it('normalizes whitespace and optional v prefix', () => {
     expect(normalizeManualCliVersionInput(' v2.1.98 ')).toBe('2.1.98')
@@ -75,6 +85,23 @@ describe('SetupState manual version check', () => {
 })
 
 describe('AuthLoginState completion', () => {
+  it('renders the shared terminal surface for login', () => {
+    render(
+      <AuthLoginState
+        cliName="Cursor CLI"
+        terminalId="cursor-login-test"
+        command="agent"
+        commandArgs={['login']}
+        onComplete={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId('standalone-terminal-surface')).toHaveAttribute(
+      'data-terminal-id',
+      'cursor-login-test'
+    )
+  })
+
   it('only advances once when completion is clicked repeatedly', () => {
     const onComplete = vi.fn()
 

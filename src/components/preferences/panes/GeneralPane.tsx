@@ -7,6 +7,7 @@ import React, {
   type FC,
 } from 'react'
 import { invoke } from '@/lib/transport'
+import { loginArgsForBackend } from '@/lib/cli-auth'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Check, ChevronsUpDown, Play } from 'lucide-react'
@@ -1538,8 +1539,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingCodexAuth(false)
     }
 
-    // Not authenticated, open login modal
-    openCliLoginModal('codex', codexStatus.path, ['login'])
+    // Not authenticated, open login modal (device-code auth for terminal/headless)
+    openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
   }, [codexStatus?.path, openCliLoginModal, queryClient])
 
   const handleCodeRabbitLogin = useCallback(async () => {
@@ -1601,7 +1602,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
   const handleCodexRelogin = useCallback(() => {
     if (!codexStatus?.path) return
-    openCliLoginModal('codex', codexStatus.path, ['login'])
+    openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
   }, [codexStatus?.path, openCliLoginModal])
 
   const handleOpenCodeRelogin = useCallback(() => {
@@ -2446,6 +2447,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <p className="text-xs text-muted-foreground px-1">
                 Install with Jean, or install <code>codex</code> yourself in
                 your environment — we&apos;ll detect it on your PATH.
+              </p>
+            )}
+            {codexStatus?.installed && codexStatus.sandbox_ready === false && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 px-1">
+                {codexStatus.sandbox_message ??
+                  'Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap'}
               </p>
             )}
           </div>

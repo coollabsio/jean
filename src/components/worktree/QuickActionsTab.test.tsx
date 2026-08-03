@@ -20,9 +20,9 @@ vi.mock('@/services/preferences', () => ({
 }))
 
 vi.mock('@/services/projects', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/services/projects')>()
+  const actual = await importOriginal()
   return {
-    ...actual,
+    ...(actual as object),
     // Remotes for the selected base are loaded inside the tab; tests pass
     // remotes via props as the fallback and leave this empty.
     useProjectRemotes: () => ({ data: undefined }),

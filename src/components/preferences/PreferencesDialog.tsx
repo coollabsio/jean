@@ -34,7 +34,9 @@ import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -43,6 +45,7 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -98,12 +101,16 @@ interface NavigationItem {
   desktopOnly?: boolean
 }
 
-interface NavigationSeparator {
-  type: 'separator'
+interface NavigationSection {
+  type: 'section'
   id: string
+  label: string
 }
 
-const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
+type NavigationEntry = NavigationItem | NavigationSection
+
+const navigationEntries: NavigationEntry[] = [
+  { type: 'section', id: 'app-section', label: 'App' },
   {
     type: 'item',
     id: 'general',
@@ -123,7 +130,7 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
     icon: Keyboard,
     desktopOnly: true,
   },
-  { type: 'separator', id: 'interface-separator' },
+  { type: 'section', id: 'backends-section', label: 'Backends' },
   {
     type: 'item',
     id: 'claude',
@@ -188,7 +195,7 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
     name: 'CodeRabbit CLI',
     icon: Rabbit,
   },
-  { type: 'separator', id: 'backend-separator' },
+  { type: 'section', id: 'tools-section', label: 'Tools' },
   {
     type: 'item',
     id: 'terminal',
@@ -207,7 +214,7 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
     name: 'Opinionated',
     icon: Sparkles,
   },
-  { type: 'separator', id: 'connectivity-separator' },
+  { type: 'section', id: 'connectivity-section', label: 'Connectivity' },
   {
     type: 'item',
     id: 'providers',
@@ -233,14 +240,14 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
     name: 'Integrations',
     icon: Puzzle,
   },
-  { type: 'separator', id: 'account-separator' },
+  { type: 'section', id: 'account-section', label: 'Account' },
   {
     type: 'item',
     id: 'usage',
     name: 'Usage',
     icon: BarChart3,
   },
-  { type: 'separator', id: 'advanced-separator' },
+  { type: 'section', id: 'advanced-section', label: 'Advanced' },
   {
     type: 'item',
     id: 'experimental',
@@ -249,9 +256,32 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
   },
 ]
 
-const navigationItems = navigationEntries.filter(
-  (entry): entry is NavigationItem => entry.type === 'item'
-)
+/** Mobile select groups: section labels + non-desktop-only items. */
+function getMobileNavigationGroups(): {
+  id: string
+  label: string
+  items: NavigationItem[]
+}[] {
+  const groups: { id: string; label: string; items: NavigationItem[] }[] = []
+  let current: { id: string; label: string; items: NavigationItem[] } | null =
+    null
+
+  for (const entry of navigationEntries) {
+    if (entry.type === 'section') {
+      current = { id: entry.id, label: entry.label, items: [] }
+      groups.push(current)
+      continue
+    }
+    if (entry.desktopOnly) continue
+    if (!current) {
+      current = { id: 'default', label: '', items: [] }
+      groups.push(current)
+    }
+    current.items.push(entry)
+  }
+
+  return groups.filter(group => group.items.length > 0)
+}
 
 const paneIconMap: Record<PreferencePane, LucideIcon> = {
   general: Settings,
@@ -702,12 +732,22 @@ export function PreferencesDialog() {
               <SidebarGroup>
                 <SidebarGroupContent>
                   <SidebarMenu>
-                    {navigationEntries.map(entry =>
-                      entry.type === 'separator' ? (
-                        <li key={entry.id} aria-hidden="true" className="py-1">
-                          <SidebarSeparator className="mx-0" />
-                        </li>
-                      ) : (
+                    {navigationEntries.map((entry, index) => {
+                      if (entry.type === 'section') {
+                        const isFirst = index === 0
+                        return (
+                          <li key={entry.id} className={isFirst ? 'pt-0' : 'pt-1'}>
+                            {!isFirst && (
+                              <SidebarSeparator className="mx-0 mb-1" />
+                            )}
+                            <SidebarGroupLabel className="h-7 px-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+                              {entry.label}
+                            </SidebarGroupLabel>
+                          </li>
+                        )
+                      }
+
+                      return (
                         <SidebarMenuItem key={entry.id}>
                           <SidebarMenuButton
                             asChild
@@ -733,7 +773,7 @@ export function PreferencesDialog() {
                           </SidebarMenuButton>
                         </SidebarMenuItem>
                       )
-                    )}
+                    })}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
@@ -752,13 +792,18 @@ export function PreferencesDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {navigationItems
-                      .filter(item => !item.desktopOnly)
-                      .map(item => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.name}
-                        </SelectItem>
-                      ))}
+                    {getMobileNavigationGroups().map(group => (
+                      <SelectGroup key={group.id}>
+                        <SelectLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {group.label}
+                        </SelectLabel>
+                        {group.items.map(item => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
                   </SelectContent>
                 </Select>
                 <ModalCloseButton

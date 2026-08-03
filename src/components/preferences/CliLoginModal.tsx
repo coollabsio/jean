@@ -31,11 +31,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/store/ui-store'
 import { useShallow } from 'zustand/react/shallow'
-import { useTerminal } from '@/hooks/useTerminal'
-import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 import { BackendLabel } from '@/components/ui/backend-label'
 import { generateId } from '@/lib/uuid'
+import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
 
 export function CliLoginModal() {
   const [retryKey, setRetryKey] = useState(0)
@@ -96,8 +95,6 @@ function CliLoginModalContent({
   onRetry,
 }: CliLoginModalContentProps) {
   const queryClient = useQueryClient()
-  const initialized = useRef(false)
-  const observerRef = useRef<ResizeObserver | null>(null)
   const [exitStatus, setExitStatus] = useState<{
     exitCode: number | null
     signal: string | null
@@ -163,66 +160,9 @@ function CliLoginModalContent({
     }
   }, [terminalId])
 
-  // Use a synthetic worktreeId for CLI login (not associated with any real worktree)
-  const { initTerminal, fit } = useTerminal({
-    terminalId,
-    worktreeId: 'cli-login', // Synthetic worktreeId for CLI login terminals
-    worktreePath: '/tmp', // CLI commands don't depend on cwd
-    command,
-    commandArgs,
-  })
-
-  const terminalBg = useTerminalBackgroundColor()
-
-  // Use callback ref to detect when container is mounted (Dialog uses portal)
-  const containerCallbackRef = useCallback(
-    (container: HTMLDivElement | null) => {
-      // Cleanup previous observer if any
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-        observerRef.current = null
-      }
-
-      if (!container) return
-
-      const observer = new ResizeObserver(entries => {
-        const entry = entries[0]
-        const { width, height } = entry?.contentRect ?? { width: 0, height: 0 }
-
-        console.log(
-          `[CliLoginModal] ResizeObserver: ${width}x${height}, initialized=${initialized.current}`
-        )
-
-        if (!entry || width === 0 || height === 0) {
-          return
-        }
-
-        // Initialize on first valid size
-        if (!initialized.current) {
-          initialized.current = true
-          console.log(
-            `[CliLoginModal] Initializing terminal at ${width}x${height}`
-          )
-          initTerminal(container)
-          return
-        }
-
-        // Debounced resize - fit is stable so this is fine
-        fit()
-      })
-
-      observer.observe(container)
-      observerRef.current = observer
-    },
-    [initTerminal, fit]
-  )
-
-  // Cleanup observer and terminal on unmount (needed for retry remount)
+  // Cleanup terminal on unmount (needed for retry remount)
   useEffect(() => {
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-      }
       invoke('stop_terminal', { terminalId }).catch(() => {
         // Terminal may already be stopped
       })
@@ -300,7 +240,7 @@ function CliLoginModalContent({
       }
     })
     return () => setOnStopped(terminalId, undefined)
-  }, [terminalId, handleOpenChange])
+  }, [terminalId, handleOpenChange, cliName, command, commandArgs])
 
   return (
     <Dialog open={true} onOpenChange={handleOpenChange}>
@@ -316,12 +256,12 @@ function CliLoginModalContent({
           </DialogTitle>
         </DialogHeader>
 
-        <div
-          className="flex-1 min-h-0 w-full overflow-hidden rounded-md border border-border p-3 sm:p-4"
-          style={{ backgroundColor: terminalBg }}
-        >
-          <div ref={containerCallbackRef} className="h-full w-full" />
-        </div>
+        <StandaloneTerminalSurface
+          terminalId={terminalId}
+          command={command}
+          commandArgs={commandArgs}
+          className="min-h-0 flex-1"
+        />
 
         {exitStatus && (
           <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">

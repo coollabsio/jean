@@ -19,9 +19,9 @@ vi.mock('@/lib/environment', () => ({
 }))
 
 vi.mock('@/lib/platform', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/lib/platform')>()
+  const actual = await importOriginal()
   return {
-    ...actual,
+    ...(actual as object),
     get isClientMacOS() {
       return platformMocks.isClientMacOS
     },

@@ -158,10 +158,11 @@ describe('GitDiffModal keyboard shortcuts', () => {
     })
     scrollContainer.scrollTo = scrollTo
 
+    // Outside native macOS, "mod" is Ctrl (see isModKeyEvent).
     const wasNotPrevented = fireEvent.keyDown(document, {
       key: 'ArrowDown',
       code: 'ArrowDown',
-      metaKey: true,
+      ctrlKey: true,
       cancelable: true,
     })
 
@@ -188,7 +189,7 @@ describe('GitDiffModal keyboard shortcuts', () => {
     const wasNotPrevented = fireEvent.keyDown(document, {
       key: 'ArrowUp',
       code: 'ArrowUp',
-      metaKey: true,
+      ctrlKey: true,
       cancelable: true,
     })
 
@@ -207,7 +208,7 @@ describe('GitDiffModal keyboard shortcuts', () => {
     const wasNotPrevented = fireEvent.keyDown(filterInput, {
       key: 'ArrowDown',
       code: 'ArrowDown',
-      metaKey: true,
+      ctrlKey: true,
       cancelable: true,
     })
 

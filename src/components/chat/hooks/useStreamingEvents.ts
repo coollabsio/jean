@@ -76,6 +76,8 @@ import {
 import {
   handleCliAuthError,
   isCliAuthError,
+  isCodexBubblewrapError,
+  rewriteCodexBubblewrapErrorMessage,
 } from '@/lib/cli-auth'
 
 interface UseStreamingEventsParams {
@@ -1672,6 +1674,9 @@ export default function useStreamingEvents({
         )
         const backend = (session?.backend as CliBackend | undefined) ?? 'claude'
         displayError = handleCliAuthError(error, backend)
+      } else if (isCodexBubblewrapError(error)) {
+        // Linux sandbox dep: suggest apt install bubblewrap
+        displayError = rewriteCodexBubblewrapErrorMessage(error)
       }
 
       // Set error state for inline display

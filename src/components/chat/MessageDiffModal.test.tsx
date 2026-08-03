@@ -24,6 +24,7 @@ vi.mock('@/services/projects', () => ({
 vi.mock('@/lib/environment', () => ({
   isNativeApp: () => false,
   isLocalBackend: () => false,
+  canOpenInEditor: () => false,
 }))
 
 vi.mock('@pierre/diffs/react', () => ({

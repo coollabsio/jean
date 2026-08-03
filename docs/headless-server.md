@@ -125,6 +125,27 @@ sudo ./scripts/install-jean-server.sh --uninstall -y
 If systemd is not available, the script still installs the binary + env file and
 prints an OpenRC example unit.
 
+## Codex on Linux (bubblewrap sandbox)
+
+Codex's Linux sandbox needs [bubblewrap](https://github.com/containers/bubblewrap)
+(`bwrap`) either:
+
+1. **System package** (recommended on servers):
+
+   ```bash
+   sudo apt install bubblewrap   # Debian/Ubuntu
+   # sudo dnf install bubblewrap  # Fedora/RHEL
+   ```
+
+2. **Bundled helper** next to the Codex binary at `codex-resources/bwrap`
+   (Jean-managed installs download this automatically when available).
+
+Without either, sandboxed shell / `apply_patch` tools fail. Jean surfaces a
+warning in **Settings → Codex** when bubblewrap is missing.
+
+**Auth on headless/servers:** Jean's Codex login uses `codex login --device-auth`
+(device code + URL). Browser callback login does not work without a local display.
+
 ## Install the local development build
 
 Install the Linux build dependencies once on Ubuntu:

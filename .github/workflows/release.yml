@@ -71,6 +71,11 @@ jobs:
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
+          # GitHub-hosted Ubuntu 22.04 runners ship LLVM libunwind-*-dev packages
+          # that conflict with system libunwind-dev required by libgstreamer1.0-dev.
+          # Without this, apt fails with "held broken packages".
+          # See: https://github.com/orgs/community/discussions/113480
+          sudo apt-get remove -y 'libunwind-*-dev' || true
           # gstreamer packages are required when bundleMediaFramework is true so
           # AppImage ships plugins WebKit needs (appsrc/appsink/autoaudiosink).
           # See: https://github.com/coollabsio/jean/issues/100
@@ -81,6 +86,7 @@ jobs:
             patchelf \
             xdg-utils \
             libfuse2 \
+            libunwind-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-base \

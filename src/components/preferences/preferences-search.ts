@@ -591,17 +591,6 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-pane-appearance',
   },
   {
-    id: 'appearance-file-viewer',
-    pane: 'appearance',
-    paneTitle: 'Appearance',
-    type: 'section',
-    title: 'File Viewer',
-    sectionTitle: 'Appearance',
-    keywords: ['file viewer', 'edit files in', 'external editor'],
-    anchorId: 'pref-appearance-section-file-viewer',
-    fallbackAnchorId: 'pref-pane-appearance',
-  },
-  {
     id: 'providers-claude-cli',
     pane: 'providers',
     paneTitle: 'Providers',

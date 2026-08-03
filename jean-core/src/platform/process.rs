@@ -519,10 +519,14 @@ mod windows_console_flash_audit {
             + 1
     }
 
+    /// Normalize path separators so Windows `\` matches Unix-style suffixes.
+    fn path_key(path: &Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
     /// Drop this audit module (and its constructed needles) from scans of process.rs.
     fn production_source(path: &Path, source: &str) -> String {
-        let rel = path.to_string_lossy();
-        if !rel.ends_with(ALLOWED_CMD_START_PATH_SUFFIX) {
+        if !path_key(path).ends_with(ALLOWED_CMD_START_PATH_SUFFIX) {
             return source.to_string();
         }
         // Keep production helpers; strip only the #[cfg(test)] audit module.
@@ -578,7 +582,7 @@ mod windows_console_flash_audit {
             let source = production_source(path, &raw);
             for (idx, _) in source.match_indices(&needle) {
                 let rel = path.strip_prefix(&root).unwrap_or(path);
-                let rel_str = rel.to_string_lossy();
+                let rel_str = path_key(rel);
                 let line = line_number(&source, idx);
                 if rel_str.ends_with(ALLOWED_CMD_START_PATH_SUFFIX)
                     && source[idx.saturating_sub(400)..idx].contains(&silent_cmd)

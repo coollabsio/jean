@@ -1704,7 +1704,12 @@ pub async fn update_session_state(
             }
             if let Some(v) = status_override {
                 match &v {
-                    Some(status) if !matches!(status.as_str(), "idle" | "review" | "completed" | "cancelled") => {
+                    Some(status)
+                        if !matches!(
+                            status.as_str(),
+                            "idle" | "review" | "completed" | "cancelled"
+                        ) =>
+                    {
                         return Err(format!(
                             "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
                         ));
@@ -6163,6 +6168,14 @@ pub async fn read_clipboard_image(_app: AppHandle) -> Result<Option<SaveImageRes
 /// fetches data asynchronously before copying. This backend command is the
 /// same-machine fallback used by the frontend clipboard helper.
 pub async fn write_clipboard_text(_text: String) -> Result<(), String> {
+    Err("Native clipboard access is only available in the desktop app".to_string())
+}
+
+/// Read text from the native system clipboard.
+///
+/// Same-machine fallback for terminal paste when the browser Clipboard API is
+/// unavailable. Remote jean-server has no host clipboard access.
+pub async fn read_clipboard_text() -> Result<String, String> {
     Err("Native clipboard access is only available in the desktop app".to_string())
 }
 

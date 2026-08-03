@@ -18,7 +18,8 @@ pub fn process_failed_recovery(kind: i32) -> &'static str {
     // Values from COREWEBVIEW2_PROCESS_FAILED_KIND_* (webview2-com-sys).
     match kind {
         0 => "browser", // BROWSER_PROCESS_EXITED
-        1 | 2 | 3 => "reload", // RENDER_PROCESS_EXITED / UNRESPONSIVE / FRAME_RENDER
+        // RENDER_PROCESS_EXITED / UNRESPONSIVE / FRAME_RENDER_PROCESS_EXITED
+        1..=3 => "reload",
         _ => "ignore",
     }
 }
@@ -56,24 +57,26 @@ pub fn install_process_failed_recovery(app: &tauri::App) {
         };
 
         let handler = ProcessFailedEventHandler::create(Box::new(move |sender, args| {
+            // ProcessFailedKind is a COM out-param getter (returns Result<()>).
             let kind = args
                 .as_ref()
                 .and_then(|args: &ICoreWebView2ProcessFailedEventArgs| {
-                    unsafe { args.ProcessFailedKind() }.ok()
+                    let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND(0);
+                    unsafe { args.ProcessFailedKind(&mut kind) }
+                        .ok()
+                        .map(|_| kind.0)
                 })
-                .map(|COREWEBVIEW2_PROCESS_FAILED_KIND(value)| value)
                 .unwrap_or(-1);
 
             let recovery = process_failed_recovery(kind);
-            log::error!(
-                "WebView2 ProcessFailed kind={kind} recovery={recovery} (issue #575)"
-            );
+            log::error!("WebView2 ProcessFailed kind={kind} recovery={recovery} (issue #575)");
 
             match recovery {
                 "browser" => {
                     // Browser process is gone — only relaunch restores a live webview.
+                    // Clone for the main-thread closure; run_on_main_thread borrows self.
                     let app = app_handle.clone();
-                    let _ = app.run_on_main_thread(move || {
+                    let _ = app_handle.run_on_main_thread(move || {
                         log::error!("Restarting Jean after WebView2 browser process exit");
                         app.restart();
                     });
@@ -86,7 +89,7 @@ pub fn install_process_failed_recovery(app: &tauri::App) {
                     if !reloaded {
                         log::warn!("WebView2 Reload after process failure failed");
                         let app = app_handle.clone();
-                        let _ = app.run_on_main_thread(move || {
+                        let _ = app_handle.run_on_main_thread(move || {
                             log::error!("Restarting Jean after failed WebView2 Reload");
                             app.restart();
                         });
