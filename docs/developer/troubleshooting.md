@@ -218,6 +218,7 @@ defaults -currentHost write -g AppleFontSmoothing -int 2
 
 **Engineering notes:**
 
+- Zoom is **client-local** (`src/lib/client-zoom.ts` + `localStorage` key `jean-client-zoom`), not shared server preferences. Remote Jean clients and the host shell keep independent zoom levels (issue #622). Server `zoom_level` fields are a one-time seed only.
 - Native zoom is applied via `getCurrentWebview().setZoom()` in `src/hooks/use-zoom.ts`.
 - On Tauri `onScaleChanged` only (not resize/`devicePixelRatio`), Jean re-applies custom zoom by bouncing through 1.0 so WKWebView refreshes its layer after multi-monitor moves. At 100% zoom the bounce is skipped entirely.
 - Do not re-listen to resize/DPR for this: `setZoom()` can change both and feed back into another refresh (UI jumps continuously). Re-entry is also guarded with a short settle window after each bounce.
