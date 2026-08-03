@@ -392,9 +392,11 @@ pub fn slugify_issue_title(title: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
 
-    // Limit total length
+    // Limit total length on a UTF-8 char boundary (byte index 40 may land
+    // inside a multi-byte character for non-ASCII titles, e.g. Japanese).
     if slug.len() > 40 {
-        slug[..40].trim_end_matches('-').to_string()
+        let end = slug.floor_char_boundary(40);
+        slug[..end].trim_end_matches('-').to_string()
     } else {
         slug
     }
@@ -2479,7 +2481,12 @@ pub fn generate_branch_name_from_advisory(ghsa_id: &str, summary: &str) -> Strin
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    let slug = if slug.len() > 40 { &slug[..40] } else { &slug };
+    // Truncate on a UTF-8 char boundary so multi-byte summaries never panic.
+    let slug = if slug.len() > 40 {
+        &slug[..slug.floor_char_boundary(40)]
+    } else {
+        &slug
+    };
     let slug = slug.trim_end_matches('-');
     // Use short GHSA ID (remove "GHSA-" prefix for branch name brevity)
     let ghsa_short = ghsa_id.strip_prefix("GHSA-").unwrap_or(ghsa_id);
@@ -3236,6 +3243,19 @@ mod tests {
     }
 
     #[test]
+    fn test_slugify_issue_title_non_ascii_does_not_panic() {
+        // 15 Japanese chars → 45 bytes after lowercasing; byte 40 lands inside a char.
+        // Previously paniced with "byte index 40 is not a char boundary".
+        let title = "日本語のタイトルを持つ課題の例";
+        let slug = slugify_issue_title(title);
+        assert!(!slug.is_empty());
+        assert!(slug.len() <= 40);
+        assert!(slug.is_char_boundary(slug.len()));
+        // Every retained character should still be valid UTF-8 (no partial sequences).
+        assert!(std::str::from_utf8(slug.as_bytes()).is_ok());
+    }
+
+    #[test]
     fn test_generate_branch_name_from_issue() {
         assert_eq!(
             generate_branch_name_from_issue(123, "Fix the login bug"),
@@ -3245,6 +3265,17 @@ mod tests {
             generate_branch_name_from_issue(42, "Add new feature"),
             "issue-42-add-new-feature"
         );
+    }
+
+    #[test]
+    fn test_generate_branch_name_from_issue_non_ascii() {
+        let branch =
+            generate_branch_name_from_issue(629, "日本語のタイトルを持つ課題の例と追加の文字");
+        assert!(branch.starts_with("issue-629-"));
+        assert!(branch.is_char_boundary(branch.len()));
+        // Prefix is ASCII; slug portion must stay within the 40-byte cap.
+        let slug = branch.strip_prefix("issue-629-").unwrap();
+        assert!(slug.len() <= 40);
     }
 
     #[test]
@@ -3299,6 +3330,19 @@ mod tests {
         );
         assert!(result.starts_with("advisory-jg7v-5cqg-jvmf-"));
         assert!(result.contains("prototype"));
+    }
+
+    #[test]
+    fn test_generate_branch_name_from_advisory_non_ascii() {
+        let result = generate_branch_name_from_advisory(
+            "GHSA-jg7v-5cqg-jvmf",
+            "日本語のセキュリティアドバイザリ概要の非常に長いタイトル例",
+        );
+        assert!(result.starts_with("advisory-jg7v-5cqg-jvmf-"));
+        assert!(result.is_char_boundary(result.len()));
+        let slug = result.strip_prefix("advisory-jg7v-5cqg-jvmf-").unwrap();
+        assert!(slug.len() <= 40);
+        assert!(!slug.ends_with('-'));
     }
 
     #[test]

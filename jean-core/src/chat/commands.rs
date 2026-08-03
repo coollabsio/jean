@@ -7452,16 +7452,26 @@ fn execute_summarization_claude(
 
     // Parse the JSON response
     serde_json::from_str(&text_content).map_err(|e| {
-        let preview = if text_content.len() > 200 {
-            format!("{}...", &text_content[..200])
-        } else {
-            text_content.to_string()
-        };
+        // Truncate by chars so a recoverable parse error never panics on
+        // multi-byte UTF-8 (byte index 200 may fall inside a character).
+        let preview = truncate_error_preview(&text_content, 200);
         log::error!(
             "Failed to parse JSON response: {e}, content preview: {preview}, full stdout: {stdout}"
         );
         format!("Failed to parse structured response: {e}")
     })
+}
+
+/// Build a short log preview of content that failed JSON parsing.
+/// Always safe for multi-byte UTF-8; never panics on a mid-character boundary.
+pub(crate) fn truncate_error_preview(text: &str, max_chars: usize) -> String {
+    let mut iter = text.chars();
+    let preview: String = iter.by_ref().take(max_chars).collect();
+    if iter.next().is_some() {
+        format!("{preview}...")
+    } else {
+        preview
+    }
 }
 
 /// Generate a context summary from a session's messages in the background
@@ -10820,5 +10830,28 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
             opencode.opencode_session_id.as_deref(),
             Some("opencode-session")
         );
+    }
+
+    #[test]
+    fn truncate_error_preview_handles_non_ascii_without_panic() {
+        // Multi-byte chars; previously `&text[..200]` paniced mid-character.
+        let text = "日".repeat(100); // 300 bytes, 100 chars
+        let preview = truncate_error_preview(&text, 200);
+        // Cap is by char count here (200), so full text fits and no ellipsis.
+        assert_eq!(preview, text);
+        assert!(!preview.ends_with("..."));
+
+        let long = "日".repeat(250);
+        let preview = truncate_error_preview(&long, 200);
+        assert!(preview.ends_with("..."));
+        assert_eq!(preview.chars().count(), 200 + 3); // 200 chars + "..."
+        assert!(preview.is_char_boundary(preview.len() - 3));
+    }
+
+    #[test]
+    fn truncate_error_preview_ascii_adds_ellipsis_when_long() {
+        let text = "a".repeat(250);
+        let preview = truncate_error_preview(&text, 200);
+        assert_eq!(preview, format!("{}...", "a".repeat(200)));
     }
 }
