@@ -172,7 +172,9 @@ interface MessageHandlers {
   ) => void
   handleCodexCommandApproval: (
     request: CodexCommandApprovalRequest,
-    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel',
+    /** When true, promote Jean session to YOLO and auto-approve residual Codex prompts. */
+    promoteToYolo?: boolean
   ) => void
   handleCodexPermissionRequestDecline: (request: CodexPermissionRequest) => void
   handleCodexUserInputAnswer: (
@@ -2863,7 +2865,8 @@ export function useMessageHandlers({
   const handleCodexCommandApproval = useCallback(
     (
       request: CodexCommandApprovalRequest,
-      decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+      decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel',
+      promoteToYolo = false
     ) => {
       const sessionId = activeSessionIdRef.current
       const worktreeId = activeWorktreeIdRef.current
@@ -2879,7 +2882,11 @@ export function useMessageHandlers({
       )
       store.setWaitingForInput(sessionId, false)
 
-      if (decision === 'acceptForSession') {
+      // Jean-level YOLO promote: switch session mode even when Codex only allows
+      // a one-shot "accept" (availableDecisions without acceptForSession — #626).
+      const shouldPromoteToYolo =
+        promoteToYolo || decision === 'acceptForSession'
+      if (shouldPromoteToYolo) {
         store.setExecutionMode(sessionId, 'yolo')
         invoke('broadcast_session_setting', {
           sessionId,
@@ -2906,7 +2913,12 @@ export function useMessageHandlers({
       invoke('respond_codex_command_approval', {
         sessionId,
         rpcId: request.rpc_id,
-        response: { decision },
+        response: {
+          decision,
+          // Backend strips this before forwarding to Codex, and uses it to set
+          // the mid-turn auto-approve flag even when decision is plain "accept".
+          promoteToYolo: shouldPromoteToYolo,
+        },
       })
         .then(() =>
           persistCodexPendingState(sessionId, worktreeId, worktreePath)

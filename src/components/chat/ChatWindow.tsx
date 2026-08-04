@@ -105,6 +105,7 @@ import { cn } from '@/lib/utils'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
 import { CodexCommandApprovalRequestCard } from './CodexCommandApprovalRequest'
+import { resolveCodexYoloDecision } from './codex-command-approval-utils'
 import { CodexPermissionsRequest } from './CodexPermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
@@ -3254,12 +3255,19 @@ export function ChatWindow({
                                     'accept'
                                   )
                                 }
-                                onApproveYolo={() =>
+                                onApproveYolo={() => {
+                                  // Prefer acceptForSession when Codex allows it;
+                                  // otherwise accept once and Jean auto-approves
+                                  // residual prompts after promoting to YOLO (#626).
+                                  const decision = resolveCodexYoloDecision(
+                                    activeCodexCommandApprovalRequest.available_decisions
+                                  )
                                   handleCodexCommandApproval(
                                     activeCodexCommandApprovalRequest,
-                                    'acceptForSession'
+                                    decision,
+                                    true
                                   )
-                                }
+                                }}
                                 onDecline={() =>
                                   handleCodexCommandApproval(
                                     activeCodexCommandApprovalRequest,

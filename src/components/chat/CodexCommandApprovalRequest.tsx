@@ -1,9 +1,11 @@
 import { Button } from '@/components/ui/button'
 import type { CodexCommandApprovalRequest } from '@/types/chat'
+import { isCodexDecisionAvailable } from './codex-command-approval-utils'
 
 interface CodexCommandApprovalRequestProps {
   request: CodexCommandApprovalRequest
   onApprove: () => void
+  /** Jean-level promote-to-YOLO (always offered, even if Codex omits acceptForSession). */
   onApproveYolo: () => void
   onDecline: () => void
   onCancel?: () => void
@@ -16,16 +18,8 @@ export function CodexCommandApprovalRequestCard({
   onDecline,
   onCancel,
 }: CodexCommandApprovalRequestProps) {
-  const availableDecisionStrings = new Set(
-    request.available_decisions?.filter(
-      (decision): decision is string => typeof decision === 'string'
-    ) ?? []
-  )
-  const isDecisionAvailable = (
-    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
-  ) =>
-    !request.available_decisions?.length ||
-    availableDecisionStrings.has(decision)
+  const isDecisionAvailable = (decision: 'accept' | 'decline' | 'cancel') =>
+    isCodexDecisionAvailable(request.available_decisions, decision)
 
   return (
     <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
@@ -90,11 +84,14 @@ export function CodexCommandApprovalRequestCard({
             Approve
           </Button>
         ) : null}
-        {isDecisionAvailable('acceptForSession') ? (
-          <Button size="sm" variant="destructive" onClick={onApproveYolo}>
-            Approve (yolo)
-          </Button>
-        ) : null}
+        {/*
+          Always offer Jean-level YOLO promote. Codex may omit acceptForSession
+          for unknown commands (issue #626); Jean still switches the session to
+          yolo and auto-accepts residual mid-turn prompts.
+        */}
+        <Button size="sm" variant="destructive" onClick={onApproveYolo}>
+          Approve (yolo)
+        </Button>
         {isDecisionAvailable('decline') ? (
           <Button size="sm" variant="secondary" onClick={onDecline}>
             Decline

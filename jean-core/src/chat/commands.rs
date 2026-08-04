@@ -8779,16 +8779,42 @@ pub fn approve_codex_command(
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
-pub fn respond_codex_command_approval(
-    session_id: String,
-    rpc_id: u64,
-    response: serde_json::Value,
-) -> Result<(), String> {
+/// Strip Jean-only YOLO promote flags from a command-approval response and
+/// return whether mid-turn auto-approve should be enabled for the session.
+///
+/// Codex may omit `acceptForSession` from `availableDecisions` (unknown
+/// commands often only allow `accept` + `cancel`). Jean still lets the user
+/// promote the session to YOLO; the frontend then sends `decision: "accept"`
+/// plus `promoteToYolo: true` so residual prompts are auto-accepted (#626).
+pub(crate) fn prepare_codex_command_approval_response(
+    response: &mut serde_json::Value,
+) -> bool {
+    let promote_to_yolo = response
+        .as_object_mut()
+        .and_then(|obj| {
+            obj.remove("promoteToYolo")
+                .or_else(|| obj.remove("promote_to_yolo"))
+        })
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let is_accept_for_session = response
         .get("decision")
         .and_then(|d| d.as_str())
         .is_some_and(|d| d == "acceptForSession");
-    if is_accept_for_session {
+
+    promote_to_yolo || is_accept_for_session
+}
+
+pub fn respond_codex_command_approval(
+    session_id: String,
+    rpc_id: u64,
+    mut response: serde_json::Value,
+) -> Result<(), String> {
+    if prepare_codex_command_approval_response(&mut response) {
+        // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
+        // prompts for the rest of this session without waiting for the next turn
+        // (issue #328 / #626).
         super::registry::set_codex_yolo_auto_approve(&session_id, true);
     }
     send_codex_response(rpc_id, response)
@@ -9890,6 +9916,30 @@ mod tests {
         assert_eq!(event.session_id, "session-1");
         assert_eq!(event.worktree_id, "worktree-1");
         assert_eq!(event.error, "rate limit reached");
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_promotes_yolo_without_accept_for_session() {
+        let mut response = serde_json::json!({
+            "decision": "accept",
+            "promoteToYolo": true,
+        });
+        assert!(prepare_codex_command_approval_response(&mut response));
+        // Jean-only flag must be stripped before forwarding to Codex.
+        assert!(response.get("promoteToYolo").is_none());
+        assert_eq!(response.get("decision").and_then(|d| d.as_str()), Some("accept"));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_accept_for_session_promotes() {
+        let mut response = serde_json::json!({ "decision": "acceptForSession" });
+        assert!(prepare_codex_command_approval_response(&mut response));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_plain_accept_does_not_promote() {
+        let mut response = serde_json::json!({ "decision": "accept" });
+        assert!(!prepare_codex_command_approval_response(&mut response));
     }
 
     fn naming_test_worktree(branch: &str, base_branch: Option<&str>) -> Worktree {
