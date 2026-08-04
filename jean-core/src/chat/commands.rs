@@ -285,6 +285,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "commandcode" => Backend::Commandcode,
         "grok" => Backend::Grok,
         "kimi" => Backend::Kimi,
+        "antigravity" => Backend::Antigravity,
         _ => Backend::Claude,
     };
 
@@ -307,6 +308,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "commandcode" => Backend::Commandcode,
                         "grok" => Backend::Grok,
                         "kimi" => Backend::Kimi,
+                        "antigravity" => Backend::Antigravity,
                         "claude" => Backend::Claude,
                         _ => resolved,
                     };
@@ -333,6 +335,7 @@ pub(crate) fn resolve_magic_prompt_backend(
             "commandcode" => return Backend::Commandcode,
             "grok" => return Backend::Grok,
             "kimi" => return Backend::Kimi,
+            "antigravity" => return Backend::Antigravity,
             "codex" => return Backend::Codex,
             "claude" => return Backend::Claude,
             _ => {}
@@ -354,6 +357,8 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Grok
     } else if model.starts_with("kimi/") {
         Backend::Kimi
+    } else if crate::is_antigravity_model(model) {
+        Backend::Antigravity
     } else if crate::is_codex_model(model) {
         Backend::Codex
     } else {
@@ -918,6 +923,7 @@ pub async fn create_session(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("antigravity") => Backend::Antigravity,
         Some("claude") => Backend::Claude,
         _ => {
             // No explicit backend — check project default, then global preference
@@ -937,6 +943,8 @@ pub async fn create_session(
                     resolved = Backend::Grok;
                 } else if prefs.default_backend == "kimi" {
                     resolved = Backend::Kimi;
+                } else if prefs.default_backend == "antigravity" {
+                    resolved = Backend::Antigravity;
                 }
             }
             // Check project-level override
@@ -959,6 +967,7 @@ pub async fn create_session(
                             "commandcode" => Backend::Commandcode,
                             "grok" => Backend::Grok,
                             "kimi" => Backend::Kimi,
+                            "antigravity" => Backend::Antigravity,
                             "claude" => Backend::Claude,
                             _ => resolved,
                         };
@@ -5737,6 +5746,7 @@ pub async fn set_session_backend(
                 "commandcode" => super::types::Backend::Commandcode,
                 "grok" => super::types::Backend::Grok,
                 "kimi" => super::types::Backend::Kimi,
+                "antigravity" => super::types::Backend::Antigravity,
                 _ => super::types::Backend::Claude,
             };
             log::trace!("Backend selection saved");
@@ -10475,6 +10485,14 @@ mod tests {
         assert_eq!(
             infer_backend_from_model("commandcode/deepseek/deepseek-v4-flash", Backend::Claude),
             Backend::Commandcode
+        );
+    }
+
+    #[test]
+    fn antigravity_model_implies_antigravity_backend() {
+        assert_eq!(
+            infer_backend_from_model("antigravity/gemini-3.6-flash-high", Backend::Claude),
+            Backend::Antigravity
         );
     }
 
