@@ -327,18 +327,74 @@ pub fn kill_process(pid: u32) -> Result<(), String> {
     }
 }
 
+/// Collect every process that has `root` as an ancestor via PPID walk.
+///
+/// Process-group kill alone is not enough for terminal shells: foreground jobs
+/// usually run in a *different* process group (job control), and tools like
+/// bun/node often reparent workers. Closing a Jean terminal must still reap
+/// those descendants or they keep holding ports (issue #635).
+#[cfg(unix)]
+fn collect_descendant_pids(root: u32) -> Vec<u32> {
+    let output = match silent_command("ps").args(["-eo", "pid=,ppid="]).output() {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(pid_s), Some(ppid_s)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let (Ok(pid), Ok(ppid)) = (pid_s.parse::<u32>(), ppid_s.parse::<u32>()) else {
+            continue;
+        };
+        children.entry(ppid).or_default().push(pid);
+    }
+
+    let mut stack = vec![root];
+    let mut descendants = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(root);
+    while let Some(current) = stack.pop() {
+        let Some(kids) = children.get(&current) else {
+            continue;
+        };
+        for &kid in kids {
+            if visited.insert(kid) {
+                descendants.push(kid);
+                stack.push(kid);
+            }
+        }
+    }
+    descendants
+}
+
 /// Kill a process and all its children (process tree)
-/// - Unix: Uses kill with negative PID to kill process group
+/// - Unix: process-group SIGKILL plus PPID-walk of descendants (job-control
+///   children often live in a different process group than the shell)
 /// - Windows: Uses taskkill /T for tree kill
 #[cfg(unix)]
 pub fn kill_process_tree(pid: u32) -> Result<(), String> {
-    // Negative PID kills the entire process group
-    let result = unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
-    if result == 0 {
-        Ok(())
-    } else {
-        // If process group kill fails, try killing just the process
-        kill_process(pid)
+    // Snapshot the PPID tree *before* any kills. Once the shell dies, job
+    // control children reparent to init and become unreachable from `pid`.
+    let descendants = collect_descendant_pids(pid);
+
+    // 1) Kill the process group (shell is usually session/group leader).
+    let _ = unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+
+    // 2) Kill descendants that live in other process groups (foreground jobs,
+    // package-manager workers). These are not covered by the group signal.
+    for child_pid in descendants {
+        let _ = unsafe { libc::kill(child_pid as i32, libc::SIGKILL) };
+    }
+
+    // 3) Always target the root itself as a final fallback. ESRCH means it is
+    // already gone (group kill succeeded) — that is success, not failure.
+    match kill_process(pid) {
+        Ok(()) => Ok(()),
+        Err(_) if !is_process_alive(pid) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -463,6 +519,66 @@ pub fn terminate_process(pid: u32) -> Result<(), String> {
     }
     // Windows doesn't have SIGTERM, use TerminateProcess
     kill_process(pid)
+}
+
+#[cfg(all(test, unix))]
+mod process_tree_tests {
+    use super::{collect_descendant_pids, kill_process_tree};
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn collect_descendant_pids_finds_nested_children() {
+        // shell -c 'sleep 60 & sleep 60 & wait' creates children under a shell.
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 60 & sleep 60 & wait"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn shell with sleep children");
+        let root = child.id();
+        // Give the shell a moment to spawn its sleeps.
+        thread::sleep(Duration::from_millis(200));
+
+        let descendants = collect_descendant_pids(root);
+        // Kill before asserting so we never leak sleep processes on failure.
+        let _ = kill_process_tree(root);
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            !descendants.is_empty(),
+            "expected nested sleep children under shell pid {root}, got {descendants:?}"
+        );
+    }
+
+    #[test]
+    fn kill_process_tree_reaps_job_control_children() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 120 & sleep 120 & wait"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn shell");
+        let root = child.id();
+        thread::sleep(Duration::from_millis(200));
+        let descendants = collect_descendant_pids(root);
+        assert!(!descendants.is_empty(), "precondition: children exist");
+
+        kill_process_tree(root).expect("kill tree");
+        let _ = child.wait();
+        thread::sleep(Duration::from_millis(100));
+
+        // None of the previously-seen descendants should still be alive.
+        for pid in descendants {
+            let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+            assert!(
+                !alive,
+                "descendant pid {pid} should be dead after tree kill"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
