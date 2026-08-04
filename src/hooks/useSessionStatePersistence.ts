@@ -13,6 +13,7 @@ import type {
   PermissionDenial,
   CodexCommandApprovalRequest,
   CodexPermissionRequest,
+  OpenCodePermissionRequest,
   CodexUserInputRequest,
   CodexMcpElicitationRequest,
   CodexDynamicToolCallRequest,
@@ -67,6 +68,7 @@ interface SessionState {
   pendingPermissionDenials: PermissionDenial[]
   pendingCodexCommandApprovalRequests: CodexCommandApprovalRequest[]
   pendingCodexPermissionRequests: CodexPermissionRequest[]
+  pendingOpencodePermissionRequests: OpenCodePermissionRequest[]
   pendingCodexUserInputRequests: CodexUserInputRequest[]
   pendingCodexMcpElicitationRequests: CodexMcpElicitationRequest[]
   pendingCodexDynamicToolCallRequests: CodexDynamicToolCallRequest[]
@@ -162,6 +164,7 @@ export function useSessionStatePersistence() {
         pendingPermissionDenials,
         pendingCodexCommandApprovalRequests,
         pendingCodexPermissionRequests,
+        pendingOpencodePermissionRequests,
         pendingCodexUserInputRequests,
         pendingCodexMcpElicitationRequests,
         pendingCodexDynamicToolCallRequests,
@@ -192,6 +195,8 @@ export function useSessionStatePersistence() {
           pendingCodexCommandApprovalRequests[sessionId] ?? [],
         pendingCodexPermissionRequests:
           pendingCodexPermissionRequests[sessionId] ?? [],
+        pendingOpencodePermissionRequests:
+          pendingOpencodePermissionRequests[sessionId] ?? [],
         pendingCodexUserInputRequests:
           pendingCodexUserInputRequests[sessionId] ?? [],
         pendingCodexMcpElicitationRequests:
@@ -245,6 +250,8 @@ export function useSessionStatePersistence() {
         pendingCodexCommandApprovalRequests:
           state.pendingCodexCommandApprovalRequests,
         pendingCodexPermissionRequests: state.pendingCodexPermissionRequests,
+        pendingOpencodePermissionRequests:
+          state.pendingOpencodePermissionRequests,
         pendingCodexUserInputRequests: state.pendingCodexUserInputRequests,
         pendingCodexMcpElicitationRequests:
           state.pendingCodexMcpElicitationRequests,
@@ -428,6 +435,16 @@ export function useSessionStatePersistence() {
         updates.pendingCodexPermissionRequests = {
           ...currentState.pendingCodexPermissionRequests,
           [activeSessionId]: session.pending_codex_permission_requests,
+        }
+      }
+
+      if (
+        session.pending_opencode_permission_requests &&
+        session.pending_opencode_permission_requests.length > 0
+      ) {
+        updates.pendingOpencodePermissionRequests = {
+          ...currentState.pendingOpencodePermissionRequests,
+          [activeSessionId]: session.pending_opencode_permission_requests,
         }
       }
 
@@ -620,6 +637,8 @@ export function useSessionStatePersistence() {
       useChatStore.getState().pendingCodexCommandApprovalRequests[sessionId]
     let prevPendingCodexPermissionRequests =
       useChatStore.getState().pendingCodexPermissionRequests[sessionId]
+    let prevPendingOpencodePermissionRequests =
+      useChatStore.getState().pendingOpencodePermissionRequests[sessionId]
     let prevPendingCodexUserInputRequests =
       useChatStore.getState().pendingCodexUserInputRequests[sessionId]
     let prevPendingCodexMcpElicitations =
@@ -652,6 +671,8 @@ export function useSessionStatePersistence() {
         state.pendingCodexCommandApprovalRequests[sessionId]
       const currentCodexPermissionRequests =
         state.pendingCodexPermissionRequests[sessionId]
+      const currentOpencodePermissionRequests =
+        state.pendingOpencodePermissionRequests[sessionId]
       const currentCodexUserInputRequests =
         state.pendingCodexUserInputRequests[sessionId]
       const currentCodexMcpElicitations =
@@ -676,6 +697,8 @@ export function useSessionStatePersistence() {
         currentCodexCommandApprovalRequests !==
           prevPendingCodexCommandApprovalRequests ||
         currentCodexPermissionRequests !== prevPendingCodexPermissionRequests ||
+        currentOpencodePermissionRequests !==
+          prevPendingOpencodePermissionRequests ||
         currentCodexUserInputRequests !== prevPendingCodexUserInputRequests ||
         currentCodexMcpElicitations !== prevPendingCodexMcpElicitations ||
         currentCodexDynamicToolCalls !== prevPendingCodexDynamicToolCalls ||
@@ -697,6 +720,8 @@ export function useSessionStatePersistence() {
         prevPendingCodexCommandApprovalRequests =
           currentCodexCommandApprovalRequests
         prevPendingCodexPermissionRequests = currentCodexPermissionRequests
+        prevPendingOpencodePermissionRequests =
+          currentOpencodePermissionRequests
         prevPendingCodexUserInputRequests = currentCodexUserInputRequests
         prevPendingCodexMcpElicitations = currentCodexMcpElicitations
         prevPendingCodexDynamicToolCalls = currentCodexDynamicToolCalls

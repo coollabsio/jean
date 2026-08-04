@@ -818,6 +818,7 @@ async fn approve_plan_and_start_yolo(
         None,
         None,
         None,
+        None, // pending_opencode_permission_requests
         None,
         None,
         None,

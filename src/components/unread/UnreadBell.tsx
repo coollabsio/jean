@@ -55,6 +55,7 @@ function getSessionStatus(session: Session) {
   // Prefer specific actionable reasons over generic waiting (matches canvas)
   const hasCodexPermission =
     (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
+    (session.pending_opencode_permission_requests?.length ?? 0) > 0 ||
     (session.pending_permission_denials?.length ?? 0) > 0
   const hasCodexCommand =
     (session.pending_codex_command_approval_requests?.length ?? 0) > 0

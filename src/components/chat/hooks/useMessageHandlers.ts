@@ -19,6 +19,7 @@ import type {
   CodexDynamicToolCallRequest,
   CodexMcpElicitationRequest,
   CodexPermissionRequest,
+  OpenCodePermissionRequest,
   CodexUserInputRequest,
   EffortLevel,
   ExecutionMode,
@@ -175,6 +176,10 @@ interface MessageHandlers {
     decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
   ) => void
   handleCodexPermissionRequestDecline: (request: CodexPermissionRequest) => void
+  handleOpencodePermissionReply: (
+    request: OpenCodePermissionRequest,
+    reply: 'once' | 'always' | 'reject'
+  ) => void
   handleCodexUserInputAnswer: (
     request: CodexUserInputRequest,
     answers: QuestionAnswer[]
@@ -565,6 +570,8 @@ export function useMessageHandlers({
       const waitingForInput =
         (state.pendingPermissionDenials[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexPermissionRequests[sessionId]?.length ?? 0) > 0 ||
+        (state.pendingOpencodePermissionRequests[sessionId]?.length ?? 0) >
+          0 ||
         (state.pendingCodexUserInputRequests[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexMcpElicitationRequests[sessionId]?.length ?? 0) >
           0 ||
@@ -578,6 +585,8 @@ export function useMessageHandlers({
         sessionId,
         pendingCodexPermissionRequests:
           state.pendingCodexPermissionRequests[sessionId] ?? [],
+        pendingOpencodePermissionRequests:
+          state.pendingOpencodePermissionRequests[sessionId] ?? [],
         pendingCodexUserInputRequests:
           state.pendingCodexUserInputRequests[sessionId] ?? [],
         pendingCodexMcpElicitationRequests:
@@ -2860,6 +2869,50 @@ export function useMessageHandlers({
     ]
   )
 
+  const handleOpencodePermissionReply = useCallback(
+    (request: OpenCodePermissionRequest, reply: 'once' | 'always' | 'reject') => {
+      const sessionId = activeSessionIdRef.current
+      const worktreeId = activeWorktreeIdRef.current
+      const worktreePath = activeWorktreePathRef.current
+      if (!sessionId || !worktreeId || !worktreePath) return
+
+      const store = useChatStore.getState()
+      const remaining = store
+        .getPendingOpencodePermissionRequests(sessionId)
+        .filter(item => item.request_id !== request.request_id)
+      store.setPendingOpencodePermissionRequests(sessionId, remaining)
+      if (remaining.length === 0) {
+        store.setWaitingForInput(sessionId, false)
+      }
+
+      const replyDir = request.working_dir?.trim() || worktreePath
+
+      invoke('respond_opencode_permission', {
+        worktreePath: replyDir,
+        requestId: request.request_id,
+        reply,
+        opencodeSessionId: request.opencode_session_id,
+        apiVersion: request.api_version ?? 'v1',
+      })
+        .then(() =>
+          persistCodexPendingState(sessionId, worktreeId, worktreePath)
+        )
+        .catch(err => {
+          console.error(
+            '[useMessageHandlers] Failed to respond to OpenCode permission request:',
+            err
+          )
+          toast.error(`Failed to respond to OpenCode permission: ${err}`)
+        })
+    },
+    [
+      activeSessionIdRef,
+      activeWorktreeIdRef,
+      activeWorktreePathRef,
+      persistCodexPendingState,
+    ]
+  )
+
   const handleCodexCommandApproval = useCallback(
     (
       request: CodexCommandApprovalRequest,
@@ -3475,6 +3528,7 @@ Please apply all these fixes to the respective files.`
     handleCodexPermissionRequest,
     handleCodexCommandApproval,
     handleCodexPermissionRequestDecline,
+    handleOpencodePermissionReply,
     handleCodexUserInputAnswer,
     handleCodexMcpElicitationAccept,
     handleCodexMcpElicitationDecline,

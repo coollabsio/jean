@@ -270,6 +270,8 @@ export interface Session {
   pending_permission_denials?: PermissionDenial[]
   /** Pending Codex permission grant requests awaiting user approval */
   pending_codex_permission_requests?: CodexPermissionRequest[]
+  /** Pending OpenCode permission grant requests awaiting user approval */
+  pending_opencode_permission_requests?: OpenCodePermissionRequest[]
   /** Pending Codex command execution approvals awaiting user response */
   pending_codex_command_approval_requests?: CodexCommandApprovalRequest[]
   /** Pending Codex request-user-input prompts awaiting user approval */
@@ -648,6 +650,40 @@ export interface CodexPermissionRequestEvent {
   session_id: string
   worktree_id: string
   request: CodexPermissionRequest
+}
+
+/**
+ * OpenCode permission request (external_directory, bash, edit, …).
+ * Surfaces `permission.asked` / `permission.v2.asked` SSE events so Jean can
+ * reply via the OpenCode Permission API instead of freezing the session.
+ */
+export interface OpenCodePermissionRequest {
+  request_id: string
+  opencode_session_id: string
+  /** Permission kind / action, e.g. "external_directory" */
+  permission: string
+  /** Patterns/resources the request covers */
+  patterns: string[]
+  /** Patterns "always" would approve for the rest of the OpenCode session */
+  always: string[]
+  metadata?: unknown
+  tool_call_id?: string | null
+  working_dir?: string | null
+  /** "v1" (default) or "v2" */
+  api_version?: string
+}
+
+export interface OpenCodePermissionRequestEvent {
+  session_id: string
+  worktree_id: string
+  request: OpenCodePermissionRequest
+}
+
+export interface OpenCodePermissionRepliedEvent {
+  session_id: string
+  worktree_id: string
+  request_id: string
+  reply: string
 }
 
 export interface CodexCommandAction {

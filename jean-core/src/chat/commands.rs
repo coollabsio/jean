@@ -1636,6 +1636,7 @@ pub async fn update_session_state(
     fixed_findings: Option<Vec<String>>,
     pending_permission_denials: Option<Vec<super::types::PermissionDenial>>,
     pending_codex_permission_requests: Option<Vec<super::types::CodexPermissionRequest>>,
+    pending_opencode_permission_requests: Option<Vec<super::types::OpenCodePermissionRequest>>,
     pending_codex_command_approval_requests: Option<Vec<super::types::CodexCommandApprovalRequest>>,
     pending_codex_user_input_requests: Option<Vec<super::types::CodexUserInputRequest>>,
     pending_codex_mcp_elicitation_requests: Option<Vec<super::types::CodexMcpElicitationRequest>>,
@@ -1674,6 +1675,9 @@ pub async fn update_session_state(
             }
             if let Some(v) = pending_codex_permission_requests {
                 session.pending_codex_permission_requests = v;
+            }
+            if let Some(v) = pending_opencode_permission_requests {
+                session.pending_opencode_permission_requests = v;
             }
             if let Some(v) = pending_codex_command_approval_requests {
                 session.pending_codex_command_approval_requests = v;
@@ -9872,6 +9876,35 @@ pub async fn answer_opencode_question(
 
     tokio::task::spawn_blocking(move || {
         super::opencode::answer_opencode_question(&app_clone, &working_dir, &tool_call_id, answers)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+/// Reply to a pending OpenCode permission request (once / always / reject).
+/// Unblocks the in-flight tool that triggered the permission ask (issue #625).
+pub async fn respond_opencode_permission(
+    app: AppHandle,
+    worktree_path: String,
+    request_id: String,
+    reply: String,
+    message: Option<String>,
+    opencode_session_id: Option<String>,
+    api_version: Option<String>,
+) -> Result<(), String> {
+    let working_dir = worktree_path;
+    let app_clone = app.clone();
+
+    tokio::task::spawn_blocking(move || {
+        super::opencode::respond_opencode_permission(
+            &app_clone,
+            &working_dir,
+            &request_id,
+            &reply,
+            message,
+            opencode_session_id.as_deref(),
+            api_version.as_deref(),
+        )
     })
     .await
     .map_err(|e| format!("Task join error: {e}"))?

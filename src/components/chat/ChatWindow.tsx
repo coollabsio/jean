@@ -85,6 +85,7 @@ import type {
   PendingSkill,
   CodexCommandApprovalRequest,
   CodexPermissionRequest,
+  OpenCodePermissionRequest,
   CodexUserInputRequest,
   CodexMcpElicitationRequest,
   CodexDynamicToolCallRequest,
@@ -106,6 +107,7 @@ import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
 import { CodexCommandApprovalRequestCard } from './CodexCommandApprovalRequest'
 import { CodexPermissionsRequest } from './CodexPermissionsRequest'
+import { OpenCodePermissionsRequest } from './OpenCodePermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
 import { SetupScriptOutput } from './SetupScriptOutput'
@@ -246,6 +248,7 @@ const EMPTY_PENDING_SKILLS: PendingSkill[] = []
 const EMPTY_QUEUED_MESSAGES: QueuedMessage[] = []
 const EMPTY_PERMISSION_DENIALS: PermissionDenial[] = []
 const EMPTY_CODEX_PERMISSION_REQUESTS: CodexPermissionRequest[] = []
+const EMPTY_OPENCODE_PERMISSION_REQUESTS: OpenCodePermissionRequest[] = []
 const EMPTY_CODEX_COMMAND_APPROVAL_REQUESTS: CodexCommandApprovalRequest[] = []
 const EMPTY_CODEX_USER_INPUT_REQUESTS: CodexUserInputRequest[] = []
 const EMPTY_CODEX_MCP_ELICITATION_REQUESTS: CodexMcpElicitationRequest[] = []
@@ -1072,6 +1075,12 @@ export function ChatWindow({
         EMPTY_CODEX_PERMISSION_REQUESTS)
       : EMPTY_CODEX_PERMISSION_REQUESTS
   )
+  const pendingOpencodePermissionRequests = useChatStore(state =>
+    deferredSessionId
+      ? (state.pendingOpencodePermissionRequests[deferredSessionId] ??
+        EMPTY_OPENCODE_PERMISSION_REQUESTS)
+      : EMPTY_OPENCODE_PERMISSION_REQUESTS
+  )
   const pendingCodexCommandApprovalRequests = useChatStore(state =>
     deferredSessionId
       ? (state.pendingCodexCommandApprovalRequests[deferredSessionId] ??
@@ -1105,6 +1114,7 @@ export function ChatWindow({
   const activeCodexCommandApprovalRequest =
     pendingCodexCommandApprovalRequests[0]
   const activeCodexPermissionRequest = pendingCodexPermissionRequests[0]
+  const activeOpencodePermissionRequest = pendingOpencodePermissionRequests[0]
   const activeCodexUserInputRequest = pendingCodexUserInputRequests[0]
   const activeCodexMcpElicitationRequest = pendingCodexMcpElicitationRequests[0]
   const activeCodexDynamicToolCallRequest =
@@ -2426,6 +2436,7 @@ export function ChatWindow({
     handleCodexCommandApproval,
     handleCodexPermissionRequest,
     handleCodexPermissionRequestDecline,
+    handleOpencodePermissionReply,
     handleCodexUserInputAnswer,
     handleCodexMcpElicitationAccept,
     handleCodexMcpElicitationDecline,
@@ -3287,6 +3298,30 @@ export function ChatWindow({
                                 onDecline={() =>
                                   handleCodexPermissionRequestDecline(
                                     activeCodexPermissionRequest
+                                  )
+                                }
+                              />
+                            )}
+
+                            {activeOpencodePermissionRequest && (
+                              <OpenCodePermissionsRequest
+                                request={activeOpencodePermissionRequest}
+                                onOnce={() =>
+                                  handleOpencodePermissionReply(
+                                    activeOpencodePermissionRequest,
+                                    'once'
+                                  )
+                                }
+                                onAlways={() =>
+                                  handleOpencodePermissionReply(
+                                    activeOpencodePermissionRequest,
+                                    'always'
+                                  )
+                                }
+                                onReject={() =>
+                                  handleOpencodePermissionReply(
+                                    activeOpencodePermissionRequest,
+                                    'reject'
                                   )
                                 }
                               />

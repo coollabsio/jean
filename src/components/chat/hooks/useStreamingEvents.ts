@@ -44,6 +44,8 @@ import type {
   PermissionDeniedEvent,
   CodexCommandApprovalRequestEvent,
   CodexPermissionRequestEvent,
+  OpenCodePermissionRequestEvent,
+  OpenCodePermissionRepliedEvent,
   CodexUserInputRequestEvent,
   CodexMcpElicitationRequestEvent,
   CodexDynamicToolCallRequestEvent,
@@ -803,6 +805,56 @@ export default function useStreamingEvents({
         })
       }
     )
+
+    const unlistenOpencodePermissionRequest =
+      listen<OpenCodePermissionRequestEvent>(
+        'chat:opencode_permission_request',
+        event => {
+          const { session_id, worktree_id, request } = event.payload
+          const { setPendingOpencodePermissionRequests, setWaitingForInput } =
+            useChatStore.getState()
+          const current =
+            useChatStore.getState().pendingOpencodePermissionRequests[
+              session_id
+            ] ?? []
+          // Deduplicate by request_id (SSE reconnects can redeliver)
+          if (current.some(r => r.request_id === request.request_id)) {
+            return
+          }
+          const next = [...current, request]
+          setPendingOpencodePermissionRequests(session_id, next)
+          setWaitingForInput(session_id, true)
+          playWaitingSound()
+          notifySession(session_id, 'Needs your input')
+          persistCodexPendingState(session_id, worktree_id, {
+            pendingOpencodePermissionRequests: next,
+          })
+        }
+      )
+
+    const unlistenOpencodePermissionReplied =
+      listen<OpenCodePermissionRepliedEvent>(
+        'chat:opencode_permission_replied',
+        event => {
+          const { session_id, worktree_id, request_id } = event.payload
+          const { setPendingOpencodePermissionRequests, setWaitingForInput } =
+            useChatStore.getState()
+          const current =
+            useChatStore.getState().pendingOpencodePermissionRequests[
+              session_id
+            ] ?? []
+          if (current.length === 0) return
+          const next = current.filter(r => r.request_id !== request_id)
+          if (next.length === current.length) return
+          setPendingOpencodePermissionRequests(session_id, next)
+          if (next.length === 0) {
+            setWaitingForInput(session_id, false)
+          }
+          persistCodexPendingState(session_id, worktree_id, {
+            pendingOpencodePermissionRequests: next,
+          })
+        }
+      )
 
     const unlistenCodexCommandApprovalRequest =
       listen<CodexCommandApprovalRequestEvent>(
@@ -2318,6 +2370,8 @@ export default function useStreamingEvents({
       unlistenToolEvent.then(f => f())
       unlistenPermissionDenied.then(f => f())
       unlistenCodexPermissionRequest.then(f => f())
+      unlistenOpencodePermissionRequest.then(f => f())
+      unlistenOpencodePermissionReplied.then(f => f())
       unlistenCodexCommandApprovalRequest.then(f => f())
       unlistenCodexUserInputRequest.then(f => f())
       unlistenCodexMcpElicitation.then(f => f())

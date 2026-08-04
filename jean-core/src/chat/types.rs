@@ -477,6 +477,50 @@ pub struct CodexPermissionRequestEvent {
     pub request: CodexPermissionRequest,
 }
 
+/// Pending OpenCode permission request awaiting user response
+///
+/// OpenCode emits `permission.asked` / `permission.v2.asked` SSE events when a
+/// tool needs approval (e.g. external_directory access outside the worktree).
+/// Jean surfaces these to the frontend and replies via the OpenCode Permission API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenCodePermissionRequest {
+    /// OpenCode permission request ID (used in POST /permission/{id}/reply)
+    pub request_id: String,
+    /// OpenCode session that owns the request (may be a child/subagent session)
+    pub opencode_session_id: String,
+    /// Permission kind (v1 `permission`) or action (v2 `action`), e.g. "external_directory"
+    pub permission: String,
+    /// Patterns/resources the request covers (paths, globs, command prefixes, …)
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    /// Patterns that "always" would approve for the rest of the OpenCode session
+    #[serde(default)]
+    pub always: Vec<String>,
+    /// Optional tool-specific metadata from OpenCode
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// Tool call ID when the request is tool-triggered
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Working directory to scope the OpenCode instance (`?directory=`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    /// API version: "v1" (default) or "v2"
+    #[serde(default = "default_opencode_permission_api_version")]
+    pub api_version: String,
+}
+
+fn default_opencode_permission_api_version() -> String {
+    "v1".to_string()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenCodePermissionRequestEvent {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub request: OpenCodePermissionRequest,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CodexCommandApprovalRequestEvent {
     pub session_id: String,
@@ -771,6 +815,9 @@ pub struct Session {
     /// Pending Codex permission requests awaiting user approval
     #[serde(default)]
     pub pending_codex_permission_requests: Vec<CodexPermissionRequest>,
+    /// Pending OpenCode permission requests awaiting user approval
+    #[serde(default)]
+    pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -936,6 +983,7 @@ impl Session {
             review_results: None,
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
+            pending_opencode_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
@@ -1154,6 +1202,7 @@ impl SessionMetadata {
             review_results: self.review_results.clone(),
             pending_permission_denials: self.pending_permission_denials.clone(),
             pending_codex_permission_requests: self.pending_codex_permission_requests.clone(),
+            pending_opencode_permission_requests: self.pending_opencode_permission_requests.clone(),
             pending_codex_command_approval_requests: self
                 .pending_codex_command_approval_requests
                 .clone(),
@@ -1218,6 +1267,8 @@ impl SessionMetadata {
         self.review_results = session.review_results.clone();
         self.pending_permission_denials = session.pending_permission_denials.clone();
         self.pending_codex_permission_requests = session.pending_codex_permission_requests.clone();
+        self.pending_opencode_permission_requests =
+            session.pending_opencode_permission_requests.clone();
         self.pending_codex_command_approval_requests =
             session.pending_codex_command_approval_requests.clone();
         self.pending_codex_user_input_requests = session.pending_codex_user_input_requests.clone();
@@ -1604,6 +1655,9 @@ pub struct SessionMetadata {
     /// Pending Codex permission requests awaiting user approval
     #[serde(default)]
     pub pending_codex_permission_requests: Vec<CodexPermissionRequest>,
+    /// Pending OpenCode permission requests awaiting user approval
+    #[serde(default)]
+    pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -1783,6 +1837,7 @@ impl SessionMetadata {
             review_results: None,
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
+            pending_opencode_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
