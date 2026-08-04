@@ -2,7 +2,7 @@ use crate::platform::wsl_aware_command;
 use serde::Serialize;
 use std::path::Path;
 
-use super::git_status::{parse_unified_diff, GitDiff};
+use super::git_status::{parse_unified_diff, GitDiff, GIT_NO_QUOTE_PATH_ARGS};
 
 /// Metadata for a single commit
 #[derive(Debug, Clone, Serialize)]
@@ -156,7 +156,9 @@ pub fn get_commit_diff(repo_path: &str, commit_sha: &str) -> Result<GitDiff, Str
     let parent_ref = format!("{commit_sha}^");
     let range = format!("{parent_ref}..{commit_sha}");
 
+    // Emit raw UTF-8 paths so frontend patch parsers work with non-ASCII names (#631).
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(GIT_NO_QUOTE_PATH_ARGS)
         .args(["diff", "--unified=3", &range])
         .output()
         .map_err(|e| format!("Failed to run git diff: {e}"))?;
@@ -166,6 +168,7 @@ pub fn get_commit_diff(repo_path: &str, commit_sha: &str) -> Result<GitDiff, Str
     } else {
         // Might be root commit — try diff-tree
         let fallback = wsl_aware_command("git", Some(Path::new(repo_path)))
+            .args(GIT_NO_QUOTE_PATH_ARGS)
             .args(["diff-tree", "-p", "--unified=3", "--root", commit_sha])
             .output()
             .map_err(|e| format!("Failed to run git diff-tree: {e}"))?;
@@ -191,4 +194,67 @@ pub fn get_commit_diff(repo_path: &str, commit_sha: &str) -> Result<GitDiff, Str
         files,
         raw_patch,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::wsl_aware_command;
+    use std::path::Path;
+
+    fn run_test_git(repo: &Path, args: &[&str]) {
+        let output = wsl_aware_command("git", Some(repo))
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn commit_diff_handles_non_ascii_filename() {
+        // Regression for #631: commit diffs must surface non-ASCII paths, not
+        // empty "No file changes" from quoted path parse failures.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        run_test_git(repo, &["init"]);
+        run_test_git(repo, &["config", "core.quotePath", "true"]);
+        run_test_git(repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(repo, &["config", "user.name", "Test"]);
+
+        let filename = "日本語ファイル名.md";
+        std::fs::write(repo.join("seed.txt"), "seed\n").expect("seed");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "seed"]);
+
+        std::fs::write(repo.join(filename), "content\n").expect("write non-ascii");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "add japanese file"]);
+
+        let sha = {
+            let output = wsl_aware_command("git", Some(repo))
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .expect("rev-parse");
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+
+        let diff = get_commit_diff(repo.to_str().unwrap(), &sha).expect("commit diff");
+        assert_eq!(diff.files.len(), 1, "files: {:?}", diff.files);
+        assert_eq!(diff.files[0].path, filename);
+        assert!(
+            diff.raw_patch.contains(filename),
+            "raw_patch should contain unquoted UTF-8 path:\n{}",
+            diff.raw_patch
+        );
+        assert!(
+            !diff.raw_patch.contains(r"\346"),
+            "raw_patch must not use octal-escaped paths:\n{}",
+            diff.raw_patch
+        );
+    }
 }

@@ -1143,6 +1143,7 @@ pub async fn get_worktree_diff(
     let base_remote = worktree.base_remote.clone();
     let base_branch = worktree.base_branch.unwrap_or(project_default_branch);
     let has_head = git_has_head(&worktree.path);
+    // -c core.quotePath=false so non-ASCII paths are raw UTF-8 (issue #631).
     let mut args = match diff_type.as_str() {
         "uncommitted" => {
             let diff_base = if has_head {
@@ -1151,12 +1152,16 @@ pub async fn get_worktree_diff(
                 "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
             };
             vec![
+                "-c".to_string(),
+                "core.quotePath=false".to_string(),
                 "diff".to_string(),
                 diff_base.to_string(),
                 "--unified=3".to_string(),
             ]
         }
         "branch" => vec![
+            "-c".to_string(),
+            "core.quotePath=false".to_string(),
             "diff".to_string(),
             "--unified=3".to_string(),
             format!(
@@ -6030,9 +6035,10 @@ pub async fn get_review_prompt(
         return Err(format!("Git log failed: {stderr}"));
     };
 
-    // Get uncommitted changes (staged + unstaged for tracked files)
+    // Get uncommitted changes (staged + unstaged for tracked files).
+    // core.quotePath=false: raw UTF-8 paths for non-ASCII names (#631).
     let uncommitted_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["diff", "HEAD"])
+        .args(["-c", "core.quotePath=false", "diff", "HEAD"])
         .output()
         .map_err(|e| format!("Failed to run git diff HEAD: {e}"))?;
 
@@ -6042,9 +6048,15 @@ pub async fn get_review_prompt(
         String::new() // Not an error if no uncommitted changes
     };
 
-    // Get list of untracked files
+    // Get list of untracked files (raw UTF-8 paths — #631)
     let untracked_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["ls-files", "--others", "--exclude-standard"])
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|e| format!("Failed to list untracked files: {e}"))?;
 
@@ -9791,9 +9803,10 @@ pub async fn run_review_with_ai(
     // Get commit history (non-fatal — same reason)
     let commits = get_branch_commits(&worktree_path, &target_branch, "HEAD").unwrap_or_default();
 
-    // Get uncommitted changes (staged + unstaged for tracked files)
+    // Get uncommitted changes (staged + unstaged for tracked files).
+    // core.quotePath=false: raw UTF-8 paths for non-ASCII names (#631).
     let uncommitted_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["diff", "HEAD"])
+        .args(["-c", "core.quotePath=false", "diff", "HEAD"])
         .output()
         .map_err(|e| format!("Failed to get uncommitted diff: {e}"))?;
 
@@ -9804,9 +9817,15 @@ pub async fn run_review_with_ai(
         String::new()
     };
 
-    // Get untracked files
+    // Get untracked files (raw UTF-8 paths — #631)
     let untracked_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["ls-files", "--others", "--exclude-standard"])
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|e| format!("Failed to list untracked files: {e}"))?;
 
