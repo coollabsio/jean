@@ -34,6 +34,8 @@ vi.mock('@/lib/terminal-instances', () => ({
   focusTerminal: vi.fn(),
 }))
 
+let mockContentRect = { width: 640, height: 360 }
+
 class ResizeObserverMock {
   private readonly callback: ResizeObserverCallback
 
@@ -42,17 +44,18 @@ class ResizeObserverMock {
   }
 
   observe = (target: Element) => {
+    const { width, height } = mockContentRect
     this.callback(
       [
         {
           target,
           contentRect: {
-            width: 640,
-            height: 360,
+            width,
+            height,
             top: 0,
             left: 0,
-            bottom: 360,
-            right: 640,
+            bottom: height,
+            right: width,
             x: 0,
             y: 0,
             toJSON: () => ({}),
@@ -73,6 +76,7 @@ class ResizeObserverMock {
 describe('StandaloneTerminalSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockContentRect = { width: 640, height: 360 }
     isNativeApp.mockReturnValue(false)
     window.ResizeObserver =
       ResizeObserverMock as unknown as typeof ResizeObserver
@@ -106,5 +110,22 @@ describe('StandaloneTerminalSurface', () => {
     )
 
     expect(screen.queryByTestId('terminal-extra-keys-bar')).toBeNull()
+  })
+
+  it('does not start the login PTY while the container is still tiny (issue #624)', async () => {
+    mockContentRect = { width: 40, height: 20 }
+
+    render(
+      <StandaloneTerminalSurface
+        terminalId="login-term-tiny"
+        command="opencode"
+        commandArgs={['auth', 'login']}
+        className="h-[300px]"
+      />
+    )
+
+    // ResizeObserver fired with sub-minimum size — must not spawn yet.
+    await new Promise(r => setTimeout(r, 30))
+    expect(initTerminal).not.toHaveBeenCalled()
   })
 })

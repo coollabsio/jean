@@ -45,6 +45,7 @@ import {
   type ResolvedTerminalTheme,
 } from '@/lib/terminal-theme'
 import { isArrowGestureActive } from '@/lib/terminal-arrow-gesture'
+import { resolveSafeTerminalDimensions } from '@/lib/terminal-dimensions'
 
 type TerminalRenderer = 'xterm' | 'ghostty-web'
 type EmbeddedTerminal = XtermTerminal | GhosttyWebTerminal
@@ -199,7 +200,10 @@ function scheduleAppearanceResize(instance: PersistentTerminal): void {
     instance.appearanceResizeTimer = null
     if (!instance.terminal || !instance.fitAddon) return
     instance.fitAddon.fit()
-    const { cols, rows } = getSafeTerminalDimensions(instance.terminal)
+    const forCommand = instance.command != null && instance.command.length > 0
+    const { cols, rows } = getSafeTerminalDimensions(instance.terminal, {
+      forCommand,
+    })
     if (!instance.initialized) return
     invoke('terminal_resize', {
       terminalId: instance.terminalId,
@@ -209,15 +213,14 @@ function scheduleAppearanceResize(instance: PersistentTerminal): void {
   }, 120)
 }
 
-function getSafeTerminalDimensions(terminal: EmbeddedTerminal): {
+function getSafeTerminalDimensions(
+  terminal: EmbeddedTerminal,
+  options?: { forCommand?: boolean }
+): {
   cols: number
   rows: number
 } {
-  const rawCols = terminal.cols
-  const rawRows = terminal.rows
-  const rows = rawRows < 2 ? 24 : rawRows
-  const cols = rawCols < 2 ? 80 : rawCols
-  return { cols, rows }
+  return resolveSafeTerminalDimensions(terminal.cols, terminal.rows, options)
 }
 
 function disableGhosttyScrollbar(instance: PersistentTerminal): void {
@@ -1071,11 +1074,15 @@ export async function attachToContainer(
     fitAddon.fit()
     // Enforce minimum dimensions — degenerate sizes (e.g. rows=0 during dialog
     // animation) cause portable_pty to crash with an internal assertion failure.
+    // Command PTYs (CLI login) also floor at 80×24 so TUI prompts like
+    // `opencode auth login` are not started mid-zoom with a handful of cols
+    // (issue #624).
+    const forCommand = command != null && command.length > 0
     const rawCols = terminal.cols
     const rawRows = terminal.rows
-    const { cols, rows } = getSafeTerminalDimensions(terminal)
+    const { cols, rows } = getSafeTerminalDimensions(terminal, { forCommand })
     console.log(
-      `[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${instance.initialized}, container=${container.clientWidth}x${container.clientHeight}`
+      `[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${instance.initialized}, container=${container.clientWidth}x${container.clientHeight}, forCommand=${forCommand}`
     )
 
     if (!(await waitForTerminalReady(terminalId, instance))) return
@@ -1117,6 +1124,12 @@ export async function attachToContainer(
       if (!isCurrentInstance(terminalId, instance)) return
 
       instance.initialized = true
+
+      // Dialog zoom / flex layout often settles a frame after first attach.
+      // Re-fit and SIGWINCH so interactive TUI CLIs pick up the final size.
+      if (forCommand) {
+        scheduleCommandTerminalSettleResize(terminalId, instance)
+      }
     } else {
       // Already initialized - just resize
       await invoke('terminal_resize', { terminalId, cols, rows }).catch(
@@ -1125,6 +1138,39 @@ export async function attachToContainer(
     }
 
     terminal.focus()
+  })
+}
+
+/**
+ * After a command PTY starts, re-measure once layout has settled and push a
+ * resize to the backend. Fixes OpenCode/clack prompts that read TTY size at
+ * startup when the first fit ran during dialog animation (issue #624).
+ */
+function scheduleCommandTerminalSettleResize(
+  terminalId: string,
+  instance: PersistentTerminal
+): void {
+  const run = () => {
+    if (!isCurrentInstance(terminalId, instance)) return
+    if (!instance.terminal || !instance.fitAddon) return
+    instance.fitAddon.fit()
+    const { cols, rows } = getSafeTerminalDimensions(instance.terminal, {
+      forCommand: true,
+    })
+    invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
+    try {
+      instance.terminal.focus()
+    } catch {
+      // ignore — terminal may be mid-dispose
+    }
+  }
+
+  // Two rAFs + short timeout covers dialog zoom-in and flex reflow.
+  scheduleAnimationFrame(() => {
+    scheduleAnimationFrame(() => {
+      setTimeout(run, 50)
+      setTimeout(run, 250)
+    })
   })
 }
 
@@ -1192,7 +1238,10 @@ export function fitTerminal(terminalId: string): void {
   if (!instance || !instance.fitAddon || !instance.terminal) return
 
   instance.fitAddon.fit()
-  const { cols, rows } = getSafeTerminalDimensions(instance.terminal)
+  const forCommand = instance.command != null && instance.command.length > 0
+  const { cols, rows } = getSafeTerminalDimensions(instance.terminal, {
+    forCommand,
+  })
   invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
 }
 

@@ -16,6 +16,29 @@ fn get_user_shell() -> String {
     crate::platform::get_default_shell()
 }
 
+/// Normalize PTY cols/rows before openpty/spawn.
+///
+/// - Degenerate sizes (< 2) become 80×24 (portable_pty asserts on 0).
+/// - Command PTYs floor at 80×24 so interactive TUI CLIs get a usable viewport
+///   even when the frontend fit ran during a dialog zoom-in (issue #624).
+pub(crate) fn effective_pty_size(cols: u16, rows: u16, is_command: bool) -> (u16, u16) {
+    let cols = if cols < 2 {
+        80
+    } else if is_command {
+        cols.max(80)
+    } else {
+        cols
+    };
+    let rows = if rows < 2 {
+        24
+    } else if is_command {
+        rows.max(24)
+    } else {
+        rows
+    };
+    (cols, rows)
+}
+
 fn is_windows_batch_file(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
@@ -127,9 +150,12 @@ pub fn spawn_terminal(
 
     let pty_system = native_pty_system();
 
-    // Guard against degenerate dimensions that crash portable_pty
-    let cols = if cols == 0 { 80 } else { cols };
-    let rows = if rows == 0 { 24 } else { rows };
+    // Guard against degenerate dimensions that crash portable_pty.
+    // Command PTYs (CLI login TUI apps) also floor at 80×24 — a tiny first
+    // fit during dialog animation leaves tools like `opencode auth login`
+    // stuck after "Add credential" (issue #624).
+    let is_command = command.as_ref().is_some_and(|c| !c.is_empty());
+    let (cols, rows) = effective_pty_size(cols, rows, is_command);
     log::info!("spawn_terminal {terminal_id}: effective size={cols}x{rows}");
 
     // Create PTY pair
@@ -561,9 +587,19 @@ pub fn kill_all_terminals() -> usize {
 mod tests {
     #[cfg(unix)]
     use super::build_unix_shell_command;
-    use super::is_windows_batch_file;
+    use super::{effective_pty_size, is_windows_batch_file};
     #[cfg(unix)]
     use super::{terminal_utf8_locale_overrides, ParentLocale};
+
+    #[test]
+    fn effective_pty_size_clamps_degenerate_and_command_floors() {
+        assert_eq!(effective_pty_size(0, 0, false), (80, 24));
+        assert_eq!(effective_pty_size(1, 1, false), (80, 24));
+        assert_eq!(effective_pty_size(40, 10, false), (40, 10));
+        // Command/login PTYs always get a TUI-usable floor (issue #624).
+        assert_eq!(effective_pty_size(12, 5, true), (80, 24));
+        assert_eq!(effective_pty_size(100, 40, true), (100, 40));
+    }
 
     #[cfg(unix)]
     #[test]

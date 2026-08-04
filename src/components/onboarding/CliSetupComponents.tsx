@@ -510,13 +510,19 @@ export function AuthLoginState({
           {action === 'install' ? 'installation' : 'authentication'}
           {' process below.'}
         </p>
+        {action === 'login' && (
+          <p className="text-xs text-muted-foreground mt-2">
+            Click the terminal, then use ↑/↓ and Enter to choose options. The
+            provider list may take a few seconds to appear.
+          </p>
+        )}
       </div>
 
       <StandaloneTerminalSurface
         terminalId={terminalId}
         command={command}
         commandArgs={commandArgs}
-        className="h-[min(50dvh,380px)] sm:h-[360px]"
+        className="h-[min(50dvh,380px)] min-h-[200px] sm:h-[360px]"
       />
 
       {exitStatus && (
