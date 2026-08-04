@@ -1235,8 +1235,11 @@ export interface AppPreferences {
   /** One-time tip: soft text on 1× displays when zoom ≠ 100% (default false = not dismissed) */
   has_seen_external_display_zoom_tip?: boolean
   chrome_enabled: boolean // Enable browser automation via Chrome extension
+  /** @deprecated Client-local only (issue #622). Kept for one-time seed/migration. */
   zoom_level: number // Desktop zoom level percentage (50-200, default 100)
+  /** @deprecated Client-local only (issue #622). Kept for one-time seed/migration. */
   mobile_zoom_level?: number // Mobile zoom level percentage (50-200, default 100)
+  /** @deprecated Client-local only (issue #622). Kept for one-time seed/migration. */
   sync_zoom_levels?: boolean // Keep desktop and mobile zoom levels in sync (default true)
   custom_cli_profiles: CustomCliProfile[] // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
   default_provider: string | null // Default Claude provider profile name (null = Anthropic direct)

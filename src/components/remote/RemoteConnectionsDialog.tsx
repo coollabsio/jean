@@ -37,6 +37,7 @@ import {
   useRemoteConnections,
   type RemoteConnection,
 } from '@/lib/remote-connections'
+import { DISMISS_TRANSIENT_UI_EVENT } from '@/lib/dismiss-transient-ui'
 import {
   checkRemoteVersionCompatibility,
   fetchRemoteServerInfo,
@@ -191,6 +192,17 @@ export function RemoteConnectionsDialog({
     return () =>
       window.removeEventListener('open-remote-connections', handleOpen)
   }, [connections])
+
+  // Close when remote connection recovery dismisses transient UI (#623).
+  useEffect(() => {
+    const handleDismiss = () => {
+      setOpen(false)
+      setEditingId(null)
+    }
+    window.addEventListener(DISMISS_TRANSIENT_UI_EVENT, handleDismiss)
+    return () =>
+      window.removeEventListener(DISMISS_TRANSIENT_UI_EVENT, handleDismiss)
+  }, [])
 
   useEffect(() => {
     if (!open || !installing || !native) return
@@ -449,7 +461,11 @@ export function RemoteConnectionsDialog({
           )}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      {/* Above RemoteConnectionRecovery (z-100) so Edit connection works while offline. */}
+      <DialogContent
+        className="sm:max-w-md z-[110]"
+        overlayClassName="z-[110]"
+      >
         <DialogHeader>
           <DialogTitle>Jean connections</DialogTitle>
           <DialogDescription>

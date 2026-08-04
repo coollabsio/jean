@@ -7,7 +7,12 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { isNativeApp, setWebAccessEnabled, setWsConnected } from './environment'
+import {
+  isNativeApp,
+  isNativeOpenAllowed,
+  setWebAccessEnabled,
+  setWsConnected,
+} from './environment'
 import { generateId } from './uuid'
 import { isServerWindows } from './platform'
 import { getActiveRemoteConnection } from './remote-connections'
@@ -232,9 +237,11 @@ export async function invoke<T>(
     return null as T
   }
 
-  // Native app + remote Jean: open remote paths in local Zed via ssh://.
-  // Must stay on the local Tauri shell (not the remote WebSocket dispatch).
-  if (isNativeApp() && usesWebSocketBackend()) {
+  // Native app + remote Jean: open remote paths in local Zed via ssh://
+  // when the remote host cannot launch apps itself. Prefer the backend's
+  // native-open path when available (e.g. headless on WSL, --allow-native-open)
+  // so we don't bypass the WSL launcher with a broken Windows-side ssh:// remap.
+  if (isNativeApp() && usesWebSocketBackend() && !isNativeOpenAllowed()) {
     const remote = getActiveRemoteConnection()
     if (remote) {
       const remapped = prepareRemoteEditorOpenArgs(command, args, remote)

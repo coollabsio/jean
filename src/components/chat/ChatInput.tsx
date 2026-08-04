@@ -124,6 +124,9 @@ export const ChatInput = memo(function ChatInput({
   const [slashTriggerIndex, setSlashTriggerIndex] = useState<number | null>(
     null
   )
+  const [slashTriggerKind, setSlashTriggerKind] = useState<
+    'mixed' | 'command' | 'skill'
+  >('mixed')
 
   // Context mention popover state (for # issues/PRs/security/Linear)
   const [contextMentionOpen, setContextMentionOpen] = useState(false)
@@ -431,9 +434,12 @@ export const ChatInput = memo(function ChatInput({
         }
       }
 
-      // Detect / trigger for slash commands and skills (only if @/# popovers not open)
+      // Detect / commands and $ skills (only if @/# popovers are not open)
       if (!fileMentionOpen && !contextMentionOpen) {
-        if (prevChar === '/') {
+        if (
+          prevChar === '/' ||
+          (prevChar === '$' && selectedBackend === 'codex')
+        ) {
           // Check that it's at start or preceded by whitespace
           const charBeforeSlash = value[cursorPos - 2]
           if (
@@ -442,6 +448,13 @@ export const ChatInput = memo(function ChatInput({
             charBeforeSlash === '\n'
           ) {
             setSlashTriggerIndex(cursorPos - 1)
+            setSlashTriggerKind(
+              prevChar === '$'
+                ? 'skill'
+                : selectedBackend === 'codex'
+                  ? 'command'
+                  : 'mixed'
+            )
             setSlashQuery('')
             setSlashPopoverOpen(true)
 
@@ -476,6 +489,7 @@ export const ChatInput = memo(function ChatInput({
       contextMentionOpen,
       hashTriggerIndex,
       formRef,
+      selectedBackend,
     ]
   )
 
@@ -1296,6 +1310,7 @@ export const ChatInput = memo(function ChatInput({
         handleRef={slashPopoverHandleRef}
         installedBackends={installedBackends}
         sessionBackend={selectedBackend}
+        triggerKind={slashTriggerKind}
       />
     </div>
   )

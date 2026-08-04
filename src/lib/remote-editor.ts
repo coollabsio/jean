@@ -7,12 +7,27 @@ export interface RemoteSshEndpoint {
   port?: number
 }
 
+/** Loopback hosts are never a useful SSH target for the *client* machine. */
+function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase()
+  return (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    h === '::1' ||
+    h === '[::1]' ||
+    h === '0.0.0.0' ||
+    h === '::'
+  )
+}
+
 /**
  * Resolve SSH connection details for opening remote filesystem paths in a
  * local editor CLI (Zed: `zed ssh://user@host/path`).
  *
  * Prefers explicit SSH fields on the connection; falls back to the Web Access
- * URL hostname when `sshHost` is unset.
+ * URL hostname when `sshHost` is unset. Loopback hostnames are rejected —
+ * they cannot be a meaningful SSH target for the client (e.g. Windows Jean
+ * connected to WSL Jean on 127.0.0.1 has no sshd on the Windows loopback).
  */
 export function resolveRemoteSshEndpoint(
   connection: RemoteConnection
@@ -27,6 +42,10 @@ export function resolveRemoteSshEndpoint(
     }
   }
   if (!host) return null
+
+  // Loopback is never a useful client-side SSH target (e.g. Windows Jean →
+  // WSL Jean on 127.0.0.1 has no sshd on the Windows loopback).
+  if (isLoopbackHost(host)) return null
 
   const user = connection.sshUser?.trim() || undefined
   const port =

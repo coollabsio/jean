@@ -1287,8 +1287,23 @@ describe('preferences service', () => {
   })
 
   describe('AppearancePane scaling', () => {
-    it('syncs desktop and mobile scaling by default', async () => {
+    it(
+      'stores desktop/mobile zoom on this client only (not shared prefs)',
+      async () => {
       const { invoke } = await import('@/lib/transport')
+      const {
+        clearClientZoomForTests,
+        readClientZoom,
+        writeClientZoom,
+      } = await import('@/lib/client-zoom')
+      clearClientZoomForTests()
+      // Seed client zoom so the pane does not depend on async prefs hydrate.
+      writeClientZoom({
+        zoom_level: ZOOM_LEVEL_DEFAULT,
+        mobile_zoom_level: ZOOM_LEVEL_DEFAULT,
+        sync_zoom_levels: true,
+      })
+
       let storedPreferences = { ...defaultPreferences }
       vi.mocked(invoke).mockImplementation(async (command, args) => {
         if (command === 'load_preferences') return storedPreferences
@@ -1319,31 +1334,45 @@ describe('preferences service', () => {
         'data-disabled'
       )
 
+      const patchCallsBefore = vi
+        .mocked(invoke)
+        .mock.calls.filter(([command]) => command === 'patch_preferences')
+        .length
+
       await user.click(syncCheckbox)
 
       await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: {
-            sync_zoom_levels: false,
-            mobile_zoom_level: ZOOM_LEVEL_DEFAULT,
-          },
-        })
         expect(syncCheckbox).not.toBeChecked()
-        expect(screen.getAllByRole('slider').at(-1)).not.toHaveAttribute(
-          'data-disabled'
-        )
+        expect(readClientZoom()?.sync_zoom_levels).toBe(false)
       })
+      expect(screen.getAllByRole('slider').at(-1)).not.toHaveAttribute(
+        'data-disabled'
+      )
+
+      // Zoom must not be written to shared server preferences (issue #622).
+      const patchCallsAfterSync = vi
+        .mocked(invoke)
+        .mock.calls.filter(([command]) => command === 'patch_preferences')
+      expect(patchCallsAfterSync).toHaveLength(patchCallsBefore)
 
       const mobileSlider = screen.getAllByRole('slider').at(-1)
-      mobileSlider?.focus()
+      expect(mobileSlider).toBeTruthy()
+      mobileSlider!.focus()
       await user.keyboard('{ArrowRight}')
 
       await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { mobile_zoom_level: 110 },
-        })
+        expect(readClientZoom()?.mobile_zoom_level).toBe(110)
       })
-    })
+      expect(
+        vi
+          .mocked(invoke)
+          .mock.calls.filter(([command]) => command === 'patch_preferences')
+      ).toHaveLength(patchCallsBefore)
+
+      clearClientZoomForTests()
+    },
+      15_000
+    )
   })
 
   describe('AppearancePane finished session animation', () => {

@@ -1,5 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearClientZoomForTests, writeClientZoom } from '@/lib/client-zoom'
 
 let mockPreferences:
   | {
@@ -11,7 +12,6 @@ let mockPreferences:
 let mockIsNativeApp = false
 let mockIsMobile = false
 const mockSetZoom = vi.fn()
-const mockMutate = vi.fn()
 const mockOnScaleChanged = vi.fn()
 interface ScaleChangedEvent {
   payload: { scaleFactor: number }
@@ -20,7 +20,7 @@ let scaleChangedHandler: ((event: ScaleChangedEvent) => void) | null = null
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({ data: mockPreferences }),
-  usePatchPreferences: () => ({ mutate: mockMutate }),
+  usePatchPreferences: () => ({ mutate: vi.fn() }),
 }))
 
 vi.mock('@/hooks/use-mobile', () => ({
@@ -39,10 +39,31 @@ vi.mock('@/lib/platform', () => ({
 }))
 
 vi.mock('@tauri-apps/api/webview', () => ({
-  getCurrentWebview: () => ({ setZoom: mockSetZoom }),
+  getCurrentWebview: () => ({
+    setZoom: (...args: unknown[]) => mockSetZoom(...args),
+  }),
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    onScaleChanged: (handler: (event: ScaleChangedEvent) => void) => {
+      scaleChangedHandler = handler
+      mockOnScaleChanged(handler)
+      return Promise.resolve(() => {
+        scaleChangedHandler = null
+      })
+    },
+  }),
+}))
+
+// Ensure dynamic imports hit the same mocks (vitest isolates some ESM paths).
+vi.mock('@tauri-apps/api/webview.js', () => ({
+  getCurrentWebview: () => ({
+    setZoom: (...args: unknown[]) => mockSetZoom(...args),
+  }),
+}))
+
+vi.mock('@tauri-apps/api/window.js', () => ({
   getCurrentWindow: () => ({
     onScaleChanged: (handler: (event: ScaleChangedEvent) => void) => {
       scaleChangedHandler = handler
@@ -58,12 +79,12 @@ import { DISPLAY_SCALE_ZOOM_SETTLE_MS, useZoom } from './use-zoom'
 
 describe('useZoom', () => {
   beforeEach(() => {
+    clearClientZoomForTests()
     mockPreferences = { zoom_level: 125 }
     mockIsNativeApp = false
     mockIsMobile = false
     mockSetZoom.mockReset()
     mockSetZoom.mockResolvedValue(undefined)
-    mockMutate.mockReset()
     mockOnScaleChanged.mockReset()
     scaleChangedHandler = null
     document.documentElement.style.zoom = ''
@@ -73,6 +94,7 @@ describe('useZoom', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    clearClientZoomForTests()
     document.documentElement.style.zoom = ''
     document.documentElement.style.fontSize = ''
     document.documentElement.style.removeProperty('--app-zoom')
@@ -229,7 +251,7 @@ describe('useZoom', () => {
     })
   })
 
-  it('uses the Mac client modifier when connected to a non-Mac server', () => {
+  it('uses the Mac client modifier when connected to a non-Mac server', async () => {
     mockIsNativeApp = true
     mockPreferences = {
       zoom_level: 125,
@@ -238,27 +260,54 @@ describe('useZoom', () => {
     }
     renderHook(() => useZoom())
 
+    await waitFor(() => {
+      expect(mockSetZoom).toHaveBeenCalledWith(1.25)
+    })
+
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: '+', metaKey: true, bubbles: true })
     )
 
-    expect(mockMutate).toHaveBeenCalledWith({
-      zoom_level: 150,
-      mobile_zoom_level: 150,
+    await waitFor(() => {
+      expect(mockSetZoom).toHaveBeenCalledWith(1.5)
     })
   })
 
-  it('uses Control for zoom in a Mac web client', () => {
+  it('uses Control for zoom in a Mac web client', async () => {
     mockPreferences = { zoom_level: 125 }
     renderHook(() => useZoom())
+
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue('--app-zoom')
+      ).toBe('1.25')
+    })
 
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: '+', ctrlKey: true, bubbles: true })
     )
 
-    expect(mockMutate).toHaveBeenCalledWith({
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue('--app-zoom')
+      ).toBe('1.5')
+    })
+  })
+
+  it('keeps client zoom when server preferences change after seed', async () => {
+    writeClientZoom({
       zoom_level: 150,
       mobile_zoom_level: 150,
+      sync_zoom_levels: true,
+    })
+    mockPreferences = { zoom_level: 90 }
+
+    renderHook(() => useZoom())
+
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue('--app-zoom')
+      ).toBe('1.5')
     })
   })
 })

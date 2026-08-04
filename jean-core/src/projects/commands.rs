@@ -12943,22 +12943,36 @@ pub async fn list_claude_skills(worktree_path: Option<String>) -> Result<Vec<Cla
     Ok(skills)
 }
 
-/// List Codex CLI skills from ~/.codex/skills/
-pub async fn list_codex_skills() -> Result<Vec<ClaudeSkill>, String> {
-    log::trace!("Listing Codex CLI skills");
-
+fn collect_codex_skills(home: &Path, worktree: Option<&Path>) -> Vec<ClaudeSkill> {
     let mut skills_map = std::collections::HashMap::new();
 
-    if let Some(home) = get_home_dir() {
-        collect_skills_from_dir(&home.join(".codex").join("skills"), &mut skills_map);
-        collect_skills_from_dir(
-            &jean_global_backend_skills_dir(&home, "codex"),
-            &mut skills_map,
-        );
+    // Current Agents Skills locations (user + project)
+    collect_skills_from_dir(&home.join(".agents").join("skills"), &mut skills_map);
+    // Legacy Codex user location
+    collect_skills_from_dir(&home.join(".codex").join("skills"), &mut skills_map);
+    // Jean-managed mirror used for cross-backend installs
+    collect_skills_from_dir(
+        &jean_global_backend_skills_dir(home, "codex"),
+        &mut skills_map,
+    );
+    if let Some(worktree) = worktree {
+        collect_skills_from_dir(&worktree.join(".agents").join("skills"), &mut skills_map);
+        // Some projects still keep Codex skills under .codex/skills
+        collect_skills_from_dir(&worktree.join(".codex").join("skills"), &mut skills_map);
     }
 
     let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
     skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
+/// List Codex CLI skills from the current Codex and legacy Jean locations.
+pub async fn list_codex_skills(worktree_path: Option<String>) -> Result<Vec<ClaudeSkill>, String> {
+    log::trace!("Listing Codex CLI skills");
+
+    let skills = get_home_dir()
+        .map(|home| collect_codex_skills(&home, worktree_path.as_deref().map(Path::new)))
+        .unwrap_or_default();
     log::trace!("Found {} Codex CLI skills", skills.len());
     Ok(skills)
 }
@@ -13423,6 +13437,31 @@ mod tests {
     use super::*;
     use crate::chat::types::Backend;
     use std::path::Path;
+
+    #[test]
+    fn codex_skills_include_agents_user_and_project_directories() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let home = temp.path().join("home");
+        let worktree = temp.path().join("repo");
+        let user_skill = home.join(".agents/skills/user-skill");
+        let project_skill = worktree.join(".agents/skills/project-skill");
+        let project_legacy_skill = worktree.join(".codex/skills/legacy-project-skill");
+        std::fs::create_dir_all(&user_skill).expect("user skill dir");
+        std::fs::create_dir_all(&project_skill).expect("project skill dir");
+        std::fs::create_dir_all(&project_legacy_skill).expect("legacy project skill dir");
+        std::fs::write(user_skill.join("SKILL.md"), "# User skill\n").expect("user skill");
+        std::fs::write(project_skill.join("SKILL.md"), "# Project skill\n").expect("project skill");
+        std::fs::write(project_legacy_skill.join("SKILL.md"), "# Legacy project skill\n")
+            .expect("legacy project skill");
+
+        let skills = collect_codex_skills(&home, Some(&worktree));
+        let names: Vec<_> = skills.into_iter().map(|skill| skill.name).collect();
+
+        assert_eq!(
+            names,
+            vec!["legacy-project-skill", "project-skill", "user-skill"]
+        );
+    }
 
     fn run_test_git(repo: &Path, args: &[&str]) {
         let output = silent_command("git")
