@@ -9,221 +9,186 @@ browser** for authenticated workflows (Gmail, admin panels, SaaS apps, etc.).
 This is **not** Jean's desktop embedded browser (Tauri child Webviews + React
 Grab). That path is desktop-only and has no server equivalent.
 
+## Engine choice
+
+**[vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)**
+(Vercel Labs agent-browser CLI + MCP).
+
+| Piece | Choice |
+| --- | --- |
+| Automation control plane | `agent-browser` CLI / `agent-browser mcp` |
+| Actual browser | Chromium / **Chrome for Testing** (`agent-browser install`) |
+| Login persistence | Jean-owned profile dir + `AGENT_BROWSER_PROFILE` |
+| Scope | **Browser use** (web only), not full desktop computer use |
+
+Jean does not reimplement CDP. Jean owns profile path, Settings UI, and
+writing backend MCP configs.
+
 ## What already exists
 
 | Capability | Where | Server-friendly? |
 | --- | --- | --- |
-| Embedded Browser panel (tabs, grab DOM) | `src-tauri/src/browser/*`, React `src/components/browser/*` | **No** — Tauri Webview |
-| Claude Chrome integration (`--chrome`) | `chrome_enabled` prefs → Claude CLI | **Only if** Chrome + [Claude in Chrome](https://code.claude.com/docs/en/chrome) extension run on a machine with a real display and Anthropic plan login (not API-key-only) |
-| MCP discovery / enable | Settings → MCP, project/session toggles | **Yes** — any MCP the host can spawn |
-| Playwright / chrome-devtools MCP | User-installed MCP servers | **Yes** — best fit for jean-server today |
+| Embedded Browser panel (tabs, grab DOM) | `src-tauri/src/browser/*` | **No** — Tauri Webview |
+| Claude Chrome integration (`--chrome`) | `chrome_enabled` prefs | Desktop + Claude extension only |
+| Agent browser (this feature) | `jean-core/src/agent_browser/` | **Yes** |
+| MCP discovery / enable | Settings → MCP | **Yes** |
 
-## Recommended architecture (jean-server)
+## Architecture
 
 ```text
 ┌──────────────────── jean-server host ─────────────────────┐
 │                                                           │
-│  User (browser on phone/laptop)                           │
-│       │ HTTPS / Tailscale                                 │
+│  User (optional remote view later)                        │
+│       │                                                   │
 │       ▼                                                   │
-│  Jean Web Access UI  ── optional ──► noVNC / remote view  │
-│       │                              of agent Chromium    │
-│       ▼                                      │            │
-│  Claude/Codex/… session                      │            │
-│       │ MCP tools (click, type, navigate)    │            │
-│       ▼                                      ▼            │
-│  Playwright MCP  ──CDP / user-data-dir──► Chromium        │
-│       persistent profile under Jean app-data              │
-│       (cookies, localStorage, logins survive restarts)    │
+│  Jean Web Access / Settings                               │
+│       │ install MCP / profile                             │
+│       ▼                                                   │
+│  Claude/Codex/… session                                   │
+│       │ MCP tools (agent-browser)                         │
+│       ▼                                                   │
+│  agent-browser daemon ──► Chromium + Jean profile         │
+│       cookies / localStorage survive restarts             │
 └───────────────────────────────────────────────────────────┘
 ```
 
 ### Why not re-use the embedded browser?
 
-- jean-server intentionally has **no Tauri, WebView, GTK, or display server**.
-- Child Webviews cannot run in the headless binary.
-- Server AI processes need a **local automation surface** (CDP / Playwright),
-  not a React-hosted iframe of arbitrary third-party sites (cookie isolation,
-  cross-origin, and security constraints).
+- jean-server has **no Tauri, WebView, GTK, or display server**.
+- Agents need a local automation surface (CDP), not a React-hosted iframe.
 
-### Why Playwright MCP (or chrome-devtools-mcp)?
+### Why agent-browser over Playwright MCP?
 
-- Works for **all backends** Jean already wires MCP into (Claude, Codex,
-  OpenCode, Cursor, Grok, Kimi), not Claude-only.
-- **Persistent profile** is first-class: login once, reuse forever.
-- Structured accessibility snapshots (no vision model required).
-- Optional headless for pure automation after login; headed for first login.
+- Built for agents (compact snapshots, `@eN` refs, auth helpers).
+- First-class persistent profiles and restore/state.
+- MCP + CLI dual path for all Jean backends.
+- Domain allowlists / content boundaries for safer defaults later.
 
-Claude `--chrome` remains great for **desktop** Jean where the user already
-has Chrome + extension. Prefer Playwright MCP on **servers**.
+Claude `--chrome` remains available on **desktop** for users with the Chrome
+extension. Prefer agent-browser on **servers** and multi-backend setups.
 
-## Manual-login flows
-
-### A. Display available (local machine, RDP, cloud desktop)
-
-1. Install Playwright MCP with a Jean-owned profile directory.
-2. Run **headed** (default): browser window opens.
-3. User logs into sites manually (2FA, CAPTCHA, passkeys).
-4. Leave profile on disk; later sessions (even headless) reuse cookies.
-
-### B. True headless VPS (no monitor) — recommended remote UX
-
-1. Run Chromium under **Xvfb** (virtual display).
-2. Export the display via **x11vnc + noVNC** (or similar).
-3. Jean Web Access (future) embeds noVNC so the user logs in from any browser
-   on the Tailscale network.
-4. Agent attaches via Playwright MCP / CDP to the **same** Chromium + profile.
-
-Until Jean hosts noVNC natively, operators can run the display stack beside
-jean-server and point Playwright MCP at the profile or CDP port.
-
-### C. Storage-state handoff (no remote desktop)
-
-1. User logs in on a trusted machine with Playwright `storageState`.
-2. Copy the JSON into the server profile / pass `--storage-state`.
-3. Weaker than a full profile (some sites re-auth aggressively) but avoids VNC.
-
-## Profile location (proposed)
+## Profile location
 
 ```text
 $JEAN_APP_DATA/agent-browser/profile/     # Chromium user-data-dir
-$JEAN_APP_DATA/agent-browser/mcp.json     # optional Jean-generated MCP snippet
 ```
 
-Single shared profile by default (one set of accounts). Future: per-project
-profiles under `agent-browser/profiles/<project-id>/`.
+Env passed into MCP:
 
-**Security:** this profile is as sensitive as a password manager. Protect host
-disk, Tailscale access, and Jean token auth. Do not commit profile dirs.
-Treat agent actions on logged-in sites as full account access.
+```text
+AGENT_BROWSER_PROFILE=<that path>
+```
 
-## MCP config sketch (works today without Jean product code)
+**Security:** the profile is as sensitive as a password manager. Protect host
+disk, Tailscale access, and Jean token auth.
 
-Claude (`~/.claude.json`):
+## Commands (Phase 1 — implemented)
+
+| Command | Purpose |
+| --- | --- |
+| `get_agent_browser_status` | Binary detection (Jean-managed or PATH), version, profile path/exists, snippets |
+| `ensure_agent_browser_profile` | Create profile directory |
+| `install_agent_browser` | npm install into `$app_data/agent-browser-cli`, then `agent-browser install` (Chromium) |
+| `install_agent_browser_mcp` | Upsert MCP entry into Claude/Codex/OpenCode/Cursor/Grok/Kimi configs; auto-enable in Jean prefs |
+
+Registered in `http_server/dispatch.rs` (native + web access).
+
+MCP entry shape (Claude):
 
 ```json
 {
   "mcpServers": {
-    "playwright": {
+    "agent-browser": {
       "type": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest",
-        "--user-data-dir",
-        "/var/lib/jean/agent-browser/profile"
-      ]
+      "command": "agent-browser",
+      "args": ["mcp"],
+      "env": {
+        "AGENT_BROWSER_PROFILE": "/path/to/app-data/agent-browser/profile"
+      }
     }
   }
 }
 ```
 
-Codex (`~/.codex/config.toml`):
+## UI
 
-```toml
-[mcp_servers.playwright]
-command = "npx"
-args = ["-y", "@playwright/mcp@latest", "--user-data-dir", "/var/lib/jean/agent-browser/profile"]
-enabled = true
-```
+Settings → **MCP Servers** → **Agent Browser** (`AgentBrowserSection.tsx`):
 
-Headless after login:
+- Status (installed / missing binary; Jean-managed vs PATH)
+- Profile path
+- **Install agent-browser** (npm into app data + Chromium download)
+- Create profile
+- Install MCP into installed backends
+- Copy Claude / Codex snippets
+- Operator fallback: `npm install -g agent-browser && agent-browser install`
 
-```text
-... "--user-data-dir", "...", "--headless"
-```
+## Manual-login flows
 
-Standalone HTTP MCP (useful when Jean sessions share one long-lived browser):
+### A. Display available
+
+1. Install agent-browser + Chromium.
+2. Install MCP from Settings.
+3. Headed first run: user logs in (2FA, CAPTCHA).
+4. Later turns reuse the profile (including headless).
+
+### B. Headless VPS
+
+1. Chromium under **Xvfb** (+ optional noVNC) for first login.
+2. Same profile path for subsequent agent runs.
+3. Future Phase 3: noVNC inside Jean Web Access.
+
+### C. State handoff
+
+`agent-browser state save/load` or cookie import if no remote display.
+
+## Roadmap
+
+### Phase 1 (this PR) — done
+
+- [x] App-data profile dir
+- [x] Status / ensure profile / install MCP commands
+- [x] Settings UI section
+- [x] Auto-enable MCP keys in preferences on install
+- [x] Unit tests for config writers / snippets
+
+### Phase 2
+
+- [ ] Managed Chromium lifecycle owned by Jean
+- [ ] Session cancel cleans browser daemon children
+- [ ] Optional Jean-managed install of agent-browser binary
+
+### Phase 3
+
+- [ ] Xvfb + noVNC remote view in Web Access
+- [ ] Origin allowlist + action audit log
+
+## Operator quick start
+
+**Preferred:** Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser**
+(requires `npm` on the server PATH; installs under app data and runs Chromium setup).
+
+Manual fallback:
 
 ```bash
-npx -y @playwright/mcp@latest \
-  --user-data-dir /var/lib/jean/agent-browser/profile \
-  --port 8931
+npm install -g agent-browser
+agent-browser install          # Chrome for Testing
+# Linux headless hosts:
+agent-browser install --with-deps
 ```
 
-Then point backends at `http://127.0.0.1:8931/mcp`.
+Then: **Install MCP into backends**.
 
-Prerequisites on the host:
-
-- Node.js 20+
-- `npx` can download `@playwright/mcp`
-- Playwright browsers installed (`npx playwright install chromium` as needed)
-- For headed first login on a server: `Xvfb` / desktop / noVNC stack
-
-After MCP is enabled in Jean (Settings → MCP → enable `playwright` for the
-backend/project/session), ask the agent:
+In chat (after first manual login):
 
 ```text
-Open https://example.com/account, describe what you see.
-If I'm not logged in, stop and tell me so I can log in manually.
+Open https://example.com/account and describe what you see.
+If you hit a login wall, stop so I can sign in in the agent browser.
 ```
 
-## Product roadmap (Jean-native)
+## Related
 
-### Phase 0 — document + operator setup (this doc)
-
-No Jean binary changes. Operators install Playwright MCP + persistent profile.
-
-### Phase 1 — Jean-managed profile + one-click MCP install
-
-- Commands: `get_agent_browser_status`, `install_agent_browser_mcp`,
-  `reset_agent_browser_profile` (destructive, confirm).
-- Create `$app_data/agent-browser/profile`.
-- Reuse the safe config writers in `jean_mcp_config.rs` to upsert a
-  `playwright` (or `jean-browser`) MCP entry for selected backends.
-- Settings UI: Integrations / Experimental section with status + install.
-- Prefs: `agent_browser_enabled`, `agent_browser_headless`, profile path override.
-
-### Phase 2 — Managed Chromium lifecycle
-
-- Start/stop Chromium (or Playwright-managed browser) with fixed CDP port.
-- Health checks; ensure only one owner of the user-data-dir lock.
-- Prefer attaching Playwright MCP with `--cdp-endpoint` / equivalent so Jean
-  owns process lifecycle and MCP is a thin client.
-
-### Phase 3 — Remote view in Web Access (manual login UX)
-
-- Bundle or vendor noVNC static assets; serve under `/agent-browser/vnc/`.
-- Spawn Xvfb + Chromium + websockify when `agent_browser_remote_view` is on.
-- Token-gated iframe in Jean UI: “Open agent browser” for login / watch.
-- Clear “AI is controlling this browser” indicator; optional pause/takeover.
-
-### Phase 4 — First-class agent tools (optional)
-
-- Jean-owned MCP tools (`browser_navigate`, `browser_snapshot`, …) so backends
-  without flexible MCP still work, and permissions can be Jean-scoped.
-- Session-level allowlist of origins; block navigation outside allowlist in
-  plan mode.
-- Audit log of browser actions in run JSONL.
-
-## Non-goals
-
-- Replacing the desktop embedded browser panel for local UI debugging / grab.
-- Giving the agent passwords; manual login remains the auth path.
-- Running untrusted page JS inside the Jean shell origin.
-- Multi-user browser isolation on one jean-server (start with single-tenant).
-
-## Backend notes
-
-- **Claude:** can use either Playwright MCP or `--chrome` (desktop). Prefer MCP
-  on server; keep `chrome_enabled` for desktop users with the extension.
-- **Codex / Grok / OpenCode / Cursor / Kimi:** MCP only for browser automation.
-- Kill lingering MCP browser children on session cancel (Codex already notes
-  chrome-devtools-mcp orphans — apply the same hygiene).
-
-## Testing strategy
-
-- Unit: profile path resolution, MCP config patch idempotency, headless flag.
-- Integration (optional CI): start Playwright MCP against a local static page
-  with storage state; assert navigate + snapshot tools respond.
-- Manual: login to a test site headed → restart jean-server → headless session
-  still authenticated.
-
-## Related docs
-
-- `docs/developer/server-architecture.md` — no WebView on server
-- `docs/developer/embedded-browser-grab.md` — desktop-only grab bridge
-- `docs/headless-server.md` — jean-server ops
-- User: Web Access / headless (jean-docs)
-- Playwright MCP: https://playwright.dev/docs/getting-started-mcp
-- Claude Chrome: https://code.claude.com/docs/en/chrome
+- `docs/developer/server-architecture.md`
+- `docs/developer/embedded-browser-grab.md` (desktop-only)
+- `docs/headless-server.md`
+- https://agent-browser.dev
+- https://code.claude.com/docs/en/chrome (desktop Claude Chrome path)

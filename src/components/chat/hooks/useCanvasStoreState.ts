@@ -41,6 +41,9 @@ export function useCanvasStoreState(): ChatStoreState {
   const pendingCodexPermissionRequests = useChatStore(
     state => state.pendingCodexPermissionRequests
   )
+  const pendingOpencodePermissionRequests = useChatStore(
+    state => state.pendingOpencodePermissionRequests
+  )
   const pendingCodexCommandApprovalRequests = useChatStore(
     state => state.pendingCodexCommandApprovalRequests
   )
@@ -68,6 +71,7 @@ export function useCanvasStoreState(): ChatStoreState {
       sessionStatusOverrides,
       pendingPermissionDenials,
       pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
       pendingCodexCommandApprovalRequests,
       pendingCodexUserInputRequests,
       pendingCodexMcpElicitationRequests,
@@ -85,6 +89,7 @@ export function useCanvasStoreState(): ChatStoreState {
       sessionStatusOverrides,
       pendingPermissionDenials,
       pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
       pendingCodexCommandApprovalRequests,
       pendingCodexUserInputRequests,
       pendingCodexMcpElicitationRequests,

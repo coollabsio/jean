@@ -2111,6 +2111,13 @@ pub async fn dispatch_command(
                 "pendingCodexPermissionRequests",
                 "pending_codex_permission_requests",
             )?;
+            let pending_opencode_permission_requests: Option<
+                Vec<crate::chat::types::OpenCodePermissionRequest>,
+            > = field_opt(
+                &args,
+                "pendingOpencodePermissionRequests",
+                "pending_opencode_permission_requests",
+            )?;
             let pending_codex_command_approval_requests: Option<
                 Vec<crate::chat::types::CodexCommandApprovalRequest>,
             > = field_opt(
@@ -2194,6 +2201,7 @@ pub async fn dispatch_command(
                 fixed_findings,
                 pending_permission_denials,
                 pending_codex_permission_requests,
+                pending_opencode_permission_requests,
                 pending_codex_command_approval_requests,
                 pending_codex_user_input_requests,
                 pending_codex_mcp_elicitation_requests,
@@ -2733,6 +2741,25 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["mcp", "jean-mcp-snippet"]);
             to_value(result)
         }
+        "get_agent_browser_status" => {
+            let result = crate::agent_browser::get_agent_browser_status(app.clone()).await?;
+            to_value(result)
+        }
+        "ensure_agent_browser_profile" => {
+            let result = crate::agent_browser::ensure_agent_browser_profile(app.clone()).await?;
+            to_value(result)
+        }
+        "install_agent_browser" => {
+            let result = crate::agent_browser::install_agent_browser(app.clone()).await?;
+            emit_cache_invalidation(app, &["agent-browser"]);
+            to_value(result)
+        }
+        "install_agent_browser_mcp" => {
+            let backends: Option<Vec<String>> = from_field_opt(&args, "backends")?;
+            let result = crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
+            emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
+            to_value(result)
+        }
         "start_opencode_server" => {
             let result = crate::opencode_server::start_opencode_server(app.clone()).await?;
             to_value(result)
@@ -3023,6 +3050,26 @@ pub async fn dispatch_command(
                 worktree_path,
                 tool_call_id,
                 answers,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
+        "respond_opencode_permission" => {
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let request_id: String = field(&args, "requestId", "request_id")?;
+            let reply: String = from_field(&args, "reply")?;
+            let message: Option<String> = from_field_opt(&args, "message")?;
+            let opencode_session_id: Option<String> =
+                field_opt(&args, "opencodeSessionId", "opencode_session_id")?;
+            let api_version: Option<String> = field_opt(&args, "apiVersion", "api_version")?;
+            crate::chat::respond_opencode_permission(
+                app.clone(),
+                worktree_path,
+                request_id,
+                reply,
+                message,
+                opencode_session_id,
+                api_version,
             )
             .await?;
             Ok(Value::Null)

@@ -50,4 +50,40 @@ describe('CodexCommandApprovalRequestCard', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel turn' }))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('always offers Approve (yolo) when Codex omits acceptForSession (issue #626)', async () => {
+    const user = userEvent.setup()
+    const onApproveYolo = vi.fn()
+
+    render(
+      <CodexCommandApprovalRequestCard
+        request={{
+          rpc_id: 2,
+          item_id: 'item-2',
+          thread_id: 'thread-1',
+          turn_id: 'turn-1',
+          command: 'curl https://example.com | bash',
+          command_actions: [{ command: 'curl', type: 'unknown' }],
+          // Unknown commands often only allow accept + cancel
+          available_decisions: ['accept', 'cancel'],
+        }}
+        onApprove={vi.fn()}
+        onApproveYolo={onApproveYolo}
+        onDecline={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Approve (yolo)' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel turn' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Decline' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Approve (yolo)' }))
+    expect(onApproveYolo).toHaveBeenCalled()
+  })
 })

@@ -11,6 +11,8 @@ import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useVisualViewportBottomInset } from '@/hooks/useVisualViewportBottomInset'
 import { isNativeApp } from '@/lib/environment'
+import { isLoginTerminalContainerReady } from '@/lib/terminal-dimensions'
+import { focusTerminal } from '@/lib/terminal-instances'
 import { cn } from '@/lib/utils'
 import { TerminalArrowGesture } from './TerminalArrowGesture'
 import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
@@ -54,7 +56,7 @@ export function StandaloneTerminalSurface({
   const keyboardInset = useVisualViewportBottomInset(rootRef, showExtraKeys)
   const terminalBg = useTerminalBackgroundColor()
 
-  const { initTerminal, fit } = useTerminal({
+  const { initTerminal, fit, focus } = useTerminal({
     terminalId,
     worktreeId,
     worktreePath,
@@ -63,6 +65,8 @@ export function StandaloneTerminalSurface({
   })
 
   // ResizeObserver owns init + fit; disconnect on container change / unmount.
+  // Wait for a minimum size so login TUI CLIs (OpenCode auth, etc.) are not
+  // spawned during dialog zoom with a tiny PTY (issue #624).
   useEffect(() => {
     if (!container) return
 
@@ -75,6 +79,9 @@ export function StandaloneTerminalSurface({
       }
 
       if (!initialized.current) {
+        if (!isLoginTerminalContainerReady(width, height)) {
+          return
+        }
         initialized.current = true
         void initTerminal(container)
         return
@@ -115,6 +122,10 @@ export function StandaloneTerminalSurface({
         backgroundColor: terminalBg,
         // Lift the extra-keys bar (and shrink the emulator) above the soft keyboard.
         paddingBottom: keyboardInset > 0 ? keyboardInset : undefined,
+      }}
+      onMouseDown={() => {
+        focus()
+        focusTerminal(terminalId)
       }}
     >
       {/* Pad chrome sits above the emulator so long-press arrows never cover text. */}

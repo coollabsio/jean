@@ -1377,6 +1377,7 @@ fn clear_session_runtime_state(session: &mut Session) {
     session.waiting_for_input_type = None;
     session.pending_permission_denials.clear();
     session.pending_codex_permission_requests.clear();
+    session.pending_opencode_permission_requests.clear();
     session.pending_codex_command_approval_requests.clear();
     session.pending_codex_user_input_requests.clear();
     session.pending_codex_mcp_elicitation_requests.clear();
@@ -1441,6 +1442,7 @@ fn prepare_forked_metadata(
     metadata.archived_by_base_close = None;
     metadata.pending_permission_denials.clear();
     metadata.pending_codex_permission_requests.clear();
+    metadata.pending_opencode_permission_requests.clear();
     metadata.pending_codex_command_approval_requests.clear();
     metadata.pending_codex_user_input_requests.clear();
     metadata.pending_codex_mcp_elicitation_requests.clear();
@@ -10188,6 +10190,7 @@ async fn update_review_session_state(
         None,
         None,
         None,
+        None, // pending_opencode_permission_requests
         None,
         None,
         None,

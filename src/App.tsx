@@ -467,7 +467,20 @@ function App() {
               reviewingUpdates[session.id] = true
               statusOverrideUpdates[session.id] = 'review'
             }
-            if (session.waiting_for_input) {
+            // Mid-turn Codex/Claude approvals keep waiting_for_input true while
+            // the turn is still running. Also treat pending approval queues as
+            // waiting so remote reconnects keep indicators (issue #626).
+            const hasPendingMidTurnApproval =
+              (session.pending_codex_command_approval_requests?.length ?? 0) >
+                0 ||
+              (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
+              (session.pending_codex_user_input_requests?.length ?? 0) > 0 ||
+              (session.pending_codex_mcp_elicitation_requests?.length ?? 0) >
+                0 ||
+              (session.pending_codex_dynamic_tool_call_requests?.length ?? 0) >
+                0 ||
+              (session.pending_permission_denials?.length ?? 0) > 0
+            if (session.waiting_for_input || hasPendingMidTurnApproval) {
               waitingUpdates[session.id] = true
             }
           }
@@ -485,8 +498,10 @@ function App() {
           }
         }
         // Clear stale waiting/reviewing state for sessions actively running a turn.
-        // The server persists these flags from the previous turn's completion;
-        // if a new turn is in-flight they're stale and would show approve buttons.
+        // The server may still have previous-turn waiting flags on disk; a new
+        // turn without pending approvals should not show approve buttons.
+        // Keep waiting when the running turn itself is paused on mid-turn
+        // approvals (Codex command/permission prompts — issue #626).
         if (data.runningSessions?.length) {
           const runningSessionIds = new Set(data.runningSessions)
           for (const sessionId of data.runningSessions) {
@@ -502,14 +517,11 @@ function App() {
               ([sessionId]) => !runningSessionIds.has(sessionId)
             )
           )
-          const filteredWaitingUpdates = Object.fromEntries(
-            Object.entries(waitingUpdates).filter(
-              ([sessionId]) => !runningSessionIds.has(sessionId)
-            )
-          )
+          // waitingUpdates already includes mid-turn pending approvals; do not
+          // strip those for running sessions.
           storeUpdates.reviewingSessions = filteredReviewingUpdates
           storeUpdates.sessionStatusOverrides = filteredStatusOverrideUpdates
-          storeUpdates.waitingForInputSessionIds = filteredWaitingUpdates
+          storeUpdates.waitingForInputSessionIds = waitingUpdates
         } else {
           storeUpdates.reviewingSessions = reviewingUpdates
           storeUpdates.sessionStatusOverrides = statusOverrideUpdates

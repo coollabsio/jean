@@ -1,6 +1,8 @@
 //! OpenCode HTTP execution engine (opencode serve).
 
-use super::types::{ContentBlock, ToolCall, UsageData};
+use super::types::{
+    ContentBlock, OpenCodePermissionRequest, OpenCodePermissionRequestEvent, ToolCall, UsageData,
+};
 use crate::http_server::EmitExt;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use once_cell::sync::Lazy;
@@ -108,6 +110,9 @@ struct SharedSseSubscriber {
     jean_session_id: String,
     worktree_id: String,
     run_id: String,
+    /// Jean execution mode for the active turn (`plan` / `build` / `yolo`).
+    /// Used to auto-approve OpenCode permission asks in yolo mode (issue #625).
+    execution_mode: Option<String>,
     cancelled: Arc<AtomicBool>,
     streamed_any: Arc<AtomicBool>,
     /// True once the OpenCode session's turn has started (first streamed part
@@ -379,6 +384,7 @@ impl SharedSseSubscription {
         worktree_id: String,
         run_id: String,
         working_dir: String,
+        execution_mode: Option<String>,
         cancelled: Arc<AtomicBool>,
         streamed_any: Arc<AtomicBool>,
         turn_started: Arc<AtomicBool>,
@@ -393,6 +399,7 @@ impl SharedSseSubscription {
             jean_session_id,
             worktree_id,
             run_id,
+            execution_mode,
             cancelled,
             streamed_any,
             turn_started,
@@ -2357,11 +2364,316 @@ fn process_shared_sse_event(
             }
             Some(false)
         }
+        // OpenCode permission prompts (e.g. external_directory access outside the
+        // worktree). Without handling these, the in-flight /message POST blocks
+        // forever and the Jean session appears frozen (issue #625).
+        "permission.asked" | "permission.v2.asked" => {
+            handle_opencode_permission_asked(
+                app,
+                subscribers,
+                &event_type,
+                &properties,
+                event_directory.as_deref(),
+            );
+            Some(true)
+        }
+        "permission.replied" | "permission.v2.replied" => {
+            // Reply can come from auto-approve or an external client; surface so
+            // the frontend can drop a stale pending card if needed.
+            handle_opencode_permission_replied(app, subscribers, &properties);
+            Some(false)
+        }
         _ => {
             log::trace!("OpenCode shared SSE: event type='{}'", event_type);
             Some(false)
         }
     }
+}
+
+/// Whether Jean should auto-approve OpenCode permission prompts for this session.
+///
+/// True when:
+/// - the active turn started in yolo mode (subscriber flag), or
+/// - session metadata selected_execution_mode is yolo
+///
+/// Mirrors Codex auto-accept so YOLO mode never freezes on external_directory asks.
+fn should_auto_approve_opencode_permissions(
+    app: &AppHandle,
+    jean_session_id: &str,
+    turn_execution_mode: Option<&str>,
+) -> bool {
+    if turn_execution_mode == Some("yolo") {
+        return true;
+    }
+    match super::storage::load_metadata(app, jean_session_id) {
+        Ok(Some(meta)) if meta.selected_execution_mode.as_deref() == Some("yolo") => true,
+        _ => false,
+    }
+}
+
+/// Parse a `permission.asked` / `permission.v2.asked` properties object into a
+/// Jean-side request, normalizing v1/v2 field names.
+fn parse_opencode_permission_request(
+    event_type: &str,
+    properties: &serde_json::Value,
+    working_dir: Option<String>,
+) -> Option<OpenCodePermissionRequest> {
+    let request_id = properties.get("id").and_then(|v| v.as_str())?.to_string();
+    let opencode_session_id = properties
+        .get("sessionID")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if request_id.is_empty() || opencode_session_id.is_empty() {
+        return None;
+    }
+
+    let is_v2 = event_type.contains("v2");
+    let permission = if is_v2 {
+        properties
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+    } else {
+        properties
+            .get("permission")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+    }
+    .to_string();
+
+    let patterns: Vec<String> = if is_v2 {
+        properties
+            .get("resources")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        properties
+            .get("patterns")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let always: Vec<String> = if is_v2 {
+        properties
+            .get("save")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_else(|| patterns.clone())
+    } else {
+        properties
+            .get("always")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_else(|| patterns.clone())
+    };
+
+    let tool_call_id = properties
+        .get("tool")
+        .and_then(|t| t.get("callID"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            properties
+                .get("source")
+                .and_then(|s| s.get("callID"))
+                .and_then(|v| v.as_str())
+        })
+        .map(str::to_string);
+
+    let metadata = properties.get("metadata").cloned().filter(|v| !v.is_null());
+
+    Some(OpenCodePermissionRequest {
+        request_id,
+        opencode_session_id,
+        permission,
+        patterns,
+        always,
+        metadata,
+        tool_call_id,
+        working_dir,
+        api_version: if is_v2 {
+            "v2".to_string()
+        } else {
+            "v1".to_string()
+        },
+    })
+}
+
+fn handle_opencode_permission_asked(
+    app: &AppHandle,
+    subscribers: &Arc<Mutex<HashMap<String, SharedSseSubscriberEntry>>>,
+    event_type: &str,
+    properties: &serde_json::Value,
+    event_directory: Option<&str>,
+) {
+    let opencode_session_id = properties
+        .get("sessionID")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if opencode_session_id.is_empty() {
+        log::warn!("OpenCode permission.asked missing sessionID");
+        return;
+    }
+
+    if let Some(dir) = event_directory {
+        remember_opencode_session_directory(opencode_session_id, dir);
+    }
+
+    let (jean_session_id, worktree_id, working_dir, turn_execution_mode) = {
+        let lock = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+        let parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+        match resolve_opencode_subscriber(&lock, &parents, opencode_session_id) {
+            Some((_root_id, entry)) => {
+                let sub = lock_recover(&entry.handle, "OPENCODE_SSE_SUBSCRIBER");
+                (
+                    sub.jean_session_id.clone(),
+                    sub.worktree_id.clone(),
+                    // Prefer the event/session directory (child workdir) over the
+                    // root subscriber's worktree so the reply hits the right instance.
+                    event_directory
+                        .map(str::to_string)
+                        .or_else(|| lookup_opencode_session_directory(opencode_session_id))
+                        .unwrap_or_else(|| entry.working_dir.clone()),
+                    sub.execution_mode.clone(),
+                )
+            }
+            None => {
+                log::warn!(
+                    "OpenCode permission.asked for unknown session={opencode_session_id} (no parent subscriber)"
+                );
+                return;
+            }
+        }
+    };
+
+    let Some(mut request) = parse_opencode_permission_request(
+        event_type,
+        properties,
+        Some(working_dir.clone()),
+    ) else {
+        log::warn!("OpenCode permission.asked could not be parsed: {properties}");
+        return;
+    };
+    request.working_dir = Some(working_dir.clone());
+
+    log::info!(
+        "OpenCode permission.asked jean_session={jean_session_id} request_id={} permission={} patterns={:?} api={}",
+        request.request_id,
+        request.permission,
+        request.patterns,
+        request.api_version
+    );
+
+    // YOLO: auto-approve with "always" so subsequent matching prompts in this
+    // OpenCode session do not re-block. Never freeze the conversation.
+    if should_auto_approve_opencode_permissions(
+        app,
+        &jean_session_id,
+        turn_execution_mode.as_deref(),
+    ) {
+        log::info!(
+            "OpenCode: auto-approving permission in yolo mode request_id={}",
+            request.request_id
+        );
+        if let Err(e) = respond_opencode_permission(
+            app,
+            &working_dir,
+            &request.request_id,
+            "always",
+            None,
+            Some(&request.opencode_session_id),
+            Some(&request.api_version),
+        ) {
+            log::error!(
+                "OpenCode: failed to auto-approve permission request_id={}: {e}",
+                request.request_id
+            );
+            // Fall through to surface the UI so the user can still unblock.
+        } else {
+            return;
+        }
+    }
+
+    let _ = app.emit_all(
+        "chat:opencode_permission_request",
+        &OpenCodePermissionRequestEvent {
+            session_id: jean_session_id,
+            worktree_id,
+            request,
+        },
+    );
+}
+
+fn handle_opencode_permission_replied(
+    app: &AppHandle,
+    subscribers: &Arc<Mutex<HashMap<String, SharedSseSubscriberEntry>>>,
+    properties: &serde_json::Value,
+) {
+    let opencode_session_id = properties
+        .get("sessionID")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let request_id = properties
+        .get("requestID")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if opencode_session_id.is_empty() || request_id.is_empty() {
+        return;
+    }
+
+    let (jean_session_id, worktree_id) = {
+        let lock = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+        let parents = lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+        match resolve_opencode_subscriber(&lock, &parents, opencode_session_id) {
+            Some((_root_id, entry)) => {
+                let sub = lock_recover(&entry.handle, "OPENCODE_SSE_SUBSCRIBER");
+                (sub.jean_session_id.clone(), sub.worktree_id.clone())
+            }
+            None => return,
+        }
+    };
+
+    #[derive(serde::Serialize, Clone)]
+    struct OpenCodePermissionRepliedEvent {
+        session_id: String,
+        worktree_id: String,
+        request_id: String,
+        reply: String,
+    }
+
+    let reply = properties
+        .get("reply")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let _ = app.emit_all(
+        "chat:opencode_permission_replied",
+        &OpenCodePermissionRepliedEvent {
+            session_id: jean_session_id,
+            worktree_id,
+            request_id: request_id.to_string(),
+            reply,
+        },
+    );
 }
 
 async fn await_opencode_http_or_cancel<F, T>(
@@ -2635,6 +2947,7 @@ pub fn execute_opencode_http(
         worktree_id.to_string(),
         run_id.to_string(),
         working_dir_string.clone(),
+        execution_mode.map(str::to_string),
         cancelled.clone(),
         streamed_via_sse.clone(),
         turn_started.clone(),
@@ -3301,6 +3614,114 @@ fn one_shot_opencode_blocking(
     Ok(stripped.to_string())
 }
 
+/// Reply to a pending OpenCode permission request.
+///
+/// - v1: `POST /permission/{requestID}/reply` with `{ reply, message? }`
+/// - v2: `POST /api/session/{sessionID}/permission/{requestID}/reply`
+///
+/// `reply` is one of `"once"`, `"always"`, or `"reject"`. This unblocks the
+/// in-flight tool call that triggered the permission ask (issue #625).
+pub fn respond_opencode_permission(
+    app: &tauri::AppHandle,
+    working_dir: &str,
+    request_id: &str,
+    reply: &str,
+    message: Option<String>,
+    opencode_session_id: Option<&str>,
+    api_version: Option<&str>,
+) -> Result<(), String> {
+    let reply = reply.trim();
+    if !matches!(reply, "once" | "always" | "reject") {
+        return Err(format!(
+            "Invalid OpenCode permission reply '{reply}' (expected once|always|reject)"
+        ));
+    }
+    if request_id.trim().is_empty() {
+        return Err("OpenCode permission request_id is required".to_string());
+    }
+
+    let base_url = crate::opencode_server::acquire(app)?;
+
+    struct ServerReleaseGuard;
+    impl Drop for ServerReleaseGuard {
+        fn drop(&mut self) {
+            crate::opencode_server::release();
+        }
+    }
+    let _server_guard = ServerReleaseGuard;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+    let query = [("directory", working_dir.to_string())];
+    let mut body = serde_json::json!({ "reply": reply });
+    if let Some(msg) = message
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        body["message"] = serde_json::Value::String(msg.to_string());
+    }
+
+    let is_v2 = api_version.map(|v| v.eq_ignore_ascii_case("v2")).unwrap_or(false);
+    let reply_url = if is_v2 {
+        let session_id = opencode_session_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                "OpenCode v2 permission reply requires opencode_session_id".to_string()
+            })?;
+        format!("{base_url}/api/session/{session_id}/permission/{request_id}/reply")
+    } else {
+        format!("{base_url}/permission/{request_id}/reply")
+    };
+
+    log::info!(
+        "OpenCode permission reply url={reply_url} request_id={request_id} reply={reply} dir={working_dir}"
+    );
+
+    let reply_resp = client
+        .post(&reply_url)
+        .query(&query)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Failed to reply to OpenCode permission: {e}"))?;
+
+    if !reply_resp.status().is_success() {
+        let status = reply_resp.status();
+        let resp_body = reply_resp.text().unwrap_or_default();
+        // If v2 endpoint is missing on older servers, fall back to v1 once.
+        if is_v2 && status.as_u16() == 404 {
+            log::warn!(
+                "OpenCode v2 permission reply 404; falling back to v1 endpoint request_id={request_id}"
+            );
+            let fallback_url = format!("{base_url}/permission/{request_id}/reply");
+            let fallback_resp = client
+                .post(&fallback_url)
+                .query(&query)
+                .json(&body)
+                .send()
+                .map_err(|e| format!("Failed to reply to OpenCode permission (v1 fallback): {e}"))?;
+            if !fallback_resp.status().is_success() {
+                let status = fallback_resp.status();
+                let resp_body = fallback_resp.text().unwrap_or_default();
+                return Err(format!(
+                    "OpenCode permission reply failed: status={status}, body={resp_body}"
+                ));
+            }
+        } else {
+            return Err(format!(
+                "OpenCode permission reply failed: status={status}, body={resp_body}"
+            ));
+        }
+    }
+
+    log::info!("OpenCode permission replied: request_id={request_id}, reply={reply}");
+    Ok(())
+}
+
 /// Answer a pending OpenCode question by calling the Question.reply API.
 ///
 /// Finds the pending question matching the given tool_call_id (via the question's
@@ -3644,6 +4065,7 @@ mod tests {
             jean_session_id: "jean-1".into(),
             worktree_id: "wt-1".into(),
             run_id: "run-1".into(),
+            execution_mode: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             streamed_any: Arc::new(AtomicBool::new(false)),
             turn_started: Arc::new(AtomicBool::new(false)),
@@ -3763,6 +4185,7 @@ mod tests {
                 jean_session_id: "jean-drop".into(),
                 worktree_id: "wt-drop".into(),
                 run_id: "run-drop".into(),
+                execution_mode: None,
                 cancelled: Arc::new(AtomicBool::new(false)),
                 streamed_any: Arc::new(AtomicBool::new(false)),
                 turn_started: Arc::new(AtomicBool::new(false)),
@@ -3819,6 +4242,7 @@ mod tests {
             jean_session_id: "jean-parent".into(),
             worktree_id: "wt-parent".into(),
             run_id: "run-parent".into(),
+            execution_mode: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             streamed_any: Arc::new(AtomicBool::new(false)),
             turn_started: Arc::new(AtomicBool::new(false)),
@@ -3884,6 +4308,7 @@ mod tests {
             jean_session_id: "jean-2".into(),
             worktree_id: "wt-2".into(),
             run_id: "run-2".into(),
+            execution_mode: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             streamed_any: Arc::new(AtomicBool::new(false)),
             turn_started: Arc::new(AtomicBool::new(false)),
@@ -4006,6 +4431,97 @@ mod tests {
     }
 
     #[test]
+    fn parse_opencode_permission_request_normalizes_v1_and_v2() {
+        let v1 = serde_json::json!({
+            "id": "per_1",
+            "sessionID": "ses_a",
+            "permission": "external_directory",
+            "patterns": ["/tmp/**"],
+            "always": ["/tmp/**"],
+            "metadata": { "filepath": "/tmp/x" },
+            "tool": { "messageID": "msg_1", "callID": "call_1" }
+        });
+        let req = parse_opencode_permission_request("permission.asked", &v1, Some("/proj".into()))
+            .expect("v1 parse");
+        assert_eq!(req.request_id, "per_1");
+        assert_eq!(req.opencode_session_id, "ses_a");
+        assert_eq!(req.permission, "external_directory");
+        assert_eq!(req.patterns, vec!["/tmp/**"]);
+        assert_eq!(req.always, vec!["/tmp/**"]);
+        assert_eq!(req.tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(req.api_version, "v1");
+        assert_eq!(req.working_dir.as_deref(), Some("/proj"));
+
+        let v2 = serde_json::json!({
+            "id": "per_2",
+            "sessionID": "ses_b",
+            "action": "external_directory",
+            "resources": ["/var/tmp/*"],
+            "save": ["/var/tmp/*"],
+            "source": { "type": "tool", "messageID": "m2", "callID": "c2" }
+        });
+        let req = parse_opencode_permission_request(
+            "permission.v2.asked",
+            &v2,
+            Some("/proj".into()),
+        )
+        .expect("v2 parse");
+        assert_eq!(req.permission, "external_directory");
+        assert_eq!(req.patterns, vec!["/var/tmp/*"]);
+        assert_eq!(req.always, vec!["/var/tmp/*"]);
+        assert_eq!(req.tool_call_id.as_deref(), Some("c2"));
+        assert_eq!(req.api_version, "v2");
+    }
+
+    #[test]
+    fn process_shared_sse_emits_permission_asked_for_primary_session() {
+        let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        let handle = Arc::new(Mutex::new(SharedSseSubscriber {
+            jean_session_id: "jean-perm".into(),
+            worktree_id: "wt-perm".into(),
+            run_id: "run-perm".into(),
+            execution_mode: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            streamed_any: Arc::new(AtomicBool::new(false)),
+            turn_started: Arc::new(AtomicBool::new(false)),
+            session_idle: Arc::new(AtomicBool::new(false)),
+            steered: Arc::new(AtomicBool::new(false)),
+            upstream_error: Arc::new(Mutex::new(None)),
+            force_abort: Arc::new(AtomicBool::new(false)),
+            tracked_parts: HashMap::new(),
+            accumulated_blocks: Vec::new(),
+            accumulated_tool_calls: Vec::new(),
+        }));
+
+        {
+            let mut subscribers = lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+            subscribers.clear();
+            subscribers.insert(
+                "ses_perm".to_string(),
+                SharedSseSubscriberEntry {
+                    working_dir: "/tmp/proj".into(),
+                    handle,
+                },
+            );
+        }
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
+
+        let event = r#"{"directory":"/tmp/proj","payload":{"type":"permission.asked","properties":{"id":"per_x","sessionID":"ses_perm","permission":"external_directory","patterns":["/tmp/**"],"always":["/tmp/**"],"metadata":{},"tool":{"messageID":"m","callID":"c"}}}}"#;
+        // Returns Some(true) so the SSE loop counts the event as emitted.
+        assert_eq!(
+            process_shared_sse_event(&app, event, &SHARED_SSE.subscribers),
+            Some(true)
+        );
+
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
+        lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
+    }
+
+    #[test]
     fn sse_provider_error_unblocks_force_abort_distinct_from_user_cancel() {
         let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
         let tmp = tempfile::tempdir().unwrap();
@@ -4017,6 +4533,7 @@ mod tests {
             jean_session_id: "jean-3".into(),
             worktree_id: "wt-3".into(),
             run_id: "run-3".into(),
+            execution_mode: None,
             cancelled: cancelled.clone(),
             streamed_any: Arc::new(AtomicBool::new(false)),
             turn_started: Arc::new(AtomicBool::new(false)),

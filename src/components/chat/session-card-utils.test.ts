@@ -151,6 +151,7 @@ describe('computeSessionCardData', () => {
       sessionStatusOverrides: {},
       pendingPermissionDenials: {},
       pendingCodexPermissionRequests: {},
+      pendingOpencodePermissionRequests: {},
       pendingCodexCommandApprovalRequests: {},
       pendingCodexUserInputRequests: {},
       pendingCodexMcpElicitationRequests: {},

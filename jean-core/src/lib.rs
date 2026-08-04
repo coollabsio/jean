@@ -35,6 +35,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod agent_browser;
 mod auto_fix;
 mod background_tasks;
 mod chat;

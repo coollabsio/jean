@@ -43,6 +43,8 @@ fn is_replayable_chat_event(event: &str) -> bool {
             | "chat:permission_denied"
             | "chat:codex_command_approval_request"
             | "chat:codex_permission_request"
+            | "chat:opencode_permission_request"
+            | "chat:opencode_permission_replied"
             | "chat:codex_user_input_request"
             | "chat:codex_mcp_elicitation_request"
             | "chat:codex_dynamic_tool_call_request"
