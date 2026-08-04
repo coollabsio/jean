@@ -230,6 +230,10 @@ export function useInstallGrokCli() {
   })
 }
 
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_grok_cli_version_exists', { version })
+}
+
 export function useGrokCliSetup() {
   const status = useGrokCliStatus()
   const versions = useAvailableGrokVersions()
@@ -245,8 +249,6 @@ export function useGrokCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_grok_cli_version_exists', { version })
 
   return {
     status: status.data,

@@ -158,11 +158,15 @@ export function SetupState({
 
   const renderManualVersionInput = (disabled = false) => (
     <div className="space-y-1.5">
-      <label className="text-xs text-muted-foreground">
+      <label
+        htmlFor="cli-manual-version"
+        className="text-xs text-muted-foreground"
+      >
         Or enter a manual version
       </label>
       <div className="flex gap-2">
         <Input
+          id="cli-manual-version"
           type="text"
           placeholder="2.1.98"
           value={manualVersion}
@@ -214,7 +218,10 @@ export function SetupState({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-foreground">
+          <label
+            htmlFor="cli-select-version"
+            className="text-sm font-medium text-foreground"
+          >
             Select Version
           </label>
           {!isLoading && !isError && versions.length > 0 && onRetry && (
@@ -256,7 +263,7 @@ export function SetupState({
               value={selectedVersion ?? undefined}
               onValueChange={handleSelectVersion}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="cli-select-version" className="w-full">
                 <SelectValue placeholder="Select a version" />
               </SelectTrigger>
               <SelectContent>
@@ -503,13 +510,19 @@ export function AuthLoginState({
           {action === 'install' ? 'installation' : 'authentication'}
           {' process below.'}
         </p>
+        {action === 'login' && (
+          <p className="text-xs text-muted-foreground mt-2">
+            Click the terminal, then use ↑/↓ and Enter to choose options. The
+            provider list may take a few seconds to appear.
+          </p>
+        )}
       </div>
 
       <StandaloneTerminalSurface
         terminalId={terminalId}
         command={command}
         commandArgs={commandArgs}
-        className="h-[min(50dvh,380px)] sm:h-[360px]"
+        className="h-[min(50dvh,380px)] min-h-[200px] sm:h-[360px]"
       />
 
       {exitStatus && (
@@ -611,6 +624,7 @@ export function CliPathSelector({
 
       <div className="space-y-3">
         <button
+          type="button"
           onClick={() => {
             if (!pathFound) return
             dbg('CliPathSelector: user selected PATH for', cliName)
@@ -640,6 +654,7 @@ export function CliPathSelector({
         </button>
 
         <button
+          type="button"
           onClick={() => {
             dbg('CliPathSelector: user selected JEAN for', cliName)
             onSelectJean()

@@ -122,7 +122,7 @@ export function groupToolCalls(toolCalls: ToolCall[]): GroupedToolCall[] {
  * Item that can be stacked in a group (thinking or tool)
  */
 export type StackableItem =
-  | { type: 'thinking'; thinking: string }
+  | { type: 'thinking'; thinking: string; key: string }
   | { type: 'tool'; tool: ToolCall }
 
 /**
@@ -189,7 +189,7 @@ function mergeConsecutiveStackables(items: TimelineItem[]): TimelineItem[] {
           result.push({
             type: 'thinking',
             thinking: buffered.item.thinking,
-            key: buffered.key,
+            key: buffered.item.key,
           })
         }
       }
@@ -205,7 +205,11 @@ function mergeConsecutiveStackables(items: TimelineItem[]): TimelineItem[] {
       })
     } else if (item.type === 'thinking') {
       stackableBuffer.push({
-        item: { type: 'thinking', thinking: item.thinking },
+        item: {
+          type: 'thinking',
+          thinking: item.thinking,
+          key: item.key,
+        },
         key: item.key,
       })
     } else {
@@ -752,8 +756,10 @@ export function resolvePlanContent(params: {
   // Prefer full assistant text over thin checklist/status when a plan tool
   // exists but only has thin steps/explanation — YOLO/new-worktree handoff.
   const fullAssistantText = collectPlanTextCandidates(params)
-    .map(text => text.trim())
-    .filter(Boolean)
+    .flatMap(text => {
+      const trimmed = text.trim()
+      return trimmed ? [trimmed] : []
+    })
     .sort((a, b) => b.length - a.length)[0]
   const formattedSteps = formatPlanSteps(input)
   if (

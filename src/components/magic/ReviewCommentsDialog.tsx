@@ -128,24 +128,30 @@ function renderInlineMarkdown(line: string): ReactNode[] {
   // Tokenize for **bold**, *italic* / _italic_, `code`. Emojis/text untouched.
   const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`)/g
   const parts = line.split(pattern).filter(p => p !== '')
-  return parts.map((part, i) => {
+  const seen = new Map<string, number>()
+  return parts.map(part => {
+    const baseKey = part
+    const n = seen.get(baseKey) ?? 0
+    seen.set(baseKey, n + 1)
+    const key = n === 0 ? baseKey : `${baseKey}#${n}`
+
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={i} className="font-semibold">
+        <strong key={key} className="font-semibold">
           {part.slice(2, -2)}
         </strong>
       )
     }
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
       return (
-        <em key={i} className="italic">
+        <em key={key} className="italic">
           {part.slice(1, -1)}
         </em>
       )
     }
     if (part.startsWith('_') && part.endsWith('_') && part.length > 2) {
       return (
-        <em key={i} className="italic">
+        <em key={key} className="italic">
           {part.slice(1, -1)}
         </em>
       )
@@ -153,14 +159,14 @@ function renderInlineMarkdown(line: string): ReactNode[] {
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <code
-          key={i}
+          key={key}
           className="rounded bg-muted px-1 py-0.5 text-[0.875em] font-mono"
         >
           {part.slice(1, -1)}
         </code>
       )
     }
-    return <span key={i}>{part}</span>
+    return <span key={key}>{part}</span>
   })
 }
 
@@ -315,9 +321,9 @@ export function ReviewCommentsDialog() {
       // Pre-select only open threads — resolved/outdated stay unselected
       setSelected(
         new Set(
-          sortedInlineComments
-            .map((comment, i) => (isOpenReviewComment(comment) ? i : -1))
-            .filter(i => i >= 0)
+          sortedInlineComments.flatMap((comment, i) =>
+            isOpenReviewComment(comment) ? [i] : []
+          )
         )
       )
 
@@ -425,11 +431,11 @@ export function ReviewCommentsDialog() {
     [comments]
   )
   const filteredInlineEntries = useMemo(() => {
-    return comments
-      .map((comment, index) => ({ comment, index }))
-      .filter(({ comment }) =>
-        inlineFilter === 'all' ? true : isOpenReviewComment(comment)
-      )
+    return comments.flatMap((comment, index) =>
+      inlineFilter === 'all' || isOpenReviewComment(comment)
+        ? [{ comment, index }]
+        : []
+    )
   }, [comments, inlineFilter])
   const filteredInlineIndexes = useMemo(
     () => filteredInlineEntries.map(entry => entry.index),
@@ -448,25 +454,24 @@ export function ReviewCommentsDialog() {
   const allSelected =
     activeItemsLength > 0 && activeSelectedCount === activeItemsLength
 
+  // Clamp during render so filter/list shrinks never leave an out-of-range index
+  const safeActiveIndex =
+    activeItemsLength === 0 ? 0 : Math.min(activeIndex, activeItemsLength - 1)
+
+  const focusActiveRow = useCallback(
+    (index: number) => {
+      const row = activeRowRefs.current[`${tab}-${index}`]
+      row?.focus({ preventScroll: true })
+      row?.scrollIntoView?.({ block: 'nearest' })
+    },
+    [tab]
+  )
+
+  // Reset selection cursor when the visible list identity changes
   useEffect(() => {
     setActiveIndex(0)
-  }, [tab, inlineFilter])
-
-  useEffect(() => {
-    if (activeItemsLength === 0) {
-      if (activeIndex !== 0) setActiveIndex(0)
-      return
-    }
-    if (activeIndex >= activeItemsLength) {
-      setActiveIndex(activeItemsLength - 1)
-    }
-  }, [activeIndex, activeItemsLength])
-
-  useEffect(() => {
-    const row = activeRowRefs.current[`${tab}-${activeIndex}`]
-    row?.focus({ preventScroll: true })
-    row?.scrollIntoView?.({ block: 'nearest' })
-  }, [tab, activeIndex])
+    requestAnimationFrame(() => focusActiveRow(0))
+  }, [tab, inlineFilter, focusActiveRow])
 
   const toggleAll = useCallback(() => {
     if (tab === 'inline') {
@@ -518,14 +523,14 @@ export function ReviewCommentsDialog() {
   const getSelectedFormattedComments = useCallback((): string[] => {
     if (tab === 'inline') {
       // Only send currently visible + selected comments (respects Open/All filter)
-      return filteredInlineEntries
-        .filter(({ index }) => selected.has(index))
-        .map(({ comment }) => formatInlineReviewComment(comment))
+      return filteredInlineEntries.flatMap(({ index, comment }) =>
+        selected.has(index) ? [formatInlineReviewComment(comment)] : []
+      )
     }
 
-    return conversationItems
-      .filter((_, i) => conversationSelected.has(i))
-      .map(formatConversationReviewItem)
+    return conversationItems.flatMap((item, i) =>
+      conversationSelected.has(i) ? [formatConversationReviewItem(item)] : []
+    )
   }, [
     tab,
     filteredInlineEntries,
@@ -634,23 +639,27 @@ export function ReviewCommentsDialog() {
 
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setActiveIndex(index => Math.min(index + 1, activeItemsLength - 1))
+        const next = Math.min(safeActiveIndex + 1, activeItemsLength - 1)
+        setActiveIndex(next)
+        requestAnimationFrame(() => focusActiveRow(next))
         return
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault()
-        setActiveIndex(index => Math.max(index - 1, 0))
+        const next = Math.max(safeActiveIndex - 1, 0)
+        setActiveIndex(next)
+        requestAnimationFrame(() => focusActiveRow(next))
         return
       }
 
       if (event.key === 'Enter') {
         event.preventDefault()
         if (tab === 'inline') {
-          const originalIndex = filteredInlineEntries[activeIndex]?.index
+          const originalIndex = filteredInlineEntries[safeActiveIndex]?.index
           if (originalIndex !== undefined) toggleExpand(originalIndex)
         } else {
-          toggleConversationExpand(activeIndex)
+          toggleConversationExpand(safeActiveIndex)
         }
         return
       }
@@ -658,16 +667,17 @@ export function ReviewCommentsDialog() {
       if (event.key === ' ') {
         event.preventDefault()
         if (tab === 'inline') {
-          const originalIndex = filteredInlineEntries[activeIndex]?.index
+          const originalIndex = filteredInlineEntries[safeActiveIndex]?.index
           if (originalIndex !== undefined) toggleSelect(originalIndex)
         } else {
-          toggleConversationSelect(activeIndex)
+          toggleConversationSelect(safeActiveIndex)
         }
       }
     },
     [
-      activeIndex,
+      safeActiveIndex,
       activeItemsLength,
+      focusActiveRow,
       error,
       filteredInlineEntries,
       handleSendSeparately,
@@ -825,7 +835,7 @@ export function ReviewCommentsDialog() {
                     const lineInfo = comment.line ? `:${comment.line}` : ''
                     const date = formatCommentDate(comment.createdAt)
                     const preview = previewLine(comment.body)
-                    const isActive = activeIndex === rowIndex
+                    const isActive = safeActiveIndex === rowIndex
 
                     return (
                       <div
@@ -834,13 +844,15 @@ export function ReviewCommentsDialog() {
                           activeRowRefs.current[`inline-${rowIndex}`] = node
                         }}
                         data-active={isActive}
-                        tabIndex={isActive ? 0 : -1}
                         data-testid={`review-comment-row-inline-${rowIndex}`}
                         className={cn(
                           'px-3 py-2.5 outline-none transition-colors',
                           isActive && 'bg-accent/40 ring-1 ring-ring/50'
                         )}
-                        onClick={() => setActiveIndex(rowIndex)}
+                        onClick={() => {
+                          setActiveIndex(rowIndex)
+                          requestAnimationFrame(() => focusActiveRow(rowIndex))
+                        }}
                       >
                         <div className="flex items-start gap-2">
                           <Checkbox
@@ -961,22 +973,28 @@ export function ReviewCommentsDialog() {
                       getConversationItemDate(item)
                     )
 
-                    const isActive = activeIndex === index
+                    const isActive = safeActiveIndex === index
+                    const conversationKey =
+                      item.kind === 'comment'
+                        ? `comment:${item.data.author.login}:${item.data.created_at}:${body.slice(0, 80)}`
+                        : `review:${item.data.author.login}:${item.data.submittedAt ?? ''}:${item.data.state}:${body.slice(0, 80)}`
 
                     return (
                       <div
-                        key={index}
+                        key={conversationKey}
                         ref={node => {
                           activeRowRefs.current[`conversation-${index}`] = node
                         }}
                         data-active={isActive}
-                        tabIndex={isActive ? 0 : -1}
                         data-testid={`review-comment-row-conversation-${index}`}
                         className={cn(
                           'px-3 py-2.5 outline-none transition-colors',
                           isActive && 'bg-accent/40 ring-1 ring-ring/50'
                         )}
-                        onClick={() => setActiveIndex(index)}
+                        onClick={() => {
+                          setActiveIndex(index)
+                          requestAnimationFrame(() => focusActiveRow(index))
+                        }}
                       >
                         <div className="flex items-start gap-2">
                           <Checkbox

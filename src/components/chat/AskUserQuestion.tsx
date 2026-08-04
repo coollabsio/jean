@@ -1,4 +1,10 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+} from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -186,17 +192,21 @@ export function AskUserQuestion({
   }, [toolCallId, answers, onSubmit])
 
   // Listen for keyboard shortcut event (CMD+Enter)
+  const onAnswerQuestion = useEffectEvent(() => {
+    handleSubmit()
+  })
+
   useEffect(() => {
     if (readOnly) return
 
     const handleAnswerQuestion = () => {
-      handleSubmit()
+      onAnswerQuestion()
     }
 
     window.addEventListener('answer-question', handleAnswerQuestion)
     return () =>
       window.removeEventListener('answer-question', handleAnswerQuestion)
-  }, [readOnly, handleSubmit])
+  }, [readOnly])
 
   // Generate summary text for collapsed view
   const getAnswerSummary = useCallback(() => {
@@ -219,9 +229,10 @@ export function AskUserQuestion({
       if (answer.customText) {
         summaryParts.push(`"${answer.customText}"`)
       } else if (answer.selectedOptions.length > 0) {
-        const selectedLabels = answer.selectedOptions
-          .map(idx => question.options[idx]?.label)
-          .filter(Boolean)
+        const selectedLabels = answer.selectedOptions.flatMap(idx => {
+          const label = question.options[idx]?.label
+          return label ? [label] : []
+        })
         summaryParts.push(selectedLabels.join(', '))
       }
     }
@@ -277,6 +288,7 @@ export function AskUserQuestion({
             ? effectiveAnswers?.find(a => a.questionIndex === qIndex)
             : answers.get(qIndex)
           const allowsCustomText = question.isOther ?? true
+          const selectedOptionsSet = new Set(answer?.selectedOptions)
 
           return (
             <div key={qIndex}>
@@ -297,8 +309,7 @@ export function AskUserQuestion({
                 {readOnly ? (
                   <div className="space-y-2.5">
                     {question.options.map((option, oIndex) => {
-                      const isSelected =
-                        answer?.selectedOptions.includes(oIndex) ?? false
+                      const isSelected = selectedOptionsSet.has(oIndex)
                       return (
                         <div
                           key={oIndex}
@@ -340,16 +351,14 @@ export function AskUserQuestion({
                         key={oIndex}
                         className={cn(
                           'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
-                          answer?.selectedOptions.includes(oIndex)
+                          selectedOptionsSet.has(oIndex)
                             ? 'border-green-500/40 bg-green-500/10'
                             : 'border-transparent bg-muted/25 hover:bg-muted/40'
                         )}
                       >
                         <Checkbox
                           id={`${toolCallId}-q${qIndex}-o${oIndex}`}
-                          checked={
-                            answer?.selectedOptions.includes(oIndex) ?? false
-                          }
+                          checked={selectedOptionsSet.has(oIndex)}
                           onCheckedChange={() => toggleOption(qIndex, oIndex)}
                           className="mt-0.5 cursor-pointer"
                         />
@@ -382,7 +391,7 @@ export function AskUserQuestion({
                         key={oIndex}
                         className={cn(
                           'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
-                          answer?.selectedOptions.includes(oIndex)
+                          selectedOptionsSet.has(oIndex)
                             ? 'border-green-500/40 bg-green-500/10'
                             : 'border-transparent bg-muted/25 hover:bg-muted/40'
                         )}

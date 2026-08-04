@@ -108,7 +108,7 @@ export const WebAccessPane: React.FC = () => {
   const [bindHostOptions, setBindHostOptions] = useState<BindHostOption[]>([])
   const [tokenVisible, setTokenVisible] = useState(false)
   const [isToggling, setIsToggling] = useState(false)
-  const [bindHostInput, setBindHostInput] = useState(
+  const [bindHostInput, setBindHostInput] = useState(() =>
     getConfiguredBindHost(preferences)
   )
 

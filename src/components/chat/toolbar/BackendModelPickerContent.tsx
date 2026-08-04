@@ -1,5 +1,12 @@
 import { Check, RefreshCw, Star, Zap } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Input } from '@/components/ui/input'
 import {
   Command,
@@ -240,15 +247,28 @@ export function BackendModelPickerContent({
     [baseBackendModelSections, defaultModelOption]
   )
 
+  const installedBackendsSet = useMemo(
+    () => new Set(installedBackends),
+    [installedBackends]
+  )
+
   const sidebarBackends = useMemo(
     () =>
-      backendModelSections
-        .filter(section => installedBackends.includes(section.backend))
-        .map(section => section.backend),
-    [backendModelSections, installedBackends]
+      backendModelSections.flatMap(section =>
+        installedBackendsSet.has(section.backend) ? [section.backend] : []
+      ),
+    [backendModelSections, installedBackendsSet]
   )
 
   const showSidebar = sidebarBackends.length > 1
+
+  // Clear search only when the picker opens — not on every sidebarBackends
+  // identity change (that array is rebuilt often and wiping search mid-type
+  // left Cmd+F acting on the unfiltered first catalog row).
+  useEffect(() => {
+    if (!open) return
+    setSearch('')
+  }, [open])
 
   // Sync active backend with locked selection / when picker opens.
   // Never leave activeBackend on an uninstalled backend (empty model list).
@@ -264,11 +284,6 @@ export function BackendModelPickerContent({
       return sidebarBackends[0] ?? selectedBackend
     })
   }, [open, isLocked, selectedBackend, sidebarBackends])
-
-  // Reset search whenever active backend changes or picker opens
-  useEffect(() => {
-    setSearch('')
-  }, [activeBackend, open])
 
   const activeSection = useMemo(
     () =>
@@ -316,30 +331,45 @@ export function BackendModelPickerContent({
     []
   )
 
-  useEffect(() => {
-    if (!open) return
-    setHighlightedValue(current => {
-      const currentStillVisible = filteredOptions.some(
-        option => getOptionCommandValue(activeBackend, option.value) === current
-      )
-      if (currentStillVisible) return current
+  // Derive a valid highlight from the current option list (avoids effect chain
+  // when activeBackend / filteredOptions change after open or search).
+  const resolvedHighlightedValue = useMemo(() => {
+    if (!open) return highlightedValue
+    const currentStillVisible = filteredOptions.some(
+      option =>
+        getOptionCommandValue(activeBackend, option.value) === highlightedValue
+    )
+    if (currentStillVisible) return highlightedValue
+    const firstOption = filteredOptions[0]
+    return firstOption
+      ? getOptionCommandValue(activeBackend, firstOption.value)
+      : ''
+  }, [
+    activeBackend,
+    filteredOptions,
+    getOptionCommandValue,
+    highlightedValue,
+    open,
+  ])
 
-      const firstOption = filteredOptions[0]
-      return firstOption
-        ? getOptionCommandValue(activeBackend, firstOption.value)
-        : ''
-    })
-  }, [activeBackend, filteredOptions, getOptionCommandValue, open])
-
-  const highlightedOption = useMemo(
-    () =>
-      filteredOptions.find(
-        option =>
-          getOptionCommandValue(activeBackend, option.value) ===
-          highlightedValue
-      ) ?? filteredOptions[0],
-    [activeBackend, filteredOptions, getOptionCommandValue, highlightedValue]
-  )
+  const highlightedOption = useMemo(() => {
+    const match = filteredOptions.find(
+      option =>
+        getOptionCommandValue(activeBackend, option.value) ===
+        resolvedHighlightedValue
+    )
+    if (match) return match
+    // Only fall back to the first visible option when we have a resolved
+    // highlight target. An empty resolved value means "nothing selected"
+    // (e.g. search with zero matches) — do not invent a fast-mode target.
+    if (!resolvedHighlightedValue) return undefined
+    return filteredOptions[0]
+  }, [
+    activeBackend,
+    filteredOptions,
+    getOptionCommandValue,
+    resolvedHighlightedValue,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -384,6 +414,7 @@ export function BackendModelPickerContent({
     (backend: CliBackend) => {
       if (isLocked && backend !== selectedBackend) return
       setActiveBackend(backend)
+      setSearch('')
       window.requestAnimationFrame(() => {
         searchInputRef.current?.focus()
       })
@@ -437,6 +468,23 @@ export function BackendModelPickerContent({
     setFastRemembered,
   ])
 
+  const onUseHighlightedFastMode = useEffectEvent(() => {
+    handleUseHighlightedFastMode()
+  })
+
+  const onBackendDigitShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (!(event.metaKey || event.ctrlKey)) return
+    if (event.altKey || event.shiftKey) return
+    const match = event.code.match(/^Digit([1-9])$/)
+    if (!match) return
+    const idx = Number(match[1]) - 1
+    const backend = sidebarBackends[idx]
+    if (!backend) return
+    event.preventDefault()
+    event.stopPropagation()
+    handleBackendButtonClick(backend)
+  })
+
   useEffect(() => {
     if (!open) return
     const handler = (event: KeyboardEvent) => {
@@ -446,29 +494,18 @@ export function BackendModelPickerContent({
 
       event.preventDefault()
       event.stopPropagation()
-      handleUseHighlightedFastMode()
+      onUseHighlightedFastMode()
     }
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [handleUseHighlightedFastMode, open])
+  }, [open])
 
   useEffect(() => {
     if (!open || sidebarBackends.length <= 1) return
-    const handler = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return
-      if (event.altKey || event.shiftKey) return
-      const match = event.code.match(/^Digit([1-9])$/)
-      if (!match) return
-      const idx = Number(match[1]) - 1
-      const backend = sidebarBackends[idx]
-      if (!backend) return
-      event.preventDefault()
-      event.stopPropagation()
-      handleBackendButtonClick(backend)
-    }
+    const handler = (event: KeyboardEvent) => onBackendDigitShortcut(event)
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [open, sidebarBackends, handleBackendButtonClick])
+  }, [open, sidebarBackends.length])
 
   // Always surface the active Claude custom provider in the model picker so
   // mid-session switches stay discoverable (provider is changed via the
@@ -508,7 +545,7 @@ export function BackendModelPickerContent({
         {!isMobile && sidebar}
         <Command
           shouldFilter={false}
-          value={highlightedValue}
+          value={resolvedHighlightedValue}
           onValueChange={setHighlightedValue}
           className="flex h-full min-w-0 flex-1 flex-col"
         >
@@ -517,7 +554,15 @@ export function BackendModelPickerContent({
               ref={searchInputRef}
               value={search}
               spellCheck={false}
-              onChange={event => setSearch(event.target.value)}
+              onChange={event => {
+                const next = event.target.value
+                setSearch(next)
+                // Drop the previous highlight so the next render re-resolves to
+                // the first option that matches the new query (or nothing).
+                // Without this, a prior highlight can survive a filter change
+                // and Cmd+F would act on a model no longer on screen.
+                setHighlightedValue('')
+              }}
               onKeyDown={event => {
                 if (event.key === 'Escape') {
                   event.preventDefault()

@@ -242,13 +242,11 @@ export function CheckpointRestoreDialog({
         await restoreAiCheckpoint(worktreeId, checkpoint.id)
         toast.success('Entire worktree restored to checkpoint')
       } else if (pendingApproval === 'applyAi' && aiProposal) {
-        const files: RestoreFileProposal[] = aiProposal.files
-          .filter(f => selectedProposalPaths.has(f.path) || f.action === 'skip')
-          .map(f =>
-            selectedProposalPaths.has(f.path)
-              ? f
-              : { ...f, action: 'skip' as const }
-          )
+        const files: RestoreFileProposal[] = aiProposal.files.flatMap(f => {
+          if (selectedProposalPaths.has(f.path)) return [f]
+          if (f.action === 'skip') return [{ ...f, action: 'skip' as const }]
+          return []
+        })
         const result = await applyAiCheckpointRestoreProposal(
           worktreeId,
           checkpoint.id,
@@ -296,9 +294,9 @@ export function CheckpointRestoreDialog({
       )
       setAiProposal(proposal)
       setPendingApproval(null)
-      const selectable = proposal.files
-        .filter(f => f.action !== 'skip')
-        .map(f => f.path)
+      const selectable = proposal.files.flatMap(f =>
+        f.action !== 'skip' ? [f.path] : []
+      )
       setSelectedProposalPaths(new Set(selectable))
       if (proposal.files.length === 0 && proposal.cleanPaths.length > 0) {
         toast.message('No conflicts — restore clean files instead')
@@ -493,6 +491,7 @@ export function CheckpointRestoreDialog({
                           checked={selectedProposalPaths.has(f.path)}
                           disabled={f.action === 'skip'}
                           onChange={() => toggleProposalPath(f.path)}
+                          aria-label={`Select ${f.path}`}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">

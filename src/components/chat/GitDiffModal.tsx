@@ -1,6 +1,7 @@
 import {
   useState,
   useEffect,
+  useEffectEvent,
   useCallback,
   useRef,
   useMemo,
@@ -162,6 +163,7 @@ const CommentInputBar = memo(function CommentInputBar({
         onChange={e => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="What should I do with this code?"
+        aria-label="What should I do with this code?"
         className="flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
       />
       <button
@@ -175,6 +177,7 @@ const CommentInputBar = memo(function CommentInputBar({
       <button
         type="button"
         onClick={onCancel}
+        aria-label="Cancel"
         className="p-1 text-muted-foreground hover:text-foreground"
       >
         <X className="h-3.5 w-3.5" />
@@ -335,6 +338,13 @@ export function GitDiffModal({
           request.baseRemote
         )
         setDiff(result)
+        // Cache stats with the load so tab switches don't need a chained effect
+        const stats: DiffStats = {
+          added: result.total_additions,
+          removed: result.total_deletions,
+        }
+        if (request.type === 'branch') setCachedBranchStats(stats)
+        else if (request.type === 'uncommitted') setCachedUncommittedStats(stats)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -395,17 +405,6 @@ export function GitDiffModal({
       opToast.error(`Failed to commit: ${error}`)
     }
   }, [diffRequest, isCommitting, preferences, loadDiff])
-
-  // Cache backend stats per tab so they persist across tab switches
-  useEffect(() => {
-    if (!diff) return
-    const stats: DiffStats = {
-      added: diff.total_additions,
-      removed: diff.total_deletions,
-    }
-    if (activeDiffType === 'branch') setCachedBranchStats(stats)
-    else if (activeDiffType === 'uncommitted') setCachedUncommittedStats(stats)
-  }, [diff, activeDiffType])
 
   /** Map @pierre/diffs file type back to backend git status */
   const diffTypeToStatus = useCallback((type: string): string => {
@@ -485,7 +484,10 @@ export function GitDiffModal({
   // Store line selection callbacks per file to maintain stable references
   const lineSelectedCallbacksRef = useRef<
     Map<string, (range: SelectedLineRange | null) => void>
-  >(new Map())
+  >(null!)
+  if (!lineSelectedCallbacksRef.current) {
+    lineSelectedCallbacksRef.current = new Map()
+  }
 
   // Get or create a stable callback for a specific file
   const getLineSelectedCallback = useCallback((fileName: string) => {
@@ -756,6 +758,10 @@ export function GitDiffModal({
 
   // Commit selected (or all) uncommitted files with Cmd+Enter from the diff modal.
   // Preserve normal copy behavior while typing or when any text is selected.
+  const onCommitFromDiffKey = useEffectEvent(() => {
+    handleCommitFromDiff()
+  })
+
   useEffect(() => {
     if (!diffRequest || !canCommitFromDiff) return
 
@@ -774,12 +780,12 @@ export function GitDiffModal({
 
       e.preventDefault()
       e.stopPropagation()
-      handleCommitFromDiff()
+      onCommitFromDiffKey()
     }
 
     document.addEventListener('keydown', handleKeyDown, true)
     return () => document.removeEventListener('keydown', handleKeyDown, true)
-  }, [diffRequest, canCommitFromDiff, handleCommitFromDiff])
+  }, [diffRequest, canCommitFromDiff])
 
   // Scroll the active file diff while the full-screen diff modal owns focus.
   // The global chat-scroll shortcuts are blocked by open dialogs, so handle
@@ -970,6 +976,12 @@ export function GitDiffModal({
   )
 
   // Keyboard shortcuts for switching diff tabs
+  const onSwitchDiffTypeKey = useEffectEvent(
+    (shortcutType: 'uncommitted' | 'branch' | 'commits' | 'checkpoints') => {
+      handleSwitchDiffType(shortcutType)
+    }
+  )
+
   useEffect(() => {
     if (!diffRequest || !showSwitcher) return
 
@@ -1002,12 +1014,12 @@ export function GitDiffModal({
 
       e.preventDefault()
       e.stopPropagation()
-      handleSwitchDiffType(shortcutType)
+      onSwitchDiffTypeKey(shortcutType)
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [diffRequest, showSwitcher, handleSwitchDiffType])
+  }, [diffRequest, showSwitcher])
 
   const title =
     activeDiffType === 'uncommitted'
@@ -1383,6 +1395,7 @@ export function GitDiffModal({
                                   setSelectedFileIndex(0)
                                 }}
                                 placeholder="Filter files..."
+                                aria-label="Filter files"
                                 className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
                               />
                             </div>
@@ -1398,13 +1411,12 @@ export function GitDiffModal({
                               activeDiffType === 'uncommitted' &&
                               gitDiffSelectedFiles.has(file.fileName)
                             return (
-                              <button
+                              <div
                                 key={file.key}
-                                type="button"
                                 data-index={index}
                                 onClick={() => handleSelectFile(index)}
                                 className={cn(
-                                  'w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors',
+                                  'w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors cursor-pointer',
                                   'hover:bg-muted/50',
                                   isSelected && 'bg-accent',
                                   isCheckedForCommit &&
@@ -1413,9 +1425,11 @@ export function GitDiffModal({
                                 )}
                               >
                                 {activeDiffType === 'uncommitted' && (
-                                  <div
+                                  <button
+                                    type="button"
                                     role="checkbox"
                                     aria-checked={isCheckedForCommit}
+                                    aria-label={`Select ${file.fileName} for commit`}
                                     onClick={e => {
                                       e.stopPropagation()
                                       useUIStore
@@ -1434,7 +1448,7 @@ export function GitDiffModal({
                                     {isCheckedForCommit && (
                                       <Check className="h-2.5 w-2.5" />
                                     )}
-                                  </div>
+                                  </button>
                                 )}
                                 <FileText
                                   className={cn(
@@ -1457,7 +1471,7 @@ export function GitDiffModal({
                                     </span>
                                   )}
                                 </div>
-                              </button>
+                              </div>
                             )
                           })}
                         </div>
@@ -1569,6 +1583,7 @@ export function GitDiffModal({
                                     setSelectedFileIndex(0)
                                   }}
                                   placeholder="Filter files..."
+                                  aria-label="Filter files"
                                   className="w-full bg-muted text-base outline-none border border-border pl-7 pr-2 py-2.5 placeholder:text-muted-foreground focus:border-ring md:text-sm"
                                 />
                               </div>
@@ -1586,12 +1601,11 @@ export function GitDiffModal({
                                 gitDiffSelectedFiles.has(file.fileName)
 
                               const fileButton = (
-                                <button
-                                  type="button"
+                                <div
                                   data-index={index}
                                   onClick={() => handleSelectFile(index)}
                                   className={cn(
-                                    'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors',
+                                    'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors cursor-pointer',
                                     'hover:bg-muted/50',
                                     isSelected && 'bg-accent',
                                     isCheckedForCommit &&
@@ -1600,9 +1614,11 @@ export function GitDiffModal({
                                   )}
                                 >
                                   {activeDiffType === 'uncommitted' && (
-                                    <div
+                                    <button
+                                      type="button"
                                       role="checkbox"
                                       aria-checked={isCheckedForCommit}
+                                      aria-label={`Select ${file.fileName} for commit`}
                                       onClick={e => {
                                         e.stopPropagation()
                                         useUIStore
@@ -1621,7 +1637,7 @@ export function GitDiffModal({
                                       {isCheckedForCommit && (
                                         <Check className="h-2.5 w-2.5" />
                                       )}
-                                    </div>
+                                    </button>
                                   )}
                                   <FileText
                                     className={cn(
@@ -1644,7 +1660,7 @@ export function GitDiffModal({
                                       </span>
                                     )}
                                   </div>
-                                </button>
+                                </div>
                               )
 
                               return activeDiffType === 'uncommitted' ? (

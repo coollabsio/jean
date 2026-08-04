@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::platform::wsl_aware_command;
 
 use super::git::resolve_git_dirs;
-use super::git_status::{parse_unified_diff, DiffFile, GitDiff};
+use super::git_status::{parse_unified_diff, DiffFile, GitDiff, GIT_NO_QUOTE_PATH_ARGS};
 
 /// Max checkpoints retained per worktree (oldest pruned first).
 const MAX_CHECKPOINTS_PER_WORKTREE: usize = 100;
@@ -346,7 +346,10 @@ fn delete_checkpoint_refs(repo_path: &str, id: &str) {
 
 /// Diff two trees/commits (or a commit vs working tree when `to` is None).
 fn diff_commits(repo_path: &str, from: &str, to: Option<&str>) -> Result<GitDiff, String> {
-    let mut args = vec!["diff", "--unified=3", from];
+    // Emit raw UTF-8 paths so frontend patch parsers work with non-ASCII names (#631).
+    let mut args = Vec::with_capacity(6);
+    args.extend_from_slice(GIT_NO_QUOTE_PATH_ARGS);
+    args.extend_from_slice(&["diff", "--unified=3", from]);
     if let Some(to_ref) = to {
         args.push(to_ref);
     }
@@ -408,9 +411,16 @@ fn diff_commits(repo_path: &str, from: &str, to: Option<&str>) -> Result<GitDiff
 }
 
 fn list_untracked_relative(repo_path: &str) -> Vec<String> {
+    // Raw UTF-8 paths — see GIT_NO_QUOTE_PATH_ARGS / #631.
     let Ok(stdout) = git_output(
         repo_path,
-        &["ls-files", "--others", "--exclude-standard"],
+        &[
+            "-c",
+            "core.quotePath=false",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ],
         None,
     ) else {
         return Vec::new();

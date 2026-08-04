@@ -288,6 +288,13 @@ const backendPaneMeta = {
   Record<PreferencesPaneScope, { description: React.ReactNode }>
 >
 
+function formatOpenCodeModelLabelForSettings(value: string) {
+  const formatted = formatOpencodeModelLabel(value)
+  return value.startsWith('opencode/')
+    ? formatted.replace(/\s+\(OpenCode\)$/, '')
+    : formatted
+}
+
 export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   scope = 'general',
 }) => {
@@ -1136,12 +1143,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
   const selectedOpenCodeModel =
     preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
-  const formatOpenCodeModelLabelForSettings = (value: string) => {
-    const formatted = formatOpencodeModelLabel(value)
-    return value.startsWith('opencode/')
-      ? formatted.replace(/\s+\(OpenCode\)$/, '')
-      : formatted
-  }
   const openCodeModelOptions = (
     availableOpencodeModels?.length
       ? availableOpencodeModels
@@ -1186,12 +1187,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedKimiModel = preferences?.selected_kimi_model ?? 'kimi/default'
   const kimiModelOptions: { value: KimiModel; label: string }[] = [
     ...(KIMI_MODEL_OPTIONS as { value: KimiModel; label: string }[]),
-    ...(availableKimiModels ?? [])
-      .filter(model => model.id !== 'default')
-      .map(model => ({
-        value: `kimi/${model.id}` as KimiModel,
-        label: model.isDefault ? `${model.label} (default)` : model.label,
-      })),
+    ...(availableKimiModels ?? []).flatMap(model =>
+      model.id === 'default'
+        ? []
+        : [
+            {
+              value: `kimi/${model.id}` as KimiModel,
+              label: model.isDefault ? `${model.label} (default)` : model.label,
+            },
+          ]
+    ),
   ]
   const selectedKimiModelLabel =
     kimiModelOptions.find(option => option.value === selectedKimiModel)
@@ -1917,6 +1922,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.claude_cli_source === 'path'
@@ -2076,6 +2082,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.gh_cli_source === 'path'
@@ -2233,6 +2240,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.coderabbit_cli_source === 'path'
@@ -2394,6 +2402,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.codex_cli_source === 'path'
@@ -2563,6 +2572,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.opencode_cli_source === 'path'
@@ -2699,6 +2709,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           cursorPathDetection?.path ?? cursorStatus?.path
@@ -2805,6 +2816,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.pi_cli_source === 'path'
@@ -2931,6 +2943,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.commandcode_cli_source === 'path'
@@ -3576,6 +3589,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.grok_cli_source === 'path'
@@ -3767,6 +3781,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.kimi_cli_source === 'path'

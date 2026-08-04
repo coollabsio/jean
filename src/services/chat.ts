@@ -968,6 +968,7 @@ export function useUpdateSessionState() {
       pendingPermissionDenials,
       pendingCodexCommandApprovalRequests,
       pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
       pendingCodexUserInputRequests,
       pendingCodexMcpElicitationRequests,
       pendingCodexDynamicToolCallRequests,
@@ -1012,6 +1013,17 @@ export function useUpdateSessionState() {
         item_id: string
         permissions: unknown
         reason?: string | null
+      }[]
+      pendingOpencodePermissionRequests?: {
+        request_id: string
+        opencode_session_id: string
+        permission: string
+        patterns: string[]
+        always: string[]
+        metadata?: unknown
+        tool_call_id?: string | null
+        working_dir?: string | null
+        api_version?: string
       }[]
       pendingCodexUserInputRequests?: {
         rpc_id: number
@@ -1062,6 +1074,7 @@ export function useUpdateSessionState() {
         pendingPermissionDenials,
         pendingCodexCommandApprovalRequests,
         pendingCodexPermissionRequests,
+        pendingOpencodePermissionRequests,
         pendingCodexUserInputRequests,
         pendingCodexMcpElicitationRequests,
         pendingCodexDynamicToolCallRequests,
@@ -2657,9 +2670,10 @@ export function formatAnswersAsNaturalLanguage(
     const question = questions[answer.questionIndex]
     if (!question) continue
 
-    const selectedLabels = answer.selectedOptions
-      .map(idx => question.options[idx]?.label)
-      .filter(Boolean)
+    const selectedLabels = answer.selectedOptions.flatMap(idx => {
+      const label = question.options[idx]?.label
+      return label ? [label] : []
+    })
 
     if (selectedLabels.length > 0 || answer.customText) {
       let text = `For "${question.question}"`

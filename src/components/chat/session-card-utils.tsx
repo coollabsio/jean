@@ -13,6 +13,7 @@ import {
   type PermissionDenial,
   type LabelData,
   type CodexPermissionRequest,
+  type OpenCodePermissionRequest,
   type CodexCommandApprovalRequest,
   type CodexUserInputRequest,
   type CodexMcpElicitationRequest,
@@ -265,6 +266,7 @@ export interface ChatStoreState {
   sessionStatusOverrides: Record<string, ManualSessionStatus>
   pendingPermissionDenials: Record<string, PermissionDenial[]>
   pendingCodexPermissionRequests: Record<string, CodexPermissionRequest[]>
+  pendingOpencodePermissionRequests: Record<string, OpenCodePermissionRequest[]>
   pendingCodexCommandApprovalRequests: Record<
     string,
     CodexCommandApprovalRequest[]
@@ -422,6 +424,7 @@ export function computeSessionCardData(
     sessionStatusOverrides,
     pendingPermissionDenials,
     pendingCodexPermissionRequests,
+    pendingOpencodePermissionRequests,
     pendingCodexCommandApprovalRequests,
     pendingCodexUserInputRequests,
     pendingCodexMcpElicitationRequests,
@@ -579,11 +582,16 @@ export function computeSessionCardData(
   const permissionDenialCount =
     sessionDenials.length > 0 ? sessionDenials.length : persistedDenials.length
 
-  // Codex pending approval/input queues (store first, then session persistence)
-  const hasCodexPermission = hasPendingEntries(
-    pendingCodexPermissionRequests[session.id],
-    session.pending_codex_permission_requests
-  )
+  // Codex / OpenCode pending approval/input queues (store first, then session persistence)
+  const hasCodexPermission =
+    hasPendingEntries(
+      pendingCodexPermissionRequests[session.id],
+      session.pending_codex_permission_requests
+    ) ||
+    hasPendingEntries(
+      pendingOpencodePermissionRequests[session.id],
+      session.pending_opencode_permission_requests
+    )
   const hasCodexCommandApproval = hasPendingEntries(
     pendingCodexCommandApprovalRequests[session.id],
     session.pending_codex_command_approval_requests

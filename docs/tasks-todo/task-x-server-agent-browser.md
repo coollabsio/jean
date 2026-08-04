@@ -10,13 +10,16 @@ Design: `docs/developer/server-agent-browser.md`
 
 ## Phase 1 (MVP product)
 
-- [ ] App-data profile dir: `$app_data/agent-browser/profile`
-- [ ] Commands: status, install MCP config for selected backends, optional
-      reset profile (confirm)
-- [ ] Reuse `jean_mcp_config` writers for safe Claude/Codex/OpenCode/… upsert
-- [ ] Preferences + Settings UI (Integrations or Experimental)
-- [ ] Docs: operator setup (Node, Playwright browsers, headed vs headless)
-- [ ] Register commands in `lib.rs` generate_handler **and** `dispatch.rs`
+- [x] Engine: vercel-labs/agent-browser (Chromium + Jean profile)
+- [x] App-data profile dir: `$app_data/agent-browser/profile`
+- [x] Commands: `get_agent_browser_status`, `ensure_agent_browser_profile`,
+      `install_agent_browser` (npm + Chromium), `install_agent_browser_mcp`
+- [x] MCP config writers for Claude/Codex/OpenCode/Cursor/Grok/Kimi
+- [x] Settings → MCP → Agent Browser UI
+- [x] Auto-enable MCP in preferences on install
+- [x] Register commands in `dispatch.rs` (native + web access)
+- [x] Unit tests for snippets / config upsert
+- [ ] Optional: destructive reset profile (confirm)
 
 ## Phase 2
 

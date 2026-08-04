@@ -24,7 +24,10 @@ import {
   upsertCodexUserInputRequest,
 } from '@/types/chat'
 import { playNotificationSound } from '@/lib/sounds'
-import { notifyIfBackground } from '@/lib/session-notifications'
+import {
+  notifyIfBackground,
+  notifySessionNeedsAttention,
+} from '@/lib/session-notifications'
 import { findPlanFilePath } from '@/components/chat/tool-call-utils'
 import { generateId } from '@/lib/uuid'
 import {
@@ -44,6 +47,8 @@ import type {
   PermissionDeniedEvent,
   CodexCommandApprovalRequestEvent,
   CodexPermissionRequestEvent,
+  OpenCodePermissionRequestEvent,
+  OpenCodePermissionRepliedEvent,
   CodexUserInputRequestEvent,
   CodexMcpElicitationRequestEvent,
   CodexDynamicToolCallRequestEvent,
@@ -302,9 +307,15 @@ export default function useStreamingEvents({
     const cancelledRunIds = new Map<string, Set<string>>()
     const cancelledUntaggedSessionIds = new Set<string>()
 
-    // Fire a native OS banner (background-only) for a session lifecycle event,
-    // gated by the desktop_notifications_enabled preference. Body = session name.
-    const notifySession = (sessionId: string, title: string): void => {
+    // Fire a native OS banner for a session lifecycle event, gated by the
+    // desktop_notifications_enabled preference. Body = session name.
+    // Waiting-for-input uses notifySessionNeedsAttention so approvals still
+    // notify when Jean is focused on a different session (issue #626).
+    const notifySession = (
+      sessionId: string,
+      title: string,
+      kind: 'waiting' | 'lifecycle' = 'lifecycle'
+    ): void => {
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
@@ -312,7 +323,11 @@ export default function useStreamingEvents({
       const name = queryClient.getQueryData<Session>(
         chatQueryKeys.session(sessionId)
       )?.name
-      notifyIfBackground(title, name)
+      if (kind === 'waiting') {
+        notifySessionNeedsAttention(sessionId, title, name)
+      } else {
+        notifyIfBackground(title, name)
+      }
     }
 
     // Play the configured waiting sound (settings preview + chat:done share this).
@@ -778,7 +793,7 @@ export default function useStreamingEvents({
       setPendingCodexMcpElicitationRequests(sessionId, next)
       setWaitingForInput(sessionId, true)
       playWaitingSound()
-      notifySession(sessionId, 'Needs your input')
+      notifySession(sessionId, 'Needs your input', 'waiting')
       persistCodexPendingState(sessionId, worktreeId, {
         pendingCodexMcpElicitationRequests: next,
       })
@@ -797,12 +812,62 @@ export default function useStreamingEvents({
         setPendingCodexPermissionRequests(session_id, next)
         setWaitingForInput(session_id, true)
         playWaitingSound()
-        notifySession(session_id, 'Needs your input')
+        notifySession(session_id, 'Needs your input', 'waiting')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexPermissionRequests: next,
         })
       }
     )
+
+    const unlistenOpencodePermissionRequest =
+      listen<OpenCodePermissionRequestEvent>(
+        'chat:opencode_permission_request',
+        event => {
+          const { session_id, worktree_id, request } = event.payload
+          const { setPendingOpencodePermissionRequests, setWaitingForInput } =
+            useChatStore.getState()
+          const current =
+            useChatStore.getState().pendingOpencodePermissionRequests[
+              session_id
+            ] ?? []
+          // Deduplicate by request_id (SSE reconnects can redeliver)
+          if (current.some(r => r.request_id === request.request_id)) {
+            return
+          }
+          const next = [...current, request]
+          setPendingOpencodePermissionRequests(session_id, next)
+          setWaitingForInput(session_id, true)
+          playWaitingSound()
+          notifySession(session_id, 'Needs your input')
+          persistCodexPendingState(session_id, worktree_id, {
+            pendingOpencodePermissionRequests: next,
+          })
+        }
+      )
+
+    const unlistenOpencodePermissionReplied =
+      listen<OpenCodePermissionRepliedEvent>(
+        'chat:opencode_permission_replied',
+        event => {
+          const { session_id, worktree_id, request_id } = event.payload
+          const { setPendingOpencodePermissionRequests, setWaitingForInput } =
+            useChatStore.getState()
+          const current =
+            useChatStore.getState().pendingOpencodePermissionRequests[
+              session_id
+            ] ?? []
+          if (current.length === 0) return
+          const next = current.filter(r => r.request_id !== request_id)
+          if (next.length === current.length) return
+          setPendingOpencodePermissionRequests(session_id, next)
+          if (next.length === 0) {
+            setWaitingForInput(session_id, false)
+          }
+          persistCodexPendingState(session_id, worktree_id, {
+            pendingOpencodePermissionRequests: next,
+          })
+        }
+      )
 
     const unlistenCodexCommandApprovalRequest =
       listen<CodexCommandApprovalRequestEvent>(
@@ -819,7 +884,7 @@ export default function useStreamingEvents({
           setPendingCodexCommandApprovalRequests(session_id, next)
           setWaitingForInput(session_id, true)
           playWaitingSound()
-          notifySession(session_id, 'Needs your input')
+          notifySession(session_id, 'Needs your input', 'waiting')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexCommandApprovalRequests: next,
           })
@@ -856,7 +921,7 @@ export default function useStreamingEvents({
         if (next === current) return
 
         playWaitingSound()
-        notifySession(session_id, 'Needs your input')
+        notifySession(session_id, 'Needs your input', 'waiting')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexUserInputRequests: next,
         })
@@ -904,7 +969,7 @@ export default function useStreamingEvents({
           setPendingCodexDynamicToolCallRequests(session_id, next)
           setWaitingForInput(session_id, true)
           playWaitingSound()
-          notifySession(session_id, 'Needs your input')
+          notifySession(session_id, 'Needs your input', 'waiting')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexDynamicToolCallRequests: next,
           })
@@ -1188,7 +1253,7 @@ export default function useStreamingEvents({
 
           // Play waiting sound
           playWaitingSound()
-          notifySession(sessionId, 'Needs your input')
+          notifySession(sessionId, 'Needs your input', 'waiting')
         }
       } else if (event.payload.waiting_for_plan) {
         // Codex/Opencode plan-mode run completed with content — enter plan-waiting state.
@@ -1351,7 +1416,7 @@ export default function useStreamingEvents({
 
         // Play waiting sound
         playWaitingSound()
-        notifySession(sessionId, 'Needs your input')
+        notifySession(sessionId, 'Needs your input', 'waiting')
       } else {
         // No blocking tools — add optimistic message FIRST, then batch-clear state.
         // This eliminates the flicker gap where neither streaming nor persisted content is visible.
@@ -1445,7 +1510,7 @@ export default function useStreamingEvents({
           }
 
           playWaitingSound()
-          notifySession(sessionId, 'Needs your input')
+          notifySession(sessionId, 'Needs your input', 'waiting')
         } else {
           // 2. Update last_run_status + session state in caches so UI reflects immediately.
           // CRITICAL: Include waiting_for_input/is_reviewing so
@@ -2318,6 +2383,8 @@ export default function useStreamingEvents({
       unlistenToolEvent.then(f => f())
       unlistenPermissionDenied.then(f => f())
       unlistenCodexPermissionRequest.then(f => f())
+      unlistenOpencodePermissionRequest.then(f => f())
+      unlistenOpencodePermissionReplied.then(f => f())
       unlistenCodexCommandApprovalRequest.then(f => f())
       unlistenCodexUserInputRequest.then(f => f())
       unlistenCodexMcpElicitation.then(f => f())

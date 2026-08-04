@@ -208,9 +208,11 @@ export function useScrollManagement({
     if (!viewport) return
 
     let currentTarget: Element | null = null
+    let disposed = false
 
     const intersectionObs = new IntersectionObserver(
       entries => {
+        if (disposed) return
         for (const entry of entries) {
           setAreFindingsVisible(entry.isIntersecting)
         }
@@ -218,35 +220,41 @@ export function useScrollManagement({
       { root: viewport, threshold: 0 }
     )
 
-    const observeFindings = () => {
+    const mutationObs = new MutationObserver(() => {
+      if (disposed) return
       const el = viewport.querySelector('[data-review-findings="unfixed"]')
-      if (el !== currentTarget) {
-        if (currentTarget) intersectionObs.unobserve(currentTarget)
-        currentTarget = el
-        if (el) {
-          intersectionObs.observe(el)
-        } else {
-          // No findings element → treat as visible (hides "scroll to findings" button)
-          setAreFindingsVisible(true)
-        }
+      if (el === currentTarget) return
+      if (currentTarget) intersectionObs.unobserve(currentTarget)
+      currentTarget = el
+      if (el) {
+        intersectionObs.observe(el)
+      } else {
+        // No findings element → treat as visible (hides "scroll to findings" button)
+        setAreFindingsVisible(true)
       }
-    }
+    })
 
-    // Initial check
-    observeFindings()
-
-    // Re-check when DOM changes (findings may appear/disappear)
-    const mutationObs = new MutationObserver(observeFindings)
+    // Initial check + re-check when DOM changes (findings may appear/disappear)
     mutationObs.observe(viewport, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ['data-review-findings'],
     })
+    // Seed current findings target (MutationObserver does not fire for existing DOM)
+    const initialEl = viewport.querySelector('[data-review-findings="unfixed"]')
+    if (initialEl) {
+      currentTarget = initialEl
+      intersectionObs.observe(initialEl)
+    } else {
+      setAreFindingsVisible(true)
+    }
 
     return () => {
+      disposed = true
       intersectionObs.disconnect()
       mutationObs.disconnect()
+      currentTarget = null
     }
   }, [])
 

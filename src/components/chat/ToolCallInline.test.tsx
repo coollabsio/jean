@@ -33,6 +33,16 @@ vi.mock('./InlineFileDiff', async importOriginal => {
   }
 })
 
+
+function clickExpandTrigger() {
+  const triggers = document.querySelectorAll(
+    '[data-slot="collapsible-trigger"]'
+  )
+  const trigger = triggers[0]
+  if (!trigger) throw new Error('No collapsible trigger found')
+  fireEvent.click(trigger)
+}
+
 describe('ToolCallInline', () => {
   it('renders Cursor EnterPlanMode instructions', () => {
     render(
@@ -56,7 +66,7 @@ describe('ToolCallInline', () => {
       screen.getByText('Read-only analysis instructions')
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText('Plan mode instructions:')).toBeInTheDocument()
     expect(
@@ -87,7 +97,7 @@ describe('ToolCallInline', () => {
     expect(screen.getByText('selectExitPlanMode')).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     const expandedContent = screen.getByText((_, element) =>
       Boolean(
@@ -117,7 +127,7 @@ describe('ToolCallInline', () => {
     expect(screen.getByText('package.json')).toBeInTheDocument()
     expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(
       screen.getByText((_, element) =>
@@ -165,7 +175,7 @@ describe('ToolCallInline', () => {
     expect(screen.getByText('Bash')).toBeInTheDocument()
     expect(screen.getByText('cd /tmp; ls -la')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     // Expanded body must surface the actual command return, not only `$ command`
     expect(screen.getByText('Output:')).toBeInTheDocument()
@@ -185,7 +195,7 @@ describe('ToolCallInline', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText('Output:')).toBeInTheDocument()
     expect(screen.getByText(/deployed revision abc123/)).toBeInTheDocument()
@@ -214,7 +224,7 @@ describe('ToolCallInline', () => {
     expect(screen.getByText('Bash')).toBeInTheDocument()
     expect(screen.getByText('printf hello')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText(output)).toBeInTheDocument()
     expect(screen.getAllByText('Output:')).toHaveLength(1)
@@ -303,7 +313,7 @@ describe('ToolCallInline', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText('chat-store.ts')).toBeInTheDocument()
     expect(screen.getByText('update')).toBeInTheDocument()
@@ -330,7 +340,7 @@ describe('ToolCallInline', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getAllByText('legacy.ts')).toHaveLength(2)
     expect(container.querySelector('diffs-container')).not.toBeNull()
@@ -421,7 +431,7 @@ describe('normalizeToolCallForDisplay', () => {
     expect(screen.getByText('Web Search')).toBeInTheDocument()
     expect(screen.getByText('tauri v2 plugins')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText(/Query: tauri v2 plugins/)).toBeInTheDocument()
     expect(screen.getByText(/Tauri docs/)).toBeInTheDocument()
@@ -463,7 +473,7 @@ describe('normalizeToolCallForDisplay', () => {
     expect(screen.getByText('Image View')).toBeInTheDocument()
     expect(screen.getByText('ui.png')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText('/tmp/screenshots/ui.png')).toBeInTheDocument()
     expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument()
@@ -702,7 +712,7 @@ describe('TaskCallInline', () => {
     expect(screen.getByText('Explore auth')).toBeInTheDocument()
     expect(screen.queryByText('Report:')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText('Report:')).toBeInTheDocument()
     expect(
@@ -727,7 +737,7 @@ describe('TaskCallInline', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button'))
+    clickExpandTrigger()
 
     expect(screen.getByText('Do research')).toBeInTheDocument()
     expect(screen.queryByText('Report:')).not.toBeInTheDocument()

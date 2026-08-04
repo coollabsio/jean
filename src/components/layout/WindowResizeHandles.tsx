@@ -76,19 +76,20 @@ const handles: Handle[] = [
   },
 ]
 
+function startResize(direction: ResizeDirection) {
+  return (event: React.MouseEvent) => {
+    if (event.button !== 0) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    void getCurrentWindow().startResizeDragging(direction)
+  }
+}
+
 export function WindowResizeHandles() {
   const isMaximized = useWindowMaximized()
 
   if (isMaximized) return null
-
-  const startResize =
-    (direction: ResizeDirection) => (event: React.MouseEvent) => {
-      if (event.button !== 0) return
-
-      event.preventDefault()
-      event.stopPropagation()
-      void getCurrentWindow().startResizeDragging(direction)
-    }
 
   return (
     <>

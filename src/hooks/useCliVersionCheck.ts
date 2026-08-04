@@ -209,10 +209,17 @@ export function useCliVersionCheck() {
 
   // Track which update pairs we've already shown notifications/run installs for
   // Format: "type:currentVersion→latestVersion"
-  const notifiedRef = useRef<Set<string>>(new Set())
+  const notifiedRef = useRef<Set<string>>(null!)
+  if (!notifiedRef.current) {
+    notifiedRef.current = new Set()
+  }
   const isInitialCheckRef = useRef(true)
 
   useEffect(() => {
+    let delayedUpdateTimer: ReturnType<typeof setTimeout> | null = null
+    // Keys marked notified for a delayed auto-update; rolled back if the timer is cleared.
+    let delayedUpdateKeys: string[] = []
+
     // Wait until all data is loaded
     const isLoading =
       claudeLoading ||
@@ -230,122 +237,148 @@ export function useCliVersionCheck() {
       coderabbitVersionsLoading ||
       commandcodeVersionsLoading ||
       preferencesLoading
-    if (isLoading) return
 
-    const updates: CliUpdateInfo[] = []
-    const currentlyOutdated = new Set<CliType>()
+    if (!isLoading) {
+      const updates: CliUpdateInfo[] = []
+      const currentlyOutdated = new Set<CliType>()
 
-    // Resolve effective CLI info (falls back to path detection when Jean binary is missing)
-    const claude = resolveCliInfo(
-      claudeStatus,
-      claudePathInfo,
-      preferences?.claude_cli_source
-    )
-    const gh = resolveCliInfo(ghStatus, ghPathInfo, preferences?.gh_cli_source)
-    const codex = resolveCliInfo(
-      codexStatus,
-      codexPathInfo,
-      preferences?.codex_cli_source
-    )
-    const opencode = resolveCliInfo(
-      opencodeStatus,
-      opencodePathInfo,
-      preferences?.opencode_cli_source
-    )
-    const pi = resolveCliInfo(piStatus, piPathInfo, preferences?.pi_cli_source)
-    const coderabbit = resolveCliInfo(
-      coderabbitStatus,
-      coderabbitPathInfo,
-      preferences?.coderabbit_cli_source
-    )
-    const commandcode = resolveCliInfo(
-      commandcodeStatus,
-      undefined,
-      preferences?.commandcode_cli_source
-    )
-
-    const checks: {
-      type: CliUpdateInfo['type']
-      info: ReturnType<typeof resolveCliInfo>
-      versions: { version: string; prerelease: boolean }[] | undefined
-    }[] = [
-      { type: 'claude', info: claude, versions: claudeVersions },
-      { type: 'gh', info: gh, versions: ghVersions },
-      { type: 'codex', info: codex, versions: codexVersions },
-      { type: 'opencode', info: opencode, versions: opencodeVersions },
-      { type: 'pi', info: pi, versions: piVersions },
-      { type: 'coderabbit', info: coderabbit, versions: coderabbitVersions },
-    ]
-    checks.push({
-      type: 'commandcode',
-      info: commandcode,
-      versions: commandcodeVersions,
-    })
-
-    for (const { type, info, versions } of checks) {
-      if (!info.version || !versions?.length) continue
-      const latestStable = versions.find(v => !v.prerelease)
-      if (!latestStable || !isNewerVersion(latestStable.version, info.version))
-        continue
-      currentlyOutdated.add(type)
-      const key = `${type}:${info.version}→${latestStable.version}`
-      if (notifiedRef.current.has(key)) continue
-      notifiedRef.current.add(key)
-      updates.push({
-        type,
-        currentVersion: info.version,
-        latestVersion: latestStable.version,
-        cliSource: info.source,
-        cliPath: info.path,
-        packageManager: info.packageManager,
-      })
-    }
-
-    // Sync store: remove CLIs no longer outdated (e.g. user updated manually),
-    // merge in newly detected updates for the titlebar badge.
-    const { setAvailableCliUpdates, availableCliUpdates } =
-      useUIStore.getState()
-    const nextUpdates = availableCliUpdates.filter(u =>
-      currentlyOutdated.has(u.type)
-    )
-    for (const update of updates) {
-      const index = nextUpdates.findIndex(
-        existing => existing.type === update.type
+      // Resolve effective CLI info (falls back to path detection when Jean binary is missing)
+      const claude = resolveCliInfo(
+        claudeStatus,
+        claudePathInfo,
+        preferences?.claude_cli_source
       )
-      if (index >= 0) nextUpdates[index] = update
-      else nextUpdates.push(update)
-    }
+      const gh = resolveCliInfo(
+        ghStatus,
+        ghPathInfo,
+        preferences?.gh_cli_source
+      )
+      const codex = resolveCliInfo(
+        codexStatus,
+        codexPathInfo,
+        preferences?.codex_cli_source
+      )
+      const opencode = resolveCliInfo(
+        opencodeStatus,
+        opencodePathInfo,
+        preferences?.opencode_cli_source
+      )
+      const pi = resolveCliInfo(
+        piStatus,
+        piPathInfo,
+        preferences?.pi_cli_source
+      )
+      const coderabbit = resolveCliInfo(
+        coderabbitStatus,
+        coderabbitPathInfo,
+        preferences?.coderabbit_cli_source
+      )
+      const commandcode = resolveCliInfo(
+        commandcodeStatus,
+        undefined,
+        preferences?.commandcode_cli_source
+      )
 
-    if (
-      nextUpdates.length !== availableCliUpdates.length ||
-      updates.length > 0
-    ) {
-      if (updates.length > 0) logger.info('CLI updates available', { updates })
-      setAvailableCliUpdates(nextUpdates)
-    }
+      const checks: {
+        type: CliUpdateInfo['type']
+        info: ReturnType<typeof resolveCliInfo>
+        versions: { version: string; prerelease: boolean }[] | undefined
+      }[] = [
+        { type: 'claude', info: claude, versions: claudeVersions },
+        { type: 'gh', info: gh, versions: ghVersions },
+        { type: 'codex', info: codex, versions: codexVersions },
+        { type: 'opencode', info: opencode, versions: opencodeVersions },
+        { type: 'pi', info: pi, versions: piVersions },
+        { type: 'coderabbit', info: coderabbit, versions: coderabbitVersions },
+      ]
+      checks.push({
+        type: 'commandcode',
+        info: commandcode,
+        versions: commandcodeVersions,
+      })
 
-    const autoUpdate = preferences?.auto_update_ai_backends ?? true
-    if (autoUpdate && updates.length > 0) {
-      const handleUpdates = () => {
-        for (const update of updates) {
-          void runBackgroundUpdate(
-            update,
-            queryClient,
-            true,
-            notifiedRef.current
+      for (const { type, info, versions } of checks) {
+        if (!info.version || !versions?.length) continue
+        const latestStable = versions.find(v => !v.prerelease)
+        if (
+          !latestStable ||
+          !isNewerVersion(latestStable.version, info.version)
+        )
+          continue
+        currentlyOutdated.add(type)
+        const key = `${type}:${info.version}→${latestStable.version}`
+        if (notifiedRef.current.has(key)) continue
+        notifiedRef.current.add(key)
+        updates.push({
+          type,
+          currentVersion: info.version,
+          latestVersion: latestStable.version,
+          cliSource: info.source,
+          cliPath: info.path,
+          packageManager: info.packageManager,
+        })
+      }
+
+      // Sync store: remove CLIs no longer outdated (e.g. user updated manually),
+      // merge in newly detected updates for the titlebar badge.
+      const { setAvailableCliUpdates, availableCliUpdates } =
+        useUIStore.getState()
+      const nextUpdates = availableCliUpdates.filter(u =>
+        currentlyOutdated.has(u.type)
+      )
+      for (const update of updates) {
+        const index = nextUpdates.findIndex(
+          existing => existing.type === update.type
+        )
+        if (index >= 0) nextUpdates[index] = update
+        else nextUpdates.push(update)
+      }
+
+      if (
+        nextUpdates.length !== availableCliUpdates.length ||
+        updates.length > 0
+      ) {
+        if (updates.length > 0) logger.info('CLI updates available', { updates })
+        setAvailableCliUpdates(nextUpdates)
+      }
+
+      const autoUpdate = preferences?.auto_update_ai_backends ?? true
+      if (autoUpdate && updates.length > 0) {
+        const handleUpdates = () => {
+          for (const update of updates) {
+            void runBackgroundUpdate(
+              update,
+              queryClient,
+              true,
+              notifiedRef.current
+            )
+          }
+        }
+
+        if (isInitialCheckRef.current) {
+          // Delay initial background updates to let the app settle.
+          // Track keys so cleanup can un-mark them if the timer never fires
+          // (Strict Mode remount, unmount, or dep change).
+          delayedUpdateKeys = updates.map(
+            u => `${u.type}:${u.currentVersion}→${u.latestVersion}`
           )
+          delayedUpdateTimer = setTimeout(handleUpdates, 5000)
+        } else {
+          handleUpdates()
         }
       }
 
-      if (isInitialCheckRef.current) {
-        // Delay initial background updates to let the app settle
-        setTimeout(handleUpdates, 5000)
-      } else {
-        handleUpdates()
-      }
+      isInitialCheckRef.current = false
     }
 
-    isInitialCheckRef.current = false
+    return () => {
+      if (delayedUpdateTimer != null) {
+        clearTimeout(delayedUpdateTimer)
+        for (const key of delayedUpdateKeys) {
+          notifiedRef.current.delete(key)
+        }
+      }
+    }
   }, [
     claudeStatus,
     ghStatus,

@@ -5,12 +5,14 @@
  * emulator and Termius-style extra-keys bar below, with soft-keyboard inset.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useVisualViewportBottomInset } from '@/hooks/useVisualViewportBottomInset'
 import { isNativeApp } from '@/lib/environment'
+import { isLoginTerminalContainerReady } from '@/lib/terminal-dimensions'
+import { focusTerminal } from '@/lib/terminal-instances'
 import { cn } from '@/lib/utils'
 import { TerminalArrowGesture } from './TerminalArrowGesture'
 import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
@@ -43,8 +45,9 @@ export function StandaloneTerminalSurface({
 }: StandaloneTerminalSurfaceProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const observerRef = useRef<ResizeObserver | null>(null)
   const initialized = useRef(false)
+  // Callback-as-state: dialogs/portals often mount at 0×0; observer waits for a real size.
+  const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const isMobile = useIsMobile()
   // Soft-keyboard special keys + arrow gesture: web access always, plus narrow viewports.
   const showExtraKeys =
@@ -53,7 +56,7 @@ export function StandaloneTerminalSurface({
   const keyboardInset = useVisualViewportBottomInset(rootRef, showExtraKeys)
   const terminalBg = useTerminalBackgroundColor()
 
-  const { initTerminal, fit } = useTerminal({
+  const { initTerminal, fit, focus } = useTerminal({
     terminalId,
     worktreeId,
     worktreePath,
@@ -61,47 +64,37 @@ export function StandaloneTerminalSurface({
     commandArgs,
   })
 
-  // Callback ref: dialogs/portals often mount at 0×0, so wait for a real size.
-  const containerCallbackRef = useCallback(
-    (container: HTMLDivElement | null) => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-        observerRef.current = null
-      }
-
-      if (!container) return
-
-      const observer = new ResizeObserver(entries => {
-        const entry = entries[0]
-        const { width, height } = entry?.contentRect ?? { width: 0, height: 0 }
-
-        if (!entry || width === 0 || height === 0) {
-          return
-        }
-
-        if (!initialized.current) {
-          initialized.current = true
-          void initTerminal(container)
-          return
-        }
-
-        fit()
-      })
-
-      observer.observe(container)
-      observerRef.current = observer
-    },
-    [initTerminal, fit]
-  )
-
+  // ResizeObserver owns init + fit; disconnect on container change / unmount.
+  // Wait for a minimum size so login TUI CLIs (OpenCode auth, etc.) are not
+  // spawned during dialog zoom with a tiny PTY (issue #624).
   useEffect(() => {
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect()
-        observerRef.current = null
+    if (!container) return
+
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0]
+      const { width, height } = entry?.contentRect ?? { width: 0, height: 0 }
+
+      if (!entry || width === 0 || height === 0) {
+        return
       }
+
+      if (!initialized.current) {
+        if (!isLoginTerminalContainerReady(width, height)) {
+          return
+        }
+        initialized.current = true
+        void initTerminal(container)
+        return
+      }
+
+      fit()
+    })
+
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
     }
-  }, [])
+  }, [container, initTerminal, fit])
 
   // Soft keyboard open/close changes padding → re-fit the emulator.
   useEffect(() => {
@@ -130,6 +123,10 @@ export function StandaloneTerminalSurface({
         // Lift the extra-keys bar (and shrink the emulator) above the soft keyboard.
         paddingBottom: keyboardInset > 0 ? keyboardInset : undefined,
       }}
+      onMouseDown={() => {
+        focus()
+        focusTerminal(terminalId)
+      }}
     >
       {/* Pad chrome sits above the emulator so long-press arrows never cover text. */}
       {showExtraKeys && (
@@ -147,7 +144,7 @@ export function StandaloneTerminalSurface({
           isMobile && 'select-none [-webkit-touch-callout:none]'
         )}
       >
-        <div ref={containerCallbackRef} className="h-full w-full overflow-hidden" />
+        <div ref={setContainer} className="h-full w-full overflow-hidden" />
       </div>
       {showExtraKeys && (
         <TerminalExtraKeysBar

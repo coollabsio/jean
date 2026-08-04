@@ -38,6 +38,16 @@ vi.mock('@/services/cursor-cli', () => ({
   useCursorCliAuth: () => authResult(mocks.cursorAuthenticated),
 }))
 
+vi.mock('@/services/pi-cli', () => ({
+  usePiCliStatus: () => statusResult(),
+  usePiCliAuth: () => authResult(),
+}))
+
+vi.mock('@/services/commandcode-cli', () => ({
+  useCommandCodeCliStatus: () => statusResult(),
+  useCommandCodeCliAuth: () => authResult(),
+}))
+
 vi.mock('@/services/grok-cli', () => ({
   useGrokCliStatus: () => statusResult(),
   useGrokCliAuth: () => authResult(),

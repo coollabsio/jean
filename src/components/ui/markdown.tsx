@@ -102,7 +102,9 @@ function CodeBlock({ children }: { children: ReactNode }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
             onClick={handleCopy}
+            aria-label="Copy code"
             className="absolute right-2 top-2 opacity-50 hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground cursor-pointer"
           >
             {copied ? (
@@ -120,9 +122,11 @@ function CodeBlock({ children }: { children: ReactNode }) {
 
 function extractTableData(table: HTMLTableElement): string[][] {
   return Array.from(table.querySelectorAll('tr')).map(row =>
-    Array.from(row.querySelectorAll('th, td'))
-      .filter(cell => !(cell as HTMLElement).dataset.checklistCell)
-      .map(cell => (cell.textContent ?? '').trim())
+    Array.from(row.querySelectorAll('th, td')).flatMap(cell =>
+      (cell as HTMLElement).dataset.checklistCell
+        ? []
+        : [(cell.textContent ?? '').trim()]
+    )
   )
 }
 
@@ -162,21 +166,22 @@ function cloneRowWithLeadingCell(
   return cloneElement(rowEl, {}, [leading, original])
 }
 
+const CHECKLIST_THEAD_LEADING = (
+  <th
+    key="__checklist__"
+    data-checklist-cell="true"
+    className="w-10 px-2"
+    aria-hidden
+  />
+)
+
 function ChecklistAwareThead({ children }: { children?: ReactNode }) {
   const { checkedRows } = useContext(ChecklistInjectionContext)
   if (!checkedRows) {
     return <thead className="bg-muted/50">{children}</thead>
   }
-  const leading = (
-    <th
-      key="__checklist__"
-      data-checklist-cell="true"
-      className="w-10 px-2"
-      aria-hidden
-    />
-  )
   const augmented = Children.map(children, row =>
-    cloneRowWithLeadingCell(row, leading)
+    cloneRowWithLeadingCell(row, CHECKLIST_THEAD_LEADING)
   )
   return <thead className="bg-muted/50">{augmented}</thead>
 }
@@ -290,8 +295,10 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={handleToggleChecklist}
                 className={checklistEnabled ? activeBtnClass : btnClass}
+                aria-label={checklistEnabled ? 'Turn off checklist' : 'Toggle checklist'}
                 aria-pressed={checklistEnabled}
               >
                 <ListChecks className="size-4" />
@@ -304,7 +311,7 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
         )}
         <Tooltip>
           <TooltipTrigger asChild>
-            <button onClick={() => handleCopy('markdown')} className={btnClass}>
+            <button type="button" onClick={() => handleCopy('markdown')} aria-label="Copy as Markdown" className={btnClass}>
               {copiedFormat === 'markdown' ? (
                 <Check className="size-4" />
               ) : (
@@ -316,7 +323,7 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button onClick={() => handleCopy('tsv')} className={btnClass}>
+            <button type="button" onClick={() => handleCopy('tsv')} aria-label="Copy for spreadsheet" className={btnClass}>
               {copiedFormat === 'tsv' ? (
                 <Check className="size-4" />
               ) : (

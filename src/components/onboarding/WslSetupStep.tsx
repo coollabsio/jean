@@ -197,7 +197,12 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
       {mode === 'wsl' && (
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">WSL Distribution</label>
+            <label
+              htmlFor="wsl-distribution"
+              className="text-sm font-medium"
+            >
+              WSL Distribution
+            </label>
             {loadingDistros ? (
               <div className="text-muted-foreground flex items-center gap-2 text-sm">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -209,7 +214,7 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
               </p>
             ) : (
               <Select value={selectedDistro} onValueChange={setSelectedDistro}>
-                <SelectTrigger>
+                <SelectTrigger id="wsl-distribution">
                   <SelectValue placeholder="Select a distribution" />
                 </SelectTrigger>
                 <SelectContent>

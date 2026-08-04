@@ -19,6 +19,7 @@ import type {
   CodexDynamicToolCallRequest,
   CodexMcpElicitationRequest,
   CodexPermissionRequest,
+  OpenCodePermissionRequest,
   CodexUserInputRequest,
   EffortLevel,
   ExecutionMode,
@@ -172,9 +173,15 @@ interface MessageHandlers {
   ) => void
   handleCodexCommandApproval: (
     request: CodexCommandApprovalRequest,
-    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel',
+    /** When true, promote Jean session to YOLO and auto-approve residual Codex prompts. */
+    promoteToYolo?: boolean
   ) => void
   handleCodexPermissionRequestDecline: (request: CodexPermissionRequest) => void
+  handleOpencodePermissionReply: (
+    request: OpenCodePermissionRequest,
+    reply: 'once' | 'always' | 'reject'
+  ) => void
   handleCodexUserInputAnswer: (
     request: CodexUserInputRequest,
     answers: QuestionAnswer[]
@@ -565,6 +572,8 @@ export function useMessageHandlers({
       const waitingForInput =
         (state.pendingPermissionDenials[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexPermissionRequests[sessionId]?.length ?? 0) > 0 ||
+        (state.pendingOpencodePermissionRequests[sessionId]?.length ?? 0) >
+          0 ||
         (state.pendingCodexUserInputRequests[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexMcpElicitationRequests[sessionId]?.length ?? 0) >
           0 ||
@@ -578,6 +587,8 @@ export function useMessageHandlers({
         sessionId,
         pendingCodexPermissionRequests:
           state.pendingCodexPermissionRequests[sessionId] ?? [],
+        pendingOpencodePermissionRequests:
+          state.pendingOpencodePermissionRequests[sessionId] ?? [],
         pendingCodexUserInputRequests:
           state.pendingCodexUserInputRequests[sessionId] ?? [],
         pendingCodexMcpElicitationRequests:
@@ -2860,10 +2871,55 @@ export function useMessageHandlers({
     ]
   )
 
+  const handleOpencodePermissionReply = useCallback(
+    (request: OpenCodePermissionRequest, reply: 'once' | 'always' | 'reject') => {
+      const sessionId = activeSessionIdRef.current
+      const worktreeId = activeWorktreeIdRef.current
+      const worktreePath = activeWorktreePathRef.current
+      if (!sessionId || !worktreeId || !worktreePath) return
+
+      const store = useChatStore.getState()
+      const remaining = store
+        .getPendingOpencodePermissionRequests(sessionId)
+        .filter(item => item.request_id !== request.request_id)
+      store.setPendingOpencodePermissionRequests(sessionId, remaining)
+      if (remaining.length === 0) {
+        store.setWaitingForInput(sessionId, false)
+      }
+
+      const replyDir = request.working_dir?.trim() || worktreePath
+
+      invoke('respond_opencode_permission', {
+        worktreePath: replyDir,
+        requestId: request.request_id,
+        reply,
+        opencodeSessionId: request.opencode_session_id,
+        apiVersion: request.api_version ?? 'v1',
+      })
+        .then(() =>
+          persistCodexPendingState(sessionId, worktreeId, worktreePath)
+        )
+        .catch(err => {
+          console.error(
+            '[useMessageHandlers] Failed to respond to OpenCode permission request:',
+            err
+          )
+          toast.error(`Failed to respond to OpenCode permission: ${err}`)
+        })
+    },
+    [
+      activeSessionIdRef,
+      activeWorktreeIdRef,
+      activeWorktreePathRef,
+      persistCodexPendingState,
+    ]
+  )
+
   const handleCodexCommandApproval = useCallback(
     (
       request: CodexCommandApprovalRequest,
-      decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+      decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel',
+      promoteToYolo = false
     ) => {
       const sessionId = activeSessionIdRef.current
       const worktreeId = activeWorktreeIdRef.current
@@ -2879,7 +2935,11 @@ export function useMessageHandlers({
       )
       store.setWaitingForInput(sessionId, false)
 
-      if (decision === 'acceptForSession') {
+      // Jean-level YOLO promote: switch session mode even when Codex only allows
+      // a one-shot "accept" (availableDecisions without acceptForSession — #626).
+      const shouldPromoteToYolo =
+        promoteToYolo || decision === 'acceptForSession'
+      if (shouldPromoteToYolo) {
         store.setExecutionMode(sessionId, 'yolo')
         invoke('broadcast_session_setting', {
           sessionId,
@@ -2906,7 +2966,12 @@ export function useMessageHandlers({
       invoke('respond_codex_command_approval', {
         sessionId,
         rpcId: request.rpc_id,
-        response: { decision },
+        response: {
+          decision,
+          // Backend strips this before forwarding to Codex, and uses it to set
+          // the mid-turn auto-approve flag even when decision is plain "accept".
+          promoteToYolo: shouldPromoteToYolo,
+        },
       })
         .then(() =>
           persistCodexPendingState(sessionId, worktreeId, worktreePath)
@@ -3224,11 +3289,13 @@ Please apply this fix to the file.`
         chatQueryKeys.sessions(worktreeId)
       )
       const allContent =
-        cachedSessionsData?.sessions
-          ?.find((s: Session) => s.id === sessionId)
-          ?.messages?.filter((m: { role: string }) => m.role === 'assistant')
-          ?.map((m: { content: string }) => m.content)
-          ?.join('\n') ?? ''
+        (
+          cachedSessionsData?.sessions
+            ?.find((s: Session) => s.id === sessionId)
+            ?.messages?.flatMap((m: { role: string; content: string }) =>
+              m.role === 'assistant' ? [m.content] : []
+            ) ?? []
+        ).join('\n')
       const findings = parseReviewFindings(allContent)
       const findingIndex = findings.findIndex(
         f =>
@@ -3361,11 +3428,13 @@ Please apply all these fixes to the respective files.`
         chatQueryKeys.sessions(worktreeId)
       )
       const allContent =
-        cachedSessionsData?.sessions
-          ?.find((s: Session) => s.id === sessionId)
-          ?.messages?.filter((m: { role: string }) => m.role === 'assistant')
-          ?.map((m: { content: string }) => m.content)
-          ?.join('\n') ?? ''
+        (
+          cachedSessionsData?.sessions
+            ?.find((s: Session) => s.id === sessionId)
+            ?.messages?.flatMap((m: { role: string; content: string }) =>
+              m.role === 'assistant' ? [m.content] : []
+            ) ?? []
+        ).join('\n')
       const allFindings = parseReviewFindings(allContent)
 
       for (const { finding } of findingsWithSuggestions) {
@@ -3471,6 +3540,7 @@ Please apply all these fixes to the respective files.`
     handleCodexPermissionRequest,
     handleCodexCommandApproval,
     handleCodexPermissionRequestDecline,
+    handleOpencodePermissionReply,
     handleCodexUserInputAnswer,
     handleCodexMcpElicitationAccept,
     handleCodexMcpElicitationDecline,

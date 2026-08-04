@@ -37,17 +37,24 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] min-w-0 sm:max-w-[70%] rounded-lg border border-border bg-muted/20 divide-y divide-border/60">
-        {texts.map((text, i) => {
+        {texts.map((text, textIndex) => {
           const imagePaths = extractImagePaths(text)
           const textFilePaths = extractTextFilePaths(text)
           const fileMentionPaths = extractFileMentionPaths(text)
           const directoryMentionPaths = extractDirectoryMentionPaths(text)
           const skillPaths = extractSkillPaths(text)
           const displayText = stripAllMarkers(text)
+          // Content identity: full text is stable once a steered prompt is added
+          // (list is append-only). Prefix with occurrence of identical texts.
+          const sameTextBefore = texts
+            .slice(0, textIndex)
+            .filter(t => t === text).length
+          const textKey =
+            sameTextBefore === 0 ? text : `${text}#${sameTextBefore}`
 
           return (
             <div
-              key={i}
+              key={textKey}
               className="relative group/steered min-w-0 px-3 py-2 text-foreground break-words [overflow-wrap:anywhere]"
             >
               {onCopyText && (
@@ -70,7 +77,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
                 <div className="flex flex-wrap gap-2 mb-2">
                   {imagePaths.map((path, idx) => (
                     <ImageLightbox
-                      key={`steered-${i}-img-${idx}`}
+                      key={path}
                       src={path}
                       alt={`Attached image ${idx + 1}`}
                       thumbnailClassName="h-20 max-w-40 object-contain rounded border border-border/50 cursor-pointer hover:border-primary/50 transition-colors"
@@ -81,11 +88,8 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
 
               {textFilePaths.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
-                  {textFilePaths.map((path, idx) => (
-                    <TextFileLightbox
-                      key={`steered-${i}-txt-${idx}`}
-                      path={path}
-                    />
+                  {textFilePaths.map(path => (
+                    <TextFileLightbox key={path} path={path} />
                   ))}
                 </div>
               )}
@@ -94,17 +98,17 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
                 (fileMentionPaths.length > 0 ||
                   directoryMentionPaths.length > 0) && (
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {directoryMentionPaths.map((path, idx) => (
+                    {directoryMentionPaths.map(path => (
                       <FileMentionBadge
-                        key={`steered-${i}-dir-${idx}`}
+                        key={`dir:${path}`}
                         path={path}
                         worktreePath={worktreePath}
                         isDirectory
                       />
                     ))}
-                    {fileMentionPaths.map((path, idx) => (
+                    {fileMentionPaths.map(path => (
                       <FileMentionBadge
-                        key={`steered-${i}-file-${idx}`}
+                        key={`file:${path}`}
                         path={path}
                         worktreePath={worktreePath}
                       />
@@ -114,7 +118,7 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
 
               {skillPaths.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
-                  {skillPaths.map((path, idx) => {
+                  {skillPaths.map(path => {
                     const parts = normalizePath(path).split('/')
                     const skillsIdx = parts.findIndex(p => p === 'skills')
                     const name =
@@ -123,9 +127,9 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
                         : path
                     return (
                       <SkillBadge
-                        key={`steered-${i}-skill-${idx}`}
+                        key={path}
                         skill={{
-                          id: `steered-${i}-skill-${idx}`,
+                          id: path,
                           name: name ?? path,
                           path,
                         }}

@@ -342,8 +342,7 @@ export function useWorktreeApproval({
           sessionId,
         })
         allUserContent = fullSession.messages
-          .filter(m => m.role === 'user')
-          .map(m => m.content)
+          .flatMap(m => (m.role === 'user' ? [m.content] : []))
           .join('\n')
       } catch (err) {
         console.error('[useWorktreeApproval] Failed to fetch session:', err)

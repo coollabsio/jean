@@ -209,8 +209,9 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
     }
 
     // 3. Get stats for untracked (new) files
-    // List all untracked files
+    // List all untracked files (raw UTF-8 paths — see GIT_NO_QUOTE_PATH_ARGS / #631)
     let untracked_output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(GIT_NO_QUOTE_PATH_ARGS)
         .args(["ls-files", "--others", "--exclude-standard"])
         .output();
 
@@ -243,8 +244,9 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
 fn get_untracked_files_raw_patch(repo_path: &str) -> String {
     let mut raw_patch = String::new();
 
-    // List all untracked files
+    // List all untracked files (raw UTF-8 paths — see GIT_NO_QUOTE_PATH_ARGS / #631)
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(GIT_NO_QUOTE_PATH_ARGS)
         .args(["ls-files", "--others", "--exclude-standard"])
         .output();
 
@@ -292,8 +294,9 @@ fn get_untracked_files_raw_patch(repo_path: &str) -> String {
 fn get_untracked_files_diff(repo_path: &str) -> Vec<DiffFile> {
     let mut untracked_files: Vec<DiffFile> = Vec::new();
 
-    // List all untracked files
+    // List all untracked files (raw UTF-8 paths — see GIT_NO_QUOTE_PATH_ARGS / #631)
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(GIT_NO_QUOTE_PATH_ARGS)
         .args(["ls-files", "--others", "--exclude-standard"])
         .output();
 
@@ -506,6 +509,189 @@ pub struct GitDiff {
     pub raw_patch: String,
 }
 
+/// Git `-c` args that force raw UTF-8 paths instead of C-quoted octal escapes.
+///
+/// With the default `core.quotePath=true`, paths containing bytes ≥ 0x80 are emitted
+/// as `"a/\346\227\245..."` which breaks `@pierre/diffs` (frontend) and our own
+/// `parse_unified_diff` header parser. Command-line `-c` overrides any user/global
+/// config. See issue #631.
+pub const GIT_NO_QUOTE_PATH_ARGS: &[&str] = &["-c", "core.quotePath=false"];
+
+/// Decode a git C-style escaped string (content between the surrounding quotes).
+/// Handles `\\`, `\"`, `\n`, `\t`, `\r`, and octal byte escapes like `\346` (UTF-8).
+fn unescape_git_c_style(escaped: &str) -> String {
+    let bytes = escaped.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'n' => {
+                    out.push(b'\n');
+                    i += 2;
+                }
+                b't' => {
+                    out.push(b'\t');
+                    i += 2;
+                }
+                b'r' => {
+                    out.push(b'\r');
+                    i += 2;
+                }
+                b'a' => {
+                    out.push(0x07);
+                    i += 2;
+                }
+                b'b' => {
+                    out.push(0x08);
+                    i += 2;
+                }
+                b'f' => {
+                    out.push(0x0c);
+                    i += 2;
+                }
+                b'v' => {
+                    out.push(0x0b);
+                    i += 2;
+                }
+                b'\\' => {
+                    out.push(b'\\');
+                    i += 2;
+                }
+                b'"' => {
+                    out.push(b'"');
+                    i += 2;
+                }
+                d0 if (b'0'..=b'7').contains(&d0) => {
+                    let mut val: u8 = d0 - b'0';
+                    i += 2;
+                    let mut count = 1;
+                    while count < 3 && i < bytes.len() && (b'0'..=b'7').contains(&bytes[i]) {
+                        val = val.wrapping_mul(8).wrapping_add(bytes[i] - b'0');
+                        i += 1;
+                        count += 1;
+                    }
+                    out.push(val);
+                }
+                other => {
+                    out.push(other);
+                    i += 2;
+                }
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Unquote a git path token: strips surrounding double-quotes and C-unescapes,
+/// or returns the token as-is when unquoted.
+fn unquote_git_path(token: &str) -> String {
+    let token = token.trim();
+    if token.len() >= 2 && token.starts_with('"') && token.ends_with('"') {
+        unescape_git_c_style(&token[1..token.len() - 1])
+    } else {
+        token.to_string()
+    }
+}
+
+/// Strip a leading `a/` or `b/` prefix from a diff path (after unquoting).
+fn strip_diff_ab_prefix(path: &str) -> &str {
+    path.strip_prefix("a/")
+        .or_else(|| path.strip_prefix("b/"))
+        .unwrap_or(path)
+}
+
+/// Extract a C-quoted token (`"..."` with escapes) from the start of `s`.
+/// Returns `(token_including_quotes, remainder)`.
+fn take_quoted_token(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if !s.starts_with('"') {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 1;
+            if i >= bytes.len() {
+                break;
+            }
+            // Skip the escaped sequence. Octal escapes are 1–3 digits.
+            if (b'0'..=b'7').contains(&bytes[i]) {
+                let mut count = 0;
+                while count < 3 && i < bytes.len() && (b'0'..=b'7').contains(&bytes[i]) {
+                    i += 1;
+                    count += 1;
+                }
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'"' {
+            return Some((&s[..=i], &s[i + 1..]));
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Parse `diff --git a/<old> b/<new>` into the new-side path (without `a/`/`b/`).
+///
+/// Handles:
+/// - C-quoted paths from `core.quotePath=true` (octal-escaped non-ASCII)
+/// - Unquoted paths that contain spaces (`a/file with spaces.txt b/file with spaces.txt`)
+/// - Renames where old and new paths differ
+fn parse_diff_git_new_path(line: &str) -> String {
+    let rest = line.strip_prefix("diff --git ").unwrap_or(line).trim();
+
+    // Quoted form: diff --git "a/..." "b/..."
+    if rest.starts_with('"') {
+        if let Some((a_tok, after_a)) = take_quoted_token(rest) {
+            if let Some((b_tok, _)) = take_quoted_token(after_a.trim_start()) {
+                let b = unquote_git_path(b_tok);
+                return strip_diff_ab_prefix(&b).to_string();
+            }
+            // Only one quoted token — fall back to a-side
+            let a = unquote_git_path(a_tok);
+            return strip_diff_ab_prefix(&a).to_string();
+        }
+    }
+
+    // Unquoted form: `a/<path> b/<path>` where path may contain spaces.
+    // Prefer an equal-path split (common for modifications).
+    if let Some(after_a) = rest.strip_prefix("a/") {
+        let mut search_at = 0;
+        while let Some(rel) = after_a[search_at..].find(" b/") {
+            let idx = search_at + rel;
+            let a_path = &after_a[..idx];
+            let b_path = &after_a[idx + 3..];
+            if a_path == b_path {
+                return a_path.to_string();
+            }
+            search_at = idx + 1;
+        }
+        // Rename / different paths: first " b/" is the separator (best-effort).
+        if let Some(idx) = after_a.find(" b/") {
+            return after_a[idx + 3..].to_string();
+        }
+        return after_a.to_string();
+    }
+
+    // Legacy fallback for unexpected shapes
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    if parts.len() >= 2 {
+        strip_diff_ab_prefix(parts[parts.len() - 1]).to_string()
+    } else if parts.len() == 1 {
+        strip_diff_ab_prefix(parts[0]).to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
 /// Parse a hunk header like "@@ -1,5 +1,7 @@" or "@@ -0,0 +1,10 @@"
 fn parse_hunk_header(header: &str) -> Option<(u32, u32, u32, u32)> {
     // Format: @@ -old_start,old_lines +new_start,new_lines @@
@@ -553,13 +739,8 @@ pub fn parse_unified_diff(raw_output: &str) -> (Vec<DiffFile>, String) {
                 files.push(file);
             }
 
-            // Parse file paths from "diff --git a/path b/path"
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            let path = if parts.len() >= 4 {
-                parts[3].trim_start_matches("b/").to_string()
-            } else {
-                "unknown".to_string()
-            };
+            // Parse file paths from "diff --git a/path b/path" (quoted or unquoted)
+            let path = parse_diff_git_new_path(line);
 
             current_file = Some(DiffFile {
                 path,
@@ -578,14 +759,14 @@ pub fn parse_unified_diff(raw_output: &str) -> (Vec<DiffFile>, String) {
             if let Some(ref mut file) = current_file {
                 file.status = "deleted".to_string();
             }
-        } else if line.starts_with("rename from ") {
+        } else if let Some(rest) = line.strip_prefix("rename from ") {
             if let Some(ref mut file) = current_file {
-                file.old_path = Some(line.trim_start_matches("rename from ").to_string());
+                file.old_path = Some(unquote_git_path(rest));
                 file.status = "renamed".to_string();
             }
-        } else if line.starts_with("rename to ") {
+        } else if let Some(rest) = line.strip_prefix("rename to ") {
             if let Some(ref mut file) = current_file {
-                file.path = line.trim_start_matches("rename to ").to_string();
+                file.path = unquote_git_path(rest);
             }
         } else if line.starts_with("Binary files") {
             if let Some(ref mut file) = current_file {
@@ -698,7 +879,10 @@ pub fn get_git_diff(
         _ => return Err(format!("Invalid diff_type: {diff_type}")),
     };
 
+    // Emit raw UTF-8 paths so frontend patch parsers and parse_unified_diff work
+    // with non-ASCII file names (issue #631).
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(GIT_NO_QUOTE_PATH_ARGS)
         .args(&args)
         .output()
         .map_err(|e| format!("Failed to run git diff: {e}"))?;
@@ -1130,5 +1314,135 @@ mod tests {
         assert!(diff
             .raw_patch
             .contains("diff --git a/hello.txt b/hello.txt"));
+    }
+
+    #[test]
+    fn unescape_git_c_style_decodes_octal_utf8() {
+        // "日本語" in UTF-8 as git octal escapes
+        let escaped = r"\346\227\245\346\234\254\350\252\236.md";
+        assert_eq!(unescape_git_c_style(escaped), "日本語.md");
+    }
+
+    #[test]
+    fn unquote_git_path_handles_quoted_and_plain() {
+        // \346\227\245 is UTF-8 for 日
+        assert_eq!(unquote_git_path(r#""a/\346\227\245.md""#), "a/日.md");
+        assert_eq!(unquote_git_path("a/plain.txt"), "a/plain.txt");
+        assert_eq!(
+            unquote_git_path("\"path with \\\"quote\\\"\""),
+            "path with \"quote\""
+        );
+    }
+
+    #[test]
+    fn parse_diff_git_new_path_handles_quoted_non_ascii() {
+        let line = r#"diff --git "a/\346\227\245\346\234\254\350\252\236.md" "b/\346\227\245\346\234\254\350\252\236.md""#;
+        assert_eq!(parse_diff_git_new_path(line), "日本語.md");
+    }
+
+    #[test]
+    fn parse_diff_git_new_path_handles_spaces() {
+        let line = "diff --git a/file with spaces.txt b/file with spaces.txt";
+        assert_eq!(parse_diff_git_new_path(line), "file with spaces.txt");
+    }
+
+    #[test]
+    fn parse_diff_git_new_path_handles_simple_ascii() {
+        let line = "diff --git a/src/main.rs b/src/main.rs";
+        assert_eq!(parse_diff_git_new_path(line), "src/main.rs");
+    }
+
+    #[test]
+    fn parse_unified_diff_quoted_non_ascii_path() {
+        // Simulate default git core.quotePath=true output for a Japanese filename
+        let patch = concat!(
+            r#"diff --git "a/\346\227\245\346\234\254\350\252\236.md" "b/\346\227\245\346\234\254\350\252\236.md""#,
+            "\n",
+            "new file mode 100644\n",
+            "index 0000000..45b983b\n",
+            r#"--- /dev/null"#,
+            "\n",
+            r#"+++ "b/\346\227\245\346\234\254\350\252\236.md""#,
+            "\n",
+            "@@ -0,0 +1 @@\n",
+            "+hello\n",
+        );
+        let (files, _) = parse_unified_diff(patch);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "日本語.md");
+        assert_eq!(files[0].status, "added");
+        assert_eq!(files[0].additions, 1);
+    }
+
+    #[test]
+    fn parse_unified_diff_path_with_spaces() {
+        let patch = concat!(
+            "diff --git a/file with spaces.txt b/file with spaces.txt\n",
+            "index 1234567..89abcde 100644\n",
+            "--- a/file with spaces.txt\n",
+            "+++ b/file with spaces.txt\n",
+            "@@ -1 +1 @@\n",
+            "-old\n",
+            "+new\n",
+        );
+        let (files, _) = parse_unified_diff(patch);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "file with spaces.txt");
+        assert_eq!(files[0].additions, 1);
+        assert_eq!(files[0].deletions, 1);
+    }
+
+    #[test]
+    fn uncommitted_diff_handles_non_ascii_filename() {
+        // Regression for #631: default core.quotePath must not break diffs.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        run_test_git(repo, &["init"]);
+        // Explicitly leave quotePath at default (true). Do not set it false.
+        run_test_git(repo, &["config", "core.quotePath", "true"]);
+        run_test_git(repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(repo, &["config", "user.name", "Test"]);
+
+        let filename = "日本語ファイル名.md";
+        std::fs::write(repo.join(filename), "line one\n").expect("write non-ascii file");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "add japanese file"]);
+        std::fs::write(repo.join(filename), "line one\nline two\n").expect("modify file");
+
+        let diff = get_git_diff(repo.to_str().unwrap(), "uncommitted", None, None)
+            .expect("diff with non-ascii path should succeed");
+
+        assert_eq!(diff.files.len(), 1, "expected one changed file, got: {:?}", diff.files);
+        assert_eq!(diff.files[0].path, filename);
+        assert!(
+            diff.raw_patch.contains(filename),
+            "raw_patch should contain unquoted UTF-8 path, got:\n{}",
+            diff.raw_patch
+        );
+        assert!(
+            !diff.raw_patch.contains(r"\346"),
+            "raw_patch must not use octal-escaped paths:\n{}",
+            diff.raw_patch
+        );
+        assert!(diff.total_additions >= 1);
+    }
+
+    #[test]
+    fn uncommitted_diff_handles_untracked_non_ascii_filename() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        run_test_git(repo, &["init"]);
+        run_test_git(repo, &["config", "core.quotePath", "true"]);
+
+        let filename = "日本語ファイル名.md";
+        std::fs::write(repo.join(filename), "new content\n").expect("write");
+
+        let diff = get_git_diff(repo.to_str().unwrap(), "uncommitted", None, None)
+            .expect("untracked non-ascii diff should work");
+
+        assert_eq!(diff.files.len(), 1);
+        assert_eq!(diff.files[0].path, filename);
+        assert_eq!(diff.files[0].status, "untracked");
+        assert!(diff.raw_patch.contains(filename));
     }
 }

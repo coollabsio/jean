@@ -7,6 +7,7 @@ let mockPreferences:
       chat_font_size?: number
       ui_font?: string
       chat_font?: string
+      font_weight?: string
     }
   | undefined
 
@@ -16,6 +17,23 @@ vi.mock('@/services/preferences', () => ({
 
 import { useFontSettings } from './use-font-settings'
 
+function clearFontCssVars() {
+  const root = document.documentElement
+  for (const prop of [
+    '--ui-font-size',
+    '--chat-font-size',
+    '--ui-font-weight',
+    '--chat-font-weight',
+    '--font-weight-normal',
+    '--font-weight-medium',
+    '--font-weight-semibold',
+    '--font-weight-bold',
+  ]) {
+    root.style.removeProperty(prop)
+  }
+  delete root.dataset.fontWeight
+}
+
 describe('useFontSettings', () => {
   beforeEach(() => {
     mockPreferences = {
@@ -23,14 +41,13 @@ describe('useFontSettings', () => {
       chat_font_size: 18,
       ui_font: 'geist',
       chat_font: 'inter',
+      font_weight: 'normal',
     }
-    document.documentElement.style.removeProperty('--ui-font-size')
-    document.documentElement.style.removeProperty('--chat-font-size')
+    clearFontCssVars()
   })
 
   afterEach(() => {
-    document.documentElement.style.removeProperty('--ui-font-size')
-    document.documentElement.style.removeProperty('--chat-font-size')
+    clearFontCssVars()
   })
 
   it('stores app font sizes in rem so web zoom can reflow layout', async () => {
@@ -44,5 +61,67 @@ describe('useFontSettings', () => {
     expect(
       document.documentElement.style.getPropertyValue('--chat-font-size')
     ).toBe('1.125rem')
+  })
+
+  it('applies the light weight ladder for softer dark-mode reading', async () => {
+    mockPreferences = {
+      ...mockPreferences!,
+      font_weight: 'light',
+    }
+    renderHook(() => useFontSettings())
+
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue('--ui-font-weight')
+      ).toBe('400')
+    })
+    expect(
+      document.documentElement.style.getPropertyValue('--font-weight-medium')
+    ).toBe('400')
+    expect(
+      document.documentElement.style.getPropertyValue('--font-weight-semibold')
+    ).toBe('500')
+    expect(
+      document.documentElement.style.getPropertyValue('--font-weight-bold')
+    ).toBe('600')
+    expect(document.documentElement.dataset.fontWeight).toBe('light')
+  })
+
+  it('applies the medium weight ladder when requested', async () => {
+    mockPreferences = {
+      ...mockPreferences!,
+      font_weight: 'medium',
+    }
+    renderHook(() => useFontSettings())
+
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue('--ui-font-weight')
+      ).toBe('500')
+    })
+    expect(
+      document.documentElement.style.getPropertyValue('--font-weight-medium')
+    ).toBe('600')
+    expect(
+      document.documentElement.style.getPropertyValue('--font-weight-semibold')
+    ).toBe('700')
+  })
+
+  it('falls back to normal weights for unknown values', async () => {
+    mockPreferences = {
+      ...mockPreferences!,
+      font_weight: 'extra-bold',
+    }
+    renderHook(() => useFontSettings())
+
+    await waitFor(() => {
+      expect(
+        document.documentElement.style.getPropertyValue('--ui-font-weight')
+      ).toBe('400')
+    })
+    expect(
+      document.documentElement.style.getPropertyValue('--font-weight-medium')
+    ).toBe('500')
+    expect(document.documentElement.dataset.fontWeight).toBe('normal')
   })
 })

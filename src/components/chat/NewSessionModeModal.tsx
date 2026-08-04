@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   ArrowLeft,
   MessageSquarePlus,
@@ -283,49 +290,42 @@ export function NewSessionModeModal() {
     setNativePickerKind(defaultKind)
   }, [chooseChat, preferences?.default_new_session_kind, target])
 
+  const onNewSessionKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      return
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      event.stopPropagation()
+      chooseChat()
+      return
+    }
+
+    if (event.key === '1') {
+      event.preventDefault()
+      event.stopPropagation()
+      choosePlainTerminal()
+      return
+    }
+
+    const choice = installedBackendChoices.find(
+      item => item.shortcut === event.key
+    )
+    if (choice) {
+      event.preventDefault()
+      event.stopPropagation()
+      chooseBackendTerminal(choice.backend)
+    }
+  })
+
   useEffect(() => {
     if (!open || nativePickerKind !== null) return
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-        return
-      }
-
-      if (event.key === 'Enter') {
-        event.preventDefault()
-        event.stopPropagation()
-        chooseChat()
-        return
-      }
-
-      if (event.key === '1') {
-        event.preventDefault()
-        event.stopPropagation()
-        choosePlainTerminal()
-        return
-      }
-
-      const choice = installedBackendChoices.find(
-        item => item.shortcut === event.key
-      )
-      if (choice) {
-        event.preventDefault()
-        event.stopPropagation()
-        chooseBackendTerminal(choice.backend)
-      }
-    }
-
+    const handleKeyDown = (event: KeyboardEvent) => onNewSessionKeyDown(event)
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [
-    chooseBackendTerminal,
-    chooseBackendTerminalYolo,
-    chooseChat,
-    choosePlainTerminal,
-    installedBackendChoices,
-    nativePickerKind,
-    open,
-  ])
+  }, [nativePickerKind, open])
 
   return (
     <>

@@ -114,10 +114,9 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
   // Separate special tools from regular tools
   // Note: plan approval tools are handled separately outside this component (after content)
   // Note: Edit tools are handled by EditedFilesDisplay at the bottom of the message
-  const isQuestionTool = (t: ToolCall) => isAskUserQuestion(t)
-  const questionTools = toolCalls.filter(isQuestionTool)
+  const questionTools = toolCalls.filter(isAskUserQuestion)
   const otherTools = toolCalls.filter(
-    t => !isQuestionTool(t) && !isPlanToolCall(t)
+    t => !isAskUserQuestion(t) && !isPlanToolCall(t)
   )
 
   // Merge multiple AskUserQuestion calls into one (Claude sometimes emits duplicates)

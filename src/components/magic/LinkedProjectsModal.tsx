@@ -160,7 +160,9 @@ export function LinkedProjectsModal({
                 >
                   <span className="truncate">{p.name}</span>
                   <button
+                    type="button"
                     onClick={() => handleRemove(p.id)}
+                    aria-label={`Unlink ${p.name}`}
                     className="ml-2 shrink-0 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -182,6 +184,7 @@ export function LinkedProjectsModal({
               ref={searchRef}
               type="text"
               placeholder="Search projects..."
+              aria-label="Search projects"
               value={search}
               onChange={e => {
                 setSearch(e.target.value)
@@ -217,6 +220,7 @@ export function LinkedProjectsModal({
 
                   return (
                     <button
+                      type="button"
                       key={p.id}
                       id={`linked-project-option-${p.id}`}
                       role="option"

@@ -433,7 +433,7 @@ export function useMessageSending({
           ) ?? []
         const codexSkills =
           queryClient.getQueryData<{ name: string }[]>(
-            skillQueryKeys.codexSkills()
+            skillQueryKeys.codexSkills(activeWorktreePath)
           ) ?? []
         const opencodeSkills =
           queryClient.getQueryData<{ name: string }[]>(

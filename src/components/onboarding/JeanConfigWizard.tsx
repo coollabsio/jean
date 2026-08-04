@@ -35,9 +35,11 @@ function JeanConfigWizardContent() {
 
   const [setupScript, setSetupScript] = useState('')
   const [teardownScript, setTeardownScript] = useState('')
-  const [runScripts, setRunScripts] = useState<string[]>([''])
+  const [runScripts, setRunScripts] = useState<
+    { id: string; value: string }[]
+  >(() => [{ id: crypto.randomUUID(), value: '' }])
   const [ports, setPorts] = useState<
-    { port: string; label: string; host: string }[]
+    { id: string; port: string; label: string; host: string }[]
   >([])
 
   const markSeen = () => {
@@ -49,19 +51,26 @@ function JeanConfigWizardContent() {
   const handleSave = async () => {
     if (!project?.path) return
 
-    const filtered = runScripts.filter(s => s.trim())
+    const filtered: string[] = []
+    for (const s of runScripts) {
+      if (s.value.trim()) filtered.push(s.value)
+    }
     let run: string | string[] | null = null
     if (filtered.length === 1) run = filtered[0] ?? null
     else if (filtered.length > 1) run = filtered
 
-    const validPorts = ports
-      .filter(p => p.port.trim() && p.label.trim())
-      .map(p => ({
-        port: Number(p.port),
-        label: p.label.trim(),
-        host: p.host.trim() || undefined,
-      }))
-      .filter(p => !isNaN(p.port) && p.port > 0 && p.port <= 65535)
+    const validPorts = ports.flatMap(p => {
+      if (!p.port.trim() || !p.label.trim()) return []
+      const port = Number(p.port)
+      if (isNaN(port) || port <= 0 || port > 65535) return []
+      return [
+        {
+          port,
+          label: p.label.trim(),
+          host: p.host.trim() || undefined,
+        },
+      ]
+    })
 
     await saveConfig.mutateAsync({
       projectPath: project.path,
@@ -87,7 +96,7 @@ function JeanConfigWizardContent() {
   const hasContent =
     setupScript.trim() ||
     teardownScript.trim() ||
-    runScripts.some(s => s.trim()) ||
+    runScripts.some(s => s.value.trim()) ||
     ports.some(p => p.port.trim() && p.label.trim())
 
   return (
@@ -191,14 +200,14 @@ function JeanConfigWizardContent() {
           {/* Run script(s) */}
           <div className="space-y-1.5">
             <Label className="text-sm">Run Script</Label>
-            {runScripts.map((cmd, i) => (
-              <div key={i} className="flex items-center gap-1">
+            {runScripts.map((entry, i) => (
+              <div key={entry.id} className="flex items-center gap-1">
                 <Input
                   placeholder="e.g. npm run dev"
-                  value={cmd}
+                  value={entry.value}
                   onChange={e => {
                     const next = [...runScripts]
-                    next[i] = e.target.value
+                    next[i] = { ...entry, value: e.target.value }
                     setRunScripts(next)
                   }}
                   className="font-mono text-base md:text-sm"
@@ -209,7 +218,7 @@ function JeanConfigWizardContent() {
                     size="icon"
                     className="h-8 w-8 shrink-0"
                     onClick={() =>
-                      setRunScripts(runScripts.filter((_, j) => j !== i))
+                      setRunScripts(runScripts.filter(s => s.id !== entry.id))
                     }
                   >
                     <X className="h-3.5 w-3.5" />
@@ -221,7 +230,12 @@ function JeanConfigWizardContent() {
               variant="ghost"
               size="sm"
               className="h-11 text-xs sm:h-7"
-              onClick={() => setRunScripts([...runScripts, ''])}
+              onClick={() =>
+                setRunScripts([
+                  ...runScripts,
+                  { id: crypto.randomUUID(), value: '' },
+                ])
+              }
             >
               <Plus className="mr-1 h-3 w-3" />
               Add command
@@ -235,7 +249,7 @@ function JeanConfigWizardContent() {
           <div className="space-y-1.5">
             <Label className="text-sm">Ports</Label>
             {ports.map((entry, i) => (
-              <div key={i} className="flex items-start gap-1">
+              <div key={entry.id} className="flex items-start gap-1">
                 <div
                   data-testid="jean-config-wizard-port-fields"
                   className="grid min-w-0 flex-1 grid-cols-2 gap-2 sm:flex sm:gap-1"
@@ -276,7 +290,9 @@ function JeanConfigWizardContent() {
                   variant="ghost"
                   size="icon"
                   className="size-11 shrink-0 sm:size-8"
-                  onClick={() => setPorts(ports.filter((_, j) => j !== i))}
+                  onClick={() =>
+                    setPorts(ports.filter(p => p.id !== entry.id))
+                  }
                 >
                   <X className="h-3.5 w-3.5" />
                 </Button>
@@ -287,7 +303,15 @@ function JeanConfigWizardContent() {
               size="sm"
               className="h-11 text-xs sm:h-7"
               onClick={() =>
-                setPorts([...ports, { port: '', label: '', host: '' }])
+                setPorts([
+                  ...ports,
+                  {
+                    id: crypto.randomUUID(),
+                    port: '',
+                    label: '',
+                    host: '',
+                  },
+                ])
               }
             >
               <Plus className="mr-1 h-3 w-3" />

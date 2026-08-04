@@ -73,6 +73,9 @@ import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDr
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
 
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
+
 interface DesktopToolbarControlsProps {
   hasPendingQuestions: boolean
   selectedBackend: CliBackend
@@ -152,7 +155,7 @@ export function DesktopToolbarControls({
   sessionHasMessages,
   providerLocked,
   customCliProfiles,
-  customCodexProviders = [],
+  customCodexProviders = EMPTY_CODEX_PROVIDERS,
   isCodex,
   modelReasoning,
   prUrl,
@@ -355,6 +358,8 @@ export function DesktopToolbarControls({
                         #{ctx.number} {ctx.title}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -386,6 +391,8 @@ export function DesktopToolbarControls({
                         #{ctx.number} {ctx.title}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -418,6 +425,8 @@ export function DesktopToolbarControls({
                         #{ctx.number} {ctx.packageName} ({ctx.severity})
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -453,6 +462,8 @@ export function DesktopToolbarControls({
                         {ctx.ghsaId} — {ctx.summary}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -490,6 +501,8 @@ export function DesktopToolbarControls({
                       </span>
                       {ctx.url && (
                         <button
+                          type="button"
+                        aria-label="Open external link"
                           className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                           onClick={e => {
                             e.stopPropagation()

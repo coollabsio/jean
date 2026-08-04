@@ -131,6 +131,7 @@ export function RemotePickerModal() {
                 )}
               >
                 <button
+                  type="button"
                   onClick={() => selectRemote(i)}
                   className="flex min-w-0 flex-1 items-center justify-between px-4 py-2 text-sm focus:outline-none"
                 >

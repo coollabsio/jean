@@ -449,6 +449,7 @@ export function OpenInModal() {
 
     return (
       <button
+        type="button"
         key={option.id}
         onClick={() => executeAction(option.id)}
         onMouseEnter={() => setSelectedOption(option.id)}
@@ -518,6 +519,7 @@ export function OpenInModal() {
 
         <div className="border-t px-4 py-2">
           <button
+            type="button"
             onClick={handleOpenSettings}
             className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >

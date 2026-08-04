@@ -74,6 +74,7 @@ export function SentryIssuesTab({
             />
           </div>
           <button
+            type="button"
             onClick={onRefresh}
             disabled={isRefetching}
             aria-label="Refresh Sentry issues"

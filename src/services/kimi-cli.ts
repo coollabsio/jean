@@ -187,6 +187,10 @@ export function useInstallKimiCli() {
   })
 }
 
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_kimi_cli_version_exists', { version })
+}
+
 export function useKimiCliSetup() {
   const status = useKimiCliStatus()
   const versions = useAvailableKimiVersions()
@@ -202,8 +206,6 @@ export function useKimiCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_kimi_cli_version_exists', { version })
 
   return {
     status: status.data,

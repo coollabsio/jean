@@ -68,9 +68,12 @@ describe('ReviewResultsPanel', () => {
 
     render(<ReviewResultsPanel sessionId="session-1" />)
 
-    // Collapsed by default — expand to see details
+    // Collapsed by default — expand via the title control inside the row
+    const row = screen.getByTestId('review-finding-row-0')
     await userEvent.click(
-      screen.getByRole('button', { name: /null access after guard removal/i })
+      within(row).getByRole('button', {
+        name: /null access after guard removal/i,
+      })
     )
 
     expect(screen.getByText('Correctness')).toBeInTheDocument()

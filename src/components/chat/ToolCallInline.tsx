@@ -402,42 +402,41 @@ export function ToolCallInline({
           isOpen && 'bg-muted/50'
         )}
       >
-        <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
-          {icon}
-          <span className="font-medium shrink-0 flex-none whitespace-nowrap">
-            {label}
-          </span>
+        <div className={TOOL_CALL_ROW_CLASS}>
+          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 text-left outline-none">
+            {icon}
+            <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+              {label}
+            </span>
+          </CollapsibleTrigger>
           {detail && filePath && onFileClick ? (
-            <code
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={handleFileClick}
-              onKeyDown={e =>
-                e.key === 'Enter' &&
-                handleFileClick(e as unknown as React.MouseEvent)
-              }
               className={cn(
                 TOOL_CALL_DETAIL_PILL_CLASS,
-                'inline-flex items-center gap-1 hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
+                'inline-flex items-center gap-1 font-mono hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
               )}
             >
               <span className="truncate">{detail}</span>
               <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-            </code>
+            </button>
           ) : detail ? (
             <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{detail}</code>
           ) : null}
-          {isStreaming && isIncomplete ? (
-            <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground/50" />
-          ) : (
-            <ChevronRight
-              className={cn(
-                'ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                isOpen && 'rotate-90'
-              )}
-            />
-          )}
-        </CollapsibleTrigger>
+          <CollapsibleTrigger className="ml-auto flex shrink-0 items-center outline-none">
+            {isStreaming && isIncomplete ? (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />
+            ) : (
+              <ChevronRight
+                className={cn(
+                  'h-3.5 w-3.5 transition-transform duration-200',
+                  isOpen && 'rotate-90'
+                )}
+              />
+            )}
+          </CollapsibleTrigger>
+        </div>
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2">
             <div className="whitespace-pre-wrap text-xs text-muted-foreground">
@@ -681,10 +680,10 @@ export function StackedGroup({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2 space-y-1">
-            {items.map((item, index) =>
+            {items.map(item =>
               item.type === 'thinking' ? (
                 <SubThinkingItem
-                  key={`thinking-${index}`}
+                  key={item.key}
                   thinking={item.thinking}
                 />
               ) : (
@@ -780,37 +779,36 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
           isOpen && 'bg-muted/30'
         )}
       >
-        <CollapsibleTrigger className={TOOL_CALL_SUB_ROW_CLASS}>
-          <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
-          <span className="font-medium shrink-0 flex-none whitespace-nowrap">
-            {label}
-          </span>
+        <div className={TOOL_CALL_SUB_ROW_CLASS}>
+          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 text-left outline-none">
+            <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
+            <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+              {label}
+            </span>
+          </CollapsibleTrigger>
           {detail && filePath && onFileClick ? (
-            <code
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={handleFileClick}
-              onKeyDown={e =>
-                e.key === 'Enter' &&
-                handleFileClick(e as unknown as React.MouseEvent)
-              }
-              className="inline-flex min-w-0 max-w-[55%] sm:max-w-full items-center gap-0.5 truncate rounded px-0.5 text-[0.625rem] font-sans leading-none hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
+              className="inline-flex min-w-0 max-w-[55%] sm:max-w-full items-center gap-0.5 truncate rounded px-0.5 text-[0.625rem] font-mono leading-none hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
             >
               <span className="truncate">{detail}</span>
               <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-60" />
-            </code>
+            </button>
           ) : detail ? (
             <code className="min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-0.5 text-[0.625rem] font-sans leading-none">
               {detail}
             </code>
           ) : null}
-          <ChevronRight
-            className={cn(
-              'ml-auto h-2.5 w-2.5 shrink-0 transition-transform duration-200',
-              isOpen && 'rotate-90'
-            )}
-          />
-        </CollapsibleTrigger>
+          <CollapsibleTrigger className="ml-auto flex shrink-0 items-center outline-none">
+            <ChevronRight
+              className={cn(
+                'h-2.5 w-2.5 transition-transform duration-200',
+                isOpen && 'rotate-90'
+              )}
+            />
+          </CollapsibleTrigger>
+        </div>
         <CollapsibleContent>
           <div className="border-t border-border/30 px-2 py-1.5">
             <div className="whitespace-pre-wrap text-[0.625rem] text-muted-foreground/70">
@@ -891,9 +889,12 @@ function FileChangeDiffView({ input }: { input: unknown }) {
           ? getFilename(change.path)
           : `file ${idx + 1}`
         const changeType = change.kind?.type ?? 'update'
+        const changeKey =
+          change.path ??
+          `change:${changeType}:${change.kind?.move_path ?? ''}:${change.diff?.slice(0, 64) ?? ''}`
 
         return (
-          <div key={change.path ?? idx}>
+          <div key={changeKey}>
             <div className="flex items-center gap-1.5 mb-1">
               <span className="font-mono truncate text-muted-foreground">
                 {filename}
@@ -1411,7 +1412,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         detail: todos.length ? `${completed}/${todos.length} done` : undefined,
         expandedContent: todos.length ? (
           <div className="space-y-1">
-            {todos.map((todo, index) => {
+            {todos.map(todo => {
               const text =
                 todo.status === 'in_progress'
                   ? (todo.activeForm ?? todo.content ?? '')
@@ -1421,7 +1422,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
               const active = todo.status === 'in_progress'
               return (
                 <div
-                  key={`${text}-${index}`}
+                  key={`${todo.content}\0${todo.activeForm ?? ''}`}
                   className="flex items-center gap-1.5"
                 >
                   {done ? (
@@ -1936,11 +1937,11 @@ function MonitorExpanded({
           </div>
         ) : (
           <div className="mt-1 max-h-64 divide-y divide-border/30 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px]">
-            {events.map((ev, i) => {
+            {events.map(ev => {
               const text = formatMonitorEventText(ev)
               return (
                 <div
-                  key={`${ev.ts_ms}-${i}`}
+                  key={`${ev.kind}:${ev.ts_ms}:${text}`}
                   className="py-1 first:pt-0 last:pb-0"
                 >
                   <span

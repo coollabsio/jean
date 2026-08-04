@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { isNativeApp } from '@/lib/environment'
-import { ZOOM_LEVEL_DEFAULT } from '@/types/preferences'
+import { useClientZoom } from '@/lib/client-zoom'
 
 export const EXTERNAL_DISPLAY_ZOOM_TIP_TOAST_ID = 'external-display-zoom-tip'
 
@@ -34,7 +34,24 @@ export function useExternalDisplayZoomTip() {
   const patchPreferences = usePatchPreferences()
   const shownRef = useRef(false)
 
-  const zoomLevel = preferences?.zoom_level ?? ZOOM_LEVEL_DEFAULT
+  const zoomSeed = useMemo(
+    () =>
+      preferences
+        ? {
+            zoom_level: preferences.zoom_level,
+            mobile_zoom_level: preferences.mobile_zoom_level,
+            sync_zoom_levels: preferences.sync_zoom_levels,
+          }
+        : null,
+    [
+      preferences?.zoom_level,
+      preferences?.mobile_zoom_level,
+      preferences?.sync_zoom_levels,
+      preferences == null,
+    ]
+  )
+  const { zoom_level: zoomLevel, sync_zoom_levels: syncZoomLevels, updateZoom } =
+    useClientZoom(zoomSeed)
   const hasSeenTip = preferences?.has_seen_external_display_zoom_tip ?? false
 
   useEffect(() => {
@@ -46,13 +63,12 @@ export function useExternalDisplayZoomTip() {
     }
 
     const setZoomTo100 = () => {
-      patchPreferences.mutate({
+      // Zoom is client-local; only the tip dismissal is shared preferences.
+      updateZoom({
         zoom_level: 100,
-        ...(preferences.sync_zoom_levels !== false
-          ? { mobile_zoom_level: 100 }
-          : {}),
-        has_seen_external_display_zoom_tip: true,
+        ...(syncZoomLevels ? { mobile_zoom_level: 100 } : {}),
       })
+      patchPreferences.mutate({ has_seen_external_display_zoom_tip: true })
     }
 
     const evaluate = () => {
@@ -136,5 +152,12 @@ export function useExternalDisplayZoomTip() {
       unlisten?.()
       window.removeEventListener('resize', onResize)
     }
-  }, [hasSeenTip, patchPreferences, preferences, zoomLevel])
+  }, [
+    hasSeenTip,
+    patchPreferences,
+    preferences,
+    syncZoomLevels,
+    updateZoom,
+    zoomLevel,
+  ])
 }

@@ -16,6 +16,29 @@ fn get_user_shell() -> String {
     crate::platform::get_default_shell()
 }
 
+/// Normalize PTY cols/rows before openpty/spawn.
+///
+/// - Degenerate sizes (< 2) become 80×24 (portable_pty asserts on 0).
+/// - Command PTYs floor at 80×24 so interactive TUI CLIs get a usable viewport
+///   even when the frontend fit ran during a dialog zoom-in (issue #624).
+pub(crate) fn effective_pty_size(cols: u16, rows: u16, is_command: bool) -> (u16, u16) {
+    let cols = if cols < 2 {
+        80
+    } else if is_command {
+        cols.max(80)
+    } else {
+        cols
+    };
+    let rows = if rows < 2 {
+        24
+    } else if is_command {
+        rows.max(24)
+    } else {
+        rows
+    };
+    (cols, rows)
+}
+
 fn is_windows_batch_file(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
@@ -127,9 +150,12 @@ pub fn spawn_terminal(
 
     let pty_system = native_pty_system();
 
-    // Guard against degenerate dimensions that crash portable_pty
-    let cols = if cols == 0 { 80 } else { cols };
-    let rows = if rows == 0 { 24 } else { rows };
+    // Guard against degenerate dimensions that crash portable_pty.
+    // Command PTYs (CLI login TUI apps) also floor at 80×24 — a tiny first
+    // fit during dialog animation leaves tools like `opencode auth login`
+    // stuck after "Add credential" (issue #624).
+    let is_command = command.as_ref().is_some_and(|c| !c.is_empty());
+    let (cols, rows) = effective_pty_size(cols, rows, is_command);
     log::info!("spawn_terminal {terminal_id}: effective size={cols}x{rows}");
 
     // Create PTY pair
@@ -462,9 +488,44 @@ pub fn spawn_terminal(
     Ok(())
 }
 
+/// Control bytes that should also deliver a POSIX signal to the foreground
+/// process group. The PTY line discipline normally does this when `ISIG` is
+/// set, but remote/WSL/ConPTY paths and raw-mode apps can leave workers
+/// running while the shell redraws a prompt (issue #635).
+const INTERRUPT_BYTES: &[u8] = &[0x03]; // Ctrl-C → SIGINT
+const SUSPEND_BYTES: &[u8] = &[0x1a]; // Ctrl-Z → SIGTSTP
+
+/// Best-effort: signal the PTY's foreground process group.
+///
+/// Used as a belt-and-suspenders complement to writing the control byte so
+/// descendants that ignore cooked-mode delivery still get the signal.
+#[cfg(unix)]
+fn signal_foreground_process_group(session: &TerminalSession, signo: i32) {
+    let Some(pgid) = session.master.process_group_leader() else {
+        return;
+    };
+    if pgid <= 1 {
+        return;
+    }
+    let result = unsafe { libc::kill(-pgid, signo) };
+    if result != 0 {
+        log::trace!(
+            "signal_foreground_process_group pgid={pgid} signo={signo} failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_foreground_process_group(_session: &TerminalSession, _signo: i32) {}
+
 /// Write data to a terminal
 pub fn write_to_terminal(terminal_id: &str, data: &str) -> Result<(), String> {
     use std::io::Write;
+
+    let bytes = data.as_bytes();
+    let wants_interrupt = bytes.iter().any(|b| INTERRUPT_BYTES.contains(b));
+    let wants_suspend = bytes.iter().any(|b| SUSPEND_BYTES.contains(b));
 
     super::registry::with_terminal(terminal_id, |session| {
         let mut writer = session
@@ -472,9 +533,31 @@ pub fn write_to_terminal(terminal_id: &str, data: &str) -> Result<(), String> {
             .lock()
             .map_err(|e| format!("Failed to lock writer: {e}"))?;
         writer
-            .write_all(data.as_bytes())
+            .write_all(bytes)
             .map_err(|e| format!("Failed to write: {e}"))?;
-        writer.flush().map_err(|e| format!("Failed to flush: {e}"))
+        writer
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))?;
+
+        // Reinforce control signals after the byte is in the PTY. Order matters:
+        // write first so cooked-mode apps still see the character; then signal
+        // the FG group so workers that missed ISIG still get interrupted.
+        #[cfg(unix)]
+        {
+            if wants_interrupt {
+                signal_foreground_process_group(session, libc::SIGINT);
+            }
+            if wants_suspend {
+                signal_foreground_process_group(session, libc::SIGTSTP);
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = wants_interrupt;
+            let _ = wants_suspend;
+        }
+
+        Ok(())
     })
     .ok_or_else(|| "Terminal not found".to_string())?
 }
@@ -498,18 +581,31 @@ pub fn resize_terminal(terminal_id: &str, cols: u16, rows: u16) -> Result<(), St
     .ok_or_else(|| "Terminal not found".to_string())?
 }
 
-/// Kill a terminal
-pub fn kill_terminal(app: &AppHandle, terminal_id: &str) -> Result<bool, String> {
-    if let Some(mut session) = unregister_terminal(terminal_id) {
-        // Kill the child process - try graceful termination first
-        if let Some(pid) = session.child.process_id() {
+/// Tear down a terminal's shell *and* any descendants (foreground jobs,
+/// package-manager workers, etc.). Killing only the shell leaves processes
+/// holding ports and still writing into the PTY after the UI shows a new
+/// prompt (issue #635).
+fn teardown_terminal_process(session: &mut TerminalSession) {
+    if let Some(pid) = session.child.process_id() {
+        // Tree kill first while the shell PID is still known — on Windows
+        // `taskkill /T` and on Unix the PPID walk both need a live root to
+        // discover children. Terminating the shell alone first reparents
+        // workers and makes them unreachable from this PID.
+        if let Err(e) = crate::platform::kill_process_tree(pid) {
+            log::trace!("Process tree kill of pid={pid} failed: {e}");
+            // Fallback: single-process terminate if tree kill failed entirely.
             if let Err(e) = crate::platform::terminate_process(pid) {
                 log::trace!("Graceful termination of pid={pid} failed: {e}");
             }
         }
+    }
+    let _ = session.child.kill();
+}
 
-        // Wait for the process to exit
-        let _ = session.child.kill();
+/// Kill a terminal
+pub fn kill_terminal(app: &AppHandle, terminal_id: &str) -> Result<bool, String> {
+    if let Some(mut session) = unregister_terminal(terminal_id) {
+        teardown_terminal_process(&mut session);
 
         // Emit stopped event
         let stopped_event = TerminalStoppedEvent {
@@ -540,15 +636,7 @@ pub fn kill_all_terminals() -> usize {
 
     for (terminal_id, mut session) in sessions.drain() {
         eprintln!("[TERMINAL CLEANUP] Killing terminal: {terminal_id}");
-
-        if let Some(pid) = session.child.process_id() {
-            eprintln!("[TERMINAL CLEANUP] Sending terminate signal to PID {pid}");
-            if let Err(e) = crate::platform::terminate_process(pid) {
-                eprintln!("[TERMINAL CLEANUP] Graceful termination failed: {e}");
-            }
-        }
-
-        let _ = session.child.kill();
+        teardown_terminal_process(&mut session);
         eprintln!("[TERMINAL CLEANUP] Killed terminal: {terminal_id}");
     }
 
@@ -561,9 +649,28 @@ pub fn kill_all_terminals() -> usize {
 mod tests {
     #[cfg(unix)]
     use super::build_unix_shell_command;
-    use super::is_windows_batch_file;
+    use super::{effective_pty_size, is_windows_batch_file};
     #[cfg(unix)]
     use super::{terminal_utf8_locale_overrides, ParentLocale};
+
+    #[test]
+    fn interrupt_and_suspend_bytes_are_recognized() {
+        // Guard the constants used by write_to_terminal for issue #635 so a
+        // future refactor cannot silently drop Ctrl-C / Ctrl-Z reinforcement.
+        assert!(super::INTERRUPT_BYTES.contains(&0x03));
+        assert!(super::SUSPEND_BYTES.contains(&0x1a));
+        assert!(!super::INTERRUPT_BYTES.contains(&0x04)); // Ctrl-D is EOF, not signal
+    }
+
+    #[test]
+    fn effective_pty_size_clamps_degenerate_and_command_floors() {
+        assert_eq!(effective_pty_size(0, 0, false), (80, 24));
+        assert_eq!(effective_pty_size(1, 1, false), (80, 24));
+        assert_eq!(effective_pty_size(40, 10, false), (40, 10));
+        // Command/login PTYs always get a TUI-usable floor (issue #624).
+        assert_eq!(effective_pty_size(12, 5, true), (80, 24));
+        assert_eq!(effective_pty_size(100, 40, true), (100, 40));
+    }
 
     #[cfg(unix)]
     #[test]

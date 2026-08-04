@@ -150,9 +150,10 @@ export async function processAttachmentFiles(
   files: Iterable<File>,
   sessionId: string
 ): Promise<void> {
-  for (const file of files) {
-    await processAttachmentFile(file, sessionId)
-  }
+  // Independent per-file I/O (save image/SVG); run in parallel.
+  await Promise.all(
+    Array.from(files, file => processAttachmentFile(file, sessionId))
+  )
 }
 
 /**

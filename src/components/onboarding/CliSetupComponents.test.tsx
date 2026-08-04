@@ -100,6 +100,9 @@ describe('AuthLoginState completion', () => {
       'data-terminal-id',
       'cursor-login-test'
     )
+    expect(
+      screen.getByText(/provider list may take a few seconds/i)
+    ).toBeTruthy()
   })
 
   it('only advances once when completion is clicked repeatedly', () => {
