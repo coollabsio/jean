@@ -2733,6 +2733,25 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["mcp", "jean-mcp-snippet"]);
             to_value(result)
         }
+        "get_agent_browser_status" => {
+            let result = crate::agent_browser::get_agent_browser_status(app.clone()).await?;
+            to_value(result)
+        }
+        "ensure_agent_browser_profile" => {
+            let result = crate::agent_browser::ensure_agent_browser_profile(app.clone()).await?;
+            to_value(result)
+        }
+        "install_agent_browser" => {
+            let result = crate::agent_browser::install_agent_browser(app.clone()).await?;
+            emit_cache_invalidation(app, &["agent-browser"]);
+            to_value(result)
+        }
+        "install_agent_browser_mcp" => {
+            let backends: Option<Vec<String>> = from_field_opt(&args, "backends")?;
+            let result = crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
+            emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
+            to_value(result)
+        }
         "start_opencode_server" => {
             let result = crate::opencode_server::start_opencode_server(app.clone()).await?;
             to_value(result)

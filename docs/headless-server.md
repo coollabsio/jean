@@ -8,11 +8,13 @@ the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 ## Agent browser (AI + manual login)
 
 jean-server has no embedded WebView. For an AI-controlled browser where you log
-in manually once and agents reuse cookies, use a persistent Chromium profile
-driven by Playwright MCP (or similar). See:
+in manually once and agents reuse cookies, Jean uses **vercel-labs/agent-browser**
+with a Jean-managed Chromium profile (`AGENT_BROWSER_PROFILE` under app data).
 
-- `docs/developer/server-agent-browser.md` — architecture and roadmap
-- jean-docs: **Agent Browser on Jean Server** workflow
+- Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser**, then install MCP into backends
+- Host prerequisite: `npm` on PATH (Jean downloads agent-browser + Chromium into app data)
+- Manual fallback: `npm install -g agent-browser && agent-browser install`
+- Design: `docs/developer/server-agent-browser.md`
 
 ## Start locally
 
