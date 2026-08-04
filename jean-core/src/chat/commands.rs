@@ -5167,6 +5167,7 @@ pub async fn send_chat_message(
             | Backend::Commandcode
             | Backend::Grok
             | Backend::Kimi
+            | Backend::Antigravity
     ) && !unified_response.cancelled
         && !skip_synthetic_history
     {
