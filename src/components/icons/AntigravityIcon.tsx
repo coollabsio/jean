@@ -1,8 +1,10 @@
 import type { LucideProps } from 'lucide-react'
 import { forwardRef } from 'react'
+import antigravityLogo from '@/assets/antigravity-logo.png'
 
 /**
- * Antigravity (Google) CLI icon — a stylized orbit/gravity-well mark.
+ * Official Google Antigravity logo.
+ * Source: https://antigravity.google/assets/image/antigravity-logo.png
  */
 export const AntigravityIcon = forwardRef<SVGSVGElement, LucideProps>(
   ({ size = 24, ...props }, ref) => (
@@ -11,30 +13,11 @@ export const AntigravityIcon = forwardRef<SVGSVGElement, LucideProps>(
       xmlns="http://www.w3.org/2000/svg"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
-      fill="none"
+      viewBox="0 0 200 184"
       aria-label="Antigravity"
       {...props}
     >
-      <circle cx="12" cy="12" r="3" fill="currentColor" />
-      <ellipse
-        cx="12"
-        cy="12"
-        rx="10"
-        ry="4.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        transform="rotate(-30 12 12)"
-      />
-      <ellipse
-        cx="12"
-        cy="12"
-        rx="10"
-        ry="4.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        transform="rotate(30 12 12)"
-      />
+      <image href={antigravityLogo} width="200" height="184" />
     </svg>
   )
 )
