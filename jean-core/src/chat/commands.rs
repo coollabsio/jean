@@ -1636,6 +1636,7 @@ pub async fn update_session_state(
     fixed_findings: Option<Vec<String>>,
     pending_permission_denials: Option<Vec<super::types::PermissionDenial>>,
     pending_codex_permission_requests: Option<Vec<super::types::CodexPermissionRequest>>,
+    pending_opencode_permission_requests: Option<Vec<super::types::OpenCodePermissionRequest>>,
     pending_codex_command_approval_requests: Option<Vec<super::types::CodexCommandApprovalRequest>>,
     pending_codex_user_input_requests: Option<Vec<super::types::CodexUserInputRequest>>,
     pending_codex_mcp_elicitation_requests: Option<Vec<super::types::CodexMcpElicitationRequest>>,
@@ -1674,6 +1675,9 @@ pub async fn update_session_state(
             }
             if let Some(v) = pending_codex_permission_requests {
                 session.pending_codex_permission_requests = v;
+            }
+            if let Some(v) = pending_opencode_permission_requests {
+                session.pending_opencode_permission_requests = v;
             }
             if let Some(v) = pending_codex_command_approval_requests {
                 session.pending_codex_command_approval_requests = v;
@@ -6589,6 +6593,65 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
 }
 
+/// Binary file payload for UI preview (images outside project asset scope, etc.).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBase64Content {
+    pub data: String,
+    pub mime_type: String,
+}
+
+fn mime_type_from_path(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        Some("ico") => "image/x-icon",
+        Some("avif") => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Read a file as base64 for binary preview (e.g. images under /tmp).
+///
+/// Same size limit as `read_file_content`. Used when asset:// and
+/// /api/project-files cannot serve paths outside project roots.
+pub async fn read_file_base64(path: String) -> Result<FileBase64Content, String> {
+    log::trace!("Reading file as base64: {path}");
+
+    let file_path = std::path::PathBuf::from(&path);
+
+    if !file_path.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
+
+    const MAX_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+    if metadata.len() > MAX_SIZE {
+        return Err(format!(
+            "File too large: {} bytes (max {} bytes)",
+            metadata.len(),
+            MAX_SIZE
+        ));
+    }
+
+    let bytes = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    let mime_type = mime_type_from_path(&file_path).to_string();
+    let data = STANDARD.encode(bytes);
+
+    Ok(FileBase64Content { data, mime_type })
+}
+
 /// Write file content to disk
 ///
 /// Used to save file content when editing in the inline editor.
@@ -8780,16 +8843,31 @@ pub fn approve_codex_command(
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
+/// Strip Jean-only YOLO promote flags from a command-approval response and
+/// return whether mid-turn auto-approve should be enabled for the session.
+pub(crate) fn prepare_codex_command_approval_response(response: &mut serde_json::Value) -> bool {
+    let promote_to_yolo = response
+        .as_object_mut()
+        .and_then(|obj| {
+            obj.remove("promoteToYolo")
+                .or_else(|| obj.remove("promote_to_yolo"))
+        })
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let is_accept_for_session = response
+        .get("decision")
+        .and_then(|decision| decision.as_str())
+        .is_some_and(|decision| decision == "acceptForSession");
+
+    promote_to_yolo || is_accept_for_session
+}
+
 pub fn respond_codex_command_approval(
     session_id: String,
     rpc_id: u64,
-    response: serde_json::Value,
+    mut response: serde_json::Value,
 ) -> Result<(), String> {
-    let is_accept_for_session = response
-        .get("decision")
-        .and_then(|d| d.as_str())
-        .is_some_and(|d| d == "acceptForSession");
-    if is_accept_for_session {
+    if prepare_codex_command_approval_response(&mut response) {
         super::registry::set_codex_yolo_auto_approve(&session_id, true);
     }
     send_codex_response(rpc_id, response)
@@ -9891,6 +9969,72 @@ mod tests {
         assert_eq!(event.session_id, "session-1");
         assert_eq!(event.worktree_id, "worktree-1");
         assert_eq!(event.error, "rate limit reached");
+    }
+
+    #[test]
+    fn mime_type_from_path_detects_common_images() {
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("/tmp/shot.PNG")),
+            "image/png"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("photo.jpeg")),
+            "image/jpeg"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("x.webp")),
+            "image/webp"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("notes.txt")),
+            "application/octet-stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_base64_encodes_bytes_outside_project_roots() {
+        let dir = std::env::temp_dir().join(format!("jean-read-file-base64-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("login.png");
+        // Minimal valid-looking PNG header bytes (not a full image)
+        let bytes: &[u8] = b"\x89PNG\r\n\x1a\nfake-image-bytes";
+        std::fs::write(&path, bytes).unwrap();
+
+        let result = read_file_base64(path.to_string_lossy().to_string())
+            .await
+            .expect("read_file_base64 should succeed for /tmp path");
+
+        assert_eq!(result.mime_type, "image/png");
+        assert_eq!(result.data, STANDARD.encode(bytes));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_promotes_yolo_without_accept_for_session() {
+        let mut response = serde_json::json!({
+            "decision": "accept",
+            "promoteToYolo": true,
+        });
+        assert!(prepare_codex_command_approval_response(&mut response));
+        // Jean-only flag must be stripped before forwarding to Codex.
+        assert!(response.get("promoteToYolo").is_none());
+        assert_eq!(
+            response.get("decision").and_then(|d| d.as_str()),
+            Some("accept")
+        );
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_accept_for_session_promotes() {
+        let mut response = serde_json::json!({ "decision": "acceptForSession" });
+        assert!(prepare_codex_command_approval_response(&mut response));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_plain_accept_does_not_promote() {
+        let mut response = serde_json::json!({ "decision": "accept" });
+        assert!(!prepare_codex_command_approval_response(&mut response));
     }
 
     fn naming_test_worktree(branch: &str, base_branch: Option<&str>) -> Worktree {

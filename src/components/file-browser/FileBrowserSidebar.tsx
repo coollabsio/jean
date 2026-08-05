@@ -144,12 +144,33 @@ export function FileBrowserSidebar({
     expandedRef.current = expanded
   })
 
-  // Reset expansion when root path changes
+  // Reset expansion when root path changes (project/worktree switch).
+  // Also close the file viewer if it was showing a file from the previous root
+  // so we don't keep loading stale paths mid-switch (can race and hard-crash).
   useEffect(() => {
     setExpanded(prev => (prev.size === 0 ? prev : new Set()))
     userExpandedRef.current = new Set()
     setSelectedPath(null)
     setSearch('')
+
+    const viewing = useUIStore.getState().viewingFilePath
+    if (!viewing) return
+
+    if (!rootPath) {
+      useUIStore.getState().setViewingFilePath(null)
+      return
+    }
+
+    const normalizedRoot = rootPath
+      .replace(/[\\/]+$/, '')
+      .replace(/\\/g, '/')
+    const normalizedView = viewing.replace(/\\/g, '/')
+    if (
+      normalizedView !== normalizedRoot &&
+      !normalizedView.startsWith(`${normalizedRoot}/`)
+    ) {
+      useUIStore.getState().setViewingFilePath(null)
+    }
   }, [rootPath])
 
   // Auto-expand parents when searching

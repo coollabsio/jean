@@ -125,7 +125,8 @@ export function patchFromEdits(
 
   // Single edit: direct old → new is exact.
   if (edits.length === 1) {
-    const only = edits[0]!
+    const only = edits[0]
+    if (!only) return null
     const oldStr = only.input.old_string ?? ''
     const newStr = only.input.new_string ?? ''
     if (oldStr === newStr) return null
@@ -135,7 +136,8 @@ export function patchFromEdits(
   // Multi-edit: reverse-apply on an empty after-state only works when the final
   // result is empty (all content removed). Otherwise show the last edit only —
   // better than a blank viewer.
-  const last = edits[edits.length - 1]!
+  const last = edits[edits.length - 1]
+  if (!last) return null
   const lastOld = last.input.old_string ?? ''
   const lastNew = last.input.new_string ?? ''
   if (lastOld !== lastNew) {

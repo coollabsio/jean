@@ -347,7 +347,8 @@ export function ReviewFindingsList({
         suggestion?: string
       }[] = []
       for (let index = 0; index < findings.length; index++) {
-        const finding = findings[index]!
+        const finding = findings[index]
+        if (!finding) continue
         if (isFixedFn(getFindingKey(finding, index))) continue
         const selected = selectedSuggestions[index]
         let suggestion: string | undefined

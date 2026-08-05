@@ -32,6 +32,7 @@ import { ExitPlanModeButton } from './ExitPlanModeButton'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
 import {
   CheckpointTurnRestoreButton,
+  isUserTurnFinished,
   turnHasFileEdits,
 } from './CheckpointTurnRestoreButton'
 import {
@@ -292,6 +293,12 @@ export const MessageItem = memo(function MessageItem({
     if (message.role !== 'user' || !getMessages) return false
     return turnHasFileEdits(getMessages(), messageIndex)
   }, [message.role, getMessages, messageIndex])
+
+  // Only offer Restore after the agent turn finishes (not mid-stream).
+  const showTurnRestore = useMemo(() => {
+    if (!userTurnHasFileEdits || !getMessages) return false
+    return isUserTurnFinished(getMessages(), messageIndex, isSending)
+  }, [userTurnHasFileEdits, getMessages, messageIndex, isSending])
 
   const handleCopyAssistantResponse = useCallback(() => {
     if (!assistantResponse) return
@@ -896,10 +903,10 @@ export const MessageItem = memo(function MessageItem({
               </div>
             )}
           </div>
-          {/* Actions under the prompt (restore when turn edited files) */}
-          {(userTurnHasFileEdits || onCopyToInput) && (
+          {/* Actions under the prompt (restore only after finished turns with file edits) */}
+          {(showTurnRestore || onCopyToInput) && (
             <div className="flex shrink-0 items-center gap-1 pr-0.5">
-              {userTurnHasFileEdits && (
+              {showTurnRestore && (
                 <CheckpointTurnRestoreButton
                   userMessageId={message.id}
                   worktreeId={worktreeId}

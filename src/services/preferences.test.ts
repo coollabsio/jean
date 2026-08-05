@@ -1357,7 +1357,8 @@ describe('preferences service', () => {
 
       const mobileSlider = screen.getAllByRole('slider').at(-1)
       expect(mobileSlider).toBeTruthy()
-      mobileSlider!.focus()
+      if (!mobileSlider) throw new Error('expected mobile zoom slider')
+      mobileSlider.focus()
       await user.keyboard('{ArrowRight}')
 
       await waitFor(() => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
+  ArrowDownUp,
   ArrowUp,
   ChevronDown,
   MoreHorizontal,
@@ -27,7 +28,9 @@ import {
   gitPush,
   fetchWorktreesStatus,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
+import { usePreferences } from '@/services/preferences'
 import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
 import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
@@ -57,6 +60,8 @@ export function resolveProjectRowClickAction(hasWorktrees: boolean):
 
 export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const isMobile = useIsMobile()
+  const { data: preferences } = usePreferences()
+  const gitSyncButton = preferences?.git_sync_button ?? false
   const {
     expandedProjectIds,
     selectedProjectId,
@@ -256,6 +261,33 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     [pickRemoteOrRun, project.id, project.path]
   )
 
+  const handleBaseSync = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      pickRemoteOrRun(async remote => {
+        await performGitSync({
+          needsPull: baseBranchBehindCount > 0,
+          needsPush: baseBranchAheadCount > 0,
+          pull: {
+            worktreeId: '',
+            worktreePath: project.path,
+            baseBranch: project.default_branch,
+            projectId: project.id,
+          },
+          pushRemote: remote,
+        })
+      })
+    },
+    [
+      pickRemoteOrRun,
+      baseBranchBehindCount,
+      baseBranchAheadCount,
+      project.path,
+      project.default_branch,
+      project.id,
+    ]
+  )
+
   return (
     <ProjectContextMenu project={project}>
       <div>
@@ -328,39 +360,79 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
 
           {/* Base branch pull/push indicators (when no base session) */}
-          {baseBranchBehindCount > 0 && (
+          {gitSyncButton &&
+          (baseBranchBehindCount > 0 || baseBranchAheadCount > 0) ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={handleBasePull}
-                  className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                  onClick={handleBaseSync}
+                  className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-500 transition-colors hover:bg-violet-500/20"
                 >
                   <span className="flex items-center gap-0.5">
-                    <ArrowDown className="h-3 w-3" />
-                    {baseBranchBehindCount}
+                    <ArrowDownUp className="h-3 w-3" />
+                    {baseBranchBehindCount > 0 && baseBranchAheadCount > 0
+                      ? `${baseBranchBehindCount}/${baseBranchAheadCount}`
+                      : baseBranchBehindCount > 0
+                        ? baseBranchBehindCount
+                        : baseBranchAheadCount}
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
+              <TooltipContent>
+                {(() => {
+                  const parts: string[] = []
+                  if (baseBranchBehindCount > 0) {
+                    parts.push(
+                      `pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''}`
+                    )
+                  }
+                  if (baseBranchAheadCount > 0) {
+                    parts.push(
+                      `push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''}`
+                    )
+                  }
+                  return `Sync ${project.default_branch}: ${parts.join(', ')}`
+                })()}
+              </TooltipContent>
             </Tooltip>
-          )}
-          {baseBranchAheadCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleBasePush}
-                  className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
-                >
-                  <span className="flex items-center gap-0.5">
-                    <ArrowUp className="h-3 w-3" />
-                    {baseBranchAheadCount}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{`Push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-            </Tooltip>
+          ) : (
+            <>
+              {baseBranchBehindCount > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleBasePull}
+                      className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                    >
+                      <span className="flex items-center gap-0.5">
+                        <ArrowDown className="h-3 w-3" />
+                        {baseBranchBehindCount}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
+                </Tooltip>
+              )}
+              {baseBranchAheadCount > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleBasePush}
+                      className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
+                    >
+                      <span className="flex items-center gap-0.5">
+                        <ArrowUp className="h-3 w-3" />
+                        {baseBranchAheadCount}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{`Push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
+                </Tooltip>
+              )}
+            </>
           )}
 
           {showStatusBadges && (

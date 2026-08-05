@@ -1225,6 +1225,8 @@ export interface AppPreferences {
   removal_behavior: RemovalBehavior // What happens when closing sessions/worktrees: 'archive' or 'delete'
   auto_save_context: boolean // Auto-save context after each session completion
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
+  /** When true, show a single Sync button instead of separate Pull and Push badges (default false) */
+  git_sync_button?: boolean
   auto_archive_on_pr_merged: boolean // Auto-archive worktrees when their PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
@@ -2344,6 +2346,7 @@ export const defaultPreferences: AppPreferences = {
   removal_behavior: 'delete', // Default: delete (permanent)
   auto_save_context: false, // Default: disabled
   auto_pull_base_branch: true, // Default: enabled
+  git_sync_button: false, // Default: separate pull/push badges
   auto_archive_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled

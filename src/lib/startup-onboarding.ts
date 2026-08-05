@@ -8,9 +8,9 @@ interface CliAuthStatus {
 
 interface StartupOnboardingState {
   /** AI backend CLI install statuses (any length; one entry per backend). */
-  aiStatuses: Array<CliStatus | undefined>
+  aiStatuses: (CliStatus | undefined)[]
   /** Matching auth statuses for each AI backend (same order as aiStatuses). */
-  aiAuth: Array<CliAuthStatus | undefined>
+  aiAuth: (CliAuthStatus | undefined)[]
   /** GitHub CLI install status. */
   ghStatus: CliStatus | undefined
   /** GitHub CLI auth status. */

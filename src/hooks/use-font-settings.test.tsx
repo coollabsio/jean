@@ -65,7 +65,7 @@ describe('useFontSettings', () => {
 
   it('applies the light weight ladder for softer dark-mode reading', async () => {
     mockPreferences = {
-      ...mockPreferences!,
+      ...(mockPreferences ?? {}),
       font_weight: 'light',
     }
     renderHook(() => useFontSettings())
@@ -89,7 +89,7 @@ describe('useFontSettings', () => {
 
   it('applies the medium weight ladder when requested', async () => {
     mockPreferences = {
-      ...mockPreferences!,
+      ...(mockPreferences ?? {}),
       font_weight: 'medium',
     }
     renderHook(() => useFontSettings())
@@ -109,7 +109,7 @@ describe('useFontSettings', () => {
 
   it('falls back to normal weights for unknown values', async () => {
     mockPreferences = {
-      ...mockPreferences!,
+      ...(mockPreferences ?? {}),
       font_weight: 'extra-bold',
     }
     renderHook(() => useFontSettings())

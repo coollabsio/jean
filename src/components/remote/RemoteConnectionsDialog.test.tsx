@@ -34,6 +34,15 @@ vi.mock('@/lib/remote-connections', () => ({
   getActiveConnectionId: () => 'local',
   removeRemoteConnection: vi.fn(),
   markConnectionSwitch: vi.fn(),
+  parseOptionalSshPort: (raw: string) => {
+    const trimmed = raw.trim()
+    if (!trimmed) return undefined
+    const port = Number(trimmed)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error('SSH port must be an integer between 1 and 65535.')
+    }
+    return port
+  },
   parseRemoteConnectionInput: (url: string, token: string) => {
     const parsed = new URL(url)
     const resolvedToken =

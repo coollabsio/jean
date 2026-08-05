@@ -4798,6 +4798,22 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </InlineField>
 
               <InlineField
+                label="Combined git sync button"
+                description="Replace separate Pull and Push badges with one Sync button that does both"
+              >
+                <Switch
+                  checked={preferences?.git_sync_button ?? false}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        git_sync_button: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+
+              <InlineField
                 label="Auto-save context"
                 description="Automatically save session context after each AI response"
               >

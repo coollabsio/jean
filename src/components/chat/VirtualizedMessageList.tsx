@@ -185,10 +185,7 @@ export const VirtualizedMessageList = memo(
       },
       ref
     ) {
-      const messageRefs = useRef<Map<number, HTMLDivElement>>(null!)
-      if (!messageRefs.current) {
-        messageRefs.current = new Map()
-      }
+      const messageRefs = useRef(new Map<number, HTMLDivElement>())
       const isLoadingMoreRef = useRef(false)
       // Captured visible-message anchor taken just before requesting an
       // older-runs load. Used to restore scroll position after prepended

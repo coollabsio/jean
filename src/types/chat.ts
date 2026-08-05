@@ -1042,6 +1042,8 @@ export function isPlanToolCall(
  * A single todo item from TodoWrite tool
  */
 export interface Todo {
+  /** Optional id (Grok TodoWrite / ACP plan entries) for merge patches */
+  id?: string
   /** The todo content (what needs to be done) */
   content: string
   /** Present continuous form shown during execution */
@@ -1055,7 +1057,10 @@ export interface Todo {
  */
 export interface TodoWriteInput {
   todos: Todo[]
-  /** Grok TodoWrite may include merge; Jean currently treats latest call as snapshot */
+  /**
+   * Grok TodoWrite merge flag. When true, `todos` is a partial patch (often
+   * status-only with null content). Jean merges by id onto the prior list.
+   */
   merge?: boolean
 }
 
@@ -1079,16 +1084,26 @@ function isTodoStatus(value: unknown): value is Todo['status'] {
 /**
  * Normalize a single todo item from Claude / Grok / Codex-shaped payloads.
  * Grok items often omit `activeForm` and may use alternate status strings.
+ *
+ * Status-only merge patches (`{ id, content: null, status }`) keep an empty
+ * content string so callers can merge onto a prior snapshot by id.
  */
 export function normalizeTodoItem(raw: unknown): Todo | null {
   if (typeof raw !== 'object' || raw === null) return null
   const item = raw as Record<string, unknown>
+  const id =
+    typeof item.id === 'string' && item.id.trim()
+      ? item.id.trim()
+      : typeof item.id === 'number'
+        ? String(item.id)
+        : undefined
   const content =
     (typeof item.content === 'string' && item.content.trim()) ||
     (typeof item.text === 'string' && item.text.trim()) ||
     (typeof item.title === 'string' && item.title.trim()) ||
     ''
-  if (!content) return null
+  // Require content OR id (status-only Grok merge patches).
+  if (!content && !id) return null
 
   const activeForm =
     (typeof item.activeForm === 'string' && item.activeForm.trim()) ||
@@ -1119,7 +1134,63 @@ export function normalizeTodoItem(raw: unknown): Todo | null {
     }
   }
 
-  return { content, activeForm, status }
+  const todo: Todo = { content, activeForm, status }
+  if (id) todo.id = id
+  return todo
+}
+
+/**
+ * Fold a sequence of TodoWrite tool calls into the latest full todo list.
+ *
+ * Grok emits `merge: true` patches that only carry changed ids/statuses (often
+ * with null content). Walk chronologically and merge by id so the UI does not
+ * stick on the first snapshot or collapse to a single status-only item.
+ */
+export function foldTodoWriteToolCalls(toolCalls: ToolCall[]): Todo[] {
+  let snapshot: Todo[] = []
+
+  for (const toolCall of toolCalls) {
+    if (!isTodoWrite(toolCall)) continue
+    const input = toolCall.input as TodoWriteInput & {
+      todos: unknown[]
+    }
+    const merge = input.merge === true
+    const incoming = (input.todos ?? [])
+      .map(normalizeTodoItem)
+      .filter((todo): todo is Todo => todo !== null)
+
+    if (!merge || snapshot.length === 0) {
+      // Full replace — drop empty-content stubs with nothing to label.
+      snapshot = incoming.filter(t => t.content.length > 0)
+      continue
+    }
+
+    const next = [...snapshot]
+    for (const item of incoming) {
+      if (item.id) {
+        const idx = next.findIndex(t => t.id === item.id)
+        const prev = idx >= 0 ? next[idx] : undefined
+        if (prev) {
+          next[idx] = {
+            ...prev,
+            status: item.status,
+            content: item.content || prev.content,
+            activeForm: item.content
+              ? item.activeForm || item.content
+              : prev.activeForm,
+            id: item.id,
+          }
+        } else if (item.content) {
+          next.push(item)
+        }
+      } else if (item.content) {
+        next.push(item)
+      }
+    }
+    snapshot = next
+  }
+
+  return snapshot
 }
 
 /**
@@ -1160,13 +1231,14 @@ export function isTodoWrite(
 
 /**
  * Extract normalized todos from a TodoWrite-shaped tool call.
+ * Drops status-only stubs with empty content (need foldTodoWriteToolCalls for merge).
  */
 export function getTodoWriteTodos(toolCall: ToolCall): Todo[] {
   if (!isTodoWrite(toolCall)) return []
   const todos = (toolCall.input as TodoWriteInput).todos
   return todos
     .map(normalizeTodoItem)
-    .filter((todo): todo is Todo => todo !== null)
+    .filter((todo): todo is Todo => todo !== null && todo.content.length > 0)
 }
 
 /**

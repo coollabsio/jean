@@ -27,10 +27,7 @@ export function useAutoArchiveOnMerge() {
   const queryClient = useQueryClient()
 
   // Track which worktrees we've already processed to avoid duplicate archives
-  const processedWorktrees = useRef<Set<string>>(null!)
-  if (!processedWorktrees.current) {
-    processedWorktrees.current = new Set()
-  }
+  const processedWorktrees = useRef(new Set<string>())
 
   const handlePrStatusUpdate = useCallback(
     async (status: PrStatusEvent) => {

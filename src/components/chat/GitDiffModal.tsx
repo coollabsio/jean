@@ -482,12 +482,9 @@ export function GitDiffModal({
   }, [diffRequest, loadDiff])
 
   // Store line selection callbacks per file to maintain stable references
-  const lineSelectedCallbacksRef = useRef<
-    Map<string, (range: SelectedLineRange | null) => void>
-  >(null!)
-  if (!lineSelectedCallbacksRef.current) {
-    lineSelectedCallbacksRef.current = new Map()
-  }
+  const lineSelectedCallbacksRef = useRef(
+    new Map<string, (range: SelectedLineRange | null) => void>()
+  )
 
   // Get or create a stable callback for a specific file
   const getLineSelectedCallback = useCallback((fileName: string) => {

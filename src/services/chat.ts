@@ -42,6 +42,12 @@ import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
+import {
+  bareCommandForBackend,
+  isBareCliCommand,
+  preferResolvedCliCommand,
+  resolveBackendCliPath,
+} from '@/services/cli-binary'
 import type {
   StoredReviewResults,
   Worktree,
@@ -215,15 +221,25 @@ export async function reconnectNativeCliSession(
     showToast = true,
     markOpened = true,
   } = options ?? {}
-  const resume = getResumeArgs(session)
-  const launch =
+  // When terminal_command is a bare name (e.g. jean-managed grok not on PATH),
+  // resolve to the absolute path from check_*_cli_installed.
+  const resolvedCommand = await resolveBackendCliPath(session.backend)
+  const resume = getResumeArgs(session, { resolvedCommand })
+  let launch =
     resume ??
     (!isNativeTerminalBackend(session.backend)
       ? {
-          command: session.terminal_command ?? '',
+          command: preferResolvedCliCommand(
+            session.terminal_command,
+            bareCommandForBackend(session.backend),
+            resolvedCommand
+          ),
           args: session.terminal_command_args ?? [],
         }
       : null)
+  if (launch && resolvedCommand && isBareCliCommand(launch.command)) {
+    launch = { ...launch, command: resolvedCommand }
+  }
   if (!launch?.command) {
     if (showToast) toast.error('No command available to reconnect this session')
     return

@@ -1576,6 +1576,11 @@ pub async fn dispatch_command(
             let result = crate::chat::read_file_content(path).await?;
             to_value(result)
         }
+        "read_file_base64" => {
+            let path: String = from_field(&args, "path")?;
+            let result = crate::chat::read_file_base64(path).await?;
+            to_value(result)
+        }
         "read_plan_file" => {
             let path: String = from_field(&args, "path")?;
             let result = crate::chat::read_plan_file(path).await?;
@@ -2125,6 +2130,13 @@ pub async fn dispatch_command(
                 "pendingCodexPermissionRequests",
                 "pending_codex_permission_requests",
             )?;
+            let pending_opencode_permission_requests: Option<
+                Vec<crate::chat::types::OpenCodePermissionRequest>,
+            > = field_opt(
+                &args,
+                "pendingOpenCodePermissionRequests",
+                "pending_opencode_permission_requests",
+            )?;
             let pending_codex_command_approval_requests: Option<
                 Vec<crate::chat::types::CodexCommandApprovalRequest>,
             > = field_opt(
@@ -2208,6 +2220,7 @@ pub async fn dispatch_command(
                 fixed_findings,
                 pending_permission_denials,
                 pending_codex_permission_requests,
+                pending_opencode_permission_requests,
                 pending_codex_command_approval_requests,
                 pending_codex_user_input_requests,
                 pending_codex_mcp_elicitation_requests,

@@ -68,15 +68,34 @@ export function turnHasFileEdits(
   return false
 }
 
+/**
+ * True when this user prompt's agent turn is complete enough to restore.
+ * Mid-flight turns (session still sending and no later user message) hide
+ * Restore — rolling back while the agent is still writing does not make sense.
+ */
+export function isUserTurnFinished(
+  messages: ChatMessage[] | undefined,
+  userMessageIndex: number,
+  isSending: boolean
+): boolean {
+  if (!messages || userMessageIndex < 0) return false
+  for (let i = userMessageIndex + 1; i < messages.length; i++) {
+    if (messages[i]?.role === 'user') return true
+  }
+  // Open / last turn: finished only when the session is no longer sending.
+  return !isSending
+}
+
 interface CheckpointTurnRestoreButtonProps {
   /** User message id that started the agent turn (checkpoint.userMessageId). */
   userMessageId: string
   /** Optional explicit worktree; falls back to modal / active worktree. */
   worktreeId?: string | null
   /**
-   * When true, show even if checkpoint.filesChanged is empty (e.g. open turn or
-   * tool-call based detection). Defaults to requiring checkpoint file stats or
-   * hasFileEdits.
+   * When true, show even if checkpoint.filesChanged is empty (e.g. tool-call
+   * based detection for a finished turn). Defaults to requiring checkpoint
+   * file stats or hasFileEdits. Callers should only pass true after the turn
+   * has finished — mid-stream restores are not offered.
    */
   hasFileEdits?: boolean
   className?: string

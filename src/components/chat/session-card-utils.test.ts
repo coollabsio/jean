@@ -79,6 +79,61 @@ describe('native client resume sessions', () => {
     })
   })
 
+  it('prefers a Jean-managed absolute path over bare grok when provided', () => {
+    const grokSession: Session = {
+      ...session,
+      name: 'Browser test setup check',
+      backend: 'grok',
+      codex_thread_id: undefined,
+      grok_session_id: 'grok-acp-2',
+    }
+    const managed =
+      '/home/user/.local/share/com.jean.desktop/grok-cli/node_modules/.bin/grok'
+
+    expect(
+      getResumeArgs(grokSession, { resolvedCommand: managed })
+    ).toEqual({
+      command: managed,
+      args: ['--resume', 'grok-acp-2'],
+    })
+    expect(
+      buildNativeClientSessionInput(
+        grokSession,
+        'worktree-1',
+        '/tmp/worktree-1',
+        { resolvedCommand: managed }
+      )
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Browser test setup check (Native)',
+      backend: 'grok',
+      primarySurface: 'terminal',
+      terminalCommand: managed,
+      terminalCommandArgs: ['--resume', 'grok-acp-2'],
+      terminalLabel: 'Browser test setup check (Native)',
+      nativeSessionId: 'grok-acp-2',
+    })
+  })
+
+  it('keeps an already-absolute terminal_command over a resolved path', () => {
+    const pathSession: Session = {
+      ...session,
+      backend: 'codex',
+      codex_thread_id: 'thread-abs',
+      terminal_command: '/usr/local/bin/codex',
+    }
+    expect(
+      getResumeArgs(pathSession, {
+        resolvedCommand:
+          '/home/user/.local/share/com.jean.desktop/codex-cli/node_modules/.bin/codex',
+      })
+    ).toEqual({
+      command: '/usr/local/bin/codex',
+      args: ['resume', 'thread-abs'],
+    })
+  })
+
   it('builds a Kimi Code resume launch with --session', () => {
     const kimiSession: Session = {
       ...session,

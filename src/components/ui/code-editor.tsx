@@ -6,6 +6,11 @@ import {
   useCallback,
   memo,
 } from 'react'
+import type * as CmView from '@codemirror/view'
+import type * as CmState from '@codemirror/state'
+import type * as CmCommands from '@codemirror/commands'
+import type * as CmLanguage from '@codemirror/language'
+import type * as LezerHighlight from '@lezer/highlight'
 import { useTheme } from '@/hooks/use-theme'
 
 interface CodeEditorProps {
@@ -21,28 +26,27 @@ interface CodeEditorProps {
   className?: string
 }
 
-type CodeMirrorModules = {
-  EditorView: typeof import('@codemirror/view').EditorView
-  keymap: typeof import('@codemirror/view').keymap
-  lineNumbers: typeof import('@codemirror/view').lineNumbers
-  highlightActiveLineGutter: typeof import('@codemirror/view').highlightActiveLineGutter
-  drawSelection: typeof import('@codemirror/view').drawSelection
-  highlightActiveLine: typeof import('@codemirror/view').highlightActiveLine
-  rectangularSelection: typeof import('@codemirror/view').rectangularSelection
-  crosshairCursor: typeof import('@codemirror/view').crosshairCursor
-  dropCursor: typeof import('@codemirror/view').dropCursor
-  EditorState: typeof import('@codemirror/state').EditorState
-  Compartment: typeof import('@codemirror/state').Compartment
-  Extension: import('@codemirror/state').Extension
-  defaultKeymap: typeof import('@codemirror/commands').defaultKeymap
-  history: typeof import('@codemirror/commands').history
-  historyKeymap: typeof import('@codemirror/commands').historyKeymap
-  syntaxHighlighting: typeof import('@codemirror/language').syntaxHighlighting
-  HighlightStyle: typeof import('@codemirror/language').HighlightStyle
-  tags: typeof import('@lezer/highlight').tags
+interface CodeMirrorModules {
+  EditorView: typeof CmView.EditorView
+  keymap: typeof CmView.keymap
+  lineNumbers: typeof CmView.lineNumbers
+  highlightActiveLineGutter: typeof CmView.highlightActiveLineGutter
+  drawSelection: typeof CmView.drawSelection
+  highlightActiveLine: typeof CmView.highlightActiveLine
+  rectangularSelection: typeof CmView.rectangularSelection
+  crosshairCursor: typeof CmView.crosshairCursor
+  dropCursor: typeof CmView.dropCursor
+  EditorState: typeof CmState.EditorState
+  Compartment: typeof CmState.Compartment
+  defaultKeymap: typeof CmCommands.defaultKeymap
+  history: typeof CmCommands.history
+  historyKeymap: typeof CmCommands.historyKeymap
+  syntaxHighlighting: typeof CmLanguage.syntaxHighlighting
+  HighlightStyle: typeof CmLanguage.HighlightStyle
+  tags: typeof LezerHighlight.tags
   getLanguageSupport: (
     language: string
-  ) => import('@codemirror/language').LanguageSupport | null
+  ) => CmLanguage.LanguageSupport | null
 }
 
 let modulesPromise: Promise<CodeMirrorModules> | null = null
@@ -83,7 +87,7 @@ function loadCodeMirrorModules(): Promise<CodeMirrorModules> {
       ]) => {
         const getLanguageSupport = (
           lang: string
-        ): import('@codemirror/language').LanguageSupport | null => {
+        ): CmLanguage.LanguageSupport | null => {
           switch (lang) {
             case 'typescript':
             case 'tsx':
@@ -131,7 +135,6 @@ function loadCodeMirrorModules(): Promise<CodeMirrorModules> {
           dropCursor: view.dropCursor,
           EditorState: state.EditorState,
           Compartment: state.Compartment,
-          Extension: null as unknown as import('@codemirror/state').Extension,
           defaultKeymap: commands.defaultKeymap,
           history: commands.history,
           historyKeymap: commands.historyKeymap,
@@ -149,7 +152,7 @@ function loadCodeMirrorModules(): Promise<CodeMirrorModules> {
 function jeanThemeExtensions(
   cm: CodeMirrorModules,
   mode: 'dark' | 'light'
-): import('@codemirror/state').Extension[] {
+): CmState.Extension[] {
   const { EditorView, syntaxHighlighting, HighlightStyle, tags: t } = cm
 
   /**

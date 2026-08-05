@@ -14,7 +14,7 @@ export const fileQueryKeys = {
 /**
  * Hook to get all files in a worktree (file browser + @ mentions).
  * Includes hidden and gitignored files (e.g. `.env`); heavy trees like
- * `node_modules`/`target` are pruned server-side.
+ * `node_modules` / `vendor` / `target` are pruned server-side (BFS walk).
  * Results are cached and only refetched when worktree changes.
  */
 export function useWorktreeFiles(worktreePath: string | null) {

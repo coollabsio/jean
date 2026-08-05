@@ -1,8 +1,7 @@
-use ignore::WalkBuilder;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -5552,82 +5551,141 @@ pub struct WorktreeFile {
     pub is_dir: bool,
 }
 
-/// List files in a worktree, respecting .gitignore
-/// Returns files sorted alphabetically, limited to prevent performance issues
-pub async fn list_worktree_files(
-    worktree_path: String,
-    max_files: Option<usize>,
-) -> Result<Vec<WorktreeFile>, String> {
-    log::trace!("Listing files in worktree: {worktree_path}");
+/// Directory names skipped while listing worktree files.
+///
+/// Gitignored files (e.g. `.env`) are intentionally included so the file
+/// browser can open them. Heavy dependency/build trees are still skipped so
+/// listing stays usable under the max-files cap.
+///
+/// `vendor` (Composer/PHP and some Go layouts) must be skipped: a single
+/// Laravel `vendor/` tree can exceed the max-files cap alone, which used to
+/// truncate the walk mid-tree and hide most project source directories.
+fn is_skipped_file_browser_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | ".turbo"
+            | ".cache"
+            | "coverage"
+            | "__pycache__"
+            | ".venv"
+            | "venv"
+            | "elm-stuff"
+            | "vendor"
+            | "Pods"
+            | "bower_components"
+            | ".gradle"
+            | ".pnpm-store"
+            | "site-packages"
+            | ".tox"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".sass-cache"
+            | "DerivedData"
+            | ".dart_tool"
+            | ".parcel-cache"
+            | ".svelte-kit"
+            | ".vercel"
+            | ".output"
+    )
+}
 
-    let max = max_files.unwrap_or(5000);
-    let mut files = Vec::new();
+/// Synchronous breadth-first listing used by [`list_worktree_files`].
+///
+/// BFS is intentional: with a max-files cap, depth-first walks (e.g. into
+/// `vendor/` or a deep monorepo package) used to exhaust the budget before
+/// sibling top-level directories were discovered, so the file browser looked
+/// nearly empty compared to editors like Zed.
+fn list_worktree_files_sync(worktree_path: &str, max: usize) -> Result<Vec<WorktreeFile>, String> {
+    let root = Path::new(worktree_path);
+    if !root.is_dir() {
+        // Missing/stale path while switching projects — return empty, not an error.
+        log::debug!("Worktree path is not a directory (skipping list): {worktree_path}");
+        return Ok(Vec::new());
+    }
 
-    // Use ignore crate's WalkBuilder which respects .gitignore by default
-    let walker = WalkBuilder::new(&worktree_path)
-        .hidden(false) // Include hidden files (user may want .env.example etc)
-        .git_ignore(true) // Respect .gitignore
-        .git_global(true) // Respect global gitignore
-        .git_exclude(true) // Respect .git/info/exclude
-        .require_git(false) // Work even if not a git repo
-        .build();
+    let mut files: Vec<WorktreeFile> = Vec::new();
+    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    queue.push_back(root.to_path_buf());
 
-    let worktree_path_ref = Path::new(&worktree_path);
-
-    for entry in walker {
+    while let Some(dir) = queue.pop_front() {
         if files.len() >= max {
             break;
         }
 
-        let entry = match entry {
-            Ok(e) => e,
+        let read = match fs::read_dir(&dir) {
+            Ok(r) => r,
             Err(e) => {
-                log::warn!("Failed to read entry: {e}");
+                log::warn!("Failed to read directory {}: {e}", dir.display());
                 continue;
             }
         };
 
-        let path = entry.path();
+        // Stable order within each directory so BFS truncation is deterministic.
+        let mut entries: Vec<fs::DirEntry> = read.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.file_name());
 
-        // Skip the root directory itself
-        if path == worktree_path_ref {
-            continue;
+        for entry in entries {
+            if files.len() >= max {
+                break;
+            }
+
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if is_skipped_file_browser_dir(name_str.as_ref()) {
+                continue;
+            }
+
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(e) => {
+                    log::warn!("Failed to read file type for {}: {e}", path.display());
+                    continue;
+                }
+            };
+
+            // Do not follow symlinks when deciding to recurse (avoids loops /
+            // walking outside the worktree). Symlink-to-dir is listed as a
+            // non-directory leaf so the tree stays finite.
+            let entry_is_dir = file_type.is_dir() && !file_type.is_symlink();
+
+            let relative = match path.strip_prefix(root) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            // Normalize to forward slashes so UI/API paths are platform-stable
+            // (Windows Path::to_string_lossy() uses backslashes).
+            let relative_str = relative.to_string_lossy().replace('\\', "/");
+            if relative_str.is_empty() {
+                continue;
+            }
+
+            let extension = if entry_is_dir {
+                String::new()
+            } else {
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+
+            files.push(WorktreeFile {
+                relative_path: relative_str,
+                extension,
+                is_dir: entry_is_dir,
+            });
+
+            if entry_is_dir {
+                queue.push_back(path);
+            }
         }
-
-        // Skip .git directory and its contents
-        if path.components().any(|c| c.as_os_str() == ".git") {
-            continue;
-        }
-
-        let entry_is_dir = path.is_dir();
-
-        // Get relative path
-        let relative = match path.strip_prefix(worktree_path_ref) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        let relative_str = relative.to_string_lossy().to_string();
-
-        // Skip empty paths
-        if relative_str.is_empty() {
-            continue;
-        }
-
-        let extension = if entry_is_dir {
-            String::new()
-        } else {
-            path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_string()
-        };
-
-        files.push(WorktreeFile {
-            relative_path: relative_str,
-            extension,
-            is_dir: entry_is_dir,
-        });
     }
 
     // Sort: directories first, then alphabetically within each group
@@ -5636,6 +5694,29 @@ pub async fn list_worktree_files(
             .cmp(&a.is_dir)
             .then_with(|| a.relative_path.cmp(&b.relative_path))
     });
+
+    Ok(files)
+}
+
+/// List files in a worktree for the file browser and @-mentions.
+///
+/// Includes hidden and gitignored files (e.g. `.env`) so users can open them
+/// from the sidebar. Skips `.git` and common heavy dependency/build directories
+/// (including `vendor` / `node_modules`). Walks breadth-first so a max-files
+/// cap still leaves a complete shallow project tree.
+/// Returns files sorted alphabetically, limited to prevent performance issues.
+pub async fn list_worktree_files(
+    worktree_path: String,
+    max_files: Option<usize>,
+) -> Result<Vec<WorktreeFile>, String> {
+    log::trace!("Listing files in worktree: {worktree_path}");
+
+    let max = max_files.unwrap_or(5000);
+    // Filesystem walk is sync and can be large; keep it off the async runtime
+    // so project switches (which re-list) cannot stall other Tauri commands.
+    let files = tokio::task::spawn_blocking(move || list_worktree_files_sync(&worktree_path, max))
+        .await
+        .map_err(|e| format!("Failed to list worktree files: {e}"))??;
 
     log::trace!("Found {} files in worktree", files.len());
     Ok(files)
@@ -10303,6 +10384,7 @@ async fn update_review_session_state(
         None,
         None,
         None,
+        None,
         is_reviewing,
         None, // status_override
         None,
@@ -13601,6 +13683,145 @@ mod tests {
         let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
         assert!(format_open_error("vscodium", &other)
             .starts_with("Failed to open VSCodium ('codium'):"));
+    }
+
+    #[test]
+    fn is_skipped_file_browser_dir_covers_heavy_trees() {
+        assert!(is_skipped_file_browser_dir(".git"));
+        assert!(is_skipped_file_browser_dir("node_modules"));
+        assert!(is_skipped_file_browser_dir("target"));
+        assert!(is_skipped_file_browser_dir("vendor"));
+        assert!(is_skipped_file_browser_dir("Pods"));
+        assert!(!is_skipped_file_browser_dir(".env"));
+        assert!(!is_skipped_file_browser_dir("src"));
+        assert!(!is_skipped_file_browser_dir("app"));
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_includes_gitignored_env_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        std::fs::write(root.join(".gitignore"), ".env\nnode_modules/\nvendor/\n")
+            .expect("gitignore");
+        std::fs::write(root.join(".env"), "SECRET=1\n").expect(".env");
+        std::fs::write(root.join(".env.example"), "SECRET=\n").expect(".env.example");
+        std::fs::write(root.join("README.md"), "hi\n").expect("readme");
+        std::fs::create_dir_all(root.join("node_modules/pkg")).expect("node_modules");
+        std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports=1\n")
+            .expect("nested node_modules file");
+        std::fs::create_dir_all(root.join("vendor/pkg")).expect("vendor");
+        std::fs::write(root.join("vendor/pkg/autoload.php"), "<?php\n").expect("vendor file");
+        std::fs::create_dir_all(root.join("src")).expect("src");
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("main");
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), None)
+            .await
+            .expect("list files");
+        let paths: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+
+        assert!(
+            paths.contains(&".env"),
+            "gitignored .env should be listed: {paths:?}"
+        );
+        assert!(
+            paths.contains(&".env.example"),
+            "hidden .env.example should be listed: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"README.md"),
+            "tracked file missing: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"src/main.rs"),
+            "nested file missing: {paths:?}"
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|p| *p == "node_modules" || p.starts_with("node_modules/")),
+            "node_modules should be pruned: {paths:?}"
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|p| *p == "vendor" || p.starts_with("vendor/")),
+            "vendor should be pruned: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| *p == ".git" || p.starts_with(".git/")),
+            ".git directory should be pruned: {paths:?}"
+        );
+        assert!(
+            paths.contains(&".gitignore"),
+            ".gitignore itself should still be listed: {paths:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_respects_max_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        for i in 0..10 {
+            std::fs::write(root.join(format!("f{i}.txt")), "x\n").expect("write file");
+        }
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), Some(3))
+            .await
+            .expect("list files");
+        assert_eq!(files.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_bfs_keeps_top_level_when_capped() {
+        // Regression: DFS into a deep heavy tree used to exhaust max_files and
+        // hide sibling top-level dirs (file browser looked nearly empty).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("app/deep/nested")).expect("app");
+        std::fs::write(root.join("app/deep/nested/leaf.php"), "<?php\n").expect("leaf");
+        std::fs::create_dir_all(root.join("bootstrap")).expect("bootstrap");
+        std::fs::write(root.join("bootstrap/app.php"), "<?php\n").expect("bootstrap file");
+        // Many files under a late-alphabet deep tree (would dominate a DFS budget)
+        std::fs::create_dir_all(root.join("zzz/deep")).expect("zzz");
+        for i in 0..50 {
+            std::fs::write(root.join("zzz/deep").join(format!("f{i}.txt")), "x\n")
+                .expect("zzz file");
+        }
+        std::fs::write(root.join("README.md"), "hi\n").expect("readme");
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), Some(8))
+            .await
+            .expect("list files");
+        let paths: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+
+        assert!(
+            paths.iter().any(|p| *p == "app" || p.starts_with("app/")),
+            "top-level app should appear under cap: {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| *p == "bootstrap" || p.starts_with("bootstrap/")),
+            "top-level bootstrap should appear under cap: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"README.md"),
+            "top-level README should appear under cap: {paths:?}"
+        );
+        assert_eq!(files.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_missing_path_returns_empty() {
+        let files = list_worktree_files(
+            "/tmp/jean-file-browser-path-that-does-not-exist-xyz".to_string(),
+            Some(10),
+        )
+        .await
+        .expect("missing path should not error");
+        assert!(files.is_empty());
     }
 
     #[test]

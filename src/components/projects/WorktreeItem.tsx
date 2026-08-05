@@ -4,7 +4,13 @@ import type {
   IndicatorStatus,
   IndicatorVariant,
 } from '@/components/ui/status-indicator'
-import { ArrowDown, ArrowUp, ChevronDown, GitBranch } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowDownUp,
+  ArrowUp,
+  ChevronDown,
+  GitBranch,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { isBaseSession, type Worktree } from '@/types/projects'
@@ -40,6 +46,7 @@ import {
   fetchWorktreesStatus,
   triggerImmediateGitPoll,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
 import {
   Tooltip,
@@ -615,6 +622,59 @@ export function WorktreeItem({
     [pickRemoteOrRun, worktree.path, worktree.pr_number, projectId]
   )
 
+  const gitSyncButton = preferences?.git_sync_button ?? false
+
+  const handleSync = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+
+      const runSync = async (remote?: string) => {
+        await performGitSync({
+          needsPull: behindCount > 0,
+          needsPush: pushCount > 0,
+          pull: {
+            worktreeId: worktree.id,
+            worktreePath: worktree.path,
+            baseBranch: worktree.base_branch ?? defaultBranch,
+            projectId,
+            remote: worktree.base_remote,
+            onMergeConflict: () => {
+              selectWorktree(worktree.id)
+              setTimeout(() => {
+                window.dispatchEvent(
+                  new CustomEvent('magic-command', {
+                    detail: { command: 'resolve-conflicts' },
+                  })
+                )
+              }, 100)
+            },
+          },
+          prNumber: worktree.pr_number,
+          pushRemote: remote,
+        })
+      }
+
+      if (pushCount > 0 && pushNeedsRemotePicker(worktree.pr_number)) {
+        pickRemoteOrRun(runSync)
+      } else {
+        void runSync()
+      }
+    },
+    [
+      behindCount,
+      pushCount,
+      worktree.id,
+      worktree.path,
+      worktree.base_branch,
+      worktree.base_remote,
+      worktree.pr_number,
+      defaultBranch,
+      projectId,
+      selectWorktree,
+      pickRemoteOrRun,
+    ]
+  )
+
   return (
     <div>
       <WorktreeContextMenu actions={menuActions} worktree={worktree}>
@@ -697,8 +757,42 @@ export function WorktreeItem({
               </span>
             )}
 
-            {/* Pull badge - shown when behind remote */}
-            {behindCount > 0 && (
+            {/* Sync / Pull / Push badges */}
+            {gitSyncButton && (behindCount > 0 || pushCount > 0) ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleSync}
+                    className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-500 transition-colors hover:bg-violet-500/20"
+                  >
+                    <span className="flex items-center gap-0.5">
+                      <ArrowDownUp className="h-3 w-3" />
+                      {behindCount > 0 && pushCount > 0
+                        ? `${behindCount}/${pushCount}`
+                        : behindCount > 0
+                          ? behindCount
+                          : pushCount}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {`Sync: ${[
+                    behindCount > 0
+                      ? `pull ${behindCount} commit${behindCount > 1 ? 's' : ''}`
+                      : null,
+                    pushCount > 0
+                      ? `push ${pushCount} commit${pushCount > 1 ? 's' : ''}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}`}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <>
+                {/* Pull badge - shown when behind remote */}
+                {behindCount > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -714,10 +808,10 @@ export function WorktreeItem({
                 </TooltipTrigger>
                 <TooltipContent>{`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}</TooltipContent>
               </Tooltip>
-            )}
+                )}
 
-            {/* Push badge - unpushed commits */}
-            {pushCount > 0 && (
+                {/* Push badge - unpushed commits */}
+                {pushCount > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -733,6 +827,8 @@ export function WorktreeItem({
                 </TooltipTrigger>
                 <TooltipContent>{`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}</TooltipContent>
               </Tooltip>
+                )}
+              </>
             )}
 
             {/* Uncommitted changes */}

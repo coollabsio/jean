@@ -209,10 +209,7 @@ export function useCliVersionCheck() {
 
   // Track which update pairs we've already shown notifications/run installs for
   // Format: "type:currentVersion→latestVersion"
-  const notifiedRef = useRef<Set<string>>(null!)
-  if (!notifiedRef.current) {
-    notifiedRef.current = new Set()
-  }
+  const notifiedRef = useRef(new Set<string>())
   const isInitialCheckRef = useRef(true)
 
   useEffect(() => {

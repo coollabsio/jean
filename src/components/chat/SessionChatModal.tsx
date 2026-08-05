@@ -54,6 +54,7 @@ import {
   reconnectNativeCliSession,
   canReconnectSession,
 } from '@/services/chat'
+import { resolveBackendCliPath } from '@/services/cli-binary'
 import { usePreferences } from '@/services/preferences'
 import {
   useWorktree,
@@ -68,6 +69,7 @@ import {
   fetchWorktreesStatus,
   triggerImmediateGitPoll,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
 import { isBaseSession } from '@/types/projects'
 import type { Session } from '@/types/chat'
@@ -665,27 +667,33 @@ export function SessionChatModal({
 
   const handleOpenInNativeClient = useCallback(
     (session: Session) => {
-      const input = buildNativeClientSessionInput(
-        session,
-        worktreeId,
-        worktreePath
-      )
-      if (!input) {
-        toast.error('No native resume command is available for this session')
-        return
-      }
+      void (async () => {
+        // Prefer Jean-managed / resolved absolute path so bare names like
+        // `grok` work when the CLI is not on PATH (default jean install).
+        const resolvedCommand = await resolveBackendCliPath(session.backend)
+        const input = buildNativeClientSessionInput(
+          session,
+          worktreeId,
+          worktreePath,
+          { resolvedCommand }
+        )
+        if (!input) {
+          toast.error('No native resume command is available for this session')
+          return
+        }
 
-      createSession.mutate(input, {
-        onSuccess: nativeSession => {
-          useChatStore
-            .getState()
-            .setSelectedBackend(nativeSession.id, input.backend)
-          void reconnectNativeCliSession(nativeSession, worktreeId, {
-            openModal: false,
-            showToast: false,
-          }).then(() => toast.success('Opened in native client'))
-        },
-      })
+        createSession.mutate(input, {
+          onSuccess: nativeSession => {
+            useChatStore
+              .getState()
+              .setSelectedBackend(nativeSession.id, input.backend)
+            void reconnectNativeCliSession(nativeSession, worktreeId, {
+              openModal: false,
+              showToast: false,
+            }).then(() => toast.success('Opened in native client'))
+          },
+        })
+      })()
     },
     [createSession, worktreeId, worktreePath]
   )
@@ -901,6 +909,48 @@ export function SessionChatModal({
     [pickRemoteOrRun, worktree, worktreePath, project]
   )
 
+  const gitSyncButton = preferences?.git_sync_button ?? false
+
+  const handleSync = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+
+      const runSync = async (remote?: string) => {
+        await performGitSync({
+          needsPull: behindCount > 0,
+          needsPush: unpushedCount > 0,
+          pull: {
+            worktreeId,
+            worktreePath,
+            baseBranch: worktree?.base_branch ?? defaultBranch,
+            projectId: project?.id,
+            remote: worktree?.base_remote,
+          },
+          prNumber: worktree?.pr_number,
+          pushRemote: remote,
+        })
+      }
+
+      if (unpushedCount > 0 && pushNeedsRemotePicker(worktree?.pr_number)) {
+        pickRemoteOrRun(runSync)
+      } else {
+        void runSync()
+      }
+    },
+    [
+      behindCount,
+      unpushedCount,
+      worktreeId,
+      worktreePath,
+      worktree?.base_branch,
+      worktree?.base_remote,
+      worktree?.pr_number,
+      defaultBranch,
+      project?.id,
+      pickRemoteOrRun,
+    ]
+  )
+
   const handleUncommittedDiffClick = useCallback(() => {
     window.dispatchEvent(
       new CustomEvent('open-git-diff', { detail: { type: 'uncommitted' } })
@@ -1088,8 +1138,10 @@ export function SessionChatModal({
                   diffRemoved={isMobile ? 0 : uncommittedRemoved}
                   branchDiffAdded={isBase || isMobile ? 0 : branchDiffAdded}
                   branchDiffRemoved={isBase || isMobile ? 0 : branchDiffRemoved}
+                  syncMode={gitSyncButton}
                   onPull={handlePull}
                   onPush={handlePush}
+                  onSync={handleSync}
                   onDiffClick={handleUncommittedDiffClick}
                   onBranchDiffClick={handleBranchDiffClick}
                 />

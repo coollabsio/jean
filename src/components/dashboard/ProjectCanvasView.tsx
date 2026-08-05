@@ -209,6 +209,7 @@ import {
   fetchWorktreesStatus,
   triggerImmediateGitPoll,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import {
@@ -495,6 +496,8 @@ function WorktreeSectionHeader({
   )
   const isBase = isBaseSession(worktree)
   const { data: gitStatus } = useGitStatus(worktree.id)
+  const { data: preferences } = usePreferences()
+  const gitSyncButton = preferences?.git_sync_button ?? false
 
   const behindCount =
     gitStatus?.behind_count ?? worktree.cached_behind_count ?? 0
@@ -567,6 +570,44 @@ function WorktreeSectionHeader({
       }
     },
     [pickRemoteOrRun, worktree.path, worktree.pr_number, projectId]
+  )
+
+  const handleSync = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+
+      const runSync = async (remote?: string) => {
+        await performGitSync({
+          needsPull: behindCount > 0,
+          needsPush: unpushedCount > 0,
+          pull: {
+            worktreeId: worktree.id,
+            worktreePath: worktree.path,
+            baseBranch: worktree.base_branch ?? defaultBranch,
+            projectId,
+            remote: worktree.base_remote,
+            onMergeConflict: () => onResolveConflicts?.(worktree),
+          },
+          prNumber: worktree.pr_number,
+          pushRemote: remote,
+        })
+      }
+
+      if (unpushedCount > 0 && pushNeedsRemotePicker(worktree.pr_number)) {
+        pickRemoteOrRun(runSync)
+      } else {
+        void runSync()
+      }
+    },
+    [
+      behindCount,
+      unpushedCount,
+      worktree,
+      defaultBranch,
+      projectId,
+      onResolveConflicts,
+      pickRemoteOrRun,
+    ]
   )
 
   const handleDiffClick = useCallback(() => {
@@ -713,8 +754,10 @@ function WorktreeSectionHeader({
                   unpushedCount={unpushedCount}
                   diffAdded={diffAdded}
                   diffRemoved={diffRemoved}
+                  syncMode={gitSyncButton}
                   onPull={handlePull}
                   onPush={handlePush}
+                  onSync={handleSync}
                   onDiffClick={handleDiffClick}
                 />
               </span>
