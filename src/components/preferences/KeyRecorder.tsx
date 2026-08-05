@@ -206,6 +206,7 @@ export const KeyRecorder: React.FC<KeyRecorderProps> = ({
   return (
     <div className="flex items-center gap-1.5">
       <button
+        type="button"
         ref={buttonRef}
         onClick={handleClick}
         disabled={disabled}

@@ -6,6 +6,8 @@ import type {
   ReviewFinding,
 } from '@/types/chat'
 import { MessageItem } from './MessageItem'
+import { getProviderChangeBeforeMessage } from './message-settings-labels'
+import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { getAssistantDurationMs } from './time-utils'
 
 interface MessageListProps {
@@ -14,6 +16,7 @@ interface MessageListProps {
   lastPlanMessageIndex: number
   sessionId: string
   worktreePath: string
+  worktreeId?: string | null
   approveShortcut: string
   approveShortcutYolo?: string
   approveShortcutClearContext?: string
@@ -59,6 +62,7 @@ export const MessageList = memo(function MessageList({
   lastPlanMessageIndex,
   sessionId,
   worktreePath,
+  worktreeId = null,
   approveShortcut,
   approveShortcutYolo,
   approveShortcutClearContext,
@@ -106,6 +110,19 @@ export const MessageList = memo(function MessageList({
     return map
   }, [messages])
 
+  // Pre-compute provider switches between consecutive user prompts
+  const providerChangeMap = useMemo(() => {
+    const map = new Map<
+      number,
+      ReturnType<typeof getProviderChangeBeforeMessage>
+    >()
+    for (let i = 0; i < messages.length; i++) {
+      const change = getProviderChangeBeforeMessage(messages, i)
+      if (change) map.set(i, change)
+    }
+    return map
+  }, [messages])
+
   if (messages.length === 0) return null
 
   return (
@@ -119,9 +136,13 @@ export const MessageList = memo(function MessageList({
           index,
           completedDurationMs
         )
+        const providerChange = providerChangeMap.get(index) ?? null
 
         return (
           <div key={message.id}>
+            {providerChange && (
+              <ProviderChangeSeparator change={providerChange} />
+            )}
             <MessageItem
               message={message}
               getMessages={getMessages}
@@ -131,6 +152,7 @@ export const MessageList = memo(function MessageList({
               hasFollowUpMessage={hasFollowUpMessage}
               sessionId={sessionId}
               worktreePath={worktreePath}
+              worktreeId={worktreeId}
               approveShortcut={approveShortcut}
               approveShortcutYolo={approveShortcutYolo}
               approveShortcutClearContext={approveShortcutClearContext}

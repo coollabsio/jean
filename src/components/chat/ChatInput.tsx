@@ -45,6 +45,7 @@ import {
   listControlChars,
   sanitizeTextInputValue,
 } from '@/lib/input-sanitization'
+import { isImeComposingEvent } from '@/lib/ime-composition'
 import {
   decodePromptAttachmentMetadata,
   parsePlainTextPromptMetadata,
@@ -123,6 +124,9 @@ export const ChatInput = memo(function ChatInput({
   const [slashTriggerIndex, setSlashTriggerIndex] = useState<number | null>(
     null
   )
+  const [slashTriggerKind, setSlashTriggerKind] = useState<
+    'mixed' | 'command' | 'skill'
+  >('mixed')
 
   // Context mention popover state (for # issues/PRs/security/Linear)
   const [contextMentionOpen, setContextMentionOpen] = useState(false)
@@ -430,9 +434,12 @@ export const ChatInput = memo(function ChatInput({
         }
       }
 
-      // Detect / trigger for slash commands and skills (only if @/# popovers not open)
+      // Detect / commands and $ skills (only if @/# popovers are not open)
       if (!fileMentionOpen && !contextMentionOpen) {
-        if (prevChar === '/') {
+        if (
+          prevChar === '/' ||
+          (prevChar === '$' && selectedBackend === 'codex')
+        ) {
           // Check that it's at start or preceded by whitespace
           const charBeforeSlash = value[cursorPos - 2]
           if (
@@ -441,6 +448,13 @@ export const ChatInput = memo(function ChatInput({
             charBeforeSlash === '\n'
           ) {
             setSlashTriggerIndex(cursorPos - 1)
+            setSlashTriggerKind(
+              prevChar === '$'
+                ? 'skill'
+                : selectedBackend === 'codex'
+                  ? 'command'
+                  : 'mixed'
+            )
             setSlashQuery('')
             setSlashPopoverOpen(true)
 
@@ -475,12 +489,21 @@ export const ChatInput = memo(function ChatInput({
       contextMentionOpen,
       hashTriggerIndex,
       formRef,
+      selectedBackend,
     ]
   )
 
   // Handle keyboard events
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Japanese/CJK IME: Enter confirms composition — must not submit or
+      // select mentions. Do not preventDefault; let the IME handle the key.
+      // keyCode 229 covers Safari/WKWebView where compositionend can fire
+      // before keydown and leave isComposing false (issue #584).
+      if (isImeComposingEvent(e)) {
+        return
+      }
+
       // When file mention popover is open, handle navigation
       if (fileMentionOpen) {
         if (e.ctrlKey && e.shiftKey && e.key === 'ArrowLeft') {
@@ -796,24 +819,26 @@ export const ChatInput = memo(function ChatInput({
           })
         }
 
-        // Restore text files (read content from disk)
-        for (const path of copiedPromptMetadata.textFiles) {
-          try {
-            const response = await invoke<ReadTextResponse>(
-              'read_pasted_text',
-              { path }
-            )
-            addPendingTextFile(activeSessionId, {
-              id: generateId(),
-              path,
-              filename: getFilename(path),
-              size: response.size,
-              content: response.content,
-            })
-          } catch {
-            // File may no longer exist, skip
-          }
-        }
+        // Restore text files (read content from disk) — independent reads
+        await Promise.all(
+          copiedPromptMetadata.textFiles.map(async path => {
+            try {
+              const response = await invoke<ReadTextResponse>(
+                'read_pasted_text',
+                { path }
+              )
+              addPendingTextFile(activeSessionId, {
+                id: generateId(),
+                path,
+                filename: getFilename(path),
+                size: response.size,
+                content: response.content,
+              })
+            } catch {
+              // File may no longer exist, skip
+            }
+          })
+        )
 
         // Restore file and directory mentions
         for (const file of copiedPromptMetadata.files) {
@@ -840,18 +865,23 @@ export const ChatInput = memo(function ChatInput({
       if (!items) return
 
       // First, check for image items in the clipboard
-      let hasImage = false
+      const imageFiles: File[] = []
       for (const item of items) {
         if (!item.type.startsWith('image/')) continue
-        hasImage = true
         // Prevent the browser from also inserting any text/html fallback for
         // image clipboard entries; mixed text is handled explicitly below.
         e.preventDefault()
 
         const file = item.getAsFile()
         if (!file) continue
-
-        await processAttachmentFile(file, activeSessionId)
+        imageFiles.push(file)
+      }
+      const hasImage = imageFiles.length > 0
+      // Independent per-image save; process in parallel
+      if (imageFiles.length > 0) {
+        await Promise.all(
+          imageFiles.map(file => processAttachmentFile(file, activeSessionId))
+        )
       }
 
       // Mixed image+text paste should preserve both parts. Because image paste
@@ -926,9 +956,10 @@ export const ChatInput = memo(function ChatInput({
       const files = e.target.files
       if (!files || files.length === 0) return
 
-      for (const file of Array.from(files)) {
-        await processAttachmentFile(file, activeSessionId)
-      }
+      // Independent per-file attachment processing
+      await Promise.all(
+        Array.from(files, file => processAttachmentFile(file, activeSessionId))
+      )
 
       e.target.value = ''
       inputRef.current?.focus()
@@ -1202,10 +1233,12 @@ export const ChatInput = memo(function ChatInput({
         multiple
         tabIndex={-1}
         className="sr-only"
+        aria-label="Attach images"
         onChange={handleFileInputChange}
       />
       <Textarea
         ref={inputRef}
+        data-chat-input
         placeholder={
           isSending
             ? executionMode === 'yolo'
@@ -1277,6 +1310,7 @@ export const ChatInput = memo(function ChatInput({
         handleRef={slashPopoverHandleRef}
         installedBackends={installedBackends}
         sessionBackend={selectedBackend}
+        triggerKind={slashTriggerKind}
       />
     </div>
   )

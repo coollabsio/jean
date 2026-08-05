@@ -73,6 +73,9 @@ pub struct GrokResponse {
     pub content_blocks: Vec<ContentBlock>,
     pub cancelled: bool,
     pub usage: Option<UsageData>,
+    /// Host/stream-recorded failure (rate limit, auth, JSON-RPC error, …).
+    /// When set, the turn must surface `chat:error` instead of completing empty.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,16 +143,141 @@ fn normalize_todo_status(raw: &str) -> &'static str {
     }
 }
 
+/// Normalize one Grok/Claude-style todo item to Jean's Todo shape:
+/// `{ id?, content, activeForm, status }`.
+///
+/// Grok `todo_write` with `merge: true` often sends status-only patches like
+/// `{ "id": "5", "content": null, "status": "completed" }`. Those must be kept
+/// (content may be empty) so stream-level merge can update the prior snapshot.
+fn normalize_todo_item_value(item: &Value) -> Option<Value> {
+    let map = item.as_object()?;
+    let id = map.get("id").cloned().filter(|v| !v.is_null());
+    let content = map
+        .get("content")
+        .or_else(|| map.get("text"))
+        .or_else(|| map.get("title"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    // Status-only merge patches have id + status and null/missing content.
+    if content.is_none() && id.is_none() {
+        return None;
+    }
+    let content = content.unwrap_or_default();
+    let active_form = map
+        .get("activeForm")
+        .or_else(|| map.get("active_form"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| content.clone());
+    let status = map
+        .get("status")
+        .and_then(Value::as_str)
+        .map(normalize_todo_status)
+        .unwrap_or("pending");
+
+    let mut out = serde_json::Map::new();
+    if let Some(id) = id {
+        out.insert("id".to_string(), id);
+    }
+    out.insert("content".to_string(), Value::String(content));
+    out.insert("activeForm".to_string(), Value::String(active_form));
+    out.insert("status".to_string(), Value::String(status.to_string()));
+    Some(Value::Object(out))
+}
+
 /// Normalize Grok/Claude-style todo items to Jean's Todo shape:
 /// `{ content, activeForm, status }` (status is pending|in_progress|completed|cancelled).
 fn normalize_todos_array(todos: &Value) -> Value {
     let Some(items) = todos.as_array() else {
         return todos.clone();
     };
-    let normalized: Vec<Value> = items
+    let normalized: Vec<Value> = items.iter().filter_map(normalize_todo_item_value).collect();
+    Value::Array(normalized)
+}
+
+/// Merge Grok TodoWrite patches into an accumulated snapshot.
+///
+/// When `merge` is false the incoming list fully replaces the snapshot.
+/// When `merge` is true, items are upserted by `id` (status always updates;
+/// empty content keeps the previous label). Without ids, non-empty content
+/// items append.
+fn merge_todo_snapshot(existing: &[Value], incoming: &Value, merge: bool) -> Vec<Value> {
+    let incoming_items: Vec<Value> = match normalize_todos_array(incoming) {
+        Value::Array(items) => items,
+        _ => Vec::new(),
+    };
+    if !merge || existing.is_empty() {
+        // Full replace — drop status-only stubs that still have empty content
+        // (no prior snapshot to fill labels from).
+        return incoming_items
+            .into_iter()
+            .filter(|item| {
+                item.get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| !s.is_empty())
+            })
+            .collect();
+    }
+
+    let mut result = existing.to_vec();
+    for item in incoming_items {
+        let id = item.get("id").cloned();
+        let new_content_empty = item
+            .get("content")
+            .and_then(Value::as_str)
+            .is_none_or(|s| s.is_empty());
+
+        if let Some(id) = id {
+            if let Some(pos) = result.iter().position(|existing_item| existing_item.get("id") == Some(&id))
+            {
+                let prev = result[pos].as_object().cloned().unwrap_or_default();
+                let mut merged = prev;
+                if let Some(status) = item.get("status").cloned() {
+                    merged.insert("status".to_string(), status);
+                }
+                if !new_content_empty {
+                    if let Some(content) = item.get("content").cloned() {
+                        merged.insert("content".to_string(), content.clone());
+                        let active = item
+                            .get("activeForm")
+                            .cloned()
+                            .unwrap_or(content);
+                        merged.insert("activeForm".to_string(), active);
+                    }
+                }
+                result[pos] = Value::Object(merged);
+            } else if !new_content_empty {
+                result.push(item);
+            }
+        } else if !new_content_empty {
+            result.push(item);
+        }
+    }
+    result
+}
+
+const GROK_ACP_PLAN_TODO_TOOL_ID: &str = "grok-acp-plan";
+
+/// Convert ACP `sessionUpdate: "plan"` entries into a synthetic TodoWrite call.
+///
+/// Grok Build mirrors todo state as full plan snapshots:
+/// `{ "sessionUpdate": "plan", "entries": [{ "content", "priority", "status" }] }`.
+/// These are the most reliable full-list updates (including intermediate status
+/// changes) and must not be ignored.
+fn extract_acp_plan_todo_write(update: &Value) -> Option<ParsedToolCall> {
+    let entries = update.get("entries")?.as_array()?;
+    if entries.is_empty() {
+        return None;
+    }
+    let todos: Vec<Value> = entries
         .iter()
-        .filter_map(|item| {
-            let map = item.as_object()?;
+        .enumerate()
+        .filter_map(|(idx, entry)| {
+            let map = entry.as_object()?;
             let content = map
                 .get("content")
                 .or_else(|| map.get("text"))
@@ -158,32 +286,65 @@ fn normalize_todos_array(todos: &Value) -> Value {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())?
                 .to_string();
-            let active_form = map
-                .get("activeForm")
-                .or_else(|| map.get("active_form"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(content.as_str())
-                .to_string();
             let status = map
                 .get("status")
                 .and_then(Value::as_str)
                 .map(normalize_todo_status)
                 .unwrap_or("pending");
-
-            let mut out = serde_json::Map::new();
-            // Preserve id when present (Grok includes it; Claude usually does not).
-            if let Some(id) = map.get("id").cloned().filter(|v| !v.is_null()) {
-                out.insert("id".to_string(), id);
-            }
-            out.insert("content".to_string(), Value::String(content));
-            out.insert("activeForm".to_string(), Value::String(active_form));
-            out.insert("status".to_string(), Value::String(status.to_string()));
-            Some(Value::Object(out))
+            // Prefer explicit id; otherwise stable 1-based index so merge patches match.
+            let id = map
+                .get("id")
+                .and_then(|v| match v {
+                    Value::String(s) if !s.is_empty() => Some(s.clone()),
+                    Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| (idx + 1).to_string());
+            Some(serde_json::json!({
+                "id": id,
+                "content": content,
+                "activeForm": content,
+                "status": status,
+            }))
         })
         .collect();
-    Value::Array(normalized)
+    if todos.is_empty() {
+        return None;
+    }
+    Some(ParsedToolCall {
+        id: GROK_ACP_PLAN_TODO_TOOL_ID.to_string(),
+        name: "TodoWrite".to_string(),
+        input: serde_json::json!({
+            "todos": todos,
+            "merge": false,
+        }),
+    })
+}
+
+/// Apply Grok TodoWrite / ACP plan state onto a running snapshot and rewrite the
+/// tool call input so the UI always sees a full merged list.
+fn apply_todo_write_snapshot(
+    tool: &mut ParsedToolCall,
+    todo_snapshot: &mut Vec<Value>,
+) {
+    if tool.name != "TodoWrite" {
+        return;
+    }
+    let merge = tool
+        .input
+        .get("merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let incoming = tool
+        .input
+        .get("todos")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(vec![]));
+    *todo_snapshot = merge_todo_snapshot(todo_snapshot, &incoming, merge);
+    let map = input_as_object_mut(&mut tool.input);
+    map.insert("todos".to_string(), Value::Array(todo_snapshot.clone()));
+    // Snapshot is complete after merge; avoid double-merge on the frontend.
+    map.insert("merge".to_string(), Value::Bool(false));
 }
 
 fn input_as_object_mut(input: &mut Value) -> &mut serde_json::Map<String, Value> {
@@ -1100,8 +1261,12 @@ where
     let mut content = String::new();
     let mut content_blocks = Vec::new();
     let mut tool_calls = Vec::new();
+    // Accumulated Grok todo list so merge:true patches and ACP plan updates
+    // keep full content labels across the turn.
+    let mut todo_snapshot: Vec<Value> = Vec::new();
     let mut session_id = initial_session_id.unwrap_or_default().to_string();
     let mut usage = None;
+    let mut error: Option<String> = None;
 
     for line in reader.lines() {
         let raw_line = line.map_err(|e| format!("Failed to read Grok CLI output: {e}"))?;
@@ -1135,6 +1300,23 @@ where
             continue;
         }
 
+        // Host terminal error marker from ACP prompt JSON-RPC failure (#580).
+        // Capture and keep scanning so a legacy trailing `type:result` does not
+        // wipe the failure — callers treat `error` as fatal.
+        if parsed.get("type").and_then(Value::as_str) == Some("error") {
+            if let Some(err) = parsed.get("error") {
+                error = Some(extract_grok_error_message(err));
+            } else {
+                error = Some("Unknown Grok error".to_string());
+            }
+            if let Some(sid) = parsed.get("session_id").and_then(Value::as_str) {
+                if !sid.is_empty() {
+                    session_id = sid.to_string();
+                }
+            }
+            continue;
+        }
+
         if let Some(extracted_session_id) = extract_session_id(&parsed) {
             session_id = extracted_session_id;
         }
@@ -1161,14 +1343,16 @@ where
                     }
                 }
                 Some("tool_call") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut tool_calls, &tool_call);
                         ensure_tool_use(&mut content_blocks, &tool_call.id);
                         on_tool_use(&tool_call);
                     }
                 }
                 Some("tool_call_update") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut tool_calls, &tool_call);
                         ensure_tool_use(&mut content_blocks, &tool_call.id);
                         on_tool_use(&tool_call);
@@ -1179,6 +1363,14 @@ where
                     ) {
                         set_tool_result(&mut tool_calls, &tool_use_id, &output);
                         on_tool_result(&tool_use_id, &output);
+                    }
+                }
+                Some("plan") => {
+                    if let Some(mut tool_call) = extract_acp_plan_todo_write(update) {
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
+                        upsert_tool_call(&mut tool_calls, &tool_call);
+                        ensure_tool_use(&mut content_blocks, &tool_call.id);
+                        on_tool_use(&tool_call);
                     }
                 }
                 _ => {}
@@ -1220,7 +1412,8 @@ where
                 }
             }
             "tool_call" | "tool_use" | "tool" => {
-                if let Some(tool_call) = extract_tool_call_event(&parsed) {
+                if let Some(mut tool_call) = extract_tool_call_event(&parsed) {
+                    apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                     upsert_tool_call(&mut tool_calls, &tool_call);
                     ensure_tool_use(&mut content_blocks, &tool_call.id);
                     on_tool_use(&tool_call);
@@ -1252,6 +1445,7 @@ where
         content_blocks,
         cancelled: false,
         usage,
+        error,
     })
 }
 
@@ -1331,11 +1525,7 @@ fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
             .to_string();
         // Enrich thin/empty plan bodies with full assistant plan text.
         if existing_plan.len() < plan_body.trim().len() {
-            if let Some(tool) = response
-                .tool_calls
-                .iter_mut()
-                .find(|tool| tool.id == id)
-            {
+            if let Some(tool) = response.tool_calls.iter_mut().find(|tool| tool.id == id) {
                 tool.input = serde_json::json!({
                     "source": "grok",
                     "plan": plan_body,
@@ -1349,9 +1539,9 @@ fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
                 ContentBlock::ToolUse { tool_call_id } if tool_call_id == &id
             )
         });
-        response
-            .content_blocks
-            .push(ContentBlock::ToolUse { tool_call_id: id.clone() });
+        response.content_blocks.push(ContentBlock::ToolUse {
+            tool_call_id: id.clone(),
+        });
         return Some(id);
     }
 
@@ -1366,9 +1556,9 @@ fn inject_synthetic_plan(response: &mut GrokResponse) -> Option<String> {
         output: None,
         parent_tool_use_id: None,
     });
-    response
-        .content_blocks
-        .push(ContentBlock::ToolUse { tool_call_id: id.clone() });
+    response.content_blocks.push(ContentBlock::ToolUse {
+        tool_call_id: id.clone(),
+    });
     Some(id)
 }
 
@@ -1695,6 +1885,161 @@ fn grok_line_is_completion_result(line: &str) -> bool {
                 .map(str::to_string)
         })
         .is_some_and(|event_type| event_type == "result" || event_type == "complete")
+}
+
+/// True when a host JSONL line is a terminal `type: "error"` marker.
+fn grok_line_is_error_marker(line: &str) -> bool {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .is_some_and(|event_type| event_type == "error")
+}
+
+/// Extract a human-readable message from a Grok/ACP error payload.
+///
+/// Handles:
+/// - string: `"message"`
+/// - JSON-RPC object: `{"code":…,"message":"…","data":…}`
+/// - nested: `{"error":{"message":"…"}}`
+pub(crate) fn extract_grok_error_message(error: &Value) -> String {
+    if let Some(s) = error.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    // Nested `error` wrapper (host may re-nest JSON-RPC payloads).
+    if let Some(inner) = error.get("error") {
+        if inner.as_object().is_some() || inner.as_str().is_some() {
+            let nested = extract_grok_error_message(inner);
+            if !nested.is_empty() && nested != "null" {
+                return nested;
+            }
+        }
+    }
+
+    if let Some(message) = error.get("message").and_then(Value::as_str) {
+        let message = message.trim();
+        if message.is_empty() {
+            // fall through
+        } else {
+            let message = if let Some(data) = error.get("data") {
+                let data_str = if let Some(s) = data.as_str() {
+                    s.trim().to_string()
+                } else if let Some(s) = data.get("message").and_then(Value::as_str) {
+                    s.trim().to_string()
+                } else if data.is_null() {
+                    String::new()
+                } else {
+                    data.to_string()
+                };
+                if !data_str.is_empty() && data_str != "null" {
+                    format!("{message}: {data_str}")
+                } else {
+                    message.to_string()
+                }
+            } else {
+                message.to_string()
+            };
+            if let Some(code) = error.get("code").and_then(Value::as_i64) {
+                return format!("[{code}] {message}");
+            }
+            return message;
+        }
+    }
+
+    let rendered = error.to_string();
+    if rendered == "null" || rendered.is_empty() {
+        "Unknown Grok error".to_string()
+    } else {
+        rendered
+    }
+}
+
+/// Format a raw Grok error into a user-facing string (rate limit, auth, generic).
+pub(crate) fn format_grok_user_error(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "Grok error: unknown failure".to_string();
+    }
+    if trimmed.starts_with("Grok rate/usage limit reached")
+        || trimmed.starts_with("Grok authentication failed")
+        || trimmed.starts_with("Grok error:")
+    {
+        return trimmed.to_string();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+
+    let is_rate_or_quota = lower.contains("rate limit")
+        || lower.contains("ratelimit")
+        || lower.contains("rate_limit")
+        || lower.contains("too many requests")
+        || lower.contains("resource_exhausted")
+        || lower.contains("resource exhausted")
+        || lower.contains("quota")
+        || lower.contains("usage limit")
+        || lower.contains("limit exceeded")
+        || lower.contains("limit reached")
+        || lower.contains("\"code\":429")
+        || lower.contains("status code 429")
+        || lower.contains(" http 429")
+        || lower.starts_with("[429]")
+        || lower.starts_with("429 ")
+        || lower.contains(" 429 ");
+
+    if is_rate_or_quota {
+        return format!(
+            "Grok rate/usage limit reached. Wait for the limit to reset or check usage in Settings, then try again.\n\nDetails: {trimmed}"
+        );
+    }
+
+    let is_auth = lower.contains("not authenticated")
+        || lower.contains("unauthenticated")
+        || lower.contains("unauthorized")
+        || lower.contains("401 unauthorized")
+        || lower.contains("invalid api key")
+        || lower.contains("invalid_api_key")
+        || lower.contains("xai_api_key")
+        || lower.contains("run `grok login`")
+        || lower.contains("run grok login")
+        || lower.contains("please log in")
+        || lower.contains("please login");
+
+    if is_auth {
+        return format!(
+            "Grok authentication failed. Run `grok login` or set XAI_API_KEY in Settings.\n\nDetails: {trimmed}"
+        );
+    }
+
+    if trimmed.starts_with("Grok ") {
+        trimmed.to_string()
+    } else {
+        format!("Grok error: {trimmed}")
+    }
+}
+
+/// Build the single terminal host marker for a Grok ACP turn.
+///
+/// On success: `{"type":"result",…}`. On JSON-RPC prompt failure: `{"type":"error",…}`.
+/// Never both — writing both caused empty completed runs (#580).
+pub(crate) fn grok_host_terminal_marker(session_id: &str, prompt_error: Option<&Value>) -> Value {
+    match prompt_error {
+        Some(error) => serde_json::json!({
+            "type": "error",
+            "error": error,
+            "session_id": session_id,
+        }),
+        None => serde_json::json!({
+            "type": "result",
+            "session_id": session_id,
+        }),
+    }
 }
 
 #[cfg(unix)]
@@ -2179,7 +2524,6 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
     )?;
 
     let mut line = String::new();
-    let mut completed = false;
     loop {
         if abort.load(Ordering::SeqCst) {
             break;
@@ -2239,26 +2583,17 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
             }
         }
         if value.get("id").and_then(Value::as_i64) == Some(prompt_request_id) {
-            if let Some(error) = value.get("error") {
-                let err_line = serde_json::json!({
-                    "type": "error",
-                    "error": error,
-                    "session_id": acp_session_id,
-                });
-                host_write_output_line(&output, &err_line.to_string())?;
-            }
-            completed = true;
+            // Write exactly one terminal marker: error OR result (never both).
+            // Writing both made Jean treat failed turns as empty completed runs (#580).
+            let prompt_error = value.get("error");
+            let marker = grok_host_terminal_marker(&acp_session_id, prompt_error);
+            host_write_output_line(&output, &marker.to_string())?;
             break;
         }
     }
 
-    if completed {
-        let result = serde_json::json!({
-            "type": "result",
-            "session_id": acp_session_id,
-        });
-        host_write_output_line(&output, &result.to_string())?;
-    }
+    // Abort/disconnect without a prompt response: no terminal marker (tail
+    // treats process death as cancel). Success/error markers are written above.
 
     stop.store(true, Ordering::SeqCst);
     let _ = UnixStream::connect(&socket_path);
@@ -2386,6 +2721,7 @@ pub fn tail_grok_output(
         content_blocks: Vec::new(),
         cancelled: false,
         usage: None,
+        error: None,
     };
     let started_at = Instant::now();
     let startup_timeout = Duration::from_secs(120);
@@ -2406,6 +2742,29 @@ pub fn tail_grok_output(
             if line.trim().is_empty() {
                 continue;
             }
+
+            // Fatal host error marker (rate limit, auth, JSON-RPC prompt failure).
+            // Fail the turn immediately — do not wait for a trailing result and
+            // never emit chat:done for empty "completed" runs (#580).
+            if grok_line_is_error_marker(&line) {
+                flush_coalesced_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
+                let raw = serde_json::from_str::<Value>(line.trim())
+                    .ok()
+                    .and_then(|value| {
+                        if let Some(sid) = value.get("session_id").and_then(Value::as_str) {
+                            if !sid.is_empty() {
+                                response.session_id = sid.to_string();
+                            }
+                        }
+                        value.get("error").map(extract_grok_error_message)
+                    })
+                    .unwrap_or_else(|| "Grok ACP host failed".to_string());
+                let msg = format_grok_user_error(&raw);
+                response.error = Some(msg.clone());
+                log::warn!("[Grok tail] host error session={session_id}: {msg}");
+                return Err(msg);
+            }
+
             if grok_line_is_completion_result(&line) {
                 completed = true;
             }
@@ -2425,6 +2784,9 @@ pub fn tail_grok_output(
                     }
                     if let Some(usage) = partial.usage {
                         response.usage = Some(usage);
+                    }
+                    if let Some(err) = partial.error {
+                        response.error = Some(err);
                     }
                     // Preserve mid-turn steered prompts in block order. Live UI
                     // already gets `chat:steered` from steer_grok_turn; this keeps
@@ -2526,6 +2888,14 @@ pub fn tail_grok_output(
     flush_coalesced_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
     response.cancelled = cancelled && !completed;
     response.content = response.content.trim().to_string();
+
+    // Legacy logs may still have type:error followed by type:result; prefer error.
+    if let Some(err) = response.error.take() {
+        let msg = format_grok_user_error(&err);
+        log::warn!("[Grok tail] turn ended with error session={session_id}: {msg}");
+        return Err(msg);
+    }
+
     if !response.cancelled {
         // Plan-mode synthetic tool injection happens in execute_grok after tail.
         // Pass authoritative content so the UI can replace any space-glued
@@ -2543,6 +2913,18 @@ pub(crate) fn parse_grok_run_to_message(
     let joined = lines.join("\n");
     let mut response = parse_grok_stream_inner(BufReader::new(joined.as_bytes()), None)?;
     response.content = response.content.trim().to_string();
+    // Surface host-recorded failures (rate limit / auth / JSON-RPC) so history
+    // does not collapse into the empty "content was not captured" placeholder.
+    if let Some(err) = response.error.as_deref() {
+        let formatted = format_grok_user_error(err);
+        let error_text = if response.content.is_empty() {
+            formatted
+        } else {
+            format!("\n\n{formatted}")
+        };
+        push_text_block(&mut response.content_blocks, &error_text);
+        response.content.push_str(&error_text);
+    }
     Ok(ChatMessage {
         id: run
             .assistant_message_id
@@ -3513,7 +3895,11 @@ fn send_grok_acp_prompt(
         content_blocks: Vec::new(),
         cancelled: false,
         usage: None,
+        error: None,
     };
+    // Accumulated Grok todo list so merge:true patches and ACP plan updates
+    // keep full content labels across the turn (live ACP path).
+    let mut todo_snapshot: Vec<Value> = Vec::new();
     let mut chunk_coalescer = ChunkCoalescer::new();
     let mut line = String::new();
     loop {
@@ -3580,26 +3966,28 @@ fn send_grok_acp_prompt(
                     }
                 }
                 Some("tool_call") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
                         flush_coalesced_chunks(
                             app,
                             jean_session_id,
                             worktree_id,
                             &mut chunk_coalescer,
                         );
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut response.tool_calls, &tool_call);
                         ensure_tool_use(&mut response.content_blocks, &tool_call.id);
                         emit_tool_use(app, jean_session_id, worktree_id, &tool_call);
                     }
                 }
                 Some("tool_call_update") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
                         flush_coalesced_chunks(
                             app,
                             jean_session_id,
                             worktree_id,
                             &mut chunk_coalescer,
                         );
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut response.tool_calls, &tool_call);
                         ensure_tool_use(&mut response.content_blocks, &tool_call.id);
                         emit_tool_use(app, jean_session_id, worktree_id, &tool_call);
@@ -3616,6 +4004,20 @@ fn send_grok_acp_prompt(
                         );
                         set_tool_result(&mut response.tool_calls, &tool_use_id, &output);
                         emit_tool_result(app, jean_session_id, worktree_id, &tool_use_id, &output);
+                    }
+                }
+                Some("plan") => {
+                    if let Some(mut tool_call) = extract_acp_plan_todo_write(update) {
+                        flush_coalesced_chunks(
+                            app,
+                            jean_session_id,
+                            worktree_id,
+                            &mut chunk_coalescer,
+                        );
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
+                        upsert_tool_call(&mut response.tool_calls, &tool_call);
+                        ensure_tool_use(&mut response.content_blocks, &tool_call.id);
+                        emit_tool_use(app, jean_session_id, worktree_id, &tool_call);
                     }
                 }
                 _ => {}
@@ -3639,7 +4041,8 @@ fn send_grok_acp_prompt(
         if value.get("id").and_then(Value::as_i64) == Some(prompt_request_id) {
             if let Some(error) = value.get("error") {
                 flush_coalesced_chunks(app, jean_session_id, worktree_id, &mut chunk_coalescer);
-                return Err(format!("Grok ACP prompt failed: {error}"));
+                let raw = extract_grok_error_message(error);
+                return Err(format_grok_user_error(&raw));
             }
             if response.usage.is_none() {
                 response.usage =
@@ -3773,6 +4176,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                 content_blocks: vec![],
                 cancelled: true,
                 usage: None,
+                error: None,
             });
         }
 
@@ -3895,6 +4299,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                 content_blocks: vec![],
                 cancelled: true,
                 usage: None,
+                error: None,
             });
         }
 
@@ -3927,17 +4332,19 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
                         content_blocks: vec![],
                         cancelled: true,
                         usage: None,
+                        error: None,
                     });
                 }
+                let user_error = format_grok_user_error(&error);
                 let _ = app.emit_all(
                     "chat:error",
                     &ErrorEvent {
                         session_id: jean_session_id.to_string(),
                         worktree_id: worktree_id.to_string(),
-                        error: error.clone(),
+                        error: user_error.clone(),
                     },
                 );
-                return Err(error);
+                return Err(user_error);
             }
         };
 
@@ -4088,9 +4495,7 @@ fn extract_json_object(text: &str) -> Result<String, String> {
                 .and_then(Value::as_str)
                 .filter(|s| !s.trim().is_empty())
             {
-                return Err(format!(
-                    "Grok structured output failed: {err} ({last_err})"
-                ));
+                return Err(format!("Grok structured output failed: {err} ({last_err})"));
             }
 
             return Err(last_err);
@@ -4146,9 +4551,7 @@ fn build_one_shot_grok_cli_args(
         "--sandbox".to_string(),
         "read-only".to_string(),
         "--model".to_string(),
-        raw_grok_model(Some(model))
-            .unwrap_or(model)
-            .to_string(),
+        raw_grok_model(Some(model)).unwrap_or(model).to_string(),
     ];
     // Prefer native constrained decoding when a schema is available. Implies
     // --output-format json and populates structuredOutput on success.
@@ -4317,9 +4720,13 @@ mod tests {
         assert!(args.contains(&"--prompt-file".to_string()));
         let prompt_file_idx = args.iter().position(|a| a == "--prompt-file").unwrap();
         assert_eq!(args[prompt_file_idx + 1], "/tmp/jean-prompt.txt");
-        assert!(!args.iter().any(|a| a == "-p" || a == "--prompt" || a == "--single"));
+        assert!(!args
+            .iter()
+            .any(|a| a == "-p" || a == "--prompt" || a == "--single"));
         // Prompt body must not appear as an argv entry.
-        assert!(!args.iter().any(|a| a.contains("diff --git") || a.len() > 10_000));
+        assert!(!args
+            .iter()
+            .any(|a| a.contains("diff --git") || a.len() > 10_000));
         assert!(args.contains(&"--json-schema".to_string()));
         assert!(args.contains(&"--effort".to_string()));
         assert!(args.contains(&"high".to_string()));
@@ -4328,8 +4735,7 @@ mod tests {
 
     #[test]
     fn one_shot_cli_args_without_schema_use_json_output() {
-        let args =
-            build_one_shot_grok_cli_args("/tmp/p.txt", ".", "grok-build", None, None);
+        let args = build_one_shot_grok_cli_args("/tmp/p.txt", ".", "grok-build", None, None);
         assert!(args.contains(&"--output-format".to_string()));
         assert!(args.contains(&"json".to_string()));
         assert!(!args.iter().any(|a| a == "--json-schema"));
@@ -4562,13 +4968,14 @@ mod tests {
 
     #[test]
     fn plan_mode_allows_terminal_create() {
+        let cwd = std::env::temp_dir();
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 10,
             "method": "terminal/create",
             "params": {
                 "command": "echo research-ok",
-                "cwd": "/tmp",
+                "cwd": cwd.to_string_lossy(),
             },
         });
         let mut output = Vec::new();
@@ -4612,6 +5019,7 @@ mod tests {
             content_blocks: vec![],
             cancelled: false,
             usage: None,
+            error: None,
         };
         assert!(inject_synthetic_plan(&mut response).is_none());
         assert!(response.tool_calls.is_empty());
@@ -4641,13 +5049,17 @@ Integrate Hermes as a first-class Jean AI backend with profile support.
             content_blocks: vec![],
             cancelled: false,
             usage: None,
+            error: None,
         };
         let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
         assert_eq!(plan_id, "grok-plan");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].name, "ExitPlanMode");
         assert_eq!(
-            response.tool_calls[0].input.get("plan").and_then(|v| v.as_str()),
+            response.tool_calls[0]
+                .input
+                .get("plan")
+                .and_then(|v| v.as_str()),
             Some(plan)
         );
     }
@@ -4692,12 +5104,16 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             ],
             cancelled: false,
             usage: None,
+            error: None,
         };
         let plan_id = inject_synthetic_plan(&mut response).expect("plan tool");
         assert_eq!(plan_id, "existing-plan");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(
-            response.tool_calls[0].input.get("plan").and_then(|v| v.as_str()),
+            response.tool_calls[0]
+                .input
+                .get("plan")
+                .and_then(|v| v.as_str()),
             Some(plan)
         );
         // Plan tool_use is last so mid-turn text stays between research tools and plan.
@@ -4721,6 +5137,168 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         assert_eq!(response.content, "Hello from Grok");
         assert_eq!(response.session_id, "grok-session-1");
         assert_eq!(response.usage.unwrap().output_tokens, 4);
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn parse_grok_stream_captures_host_error_marker() {
+        // Host writes type:error when session/prompt returns a JSON-RPC error (#580).
+        let input = r#"
+{"type":"session","session_id":"grok-err-1"}
+{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded","data":"retry after 60s"},"session_id":"grok-err-1"}
+"#;
+        let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
+        assert!(response.content.is_empty());
+        assert_eq!(response.session_id, "grok-err-1");
+        let err = response.error.expect("error captured");
+        assert!(err.to_ascii_lowercase().contains("rate limit"));
+        assert!(err.contains("retry after 60s"));
+    }
+
+    #[test]
+    fn parse_grok_stream_error_survives_legacy_trailing_result() {
+        // Old hosts wrote type:error then type:result — error must still win.
+        let input = r#"
+{"type":"error","error":"usage limit reached for this period","session_id":"s-legacy"}
+{"type":"result","session_id":"s-legacy"}
+"#;
+        let response = parse_grok_stream_inner(BufReader::new(input.as_bytes()), None).unwrap();
+        assert_eq!(
+            response.error.as_deref(),
+            Some("usage limit reached for this period")
+        );
+        assert!(response.content.is_empty());
+    }
+
+    #[test]
+    fn extract_and_format_grok_rate_limit_errors() {
+        let rpc = serde_json::json!({
+            "code": -32000,
+            "message": "Rate limit exceeded",
+            "data": {"message": "Too many requests"}
+        });
+        let raw = extract_grok_error_message(&rpc);
+        assert!(raw.contains("Rate limit exceeded"));
+        assert!(raw.contains("Too many requests"));
+
+        let formatted = format_grok_user_error(&raw);
+        assert!(
+            formatted.contains("rate/usage limit"),
+            "expected friendly rate-limit copy, got: {formatted}"
+        );
+        assert!(formatted.contains("Rate limit exceeded"));
+    }
+
+    #[test]
+    fn extract_and_format_grok_rate_limit_from_json_rpc_code() {
+        let rpc = serde_json::json!({
+            "code": 429,
+            "message": "Please slow down"
+        });
+        let raw = extract_grok_error_message(&rpc);
+        assert!(raw.contains("429"));
+
+        let formatted = format_grok_user_error(&raw);
+        assert!(
+            formatted.contains("rate/usage limit"),
+            "expected friendly rate-limit copy, got: {formatted}"
+        );
+    }
+
+    #[test]
+    fn format_grok_user_error_auth_guidance() {
+        let formatted = format_grok_user_error("Run `grok login` first, or set XAI_API_KEY.");
+        assert!(formatted.contains("authentication failed"));
+        assert!(formatted.contains("grok login"));
+    }
+
+    #[test]
+    fn format_grok_user_error_is_idempotent() {
+        for raw in [
+            "Rate limit exceeded",
+            "Run `grok login` first",
+            "Unexpected Grok failure",
+        ] {
+            let formatted = format_grok_user_error(raw);
+            assert_eq!(format_grok_user_error(&formatted), formatted);
+        }
+    }
+
+    #[test]
+    fn grok_host_terminal_marker_is_error_or_result_not_both() {
+        let ok = grok_host_terminal_marker("sess-1", None);
+        assert_eq!(ok.get("type").and_then(Value::as_str), Some("result"));
+        assert!(ok.get("error").is_none());
+        assert_eq!(ok.get("session_id").and_then(Value::as_str), Some("sess-1"));
+
+        let err_payload = serde_json::json!({"code": 429, "message": "rate limit"});
+        let err = grok_host_terminal_marker("sess-2", Some(&err_payload));
+        assert_eq!(err.get("type").and_then(Value::as_str), Some("error"));
+        assert_eq!(err.get("error"), Some(&err_payload));
+        assert_eq!(
+            err.get("session_id").and_then(Value::as_str),
+            Some("sess-2")
+        );
+    }
+
+    #[test]
+    fn grok_line_classifiers_distinguish_error_and_result() {
+        assert!(grok_line_is_error_marker(
+            r#"{"type":"error","error":"nope","session_id":"s"}"#
+        ));
+        assert!(!grok_line_is_error_marker(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(grok_line_is_completion_result(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(!grok_line_is_completion_result(
+            r#"{"type":"error","error":"nope","session_id":"s"}"#
+        ));
+    }
+
+    #[test]
+    fn parse_grok_run_to_message_surfaces_rate_limit_error() {
+        let lines = vec![
+            r#"{"type":"session","session_id":"grok-hist-err"}"#.to_string(),
+            r#"{"type":"assistant","delta":"Partial reply before failure."}"#.to_string(),
+            r#"{"type":"error","error":{"code":-32000,"message":"Rate limit exceeded"},"session_id":"grok-hist-err"}"#.to_string(),
+        ];
+        let run = RunEntry {
+            run_id: "run-err".to_string(),
+            user_message_id: "u-err".to_string(),
+            user_message: "hello grok".to_string(),
+            model: Some("grok-4.5".to_string()),
+            execution_mode: Some("plan".to_string()),
+            thinking_level: None,
+            effort_level: None,
+            backend: Some(super::super::types::Backend::Grok),
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status: super::super::types::RunStatus::Completed,
+            assistant_message_id: Some("a-err".to_string()),
+            cancelled: false,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: Some("grok-hist-err".to_string()),
+            kimi_session_id: None,
+            checkpoint_id: None,
+        };
+        let message = parse_grok_run_to_message(&lines, &run).unwrap();
+        assert!(message.content.contains("Partial reply before failure."));
+        assert!(
+            message.content.contains("rate/usage limit")
+                || message.content.to_ascii_lowercase().contains("rate limit"),
+            "expected rate-limit message, got: {}",
+            message.content
+        );
+        assert!(!message.content.contains("not captured"));
     }
 
     #[test]
@@ -4806,7 +5384,13 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             value.get("summary").and_then(Value::as_str),
             Some("Looks good")
         );
-        assert_eq!(value.get("findings").and_then(Value::as_array).map(|a| a.len()), Some(0));
+        assert_eq!(
+            value
+                .get("findings")
+                .and_then(Value::as_array)
+                .map(|a| a.len()),
+            Some(0)
+        );
     }
 
     #[test]
@@ -5117,6 +5701,101 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         });
         assert_eq!(todos2.name, "TodoWrite");
         assert_eq!(todos2.input["todos"][0]["activeForm"], "A");
+    }
+
+    #[test]
+    fn merge_todo_snapshot_applies_status_only_patches() {
+        let initial = serde_json::json!([
+            {"id": "1", "content": "Explore", "status": "in_progress"},
+            {"id": "2", "content": "Identify", "status": "pending"},
+            {"id": "3", "content": "Fix", "status": "pending"}
+        ]);
+        let snapshot = merge_todo_snapshot(&[], &initial, false);
+        assert_eq!(snapshot.len(), 3);
+        assert_eq!(snapshot[0]["status"], "in_progress");
+
+        // Grok merge:true with null content — only statuses change
+        let patch = serde_json::json!([
+            {"id": "1", "content": null, "status": "completed"},
+            {"id": "2", "content": null, "status": "completed"},
+            {"id": "3", "content": null, "status": "in_progress"}
+        ]);
+        let merged = merge_todo_snapshot(&snapshot, &patch, true);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0]["content"], "Explore");
+        assert_eq!(merged[0]["status"], "completed");
+        assert_eq!(merged[1]["content"], "Identify");
+        assert_eq!(merged[1]["status"], "completed");
+        assert_eq!(merged[2]["content"], "Fix");
+        assert_eq!(merged[2]["status"], "in_progress");
+
+        // Partial merge with only one id
+        let last = serde_json::json!([{"id": "3", "status": "completed"}]);
+        let done = merge_todo_snapshot(&merged, &last, true);
+        assert_eq!(done.len(), 3);
+        assert_eq!(done[2]["status"], "completed");
+        assert_eq!(done[2]["content"], "Fix");
+    }
+
+    #[test]
+    fn extract_acp_plan_todo_write_maps_entries() {
+        let update = serde_json::json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                {"content": "Explore existing browser tests", "priority": "medium", "status": "completed"},
+                {"content": "Add shared helpers", "priority": "medium", "status": "in_progress"},
+                {"content": "Write core tests", "priority": "medium", "status": "pending"}
+            ]
+        });
+        let tool = extract_acp_plan_todo_write(&update).expect("plan tool");
+        assert_eq!(tool.id, GROK_ACP_PLAN_TODO_TOOL_ID);
+        assert_eq!(tool.name, "TodoWrite");
+        assert_eq!(tool.input["todos"].as_array().unwrap().len(), 3);
+        assert_eq!(tool.input["todos"][0]["status"], "completed");
+        assert_eq!(tool.input["todos"][1]["status"], "in_progress");
+        assert_eq!(tool.input["todos"][0]["id"], "1");
+        assert_eq!(tool.input["todos"][1]["content"], "Add shared helpers");
+    }
+
+    #[test]
+    fn parse_grok_stream_merges_todo_write_and_plan_updates() {
+        let input = r#"
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t-todo-1","title":"todo_write","rawInput":{"merge":false,"todos":[{"id":"1","content":"Explore","status":"in_progress"},{"id":"2","content":"Fix","status":"pending"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-todo-1","title":"Updating plan","kind":"think","rawInput":{"variant":"TodoWrite","merge":false,"todos":[{"id":"1","content":"Explore","status":"in_progress"},{"id":"2","content":"Fix","status":"pending"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan","entries":[{"content":"Explore","priority":"medium","status":"in_progress"},{"content":"Fix","priority":"medium","status":"pending"}]}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t-todo-2","title":"todo_write","rawInput":{"merge":true,"todos":[{"id":"1","status":"completed"},{"id":"2","status":"in_progress"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-todo-2","title":"Updating plan","rawInput":{"variant":"TodoWrite","merge":true,"todos":[{"id":"1","content":null,"status":"completed"},{"id":"2","content":null,"status":"in_progress"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan","entries":[{"content":"Explore","priority":"medium","status":"completed"},{"content":"Fix","priority":"medium","status":"in_progress"}]}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t-todo-3","title":"todo_write","rawInput":{"merge":true,"todos":[{"id":"2","status":"completed"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan","entries":[{"content":"Explore","priority":"medium","status":"completed"},{"content":"Fix","priority":"medium","status":"completed"}]}}}
+"#;
+        let response =
+            parse_grok_stream_inner(std::io::Cursor::new(input.as_bytes()), Some("s")).unwrap();
+
+        // Latest TodoWrite (plan synthetic id wins if last) should have both items completed
+        let todos = response
+            .tool_calls
+            .iter()
+            .rev()
+            .find(|tc| tc.name == "TodoWrite")
+            .expect("TodoWrite present");
+        let items = todos.input["todos"].as_array().expect("todos array");
+        assert_eq!(items.len(), 2, "merge must keep full list, got: {items:?}");
+        assert_eq!(items[0]["content"], "Explore");
+        assert_eq!(items[0]["status"], "completed");
+        assert_eq!(items[1]["content"], "Fix");
+        assert_eq!(items[1]["status"], "completed");
+
+        // Intermediate merge tool call (t-todo-2) should already be expanded
+        let mid = response
+            .tool_calls
+            .iter()
+            .find(|tc| tc.id == "t-todo-2")
+            .expect("mid todo");
+        assert_eq!(mid.input["todos"].as_array().unwrap().len(), 2);
+        assert_eq!(mid.input["todos"][0]["status"], "completed");
+        assert_eq!(mid.input["todos"][0]["content"], "Explore");
+        assert_eq!(mid.input["todos"][1]["status"], "in_progress");
     }
 
     #[test]
@@ -5439,6 +6118,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-1".to_string()),
             kimi_session_id: None,
+            checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
         assert_eq!(message.content, "Survived restart");
@@ -5515,6 +6195,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
         assert_eq!(message.content, "BeforeAfter");

@@ -17,7 +17,7 @@ use super::run_log;
 use super::storage::{
     cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
     get_index_path, get_session_dir, load_metadata, load_sessions, save_metadata,
-    with_existing_metadata_mut, with_sessions_mut,
+    with_existing_metadata_mut, with_metadata_mut, with_sessions_mut,
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
@@ -34,6 +34,22 @@ use crate::projects::types::{SessionType, Worktree};
 const QUEUE_DEFAULT_ALLOWED_TOOLS: [&str; 4] = ["Bash(git:*)", "Read", "Glob", "Grep"];
 const IMAGE_ONLY_DEFAULT_PROMPT: &str = "Please check this image and tell me what is wrong.";
 const TEXT_ONLY_DEFAULT_PROMPT: &str = "Please check the attached text as reference.";
+
+fn resumed_grok_tail_error_event(
+    session_id: &str,
+    worktree_id: &str,
+    error: &str,
+) -> (&'static str, super::grok::ErrorEvent) {
+    (
+        "chat:error",
+        super::grok::ErrorEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            error: error.to_string(),
+        },
+    )
+}
+
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 ## Not Plan Mode
 
@@ -361,7 +377,7 @@ fn codex_reasoning_effort<'a>(effort: &'a EffortLevel, model: Option<&str>) -> O
         )
     );
     match effort {
-        EffortLevel::Off => None,
+        EffortLevel::Off | EffortLevel::Adaptive => None,
         EffortLevel::Minimal => Some("low"),
         // Migrate GPT 5.6 sessions persisted before the Codex-native value was fixed.
         EffortLevel::Ultracode if supports_ultra => Some("ultra"),
@@ -413,6 +429,42 @@ fn default_model_for_backend(
     } else {
         Some(model.clone())
     }
+}
+
+/// Trim and drop empty optional strings (MCP/UI may send `""` or whitespace).
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Resolve the model used for a send.
+///
+/// Precedence:
+/// 1. Explicit `model` on the send (one-shot override, e.g. MCP `send_chat_message`)
+/// 2. Session `selected_model` (set via UI or MCP `set_session_model`)
+/// 3. Backend default from preferences (when available)
+///
+/// Without (2), Jean MCP agents that call `set_session_model` then send without
+/// `model` would fall through to the CLI default (often Opus) instead of the
+/// session's chosen model.
+fn resolve_send_model(
+    explicit_model: Option<String>,
+    session_selected_model: Option<String>,
+    backend_default_model: Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit_model)
+        .or_else(|| normalize_optional_string(session_selected_model))
+        .or_else(|| normalize_optional_string(backend_default_model))
+}
+
+/// Resolve execution mode for a send: explicit override → session selection.
+fn resolve_send_execution_mode(
+    explicit_mode: Option<String>,
+    session_selected_mode: Option<String>,
+) -> Option<String> {
+    normalize_optional_string(explicit_mode)
+        .or_else(|| normalize_optional_string(session_selected_mode))
 }
 
 fn build_kimi_system_prompt(
@@ -514,7 +566,7 @@ fn find_neighbor_non_archived_session_id(
     None
 }
 
-fn emit_sessions_cache_invalidation(app: &AppHandle) {
+pub(crate) fn emit_sessions_cache_invalidation(app: &AppHandle) {
     if let Err(e) = app.emit_all(
         "cache:invalidate",
         &serde_json::json!({ "keys": ["sessions"] }),
@@ -1584,6 +1636,7 @@ pub async fn update_session_state(
     fixed_findings: Option<Vec<String>>,
     pending_permission_denials: Option<Vec<super::types::PermissionDenial>>,
     pending_codex_permission_requests: Option<Vec<super::types::CodexPermissionRequest>>,
+    pending_opencode_permission_requests: Option<Vec<super::types::OpenCodePermissionRequest>>,
     pending_codex_command_approval_requests: Option<Vec<super::types::CodexCommandApprovalRequest>>,
     pending_codex_user_input_requests: Option<Vec<super::types::CodexUserInputRequest>>,
     pending_codex_mcp_elicitation_requests: Option<Vec<super::types::CodexMcpElicitationRequest>>,
@@ -1592,6 +1645,7 @@ pub async fn update_session_state(
     >,
     denied_message_context: Option<Option<super::types::DeniedMessageContext>>,
     is_reviewing: Option<bool>,
+    status_override: Option<Option<String>>,
     waiting_for_input: Option<bool>,
     waiting_for_input_type: Option<Option<String>>,
     plan_file_path: Option<Option<String>>,
@@ -1622,6 +1676,9 @@ pub async fn update_session_state(
             if let Some(v) = pending_codex_permission_requests {
                 session.pending_codex_permission_requests = v;
             }
+            if let Some(v) = pending_opencode_permission_requests {
+                session.pending_opencode_permission_requests = v;
+            }
             if let Some(v) = pending_codex_command_approval_requests {
                 session.pending_codex_command_approval_requests = v;
             }
@@ -1639,6 +1696,33 @@ pub async fn update_session_state(
             }
             if let Some(v) = is_reviewing {
                 session.is_reviewing = v;
+                // Keep status_override in sync with legacy reviewing flag when
+                // callers only touch is_reviewing (e.g. cancel/fail completion).
+                if v {
+                    if session.status_override.as_deref() != Some("review") {
+                        session.status_override = Some("review".to_string());
+                    }
+                } else if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
+            }
+            if let Some(v) = status_override {
+                match &v {
+                    Some(status)
+                        if !matches!(
+                            status.as_str(),
+                            "idle" | "review" | "completed" | "cancelled"
+                        ) =>
+                    {
+                        return Err(format!(
+                            "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
+                        ));
+                    }
+                    _ => {}
+                }
+                session.status_override = v;
+                // Keep legacy is_reviewing flag aligned with the override
+                session.is_reviewing = session.status_override.as_deref() == Some("review");
             }
             if let Some(v) = waiting_for_input {
                 session.waiting_for_input = v;
@@ -1745,6 +1829,9 @@ fn queued_prompt_skips_plan_wait(
 fn apply_non_waiting_completion_state(session: &mut Session) {
     session.waiting_for_input = false;
     session.is_reviewing = false;
+    if session.status_override.as_deref() == Some("review") {
+        session.status_override = None;
+    }
     session.waiting_for_input_type = None;
 }
 
@@ -2412,8 +2499,8 @@ pub async fn set_active_session(
 }
 
 /// Update the last_opened_at timestamp on a session's metadata.
-/// View-only: never mutates waiting/review state — explicit user actions
-/// (approve/reject/answer) are the only path out of waiting.
+/// Viewing a native-terminal session acknowledges its attention signal. Chat
+/// sessions keep their actionable waiting state until the user answers it.
 ///
 /// Emits `cache:invalidate` for sessions so native + web clients refresh
 /// unread/finished-session state (e.g. web marks read → native bell clears).
@@ -2426,6 +2513,10 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
             .unwrap_or_default()
             .as_secs();
         metadata.last_opened_at = Some(now);
+        if metadata.primary_surface.as_deref() == Some("terminal") {
+            metadata.waiting_for_input = false;
+            metadata.waiting_for_input_type = None;
+        }
         save_metadata(&app, &metadata)?;
         // Broadcast so other clients (native ↔ web) drop stale last_opened_at.
         emit_sessions_cache_invalidation(&app);
@@ -2457,6 +2548,10 @@ pub async fn set_sessions_last_opened_bulk(
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
+            if metadata.primary_surface.as_deref() == Some("terminal") {
+                metadata.waiting_for_input = false;
+                metadata.waiting_for_input_type = None;
+            }
             if let Err(error) = save_metadata(&app, &metadata) {
                 result = Err(error);
                 break;
@@ -2466,6 +2561,99 @@ pub async fn set_sessions_last_opened_bulk(
     }
 
     finish_bulk_update(updated, result, || emit_sessions_cache_invalidation(&app))
+}
+
+/// Auto-name a native terminal session from its first prompt. Terminal
+/// sessions do not have Jean run messages, so the backend lifecycle signal is
+/// their naming entry point.
+pub async fn trigger_terminal_session_naming(
+    app: AppHandle,
+    session_id: String,
+    first_prompt: String,
+) {
+    if first_prompt.trim().is_empty() {
+        return;
+    }
+    let Ok(Some(metadata)) = load_metadata(&app, &session_id) else {
+        return;
+    };
+    let worktree_id = metadata.worktree_id;
+    let Ok(projects) = load_projects_data(&app) else {
+        return;
+    };
+    let Some(worktree) = projects.find_worktree(&worktree_id).cloned() else {
+        return;
+    };
+    let worktree_path = worktree.path.clone();
+    let Ok(sessions) = load_sessions(&app, &worktree_path, &worktree_id) else {
+        return;
+    };
+    let generate_branch_candidate = !sessions.branch_naming_completed;
+    let generate_session_candidate = sessions
+        .find_session(&session_id)
+        .is_some_and(|session| !session.session_naming_completed);
+    if !generate_branch_candidate && !generate_session_candidate {
+        return;
+    }
+
+    let Ok(preferences) = crate::load_preferences(app.clone()).await else {
+        return;
+    };
+    let generate_branch = generate_branch_candidate
+        && preferences.auto_branch_naming
+        && should_auto_name_branch(Some(&worktree));
+    let generate_session = generate_session_candidate && preferences.auto_session_naming;
+    if generate_branch || generate_session {
+        let existing_branch_names = if generate_branch {
+            projects
+                .worktrees
+                .iter()
+                .map(|worktree| worktree.name.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        spawn_naming_task(
+            app.clone(),
+            NamingRequest {
+                session_id: session_id.clone(),
+                worktree_id: worktree_id.clone(),
+                worktree_path: PathBuf::from(&worktree_path),
+                first_message: first_prompt,
+                model: preferences.magic_prompt_models.session_naming_model.clone(),
+                existing_branch_names,
+                generate_session_name: generate_session,
+                generate_branch_name: generate_branch,
+                custom_session_prompt: generate_session
+                    .then(|| preferences.magic_prompts.session_naming.clone())
+                    .flatten(),
+                custom_profile_name: preferences
+                    .magic_prompt_providers
+                    .session_naming_provider
+                    .clone(),
+                backend_override: preferences
+                    .magic_prompt_backends
+                    .session_naming_backend
+                    .clone(),
+                reasoning_effort: preferences
+                    .magic_prompt_efforts
+                    .session_naming_effort
+                    .clone(),
+            },
+        );
+    }
+
+    let _ = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if generate_branch_candidate {
+            sessions.branch_naming_completed = true;
+        }
+        if generate_session_candidate {
+            if let Some(session) = sessions.find_session_mut(&session_id) {
+                session.session_naming_completed = true;
+            }
+        }
+        Ok(())
+    });
 }
 
 // ============================================================================
@@ -2657,7 +2845,10 @@ pub async fn send_chat_message(
                             .magic_prompt_providers
                             .session_naming_provider
                             .clone(),
-                        backend_override: prefs.magic_prompt_backends.session_naming_backend.clone(),
+                        backend_override: prefs
+                            .magic_prompt_backends
+                            .session_naming_backend
+                            .clone(),
                         reasoning_effort: prefs.magic_prompt_efforts.session_naming_effort.clone(),
                     };
 
@@ -2737,15 +2928,33 @@ pub async fn send_chat_message(
     // Capture session info for run log before borrowing session mutably
     let session_name = session.name.clone();
     let session_order = session.order;
+    let session_backend = session.backend.clone();
+    let session_selected_model = session.selected_model.clone();
+    let session_selected_execution_mode = session.selected_execution_mode.clone();
+    let session_selected_thinking_level = session.selected_thinking_level.clone();
+    let session_selected_effort_level = session.selected_effort_level.clone();
+    let session_selected_provider = session.selected_provider.clone();
 
     // Note: User message is stored in NDJSON run entry (run.user_message),
     // not in sessions JSON. Messages are loaded from NDJSON on demand.
 
+    // MCP (and other non-UI callers) often omit per-turn settings. Fall back to
+    // the session's persisted choices so `set_session_model` / toolbar selection
+    // are respected when `model` / `executionMode` are not passed on the send.
+    // Explicit non-empty values remain one-shot overrides.
+    let mut model = resolve_send_model(model, session_selected_model, None);
+    let execution_mode =
+        resolve_send_execution_mode(execution_mode, session_selected_execution_mode);
+    let thinking_level = thinking_level.or(session_selected_thinking_level);
+    let effort_level = effort_level.or(session_selected_effort_level);
+    // selected_provider may be a sentinel (__anthropic__/__default__) rather than
+    // a real custom profile name — only use it when it looks like a profile id.
+    let custom_profile_name = normalize_optional_string(custom_profile_name).or_else(|| {
+        normalize_optional_string(session_selected_provider)
+            .filter(|provider| provider != "__anthropic__" && provider != "__default__")
+    });
+
     // Determine backend from session (or explicit param, or default to claude)
-    let session_backend = sessions
-        .find_session(&session_id)
-        .map(|s| s.backend.clone())
-        .unwrap_or_default();
     let effective_backend = match backend.as_deref() {
         Some("codex") => Backend::Codex,
         Some("opencode") => Backend::Opencode,
@@ -2763,6 +2972,18 @@ pub async fn send_chat_message(
     } else {
         effective_backend
     };
+
+    // Final model fallback: preferences default for the resolved backend.
+    // Covers sessions created before selected_model was persisted, or when
+    // create_session could not load preferences.
+    if model.is_none() {
+        if let Ok(prefs) = crate::load_preferences(app.clone()).await {
+            model = default_model_for_backend(&effective_backend, &prefs);
+        }
+    }
+    log::info!(
+        "[SendChat] resolved session={session_id} model={model:?} backend={effective_backend:?} execution_mode={execution_mode:?}"
+    );
 
     // Sync session.backend when model-based resolution overrides it
     // (e.g. user switched from Claude model to Codex model mid-session).
@@ -2782,6 +3003,9 @@ pub async fn send_chat_message(
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.waiting_for_input = false;
             session.is_reviewing = false;
+            if session.status_override.as_deref() == Some("review") {
+                session.status_override = None;
+            }
             session.waiting_for_input_type = None;
         }
         Ok(())
@@ -2861,12 +3085,23 @@ pub async fn send_chat_message(
         previous_custom_profile.as_deref(),
         custom_profile_name.as_deref(),
     );
+    // On provider switch, always start a fresh native session for the *target*
+    // backend. The previous provider's history is injected via handoff; resuming
+    // an old OpenCode/Codex/etc. session would omit that Jean-local context.
+    let clear_target_resume = backend_handoff || profile_handoff;
     let message_for_backend = if backend_handoff || profile_handoff {
-        let history = run_log::load_session_messages_window(&app, &session_id, Some(20), None)
-            .map(|loaded| super::handoff::format_handoff_history(&loaded.messages, 30_000))
-            .unwrap_or_default();
+        let history = super::handoff::build_handoff_history_text(
+            &app,
+            &session_id,
+            previous_metadata.as_ref(),
+        );
 
-        if let Some(previous_backend) = previous_backend.as_ref().filter(|_| !history.is_empty()) {
+        if history.trim().is_empty() {
+            log::warn!(
+                "[SendChat] provider-switch handoff requested but history empty session={session_id} previous={previous_backend:?} current={effective_backend:?}"
+            );
+            message.clone()
+        } else if let Some(previous_backend) = previous_backend.as_ref() {
             let template = crate::load_preferences(app.clone())
                 .await
                 .ok()
@@ -2889,7 +3124,8 @@ pub async fn send_chat_message(
                 )
             };
             log::info!(
-                "[SendChat] injecting hidden provider-switch handoff session={session_id} previous={previous_backend:?} current={effective_backend:?}"
+                "[SendChat] injecting hidden provider-switch handoff session={session_id} previous={previous_backend:?} current={effective_backend:?} history_chars={}",
+                history.chars().count()
             );
             super::handoff::prepend_hidden_handoff(&message, &handoff_prompt)
         } else {
@@ -2898,18 +3134,52 @@ pub async fn send_chat_message(
     } else {
         message.clone()
     };
-    let claude_session_id = if claude_profile_changed {
+    let claude_session_id = if claude_profile_changed
+        || (clear_target_resume && effective_backend == Backend::Claude)
+    {
         None
     } else {
         claude_session_id
     };
-    let codex_thread_id = if codex_profile_changed {
-        log::info!(
-            "[SendChat] Codex provider changed session={session_id}; starting new thread"
-        );
+    let codex_thread_id = if codex_profile_changed
+        || (clear_target_resume && effective_backend == Backend::Codex)
+    {
+        if codex_profile_changed || clear_target_resume {
+            log::info!(
+                "[SendChat] Codex starting new thread session={session_id} (profile_changed={codex_profile_changed} handoff={clear_target_resume})"
+            );
+        }
         None
     } else {
         codex_thread_id
+    };
+    let opencode_session_id = if clear_target_resume && effective_backend == Backend::Opencode {
+        log::info!(
+            "[SendChat] OpenCode starting new session for provider handoff session={session_id}"
+        );
+        None
+    } else {
+        opencode_session_id
+    };
+    let cursor_chat_id = if clear_target_resume && effective_backend == Backend::Cursor {
+        None
+    } else {
+        cursor_chat_id
+    };
+    let pi_session_id = if clear_target_resume && effective_backend == Backend::Pi {
+        None
+    } else {
+        pi_session_id
+    };
+    let grok_session_id = if clear_target_resume && effective_backend == Backend::Grok {
+        None
+    } else {
+        grok_session_id
+    };
+    let kimi_session_id = if clear_target_resume && effective_backend == Backend::Kimi {
+        None
+    } else {
+        kimi_session_id
     };
 
     // Cursor CLI doesn't support thinking/effort levels
@@ -2923,14 +3193,16 @@ pub async fn send_chat_message(
     };
     let run_effort_level = match effective_backend {
         Backend::Cursor | Backend::Commandcode => None,
-        Backend::Pi => effort_level.as_ref().map(|e| match e {
-            EffortLevel::Off => "off",
-            EffortLevel::Minimal => "minimal",
-            EffortLevel::Low => "low",
-            EffortLevel::Medium => "medium",
-            EffortLevel::High => "high",
-            EffortLevel::Xhigh | EffortLevel::Max | EffortLevel::Ultracode => "xhigh",
-            EffortLevel::Other(value) => value.as_str(),
+        Backend::Pi => effort_level.as_ref().and_then(|e| match e {
+            // Adaptive omits the flag so PI can choose its own depth.
+            EffortLevel::Adaptive => None,
+            EffortLevel::Off => Some("off"),
+            EffortLevel::Minimal => Some("minimal"),
+            EffortLevel::Low => Some("low"),
+            EffortLevel::Medium => Some("medium"),
+            EffortLevel::High => Some("high"),
+            EffortLevel::Xhigh | EffortLevel::Max | EffortLevel::Ultracode => Some("xhigh"),
+            EffortLevel::Other(value) => Some(value.as_str()),
         }),
         _ => effort_level.as_ref().and_then(|e| e.effort_value()),
     };
@@ -2956,6 +3228,59 @@ pub async fn send_chat_message(
     let input_file = run_log_writer.input_file_path()?;
     let output_file = run_log_writer.output_file_path()?;
     let run_id = run_log_writer.run_id().to_string();
+
+    // Snapshot the worktree before the agent can modify files so the user can
+    // review AI changes and restore individual files or the whole tree later.
+    // Failures are non-fatal — chat should still proceed.
+    let checkpoint_id = match crate::projects::checkpoints::create_checkpoint(
+        &app,
+        crate::projects::checkpoints::CreateCheckpointArgs {
+            worktree_id: worktree_id.clone(),
+            worktree_path: worktree_path.clone(),
+            session_id: session_id.clone(),
+            run_id: Some(run_id.clone()),
+            user_message_id: Some(user_message_id.clone()),
+            user_message: message.clone(),
+        },
+    ) {
+        Ok(cp) => {
+            let cp_id = cp.id.clone();
+            if let Err(e) = with_metadata_mut(
+                &app,
+                &session_id,
+                &worktree_id,
+                &session_name,
+                session_order,
+                |metadata| {
+                    if let Some(run) = metadata.find_run_mut(&run_id) {
+                        run.checkpoint_id = Some(cp_id.clone());
+                    }
+                    Ok(())
+                },
+            ) {
+                log::warn!("[Checkpoint] failed to attach id to run {run_id}: {e}");
+            }
+            // Emit so clients can show restore affordances immediately.
+            if let Err(e) = app.emit_all(
+                "checkpoint:created",
+                &serde_json::json!({
+                    "worktree_id": worktree_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "checkpoint_id": cp_id,
+                    "user_message_id": user_message_id,
+                }),
+            ) {
+                log::warn!("[Checkpoint] failed to emit checkpoint:created: {e}");
+            }
+            Some(cp_id)
+        }
+        Err(e) => {
+            log::warn!("[Checkpoint] create failed session={session_id} run={run_id}: {e}");
+            None
+        }
+    };
+    let _ = checkpoint_id;
 
     // Write input file with the effective backend prompt. Hidden handoff context
     // is intentionally not stored as the visible user message in metadata.
@@ -3051,12 +3376,19 @@ pub async fn send_chat_message(
     let thread_allowed_tools = allowed_tools_for_cli.clone();
     let thread_parallel_prompt = parallel_execution_prompt.clone();
     let thread_ai_language = ai_language.clone();
-    let thread_mcp_config = if effective_backend == Backend::Claude {
-        super::jean_mcp::merge_into_mcp_config(&app, &session_id, mcp_config.as_deref())
-            .await
-            .or_else(|| mcp_config.clone())
-    } else {
-        mcp_config.clone()
+    // Always inject Jean MCP for backends that honor runtime mcp_config.
+    // Claude uses --mcp-config/--strict-mcp-config; Grok/Cursor use the same
+    // JSON to decide which servers (including jean) stay enabled for the turn.
+    // Without this, fire-and-forget magic sends that omit frontend mcpConfig
+    // would leave Jean MCP disabled (especially Grok, which disables all
+    // discovered servers when the enabled set is empty).
+    let thread_mcp_config = match effective_backend {
+        Backend::Claude | Backend::Grok | Backend::Cursor => {
+            super::jean_mcp::merge_into_mcp_config(&app, &session_id, mcp_config.as_deref())
+                .await
+                .or_else(|| mcp_config.clone())
+        }
+        _ => mcp_config.clone(),
     };
     let thread_custom_profile = custom_profile_name.clone();
     let thread_codex_provider = if effective_backend == Backend::Codex {
@@ -3278,10 +3610,17 @@ pub async fn send_chat_message(
                         );
                     }
                 }
+                // Skill badge attachments inject absolute SKILL.md paths that
+                // Codex must be able to read. Include current + legacy skill roots.
                 if let Some(home) = dirs::home_dir() {
-                    let codex_skills_dir = home.join(".codex").join("skills");
-                    if codex_skills_dir.exists() {
-                        codex_add_dirs.push(codex_skills_dir.to_string_lossy().to_string());
+                    for skills_dir in [
+                        home.join(".agents").join("skills"),
+                        home.join(".codex").join("skills"),
+                        home.join(".jean").join("skills").join("codex"),
+                    ] {
+                        if skills_dir.exists() {
+                            codex_add_dirs.push(skills_dir.to_string_lossy().to_string());
+                        }
                     }
                 }
 
@@ -3708,7 +4047,10 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("xhigh".to_string()),
                         super::types::EffortLevel::Ultracode => Some("xhigh".to_string()),
-                        super::types::EffortLevel::Off => None,
+                        // Off / Adaptive: omit so the model can choose depth
+                        super::types::EffortLevel::Off | super::types::EffortLevel::Adaptive => {
+                            None
+                        }
                         super::types::EffortLevel::Other(value) => Some(value.clone()),
                     });
 
@@ -4510,7 +4852,10 @@ pub async fn send_chat_message(
                         super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
                         super::types::EffortLevel::Max => Some("max".to_string()),
                         super::types::EffortLevel::Ultracode => Some("max".to_string()),
-                        super::types::EffortLevel::Off => None,
+                        // Off / Adaptive: omit --effort so Grok can choose depth
+                        super::types::EffortLevel::Off | super::types::EffortLevel::Adaptive => {
+                            None
+                        }
                         super::types::EffortLevel::Other(value) => Some(value.clone()),
                     });
 
@@ -5125,6 +5470,9 @@ pub async fn send_chat_message(
             } else if has_blocking_tool {
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some(
                     if has_question_tool {
                         "question"
@@ -5137,6 +5485,9 @@ pub async fn send_chat_message(
                 // Codex/OpenCode plan-mode with content → waiting for plan approval
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
+                if session.status_override.as_deref() == Some("review") {
+                    session.status_override = None;
+                }
                 session.waiting_for_input_type = Some("plan".to_string());
             } else {
                 // Normal completion
@@ -5813,6 +6164,14 @@ pub async fn write_clipboard_text(_text: String) -> Result<(), String> {
     Err("Native clipboard access is only available in the desktop app".to_string())
 }
 
+/// Read text from the native system clipboard.
+///
+/// Same-machine fallback for terminal paste when the browser Clipboard API is
+/// unavailable. Remote jean-server has no host clipboard access.
+pub async fn read_clipboard_text() -> Result<String, String> {
+    Err("Native clipboard access is only available in the desktop app".to_string())
+}
+
 /// Save a dropped image file to the app data directory
 ///
 /// Takes a source file path (from Tauri's drag-drop event) and copies it
@@ -6223,6 +6582,65 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
 }
 
+/// Binary file payload for UI preview (images outside project asset scope, etc.).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBase64Content {
+    pub data: String,
+    pub mime_type: String,
+}
+
+fn mime_type_from_path(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        Some("ico") => "image/x-icon",
+        Some("avif") => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Read a file as base64 for binary preview (e.g. images under /tmp).
+///
+/// Same size limit as `read_file_content`. Used when asset:// and
+/// /api/project-files cannot serve paths outside project roots.
+pub async fn read_file_base64(path: String) -> Result<FileBase64Content, String> {
+    log::trace!("Reading file as base64: {path}");
+
+    let file_path = std::path::PathBuf::from(&path);
+
+    if !file_path.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
+
+    const MAX_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+    if metadata.len() > MAX_SIZE {
+        return Err(format!(
+            "File too large: {} bytes (max {} bytes)",
+            metadata.len(),
+            MAX_SIZE
+        ));
+    }
+
+    let bytes = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    let mime_type = mime_type_from_path(&file_path).to_string();
+    let data = STANDARD.encode(bytes);
+
+    Ok(FileBase64Content { data, mime_type })
+}
+
 /// Write file content to disk
 ///
 /// Used to save file content when editing in the inline editor.
@@ -6388,11 +6806,7 @@ pub async fn open_file_in_default_app(
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     std::process::Command::new("open")
                         .args(macos_open_app_args(
-                            "VSCodium",
-                            "vscodium",
-                            &path,
-                            line,
-                            column,
+                            "VSCodium", "vscodium", &path, line, column,
                         ))
                         .spawn()
                 }
@@ -7209,16 +7623,26 @@ fn execute_summarization_claude(
 
     // Parse the JSON response
     serde_json::from_str(&text_content).map_err(|e| {
-        let preview = if text_content.len() > 200 {
-            format!("{}...", &text_content[..200])
-        } else {
-            text_content.to_string()
-        };
+        // Truncate by chars so a recoverable parse error never panics on
+        // multi-byte UTF-8 (byte index 200 may fall inside a character).
+        let preview = truncate_error_preview(&text_content, 200);
         log::error!(
             "Failed to parse JSON response: {e}, content preview: {preview}, full stdout: {stdout}"
         );
         format!("Failed to parse structured response: {e}")
     })
+}
+
+/// Build a short log preview of content that failed JSON parsing.
+/// Always safe for multi-byte UTF-8; never panics on a mid-character boundary.
+pub(crate) fn truncate_error_preview(text: &str, max_chars: usize) -> String {
+    let mut iter = text.chars();
+    let preview: String = iter.by_ref().take(max_chars).collect();
+    if iter.next().is_some() {
+        format!("{preview}...")
+    } else {
+        preview
+    }
 }
 
 /// Generate a context summary from a session's messages in the background
@@ -7916,7 +8340,12 @@ pub async fn resume_session(
                                 log::error!("Failed to mark Grok run as crashed: {e}");
                             }
                         }
-                        emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
+                        let (event_name, event) = resumed_grok_tail_error_event(
+                            &session_id_clone,
+                            &worktree_id_clone,
+                            &e,
+                        );
+                        let _ = app_clone.emit_all(event_name, &event);
                         return;
                     }
                 };
@@ -8413,16 +8842,42 @@ pub fn approve_codex_command(
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
-pub fn respond_codex_command_approval(
-    session_id: String,
-    rpc_id: u64,
-    response: serde_json::Value,
-) -> Result<(), String> {
+/// Strip Jean-only YOLO promote flags from a command-approval response and
+/// return whether mid-turn auto-approve should be enabled for the session.
+///
+/// Codex may omit `acceptForSession` from `availableDecisions` (unknown
+/// commands often only allow `accept` + `cancel`). Jean still lets the user
+/// promote the session to YOLO; the frontend then sends `decision: "accept"`
+/// plus `promoteToYolo: true` so residual prompts are auto-accepted (#626).
+pub(crate) fn prepare_codex_command_approval_response(
+    response: &mut serde_json::Value,
+) -> bool {
+    let promote_to_yolo = response
+        .as_object_mut()
+        .and_then(|obj| {
+            obj.remove("promoteToYolo")
+                .or_else(|| obj.remove("promote_to_yolo"))
+        })
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let is_accept_for_session = response
         .get("decision")
         .and_then(|d| d.as_str())
         .is_some_and(|d| d == "acceptForSession");
-    if is_accept_for_session {
+
+    promote_to_yolo || is_accept_for_session
+}
+
+pub fn respond_codex_command_approval(
+    session_id: String,
+    rpc_id: u64,
+    mut response: serde_json::Value,
+) -> Result<(), String> {
+    if prepare_codex_command_approval_response(&mut response) {
+        // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
+        // prompts for the rest of this session without waiting for the next turn
+        // (issue #328 / #626).
         super::registry::set_codex_yolo_auto_approve(&session_id, true);
     }
     send_codex_response(rpc_id, response)
@@ -9511,9 +9966,115 @@ pub async fn answer_opencode_question(
     .map_err(|e| format!("Task join error: {e}"))?
 }
 
+/// Reply to a pending OpenCode permission request (once / always / reject).
+/// Unblocks the in-flight tool that triggered the permission ask (issue #625).
+pub async fn respond_opencode_permission(
+    app: AppHandle,
+    worktree_path: String,
+    request_id: String,
+    reply: String,
+    message: Option<String>,
+    opencode_session_id: Option<String>,
+    api_version: Option<String>,
+) -> Result<(), String> {
+    let working_dir = worktree_path;
+    let app_clone = app.clone();
+
+    tokio::task::spawn_blocking(move || {
+        super::opencode::respond_opencode_permission(
+            &app_clone,
+            &working_dir,
+            &request_id,
+            &reply,
+            message,
+            opencode_session_id.as_deref(),
+            api_version.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resumed_grok_host_error_uses_chat_error_event() {
+        let (event_name, event) =
+            resumed_grok_tail_error_event("session-1", "worktree-1", "rate limit reached");
+
+        assert_eq!(event_name, "chat:error");
+        assert_eq!(event.session_id, "session-1");
+        assert_eq!(event.worktree_id, "worktree-1");
+        assert_eq!(event.error, "rate limit reached");
+    }
+
+    #[test]
+    fn mime_type_from_path_detects_common_images() {
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("/tmp/shot.PNG")),
+            "image/png"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("photo.jpeg")),
+            "image/jpeg"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("x.webp")),
+            "image/webp"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("notes.txt")),
+            "application/octet-stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_base64_encodes_bytes_outside_project_roots() {
+        let dir = std::env::temp_dir().join(format!(
+            "jean-read-file-base64-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("login.png");
+        // Minimal valid-looking PNG header bytes (not a full image)
+        let bytes: &[u8] = b"\x89PNG\r\n\x1a\nfake-image-bytes";
+        std::fs::write(&path, bytes).unwrap();
+
+        let result = read_file_base64(path.to_string_lossy().to_string())
+            .await
+            .expect("read_file_base64 should succeed for /tmp path");
+
+        assert_eq!(result.mime_type, "image/png");
+        assert_eq!(result.data, STANDARD.encode(bytes));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_promotes_yolo_without_accept_for_session() {
+        let mut response = serde_json::json!({
+            "decision": "accept",
+            "promoteToYolo": true,
+        });
+        assert!(prepare_codex_command_approval_response(&mut response));
+        // Jean-only flag must be stripped before forwarding to Codex.
+        assert!(response.get("promoteToYolo").is_none());
+        assert_eq!(response.get("decision").and_then(|d| d.as_str()), Some("accept"));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_accept_for_session_promotes() {
+        let mut response = serde_json::json!({ "decision": "acceptForSession" });
+        assert!(prepare_codex_command_approval_response(&mut response));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_plain_accept_does_not_promote() {
+        let mut response = serde_json::json!({ "decision": "accept" });
+        assert!(!prepare_codex_command_approval_response(&mut response));
+    }
 
     fn naming_test_worktree(branch: &str, base_branch: Option<&str>) -> Worktree {
         serde_json::from_value(serde_json::json!({
@@ -9667,13 +10228,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            macos_open_app_args(
-                "VSCodium",
-                "vscodium",
-                "/tmp/main.ts",
-                Some(10),
-                Some(2)
-            ),
+            macos_open_app_args("VSCodium", "vscodium", "/tmp/main.ts", Some(10), Some(2)),
             vec![
                 "-a".to_string(),
                 "VSCodium".to_string(),
@@ -9958,6 +10513,65 @@ mod tests {
         assert_eq!(
             default_model_for_backend(&Backend::Commandcode, &prefs),
             Some("commandcode/deepseek/deepseek-v4-flash".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_prefers_explicit_over_session_and_prefs() {
+        assert_eq!(
+            resolve_send_model(
+                Some("claude-fable-5".to_string()),
+                Some("claude-opus-4-8[1m]".to_string()),
+                Some("claude-sonnet-4-6[1m]".to_string()),
+            ),
+            Some("claude-fable-5".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_falls_back_to_session_selected_model() {
+        // MCP set_session_model then send_chat_message without model
+        assert_eq!(
+            resolve_send_model(
+                None,
+                Some("claude-fable-5".to_string()),
+                Some("claude-opus-4-8[1m]".to_string()),
+            ),
+            Some("claude-fable-5".to_string())
+        );
+        // Empty / whitespace explicit model is treated as omitted
+        assert_eq!(
+            resolve_send_model(
+                Some("   ".to_string()),
+                Some("claude-fable-5".to_string()),
+                None,
+            ),
+            Some("claude-fable-5".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_send_model_falls_back_to_preferences_default() {
+        assert_eq!(
+            resolve_send_model(None, None, Some("claude-sonnet-4-6[1m]".to_string())),
+            Some("claude-sonnet-4-6[1m]".to_string())
+        );
+        assert_eq!(resolve_send_model(None, Some("".to_string()), None), None);
+    }
+
+    #[test]
+    fn resolve_send_execution_mode_falls_back_to_session() {
+        assert_eq!(
+            resolve_send_execution_mode(Some("yolo".to_string()), Some("plan".to_string())),
+            Some("yolo".to_string())
+        );
+        assert_eq!(
+            resolve_send_execution_mode(None, Some("build".to_string())),
+            Some("build".to_string())
+        );
+        assert_eq!(
+            resolve_send_execution_mode(Some("".to_string()), Some("plan".to_string())),
+            Some("plan".to_string())
         );
     }
 
@@ -10508,5 +11122,28 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
             opencode.opencode_session_id.as_deref(),
             Some("opencode-session")
         );
+    }
+
+    #[test]
+    fn truncate_error_preview_handles_non_ascii_without_panic() {
+        // Multi-byte chars; previously `&text[..200]` paniced mid-character.
+        let text = "日".repeat(100); // 300 bytes, 100 chars
+        let preview = truncate_error_preview(&text, 200);
+        // Cap is by char count here (200), so full text fits and no ellipsis.
+        assert_eq!(preview, text);
+        assert!(!preview.ends_with("..."));
+
+        let long = "日".repeat(250);
+        let preview = truncate_error_preview(&long, 200);
+        assert!(preview.ends_with("..."));
+        assert_eq!(preview.chars().count(), 200 + 3); // 200 chars + "..."
+        assert!(preview.is_char_boundary(preview.len() - 3));
+    }
+
+    #[test]
+    fn truncate_error_preview_ascii_adds_ellipsis_when_long() {
+        let text = "a".repeat(250);
+        let preview = truncate_error_preview(&text, 200);
+        assert_eq!(preview, format!("{}...", "a".repeat(200)));
     }
 }

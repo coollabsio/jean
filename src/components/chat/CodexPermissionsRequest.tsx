@@ -7,6 +7,18 @@ interface CodexPermissionsRequestProps {
   onDecline: () => void
 }
 
+type CodexFsPath = NonNullable<
+  NonNullable<
+    NonNullable<CodexPermissionRequest['permissions']['fileSystem']>['entries']
+  >[number]
+>['path']
+
+function formatPath(path: CodexFsPath) {
+  if (path.type === 'path') return path.path
+  if (path.type === 'globPattern') return path.pattern
+  return JSON.stringify(path.value)
+}
+
 export function CodexPermissionsRequest({
   request,
   onGrant,
@@ -15,11 +27,6 @@ export function CodexPermissionsRequest({
   const fileSystem = request.permissions.fileSystem
   const network = request.permissions.network
   const entries = fileSystem?.entries ?? []
-  const formatPath = (path: (typeof entries)[number]['path']) => {
-    if (path.type === 'path') return path.path
-    if (path.type === 'globPattern') return path.pattern
-    return JSON.stringify(path.value)
-  }
 
   return (
     <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
@@ -39,8 +46,8 @@ export function CodexPermissionsRequest({
           <div>
             <div className="font-medium text-foreground">Filesystem access</div>
             <ul className="list-disc space-y-1 pl-4">
-              {entries.map((entry, index) => (
-                <li key={`${entry.access}-${index}`}>
+              {entries.map(entry => (
+                <li key={`${entry.access}:${formatPath(entry.path)}`}>
                   {entry.access} · {formatPath(entry.path)}
                 </li>
               ))}

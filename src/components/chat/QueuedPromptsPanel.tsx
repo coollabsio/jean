@@ -11,6 +11,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { isImeComposingEvent } from '@/lib/ime-composition'
 import type { QueuedMessage } from '@/types/chat'
 
 interface QueuedPromptsPanelProps {
@@ -170,9 +171,8 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
         <CollapsibleContent>
           <div
             ref={listRef}
-            role="listbox"
+            role="list"
             aria-label="Queued prompts"
-            aria-activedescendant={`queued-prompt-${selectedIndex}`}
             tabIndex={0}
             onKeyDown={handleKeyDown}
             className="max-h-48 overflow-y-auto border-t border-border/50 outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -188,8 +188,8 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   ref={el => {
                     rowRefs.current[index] = el
                   }}
-                  role="option"
-                  aria-selected={isSelected}
+                  role="listitem"
+                  aria-current={isSelected ? 'true' : undefined}
                   onClick={() => setSelectedIndex(index)}
                   className={cn(
                     'group flex items-center gap-2 px-3 py-1.5 text-xs cursor-default',
@@ -207,6 +207,10 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                       onClick={e => e.stopPropagation()}
                       onKeyDown={e => {
                         e.stopPropagation()
+                        // Don't commit edit when Enter confirms IME composition
+                        if (isImeComposingEvent(e)) {
+                          return
+                        }
                         if (e.key === 'Escape') {
                           e.preventDefault()
                           cancelEditing()

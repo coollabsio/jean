@@ -12,7 +12,11 @@ import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import { startCommitJob } from '@/services/commit-jobs'
 import { buildMcpConfigJson } from '@/services/mcp'
-import { saveWorktreePr, projectsQueryKeys } from '@/services/projects'
+import {
+  saveWorktreePr,
+  linkWorktreePr,
+  projectsQueryKeys,
+} from '@/services/projects'
 import {
   gitPush,
   triggerImmediateGitPoll,
@@ -767,9 +771,36 @@ export function useGitOperations({
     }
   }, [activeWorktreeId, activeWorktreePath, worktree?.project_id])
 
-  // Handle Open PR - creates PR with AI-generated title and description in background
+  // Handle Open PR - opens linked PR, or creates one with AI-generated content
   const handleOpenPr = useCallback(async () => {
     if (!activeWorktreeId || !activeWorktreePath || !worktree) return
+
+    // Already linked: open in browser (same as create-PR flow after success)
+    if (worktree.pr_url) {
+      await openExternal(worktree.pr_url)
+      return
+    }
+
+    // Number without URL (e.g. older checkout_pr): resolve URL then open
+    if (worktree.pr_number) {
+      try {
+        const linked = await linkWorktreePr(
+          activeWorktreeId,
+          activeWorktreePath,
+          worktree.pr_number
+        )
+        queryClient.invalidateQueries({
+          queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+        })
+        queryClient.invalidateQueries({
+          queryKey: [...projectsQueryKeys.all, 'worktree', activeWorktreeId],
+        })
+        await openExternal(linked.pr_url)
+      } catch (error) {
+        toast.error(`Failed to open PR #${worktree.pr_number}: ${error}`)
+      }
+      return
+    }
 
     const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
     setWorktreeLoading(activeWorktreeId, 'pr')
@@ -1171,8 +1202,8 @@ export function useGitOperations({
       return
     }
 
-    // Validate: no open PR
-    if (worktreeData.pr_url) {
+    // Validate: no open PR (number or URL — checkouts may have only a number)
+    if (worktreeData.pr_number || worktreeData.pr_url) {
       toast.error(
         'Cannot merge locally while a PR is open. Close or merge the PR on GitHub first.'
       )

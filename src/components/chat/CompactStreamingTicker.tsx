@@ -10,6 +10,10 @@ import {
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
+  formatJeanMcpToolDetail,
+  formatJeanMcpToolLabel,
+  isJeanMcpToolName,
+  normalizeToolCallForDisplay,
 } from './ToolCallInline'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
 import { StreamingMessage } from './StreamingMessage'
@@ -37,11 +41,12 @@ function summarizeLatest(
 ): { label: string; detail?: string } {
   // Prefer the most recent content block (preserves order of text + tools).
   const normalizedBlocks = coalesceContentBlocks(contentBlocks)
+  const toolCallById = new Map(toolCalls.map(t => [t.id, t]))
   for (let i = normalizedBlocks.length - 1; i >= 0; i--) {
     const block = normalizedBlocks[i]
     if (!block) continue
     if (block.type === 'tool_use') {
-      const tc = toolCalls.find(t => t.id === block.tool_call_id)
+      const tc = toolCallById.get(block.tool_call_id)
       if (tc) return summarizeToolCall(tc)
       continue
     }
@@ -63,7 +68,11 @@ function summarizeLatest(
 }
 
 function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
-  const input = (tc.input ?? {}) as Record<string, unknown>
+  const normalized = normalizeToolCallForDisplay(
+    tc.name,
+    (tc.input ?? {}) as Record<string, unknown>
+  )
+  const input = normalized.input
   const filePath =
     typeof input.file_path === 'string' ? input.file_path : undefined
   const path = typeof input.path === 'string' ? input.path : undefined
@@ -73,6 +82,13 @@ function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
   const description =
     typeof input.description === 'string' ? input.description : undefined
   const query = typeof input.query === 'string' ? input.query : undefined
+  const backend = typeof input.backend === 'string' ? input.backend : undefined
+  const toolName =
+    typeof input.tool_name === 'string'
+      ? input.tool_name
+      : typeof input.toolName === 'string'
+        ? input.toolName
+        : undefined
   // Codex web search may nest the query under action
   const action =
     input.action && typeof input.action === 'object'
@@ -86,26 +102,31 @@ function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
         : undefined
 
   const friendlyLabel =
-    tc.name === 'CodexWebSearch'
+    normalized.name === 'CodexWebSearch'
       ? 'Web Search'
-      : tc.name === 'CodexImageView'
+      : normalized.name === 'CodexImageView'
         ? 'Image View'
-        : tc.name === 'CodexImageGeneration'
+        : normalized.name === 'CodexImageGeneration'
           ? 'Image Generation'
-          : tc.name === 'CodexContextCompaction'
+          : normalized.name === 'CodexContextCompaction'
             ? 'Context Compaction'
-            : tc.name
+            : isJeanMcpToolName(normalized.name)
+              ? formatJeanMcpToolLabel(normalized.name)
+              : normalized.name
 
-  const detail =
-    query ??
-    actionQuery ??
-    filePath ??
-    path ??
-    command ??
-    url ??
-    pattern ??
-    description ??
-    undefined
+  const detail = isJeanMcpToolName(normalized.name)
+    ? formatJeanMcpToolDetail(input)
+    : (query ??
+      actionQuery ??
+      filePath ??
+      path ??
+      command ??
+      url ??
+      pattern ??
+      description ??
+      backend ??
+      toolName ??
+      undefined)
   return {
     label: friendlyLabel,
     detail: detail ? truncate(detail, 80) : undefined,
@@ -153,6 +174,28 @@ function filterActivityBlocks(
 type CompactStreamSegment =
   | { type: 'activity'; blocks: ContentBlock[]; toolCalls: ToolCall[] }
   | { type: 'steered'; texts: string[] }
+
+/** Stable key for a stream segment that stays fixed as segment content grows. */
+function compactStreamSegmentKey(segment: CompactStreamSegment): string {
+  if (segment.type === 'steered') {
+    // First steered text is fixed once the segment is created; later texts append.
+    return `steered:${segment.texts[0] ?? ''}`
+  }
+  const toolId = segment.toolCalls[0]?.id
+  if (toolId) return `activity:tool:${toolId}`
+  const first = segment.blocks[0]
+  if (first) {
+    if (first.type === 'tool_use') return `activity:tooluse:${first.tool_call_id}`
+    if (first.type === 'text')
+      return `activity:text:${first.text.slice(0, 64)}`
+    if (first.type === 'thinking')
+      return `activity:thinking:${first.thinking.slice(0, 64)}`
+    if (first.type === 'user_input')
+      return `activity:user:${first.text.slice(0, 64)}`
+  }
+  // Empty working-section placeholder after a steered batch
+  return 'activity:working'
+}
 
 function splitAtSteeredInputs(
   contentBlocks: ContentBlock[],
@@ -296,18 +339,37 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     [orderedActivityBlocks, activityToolCalls, hasPlan]
   )
 
-  const questionToolCalls = toolCalls.filter(isAskUserQuestion)
+  const {
+    questionToolCalls,
+    questionBlocks,
+    remainingBlocks,
+    remainingToolCalls,
+  } = useMemo(() => {
+    const questions = toolCalls.filter(isAskUserQuestion)
+    if (questions.length === 0) {
+      return {
+        questionToolCalls: questions,
+        questionBlocks: [] as ContentBlock[],
+        remainingBlocks: contentBlocks,
+        remainingToolCalls: toolCalls,
+      }
+    }
+    const questionIds = new Set(questions.map(tool => tool.id))
+    return {
+      questionToolCalls: questions,
+      questionBlocks: contentBlocks.filter(
+        block =>
+          block.type === 'tool_use' && questionIds.has(block.tool_call_id)
+      ),
+      remainingBlocks: contentBlocks.filter(
+        block =>
+          block.type !== 'tool_use' || !questionIds.has(block.tool_call_id)
+      ),
+      remainingToolCalls: toolCalls.filter(tool => !questionIds.has(tool.id)),
+    }
+  }, [contentBlocks, toolCalls])
+
   if (questionToolCalls.length > 0) {
-    const questionIds = new Set(questionToolCalls.map(tool => tool.id))
-    const questionBlocks = contentBlocks.filter(
-      block => block.type === 'tool_use' && questionIds.has(block.tool_call_id)
-    )
-    const remainingBlocks = contentBlocks.filter(
-      block => block.type !== 'tool_use' || !questionIds.has(block.tool_call_id)
-    )
-    const remainingToolCalls = toolCalls.filter(
-      tool => !questionIds.has(tool.id)
-    )
     const hasOtherActivity = hasVisibleActivity(
       remainingBlocks,
       remainingToolCalls,
@@ -342,29 +404,37 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     })
     return (
       <div className="space-y-3">
-        {steeredSegments.map((segment, index) =>
-          segment.type === 'steered' ? (
-            <SteeredPromptGroup
-              key={`steered-${index}`}
-              texts={segment.texts}
-              worktreePath={worktreePath}
-              onCopyText={onCopySteeredText}
-            />
-          ) : (
-            <CompactStreamingTicker
-              key={`activity-${index}`}
-              {...props}
-              contentBlocks={segment.blocks}
-              toolCalls={segment.toolCalls}
-              showLoadingIndicator={
-                showLoadingIndicator &&
-                index === lastActivityIndex &&
-                index > lastSteeredIndex
-              }
-              streamingContent=""
-            />
-          )
-        )}
+        {(() => {
+          const seenKeys = new Map<string, number>()
+          return steeredSegments.map((segment, index) => {
+            const baseKey = compactStreamSegmentKey(segment)
+            const n = seenKeys.get(baseKey) ?? 0
+            seenKeys.set(baseKey, n + 1)
+            const key = n === 0 ? baseKey : `${baseKey}#${n}`
+
+            return segment.type === 'steered' ? (
+              <SteeredPromptGroup
+                key={key}
+                texts={segment.texts}
+                worktreePath={worktreePath}
+                onCopyText={onCopySteeredText}
+              />
+            ) : (
+              <CompactStreamingTicker
+                key={key}
+                {...props}
+                contentBlocks={segment.blocks}
+                toolCalls={segment.toolCalls}
+                showLoadingIndicator={
+                  showLoadingIndicator &&
+                  index === lastActivityIndex &&
+                  index > lastSteeredIndex
+                }
+                streamingContent=""
+              />
+            )
+          })
+        })()}
         {hasPlan && (
           <StreamingMessage
             {...props}

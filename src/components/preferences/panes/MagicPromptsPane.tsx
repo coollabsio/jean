@@ -77,8 +77,6 @@ import {
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_RELEASE_NOTES_PROMPT,
   DEFAULT_REVIEW_COMMENTS_PROMPT,
-  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_SESSION_NAMING_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_GLOBAL_SYSTEM_PROMPT,
@@ -161,49 +159,6 @@ interface PromptSection {
 }
 
 const PROMPT_SECTIONS: PromptSection[] = [
-  {
-    label: 'Automation',
-    configs: [
-      {
-        key: 'automate_github_bugs',
-        modelKey: 'automate_github_bugs_model',
-        effortKey: 'automate_github_bugs_effort',
-        providerKey: 'automate_github_bugs_provider',
-        backendKey: 'automate_github_bugs_backend',
-        modeKey: 'automate_github_bugs_mode',
-        label: 'Automate GitHub Bugs',
-        description:
-          'Orchestration prompt that triages the latest open GitHub bug/fix issues via Jean MCP, creates worktrees, and starts autoinvestigation.',
-        variables: [
-          {
-            name: '{projectId}',
-            description: 'Current project id (injected when the automation runs)',
-          },
-        ],
-        defaultValue: DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
-      },
-      {
-        key: 'automate_security_advisories',
-        modelKey: 'automate_security_advisories_model',
-        effortKey: 'automate_security_advisories_effort',
-        providerKey: 'automate_security_advisories_provider',
-        backendKey: 'automate_security_advisories_backend',
-        modeKey: 'automate_security_advisories_mode',
-        label: 'Automate Security Advisories',
-        description:
-          'Orchestration prompt that triages repository security advisories via Jean MCP, creates worktrees, and starts autoinvestigation.',
-        variables: [
-          {
-            name: '{projectId}',
-            description: 'Current project id (injected when the automation runs)',
-          },
-        ],
-        defaultValue: DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
-      },
-    ],
-  },
   {
     label: 'Investigation',
     configs: [
@@ -394,7 +349,8 @@ const PROMPT_SECTIONS: PromptSection[] = [
         providerKey: 'code_review_provider',
         backendKey: 'code_review_backend',
         label: 'Code Review',
-        description: 'Prompt for AI-powered code review of your changes.',
+        description:
+          'Prompt for AI-powered code review of your changes. Each reviewer row has its own Mode for sessions created when sending that reviewer’s findings to chat.',
         variables: [
           {
             name: '{branch_info}',
@@ -717,6 +673,7 @@ function makeCodeReviewConfig(
     reasoning_effort:
       getMagicPromptModelReasoning(catalog, backend, model, null, [])
         ?.default ?? null,
+    fix_mode: DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
   }
 }
 
@@ -737,23 +694,29 @@ const CODEX_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] = [
   { value: 'gpt-5.4-fast', label: 'GPT 5.4 Fast' },
   { value: 'gpt-5.4-mini', label: 'GPT 5.4 Mini' },
   { value: 'gpt-5.4-mini-fast', label: 'GPT 5.4 Mini Fast' },
-  ...codexModelOptions
-    .filter(
-      o =>
-        ![
-          'gpt-5.6-sol',
-          'gpt-5.6-terra',
-          'gpt-5.6-luna',
-          'gpt-5.5',
-          'gpt-5.4',
-          'gpt-5.4-mini',
-        ].includes(o.value) // Already listed above
-    )
-    .map(o => ({ value: o.value as MagicPromptModel, label: o.label })),
+  ...codexModelOptions.flatMap(o =>
+    [
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ].includes(o.value) // Already listed above
+      ? []
+      : [{ value: o.value as MagicPromptModel, label: o.label }]
+  ),
 ]
 
 interface MagicPromptsPaneProps {
   searchTargetPromptKey?: keyof MagicPrompts | null
+}
+
+function formatOpenCodeLabel(value: string) {
+  const formatted = formatOpencodeModelLabel(value)
+  return value.startsWith('opencode/')
+    ? formatted.replace(/\s+\(OpenCode\)$/, '')
+    : formatted
 }
 
 export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
@@ -788,13 +751,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       })),
     [modelCatalog]
   )
-
-  const formatOpenCodeLabel = (value: string) => {
-    const formatted = formatOpencodeModelLabel(value)
-    return value.startsWith('opencode/')
-      ? formatted.replace(/\s+\(OpenCode\)$/, '')
-      : formatted
-  }
 
   const opencodeModelOptions = useMemo(() => {
     const models = availableOpencodeModels?.length
@@ -907,14 +863,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   // Resolve effective backend for model filtering: per-operation override > global default_backend
   const effectiveBackend =
     currentBackend ?? preferences?.default_backend ?? 'claude'
-  // Prefer investigation models when a newly-added prompt still has a Claude
-  // default that does not match the effective backend (e.g. Grok + Opus).
-  const investigationFallbackModel =
-    selectedKey === 'automate_github_bugs'
-      ? currentModels.investigate_issue_model
-      : selectedKey === 'automate_security_advisories'
-        ? currentModels.investigate_advisory_model
-        : undefined
   const modelMatchesEffectiveBackend = (model: string | undefined): boolean => {
     if (!model) return false
     switch (effectiveBackend) {
@@ -949,12 +897,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const currentModel = (() => {
     if (!rawCurrentModel) return undefined
     if (modelMatchesEffectiveBackend(rawCurrentModel)) return rawCurrentModel
-    if (
-      investigationFallbackModel &&
-      modelMatchesEffectiveBackend(investigationFallbackModel)
-    ) {
-      return investigationFallbackModel
-    }
     if (effectiveBackend === 'codex') return CODEX_MODEL_OPTIONS[0]?.value
     if (effectiveBackend === 'opencode') return opencodeModelOptions[0]?.value
     if (effectiveBackend === 'cursor') return cursorModelOptions[0]?.value
@@ -995,49 +937,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const currentModelIsPi = currentModel ? isPiModel(currentModel) : false
   const currentModelIsGrok = currentModel ? isGrokModel(currentModel) : false
   const currentModelIsKimi = currentModel ? isKimiModel(currentModel) : false
-
-  // Persist corrected automation models so Grok+Opus (and similar) mismatches
-  // don't stick after the user opens Magic Prompts.
-  useEffect(() => {
-    if (!preferences || !selectedConfig.modelKey || !currentModel) return
-    if (
-      selectedKey !== 'automate_github_bugs' &&
-      selectedKey !== 'automate_security_advisories'
-    ) {
-      return
-    }
-    if (rawCurrentModel === currentModel) return
-    if (!modelMatchesEffectiveBackend(rawCurrentModel)) {
-      patchPreferences.mutate({
-        magic_prompt_models: {
-          ...currentModels,
-          [selectedConfig.modelKey]: currentModel,
-        },
-        ...(selectedConfig.backendKey &&
-        currentBackends[selectedConfig.backendKey] === undefined
-          ? {
-              magic_prompt_backends: {
-                ...currentBackends,
-                [selectedConfig.backendKey]:
-                  selectedKey === 'automate_github_bugs'
-                    ? (currentBackends.investigate_issue_backend ?? null)
-                    : (currentBackends.investigate_advisory_backend ?? null),
-              },
-            }
-          : {}),
-      })
-    }
-  }, [
-    preferences,
-    selectedKey,
-    selectedConfig.modelKey,
-    selectedConfig.backendKey,
-    rawCurrentModel,
-    currentModel,
-    currentModels,
-    currentBackends,
-    patchPreferences,
-  ])
 
   const filteredClaudeOptions = useMemo(() => {
     if (
@@ -1223,6 +1122,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             model,
             reasoning_effort:
               getReviewReasoning({ backend, model })?.default ?? null,
+            fix_mode: DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
           },
         ])
         return
@@ -1900,6 +1800,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 const promptIsModified = currentPrompts[config.key] !== null
                 return (
                   <button
+                    type="button"
                     key={config.key}
                     onClick={() => setSelectedKey(config.key)}
                     id={getMagicPromptItemId(config.key)}
@@ -1961,7 +1862,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   return (
                     <div
                       data-testid={`magic-code-review-config-${index}`}
-                      key={`${codeReviewConfigKey(config)}-${index}`}
+                      key={codeReviewConfigKey(config)}
                       className="flex flex-col gap-2 rounded-lg border border-border/60 p-2.5"
                     >
                       <div className="flex h-7 items-center justify-between">
@@ -2011,6 +1912,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                                 reasoning_effort:
                                   getReviewReasoning({ backend, model })
                                     ?.default ?? null,
+                                fix_mode:
+                                  config.fix_mode ??
+                                  DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode,
                               })
                             }
                           }}
@@ -2109,6 +2013,35 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                                 {level.label}
                               </SelectItem>
                             ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          Mode
+                        </span>
+                        <Select
+                          value={
+                            config.fix_mode ??
+                            DEFAULT_MAGIC_PROMPT_MODES.code_review_fix_mode
+                          }
+                          onValueChange={mode =>
+                            updateCodeReviewConfig(index, {
+                              ...config,
+                              fix_mode: mode as MagicPromptExecutionMode,
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label={`Review ${index + 1} mode`}
+                            size="sm"
+                            className="w-full min-w-0 text-xs"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="plan">Plan</SelectItem>
+                            <SelectItem value="yolo">Yolo</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

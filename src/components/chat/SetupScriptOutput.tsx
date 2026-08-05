@@ -55,6 +55,7 @@ export function SetupScriptOutput({
           {/* Only show dismiss button on failure - success messages should persist */}
           {!result.success && (
             <button
+              type="button"
               onClick={onDismiss}
               className="mr-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label="Dismiss"

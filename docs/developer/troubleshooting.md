@@ -1,5 +1,24 @@
 # Troubleshooting Guide
 
+## Windows: Jean window goes "invisible" / shows desktop wallpaper
+
+**Symptoms:**
+- Jean window frame remains but content shows the desktop wallpaper (or is blank).
+- Task Manager may show only the Jean host process with no WebView2 child processes.
+- Reported after opening menus/dialogs (e.g. sidebar **New**) and alt-tabbing while connected to a remote Jean (issue [#575](https://github.com/coollabsio/jean/issues/575)).
+
+**Root cause:**
+WebView2's browser or renderer process crashed. Jean's window was historically transparent on all platforms; when the webview stops painting, the transparent host shows whatever is behind it (wallpaper), which looks like the app went invisible.
+
+**Fixes in current releases:**
+1. Windows builds force an opaque main window (`tauri.windows.conf.json` sets `transparent: false`).
+2. A WebView2 `ProcessFailed` handler reloads the page on renderer exits, or restarts Jean when the browser process dies (`src-tauri/src/platform/windows_webview.rs`).
+3. New Project no longer nests the remote `DirectoryBrowser` dialog inside another Radix dialog (focus-trap stacking).
+
+**If it still happens:** restart Jean (or wait for auto-restart after browser-process exit). Update WebView2 Runtime via Windows Update / Evergreen installer. Note GPU driver issues if crashes correlate with sleep/wake or multi-monitor changes.
+
+---
+
 ## Linux Graphics Issues
 
 ### White Screen on Ubuntu 24.04+ (AppImage)
@@ -161,6 +180,51 @@ export JEAN_SAFE_GRAPHICS=1
 export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=softpipe
 ```
+
+---
+
+---
+
+## macOS: Blurry text on external monitors
+
+**Symptoms:**
+- Jean text looks soft/fuzzy on an external display but sharp on the built-in Retina panel
+- Blurriness appears or worsens after dragging Jean between displays
+- Other native apps may look fine while Jean looks soft
+
+**Common causes (layered):**
+
+1. **App zoom ≠ 100%** — Non-100% webview zoom on a 1× external LCD produces non-integer glyph rasterization and soft text. Jean defaults to 100%.
+2. **macOS display scaling** — “Looks like” resolutions that aren’t true HiDPI force the whole desktop (including WKWebView) through fractional scaling.
+3. **Font smoothing** — Forced grayscale anti-aliasing is softer on low-PPI external LCDs than on Retina.
+4. **Window transparency / vibrancy** — Translucent + blur materials can add an extra soft pass over content.
+
+**What to try in Jean (quickest first):**
+
+1. **Settings → Appearance → Desktop zoom level → 100%** (or `Cmd+0`). Prefer 100% on external monitors; use UI/chat font scaling if you need larger text without page zoom. Jean may show a one-time toast on 1× displays when zoom ≠ 100% with a **Use 100%** action.
+2. Turn **Window transparency** off (same pane) if it is enabled. Jean starts **opaque by default**; vibrancy is opt-in only.
+3. Move Jean fully onto the external display, then toggle zoom 100% → 90% → 100% once so the webview rebuilds its backing store after a display change (Jean also re-applies zoom on scale-factor changes automatically).
+
+**macOS system checks:**
+
+1. **System Settings → Displays** for the external monitor: prefer native resolution or a labeled **HiDPI** option when available. Avoid odd scaled “Looks like” sizes when possible.
+2. Confirm cable/adapter is driving the full resolution (some hubs force lower modes).
+3. Optional system font smoothing (logout required; affects all apps):
+
+```bash
+# Stronger smoothing (try 1–3). 0 disables.
+defaults -currentHost write -g AppleFontSmoothing -int 2
+```
+
+**Engineering notes:**
+
+- Zoom is **client-local** (`src/lib/client-zoom.ts` + `localStorage` key `jean-client-zoom`), not shared server preferences. Remote Jean clients and the host shell keep independent zoom levels (issue #622). Server `zoom_level` fields are a one-time seed only.
+- Native zoom is applied via `getCurrentWebview().setZoom()` in `src/hooks/use-zoom.ts`.
+- On Tauri `onScaleChanged` only (not resize/`devicePixelRatio`), Jean re-applies custom zoom by bouncing through 1.0 so WKWebView refreshes its layer after multi-monitor moves. At 100% zoom the bounce is skipped entirely.
+- Do not re-listen to resize/DPR for this: `setZoom()` can change both and feed back into another refresh (UI jumps continuously). Re-entry is also guarded with a short settle window after each bounce.
+- CSS uses `-webkit-font-smoothing: antialiased` on HiDPI, and `auto` on 1× displays (`src/App.css`).
+- Main window config is opaque with empty `windowEffects` (`src-tauri/tauri.conf.json`); `set_window_vibrancy` enables translucency only when the Appearance preference is on.
+- Soft-text tip: `useExternalDisplayZoomTip` + `has_seen_external_display_zoom_tip` preference.
 
 ---
 

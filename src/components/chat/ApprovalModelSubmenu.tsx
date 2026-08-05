@@ -124,9 +124,10 @@ export function ApprovalModelSubmenu({
   })
 
   const selectedProvider = preferences?.default_provider ?? null
-  const customCliProfiles = preferences?.custom_cli_profiles ?? []
+  // Prefer the preferences array reference so useMemo is stable when empty/default.
+  const customCliProfiles = preferences?.custom_cli_profiles
   const claudeModelOptions = useMemo(
-    () => getClaudeModelOptions(selectedProvider, customCliProfiles),
+    () => getClaudeModelOptions(selectedProvider, customCliProfiles ?? []),
     [selectedProvider, customCliProfiles]
   )
   const opencodeModelOptions = useMemo(
@@ -171,16 +172,14 @@ export function ApprovalModelSubmenu({
     const query = search.trim().toLowerCase()
     if (!query) return sections
 
-    return sections
-      .map(section => ({
-        ...section,
-        options: section.options.filter(option =>
-          `${section.label} ${option.label} ${option.value}`
-            .toLowerCase()
-            .includes(query)
-        ),
-      }))
-      .filter(section => section.options.length > 0)
+    return sections.flatMap(section => {
+      const options = section.options.filter(option =>
+        `${section.label} ${option.label} ${option.value}`
+          .toLowerCase()
+          .includes(query)
+      )
+      return options.length > 0 ? [{ ...section, options }] : []
+    })
   }, [search, sections])
 
   if (sections.length === 0) return null

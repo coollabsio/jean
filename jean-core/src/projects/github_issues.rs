@@ -419,9 +419,11 @@ pub fn slugify_issue_title(title: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
 
-    // Limit total length
+    // Limit total length on a UTF-8 char boundary (byte index 40 may land
+    // inside a multi-byte character for non-ASCII titles, e.g. Japanese).
     if slug.len() > 40 {
-        slug[..40].trim_end_matches('-').to_string()
+        let end = slug.floor_char_boundary(40);
+        slug[..end].trim_end_matches('-').to_string()
     } else {
         slug
     }
@@ -1396,6 +1398,12 @@ pub struct GitHubReviewComment {
     pub start_line: Option<u32>,
     #[serde(default)]
     pub line: Option<u32>,
+    /// Whether GitHub considers the review thread outdated (line moved/changed).
+    #[serde(default)]
+    pub is_outdated: bool,
+    /// Whether the review thread has been marked resolved on GitHub.
+    #[serde(default)]
+    pub is_resolved: bool,
 }
 
 /// Raw GraphQL response for PR review threads.
@@ -1433,6 +1441,7 @@ struct ReviewThreadConnection {
 #[serde(rename_all = "camelCase")]
 struct ReviewThread {
     is_outdated: bool,
+    is_resolved: bool,
     comments: ReviewThreadCommentConnection,
 }
 
@@ -1462,31 +1471,43 @@ struct RawGraphqlAuthor {
     login: String,
 }
 
-impl From<RawGraphqlReviewComment> for GitHubReviewComment {
-    fn from(raw: RawGraphqlReviewComment) -> Self {
-        Self {
+impl RawGraphqlReviewComment {
+    fn into_github_comment(self, is_outdated: bool, is_resolved: bool) -> GitHubReviewComment {
+        GitHubReviewComment {
             author: GitHubAuthor {
-                login: raw
+                login: self
                     .author
                     .map(|author| author.login)
                     .unwrap_or_else(|| "unknown".to_string()),
             },
-            body: raw.body,
-            created_at: raw.created_at,
-            diff_hunk: raw.diff_hunk,
-            path: raw.path,
-            start_line: raw.start_line,
-            line: raw.line,
+            body: self.body,
+            created_at: self.created_at,
+            diff_hunk: self.diff_hunk,
+            path: self.path,
+            start_line: self.start_line,
+            line: self.line,
+            is_outdated,
+            is_resolved,
         }
     }
 }
 
-fn current_review_comments_from_threads(threads: Vec<ReviewThread>) -> Vec<GitHubReviewComment> {
+/// Map review threads to frontend comments, preserving outdated/resolved status.
+///
+/// Callers (UI) filter to open threads by default; resolved and outdated comments
+/// remain available so users can opt in to see them.
+fn review_comments_from_threads(threads: Vec<ReviewThread>) -> Vec<GitHubReviewComment> {
     threads
         .into_iter()
-        .filter(|thread| !thread.is_outdated)
-        .flat_map(|thread| thread.comments.nodes)
-        .map(GitHubReviewComment::from)
+        .flat_map(|thread| {
+            let is_outdated = thread.is_outdated;
+            let is_resolved = thread.is_resolved;
+            thread
+                .comments
+                .nodes
+                .into_iter()
+                .map(move |comment| comment.into_github_comment(is_outdated, is_resolved))
+        })
         .collect()
 }
 
@@ -1744,8 +1765,9 @@ pub async fn get_github_pr(
 /// Fetch inline review comments for a PR.
 ///
 /// Uses GitHub GraphQL review threads instead of REST review comments so GitHub
-/// calculates `isOutdated` for us. REST exposes line/position fields, but those
-/// are not a reliable way to infer whether GitHub considers a thread outdated.
+/// calculates `isOutdated` / `isResolved` for us. REST exposes line/position
+/// fields, but those are not a reliable way to infer thread status. The UI
+/// defaults to open (non-outdated, non-resolved) comments and can show the rest.
 pub async fn get_pr_review_comments(
     app: AppHandle,
     project_path: String,
@@ -1762,6 +1784,7 @@ query($owner: String!, $repo: String!, $prNumber: Int!) {
       reviewThreads(first: 100) {
         nodes {
           isOutdated
+          isResolved
           comments(first: 100) {
             nodes {
               author {
@@ -1816,17 +1839,22 @@ query($owner: String!, $repo: String!, $prNumber: Int!) {
 
     let threads = response.data.repository.pull_request.review_threads.nodes;
     let total_threads = threads.len();
+    let open_threads = threads
+        .iter()
+        .filter(|thread| !thread.is_outdated && !thread.is_resolved)
+        .count();
     let total_comments: usize = threads
         .iter()
         .map(|thread| thread.comments.nodes.len())
         .sum();
-    let comments = current_review_comments_from_threads(threads);
+    let comments = review_comments_from_threads(threads);
 
     log::trace!(
-        "Got {} current review comments for PR #{pr_number} ({} total comments across {} threads, outdated threads hidden)",
+        "Got {} review comments for PR #{pr_number} ({} total comments across {} threads, {} open)",
         comments.len(),
         total_comments,
-        total_threads
+        total_threads,
+        open_threads
     );
     Ok(comments)
 }
@@ -2496,7 +2524,12 @@ pub fn generate_branch_name_from_advisory(ghsa_id: &str, summary: &str) -> Strin
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    let slug = if slug.len() > 40 { &slug[..40] } else { &slug };
+    // Truncate on a UTF-8 char boundary so multi-byte summaries never panic.
+    let slug = if slug.len() > 40 {
+        &slug[..slug.floor_char_boundary(40)]
+    } else {
+        &slug
+    };
     let slug = slug.trim_end_matches('-');
     // Use short GHSA ID (remove "GHSA-" prefix for branch name brevity)
     let ghsa_short = ghsa_id.strip_prefix("GHSA-").unwrap_or(ghsa_id);
@@ -3181,29 +3214,47 @@ mod tests {
     }
 
     #[test]
-    fn test_outdated_review_threads_are_filtered() {
-        let comments = current_review_comments_from_threads(vec![
+    fn test_review_comments_preserve_outdated_and_resolved_flags() {
+        let comments = review_comments_from_threads(vec![
             ReviewThread {
                 is_outdated: false,
+                is_resolved: false,
                 comments: ReviewThreadCommentConnection {
-                    nodes: vec![graphql_review_comment("current")],
+                    nodes: vec![graphql_review_comment("open")],
                 },
             },
             ReviewThread {
                 is_outdated: true,
+                is_resolved: false,
                 comments: ReviewThreadCommentConnection {
                     nodes: vec![graphql_review_comment("outdated")],
                 },
             },
+            ReviewThread {
+                is_outdated: false,
+                is_resolved: true,
+                comments: ReviewThreadCommentConnection {
+                    nodes: vec![graphql_review_comment("resolved")],
+                },
+            },
         ]);
 
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].body, "current");
+        assert_eq!(comments.len(), 3);
+        assert_eq!(comments[0].body, "open");
+        assert!(!comments[0].is_outdated);
+        assert!(!comments[0].is_resolved);
+        assert_eq!(comments[1].body, "outdated");
+        assert!(comments[1].is_outdated);
+        assert!(!comments[1].is_resolved);
+        assert_eq!(comments[2].body, "resolved");
+        assert!(!comments[2].is_outdated);
+        assert!(comments[2].is_resolved);
     }
 
     #[test]
     fn test_review_comment_conversion_preserves_fields() {
-        let comment = GitHubReviewComment::from(graphql_review_comment("Please update this."));
+        let comment =
+            graphql_review_comment("Please update this.").into_github_comment(false, true);
 
         assert_eq!(comment.author.login, "reviewer");
         assert_eq!(comment.body, "Please update this.");
@@ -3212,6 +3263,8 @@ mod tests {
         assert_eq!(comment.path, "src/main.rs");
         assert_eq!(comment.start_line, Some(10));
         assert_eq!(comment.line, Some(12));
+        assert!(!comment.is_outdated);
+        assert!(comment.is_resolved);
     }
 
     #[test]
@@ -3233,6 +3286,19 @@ mod tests {
     }
 
     #[test]
+    fn test_slugify_issue_title_non_ascii_does_not_panic() {
+        // 15 Japanese chars → 45 bytes after lowercasing; byte 40 lands inside a char.
+        // Previously paniced with "byte index 40 is not a char boundary".
+        let title = "日本語のタイトルを持つ課題の例";
+        let slug = slugify_issue_title(title);
+        assert!(!slug.is_empty());
+        assert!(slug.len() <= 40);
+        assert!(slug.is_char_boundary(slug.len()));
+        // Every retained character should still be valid UTF-8 (no partial sequences).
+        assert!(std::str::from_utf8(slug.as_bytes()).is_ok());
+    }
+
+    #[test]
     fn test_generate_branch_name_from_issue() {
         assert_eq!(
             generate_branch_name_from_issue(123, "Fix the login bug"),
@@ -3242,6 +3308,17 @@ mod tests {
             generate_branch_name_from_issue(42, "Add new feature"),
             "issue-42-add-new-feature"
         );
+    }
+
+    #[test]
+    fn test_generate_branch_name_from_issue_non_ascii() {
+        let branch =
+            generate_branch_name_from_issue(629, "日本語のタイトルを持つ課題の例と追加の文字");
+        assert!(branch.starts_with("issue-629-"));
+        assert!(branch.is_char_boundary(branch.len()));
+        // Prefix is ASCII; slug portion must stay within the 40-byte cap.
+        let slug = branch.strip_prefix("issue-629-").unwrap();
+        assert!(slug.len() <= 40);
     }
 
     #[test]
@@ -3296,6 +3373,19 @@ mod tests {
         );
         assert!(result.starts_with("advisory-jg7v-5cqg-jvmf-"));
         assert!(result.contains("prototype"));
+    }
+
+    #[test]
+    fn test_generate_branch_name_from_advisory_non_ascii() {
+        let result = generate_branch_name_from_advisory(
+            "GHSA-jg7v-5cqg-jvmf",
+            "日本語のセキュリティアドバイザリ概要の非常に長いタイトル例",
+        );
+        assert!(result.starts_with("advisory-jg7v-5cqg-jvmf-"));
+        assert!(result.is_char_boundary(result.len()));
+        let slug = result.strip_prefix("advisory-jg7v-5cqg-jvmf-").unwrap();
+        assert!(slug.len() <= 40);
+        assert!(!slug.ends_with('-'));
     }
 
     #[test]

@@ -365,6 +365,7 @@ export function LabelModal({
             <div className="grid grid-cols-5 gap-2">
               {LABEL_COLORS.map(color => (
                 <button
+                  type="button"
                   key={color.value}
                   className={`w-full h-8 rounded-md transition-transform hover:scale-105 ${
                     selectedColor === color.value
@@ -374,6 +375,7 @@ export function LabelModal({
                   style={{ backgroundColor: color.value }}
                   onClick={() => setSelectedColor(color.value)}
                   title={color.name}
+                  aria-label={color.name}
                 >
                   {selectedColor === color.value && (
                     <Check
@@ -386,6 +388,7 @@ export function LabelModal({
 
             <div className="flex gap-2 pt-2">
               <button
+                type="button"
                 className="flex-1 h-8 text-sm rounded-md border hover:bg-accent"
                 onClick={() => {
                   setIsCreatingCustom(false)
@@ -396,6 +399,7 @@ export function LabelModal({
                 Back
               </button>
               <button
+                type="button"
                 className="flex-1 h-8 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={
                   editingLabelName ? saveEditedColor : handleCreateCustom
@@ -416,6 +420,7 @@ export function LabelModal({
                 const isCustom = !PRESET_LABELS.includes(labelName)
                 return (
                   <button
+                    type="button"
                     key={labelName}
                     className={`flex items-center h-8 px-3 text-sm rounded-md text-left transition-colors group ${
                       focusedIndex === i

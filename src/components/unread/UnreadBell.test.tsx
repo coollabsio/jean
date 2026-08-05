@@ -24,6 +24,15 @@ vi.mock('@/services/chat', () => ({
   useAllSessions: () => ({ data: allSessions, isLoading: false }),
 }))
 
+let finishedSessionAnimationEnabled = true
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({
+    data: {
+      finished_session_animation_enabled: finishedSessionAnimationEnabled,
+    },
+  }),
+}))
+
 vi.mock('./useUnreadCount', () => ({
   useUnreadCount: () => unreadCount,
 }))
@@ -128,6 +137,7 @@ describe('UnreadBell', () => {
       globalThis as typeof globalThis & { __JEAN_TEST_IS_NATIVE__?: boolean }
     ).__JEAN_TEST_IS_NATIVE__ = true
     unreadCount = 2
+    finishedSessionAnimationEnabled = true
     allSessions = {
       entries: [
         {
@@ -193,6 +203,28 @@ describe('UnreadBell', () => {
 
     expect(
       screen.getByText(/(?:⌘|⌃|Ctrl) \+ ⇧|Shift \+ F/i)
+    ).toBeInTheDocument()
+  })
+
+  it('uses a bell ring animation on the finished-sessions badge by default', () => {
+    const { container } = renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    const bell = container.querySelector('svg')
+    expect(bell?.getAttribute('class') ?? '').toContain('bell-ring')
+    expect(container.querySelector('.finished-session-glow')).toBeNull()
+    expect(container.querySelector('.card-border-spin')).toBeNull()
+  })
+
+  it('disables the finished-sessions animation when preference is off', () => {
+    finishedSessionAnimationEnabled = false
+    const { container } = renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    const bell = container.querySelector('svg')
+    expect(bell?.getAttribute('class') ?? '').not.toContain('bell-ring')
+    expect(container.querySelector('.finished-session-glow')).toBeNull()
+    expect(container.querySelector('.card-border-spin')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: /2 finished sessions/i })
     ).toBeInTheDocument()
   })
 

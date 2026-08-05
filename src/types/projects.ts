@@ -19,9 +19,13 @@ export interface ProjectAutoFixSettings {
   excluded_labels?: string[]
   planning_backend: string
   planning_model?: string | null
+  /** Claude custom CLI profile name for planning (null/undefined = Anthropic). */
+  planning_provider?: string | null
   auto_yolo_enabled?: boolean
   yolo_backend: string
   yolo_model?: string | null
+  /** Claude custom CLI profile name for yolo (null/undefined = Anthropic). */
+  yolo_provider?: string | null
   active_hours_enabled?: boolean
   active_hours_start?: number
   active_hours_end?: number

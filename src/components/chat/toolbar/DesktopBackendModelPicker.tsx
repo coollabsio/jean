@@ -157,13 +157,12 @@ export function DesktopBackendModelPicker({
     installedBackends,
   })
 
-  const selectableChoiceCount = useMemo(
-    () =>
-      backendModelSections
-        .filter(section => installedBackends.includes(section.backend))
-        .reduce((count, section) => count + section.options.length, 0),
-    [backendModelSections, installedBackends]
-  )
+  const selectableChoiceCount = useMemo(() => {
+    const installedBackendsSet = new Set(installedBackends)
+    return backendModelSections
+      .filter(section => installedBackendsSet.has(section.backend))
+      .reduce((count, section) => count + section.options.length, 0)
+  }, [backendModelSections, installedBackends])
   const hasMultipleChoices = selectableChoiceCount > 1
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {

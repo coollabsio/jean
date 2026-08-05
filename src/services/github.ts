@@ -1386,6 +1386,31 @@ export async function attachSavedContext(
 }
 
 /**
+ * Inject a lightweight session reference (MCP pointer prompt) into another session.
+ * Does not dump full message history — the agent uses Jean MCP to fetch on demand.
+ */
+export async function attachSessionReference(
+  targetSessionId: string,
+  sourceSessionId: string,
+  sessionName: string,
+  projectName: string,
+  worktreeName: string
+): Promise<AttachedSavedContext> {
+  return invoke<AttachedSavedContext>('attach_session_reference', {
+    targetSessionId,
+    sourceSessionId,
+    sessionName,
+    projectName,
+    worktreeName,
+  })
+}
+
+/** Stable slug for a session-reference attachment (must match Rust `session_reference_slug`). */
+export function sessionReferenceSlug(sourceSessionId: string): string {
+  return `session-ref-${sourceSessionId}`
+}
+
+/**
  * Remove an attached saved context from a session
  */
 export async function removeSavedContext(

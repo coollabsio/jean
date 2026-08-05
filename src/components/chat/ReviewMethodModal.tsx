@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useEffectEvent } from 'react'
 import { Bot, Loader2, Rabbit, ShieldCheck } from 'lucide-react'
 import {
   Dialog,
@@ -47,56 +47,47 @@ export function ReviewMethodModal({
     [onOpenChange]
   )
 
+  // useEffectEvent keeps latest review handlers without re-binding keydown.
+  const onReviewKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      return
+    }
+
+    if (event.key === '1') {
+      event.preventDefault()
+      event.stopPropagation()
+      choose(onAiReview)
+      return
+    }
+
+    if (event.key === '2') {
+      event.preventDefault()
+      event.stopPropagation()
+      choose(onFinalReview)
+      return
+    }
+
+    if (event.key === '3' && codeRabbitReady && !isLoading) {
+      event.preventDefault()
+      event.stopPropagation()
+      choose(onCodeRabbitCliReview)
+      return
+    }
+
+    if (event.key === '4' && codeRabbitPrAvailable) {
+      event.preventDefault()
+      event.stopPropagation()
+      choose(onCodeRabbitPrReview)
+    }
+  })
+
   useEffect(() => {
     if (!open || !keyboardShortcutsEnabled) return
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-        return
-      }
-
-      if (event.key === '1') {
-        event.preventDefault()
-        event.stopPropagation()
-        choose(onAiReview)
-        return
-      }
-
-      if (event.key === '2') {
-        event.preventDefault()
-        event.stopPropagation()
-        choose(onFinalReview)
-        return
-      }
-
-      if (event.key === '3' && codeRabbitReady && !isLoading) {
-        event.preventDefault()
-        event.stopPropagation()
-        choose(onCodeRabbitCliReview)
-        return
-      }
-
-      if (event.key === '4' && codeRabbitPrAvailable) {
-        event.preventDefault()
-        event.stopPropagation()
-        choose(onCodeRabbitPrReview)
-      }
-    }
-
+    const handleKeyDown = (event: KeyboardEvent) => onReviewKeyDown(event)
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [
-    codeRabbitReady,
-    isLoading,
-    onAiReview,
-    onFinalReview,
-    onCodeRabbitCliReview,
-    onCodeRabbitPrReview,
-    codeRabbitPrAvailable,
-    choose,
-    keyboardShortcutsEnabled,
-    open,
-  ])
+  }, [keyboardShortcutsEnabled, open])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

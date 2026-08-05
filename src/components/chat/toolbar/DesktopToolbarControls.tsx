@@ -62,6 +62,7 @@ import {
   KIMI_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
+  withAdaptiveEffortOption,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   getPrStatusDisplay,
@@ -71,6 +72,9 @@ import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBack
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
+
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
 
 interface DesktopToolbarControlsProps {
   hasPendingQuestions: boolean
@@ -151,7 +155,7 @@ export function DesktopToolbarControls({
   sessionHasMessages,
   providerLocked,
   customCliProfiles,
-  customCodexProviders = [],
+  customCodexProviders = EMPTY_CODEX_PROVIDERS,
   isCodex,
   modelReasoning,
   prUrl,
@@ -206,23 +210,25 @@ export function DesktopToolbarControls({
       (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
       : isPi
-        ? PI_EFFORT_LEVEL_OPTIONS
+        ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
         : isCodex
-          ? CODEX_EFFORT_LEVEL_OPTIONS
+          ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)
           : isKimi
-            ? KIMI_EFFORT_LEVEL_OPTIONS
+            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS, selectedModel)
             : isGrok
-              ? GROK_EFFORT_LEVEL_OPTIONS
-              : EFFORT_LEVEL_OPTIONS
+              ? withAdaptiveEffortOption(GROK_EFFORT_LEVEL_OPTIONS, selectedModel)
+              : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
-      ? modelReasoning.levels
-      : THINKING_LEVEL_OPTIONS
+      ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
+      : withAdaptiveEffortOption(THINKING_LEVEL_OPTIONS, selectedModel)
+  const effortOptionValues = new Set(effortLevelOptions.map(o => o.value))
+  const thinkingOptionValues = new Set(thinkingLevelOptions.map(o => o.value))
   const displayedEffortLevel =
     modelReasoning?.type === 'effort'
-      ? modelReasoning.levels.some(o => o.value === selectedEffortLevel)
+      ? effortOptionValues.has(selectedEffortLevel)
         ? selectedEffortLevel
         : modelReasoning.default
       : isCodex || isPi
@@ -238,10 +244,11 @@ export function DesktopToolbarControls({
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
   const displayedThinkingLevel =
-    modelReasoning?.type === 'thinking' &&
-    !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
-      ? modelReasoning.default
-      : selectedThinkingLevel
+    thinkingOptionValues.has(selectedThinkingLevel)
+      ? selectedThinkingLevel
+      : modelReasoning?.type === 'thinking'
+        ? modelReasoning.default
+        : selectedThinkingLevel
   const displayedThinkingLabel =
     thinkingLevelOptions.find(o => o.value === displayedThinkingLevel)?.label ??
     displayedThinkingLevel
@@ -351,6 +358,8 @@ export function DesktopToolbarControls({
                         #{ctx.number} {ctx.title}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -382,6 +391,8 @@ export function DesktopToolbarControls({
                         #{ctx.number} {ctx.title}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -414,6 +425,8 @@ export function DesktopToolbarControls({
                         #{ctx.number} {ctx.packageName} ({ctx.severity})
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -449,6 +462,8 @@ export function DesktopToolbarControls({
                         {ctx.ghsaId} — {ctx.summary}
                       </span>
                       <button
+                        type="button"
+                        aria-label="Open external link"
                         className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                         onClick={e => {
                           e.stopPropagation()
@@ -486,6 +501,8 @@ export function DesktopToolbarControls({
                       </span>
                       {ctx.url && (
                         <button
+                          type="button"
+                        aria-label="Open external link"
                           className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                           onClick={e => {
                             e.stopPropagation()

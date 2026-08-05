@@ -16,34 +16,36 @@ export function useToolbarDropdownShortcuts({
   useEffect(() => {
     if (!enabled) return
 
-    const unlisteners: (() => void)[] = []
+    const onProvider = setProviderDropdownOpen
+      ? () => setProviderDropdownOpen(true)
+      : null
+    const onModel = setModelDropdownOpen
+      ? () => setModelDropdownOpen(true)
+      : null
+    const onThinking = setThinkingDropdownOpen
+      ? () => setThinkingDropdownOpen(true)
+      : null
 
-    if (setProviderDropdownOpen) {
-      const onProvider = () => setProviderDropdownOpen(true)
+    if (onProvider) {
       window.addEventListener('open-provider-dropdown', onProvider)
-      unlisteners.push(() =>
-        window.removeEventListener('open-provider-dropdown', onProvider)
-      )
     }
-
-    if (setModelDropdownOpen) {
-      const onModel = () => setModelDropdownOpen(true)
+    if (onModel) {
       window.addEventListener('open-model-dropdown', onModel)
-      unlisteners.push(() =>
-        window.removeEventListener('open-model-dropdown', onModel)
-      )
     }
-
-    if (setThinkingDropdownOpen) {
-      const onThinking = () => setThinkingDropdownOpen(true)
+    if (onThinking) {
       window.addEventListener('open-thinking-dropdown', onThinking)
-      unlisteners.push(() =>
-        window.removeEventListener('open-thinking-dropdown', onThinking)
-      )
     }
 
     return () => {
-      for (const unlisten of unlisteners) unlisten()
+      if (onProvider) {
+        window.removeEventListener('open-provider-dropdown', onProvider)
+      }
+      if (onModel) {
+        window.removeEventListener('open-model-dropdown', onModel)
+      }
+      if (onThinking) {
+        window.removeEventListener('open-thinking-dropdown', onThinking)
+      }
     }
   }, [
     enabled,

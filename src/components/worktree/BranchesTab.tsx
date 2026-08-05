@@ -57,8 +57,10 @@ export function BranchesTab({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={onRefresh}
                 disabled={isRefetching}
+                aria-label="Refresh branches"
                 className={cn(
                   'flex items-center justify-center h-8 w-8 rounded-md border border-border',
                   'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',

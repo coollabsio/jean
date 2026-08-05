@@ -12,7 +12,11 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import { useAllBackendsMcpHealth } from '@/services/mcp'
-import { getModelFastInfo, type ClaudeModel } from '@/types/preferences'
+import {
+  getModelFastInfo,
+  type ClaudeModel,
+  type CodexProviderProfile,
+} from '@/types/preferences'
 import {
   getSupportedExecutionModes,
   type EffortLevel,
@@ -73,6 +77,9 @@ export {
 }
 export type { ChatToolbarProps }
 
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
+
 /** Tracks concurrent ChatToolbar mounts (remount races during session switch). */
 let chatToolbarMountCount = 0
 
@@ -128,7 +135,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   onBackendModelChange,
   onProviderChange,
   customCliProfiles,
-  customCodexProviders = [],
+  customCodexProviders = EMPTY_CODEX_PROVIDERS,
   onThinkingLevelChange,
   onEffortLevelChange,
   onSetExecutionMode,
@@ -155,6 +162,9 @@ export const ChatToolbar = memo(function ChatToolbar({
   const [mcpDropdownOpen, setMcpDropdownOpen] = useState(false)
   const [mobileBackendModelPickerOpen, setMobileBackendModelPickerOpen] =
     useState(false)
+  // Bumped after a mobile model pick so MobileSettingsMenu opens effort/thinking
+  // without forcing the user to reopen the gear (issue #574).
+  const [openReasoningSheetSignal, setOpenReasoningSheetSignal] = useState(0)
   const isMobile = useIsMobile()
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
@@ -230,6 +240,10 @@ export const ChatToolbar = memo(function ChatToolbar({
     const values = new Set(
       selectedModelReasoning.levels.map(level => level.value)
     )
+    // Adaptive/Default is only valid for Gemini models.
+    if (selectedModel?.toLowerCase().includes('gemini')) {
+      values.add('adaptive')
+    }
     if (selectedModelReasoning.type === 'effort') {
       if (!values.has(selectedEffortLevel)) {
         onEffortLevelChange(selectedModelReasoning.default as EffortLevel)
@@ -241,6 +255,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     onEffortLevelChange,
     onThinkingLevelChange,
     selectedEffortLevel,
+    selectedModel,
     selectedModelReasoning,
     selectedThinkingLevel,
   ])
@@ -338,6 +353,14 @@ export const ChatToolbar = memo(function ChatToolbar({
     },
     [onEffortLevelChange]
   )
+
+  const handleAfterMobileModelSelect = useCallback(() => {
+    // Defer so selectedBackend/model props refresh before the reasoning sheet
+    // decides effort vs thinking options.
+    requestAnimationFrame(() => {
+      setOpenReasoningSheetSignal(n => n + 1)
+    })
+  }, [])
 
   const handlePullClick = useCallback(async () => {
     if (!activeWorktreePath || !worktreeId) return
@@ -461,6 +484,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             isDisabled={false}
             providerLocked={providerLocked}
             selectedBackend={selectedBackend}
+            selectedModel={selectedModel}
             selectedProvider={selectedProvider}
             backendModelLabel={backendModelLabel}
             backendModelLabelText={backendModelLabelText}
@@ -479,6 +503,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             handleProviderChange={handleProviderChange}
             handleEffortLevelChange={handleEffortLevelChange}
             handleThinkingLevelChange={handleThinkingLevelChange}
+            openReasoningSheetSignal={openReasoningSheetSignal}
             loadedIssueContexts={loadedIssueContexts}
             loadedPRContexts={loadedPRContexts}
             loadedSecurityContexts={loadedSecurityContexts}
@@ -521,6 +546,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               customCliProfiles={customCliProfiles}
               onModelChange={handleModelChange}
               onBackendModelChange={onBackendModelChange}
+              onAfterModelSelect={handleAfterMobileModelSelect}
             />
           )}
 

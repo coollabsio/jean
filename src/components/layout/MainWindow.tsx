@@ -27,6 +27,21 @@ const LeftSideBar = lazy(() =>
     default: mod.LeftSideBar,
   }))
 )
+const FileBrowserSidebar = lazy(() =>
+  import('@/components/file-browser').then(mod => ({
+    default: mod.FileBrowserSidebar,
+  }))
+)
+const MobileFileBrowser = lazy(() =>
+  import('@/components/file-browser').then(mod => ({
+    default: mod.MobileFileBrowser,
+  }))
+)
+const FileContentModal = lazy(() =>
+  import('@/components/chat/FileContentModal').then(mod => ({
+    default: mod.FileContentModal,
+  }))
+)
 const PreferencesDialog = lazy(() =>
   import('@/components/preferences/PreferencesDialog').then(mod => ({
     default: mod.PreferencesDialog,
@@ -197,6 +212,9 @@ import { isLinux, isWindows } from '@/lib/platform'
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
 const MAX_SIDEBAR_WIDTH = 500
+// File browser sidebar resize constraints (pixels)
+const MIN_FILE_BROWSER_WIDTH = 180
+const MAX_FILE_BROWSER_WIDTH = 520
 
 function useRetainedMount(active: boolean) {
   const [shouldMount, setShouldMount] = useState(active)
@@ -218,6 +236,12 @@ export function MainWindow() {
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarSize = useUIStore(state => state.setLeftSidebarSize)
   const setLeftSidebarVisible = useUIStore(state => state.setLeftSidebarVisible)
+  const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
+  const fileBrowserSize = useUIStore(state => state.fileBrowserSize)
+  const setFileBrowserSize = useUIStore(state => state.setFileBrowserSize)
+  const setFileBrowserVisible = useUIStore(state => state.setFileBrowserVisible)
+  const viewingFilePath = useUIStore(state => state.viewingFilePath)
+  const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
   const preferencesOpen = useUIStore(state => state.preferencesOpen)
   const commitModalOpen = useUIStore(state => state.commitModalOpen)
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
@@ -326,6 +350,7 @@ export function MainWindow() {
 
   // Ref for the sidebar element to update width directly during drag
   const sidebarRef = useRef<HTMLDivElement>(null)
+  const fileBrowserRef = useRef<HTMLDivElement>(null)
 
   // Set up global event listeners (keyboard shortcuts, etc.)
   useMainWindowEventListeners()
@@ -428,6 +453,36 @@ export function MainWindow() {
     [leftSidebarSize, setLeftSidebarSize]
   )
 
+  const handleFileBrowserResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      const startX = e.clientX
+      const startWidth = fileBrowserSize
+      let currentWidth = startWidth
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const delta = moveEvent.clientX - startX
+        currentWidth = Math.min(
+          MAX_FILE_BROWSER_WIDTH,
+          Math.max(MIN_FILE_BROWSER_WIDTH, startWidth + delta)
+        )
+        if (fileBrowserRef.current) {
+          fileBrowserRef.current.style.width = `${currentWidth}px`
+        }
+      }
+
+      const handleMouseUp = () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+        setFileBrowserSize(currentWidth)
+      }
+
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+    },
+    [fileBrowserSize, setFileBrowserSize]
+  )
+
   const shouldRenderPreferencesDialog = useRetainedMount(preferencesOpen)
   const shouldRenderProjectSettingsDialog = useRetainedMount(
     projectSettingsDialogOpen
@@ -449,8 +504,8 @@ export function MainWindow() {
     reviewCommentsModalOpen
   )
   const shouldRenderWorkflowRunsModal = useRetainedMount(workflowRunsModalOpen)
-  // Always mount MagicModal so automation event listeners (mobile toolbar
-  // magic-command dispatches) work even when the dialog has never been opened.
+  // Always mount MagicModal so canvas/mobile magic-command dispatches and
+  // prompt-session starters work even when the dialog has never been opened.
   const shouldRenderMagicModal = true
   const shouldRenderResolveConflictsDialog = useRetainedMount(
     resolveConflictsDialogOpen
@@ -526,10 +581,41 @@ export function MainWindow() {
         {/* Desktop: custom resize handle for left sidebar */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize left sidebar"
             className="relative h-full w-px bg-border"
             onMouseDown={handleResizeStart}
           >
             {/* Invisible wider hit area for easier clicking */}
+            <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
+          </div>
+        )}
+
+        {/* Desktop: file browser sidebar */}
+        {!isMobile && fileBrowserVisible && isInitialized && (
+          <div
+            ref={fileBrowserRef}
+            className="h-full overflow-hidden"
+            style={{ width: fileBrowserSize }}
+          >
+            <Suspense fallback={null}>
+              <FileBrowserSidebar />
+            </Suspense>
+          </div>
+        )}
+
+        {/* Desktop: resize handle for file browser */}
+        {!isMobile && fileBrowserVisible && isInitialized && (
+          <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize file browser"
+            className="relative h-full w-px bg-border"
+            onMouseDown={handleFileBrowserResizeStart}
+          >
             <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
           </div>
         )}
@@ -544,6 +630,17 @@ export function MainWindow() {
             dragOffset={swipeOpenSidebar.translateX}
             dragTransition={swipeOpenSidebar.transitionStyle}
           />
+        )}
+
+        {/* Mobile: file browser overlay drawer */}
+        {isMobile && isInitialized && (
+          <Suspense fallback={null}>
+            <MobileFileBrowser
+              open={fileBrowserVisible}
+              onOpenChange={setFileBrowserVisible}
+              width={fileBrowserSize}
+            />
+          </Suspense>
         )}
 
         {/* Main Content + bottom browser panel stacked vertically */}
@@ -566,6 +663,13 @@ export function MainWindow() {
 
       {/* Global UI Components (hidden until triggered) */}
       <CommandPalette />
+      {/* Global file viewer/editor (tool clicks + file browser) */}
+      <Suspense fallback={null}>
+        <FileContentModal
+          filePath={viewingFilePath}
+          onClose={() => setViewingFilePath(null)}
+        />
+      </Suspense>
       {shouldRenderPreferencesDialog && (
         <Suspense fallback={null}>
           <PreferencesDialog />

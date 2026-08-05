@@ -34,6 +34,7 @@ import type { CliBackend } from '@/types/preferences'
 
 const THINKING_LEVEL_VALUES = new Set<ThinkingLevel>([
   'off',
+  'adaptive',
   'think',
   'megathink',
   'ultrathink',
@@ -50,6 +51,8 @@ function mapCodexReasoningToEffort(
   value: string | null | undefined
 ): EffortLevel | undefined {
   switch (value) {
+    case 'adaptive':
+      return 'adaptive'
     case 'low':
       return 'low'
     case 'medium':
@@ -339,8 +342,7 @@ export function useWorktreeApproval({
           sessionId,
         })
         allUserContent = fullSession.messages
-          .filter(m => m.role === 'user')
-          .map(m => m.content)
+          .flatMap(m => (m.role === 'user' ? [m.content] : []))
           .join('\n')
       } catch (err) {
         console.error('[useWorktreeApproval] Failed to fetch session:', err)

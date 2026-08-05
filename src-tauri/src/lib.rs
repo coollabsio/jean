@@ -93,6 +93,11 @@ fn create_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         .build()?;
     let view_menu = SubmenuBuilder::new(app, "View")
         .item(&MenuItemBuilder::with_id("toggle-left-sidebar", "Toggle Left Sidebar").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id("toggle-file-browser", "Toggle File Browser")
+                .accelerator("CmdOrCtrl+Shift+B")
+                .build(app)?,
+        )
         .item(&MenuItemBuilder::with_id("toggle-right-sidebar", "Toggle Right Sidebar").build(app)?)
         .separator()
         .item(
@@ -139,6 +144,7 @@ fn install_menu_events(app: &tauri::App) {
             "check-updates" => Some("menu-check-updates"),
             "preferences" => Some("menu-preferences"),
             "toggle-left-sidebar" => Some("menu-toggle-left-sidebar"),
+            "toggle-file-browser" => Some("menu-toggle-file-browser"),
             "toggle-right-sidebar" => Some("menu-toggle-right-sidebar"),
             "toggle-terminal" => Some("menu-toggle-terminal"),
             "toggle-browser" => Some("menu-toggle-browser"),
@@ -277,6 +283,9 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         }
     });
 
+    // Window materials: production config starts opaque (no sidebar effects).
+    // Apply the saved window_vibrancy preference once prefs load. Default is
+    // false so text stays sharp; vibrancy remains an explicit opt-in.
     let http = core.clone();
     let desktop_app = app.handle().clone();
     tauri::async_runtime::spawn(async move {
@@ -318,6 +327,11 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         create_app_menu(app)?;
         install_menu_events(app);
     }
+
+    // Recover from WebView2 process death on Windows (issue #575 — blank /
+    // "invisible" window after the browser process exits). No-op elsewhere.
+    platform::install_process_failed_recovery(app);
+
     Ok(())
 }
 
@@ -381,6 +395,7 @@ pub fn run() {
             desktop_commands::send_native_notification,
             desktop_commands::read_clipboard_image,
             desktop_commands::write_clipboard_text,
+            desktop_commands::read_clipboard_text,
             desktop_commands::save_dropped_image,
             desktop_commands::open_file_in_default_app,
             desktop_commands::open_worktree_in_finder,

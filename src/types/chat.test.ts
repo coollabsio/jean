@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCodexUserInputAnswerMap,
   findCodexUserInputRequest,
+  foldTodoWriteToolCalls,
   getAskUserQuestions,
   getCodexUserInputRequestId,
   getTodoWriteTodos,
@@ -143,11 +144,13 @@ describe('TodoWrite (Grok + Claude)', () => {
     expect(isTodoWrite(tool)).toBe(true)
     expect(getTodoWriteTodos(tool)).toEqual([
       {
+        id: '1',
         content: 'Investigate steering',
         activeForm: 'Investigate steering',
         status: 'in_progress',
       },
       {
+        id: '2',
         content: 'Fix tools',
         activeForm: 'Fix tools',
         status: 'pending',
@@ -175,6 +178,77 @@ describe('TodoWrite (Grok + Claude)', () => {
     expect(
       normalizeTodoItem({ content: 'y', status: 'in-progress' })?.status
     ).toBe('in_progress')
+  })
+
+  it('keeps status-only merge patches when id is present', () => {
+    const item = normalizeTodoItem({
+      id: '5',
+      content: null,
+      status: 'completed',
+    })
+    expect(item).toEqual({
+      id: '5',
+      content: '',
+      activeForm: '',
+      status: 'completed',
+    })
+  })
+
+  it('folds Grok merge:true TodoWrite patches into a full list', () => {
+    const toolCalls = [
+      {
+        id: 't1',
+        name: 'todo_write',
+        input: {
+          merge: false,
+          todos: [
+            { id: '1', content: 'Explore', status: 'in_progress' },
+            { id: '2', content: 'Fix', status: 'pending' },
+            { id: '3', content: 'Verify', status: 'pending' },
+          ],
+        },
+      },
+      {
+        id: 't2',
+        name: 'Updating plan',
+        input: {
+          merge: true,
+          variant: 'TodoWrite',
+          todos: [
+            { id: '1', content: null, status: 'completed' },
+            { id: '2', content: null, status: 'in_progress' },
+          ],
+        },
+      },
+      {
+        id: 't3',
+        name: 'todo_write',
+        input: {
+          merge: true,
+          todos: [{ id: '2', status: 'completed' }, { id: '3', status: 'completed' }],
+        },
+      },
+    ]
+    expect(foldTodoWriteToolCalls(toolCalls)).toEqual([
+      {
+        id: '1',
+        content: 'Explore',
+        activeForm: 'Explore',
+        status: 'completed',
+      },
+      {
+        id: '2',
+        content: 'Fix',
+        activeForm: 'Fix',
+        status: 'completed',
+      },
+      {
+        id: '3',
+        content: 'Verify',
+        activeForm: 'Verify',
+        status: 'completed',
+      },
+    ])
   })
 })
 

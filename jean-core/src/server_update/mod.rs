@@ -164,9 +164,7 @@ async fn check_desktop_host_update() -> Result<ServerUpdateStatus, String> {
         // Install is performed by the native shell via host:install-desktop-update.
         can_update: available,
         reason: if available {
-            Some(
-                "Install runs on the host Jean desktop app (native updater)".to_string(),
-            )
+            Some("Install runs on the host Jean desktop app (native updater)".to_string())
         } else {
             None
         },

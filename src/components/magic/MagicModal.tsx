@@ -19,8 +19,6 @@ import {
   Link2,
   ShieldAlert,
   Loader2,
-  Bot,
-  Shield,
 } from 'lucide-react'
 import {
   Dialog,
@@ -89,8 +87,6 @@ import type {
 import type { Session } from '@/types/chat'
 import {
   type CliBackend,
-  DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT,
-  DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT,
   DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
@@ -125,10 +121,12 @@ import {
   startCodeReviewsSequentially,
 } from '@/lib/code-review-configs'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
+import { resolveMcpConfigForSend } from '@/services/mcp'
 
 type MagicOption =
   | 'save-context'
   | 'load-context'
+  | 'inject-session'
   | 'linked-projects'
   | 'fork-session'
   | 'commit'
@@ -145,8 +143,6 @@ type MagicOption =
   | 'investigate-issue'
   | 'investigate-pr'
   | 'investigate-advisory'
-  | 'automate-github-bugs'
-  | 'automate-security-advisories'
   | 'merge-pr'
   | 'review-comments'
   | 'revert-last-commit'
@@ -174,8 +170,6 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge-pr',
   'resolve-conflicts',
   'linked-projects',
-  'automate-github-bugs',
-  'automate-security-advisories',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
@@ -257,6 +251,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           key: 'L',
         },
         {
+          id: 'inject-session',
+          label: 'Inject Session',
+          icon: MessageSquare,
+          key: 'J',
+        },
+        {
           id: 'linked-projects',
           label: 'Linked Projects',
           icon: Link2,
@@ -267,23 +267,6 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           label: 'Fork Session',
           icon: GitBranchPlus,
           key: 'W',
-        },
-      ],
-    },
-    {
-      header: 'Automation',
-      options: [
-        {
-          id: 'automate-github-bugs',
-          label: 'GitHub Bugs',
-          icon: Bot,
-          key: 'H',
-        },
-        {
-          id: 'automate-security-advisories',
-          label: 'Security Advisories',
-          icon: Shield,
-          key: 'X',
         },
       ],
     },
@@ -396,6 +379,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
 const KEY_TO_OPTION: Record<string, MagicOption> = {
   s: 'save-context',
   l: 'load-context',
+  j: 'inject-session',
   k: 'linked-projects',
   w: 'fork-session',
   c: 'commit',
@@ -413,8 +397,6 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   i: 'investigate-issue',
   a: 'investigate-pr',
   y: 'investigate-advisory',
-  h: 'automate-github-bugs',
-  x: 'automate-security-advisories',
   n: 'merge-pr',
   z: 'revert-last-commit',
 }
@@ -464,7 +446,8 @@ export function MagicModal() {
   const [customResolveModel, setCustomResolveModel] = useState<string>('sonnet')
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false)
 
-  const hasOpenPr = Boolean(worktree?.pr_url)
+  // PR checkouts may have pr_number before pr_url is filled; treat either as open.
+  const hasOpenPr = Boolean(worktree?.pr_number || worktree?.pr_url)
 
   // Check if worktree has loaded issue/PR contexts (for enabling investigate options)
   // Contexts may be registered under session ID (Load Context) or worktree ID (create_worktree)
@@ -699,8 +682,8 @@ export function MagicModal() {
       : null
 
   /**
-   * Resolve the worktree to run a new prompt-session in.
-   * Prefer store snapshots over React Query so automation still works when
+   * Resolve the worktree to run a new prompt session in.
+   * Prefer store snapshots over React Query so prompt sessions still work when
    * useWorktree() has not loaded yet (common right after opening Magic).
    */
   const resolvePromptSessionWorktree = useCallback(async (): Promise<{
@@ -767,26 +750,11 @@ export function MagicModal() {
       errorLabel,
     }: {
       sessionName: string
-      backendKey:
-        | 'final_review_backend'
-        | 'automate_github_bugs_backend'
-        | 'automate_security_advisories_backend'
-      modelKey:
-        | 'final_review_model'
-        | 'automate_github_bugs_model'
-        | 'automate_security_advisories_model'
-      providerKey:
-        | 'final_review_provider'
-        | 'automate_github_bugs_provider'
-        | 'automate_security_advisories_provider'
-      modeKey:
-        | 'final_review_mode'
-        | 'automate_github_bugs_mode'
-        | 'automate_security_advisories_mode'
-      effortKey:
-        | 'final_review_effort'
-        | 'automate_github_bugs_effort'
-        | 'automate_security_advisories_effort'
+      backendKey: 'final_review_backend'
+      modelKey: 'final_review_model'
+      providerKey: 'final_review_provider'
+      modeKey: 'final_review_mode'
+      effortKey: 'final_review_effort'
       prompt: string
       errorLabel: string
     }) => {
@@ -852,6 +820,17 @@ export function MagicModal() {
       const loadingToastId = toast.loading(`Starting ${errorLabel}...`)
 
       try {
+        // Resolve MCP the same way ChatWindow does so Jean MCP and other
+        // enabled servers are available on the first prompt-session turn.
+        const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
+          worktreePath,
+          backend,
+          projectEnabled: project?.enabled_mcp_servers,
+          globalEnabled: preferences?.default_enabled_mcp_servers,
+          knownServers:
+            project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+        })
+
         const session = await invoke<Session>('create_session', {
           worktreeId,
           worktreePath,
@@ -870,6 +849,7 @@ export function MagicModal() {
         store.setLastSentMessage(session.id, prompt)
         store.setError(session.id, null)
         store.clearInputDraft(session.id)
+        store.setEnabledMcpServers(session.id, enabledServers)
 
         // Prefer open-session-modal so the new session tab is selected even
         // when a worktree chat modal is already open.
@@ -915,6 +895,7 @@ export function MagicModal() {
             worktreePath,
             sessionId: session.id,
             selectedExecutionMode: executionMode,
+            enabledMcpServers: enabledServers,
           }),
         ])
 
@@ -937,6 +918,7 @@ export function MagicModal() {
             provider && provider !== '__anthropic__' ? provider : undefined,
           chromeEnabled: preferences?.chrome_enabled ?? false,
           aiLanguage: preferences?.ai_language,
+          mcpConfig,
         })
 
         queryClient.invalidateQueries({
@@ -952,6 +934,8 @@ export function MagicModal() {
     [
       preferences,
       project?.default_backend,
+      project?.enabled_mcp_servers,
+      project?.known_mcp_servers,
       queryClient,
       resolvePromptSessionWorktree,
     ]
@@ -971,84 +955,6 @@ export function MagicModal() {
       errorLabel: 'final review',
     })
   }, [preferences?.magic_prompts?.final_review, startPromptSession])
-
-  const startAutomation = useCallback(
-    async (kind: 'github-bugs' | 'security-advisories') => {
-      const resolved = await resolvePromptSessionWorktree()
-      if (!resolved) {
-        toast.error('No worktree selected')
-        notify('No worktree selected', undefined, { type: 'error' })
-        return
-      }
-
-      const projectId =
-        resolved.projectId ??
-        worktree?.project_id ??
-        selectedProjectId ??
-        '{projectId}'
-      const isBugs = kind === 'github-bugs'
-      const promptTemplate = isBugs
-        ? (preferences?.magic_prompts?.automate_github_bugs ??
-          DEFAULT_AUTOMATE_GITHUB_BUGS_PROMPT)
-        : (preferences?.magic_prompts?.automate_security_advisories ??
-          DEFAULT_AUTOMATE_SECURITY_ADVISORIES_PROMPT)
-      const prompt = promptTemplate.replaceAll('{projectId}', projectId)
-
-      await startPromptSession({
-        sessionName: isBugs
-          ? 'Automate GitHub bugs'
-          : 'Automate security advisories',
-        backendKey: isBugs
-          ? 'automate_github_bugs_backend'
-          : 'automate_security_advisories_backend',
-        modelKey: isBugs
-          ? 'automate_github_bugs_model'
-          : 'automate_security_advisories_model',
-        providerKey: isBugs
-          ? 'automate_github_bugs_provider'
-          : 'automate_security_advisories_provider',
-        modeKey: isBugs
-          ? 'automate_github_bugs_mode'
-          : 'automate_security_advisories_mode',
-        effortKey: isBugs
-          ? 'automate_github_bugs_effort'
-          : 'automate_security_advisories_effort',
-        prompt,
-        errorLabel: isBugs
-          ? 'GitHub bugs automation'
-          : 'security advisories automation',
-      })
-    },
-    [
-      preferences?.magic_prompts?.automate_github_bugs,
-      preferences?.magic_prompts?.automate_security_advisories,
-      resolvePromptSessionWorktree,
-      selectedProjectId,
-      startPromptSession,
-      worktree?.project_id,
-    ]
-  )
-
-  // Mobile toolbar (and other surfaces) dispatch automation via magic-command
-  // while MagicModal stays closed — still handle them from the always-mounted modal.
-  useEffect(() => {
-    const handleAutomationCommand = (
-      e: Event
-    ) => {
-      const detail = (e as CustomEvent<{ command?: string }>).detail
-      const command = detail?.command
-      if (command === 'automate-github-bugs') {
-        void startAutomation('github-bugs')
-      } else if (command === 'automate-security-advisories') {
-        void startAutomation('security-advisories')
-      }
-    }
-
-    window.addEventListener('magic-command', handleAutomationCommand)
-    return () => {
-      window.removeEventListener('magic-command', handleAutomationCommand)
-    }
-  }, [startAutomation])
 
   const investigateClaudeModelOptions = useMemo(
     () => getClaudeModelOptionsForProvider(investigateClaudeProvider),
@@ -1256,19 +1162,7 @@ export function MagicModal() {
     setCustomInvestigateModel(nextModel)
   }, [getInvestigateModelOptions, installedBackends, investigateDefaults])
 
-  useEffect(() => {
-    if (!customInvestigateModelOptions.length) return
-    if (
-      !customInvestigateModelOptions.some(
-        option => option.value === customInvestigateModel
-      )
-    ) {
-      const firstOption = customInvestigateModelOptions[0]
-      if (firstOption) {
-        setCustomInvestigateModel(firstOption.value)
-      }
-    }
-  }, [customInvestigateModel, customInvestigateModelOptions])
+  // Invalid customInvestigateModel is handled by effectiveCustomInvestigateModel
 
   useEffect(() => {
     if (!resolveDialogOpen) {
@@ -1290,19 +1184,7 @@ export function MagicModal() {
     setCustomResolveModel(nextModel)
   }, [getResolveModelOptions, installedBackends, resolveDefaults])
 
-  useEffect(() => {
-    if (!customResolveModelOptions.length) return
-    if (
-      !customResolveModelOptions.some(
-        option => option.value === customResolveModel
-      )
-    ) {
-      const firstOption = customResolveModelOptions[0]
-      if (firstOption) {
-        setCustomResolveModel(firstOption.value)
-      }
-    }
-  }, [customResolveModel, customResolveModelOptions])
+  // Invalid customResolveModel is handled by effectiveCustomResolveModel
 
   // Direct git execution for when ChatWindow isn't rendered (project canvas)
   const executeGitDirectly = useCallback(
@@ -1480,6 +1362,30 @@ export function MagicModal() {
         case 'open-pr': {
           if (worktree.pr_url) {
             await openExternal(worktree.pr_url)
+            return
+          }
+          // Number without URL (e.g. older checkout_pr): resolve then open
+          if (worktree.pr_number) {
+            try {
+              const linked = await linkWorktreePr(
+                selectedWorktreeId,
+                worktree.path,
+                worktree.pr_number
+              )
+              queryClient.invalidateQueries({
+                queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+              })
+              queryClient.invalidateQueries({
+                queryKey: [
+                  ...projectsQueryKeys.all,
+                  'worktree',
+                  selectedWorktreeId,
+                ],
+              })
+              await openExternal(linked.pr_url)
+            } catch (error) {
+              toast.error(`Failed to open PR #${worktree.pr_number}: ${error}`)
+            }
             return
           }
           setWorktreeLoading(selectedWorktreeId, 'pr')
@@ -1735,11 +1641,28 @@ ${resolveInstructions}`
               setExecutionMode(newSession.id, 'yolo')
               setExecutingMode(newSession.id, 'yolo')
               clearInputDraft(newSession.id)
+
+              const {
+                mcpConfig: prConflictMcpConfig,
+                enabledServers: prConflictEnabledMcp,
+              } = await resolveMcpConfigForSend({
+                worktreePath: worktree.path,
+                backend: resolvedBackend as CliBackend,
+                projectEnabled: project?.enabled_mcp_servers,
+                globalEnabled: preferences?.default_enabled_mcp_servers,
+                knownServers:
+                  project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+              })
+              useChatStore
+                .getState()
+                .setEnabledMcpServers(newSession.id, prConflictEnabledMcp)
+
               invoke('update_session_state', {
                 worktreeId: selectedWorktreeId,
                 worktreePath: worktree.path,
                 sessionId: newSession.id,
                 selectedExecutionMode: 'yolo',
+                enabledMcpServers: prConflictEnabledMcp,
               }).catch(() => undefined)
 
               await invoke('send_chat_message', {
@@ -1758,6 +1681,7 @@ ${resolveInstructions}`
                     : undefined,
                 chromeEnabled: preferences?.chrome_enabled ?? false,
                 aiLanguage: preferences?.ai_language,
+                mcpConfig: prConflictMcpConfig,
               })
 
               queryClient.invalidateQueries({
@@ -1917,11 +1841,28 @@ ${resolveInstructions}`
             setExecutionMode(newSession.id, 'yolo')
             setExecutingMode(newSession.id, 'yolo')
             clearInputDraft(newSession.id)
+
+            const {
+              mcpConfig: conflictMcpConfig,
+              enabledServers: conflictEnabledMcp,
+            } = await resolveMcpConfigForSend({
+              worktreePath: worktree.path,
+              backend: resolvedBackend as CliBackend,
+              projectEnabled: project?.enabled_mcp_servers,
+              globalEnabled: preferences?.default_enabled_mcp_servers,
+              knownServers:
+                project?.known_mcp_servers ?? preferences?.known_mcp_servers,
+            })
+            useChatStore
+              .getState()
+              .setEnabledMcpServers(newSession.id, conflictEnabledMcp)
+
             invoke('update_session_state', {
               worktreeId: selectedWorktreeId,
               worktreePath: worktree.path,
               sessionId: newSession.id,
               selectedExecutionMode: 'yolo',
+              enabledMcpServers: conflictEnabledMcp,
             }).catch(() => undefined)
 
             await invoke('send_chat_message', {
@@ -1940,6 +1881,7 @@ ${resolveInstructions}`
                   : undefined,
               chromeEnabled: preferences?.chrome_enabled ?? false,
               aiLanguage: preferences?.ai_language,
+              mcpConfig: conflictMcpConfig,
             })
 
             queryClient.invalidateQueries({
@@ -2459,22 +2401,6 @@ ${resolveInstructions}`
         return
       }
 
-      // Automation: create a new session in the current worktree and run the orchestration prompt
-      if (
-        option === 'automate-github-bugs' ||
-        option === 'automate-security-advisories'
-      ) {
-        setMagicModalOpen(false)
-        // Resolve worktree inside startAutomation (store path / get_worktree fallback)
-        // so a slow useWorktree() query does not block the click.
-        void startAutomation(
-          option === 'automate-github-bugs'
-            ? 'github-bugs'
-            : 'security-advisories'
-        )
-        return
-      }
-
       // Investigate options: guard against missing contexts
       if (
         option === 'investigate-issue' ||
@@ -2546,9 +2472,9 @@ ${resolveInstructions}`
       }
 
       // If PR already exists, open it in the browser instead of creating a new one
-      if (option === 'open-pr' && worktree?.pr_url) {
-        await openExternal(worktree.pr_url)
+      if (option === 'open-pr' && (worktree?.pr_url || worktree?.pr_number)) {
         setMagicModalOpen(false)
+        void executeGitDirectly('open-pr')
         return
       }
 
@@ -2608,7 +2534,6 @@ ${resolveInstructions}`
       worktree?.path,
       worktree?.pr_number,
       detectLinkPrForCurrentBranch,
-      startAutomation,
     ]
   )
 
@@ -2750,6 +2675,7 @@ ${resolveInstructions}`
 
                         return (
                           <button
+                            type="button"
                             key={option.id}
                             onClick={() =>
                               !isDisabled && executeAction(option.id)

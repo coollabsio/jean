@@ -7,12 +7,15 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { LinearIssue } from '@/types/linear'
+import { ItemSelectCheckbox } from './ItemSelectCheckbox'
 
 export interface LinearIssueItemProps {
   issue: LinearIssue
   index: number
   isSelected: boolean
   isCreating: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
@@ -32,6 +35,8 @@ export function LinearIssueItem({
   index,
   isSelected,
   isCreating,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -45,9 +50,18 @@ export function LinearIssueItem({
         'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
         'hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         isCreating && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={isCreating}
+          ariaLabel={`Select Linear issue ${issue.identifier}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
       ) : (
@@ -58,6 +72,7 @@ export function LinearIssueItem({
         />
       )}
       <button
+        type="button"
         onClick={e => onClick(e.metaKey)}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
@@ -108,11 +123,13 @@ export function LinearIssueItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
               onClick={e => {
                 e.stopPropagation()
                 onInvestigate(e.metaKey)
               }}
               disabled={isCreating}
+              aria-label="Investigate"
               className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {isCreating ? (
@@ -129,10 +146,12 @@ export function LinearIssueItem({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  type="button"
                   onClick={e => {
                     e.stopPropagation()
                     onPreview()
                   }}
+                  aria-label="Preview"
                   className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <Eye className="h-3 w-3" />

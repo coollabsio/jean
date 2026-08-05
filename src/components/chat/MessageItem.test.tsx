@@ -487,6 +487,42 @@ describe('MessageItem', () => {
     )
   })
 
+  it('constrains long user prompts so mobile viewports do not clip the left edge', () => {
+    const longUrl =
+      'https://github.com/coollabsio/jean/actions/runs/30667035760'
+    const content = [
+      'Investigate the failed GitHub Actions workflow run for "CI Build"',
+      `- Run URL: ${longUrl}`,
+      '1. Use the GitHub CLI to fetch the workflow run logs',
+    ].join('\n')
+
+    const { container } = render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          id: 'user-1',
+          role: 'user',
+          content,
+          tool_calls: [],
+          content_blocks: [],
+        }}
+      />
+    )
+
+    const bubble = container.querySelector(
+      '.max-w-\\[85\\%\\].min-w-0'
+    ) as HTMLElement | null
+    expect(bubble).toBeTruthy()
+    expect(bubble?.className).toContain('min-w-0')
+
+    const text = screen.getByText(/Investigate the failed GitHub Actions/)
+    expect(text.className).toContain('overflow-wrap:anywhere')
+    expect(text.className).toContain('break-words')
+    expect(text.className).toContain('min-w-0')
+    expect(screen.getByText(new RegExp(longUrl))).toBeInTheDocument()
+  })
+
   it('shows a custom context menu on right-click instead of browser defaults', async () => {
     const user = userEvent.setup()
     const original = window.getSelection

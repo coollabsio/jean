@@ -156,10 +156,11 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
 
   const selectedCodexPatch = useMemo(() => {
     if (!selectedFilePath) return null
-    const patches = codexChanges
-      .filter(change => change.path === selectedFilePath)
-      .map(change => codexDiffToPatch(change.path, change.diff))
-      .filter((patch): patch is string => Boolean(patch))
+    const patches = codexChanges.flatMap(change => {
+      if (change.path !== selectedFilePath) return []
+      const patch = codexDiffToPatch(change.path, change.diff)
+      return patch ? [patch] : []
+    })
     return patches.length > 0 ? patches.join('\n') : null
   }, [codexChanges, selectedFilePath])
 
@@ -170,49 +171,58 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
     if (!selectedFilePath || !getMessages || messageIndex == null) return []
     return getMessages()
       .slice(messageIndex + 1)
-      .flatMap(msg => (msg.tool_calls ?? []).filter(isEditTool))
-      .filter(t => t.input.file_path === selectedFilePath)
+      .flatMap(msg =>
+        (msg.tool_calls ?? []).flatMap(tc =>
+          isEditTool(tc) && tc.input.file_path === selectedFilePath ? [tc] : []
+        )
+      )
   }, [selectedFilePath, getMessages, messageIndex])
 
   if (uniqueFilePaths.length === 0) return null
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground/70">
-      <span>
-        Edited {uniqueFilePaths.length} file
-        {uniqueFilePaths.length === 1 ? '' : 's'}:
-      </span>
+    <div className="mt-2 space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground/70">
+        <span>
+          Edited {uniqueFilePaths.length} file
+          {uniqueFilePaths.length === 1 ? '' : 's'}:
+        </span>
 
-      {uniqueFilePaths.map(filePath => {
-        const stats = fileStats.get(filePath)
-        return (
-          <Tooltip key={filePath}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setSelectedFilePath(filePath)}
-                aria-label={`View changes to ${getFilename(filePath)}`}
-                className="inline-flex min-w-0 max-w-full rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Badge
-                  variant="outline"
-                  className="max-w-[calc(100vw-4rem)] cursor-pointer gap-1.5 sm:max-w-none"
+        {uniqueFilePaths.map(filePath => {
+          const stats = fileStats.get(filePath)
+          return (
+            <Tooltip key={filePath}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFilePath(filePath)}
+                  aria-label={`View changes to ${getFilename(filePath)}`}
+                  className="inline-flex min-w-0 max-w-full rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="min-w-0 truncate">{getFilename(filePath)}</span>
-                  {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                    <span className="flex shrink-0 items-center font-mono text-xs opacity-80">
-                      <span className="text-green-500">+{stats.additions}</span>
-                      <span className="text-muted-foreground mx-0.5">/</span>
-                      <span className="text-red-500">-{stats.deletions}</span>
+                  <Badge
+                    variant="outline"
+                    className="max-w-[calc(100vw-4rem)] cursor-pointer gap-1.5 sm:max-w-none"
+                  >
+                    <span className="min-w-0 truncate">
+                      {getFilename(filePath)}
                     </span>
-                  )}
-                </Badge>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{filePath}</TooltipContent>
-          </Tooltip>
-        )
-      })}
+                    {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                      <span className="flex shrink-0 items-center font-mono text-xs opacity-80">
+                        <span className="text-green-500">
+                          +{stats.additions}
+                        </span>
+                        <span className="text-muted-foreground mx-0.5">/</span>
+                        <span className="text-red-500">-{stats.deletions}</span>
+                      </span>
+                    )}
+                  </Badge>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{filePath}</TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
 
       {selectedFilePath && (
         <MessageDiffModal

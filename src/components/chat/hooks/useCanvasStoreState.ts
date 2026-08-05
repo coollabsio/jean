@@ -32,8 +32,29 @@ export function useCanvasStoreState(): ChatStoreState {
     state => state.waitingForInputSessionIds
   )
   const reviewingSessions = useChatStore(state => state.reviewingSessions)
+  const sessionStatusOverrides = useChatStore(
+    state => state.sessionStatusOverrides
+  )
   const pendingPermissionDenials = useChatStore(
     state => state.pendingPermissionDenials
+  )
+  const pendingCodexPermissionRequests = useChatStore(
+    state => state.pendingCodexPermissionRequests
+  )
+  const pendingOpencodePermissionRequests = useChatStore(
+    state => state.pendingOpencodePermissionRequests
+  )
+  const pendingCodexCommandApprovalRequests = useChatStore(
+    state => state.pendingCodexCommandApprovalRequests
+  )
+  const pendingCodexUserInputRequests = useChatStore(
+    state => state.pendingCodexUserInputRequests
+  )
+  const pendingCodexMcpElicitationRequests = useChatStore(
+    state => state.pendingCodexMcpElicitationRequests
+  )
+  const pendingCodexDynamicToolCallRequests = useChatStore(
+    state => state.pendingCodexDynamicToolCallRequests
   )
   const sessionLabels = useChatStore(state => state.sessionLabels)
 
@@ -47,7 +68,14 @@ export function useCanvasStoreState(): ChatStoreState {
       answeredQuestions,
       waitingForInputSessionIds,
       reviewingSessions,
+      sessionStatusOverrides,
       pendingPermissionDenials,
+      pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
+      pendingCodexCommandApprovalRequests,
+      pendingCodexUserInputRequests,
+      pendingCodexMcpElicitationRequests,
+      pendingCodexDynamicToolCallRequests,
       sessionLabels,
     }),
     [
@@ -58,7 +86,14 @@ export function useCanvasStoreState(): ChatStoreState {
       answeredQuestions,
       waitingForInputSessionIds,
       reviewingSessions,
+      sessionStatusOverrides,
       pendingPermissionDenials,
+      pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
+      pendingCodexCommandApprovalRequests,
+      pendingCodexUserInputRequests,
+      pendingCodexMcpElicitationRequests,
+      pendingCodexDynamicToolCallRequests,
       sessionLabels,
     ]
   )

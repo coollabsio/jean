@@ -13,6 +13,7 @@ import { useCommandContext } from '@/lib/commands'
 import {
   ArrowUpCircle,
   Download,
+  FolderTree,
   Github,
   Heart,
   PanelLeft,
@@ -49,7 +50,10 @@ export function TitleBar({
   title = 'Jean',
   hideTitle = false,
 }: TitleBarProps) {
-  const { leftSidebarVisible, toggleLeftSidebar } = useUIStore()
+  const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
+  const toggleLeftSidebar = useUIStore(state => state.toggleLeftSidebar)
+  const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
+  const toggleFileBrowser = useUIStore(state => state.toggleFileBrowser)
   const commandContext = useCommandContext()
   const { data: preferences } = usePreferences()
   const isMobile = useIsMobile()
@@ -57,6 +61,10 @@ export function TitleBar({
   const sidebarShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.toggle_left_sidebar ||
       DEFAULT_KEYBINDINGS.toggle_left_sidebar) as string
+  )
+  const fileBrowserShortcut = formatShortcutDisplay(
+    (preferences?.keybindings?.toggle_file_browser ||
+      DEFAULT_KEYBINDINGS.toggle_file_browser) as string
   )
   const native = isNativeApp()
 
@@ -111,6 +119,32 @@ export function TitleBar({
               {leftSidebarVisible ? 'Hide' : 'Show'} Left Sidebar{' '}
               <kbd className="ml-1 text-[0.625rem] opacity-60">
                 {sidebarShortcut}
+              </kbd>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={toggleFileBrowser}
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
+                  fileBrowserVisible && 'text-foreground bg-muted/50'
+                )}
+                aria-pressed={fileBrowserVisible}
+                aria-label={
+                  fileBrowserVisible ? 'Hide file browser' : 'Show file browser'
+                }
+                data-testid="toggle-file-browser"
+              >
+                <FolderTree className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+              <kbd className="ml-1 text-[0.625rem] opacity-60">
+                {fileBrowserShortcut}
               </kbd>
             </TooltipContent>
           </Tooltip>
@@ -204,6 +238,7 @@ export function TitleBar({
         {appVersion && <UpdateIndicator />}
         {appVersion && (
           <button
+            type="button"
             onClick={() =>
               openExternal(
                 `https://github.com/coollabsio/jean/releases/tag/v${appVersion}`
@@ -266,7 +301,7 @@ function CliUpdatesIndicator() {
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <button className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer">
+            <button type="button" className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer">
               <Download className="size-3" />
               <span>{updates.length}</span>
             </button>
@@ -293,13 +328,16 @@ function CliUpdatesIndicator() {
               </div>
               <div className="flex items-center gap-1 ml-2 shrink-0">
                 <button
+                  type="button"
                   onClick={() => triggerUpdate(update)}
                   className="rounded px-2 py-0.5 text-[0.625rem] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
                 >
                   Update
                 </button>
                 <button
+                  type="button"
                   onClick={() => dismissCliUpdateNotice(update.type)}
+                  aria-label="Dismiss update notice"
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                 >
                   <X className="size-3" />
@@ -335,6 +373,7 @@ function ServerUpdateIndicator() {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={handleClick}
           className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
         >
@@ -378,6 +417,7 @@ function UpdateIndicator() {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          type="button"
           onClick={() => {
             if (isInstalling && !readyVersion) return
             window.dispatchEvent(new Event('install-pending-update'))

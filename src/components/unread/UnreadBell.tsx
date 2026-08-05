@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAllSessions } from '@/services/chat'
+import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
@@ -51,12 +52,68 @@ interface UnreadItem {
 }
 
 function getSessionStatus(session: Session) {
-  if (session.waiting_for_input) {
-    const isplan = session.waiting_for_input_type === 'plan'
+  // Prefer specific actionable reasons over generic waiting (matches canvas)
+  const hasCodexPermission =
+    (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
+    (session.pending_opencode_permission_requests?.length ?? 0) > 0 ||
+    (session.pending_permission_denials?.length ?? 0) > 0
+  const hasCodexCommand =
+    (session.pending_codex_command_approval_requests?.length ?? 0) > 0
+  const hasCodexUserInput =
+    (session.pending_codex_user_input_requests?.length ?? 0) > 0
+  const hasCodexMcp =
+    (session.pending_codex_mcp_elicitation_requests?.length ?? 0) > 0
+  const hasCodexTool =
+    (session.pending_codex_dynamic_tool_call_requests?.length ?? 0) > 0
+
+  if (hasCodexPermission) {
     return {
-      icon: isplan ? FileText : HelpCircle,
-      label: isplan ? 'Needs approval' : 'Needs input',
+      icon: AlertTriangle,
+      label: 'Permission required',
       className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexCommand) {
+    return {
+      icon: AlertTriangle,
+      label: 'Command approval required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexTool) {
+    return {
+      icon: AlertTriangle,
+      label: 'Tool approval required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexMcp) {
+    return {
+      icon: HelpCircle,
+      label: 'MCP input required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (hasCodexUserInput) {
+    return {
+      icon: HelpCircle,
+      label: 'Input required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (session.waiting_for_input) {
+    const isPlan = session.waiting_for_input_type === 'plan'
+    return {
+      icon: isPlan ? FileText : HelpCircle,
+      label: isPlan ? 'Plan approval required' : 'Input required',
+      className: 'text-yellow-500',
+    }
+  }
+  if (session.scheduled_wakeup) {
+    return {
+      icon: CirclePause,
+      label: 'Scheduled',
+      className: 'text-cyan-500',
     }
   }
   const config: Record<
@@ -99,6 +156,9 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const showDesktopKeyboardAffordances = isNativeApp() && !isMobile
   const queryClient = useQueryClient()
   const unreadCount = useUnreadCount()
+  const { data: preferences } = usePreferences()
+  const animationEnabled =
+    preferences?.finished_session_animation_enabled ?? true
   const { data: allSessions, isLoading } = useAllSessions(open)
   // Listen for command palette event to open the popover
   useEffect(() => {
@@ -179,6 +239,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const markSessionsReadOptimistically = useCallback(
     (sessionIds: string[]) => {
       const now = Math.floor(Date.now() / 1000)
+      const sessionIdSet = new Set(sessionIds)
       queryClient.setQueryData(['all-sessions'], old => {
         if (!old) return old
         const data = old as { entries?: { sessions?: Session[] }[] }
@@ -188,7 +249,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           entries: data.entries.map(entry => ({
             ...entry,
             sessions: (entry.sessions ?? []).map(session =>
-              sessionIds.includes(session.id)
+              sessionIdSet.has(session.id)
                 ? { ...session, last_opened_at: now }
                 : session
             ),
@@ -372,13 +433,19 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <div className="card-border-spin">
+        <div>
           <button
             type="button"
             onClick={handleTriggerClick}
             className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-yellow-400 cursor-pointer"
           >
-            <BellDot className="h-3.5 w-3.5 shrink-0 animate-[bell-ring_2s_ease-in-out_infinite]" />
+            <BellDot
+              className={cn(
+                'h-3.5 w-3.5 shrink-0',
+                animationEnabled &&
+                  'animate-[bell-ring_2s_ease-in-out_infinite]'
+              )}
+            />
             {displayCount} finished{' '}
             {displayCount === 1 ? 'session' : 'sessions'}
             {showDesktopKeyboardAffordances && (

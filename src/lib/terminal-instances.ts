@@ -29,6 +29,7 @@ import { listen } from '@/lib/transport'
 import { queryClient } from '@/lib/query-client'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
+import { isModKeyEvent } from '@/types/keybindings'
 import {
   defaultPreferences,
   type AppPreferences,
@@ -43,6 +44,8 @@ import {
   resolveTerminalTheme,
   type ResolvedTerminalTheme,
 } from '@/lib/terminal-theme'
+import { isArrowGestureActive } from '@/lib/terminal-arrow-gesture'
+import { resolveSafeTerminalDimensions } from '@/lib/terminal-dimensions'
 
 type TerminalRenderer = 'xterm' | 'ghostty-web'
 type EmbeddedTerminal = XtermTerminal | GhosttyWebTerminal
@@ -64,6 +67,7 @@ interface PersistentTerminal {
   worktreePath: string
   command: string | null
   commandArgs: string[] | null
+  sessionId: string | null
   initialized: boolean // PTY has been started
   replayRequested: boolean // Buffered web replay has been requested for an existing PTY
   opened: boolean // Terminal UI has been opened into hostElement
@@ -196,7 +200,10 @@ function scheduleAppearanceResize(instance: PersistentTerminal): void {
     instance.appearanceResizeTimer = null
     if (!instance.terminal || !instance.fitAddon) return
     instance.fitAddon.fit()
-    const { cols, rows } = getSafeTerminalDimensions(instance.terminal)
+    const forCommand = instance.command != null && instance.command.length > 0
+    const { cols, rows } = getSafeTerminalDimensions(instance.terminal, {
+      forCommand,
+    })
     if (!instance.initialized) return
     invoke('terminal_resize', {
       terminalId: instance.terminalId,
@@ -206,15 +213,14 @@ function scheduleAppearanceResize(instance: PersistentTerminal): void {
   }, 120)
 }
 
-function getSafeTerminalDimensions(terminal: EmbeddedTerminal): {
+function getSafeTerminalDimensions(
+  terminal: EmbeddedTerminal,
+  options?: { forCommand?: boolean }
+): {
   cols: number
   rows: number
 } {
-  const rawCols = terminal.cols
-  const rawRows = terminal.rows
-  const rows = rawRows < 2 ? 24 : rawRows
-  const cols = rawCols < 2 ? 80 : rawCols
-  return { cols, rows }
+  return resolveSafeTerminalDimensions(terminal.cols, terminal.rows, options)
 }
 
 function disableGhosttyScrollbar(instance: PersistentTerminal): void {
@@ -265,6 +271,12 @@ function attachTouchScroll(instance: PersistentTerminal): (() => void) | null {
   }
 
   const onTouchMove = (event: TouchEvent): void => {
+    // Yield to the Termius-style long-press arrow gesture when active.
+    if (isArrowGestureActive(instance.terminalId)) {
+      lastY = null
+      remainder = 0
+      return
+    }
     if (lastY === null || event.touches.length !== 1) return
     const y = event.touches[0]?.clientY
     if (y === undefined) return
@@ -455,6 +467,8 @@ function ensureWakeHandler(): void {
     for (const terminalId of [...inputBuffers.keys()]) {
       flushTerminalInput(terminalId)
     }
+    // Also deliver sticky Ctrl-C/D/Z held across a remote WS blip (issue #635).
+    flushPendingCriticalInput()
 
     for (const inst of instances.values()) {
       if (!inst.terminal || inst.renderer !== 'xterm') continue
@@ -526,6 +540,7 @@ function getThemeFromCss(): ResolvedTerminalTheme {
 }
 
 function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
+  // Mod+Shift+Escape: unfocus terminal (platform mod, or either key as escape hatch)
   if (
     (event.metaKey || event.ctrlKey) &&
     event.shiftKey &&
@@ -543,23 +558,43 @@ function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
     return false
   }
 
-  if (!event.metaKey) return false
+  // Only the platform primary mod (Cmd on macOS native, Ctrl elsewhere) is
+  // reserved for app shortcuts. Control on macOS native must reach the PTY
+  // (issue #615: Ctrl+T must not open a new terminal tab).
+  if (!isModKeyEvent(event)) return false
   const code = event.code
-  // CMD+` → toggle terminal panel
+  // Mod+` → toggle terminal panel
   if (code === 'Backquote') return true
-  // CMD+T → new terminal tab
+  // Mod+T → new terminal tab
   if (!event.shiftKey && !event.altKey && code === 'KeyT') return true
-  // CMD+W → close terminal tab
+  // Mod+W → close terminal tab
   if (!event.shiftKey && !event.altKey && code === 'KeyW') return true
-  // CMD+1..9 → switch terminal tab
+  // Mod+1..9 → switch terminal tab
   if (!event.shiftKey && !event.altKey && /^Digit[1-9]$/.test(code)) {
     return true
   }
-  // CMD+Alt+Backspace → cancel prompt
+  // Mod+Alt+Backspace → cancel prompt
   return event.altKey && (code === 'Backspace' || code === 'Delete')
 }
 
 const INPUT_FLUSH_DELAY_MS = 5
+
+/** Control chars that must never be silently dropped on a brief WS disconnect
+ *  (issue #635). Typing general keys while offline is discarded on purpose;
+ *  interrupt/EOF/suspend are sticky until the transport is back. */
+const CRITICAL_TERMINAL_CONTROL_CHARS = new Set(['\u0003', '\u0004', '\u001a'])
+
+/** Pending critical control input held while the WebSocket is down, keyed by
+ *  terminal id. Flushed on reconnect / wake. */
+const pendingCriticalInput = new Map<string, string>()
+
+function extractCriticalControlChars(data: string): string {
+  let out = ''
+  for (const ch of data) {
+    if (CRITICAL_TERMINAL_CONTROL_CHARS.has(ch)) out += ch
+  }
+  return out
+}
 
 function shouldFlushTerminalInputNow(data: string): boolean {
   return (
@@ -571,25 +606,75 @@ function shouldFlushTerminalInputNow(data: string): boolean {
   )
 }
 
+function sendTerminalWrite(terminalId: string, data: string): void {
+  if (!data) return
+  invoke('terminal_write', { terminalId, data }).catch(error => {
+    console.error('[terminal-instances] terminal_write failed:', error)
+    // Re-queue only critical control bytes so a flaky remote link cannot
+    // swallow Ctrl-C while the process keeps holding the port.
+    const critical = extractCriticalControlChars(data)
+    if (!critical) return
+    const existing = pendingCriticalInput.get(terminalId) ?? ''
+    pendingCriticalInput.set(terminalId, existing + critical)
+  })
+}
+
+function flushPendingCriticalInput(terminalId?: string): void {
+  if (!isTransportConnected()) return
+  const ids = terminalId
+    ? [terminalId]
+    : [...pendingCriticalInput.keys()]
+  for (const id of ids) {
+    const data = pendingCriticalInput.get(id)
+    if (!data) continue
+    pendingCriticalInput.delete(id)
+    sendTerminalWrite(id, data)
+  }
+}
+
 function flushTerminalInput(terminalId: string): void {
   const buffer = inputBuffers.get(terminalId)
   if (!buffer) return
   if (buffer.timer) clearTimeout(buffer.timer)
   inputBuffers.delete(terminalId)
   if (!buffer.data) return
-  invoke('terminal_write', { terminalId, data: buffer.data }).catch(
-    console.error
-  )
+
+  if (!isTransportConnected()) {
+    // Hold interrupt/EOF/suspend until reconnect; drop everything else.
+    const critical = extractCriticalControlChars(buffer.data)
+    if (critical) {
+      const existing = pendingCriticalInput.get(terminalId) ?? ''
+      pendingCriticalInput.set(terminalId, existing + critical)
+    }
+    return
+  }
+
+  sendTerminalWrite(terminalId, buffer.data)
 }
 
 function discardTerminalInput(terminalId: string): void {
   const buffer = inputBuffers.get(terminalId)
   if (buffer?.timer) clearTimeout(buffer.timer)
   inputBuffers.delete(terminalId)
+  pendingCriticalInput.delete(terminalId)
 }
 
 function queueTerminalInput(terminalId: string, data: string): void {
-  if (!isTransportConnected()) return
+  if (!isTransportConnected()) {
+    // Do not buffer normal keystrokes while offline (dump-on-reconnect is a
+    // footgun). Critical control sequences are the exception — losing Ctrl-C
+    // leaves remote processes running and injects their logs into typing.
+    const critical = extractCriticalControlChars(data)
+    if (critical) {
+      const existing = pendingCriticalInput.get(terminalId) ?? ''
+      pendingCriticalInput.set(terminalId, existing + critical)
+    }
+    return
+  }
+
+  // Deliver any sticky interrupts from a prior disconnect first so they land
+  // before newly typed characters.
+  flushPendingCriticalInput(terminalId)
 
   const buffer = inputBuffers.get(terminalId) ?? {
     data: '',
@@ -609,6 +694,15 @@ function queueTerminalInput(terminalId: string, data: string): void {
     INPUT_FLUSH_DELAY_MS
   )
   inputBuffers.set(terminalId, buffer)
+}
+
+/**
+ * Inject input into a terminal PTY (extra-keys bar, image drop, tests).
+ * Uses the same coalescing path as xterm onData.
+ */
+export function writeTerminalInput(terminalId: string, data: string): void {
+  if (!data) return
+  queueTerminalInput(terminalId, data)
 }
 
 function queueTerminalOutput(instance: PersistentTerminal, data: string): void {
@@ -898,6 +992,7 @@ export function getOrCreateTerminal(
     worktreePath: string
     command?: string | null
     commandArgs?: string[] | null
+    sessionId?: string | null
   }
 ): PersistentTerminal {
   const existing = instances.get(terminalId)
@@ -913,6 +1008,7 @@ export function getOrCreateTerminal(
     worktreePath,
     command = null,
     commandArgs = null,
+    sessionId = null,
   } = options
 
   // Ensure the visibility/focus wake handler is running.
@@ -933,6 +1029,7 @@ export function getOrCreateTerminal(
     worktreePath,
     command,
     commandArgs,
+    sessionId,
     initialized: false,
     replayRequested: false,
     opened: false,
@@ -990,7 +1087,7 @@ export async function attachToContainer(
     return
   }
 
-  const { worktreePath, command, commandArgs } = instance
+  const { worktreePath, command, commandArgs, sessionId } = instance
 
   terminal.options.theme = getTerminalTheme()
 
@@ -1046,11 +1143,15 @@ export async function attachToContainer(
     fitAddon.fit()
     // Enforce minimum dimensions — degenerate sizes (e.g. rows=0 during dialog
     // animation) cause portable_pty to crash with an internal assertion failure.
+    // Command PTYs (CLI login) also floor at 80×24 so TUI prompts like
+    // `opencode auth login` are not started mid-zoom with a handful of cols
+    // (issue #624).
+    const forCommand = command != null && command.length > 0
     const rawCols = terminal.cols
     const rawRows = terminal.rows
-    const { cols, rows } = getSafeTerminalDimensions(terminal)
+    const { cols, rows } = getSafeTerminalDimensions(terminal, { forCommand })
     console.log(
-      `[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${instance.initialized}, container=${container.clientWidth}x${container.clientHeight}`
+      `[terminal-instances] attachToContainer ${terminalId}: fit=${rawCols}x${rawRows} → used=${cols}x${rows}, initialized=${instance.initialized}, container=${container.clientWidth}x${container.clientHeight}, forCommand=${forCommand}`
     )
 
     if (!(await waitForTerminalReady(terminalId, instance))) return
@@ -1083,6 +1184,7 @@ export async function attachToContainer(
           rows,
           command,
           commandArgs,
+          sessionId,
         }).catch(error => {
           console.error('[terminal-instances] start_terminal failed:', error)
           terminal.writeln(`\x1b[31mFailed to start terminal: ${error}\x1b[0m`)
@@ -1091,6 +1193,12 @@ export async function attachToContainer(
       if (!isCurrentInstance(terminalId, instance)) return
 
       instance.initialized = true
+
+      // Dialog zoom / flex layout often settles a frame after first attach.
+      // Re-fit and SIGWINCH so interactive TUI CLIs pick up the final size.
+      if (forCommand) {
+        scheduleCommandTerminalSettleResize(terminalId, instance)
+      }
     } else {
       // Already initialized - just resize
       await invoke('terminal_resize', { terminalId, cols, rows }).catch(
@@ -1099,6 +1207,39 @@ export async function attachToContainer(
     }
 
     terminal.focus()
+  })
+}
+
+/**
+ * After a command PTY starts, re-measure once layout has settled and push a
+ * resize to the backend. Fixes OpenCode/clack prompts that read TTY size at
+ * startup when the first fit ran during dialog animation (issue #624).
+ */
+function scheduleCommandTerminalSettleResize(
+  terminalId: string,
+  instance: PersistentTerminal
+): void {
+  const run = () => {
+    if (!isCurrentInstance(terminalId, instance)) return
+    if (!instance.terminal || !instance.fitAddon) return
+    instance.fitAddon.fit()
+    const { cols, rows } = getSafeTerminalDimensions(instance.terminal, {
+      forCommand: true,
+    })
+    invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
+    try {
+      instance.terminal.focus()
+    } catch {
+      // ignore — terminal may be mid-dispose
+    }
+  }
+
+  // Two rAFs + short timeout covers dialog zoom-in and flex reflow.
+  scheduleAnimationFrame(() => {
+    scheduleAnimationFrame(() => {
+      setTimeout(run, 50)
+      setTimeout(run, 250)
+    })
   })
 }
 
@@ -1115,6 +1256,7 @@ export function startHeadless(
     worktreePath: string
     command: string
     commandArgs?: string[] | null
+    sessionId?: string | null
   }
 ): void {
   const instance = getOrCreateTerminal(terminalId, options)
@@ -1132,6 +1274,7 @@ export function startHeadless(
         rows: 24,
         command: options.command,
         commandArgs: options.commandArgs ?? null,
+        sessionId: options.sessionId ?? null,
       })
     })
     .catch(error => {
@@ -1164,7 +1307,10 @@ export function fitTerminal(terminalId: string): void {
   if (!instance || !instance.fitAddon || !instance.terminal) return
 
   instance.fitAddon.fit()
-  const { cols, rows } = getSafeTerminalDimensions(instance.terminal)
+  const forCommand = instance.command != null && instance.command.length > 0
+  const { cols, rows } = getSafeTerminalDimensions(instance.terminal, {
+    forCommand,
+  })
   invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
 }
 
@@ -1176,6 +1322,19 @@ export function focusTerminal(terminalId: string): void {
   if (!instance || !instance.terminal) return
 
   instance.terminal.focus()
+}
+
+/**
+ * Return currently selected terminal text, or empty string if none.
+ */
+export function getTerminalSelection(terminalId: string): string {
+  const instance = instances.get(terminalId)
+  if (!instance?.terminal) return ''
+  try {
+    return instance.terminal.getSelection() ?? ''
+  } catch {
+    return ''
+  }
 }
 
 /**

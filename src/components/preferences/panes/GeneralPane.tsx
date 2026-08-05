@@ -7,6 +7,7 @@ import React, {
   type FC,
 } from 'react'
 import { invoke } from '@/lib/transport'
+import { loginArgsForBackend } from '@/lib/cli-auth'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Check, ChevronsUpDown, Play } from 'lucide-react'
@@ -151,6 +152,7 @@ import {
   getCatalogModelReasoning,
   useModelCatalog,
 } from '@/services/model-catalog'
+import { withAdaptiveEffortOption } from '@/components/chat/toolbar/toolbar-options'
 import type { AppPreferences } from '@/types/preferences'
 import {
   effortLevelOptions,
@@ -167,6 +169,7 @@ import {
   notificationSoundOptions,
   type RemovalBehavior,
   type ClaudeModel,
+  getClaudeModelOptionsForProvider,
   type CodexModel,
   type CodexGoalExecutionMode,
   type CodexReasoningEffort,
@@ -293,6 +296,13 @@ const backendPaneMeta = {
   Record<PreferencesPaneScope, { description: React.ReactNode }>
 >
 
+function formatOpenCodeModelLabelForSettings(value: string) {
+  const formatted = formatOpencodeModelLabel(value)
+  return value.startsWith('opencode/')
+    ? formatted.replace(/\s+\(OpenCode\)$/, '')
+    : formatted
+}
+
 export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   scope = 'general',
 }) => {
@@ -305,24 +315,35 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     'codex',
     preferences?.selected_codex_model ?? 'gpt-5.6-sol'
   )
-  const selectedCodexReasoningOptions =
+  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+  const selectedCodexReasoningOptions = withAdaptiveEffortOption(
     codexReasoning?.type === 'effort'
       ? codexReasoning.levels
-      : codexReasoningOptions
+      : codexReasoningOptions,
+    selectedCodexModel
+  )
   const grokReasoning = getCatalogModelReasoning(
     modelCatalog,
     'grok',
     preferences?.selected_grok_model ?? 'grok/grok-4.5'
   )
-  const selectedGrokReasoningOptions =
+  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  const selectedGrokReasoningOptions = withAdaptiveEffortOption(
     grokReasoning?.type === 'effort'
       ? grokReasoning.levels
-      : grokReasoningOptions
+      : grokReasoningOptions,
+    selectedGrokModel
+  )
+  const selectedClaudeModel =
+    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
   const claudeReasoning = getCatalogModelReasoning(
     modelCatalog,
     'claude',
-    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+    selectedClaudeModel
   )
+  const selectedClaudeReasoningOptions = claudeReasoning
+    ? withAdaptiveEffortOption(claudeReasoning.levels, selectedClaudeModel)
+    : []
   const patchPreferences = usePatchPreferences()
   const isWebAccessView = !isNativeApp()
   const webAccessSoundsEnabled = preferences?.web_access_sounds_enabled ?? true
@@ -344,10 +365,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
 
-  const remoteClaudeModelOptions = useMemo(
-    () => getCatalogModelOptions(modelCatalog, 'claude'),
-    [modelCatalog]
+  const customCliProfiles = useMemo(
+    () => preferences?.custom_cli_profiles ?? [],
+    [preferences?.custom_cli_profiles]
   )
+  const defaultClaudeProvider = preferences?.default_provider ?? null
+  const remoteClaudeModelOptions = useMemo(() => {
+    // When a custom CLI provider is the global default, surface the
+    // provider-routed opus/sonnet/haiku aliases so Settings → Claude can set
+    // a matching default model (issue #418).
+    const options = defaultClaudeProvider
+      ? getClaudeModelOptionsForProvider(
+          defaultClaudeProvider,
+          customCliProfiles
+        )
+      : getCatalogModelOptions(modelCatalog, 'claude')
+    const selected = preferences?.selected_model
+    if (selected && !options.some(option => option.value === selected)) {
+      return [...options, { value: selected as ClaudeModel, label: selected }]
+    }
+    return options
+  }, [
+    modelCatalog,
+    defaultClaudeProvider,
+    customCliProfiles,
+    preferences?.selected_model,
+  ])
   const remoteCodexDefaultModelOptions = useMemo(
     () => getCatalogDefaultModelOptions(modelCatalog, 'codex'),
     [modelCatalog]
@@ -1151,12 +1194,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
   const selectedOpenCodeModel =
     preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
-  const formatOpenCodeModelLabelForSettings = (value: string) => {
-    const formatted = formatOpencodeModelLabel(value)
-    return value.startsWith('opencode/')
-      ? formatted.replace(/\s+\(OpenCode\)$/, '')
-      : formatted
-  }
   const openCodeModelOptions = (
     availableOpencodeModels?.length
       ? availableOpencodeModels
@@ -1184,7 +1221,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedCursorModelLabel =
     cursorModelOptions.find(option => option.value === selectedCursorModel)
       ?.label ?? formatCursorModelLabel(selectedCursorModel)
-  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
   const grokModelOptions: { value: GrokModel; label: string }[] = (
     availableGrokModels?.length
       ? availableGrokModels.map(model => ({
@@ -1202,12 +1238,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedKimiModel = preferences?.selected_kimi_model ?? 'kimi/default'
   const kimiModelOptions: { value: KimiModel; label: string }[] = [
     ...(KIMI_MODEL_OPTIONS as { value: KimiModel; label: string }[]),
-    ...(availableKimiModels ?? [])
-      .filter(model => model.id !== 'default')
-      .map(model => ({
-        value: `kimi/${model.id}` as KimiModel,
-        label: model.isDefault ? `${model.label} (default)` : model.label,
-      })),
+    ...(availableKimiModels ?? []).flatMap(model =>
+      model.id === 'default'
+        ? []
+        : [
+            {
+              value: `kimi/${model.id}` as KimiModel,
+              label: model.isDefault ? `${model.label} (default)` : model.label,
+            },
+          ]
+    ),
   ]
   const selectedKimiModelLabel =
     kimiModelOptions.find(option => option.value === selectedKimiModel)
@@ -1259,7 +1299,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       preferences,
       piModelOptions
     )
-  const buildReasoning =
+  const buildReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveBuildBackend, buildModel) ??
     (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveBuildBackend)
       ? {
@@ -1273,7 +1313,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 : effortLevelOptions,
         }
       : null)
-  const yoloReasoning =
+  const buildReasoning = buildReasoningRaw
+    ? {
+        ...buildReasoningRaw,
+        levels: withAdaptiveEffortOption(buildReasoningRaw.levels, buildModel),
+      }
+    : null
+  const yoloReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveYoloBackend, yoloModel) ??
     (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveYoloBackend)
       ? {
@@ -1287,6 +1333,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 : effortLevelOptions,
         }
       : null)
+  const yoloReasoning = yoloReasoningRaw
+    ? {
+        ...yoloReasoningRaw,
+        levels: withAdaptiveEffortOption(yoloReasoningRaw.levels, yoloModel),
+      }
+    : null
   const piAuthMessage = piAuth?.error
 
   const selectedCommandCodeModel =
@@ -1567,8 +1619,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingCodexAuth(false)
     }
 
-    // Not authenticated, open login modal
-    openCliLoginModal('codex', codexStatus.path, ['login'])
+    // Not authenticated, open login modal (device-code auth for terminal/headless)
+    openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
   }, [codexStatus?.path, openCliLoginModal, queryClient])
 
   const handleCodeRabbitLogin = useCallback(async () => {
@@ -1635,7 +1687,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
   const handleCodexRelogin = useCallback(() => {
     if (!codexStatus?.path) return
-    openCliLoginModal('codex', codexStatus.path, ['login'])
+    openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
   }, [codexStatus?.path, openCliLoginModal])
 
   const handleOpenCodeRelogin = useCallback(() => {
@@ -1950,6 +2002,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.claude_cli_source === 'path'
@@ -2109,6 +2162,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.gh_cli_source === 'path'
@@ -2417,6 +2471,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.coderabbit_cli_source === 'path'
@@ -2578,6 +2633,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.codex_cli_source === 'path'
@@ -2631,6 +2687,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <p className="text-xs text-muted-foreground px-1">
                 Install with Jean, or install <code>codex</code> yourself in
                 your environment — we&apos;ll detect it on your PATH.
+              </p>
+            )}
+            {codexStatus?.installed && codexStatus.sandbox_ready === false && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 px-1">
+                {codexStatus.sandbox_message ??
+                  'Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap'}
               </p>
             )}
           </div>
@@ -2741,6 +2803,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.opencode_cli_source === 'path'
@@ -2877,6 +2940,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           cursorPathDetection?.path ?? cursorStatus?.path
@@ -2983,6 +3047,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.pi_cli_source === 'path'
@@ -3109,6 +3174,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.commandcode_cli_source === 'path'
@@ -3185,7 +3251,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <div className="space-y-4">
             <InlineField
               label="Model"
-              description="Claude model for AI assistance"
+              description={
+                defaultClaudeProvider
+                  ? `Claude model for AI assistance (routed via ${defaultClaudeProvider}). Change the default provider under Settings → Providers.`
+                  : 'Claude model for AI assistance. Custom CLI providers are configured under Settings → Providers.'
+              }
             >
               <Select
                 value={preferences?.selected_model ?? 'claude-opus-4-8[1m]'}
@@ -3219,7 +3289,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {claudeReasoning.levels.map(option => (
+                    {selectedClaudeReasoningOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -3246,7 +3316,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {claudeReasoning.levels.map(option => (
+                    {selectedClaudeReasoningOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -3750,6 +3820,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.grok_cli_source === 'path'
@@ -3941,6 +4012,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.kimi_cli_source === 'path'
@@ -4950,6 +5022,22 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     if (preferences) {
                       patchPreferences.mutate({
                         auto_pull_base_branch: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+
+              <InlineField
+                label="Combined git sync button"
+                description="Replace separate Pull and Push badges with one Sync button that does both"
+              >
+                <Switch
+                  checked={preferences?.git_sync_button ?? false}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        git_sync_button: checked,
                       })
                     }
                   }}

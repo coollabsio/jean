@@ -108,7 +108,7 @@ export const WebAccessPane: React.FC = () => {
   const [bindHostOptions, setBindHostOptions] = useState<BindHostOption[]>([])
   const [tokenVisible, setTokenVisible] = useState(false)
   const [isToggling, setIsToggling] = useState(false)
-  const [bindHostInput, setBindHostInput] = useState(
+  const [bindHostInput, setBindHostInput] = useState(() =>
     getConfiguredBindHost(preferences)
   )
 
@@ -208,13 +208,17 @@ export const WebAccessPane: React.FC = () => {
   const tokenRequired = preferences?.http_server_token_required ?? true
 
   const handleCopyUrl = useCallback(
-    (url: string) => {
+    async (url: string) => {
       const fullUrl =
         tokenRequired && serverStatus?.token
           ? `${url}?token=${serverStatus.token}`
           : url
-      copyToClipboard(fullUrl)
-      toast.success('URL copied to clipboard')
+      try {
+        await copyToClipboard(fullUrl)
+        toast.success('URL copied to clipboard')
+      } catch (error) {
+        toast.error(getErrorMessage(error))
+      }
     },
     [serverStatus?.token, tokenRequired]
   )
@@ -298,11 +302,15 @@ export const WebAccessPane: React.FC = () => {
     [applyBindHost]
   )
 
-  const handleCopyToken = useCallback(() => {
+  const handleCopyToken = useCallback(async () => {
     const token = serverStatus?.token ?? preferences?.http_server_token
     if (!token) return
-    copyToClipboard(token)
-    toast.success('Token copied to clipboard')
+    try {
+      await copyToClipboard(token)
+      toast.success('Token copied to clipboard')
+    } catch (error) {
+      toast.error(getErrorMessage(error))
+    }
   }, [serverStatus, preferences?.http_server_token])
 
   const handleTokenRequiredChange = useCallback(
@@ -512,6 +520,22 @@ export const WebAccessPane: React.FC = () => {
               description="Open in a browser to access Jean"
             >
               <div className="flex flex-col gap-2">
+                {!isLoopbackBindHost(activeBindHost) && (
+                  <div className="flex items-start gap-3 rounded-md border border-border bg-muted/40 p-3">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="text-xs text-muted-foreground">
+                      Browsers only treat{' '}
+                      <code className="text-foreground">https://</code> and{' '}
+                      <code className="text-foreground">http://localhost</code>{' '}
+                      as secure contexts. On plain HTTP over a Tailscale IP or
+                      MagicDNS name, clipboard copy and some other APIs can
+                      fail. Prefer{' '}
+                      <code className="text-foreground">tailscale serve</code>{' '}
+                      (or any reverse proxy with TLS) in front of Jean, and keep
+                      token auth enabled.
+                    </div>
+                  </div>
+                )}
                 {showLocalhostUrl && (
                   <div className="flex items-center gap-2">
                     <Input

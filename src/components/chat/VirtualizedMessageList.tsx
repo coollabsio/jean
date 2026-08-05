@@ -17,15 +17,22 @@ import type {
   ReviewFinding,
 } from '@/types/chat'
 import { MessageItem } from './MessageItem'
+import { getProviderChangeBeforeMessage } from './message-settings-labels'
+import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { getAssistantDurationMs } from './time-utils'
 import {
   capturePrependScrollAnchor,
   restorePrependScrollAnchor,
   type PrependScrollAnchor,
 } from './message-scroll-anchor'
+import {
+  getDefaultVisibleCount,
+  getSessionScrollState,
+  updateSessionScrollState,
+} from './session-scroll-state'
 
 /** Number of messages to render initially (from the end) */
-const INITIAL_VISIBLE_COUNT = 10
+const INITIAL_VISIBLE_COUNT = getDefaultVisibleCount()
 /** Number of messages to load when scrolling up */
 const LOAD_MORE_COUNT = 20
 /** Scroll threshold in pixels to trigger loading more */
@@ -56,6 +63,8 @@ interface VirtualizedMessageListProps {
   sessionId: string
   /** Worktree path for resolving file mentions */
   worktreePath: string
+  /** Worktree id for checkpoint restore */
+  worktreeId?: string | null
   /** Keyboard shortcut for approve button */
   approveShortcut: string
   /** Keyboard shortcut for approve yolo button */
@@ -142,6 +151,7 @@ export const VirtualizedMessageList = memo(
         lastPlanMessageIndex,
         sessionId,
         worktreePath,
+        worktreeId = null,
         approveShortcut,
         approveShortcutYolo,
         approveShortcutClearContext,
@@ -175,7 +185,7 @@ export const VirtualizedMessageList = memo(
       },
       ref
     ) {
-      const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+      const messageRefs = useRef(new Map<number, HTMLDivElement>())
       const isLoadingMoreRef = useRef(false)
       // Captured visible-message anchor taken just before requesting an
       // older-runs load. Used to restore scroll position after prepended
@@ -194,8 +204,15 @@ export const VirtualizedMessageList = memo(
       }, [messages])
       const getMessages = useCallback(() => messagesRef.current, [])
 
-      // Track how many messages to render (from the end)
-      const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT)
+      // Track how many messages to render (from the end). Seed from any saved
+      // per-session snapshot so returning to a session re-mounts the same
+      // history window the user had expanded (issue #594).
+      const [visibleCount, setVisibleCount] = useState(() => {
+        const saved = sessionId
+          ? getSessionScrollState(sessionId)?.visibleCount
+          : undefined
+        return saved ?? INITIAL_VISIBLE_COUNT
+      })
 
       // Calculate which messages to render
       const startIndex = Math.max(0, messages.length - visibleCount)
@@ -203,12 +220,27 @@ export const VirtualizedMessageList = memo(
       const hasMoreMessages = startIndex > 0
       const showLoadMoreButton = hasMoreMessages || hasOlderOnDisk
 
-      // Reset visible count when session changes
+      // Restore (or reset) visible count when session changes, and keep the
+      // in-memory snapshot updated as the user expands the window.
       const prevSessionRef = useRef(sessionId)
+
+      // Persist only after the current session's visibleCount has settled.
+      // This effect must run *before* the restore effect so that on a session
+      // switch, prevSessionRef still points at the outgoing session and we
+      // skip writing that session's window size under the incoming id.
+      useEffect(() => {
+        if (!sessionId) return
+        if (prevSessionRef.current !== sessionId) return
+        updateSessionScrollState(sessionId, { visibleCount })
+      }, [sessionId, visibleCount])
+
       useEffect(() => {
         if (sessionId !== prevSessionRef.current) {
+          const saved = sessionId
+            ? getSessionScrollState(sessionId)?.visibleCount
+            : undefined
           // eslint-disable-next-line react-hooks/set-state-in-effect
-          setVisibleCount(INITIAL_VISIBLE_COUNT)
+          setVisibleCount(saved ?? INITIAL_VISIBLE_COUNT)
           prevSessionRef.current = sessionId
         }
       }, [sessionId])
@@ -222,6 +254,19 @@ export const VirtualizedMessageList = memo(
           if (messages[i]?.role === 'user') {
             foundUserMessage = true
           }
+        }
+        return map
+      }, [messages])
+
+      // Pre-compute provider switches between consecutive user prompts
+      const providerChangeMap = useMemo(() => {
+        const map = new Map<
+          number,
+          ReturnType<typeof getProviderChangeBeforeMessage>
+        >()
+        for (let i = 0; i < messages.length; i++) {
+          const change = getProviderChangeBeforeMessage(messages, i)
+          if (change) map.set(i, change)
         }
         return map
       }, [messages])
@@ -407,6 +452,7 @@ export const VirtualizedMessageList = memo(
               globalIndex,
               completedDurationMs
             )
+            const providerChange = providerChangeMap.get(globalIndex) ?? null
 
             return (
               <div
@@ -420,6 +466,9 @@ export const VirtualizedMessageList = memo(
                   globalIndex === messages.length - 1 && isSending ? '' : 'pb-4'
                 }
               >
+                {providerChange && (
+                  <ProviderChangeSeparator change={providerChange} />
+                )}
                 <MessageItem
                   message={message}
                   getMessages={getMessages}
@@ -429,6 +478,7 @@ export const VirtualizedMessageList = memo(
                   hasFollowUpMessage={hasFollowUpMessage}
                   sessionId={sessionId}
                   worktreePath={worktreePath}
+                  worktreeId={worktreeId}
                   approveShortcut={approveShortcut}
                   approveShortcutYolo={approveShortcutYolo}
                   approveShortcutClearContext={approveShortcutClearContext}

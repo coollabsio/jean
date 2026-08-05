@@ -16,6 +16,23 @@ fn gh_command(gh: &Path, repo_path: &str) -> std::process::Command {
 static WORKTREE_CREATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 const WORKTREE_CREATE_ATTEMPTS: usize = 4;
 
+/// Strip Windows `\\?\` / `\\?\UNC\` verbatim prefixes from a path string.
+///
+/// `std::fs::canonicalize` on Windows returns extended-length paths. Git for
+/// Windows rejects those as `GIT_INDEX_FILE` values (lock creation fails with
+/// "Invalid argument"), so strip the prefix for any path we hand to git env vars
+/// or pass back as a string path for external tools.
+fn strip_windows_verbatim_prefix(path: std::path::PathBuf) -> std::path::PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return std::path::PathBuf::from(rest);
+    }
+    path
+}
+
 /// Resolve the git metadata directories for a working directory.
 ///
 /// Returns `(git_dir, git_common_dir)` as absolute, canonicalized paths.
@@ -49,6 +66,7 @@ pub fn resolve_git_dirs(working_dir: &Path) -> Option<(String, String)> {
         };
         std::fs::canonicalize(&abs)
             .ok()
+            .map(strip_windows_verbatim_prefix)
             .map(|p| p.to_string_lossy().into_owned())
     };
 
@@ -402,6 +420,56 @@ pub fn remove_git_remote(repo_path: &str, remote_name: &str) -> Result<(), Strin
     }
 
     Ok(())
+}
+
+/// Remotes Jean may auto-remove when a PR is cleared/deleted.
+///
+/// Never treat `origin` (or empty names) as ephemeral — those are permanent
+/// project remotes the user expects to keep.
+pub fn is_ephemeral_pr_remote(remote_name: &str) -> bool {
+    let name = remote_name.trim();
+    !name.is_empty() && name != "origin"
+}
+
+/// Best-effort remove of a Jean-managed PR/fork remote.
+///
+/// No-ops for `origin`, missing remotes, and empty names. Logs failures rather
+/// than propagating them so PR cleanup can still complete.
+pub fn try_remove_ephemeral_remote(repo_path: &str, remote_name: &str) {
+    if !is_ephemeral_pr_remote(remote_name) {
+        return;
+    }
+    if !remote_exists(repo_path, remote_name) {
+        return;
+    }
+    match remove_git_remote(repo_path, remote_name) {
+        Ok(()) => {
+            log::info!("Removed ephemeral PR remote '{remote_name}' from {repo_path}");
+        }
+        Err(e) => {
+            log::warn!("Failed to remove ephemeral PR remote '{remote_name}': {e}");
+        }
+    }
+}
+
+/// Configured remote for a local branch (`branch.<name>.remote`), if any.
+pub fn configured_branch_remote(repo_path: &str, branch: &str) -> Option<String> {
+    if branch.is_empty() {
+        return None;
+    }
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["config", "--get", &format!("branch.{branch}.remote")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let remote = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if remote.is_empty() {
+        None
+    } else {
+        Some(remote)
+    }
 }
 
 /// Get all git remotes for a repository (not filtered to GitHub)
@@ -1840,6 +1908,7 @@ pub fn commit_changes(repo_path: &str, message: &str, stage_all: bool) -> Result
 /// * `title` - Optional PR title (if None, gh will prompt or use default)
 /// * `body` - Optional PR body
 /// * `draft` - Whether to create as draft PR
+/// * `base_branch` - Optional base branch (when set, passed as `gh pr create --base`)
 ///
 /// Returns the PR URL on success
 pub fn open_pull_request(
@@ -1847,6 +1916,7 @@ pub fn open_pull_request(
     title: Option<&str>,
     body: Option<&str>,
     draft: bool,
+    base_branch: Option<&str>,
     gh_binary: &std::path::Path,
 ) -> Result<String, String> {
     log::trace!("Opening pull request from {repo_path}");
@@ -1869,6 +1939,11 @@ pub fn open_pull_request(
 
     // Build the gh pr create command
     let mut args = vec!["pr", "create", "--fill"];
+
+    if let Some(base) = base_branch.filter(|b| !b.trim().is_empty()) {
+        args.push("--base");
+        args.push(base);
+    }
 
     if let Some(t) = title {
         args.push("--title");
@@ -2761,12 +2836,14 @@ mod tests {
 
     #[test]
     fn strip_non_tty_shell_noise_removes_bash_job_control_messages() {
-        let noisy = "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
+        let noisy =
+            "bash: cannot set terminal process group (346967): Inappropriate ioctl for device\n\
                      bash: no job control in this shell\n\
                      copied .env";
         assert_eq!(strip_non_tty_shell_noise(noisy), "copied .env");
 
-        let only_noise = "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
+        let only_noise =
+            "bash: cannot set terminal process group (1): Inappropriate ioctl for device\n\
                           bash: no job control in this shell\n";
         assert_eq!(strip_non_tty_shell_noise(only_noise), "");
 
@@ -2888,6 +2965,49 @@ mod tests {
         let path = dir.path().to_str().unwrap();
         assert!(remote_exists(path, "fork"));
         assert!(!remote_exists(path, "upstream"));
+    }
+
+    #[test]
+    fn test_is_ephemeral_pr_remote_skips_origin_and_empty() {
+        assert!(!is_ephemeral_pr_remote("origin"));
+        assert!(!is_ephemeral_pr_remote(""));
+        assert!(!is_ephemeral_pr_remote("   "));
+        assert!(is_ephemeral_pr_remote("fork"));
+        assert!(is_ephemeral_pr_remote("some-contributor"));
+    }
+
+    #[test]
+    fn test_try_remove_ephemeral_remote_removes_fork_keeps_origin() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", "https://example.com/origin.git"],
+        );
+
+        try_remove_ephemeral_remote(path, "origin");
+        assert!(remote_exists(path, "origin"));
+
+        try_remove_ephemeral_remote(path, "fork");
+        assert!(!remote_exists(path, "fork"));
+        assert!(remote_exists(path, "origin"));
+
+        // Missing remotes and empty names are no-ops
+        try_remove_ephemeral_remote(path, "already-gone");
+        try_remove_ephemeral_remote(path, "");
+    }
+
+    #[test]
+    fn test_configured_branch_remote_reads_branch_config() {
+        let dir = repo_with_fork_remote();
+        let path = dir.path().to_str().unwrap();
+        run_git(dir.path(), &["config", "branch.main.remote", "fork"]);
+        assert_eq!(
+            configured_branch_remote(path, "main").as_deref(),
+            Some("fork")
+        );
+        assert_eq!(configured_branch_remote(path, "missing"), None);
+        assert_eq!(configured_branch_remote(path, ""), None);
     }
 
     #[test]

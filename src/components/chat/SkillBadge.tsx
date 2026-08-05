@@ -66,53 +66,64 @@ export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={handleOpen}
-            className={cn(
-              'flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/50 cursor-pointer hover:border-primary/50 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-              compact ? 'h-6 px-2' : 'h-7 px-2.5'
-            )}
-          >
-            <Wand2
+      <div
+        className={cn(
+          'inline-flex items-center rounded-md border border-border/50 bg-muted/50 hover:border-primary/50 transition-colors',
+          compact ? 'h-6' : 'h-7'
+        )}
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleOpen}
               className={cn(
-                'shrink-0 text-purple-500',
-                compact ? 'h-3 w-3' : 'h-3.5 w-3.5'
-              )}
-            />
-            <span
-              className={cn(
-                'font-medium truncate max-w-[120px]',
-                compact ? 'text-[10px]' : 'text-xs'
+                'flex items-center gap-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-md',
+                compact ? 'h-6 px-2' : 'h-7 px-2.5'
               )}
             >
-              /{skill.name}
-            </span>
-            {onRemove && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleRemove}
-                    className="ml-0.5 p-0.5 rounded hover:bg-accent/50 transition-colors"
-                  >
-                    <X
-                      className={cn(
-                        'text-muted-foreground',
-                        compact ? 'h-3 w-3' : 'h-3.5 w-3.5'
-                      )}
-                    />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Remove skill</TooltipContent>
-              </Tooltip>
-            )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{`Skill: ${skill.name}\n${skill.path}`}</TooltipContent>
-      </Tooltip>
+              <Wand2
+                className={cn(
+                  'shrink-0 text-purple-500',
+                  compact ? 'h-3 w-3' : 'h-3.5 w-3.5'
+                )}
+              />
+              <span
+                className={cn(
+                  'font-medium truncate max-w-[120px]',
+                  compact ? 'text-[10px]' : 'text-xs'
+                )}
+              >
+                /{skill.name}
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{`Skill: ${skill.name}\n${skill.path}`}</TooltipContent>
+        </Tooltip>
+        {onRemove && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleRemove}
+                aria-label="Remove skill"
+                className={cn(
+                  'p-0.5 rounded hover:bg-accent/50 transition-colors',
+                  compact ? 'mr-1' : 'mr-1.5'
+                )}
+              >
+                <X
+                  className={cn(
+                    'text-muted-foreground',
+                    compact ? 'h-3 w-3' : 'h-3.5 w-3.5'
+                  )}
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Remove skill</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95">

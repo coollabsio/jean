@@ -735,10 +735,7 @@ pub fn apply_codex_provider_to_config(
         provider_entry.insert("wire_api".to_string(), serde_json::json!(wire));
     }
 
-    config.insert(
-        "model_provider".to_string(),
-        serde_json::json!(provider_id),
-    );
+    config.insert("model_provider".to_string(), serde_json::json!(provider_id));
     config.insert(
         "model_providers".to_string(),
         serde_json::json!({ provider_id: provider_entry }),
@@ -1481,10 +1478,16 @@ fn persist_codex_recovered_completion_state(
         metadata.waiting_for_input = true;
         metadata.waiting_for_input_type = Some("plan".to_string());
         metadata.is_reviewing = false;
+        if metadata.status_override.as_deref() == Some("review") {
+            metadata.status_override = None;
+        }
     } else {
         metadata.waiting_for_input = false;
         metadata.waiting_for_input_type = None;
         metadata.is_reviewing = false;
+        if metadata.status_override.as_deref() == Some("review") {
+            metadata.status_override = None;
+        }
     }
 
     super::storage::save_metadata(app, &metadata)
@@ -3247,9 +3250,7 @@ fn handle_approval_request(
                     .get("permissions")
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
-                log::trace!(
-                    "Auto-granting permissions request in yolo mode (rpc_id={rpc_id})"
-                );
+                log::trace!("Auto-granting permissions request in yolo mode (rpc_id={rpc_id})");
                 if let Err(e) = super::codex_server::send_response(
                     rpc_id,
                     serde_json::json!({
@@ -3826,8 +3827,7 @@ fn process_codex_event(
                 | "entered_review_mode"
                 | "exited_review_mode" => {}
                 "plan" => {
-                    let tool_id =
-                        resolve_codex_plan_tool_id(tool_calls, None, Some(item_id));
+                    let tool_id = resolve_codex_plan_tool_id(tool_calls, None, Some(item_id));
                     let existing = tool_calls
                         .iter()
                         .find(|tc| tc.id == tool_id)
@@ -3928,8 +3928,7 @@ fn process_codex_event(
                     }
                 }
                 "plan" => {
-                    let tool_id =
-                        resolve_codex_plan_tool_id(tool_calls, None, Some(item_id));
+                    let tool_id = resolve_codex_plan_tool_id(tool_calls, None, Some(item_id));
                     let existing = tool_calls
                         .iter()
                         .find(|tc| tc.id == tool_id)
@@ -4628,8 +4627,7 @@ pub fn parse_codex_run_to_message(
                     }
                     // Informational items (web search, image tools) — history path
                     "web_search" | "image_generation" | "image_view" | "context_compaction" => {
-                        let tool_name =
-                            informational_tool_name(item_type).unwrap_or("CodexTool");
+                        let tool_name = informational_tool_name(item_type).unwrap_or("CodexTool");
                         let tool_id = if item_id.is_empty() {
                             Uuid::new_v4().to_string()
                         } else {
@@ -4861,8 +4859,7 @@ pub fn parse_codex_run_to_message(
                     "web_search" | "image_generation" | "image_view" | "context_compaction" => {
                         let input = informational_tool_input(item_type, item);
                         let output = informational_tool_output(item_type, item);
-                        let tool_name =
-                            informational_tool_name(item_type).unwrap_or("CodexTool");
+                        let tool_name = informational_tool_name(item_type).unwrap_or("CodexTool");
                         let tool_id = pending_tool_ids.remove(item_id).unwrap_or_else(|| {
                             if item_id.is_empty() {
                                 Uuid::new_v4().to_string()
@@ -5222,9 +5219,7 @@ fn build_one_shot_codex_args(
                 provider.name.trim()
             };
             args.push("-c".into());
-            args.push(
-                format!("model_providers.{provider_id}.name=\"{display_name}\"").into(),
-            );
+            args.push(format!("model_providers.{provider_id}.name=\"{display_name}\"").into());
             args.push("-c".into());
             args.push(
                 format!(
@@ -5250,9 +5245,7 @@ fn build_one_shot_codex_args(
                 .filter(|w| !w.is_empty())
             {
                 args.push("-c".into());
-                args.push(
-                    format!("model_providers.{provider_id}.wire_api=\"{wire}\"").into(),
-                );
+                args.push(format!("model_providers.{provider_id}.wire_api=\"{wire}\"").into());
             }
         }
     }
@@ -5710,7 +5703,8 @@ mod tests {
         let schema_file = std::path::Path::new("/tmp/jean-codex-schema.json");
         let working_dir = std::path::Path::new("/tmp/project");
 
-        let args = build_one_shot_codex_args("gpt-5.4", false, schema_file, Some(working_dir), None);
+        let args =
+            build_one_shot_codex_args("gpt-5.4", false, schema_file, Some(working_dir), None);
 
         assert!(args.windows(2).any(|window| {
             window
@@ -6043,9 +6037,13 @@ mod tests {
     #[test]
     fn codex_yolo_auto_approve_flag_tracks_session() {
         super::super::registry::set_codex_yolo_auto_approve("sess-328", true);
-        assert!(super::super::registry::is_codex_yolo_auto_approve("sess-328"));
+        assert!(super::super::registry::is_codex_yolo_auto_approve(
+            "sess-328"
+        ));
         super::super::registry::set_codex_yolo_auto_approve("sess-328", false);
-        assert!(!super::super::registry::is_codex_yolo_auto_approve("sess-328"));
+        assert!(!super::super::registry::is_codex_yolo_auto_approve(
+            "sess-328"
+        ));
     }
 
     #[test]
@@ -6080,6 +6078,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6137,6 +6136,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6191,6 +6191,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6250,6 +6251,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6259,7 +6261,11 @@ mod tests {
             .iter()
             .filter(|tool| tool.name == CODEX_PLAN_TOOL_NAME)
             .collect();
-        assert_eq!(plan_tools.len(), 1, "split plan tools should collapse to one");
+        assert_eq!(
+            plan_tools.len(),
+            1,
+            "split plan tools should collapse to one"
+        );
         let plan_tool = plan_tools[0];
         assert_eq!(
             plan_tool.input.get("plan").and_then(|v| v.as_str()),
@@ -6307,6 +6313,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6334,7 +6341,10 @@ mod tests {
         });
         let line = notification_to_history_line("item/completed", &params).expect("history line");
         let parsed: serde_json::Value = serde_json::from_str(&line).expect("json");
-        assert_eq!(parsed.get("turn_id").and_then(|v| v.as_str()), Some("turn-99"));
+        assert_eq!(
+            parsed.get("turn_id").and_then(|v| v.as_str()),
+            Some("turn-99")
+        );
         assert_eq!(
             parsed
                 .get("item")
@@ -6375,6 +6385,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6494,6 +6505,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6551,6 +6563,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6613,6 +6626,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6656,6 +6670,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -6813,6 +6828,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");

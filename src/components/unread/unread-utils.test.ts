@@ -40,4 +40,23 @@ describe('isUnreadSession', () => {
       )
     ).toBe(true)
   })
+
+  it('treats pending Codex command approvals as unread even without waiting_for_input (issue #626)', () => {
+    expect(
+      isUnreadSession(
+        session({
+          waiting_for_input: false,
+          pending_codex_command_approval_requests: [
+            {
+              rpc_id: 1,
+              item_id: 'item-1',
+              thread_id: 'thread-1',
+              turn_id: 'turn-1',
+              command: 'npm test',
+            },
+          ],
+        })
+      )
+    ).toBe(true)
+  })
 })

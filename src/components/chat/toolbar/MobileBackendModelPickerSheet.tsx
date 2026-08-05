@@ -22,6 +22,8 @@ interface MobileBackendModelPickerSheetProps {
   customCliProfiles: CustomCliProfile[]
   onModelChange: (model: string) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
+  /** Fired after a model is selected (picker already closed). */
+  onAfterModelSelect?: (backend: CliBackend, model: string) => void
 }
 
 export function MobileBackendModelPickerSheet({
@@ -36,6 +38,7 @@ export function MobileBackendModelPickerSheet({
   customCliProfiles,
   onModelChange,
   onBackendModelChange,
+  onAfterModelSelect,
 }: MobileBackendModelPickerSheetProps) {
   const isMobile = useIsMobile()
 
@@ -71,6 +74,7 @@ export function MobileBackendModelPickerSheet({
           onModelChange={onModelChange}
           onBackendModelChange={onBackendModelChange}
           onRequestClose={() => onOpenChange(false)}
+          onAfterSelect={onAfterModelSelect}
           className="min-h-0"
           commandListClassName="!max-h-none min-h-0 flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
         />

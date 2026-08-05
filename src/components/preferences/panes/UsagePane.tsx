@@ -164,7 +164,7 @@ function MetaLine({ items }: { items: (string | null | undefined)[] }) {
   return (
     <p className="truncate text-xs text-muted-foreground">
       {parts.map((part, i) => (
-        <React.Fragment key={`${part}-${i}`}>
+        <React.Fragment key={part}>
           {i > 0 ? (
             <span className="mx-1.5 text-border" aria-hidden>
               ·

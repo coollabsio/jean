@@ -165,6 +165,8 @@ pub enum MessageRole {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ThinkingLevel {
     Off,
+    /// Omit thinking settings so the model can choose its own depth
+    Adaptive,
     Think,
     Megathink,
     #[default]
@@ -189,6 +191,7 @@ impl<'de> Deserialize<'de> for ThinkingLevel {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "off" => Self::Off,
+            "adaptive" => Self::Adaptive,
             "think" => Self::Think,
             "megathink" => Self::Megathink,
             "ultrathink" => Self::Ultrathink,
@@ -205,6 +208,8 @@ impl<'de> Deserialize<'de> for ThinkingLevel {
 pub enum EffortLevel {
     /// Don't send effort (used when thinking is disabled for mode)
     Off,
+    /// Omit effort so the model chooses its own reasoning depth
+    Adaptive,
     Minimal,
     Low,
     Medium,
@@ -221,7 +226,7 @@ impl Serialize for EffortLevel {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.effort_value().unwrap_or("off"))
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -233,6 +238,7 @@ impl<'de> Deserialize<'de> for EffortLevel {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
             "off" => Self::Off,
+            "adaptive" => Self::Adaptive,
             "minimal" => Self::Minimal,
             "low" => Self::Low,
             "medium" => Self::Medium,
@@ -246,10 +252,28 @@ impl<'de> Deserialize<'de> for EffortLevel {
 }
 
 impl EffortLevel {
-    /// Get the effort value string for CLI --settings JSON
+    /// Stable string form for persistence / wire format
+    pub fn as_str(&self) -> &str {
+        match self {
+            EffortLevel::Off => "off",
+            EffortLevel::Adaptive => "adaptive",
+            EffortLevel::Minimal => "minimal",
+            EffortLevel::Low => "low",
+            EffortLevel::Medium => "medium",
+            EffortLevel::High => "high",
+            EffortLevel::Xhigh => "xhigh",
+            EffortLevel::Max => "max",
+            EffortLevel::Ultracode => "ultracode",
+            EffortLevel::Other(value) => value.as_str(),
+        }
+    }
+
+    /// Get the effort value string for CLI --settings JSON.
+    /// Returns `None` when Jean should omit the effort parameter entirely
+    /// (`Off` disables thinking for a mode; `Adaptive` lets the model decide).
     pub fn effort_value(&self) -> Option<&str> {
         match self {
-            EffortLevel::Off => None,
+            EffortLevel::Off | EffortLevel::Adaptive => None,
             EffortLevel::Minimal => Some("minimal"),
             EffortLevel::Low => Some("low"),
             EffortLevel::Medium => Some("medium"),
@@ -266,6 +290,7 @@ impl ThinkingLevel {
     pub fn thinking_value(&self) -> &str {
         match self {
             Self::Off => "off",
+            Self::Adaptive => "adaptive",
             Self::Think => "think",
             Self::Megathink => "megathink",
             Self::Ultrathink => "ultrathink",
@@ -273,15 +298,22 @@ impl ThinkingLevel {
         }
     }
 
-    /// Whether thinking is enabled for this level
+    /// Whether thinking is enabled for this level.
+    /// `Adaptive` omits thinking settings entirely (model decides), so it is
+    /// not treated as explicitly enabled.
     pub fn is_enabled(&self) -> bool {
-        !matches!(self, ThinkingLevel::Off)
+        !matches!(self, ThinkingLevel::Off | ThinkingLevel::Adaptive)
+    }
+
+    /// Whether Jean should omit thinking settings so the model decides.
+    pub fn omits_thinking_settings(&self) -> bool {
+        matches!(self, ThinkingLevel::Adaptive)
     }
 
     /// Get the MAX_THINKING_TOKENS value for this level
     pub fn thinking_tokens(&self) -> Option<u32> {
         match self {
-            ThinkingLevel::Off => None,
+            ThinkingLevel::Off | ThinkingLevel::Adaptive => None,
             ThinkingLevel::Think => Some(4_000),
             ThinkingLevel::Megathink => Some(10_000),
             ThinkingLevel::Ultrathink => Some(31_999),
@@ -443,6 +475,50 @@ pub struct CodexPermissionRequestEvent {
     pub session_id: String,
     pub worktree_id: String,
     pub request: CodexPermissionRequest,
+}
+
+/// Pending OpenCode permission request awaiting user response
+///
+/// OpenCode emits `permission.asked` / `permission.v2.asked` SSE events when a
+/// tool needs approval (e.g. external_directory access outside the worktree).
+/// Jean surfaces these to the frontend and replies via the OpenCode Permission API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenCodePermissionRequest {
+    /// OpenCode permission request ID (used in POST /permission/{id}/reply)
+    pub request_id: String,
+    /// OpenCode session that owns the request (may be a child/subagent session)
+    pub opencode_session_id: String,
+    /// Permission kind (v1 `permission`) or action (v2 `action`), e.g. "external_directory"
+    pub permission: String,
+    /// Patterns/resources the request covers (paths, globs, command prefixes, …)
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    /// Patterns that "always" would approve for the rest of the OpenCode session
+    #[serde(default)]
+    pub always: Vec<String>,
+    /// Optional tool-specific metadata from OpenCode
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// Tool call ID when the request is tool-triggered
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Working directory to scope the OpenCode instance (`?directory=`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    /// API version: "v1" (default) or "v2"
+    #[serde(default = "default_opencode_permission_api_version")]
+    pub api_version: String,
+}
+
+fn default_opencode_permission_api_version() -> String {
+    "v1".to_string()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenCodePermissionRequestEvent {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub request: OpenCodePermissionRequest,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -739,6 +815,9 @@ pub struct Session {
     /// Pending Codex permission requests awaiting user approval
     #[serde(default)]
     pub pending_codex_permission_requests: Vec<CodexPermissionRequest>,
+    /// Pending OpenCode permission requests awaiting user approval
+    #[serde(default)]
+    pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -754,9 +833,12 @@ pub struct Session {
     /// Original message context for re-send after permission approval
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denied_message_context: Option<DeniedMessageContext>,
-    /// Whether this session is marked for review
+    /// Whether this session is marked for review (legacy; prefer status_override)
     #[serde(default)]
     pub is_reviewing: bool,
+    /// User-forced session status: "idle" | "review" | "completed" | "cancelled"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_override: Option<String>,
     /// Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode)
     #[serde(default)]
     pub waiting_for_input: bool,
@@ -901,12 +983,14 @@ impl Session {
             review_results: None,
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
+            pending_opencode_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
             pending_codex_dynamic_tool_call_requests: vec![],
             denied_message_context: None,
             is_reviewing: false,
+            status_override: None,
             waiting_for_input: false,
             waiting_for_input_type: None,
             approved_plan_message_ids: vec![],
@@ -1077,7 +1161,8 @@ impl SessionMetadata {
             .runs
             .last()
             .map(|r| r.ended_at.unwrap_or(r.started_at))
-            .unwrap_or(self.created_at);
+            .unwrap_or(self.created_at)
+            .max(self.terminal_activity_at.unwrap_or(0));
         let last_message_at = self.runs.last().map(|r| r.ended_at.unwrap_or(r.started_at));
         Session {
             id: self.id.clone(),
@@ -1117,6 +1202,7 @@ impl SessionMetadata {
             review_results: self.review_results.clone(),
             pending_permission_denials: self.pending_permission_denials.clone(),
             pending_codex_permission_requests: self.pending_codex_permission_requests.clone(),
+            pending_opencode_permission_requests: self.pending_opencode_permission_requests.clone(),
             pending_codex_command_approval_requests: self
                 .pending_codex_command_approval_requests
                 .clone(),
@@ -1129,6 +1215,7 @@ impl SessionMetadata {
                 .clone(),
             denied_message_context: self.denied_message_context.clone(),
             is_reviewing,
+            status_override: self.status_override.clone(),
             waiting_for_input,
             waiting_for_input_type: self.waiting_for_input_type.clone(),
             approved_plan_message_ids: self.approved_plan_message_ids.clone(),
@@ -1180,6 +1267,8 @@ impl SessionMetadata {
         self.review_results = session.review_results.clone();
         self.pending_permission_denials = session.pending_permission_denials.clone();
         self.pending_codex_permission_requests = session.pending_codex_permission_requests.clone();
+        self.pending_opencode_permission_requests =
+            session.pending_opencode_permission_requests.clone();
         self.pending_codex_command_approval_requests =
             session.pending_codex_command_approval_requests.clone();
         self.pending_codex_user_input_requests = session.pending_codex_user_input_requests.clone();
@@ -1189,6 +1278,7 @@ impl SessionMetadata {
             session.pending_codex_dynamic_tool_call_requests.clone();
         self.denied_message_context = session.denied_message_context.clone();
         self.is_reviewing = session.is_reviewing;
+        self.status_override = session.status_override.clone();
         self.waiting_for_input = session.waiting_for_input;
         self.waiting_for_input_type = session.waiting_for_input_type.clone();
         self.approved_plan_message_ids = session.approved_plan_message_ids.clone();
@@ -1437,6 +1527,9 @@ pub struct RunEntry {
     /// Kimi Code ACP session ID — persisted per-run for conversation continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// AI change checkpoint id captured before this run (working-tree snapshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_id: Option<String>,
 }
 
 impl RunEntry {
@@ -1562,6 +1655,9 @@ pub struct SessionMetadata {
     /// Pending Codex permission requests awaiting user approval
     #[serde(default)]
     pub pending_codex_permission_requests: Vec<CodexPermissionRequest>,
+    /// Pending OpenCode permission requests awaiting user approval
+    #[serde(default)]
+    pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -1577,9 +1673,12 @@ pub struct SessionMetadata {
     /// Original message context for re-send after permission approval
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denied_message_context: Option<DeniedMessageContext>,
-    /// Whether this session is marked for review
+    /// Whether this session is marked for review (legacy; prefer status_override)
     #[serde(default)]
     pub is_reviewing: bool,
+    /// User-forced session status: "idle" | "review" | "completed" | "cancelled"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_override: Option<String>,
     /// Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode)
     #[serde(default)]
     pub waiting_for_input: bool,
@@ -1628,6 +1727,10 @@ pub struct SessionMetadata {
     /// Display label for the terminal tab/session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_label: Option<String>,
+    /// Last lifecycle signal from a native terminal backend. Native terminal
+    /// sessions have no Jean run entries, so this drives their freshness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_activity_at: Option<u64>,
 
     /// Run history - each entry corresponds to one Claude CLI execution
     #[serde(default)]
@@ -1734,12 +1837,14 @@ impl SessionMetadata {
             review_results: None,
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
+            pending_opencode_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
             pending_codex_dynamic_tool_call_requests: vec![],
             denied_message_context: None,
             is_reviewing: false,
+            status_override: None,
             waiting_for_input: false,
             waiting_for_input_type: None,
             approved_plan_message_ids: vec![],
@@ -1754,6 +1859,7 @@ impl SessionMetadata {
             terminal_command: None,
             terminal_command_args: vec![],
             terminal_label: None,
+            terminal_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
             version: 1,
@@ -1808,6 +1914,20 @@ mod tests {
     }
 
     #[test]
+    fn effort_level_adaptive_omits_backend_value() {
+        assert_eq!(EffortLevel::Adaptive.effort_value(), None);
+        assert_eq!(EffortLevel::Adaptive.as_str(), "adaptive");
+        assert_eq!(
+            serde_json::to_string(&EffortLevel::Adaptive).unwrap(),
+            "\"adaptive\""
+        );
+        assert_eq!(
+            serde_json::from_str::<EffortLevel>("\"adaptive\"").unwrap(),
+            EffortLevel::Adaptive
+        );
+    }
+
+    #[test]
     fn effort_level_accepts_catalog_defined_values() {
         let effort = serde_json::from_str::<EffortLevel>("\"turbo\"").unwrap();
         assert_eq!(effort.effort_value(), Some("turbo"));
@@ -1825,6 +1945,8 @@ mod tests {
     #[test]
     fn test_thinking_level_is_enabled() {
         assert!(!ThinkingLevel::Off.is_enabled());
+        assert!(!ThinkingLevel::Adaptive.is_enabled());
+        assert!(ThinkingLevel::Adaptive.omits_thinking_settings());
         assert!(ThinkingLevel::Think.is_enabled());
         assert!(ThinkingLevel::Megathink.is_enabled());
         assert!(ThinkingLevel::Ultrathink.is_enabled());
@@ -1833,9 +1955,23 @@ mod tests {
     #[test]
     fn test_thinking_level_tokens() {
         assert_eq!(ThinkingLevel::Off.thinking_tokens(), None);
+        assert_eq!(ThinkingLevel::Adaptive.thinking_tokens(), None);
         assert_eq!(ThinkingLevel::Think.thinking_tokens(), Some(4_000));
         assert_eq!(ThinkingLevel::Megathink.thinking_tokens(), Some(10_000));
         assert_eq!(ThinkingLevel::Ultrathink.thinking_tokens(), Some(31_999));
+    }
+
+    #[test]
+    fn thinking_level_adaptive_roundtrips() {
+        assert_eq!(ThinkingLevel::Adaptive.thinking_value(), "adaptive");
+        assert_eq!(
+            serde_json::to_string(&ThinkingLevel::Adaptive).unwrap(),
+            "\"adaptive\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ThinkingLevel>("\"adaptive\"").unwrap(),
+            ThinkingLevel::Adaptive
+        );
     }
 
     #[test]
@@ -2150,6 +2286,20 @@ mod tests {
     }
 
     #[test]
+    fn native_terminal_activity_drives_session_freshness_without_runs() {
+        let mut metadata = SessionMetadata::new(
+            "session-1".to_string(),
+            "wt-1".to_string(),
+            "Codex".to_string(),
+            0,
+        );
+        metadata.created_at = 100;
+        metadata.terminal_activity_at = Some(200);
+
+        assert_eq!(metadata.to_session().updated_at, 200);
+    }
+
+    #[test]
     fn test_grok_session_id_roundtrip_via_update_from_session() {
         let mut session = Session::new("Grok tool call support".to_string(), 0, Backend::Grok);
         session.grok_session_id = Some("grok-acp-1".to_string());
@@ -2228,6 +2378,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         let restored = metadata.to_session();
@@ -2270,6 +2421,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert!(metadata.find_run("run-1").is_some());
@@ -2302,6 +2454,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         // Cancelled-with-content now renders user + partial assistant (incl tool calls).
@@ -2355,6 +2508,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-completed".to_string(),
@@ -2380,6 +2534,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         // Cancelled partial turn (user + assistant) + completed turn (user + assistant) = 4.
@@ -2423,6 +2578,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert!(metadata.latest_claude_session_id().is_none());
@@ -2452,6 +2608,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         });
 
         assert_eq!(metadata.latest_claude_session_id(), Some("claude-sess-abc"));

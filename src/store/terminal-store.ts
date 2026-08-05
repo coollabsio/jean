@@ -15,6 +15,8 @@ export interface TerminalInstance {
   label: string
   /** Panel terminals belong to side/bottom/drawer tabs; session terminals are single full-screen sessions. */
   kind?: TerminalKind
+  /** Jean session backed by this terminal, when it is a full-screen CLI session. */
+  sessionId?: string
 }
 
 export interface AddTerminalOptions {
@@ -24,6 +26,7 @@ export interface AddTerminalOptions {
   activate?: boolean
   /** Whether adding this terminal should open/show the side/bottom terminal panel. */
   openPanel?: boolean
+  sessionId?: string
 }
 
 export function isPanelTerminal(terminal: TerminalInstance): boolean {
@@ -232,6 +235,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       commandArgs: options?.commandArgs ?? null,
       label: label ?? getDefaultLabel(command),
       kind,
+      sessionId: options?.sessionId,
     }
 
     set(state => {
@@ -471,7 +475,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   closePanelTerminals: worktreeId => {
     const state = get()
     const terminals = state.terminals[worktreeId] ?? []
-    const panelTerminalIds = terminals.filter(isPanelTerminal).map(t => t.id)
+    const panelTerminalIds = terminals.flatMap(t =>
+      isPanelTerminal(t) ? [t.id] : []
+    )
     const sessionTerminals = terminals.filter(t => !isPanelTerminal(t))
 
     if (

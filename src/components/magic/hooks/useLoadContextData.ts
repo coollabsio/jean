@@ -247,11 +247,11 @@ export function useLoadContextData({
     )
     const localFiltered = filterAdvisories(advisories ?? [], searchQuery)
     return localFiltered
-      .filter(advisory => !loadedGhsaIds.has(advisory.ghsaId))
       .filter(
         advisory =>
-          includeClosed ||
-          (advisory.state !== 'closed' && advisory.state !== 'published')
+          !loadedGhsaIds.has(advisory.ghsaId) &&
+          (includeClosed ||
+            (advisory.state !== 'closed' && advisory.state !== 'published'))
       )
       .sort(
         (a, b) =>
@@ -280,30 +280,32 @@ export function useLoadContextData({
     )
   }, [contextsData, searchQuery, attachedSavedContexts])
 
-  // Filter sessions (exclude current session, apply search, group by project/worktree)
+  // Filter sessions (exclude current session + already-injected refs, apply search)
   const filteredEntries = useMemo(() => {
     if (!allSessionsData?.entries) return []
 
-    return allSessionsData.entries
-      .map(entry => {
-        const filteredSessions = entry.sessions
-          .filter(s => s.messages.length > 0)
-          .filter(s => s.id !== activeSessionId)
-          .filter(s => {
-            if (!searchQuery) return true
-            const query = searchQuery.toLowerCase()
-            return (
-              s.name.toLowerCase().includes(query) ||
-              entry.project_name.toLowerCase().includes(query) ||
-              entry.worktree_name.toLowerCase().includes(query) ||
-              s.messages.some(m => m.content.toLowerCase().includes(query))
-            )
-          })
+    const attachedSlugs = new Set(attachedSavedContexts?.map(c => c.slug) ?? [])
 
-        return { ...entry, sessions: filteredSessions }
+    return allSessionsData.entries.flatMap(entry => {
+      const query = searchQuery ? searchQuery.toLowerCase() : ''
+      const filteredSessions = entry.sessions.filter(s => {
+        if (s.messages.length === 0) return false
+        if (s.id === activeSessionId) return false
+        // Hide sessions already injected as session-ref-* attached contexts
+        if (attachedSlugs.has(`session-ref-${s.id}`)) return false
+        if (!query) return true
+        return (
+          s.name.toLowerCase().includes(query) ||
+          entry.project_name.toLowerCase().includes(query) ||
+          entry.worktree_name.toLowerCase().includes(query) ||
+          s.messages.some(m => m.content.toLowerCase().includes(query))
+        )
       })
-      .filter(entry => entry.sessions.length > 0)
-  }, [allSessionsData, searchQuery, activeSessionId])
+      return filteredSessions.length > 0
+        ? [{ ...entry, sessions: filteredSessions }]
+        : []
+    })
+  }, [allSessionsData, searchQuery, activeSessionId, attachedSavedContexts])
 
   // Filter Linear issues locally, merge with search results, exclude already loaded ones
   const filteredLinearIssues = useMemo(() => {

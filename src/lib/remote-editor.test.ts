@@ -44,6 +44,35 @@ describe('resolveRemoteSshEndpoint', () => {
       )
     ).toBeNull()
   })
+
+  it('does not fall back to loopback Web Access hostnames', () => {
+    expect(
+      resolveRemoteSshEndpoint(
+        baseConnection({ url: 'http://127.0.0.1:3456', sshHost: undefined })
+      )
+    ).toBeNull()
+    expect(
+      resolveRemoteSshEndpoint(
+        baseConnection({ url: 'http://localhost:3456', sshHost: '' })
+      )
+    ).toBeNull()
+    expect(
+      resolveRemoteSshEndpoint(
+        baseConnection({ url: 'http://[::1]:3456', sshHost: undefined })
+      )
+    ).toBeNull()
+  })
+
+  it('rejects explicit loopback SSH hosts', () => {
+    expect(
+      resolveRemoteSshEndpoint(
+        baseConnection({ sshHost: '127.0.0.1', sshUser: 'ubuntu' })
+      )
+    ).toBeNull()
+    expect(
+      resolveRemoteSshEndpoint(baseConnection({ sshHost: 'localhost' }))
+    ).toBeNull()
+  })
 })
 
 describe('buildZedSshTarget', () => {
@@ -147,5 +176,15 @@ describe('prepareRemoteEditorOpenArgs', () => {
         baseConnection({ url: 'bad', sshHost: undefined })
       )
     ).toThrow(/SSH/)
+  })
+
+  it('errors when only a loopback host is available (e.g. WSL on 127.0.0.1)', () => {
+    expect(() =>
+      prepareRemoteEditorOpenArgs(
+        'open_worktree_in_editor',
+        { worktreePath: '/home/user/project', editor: 'zed' },
+        baseConnection({ url: 'http://127.0.0.1:3456', sshHost: undefined })
+      )
+    ).toThrow(/Configure SSH/)
   })
 })

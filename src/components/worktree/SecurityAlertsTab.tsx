@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react'
 import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
@@ -11,6 +12,9 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { SecurityAlertItem, AdvisoryItem } from './NewWorktreeItems'
+import { BulkInvestigateBar } from './BulkInvestigateBar'
+import { SelectAllControl } from './ItemSelectCheckbox'
+import { useMultiSelect } from './hooks/useMultiSelect'
 import type { DependabotAlert, RepositoryAdvisory } from '@/types/github'
 
 const ALERT_STATE_LABELS: Record<string, string> = {
@@ -37,6 +41,10 @@ const STATE_DOT_COLORS: Record<string, string> = {
   triage: 'bg-yellow-500',
   draft: 'bg-blue-500',
 }
+
+export type SecuritySelection =
+  | { kind: 'alert'; alert: DependabotAlert }
+  | { kind: 'advisory'; advisory: RepositoryAdvisory }
 
 export interface SecurityAlertsTabProps {
   searchQuery: string
@@ -68,6 +76,18 @@ export interface SecurityAlertsTabProps {
   ) => void
   onPreviewAdvisory: (advisory: RepositoryAdvisory) => void
   creatingFromGhsaId: string | null
+  onBulkInvestigateSecurity?: (
+    items: SecuritySelection[]
+  ) => void | Promise<void>
+  isBulkInvestigating?: boolean
+}
+
+function alertKey(number: number) {
+  return `alert:${number}`
+}
+
+function advisoryKey(ghsaId: string) {
+  return `advisory:${ghsaId}`
 }
 
 export function SecurityAlertsTab({
@@ -96,10 +116,38 @@ export function SecurityAlertsTab({
   onInvestigateAdvisory,
   onPreviewAdvisory,
   creatingFromGhsaId,
+  onBulkInvestigateSecurity,
+  isBulkInvestigating = false,
 }: SecurityAlertsTabProps) {
+  const selectableItems = useMemo(() => {
+    const items: SecuritySelection[] = [
+      ...alerts.map(alert => ({ kind: 'alert' as const, alert })),
+      ...filteredAdvisories.map(advisory => ({
+        kind: 'advisory' as const,
+        advisory,
+      })),
+    ]
+    return items
+  }, [alerts, filteredAdvisories])
+
+  const getKey = useCallback((item: SecuritySelection) => {
+    return item.kind === 'alert'
+      ? alertKey(item.alert.number)
+      : advisoryKey(item.advisory.ghsaId)
+  }, [])
+
+  const multi = useMultiSelect(selectableItems, getKey)
+
+  const handleBulkInvestigate = useCallback(async () => {
+    if (!onBulkInvestigateSecurity || multi.selectedItems.length < 1) return
+    await onBulkInvestigateSecurity(multi.selectedItems)
+    multi.clear()
+  }, [onBulkInvestigateSecurity, multi])
+
+  const hasItems = alerts.length > 0 || filteredAdvisories.length > 0
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Search and filters */}
       <div className="p-3 space-y-2 border-b border-border">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -116,8 +164,10 @@ export function SecurityAlertsTab({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={onRefresh}
                 disabled={isRefetching || isRefetchingAdvisories}
+                aria-label="Refresh security data"
                 className={cn(
                   'flex items-center justify-center h-8 w-8 rounded-md border border-border',
                   'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
@@ -137,7 +187,7 @@ export function SecurityAlertsTab({
             <TooltipContent>Refresh security data</TooltipContent>
           </Tooltip>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Checkbox
             id="include-resolved"
             checked={includeClosed}
@@ -149,10 +199,21 @@ export function SecurityAlertsTab({
           >
             Include resolved alerts
           </label>
+          {!isLoading &&
+            !isLoadingAdvisories &&
+            !error &&
+            hasItems && (
+              <SelectAllControl
+                id="select-all-security"
+                allChecked={multi.allVisibleChecked}
+                someChecked={multi.someVisibleChecked}
+                onToggleAll={multi.toggleAllVisible}
+                ariaLabel="Select all visible security items"
+              />
+            )}
         </div>
       </div>
 
-      {/* Alerts and advisories list */}
       <ScrollArea className="flex-1">
         {isLoading && isLoadingAdvisories && (
           <div className="flex items-center justify-center py-8">
@@ -189,7 +250,6 @@ export function SecurityAlertsTab({
             </div>
           )}
 
-        {/* Dependabot Alerts section grouped by state */}
         {!isLoading && !error && alerts.length > 0 && (
           <div className="py-1">
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -198,6 +258,7 @@ export function SecurityAlertsTab({
             {alerts.map((alert, index) => {
               const showStateHeader =
                 index === 0 || alert.state !== alerts[index - 1]?.state
+              const key = alertKey(alert.number)
               return (
                 <div key={alert.number}>
                   {showStateHeader && (
@@ -218,6 +279,8 @@ export function SecurityAlertsTab({
                     index={index}
                     isSelected={index === selectedIndex}
                     isCreating={creatingFromNumber === alert.number}
+                    isChecked={multi.isChecked(key)}
+                    onCheckedChange={checked => multi.toggle(key, checked)}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={bg => onSelectAlert(alert, bg)}
                     onInvestigate={bg => onInvestigateAlert(alert, bg)}
@@ -229,7 +292,6 @@ export function SecurityAlertsTab({
           </div>
         )}
 
-        {/* Repository Advisories section grouped by state */}
         {!isLoadingAdvisories && filteredAdvisories.length > 0 && (
           <div className="py-1">
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -240,6 +302,7 @@ export function SecurityAlertsTab({
               const showStateHeader =
                 index === 0 ||
                 advisory.state !== filteredAdvisories[index - 1]?.state
+              const key = advisoryKey(advisory.ghsaId)
               return (
                 <div key={advisory.ghsaId}>
                   {showStateHeader && (
@@ -262,6 +325,8 @@ export function SecurityAlertsTab({
                     index={combinedIndex}
                     isSelected={combinedIndex === selectedIndex}
                     isCreating={creatingFromGhsaId === advisory.ghsaId}
+                    isChecked={multi.isChecked(key)}
+                    onCheckedChange={checked => multi.toggle(key, checked)}
                     onMouseEnter={() => setSelectedIndex(combinedIndex)}
                     onClick={bg => onSelectAdvisory(advisory, bg)}
                     onInvestigate={bg => onInvestigateAdvisory(advisory, bg)}
@@ -273,6 +338,16 @@ export function SecurityAlertsTab({
           </div>
         )}
       </ScrollArea>
+
+      {multi.showBulkBar && onBulkInvestigateSecurity && (
+        <BulkInvestigateBar
+          count={multi.checkedCount}
+          isLoading={isBulkInvestigating}
+          noun={multi.checkedCount === 1 ? 'item' : 'items'}
+          onClear={multi.clear}
+          onInvestigate={() => void handleBulkInvestigate()}
+        />
+      )}
     </div>
   )
 }

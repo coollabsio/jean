@@ -9,6 +9,7 @@
 const dbg = (...args: unknown[]) => console.debug('[ONBOARDING]', ...args)
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { loginArgsForBackend } from '@/lib/cli-auth'
 import {
   Dialog,
   DialogContent,
@@ -92,7 +93,13 @@ import {
   type MagicPromptModels,
 } from '@/types/preferences'
 import { isServerWindows } from '@/lib/platform'
+import {
+  getActiveConnectionId,
+  LOCAL_CONNECTION_ID,
+} from '@/lib/remote-connections'
 import { WslSetupStep } from './WslSetupStep'
+import { UsageModeStep, type OnboardingUsageMode } from './UsageModeStep'
+import { RemoteSetupStep } from './RemoteSetupStep'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
 type AIBackend =
@@ -106,6 +113,11 @@ type AIBackend =
   | 'kimi'
 type CliType = AIBackend | 'gh'
 
+/** Static CLI login arg arrays (module scope — avoid recreating each render) */
+const AUTH_LOGIN_ARGS = ['auth', 'login']
+const SIMPLE_LOGIN_ARGS = ['login']
+const EMPTY_LOGIN_ARGS: string[] = []
+
 export const AI_BACKENDS: AIBackend[] = [
   'claude',
   'codex',
@@ -118,6 +130,8 @@ export const AI_BACKENDS: AIBackend[] = [
 ]
 
 type OnboardingStep =
+  | 'usage-mode'
+  | 'remote-setup'
   | 'wsl-setup'
   | 'backend-select'
   | 'claude-setup'
@@ -165,6 +179,8 @@ type OnboardingStep =
  * they never appear as a Back destination.
  */
 const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
+  'usage-mode',
+  'remote-setup',
   'wsl-setup',
   'backend-select',
   'claude-setup',
@@ -462,42 +478,42 @@ function OnboardingDialogContent() {
       return
     }
 
-    setHistoryStack(h => {
-      const prev = h.at(-1)
-      if (!prev) return h
-      dbg('step: BACK', stepRef.current, '→', prev)
-      // Reset transient per-CLI state so the user lands on a fresh screen
-      // (re-shows the path/Jean-managed picker, clears any prior install error).
-      if (prev === 'claude-setup') {
-        setClaudePathSelected(false)
-        setClaudeInstallFailed(false)
-      } else if (prev === 'codex-setup') {
-        setCodexPathSelected(false)
-        setCodexInstallFailed(false)
-      } else if (prev === 'opencode-setup') {
-        setOpencodePathSelected(false)
-        setOpencodeInstallFailed(false)
-      } else if (prev === 'pi-setup') {
-        setPiPathSelected(false)
-        setPiInstallFailed(false)
-      } else if (prev === 'commandcode-setup') {
-        setCommandcodePathSelected(false)
-        setCommandcodeInstallFailed(false)
-      } else if (prev === 'grok-setup') {
-        setGrokPathSelected(false)
-        setGrokInstallFailed(false)
-      } else if (prev === 'kimi-setup') {
-        setKimiPathSelected(false)
-        setKimiInstallFailed(false)
-      } else if (prev === 'gh-setup') {
-        setGhPathSelected(false)
-        setGhInstallFailed(false)
-      }
-      stepRef.current = prev
-      _setStepRaw(prev)
-      return h.slice(0, -1)
-    })
+    const prev = historyStack.at(-1)
+    if (!prev) return
+
+    dbg('step: BACK', stepRef.current, '→', prev)
+    // Reset transient per-CLI state so the user lands on a fresh screen
+    // (re-shows the path/Jean-managed picker, clears any prior install error).
+    if (prev === 'claude-setup') {
+      setClaudePathSelected(false)
+      setClaudeInstallFailed(false)
+    } else if (prev === 'codex-setup') {
+      setCodexPathSelected(false)
+      setCodexInstallFailed(false)
+    } else if (prev === 'opencode-setup') {
+      setOpencodePathSelected(false)
+      setOpencodeInstallFailed(false)
+    } else if (prev === 'pi-setup') {
+      setPiPathSelected(false)
+      setPiInstallFailed(false)
+    } else if (prev === 'commandcode-setup') {
+      setCommandcodePathSelected(false)
+      setCommandcodeInstallFailed(false)
+    } else if (prev === 'grok-setup') {
+      setGrokPathSelected(false)
+      setGrokInstallFailed(false)
+    } else if (prev === 'kimi-setup') {
+      setKimiPathSelected(false)
+      setKimiInstallFailed(false)
+    } else if (prev === 'gh-setup') {
+      setGhPathSelected(false)
+      setGhInstallFailed(false)
+    }
+    stepRef.current = prev
+    _setStepRaw(prev)
+    setHistoryStack(h => h.slice(0, -1))
   }, [
+    historyStack,
     claudePathSelected,
     codexPathSelected,
     opencodePathSelected,
@@ -849,18 +865,6 @@ function OnboardingDialogContent() {
       setGhLoginAttempt(0)
     })
 
-    // On Windows, show WSL mode selection first if not yet chosen
-    if (
-      isServerWindows() &&
-      preferences &&
-      !preferences.wsl_mode_chosen &&
-      !onboardingStartStep
-    ) {
-      dbg('init effect: Windows + WSL not chosen → wsl-setup')
-      queueMicrotask(() => setStep('wsl-setup', { replace: true }))
-      return
-    }
-
     if (onboardingStartStep === 'gh') {
       dbg('init effect: startStep=gh → gh-setup')
       queueMicrotask(() => {
@@ -883,37 +887,82 @@ function OnboardingDialogContent() {
 
     const readyBackends = AI_BACKENDS.filter(isBackendReady)
     const ghReady = !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
+    const remoteActive = getActiveConnectionId() !== LOCAL_CONNECTION_ID
     dbg(
       'init effect: readyBackends:',
       readyBackends,
       'ghReady:',
       ghReady,
+      'remoteActive:',
+      remoteActive,
       'manuallyTriggered:',
       onboardingManuallyTriggered
     )
 
-    // When manually triggered, always start at wsl-setup on Windows so users
-    // can change their WSL/native choice, then backend-select (via Continue
-    // on the WSL step). Non-Windows goes straight to backend-select.
+    // Manual re-open always starts with Local vs Remote so users can switch.
     if (onboardingManuallyTriggered) {
-      const firstStep: OnboardingStep = isServerWindows()
-        ? 'wsl-setup'
-        : 'backend-select'
-      dbg('init effect: manual trigger →', firstStep)
+      dbg('init effect: manual trigger → usage-mode')
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
-        setStep(firstStep, { replace: true })
+        setStep('usage-mode', { replace: true })
       })
       return
     }
 
-    if (ghReady && readyBackends.length > 0) {
+    // Already on a remote: skip usage mode and continue CLI setup there.
+    // WSL mode only applies to local Windows development.
+    if (remoteActive) {
+      if (ghReady && readyBackends.length > 0) {
+        // Auto-opened with tools already ready (e.g. reconnecting to a remote
+        // that was set up earlier). Don't force the "Setup Complete" screen —
+        // that was reappearing on every remote session open.
+        if (!onboardingManuallyTriggered) {
+          dbg('init effect: remote all ready → auto-dismiss')
+          useUIStore.setState({
+            onboardingOpen: false,
+            onboardingStartStep: null,
+            onboardingDismissed: true,
+          })
+          return
+        }
+        dbg('init effect: remote all ready → complete')
+        queueMicrotask(() => setStep('complete', { replace: true }))
+        return
+      }
+      if (readyBackends.length > 0) {
+        dbg('init effect: remote + some backends ready → after backends')
+        queueMicrotask(() => {
+          setSelectedBackends(readyBackends)
+          setStep(getNextStepAfterBackends(), { replace: true })
+        })
+        return
+      }
+      dbg('init effect: remote + nothing ready → backend-select')
+      queueMicrotask(() => setStep('backend-select', { replace: true }))
+      return
+    }
+
+    const needsWslChoice =
+      isServerWindows() && !!preferences && !preferences.wsl_mode_chosen
+
+    // Local tools already ready and environment chosen → finish.
+    if (ghReady && readyBackends.length > 0 && !needsWslChoice) {
+      if (!onboardingManuallyTriggered) {
+        dbg('init effect: all ready → auto-dismiss')
+        useUIStore.setState({
+          onboardingOpen: false,
+          onboardingStartStep: null,
+          onboardingDismissed: true,
+        })
+        return
+      }
       dbg('init effect: all ready → complete')
       queueMicrotask(() => setStep('complete', { replace: true }))
       return
     }
 
-    if (readyBackends.length > 0) {
+    // Partial local progress (and WSL already chosen): resume CLI setup.
+    if (readyBackends.length > 0 && !needsWslChoice) {
       dbg('init effect: some backends ready → skip to after backends')
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
@@ -922,8 +971,10 @@ function OnboardingDialogContent() {
       return
     }
 
-    dbg('init effect: nothing ready → backend-select')
-    queueMicrotask(() => setStep('backend-select', { replace: true }))
+    // First-run (or Windows still needs environment choice after Local):
+    // Local vs Remote before any CLI installs.
+    dbg('init effect: nothing ready or needs env choice → usage-mode')
+    queueMicrotask(() => setStep('usage-mode', { replace: true }))
   }, [
     onboardingOpen,
     onboardingStartStep,
@@ -2076,46 +2127,46 @@ function OnboardingDialogContent() {
       ? pathDetection.data.path
       : (claudeSetup.status?.path ?? '')
   const claudeLoginArgs = claudeSetup.status?.supports_auth_command
-    ? ['auth', 'login']
-    : ['login']
+    ? AUTH_LOGIN_ARGS
+    : SIMPLE_LOGIN_ARGS
   const codexLoginCommand =
     codexPathSelected && codexPathDetection.data?.path
       ? codexPathDetection.data.path
       : (codexSetup.status?.path ?? '')
-  const codexLoginArgs = ['login']
+  const codexLoginArgs = loginArgsForBackend('codex')
   const opencodeLoginCommand =
     opencodePathSelected && opencodePathDetection.data?.path
       ? opencodePathDetection.data.path
       : (opencodeSetup.status?.path ?? '')
-  const opencodeLoginArgs = ['auth', 'login']
+  const opencodeLoginArgs = AUTH_LOGIN_ARGS
   const cursorLoginCommand =
     cursorStatus.data?.path ?? cursorPathDetection.data?.path ?? ''
-  const cursorLoginArgs = ['login']
+  const cursorLoginArgs = SIMPLE_LOGIN_ARGS
   const piLoginCommand =
     piPathSelected && piPathDetection.data?.path
       ? piPathDetection.data.path
       : (piSetup.status?.path ?? '')
-  const piLoginArgs: string[] = []
+  const piLoginArgs = EMPTY_LOGIN_ARGS
   const commandcodeLoginCommand =
     commandcodePathSelected && commandcodePathDetection.data?.path
       ? commandcodePathDetection.data.path
       : (commandcodeSetup.status?.path ?? '')
-  const commandcodeLoginArgs = ['login']
+  const commandcodeLoginArgs = SIMPLE_LOGIN_ARGS
   const grokLoginCommand =
     grokPathSelected && grokPathDetection.data?.path
       ? grokPathDetection.data.path
       : (grokSetup.status?.path ?? '')
-  const grokLoginArgs = ['login']
+  const grokLoginArgs = SIMPLE_LOGIN_ARGS
   const kimiLoginCommand =
     kimiPathSelected && kimiPathDetection.data?.path
       ? kimiPathDetection.data.path
       : (kimiSetup.status?.path ?? '')
-  const kimiLoginArgs = ['login']
+  const kimiLoginArgs = SIMPLE_LOGIN_ARGS
   const ghLoginCommand =
     ghPathSelected && ghPathDetection.data?.path
       ? ghPathDetection.data.path
       : (ghSetup.status?.path ?? '')
-  const ghLoginArgs = ['auth', 'login']
+  const ghLoginArgs = AUTH_LOGIN_ARGS
 
   dbg('login commands:', {
     claude: {
@@ -2182,8 +2233,45 @@ function OnboardingDialogContent() {
     },
   })
 
+  const continueAfterLocalChoice = useCallback(() => {
+    if (isServerWindows() && preferences && !preferences.wsl_mode_chosen) {
+      dbg('local chosen → wsl-setup')
+      setStep('wsl-setup')
+      return
+    }
+    dbg('local chosen → backend-select')
+    setStep('backend-select')
+  }, [preferences, setStep])
+
+  const handleUsageModeSelect = useCallback(
+    (mode: OnboardingUsageMode) => {
+      if (mode === 'remote') {
+        dbg('usage-mode → remote-setup')
+        setStep('remote-setup')
+        return
+      }
+      continueAfterLocalChoice()
+    },
+    [continueAfterLocalChoice, setStep]
+  )
+
   const getDialogContent = () => {
     const dialogStep = step as OnboardingStep
+    if (dialogStep === 'usage-mode') {
+      return {
+        title: 'Welcome to Jean',
+        description: 'Choose local development or remote control.',
+      }
+    }
+
+    if (dialogStep === 'remote-setup') {
+      return {
+        title: 'Connect to a remote Jean',
+        description:
+          'Install jean-server over SSH, or connect with an existing Web Access URL.',
+      }
+    }
+
     if (dialogStep === 'wsl-setup') {
       return {
         title: 'Welcome to Jean',
@@ -2462,12 +2550,34 @@ function OnboardingDialogContent() {
         </DialogHeader>
 
         <div className="overflow-y-auto py-4 flex flex-col">
-          {step !== 'wsl-setup' && renderStepIndicator()}
+          {step !== 'usage-mode' &&
+            step !== 'remote-setup' &&
+            step !== 'wsl-setup' &&
+            renderStepIndicator()}
 
           <div className="w-full">
-            {step === 'wsl-setup' ? (
+            {step === 'usage-mode' ? (
+              <UsageModeStep onSelect={handleUsageModeSelect} />
+            ) : step === 'remote-setup' ? (
+              <RemoteSetupStep />
+            ) : step === 'wsl-setup' ? (
               <WslSetupStep
                 onComplete={() => {
+                  const ready = AI_BACKENDS.filter(isBackendReady)
+                  const ghOk =
+                    !!ghSetup.status?.installed && !!ghAuth.data?.authenticated
+                  if (ghOk && ready.length > 0) {
+                    dbg('WSL setup complete → complete')
+                    setSelectedBackends(ready)
+                    setStep('complete')
+                    return
+                  }
+                  if (ready.length > 0) {
+                    dbg('WSL setup complete → after backends')
+                    setSelectedBackends(ready)
+                    setStep(getNextStepAfterBackends())
+                    return
+                  }
                   dbg('WSL setup complete → backend-select')
                   setStep('backend-select')
                 }}

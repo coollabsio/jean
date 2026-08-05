@@ -98,9 +98,9 @@ export function mergePinnedLabels(
   pinnedLabels: LabelData[]
 ): LabelData[] {
   const pinnedByName = new Map(
-    pinnedLabels
-      .filter(label => label.pinned)
-      .map(label => [label.name.toLowerCase(), label])
+    pinnedLabels.flatMap(label =>
+      label.pinned ? [[label.name.toLowerCase(), label] as const] : []
+    )
   )
 
   return labels.map(label => {

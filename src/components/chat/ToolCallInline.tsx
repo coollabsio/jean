@@ -57,14 +57,19 @@ function isPlaceholderToolOutput(output: string | undefined | null): boolean {
 
 function shouldRenderRawOutput(toolCall: ToolCall): boolean {
   if (!toolCall.output?.trim()) return false
+  if (isPlaceholderToolOutput(toolCall.output)) return false
+  const input = (toolCall.input ?? {}) as Record<string, unknown>
+  const normalizedName = normalizeToolCallForDisplay(toolCall.name, input).name
   // These tools already surface output (results/path/etc.) in expandedContent.
   if (
-    toolCall.name === 'FileChange' ||
-    toolCall.name === 'Monitor' ||
-    toolCall.name === 'CodexWebSearch' ||
-    toolCall.name === 'CodexImageView' ||
-    toolCall.name === 'CodexImageGeneration' ||
-    toolCall.name === 'CodexContextCompaction'
+    normalizedName === 'FileChange' ||
+    normalizedName === 'Monitor' ||
+    normalizedName === 'CodexWebSearch' ||
+    normalizedName === 'CodexImageView' ||
+    normalizedName === 'CodexImageGeneration' ||
+    normalizedName === 'CodexContextCompaction' ||
+    // Bash/shell expandedContent includes stdout when present (issue #572).
+    normalizedName === 'Bash'
   ) {
     return false
   }
@@ -81,6 +86,168 @@ function firstStringField(
     if (typeof value === 'string' && value.trim()) return value
   }
   return undefined
+}
+
+/**
+ * Strip MCP / client prefixes from a Jean tool name and return the bare registry name.
+ * Handles: jean_get_current_context, jean-dev_list_projects, mcp:jean:list_worktrees,
+ * mcp__jean__create_session, mcp__jean-dev__get_current_context.
+ */
+export function extractJeanMcpBareToolName(name: string): string | null {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+
+  if (trimmed.startsWith('mcp__')) {
+    // mcp__jean__tool or mcp__jean-dev__tool (tool may contain underscores)
+    const rest = trimmed.slice('mcp__'.length)
+    const serverSep = rest.indexOf('__')
+    if (serverSep > 0) {
+      const server = rest.slice(0, serverSep)
+      const tool = rest.slice(serverSep + 2)
+      if (
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
+        tool
+      ) {
+        return tool
+      }
+    }
+    return null
+  }
+
+  if (trimmed.startsWith('mcp:')) {
+    // mcp:jean:tool or mcp:jean-dev:tool
+    const parts = trimmed.split(':')
+    if (parts.length >= 3) {
+      const server = parts[1] ?? ''
+      const tool = parts.slice(2).join(':')
+      if (
+        (server === 'jean' ||
+          server === 'jean-dev' ||
+          server.startsWith('jean')) &&
+        tool
+      ) {
+        return tool
+      }
+    }
+    return null
+  }
+
+  // Client-side prefix: jean_get_current_context / jean-dev_list_projects
+  for (const prefix of ['jean-dev_', 'jean_']) {
+    if (trimmed.startsWith(prefix)) {
+      const bare = trimmed.slice(prefix.length)
+      if (bare) return bare
+    }
+  }
+
+  return null
+}
+
+export function isJeanMcpToolName(name: string): boolean {
+  return extractJeanMcpBareToolName(name) != null
+}
+
+/** True for tools that should not get the "(unhandled tool)" suffix. */
+function isRecognizedExternalTool(name: string): boolean {
+  return (
+    name.startsWith('mcp__') ||
+    name.startsWith('mcp:') ||
+    isJeanMcpToolName(name)
+  )
+}
+
+/** Title-case a snake_case / kebab-case tool id for display. */
+function humanizeSnakeCase(name: string): string {
+  return name
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ')
+}
+
+/** Friendly label for a Jean MCP tool call. */
+export function formatJeanMcpToolLabel(name: string): string {
+  const bare = extractJeanMcpBareToolName(name) ?? name
+  return `Jean: ${humanizeSnakeCase(bare)}`
+}
+
+/** Detail line for Jean MCP tools from common argument fields. */
+export function formatJeanMcpToolDetail(
+  input: Record<string, unknown>
+): string | undefined {
+  const parts: string[] = []
+  const backend = firstStringField(input, ['backend'])
+  const projectId = firstStringField(input, ['projectId', 'project_id'])
+  const worktreeId = firstStringField(input, ['worktreeId', 'worktree_id'])
+  const sessionId = firstStringField(input, ['sessionId', 'session_id'])
+  const path = firstStringField(input, ['path'])
+  const name = firstStringField(input, ['name', 'customName', 'custom_name'])
+  const branch = firstStringField(input, [
+    'baseBranch',
+    'base_branch',
+    'branchName',
+    'branch_name',
+  ])
+  const model = firstStringField(input, ['model'])
+  const message = firstStringField(input, ['message'])
+
+  if (backend) parts.push(backend)
+  if (name) parts.push(name)
+  if (branch) parts.push(branch)
+  if (model) parts.push(model)
+  if (path) parts.push(path)
+  if (message)
+    parts.push(message.length > 40 ? `${message.slice(0, 40)}…` : message)
+  // Short id suffixes only when nothing more descriptive is available
+  if (parts.length === 0) {
+    if (worktreeId) parts.push(`worktree ${worktreeId.slice(0, 8)}`)
+    else if (projectId) parts.push(`project ${projectId.slice(0, 8)}`)
+    else if (sessionId) parts.push(`session ${sessionId.slice(0, 8)}`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
+/**
+ * Unwrap meta tool wrappers (e.g. Grok/MCP bridge `use_tool`) that nest the
+ * real tool name + args under tool_name / tool_input.
+ */
+function unwrapMetaToolCall(
+  name: string,
+  input: Record<string, unknown>
+): { name: string; input: Record<string, unknown> } | null {
+  const isMeta =
+    name === 'use_tool' ||
+    name === 'useTool' ||
+    name === 'UseTool' ||
+    name === 'call_tool' ||
+    name === 'callTool' ||
+    name === 'CallTool'
+  if (!isMeta) return null
+
+  const nestedName = firstStringField(input, [
+    'tool_name',
+    'toolName',
+    'name',
+    'tool',
+  ])
+  if (!nestedName) return null
+
+  const rawNested =
+    input.tool_input ??
+    input.toolInput ??
+    input.arguments ??
+    input.args ??
+    input.input ??
+    input.parameters
+
+  let nestedInput: Record<string, unknown> = {}
+  if (rawNested && typeof rawNested === 'object' && !Array.isArray(rawNested)) {
+    nestedInput = rawNested as Record<string, unknown>
+  }
+
+  return { name: nestedName, input: nestedInput }
 }
 
 function formatCodexWebSearchDetail(
@@ -235,42 +402,41 @@ export function ToolCallInline({
           isOpen && 'bg-muted/50'
         )}
       >
-        <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
-          {icon}
-          <span className="font-medium shrink-0 flex-none whitespace-nowrap">
-            {label}
-          </span>
+        <div className={TOOL_CALL_ROW_CLASS}>
+          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 text-left outline-none">
+            {icon}
+            <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+              {label}
+            </span>
+          </CollapsibleTrigger>
           {detail && filePath && onFileClick ? (
-            <code
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={handleFileClick}
-              onKeyDown={e =>
-                e.key === 'Enter' &&
-                handleFileClick(e as unknown as React.MouseEvent)
-              }
               className={cn(
                 TOOL_CALL_DETAIL_PILL_CLASS,
-                'inline-flex items-center gap-1 hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
+                'inline-flex items-center gap-1 font-mono hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
               )}
             >
               <span className="truncate">{detail}</span>
               <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-            </code>
+            </button>
           ) : detail ? (
             <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{detail}</code>
           ) : null}
-          {isStreaming && isIncomplete ? (
-            <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground/50" />
-          ) : (
-            <ChevronRight
-              className={cn(
-                'ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                isOpen && 'rotate-90'
-              )}
-            />
-          )}
-        </CollapsibleTrigger>
+          <CollapsibleTrigger className="ml-auto flex shrink-0 items-center outline-none">
+            {isStreaming && isIncomplete ? (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />
+            ) : (
+              <ChevronRight
+                className={cn(
+                  'h-3.5 w-3.5 transition-transform duration-200',
+                  isOpen && 'rotate-90'
+                )}
+              />
+            )}
+          </CollapsibleTrigger>
+        </div>
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2">
             <div className="whitespace-pre-wrap text-xs text-muted-foreground">
@@ -463,7 +629,7 @@ export function StackedGroup({
     if (item.type === 'thinking') {
       thinkingCount++
     } else {
-      const name = getToolSummaryName(item.tool.name)
+      const name = getToolSummaryName(item.tool)
       toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1)
     }
   }
@@ -514,10 +680,10 @@ export function StackedGroup({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2 space-y-1">
-            {items.map((item, index) =>
+            {items.map(item =>
               item.type === 'thinking' ? (
                 <SubThinkingItem
-                  key={`thinking-${index}`}
+                  key={item.key}
                   thinking={item.thinking}
                 />
               ) : (
@@ -613,37 +779,36 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
           isOpen && 'bg-muted/30'
         )}
       >
-        <CollapsibleTrigger className={TOOL_CALL_SUB_ROW_CLASS}>
-          <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
-          <span className="font-medium shrink-0 flex-none whitespace-nowrap">
-            {label}
-          </span>
+        <div className={TOOL_CALL_SUB_ROW_CLASS}>
+          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 text-left outline-none">
+            <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
+            <span className="font-medium shrink-0 flex-none whitespace-nowrap">
+              {label}
+            </span>
+          </CollapsibleTrigger>
           {detail && filePath && onFileClick ? (
-            <code
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={handleFileClick}
-              onKeyDown={e =>
-                e.key === 'Enter' &&
-                handleFileClick(e as unknown as React.MouseEvent)
-              }
-              className="inline-flex min-w-0 max-w-[55%] sm:max-w-full items-center gap-0.5 truncate rounded px-0.5 text-[0.625rem] font-sans leading-none hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
+              className="inline-flex min-w-0 max-w-[55%] sm:max-w-full items-center gap-0.5 truncate rounded px-0.5 text-[0.625rem] font-mono leading-none hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
             >
               <span className="truncate">{detail}</span>
               <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-60" />
-            </code>
+            </button>
           ) : detail ? (
             <code className="min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-0.5 text-[0.625rem] font-sans leading-none">
               {detail}
             </code>
           ) : null}
-          <ChevronRight
-            className={cn(
-              'ml-auto h-2.5 w-2.5 shrink-0 transition-transform duration-200',
-              isOpen && 'rotate-90'
-            )}
-          />
-        </CollapsibleTrigger>
+          <CollapsibleTrigger className="ml-auto flex shrink-0 items-center outline-none">
+            <ChevronRight
+              className={cn(
+                'h-2.5 w-2.5 transition-transform duration-200',
+                isOpen && 'rotate-90'
+              )}
+            />
+          </CollapsibleTrigger>
+        </div>
         <CollapsibleContent>
           <div className="border-t border-border/30 px-2 py-1.5">
             <div className="whitespace-pre-wrap text-[0.625rem] text-muted-foreground/70">
@@ -724,9 +889,12 @@ function FileChangeDiffView({ input }: { input: unknown }) {
           ? getFilename(change.path)
           : `file ${idx + 1}`
         const changeType = change.kind?.type ?? 'update'
+        const changeKey =
+          change.path ??
+          `change:${changeType}:${change.kind?.move_path ?? ''}:${change.diff?.slice(0, 64) ?? ''}`
 
         return (
-          <div key={change.path ?? idx}>
+          <div key={changeKey}>
             <div className="flex items-center gap-1.5 mb-1">
               <span className="font-mono truncate text-muted-foreground">
                 {filename}
@@ -769,6 +937,13 @@ export function normalizeToolCallForDisplay(
   name: string,
   input: Record<string, unknown>
 ): { name: string; input: Record<string, unknown> } {
+  // Unwrap meta wrappers (use_tool / call_tool) before other normalization so
+  // Jean MCP and other nested tools get the right renderer.
+  const unwrapped = unwrapMetaToolCall(name, input)
+  if (unwrapped) {
+    return normalizeToolCallForDisplay(unwrapped.name, unwrapped.input)
+  }
+
   const variant = typeof input.variant === 'string' ? input.variant : undefined
   const normalizedName = (() => {
     switch (variant) {
@@ -812,6 +987,16 @@ export function normalizeToolCallForDisplay(
   delete withoutVariant.variant
 
   switch (normalizedName) {
+    case 'Bash':
+    case 'shell_command':
+    case 'run_terminal_command':
+    case 'Shell':
+    case 'shell':
+    case 'execute':
+      return {
+        name: 'Bash',
+        input: withoutVariant,
+      }
     case 'read_file':
     case 'Read':
       return {
@@ -863,8 +1048,6 @@ export function normalizeToolCallForDisplay(
           path: input.path ?? input.targetDirectory,
         },
       }
-    case 'shell_command':
-      return { name: 'Bash', input }
     case 'read_directory':
       return { name: 'List', input }
     case 'glob':
@@ -900,8 +1083,8 @@ export function normalizeToolCallForDisplay(
   }
 }
 
-function getToolSummaryName(name: string): string {
-  switch (name) {
+function getToolSummaryName(toolCall: ToolCall): string {
+  switch (toolCall.name) {
     case 'CodexWebSearch':
       return 'Web Search'
     case 'CodexImageGeneration':
@@ -910,8 +1093,16 @@ function getToolSummaryName(name: string): string {
       return 'Image View'
     case 'CodexContextCompaction':
       return 'Context Compaction'
-    default:
-      return normalizeToolCallForDisplay(name, {}).name
+    default: {
+      const normalized = normalizeToolCallForDisplay(
+        toolCall.name,
+        (toolCall.input ?? {}) as Record<string, unknown>
+      ).name
+      if (isJeanMcpToolName(normalized) || isJeanMcpToolName(toolCall.name)) {
+        return formatJeanMcpToolLabel(normalized)
+      }
+      return normalized
+    }
   }
 }
 
@@ -1044,13 +1235,32 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         command && command.length > 50
           ? command.substring(0, 50) + '...'
           : command
+      const header = description
+        ? `${description}\n\n$ ${command ?? '(no command)'}`
+        : `$ ${command ?? '(no command)'}`
+      // Surface stdout/stderr in the main expanded body so bash results are
+      // visible without relying on a separate "Output:" panel (issue #572).
+      const output = toolCall.output?.trim()
+      const hasOutput = Boolean(output) && !isPlaceholderToolOutput(output)
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: 'Bash',
         detail: truncatedCommand,
-        expandedContent: description
-          ? `${description}\n\n$ ${command}`
-          : `$ ${command ?? '(no command)'}`,
+        expandedContent: hasOutput ? (
+          <div className="space-y-2">
+            <div className="whitespace-pre-wrap">{header}</div>
+            <div>
+              <div className="text-xs text-muted-foreground/60 mb-1">
+                Output:
+              </div>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs font-mono text-foreground/80 bg-muted/50 rounded p-2">
+                {output}
+              </pre>
+            </div>
+          </div>
+        ) : (
+          header
+        ),
       }
     }
 
@@ -1202,7 +1412,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         detail: todos.length ? `${completed}/${todos.length} done` : undefined,
         expandedContent: todos.length ? (
           <div className="space-y-1">
-            {todos.map((todo, index) => {
+            {todos.map(todo => {
               const text =
                 todo.status === 'in_progress'
                   ? (todo.activeForm ?? todo.content ?? '')
@@ -1212,7 +1422,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
               const active = todo.status === 'in_progress'
               return (
                 <div
-                  key={`${text}-${index}`}
+                  key={`${todo.content}\0${todo.activeForm ?? ''}`}
                   className="flex items-center gap-1.5"
                 >
                   {done ? (
@@ -1612,23 +1822,43 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     default: {
-      const isMcpTool =
-        normalized.name.startsWith('mcp__') ||
-        normalized.name.startsWith('mcp:')
+      const jeanBare = extractJeanMcpBareToolName(normalized.name)
+      if (jeanBare) {
+        const detail = formatJeanMcpToolDetail(input)
+        const expanded = toolCall.output?.trim()
+          ? toolCall.output
+          : Object.keys(input).length > 0
+            ? JSON.stringify(input, null, 2)
+            : 'No details available'
+        return {
+          icon: <Bot className="h-4 w-4 shrink-0" />,
+          label: formatJeanMcpToolLabel(normalized.name),
+          detail,
+          expandedContent: expanded,
+        }
+      }
+
+      const isKnownExternal = isRecognizedExternalTool(normalized.name)
       // Surface something useful even for tools without a dedicated renderer.
-      const detail = firstStringField(input, [
-        'query',
-        'command',
-        'path',
-        'file_path',
-        'filePath',
-        'url',
-        'pattern',
-        'description',
-        'prompt',
-        'title',
-        'name',
-      ])
+      const detail =
+        firstStringField(input, [
+          'query',
+          'command',
+          'path',
+          'file_path',
+          'filePath',
+          'url',
+          'pattern',
+          'description',
+          'prompt',
+          'title',
+          'name',
+          'tool_name',
+          'toolName',
+          'backend',
+          'projectId',
+          'worktreeId',
+        ]) ?? formatJeanMcpToolDetail(input)
       const expanded = toolCall.output?.trim()
         ? toolCall.output
         : Object.keys(input).length > 0
@@ -1636,7 +1866,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
           : 'No details available'
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
-        label: isMcpTool
+        label: isKnownExternal
           ? normalized.name
           : `${normalized.name} (unhandled tool)`,
         detail,
@@ -1707,11 +1937,11 @@ function MonitorExpanded({
           </div>
         ) : (
           <div className="mt-1 max-h-64 divide-y divide-border/30 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px]">
-            {events.map((ev, i) => {
+            {events.map(ev => {
               const text = formatMonitorEventText(ev)
               return (
                 <div
-                  key={`${ev.ts_ms}-${i}`}
+                  key={`${ev.kind}:${ev.ts_ms}:${text}`}
                   className="py-1 first:pt-0 last:pb-0"
                 >
                   <span

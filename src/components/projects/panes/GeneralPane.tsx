@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import {
   Check,
   ChevronsUpDown,
@@ -97,6 +97,10 @@ export function GeneralPane({
   const profiles = preferences?.custom_cli_profiles ?? []
   // Only show backends the user is logged into (installed + authenticated).
   const { installedBackends } = useInstalledBackends()
+  const installedBackendsSet = useMemo(
+    () => new Set(installedBackends),
+    [installedBackends]
+  )
 
   const updateSettings = useUpdateProjectSettings()
   const { data: appDataDir = '' } = useAppDataDir()
@@ -435,7 +439,7 @@ export function GeneralPane({
                     'kimi',
                   ] as CliBackend[]
                 )
-                  .filter(backend => installedBackends.includes(backend))
+                  .filter(backend => installedBackendsSet.has(backend))
                   .map(backend => (
                     <SelectItem key={backend} value={backend}>
                       {backend === 'cursor' ||

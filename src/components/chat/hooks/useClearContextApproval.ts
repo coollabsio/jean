@@ -27,6 +27,7 @@ import {
 
 const THINKING_LEVEL_VALUES = new Set<ThinkingLevel>([
   'off',
+  'adaptive',
   'think',
   'megathink',
   'ultrathink',
@@ -43,6 +44,8 @@ function mapCodexReasoningToEffort(
   value: string | null | undefined
 ): EffortLevel | undefined {
   switch (value) {
+    case 'adaptive':
+      return 'adaptive'
     case 'low':
       return 'low'
     case 'medium':
@@ -238,8 +241,7 @@ export function useClearContextApproval({
           sessionId,
         })
         allUserContent = fullSession.messages
-          .filter(m => m.role === 'user')
-          .map(m => m.content)
+          .flatMap(m => (m.role === 'user' ? [m.content] : []))
           .join('\n')
         console.log('[useClearContextApproval] Fetched session messages:', {
           sessionId,

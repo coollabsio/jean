@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
-import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import { useEffect, useMemo } from 'react'
+import { usePreferences } from '@/services/preferences'
 import { isNativeApp } from '@/lib/environment'
 import { ZOOM_LEVEL_DEFAULT, zoomLevelTicks } from '@/types/preferences'
 import { isClientMacOS } from '@/lib/platform'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useClientZoom } from '@/lib/client-zoom'
 
 const tickValues = zoomLevelTicks.map(t => t.value)
 
@@ -22,6 +23,7 @@ function findNearestTickIndex(zoom: number): number {
   return closest
 }
 
+/** Apply UI zoom when the saved preference changes. */
 async function applyZoom(scaleFactor: number) {
   if (!isNativeApp()) {
     const root = document.documentElement
@@ -42,20 +44,144 @@ async function applyZoom(scaleFactor: number) {
   }
 }
 
+/** UI zoom at 100% — re-applying is a no-op and can still disturb the surface. */
+function isDefaultZoom(scaleFactor: number): boolean {
+  return Math.abs(scaleFactor - 1) < 0.001
+}
+
+function sameDisplayScale(a: number | undefined, b: number): boolean {
+  return a !== undefined && Math.abs(a - b) < 0.001
+}
+
+/**
+ * How long to keep absorbing scale events after a zoom bounce.
+ * setZoom() can emit delayed scale/DPR side-effects after the awaits resolve.
+ */
+export const DISPLAY_SCALE_ZOOM_SETTLE_MS = 50
+
 export function useZoom() {
   const { data: preferences } = usePreferences()
-  const patchPreferences = usePatchPreferences()
   const isMobile = useIsMobile()
-  const syncZoomLevels = preferences?.sync_zoom_levels ?? true
-  const desktopZoom = preferences?.zoom_level ?? ZOOM_LEVEL_DEFAULT
-  const zoomLevel =
-    isMobile && !syncZoomLevels
-      ? (preferences?.mobile_zoom_level ?? ZOOM_LEVEL_DEFAULT)
-      : desktopZoom
 
-  // Apply zoom when preferences change
+  // Zoom is client-local (localStorage) so remote Jean clients and the host
+  // shell do not overwrite each other via shared AppPreferences (issue #622).
+  const zoomSeed = useMemo(
+    () =>
+      preferences
+        ? {
+            zoom_level: preferences.zoom_level,
+            mobile_zoom_level: preferences.mobile_zoom_level,
+            sync_zoom_levels: preferences.sync_zoom_levels,
+          }
+        : null,
+    [
+      preferences?.zoom_level,
+      preferences?.mobile_zoom_level,
+      preferences?.sync_zoom_levels,
+      // preferences identity when still loading → null seed
+      preferences == null,
+    ]
+  )
+
+  const {
+    zoom_level: desktopZoom,
+    mobile_zoom_level: mobileZoom,
+    sync_zoom_levels: syncZoomLevels,
+    updateZoom,
+  } = useClientZoom(zoomSeed)
+
+  const zoomLevel =
+    isMobile && !syncZoomLevels ? mobileZoom : desktopZoom
+
+  // Apply zoom when client-local zoom changes
   useEffect(() => {
-    applyZoom(zoomLevel / 100)
+    void applyZoom(zoomLevel / 100)
+  }, [zoomLevel])
+
+  // A native display-scale event is the reliable signal that the window moved
+  // between monitors. Do not use resize/devicePixelRatio here: setZoom() can
+  // change both and feed the zoom operation back into itself.
+  useEffect(() => {
+    if (!isNativeApp()) return
+
+    const scaleFactor = zoomLevel / 100
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    let refreshing = false
+    let settleTimer: ReturnType<typeof setTimeout> | undefined
+    let lastDisplayScale: number | undefined
+
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        if (cancelled) return
+
+        unlisten = await getCurrentWindow().onScaleChanged(event => {
+          const displayScale = event.payload.scaleFactor
+
+          // 100% zoom does not need a bounce refresh; calling setZoom(1) on
+          // every scale change is what made the UI jump continuously.
+          if (cancelled || isDefaultZoom(scaleFactor)) {
+            return
+          }
+
+          // Absorb side-effect scale events from an in-flight (or settling)
+          // setZoom bounce so they cannot start another refresh loop.
+          if (refreshing) {
+            lastDisplayScale = displayScale
+            return
+          }
+
+          if (sameDisplayScale(lastDisplayScale, displayScale)) {
+            return
+          }
+
+          lastDisplayScale = displayScale
+          refreshing = true
+          if (settleTimer !== undefined) {
+            clearTimeout(settleTimer)
+            settleTimer = undefined
+          }
+
+          void (async () => {
+            try {
+              const { getCurrentWebview } = await import(
+                '@tauri-apps/api/webview'
+              )
+              if (cancelled) return
+              const webview = getCurrentWebview()
+              // Bounce through 1 so WKWebView rebuilds its layer at the new DPR.
+              await webview.setZoom(1)
+              if (cancelled) return
+              await webview.setZoom(scaleFactor)
+            } catch (error) {
+              console.error(
+                'Failed to re-apply zoom after display scale change:',
+                error
+              )
+            } finally {
+              // Keep absorbing late scale events for a short settle window.
+              settleTimer = setTimeout(() => {
+                settleTimer = undefined
+                if (!cancelled) {
+                  refreshing = false
+                }
+              }, DISPLAY_SCALE_ZOOM_SETTLE_MS)
+            }
+          })()
+        })
+      } catch (error) {
+        console.error('Failed to listen for display scale changes:', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (settleTimer !== undefined) {
+        clearTimeout(settleTimer)
+      }
+      unlisten?.()
+    }
   }, [zoomLevel])
 
   // Keyboard shortcuts: Cmd/Ctrl + =/- for zoom, Cmd/Ctrl + 0 for reset
@@ -84,22 +210,23 @@ export function useZoom() {
         newZoom = tickValues[prevIndex] ?? currentZoom
       }
 
-      if (newZoom !== currentZoom && preferences) {
-        if (syncZoomLevels) {
-          patchPreferences.mutate({
-            zoom_level: newZoom,
-            mobile_zoom_level: newZoom,
-          })
-        } else if (isMobile) {
-          patchPreferences.mutate({ mobile_zoom_level: newZoom })
-        } else {
-          patchPreferences.mutate({ zoom_level: newZoom })
-        }
+      if (newZoom === currentZoom) return
+
+      // Always persist on this client only — never patch shared AppPreferences.
+      if (syncZoomLevels) {
+        updateZoom({
+          zoom_level: newZoom,
+          mobile_zoom_level: newZoom,
+        })
+      } else if (isMobile) {
+        updateZoom({ mobile_zoom_level: newZoom })
+      } else {
+        updateZoom({ zoom_level: newZoom })
       }
     }
 
     document.addEventListener('keydown', handleKeyDown, { capture: true })
     return () =>
       document.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [isMobile, patchPreferences, preferences, syncZoomLevels, zoomLevel])
+  }, [isMobile, syncZoomLevels, updateZoom, zoomLevel])
 }

@@ -55,6 +55,31 @@ export function rewriteCliAuthErrorMessage(
   )
 }
 
+/** True when Codex reports a missing Linux sandbox / bubblewrap dependency. */
+export function isCodexBubblewrapError(error: string): boolean {
+  const lower = error.toLowerCase()
+  return (
+    lower.includes('bubblewrap') ||
+    lower.includes('no system bwrap') ||
+    (lower.includes('bwrap') &&
+      (lower.includes('not found') ||
+        lower.includes('unavailable') ||
+        lower.includes('could not find')))
+  )
+}
+
+/** User-facing guidance when Codex sandbox cannot find bubblewrap. */
+export function rewriteCodexBubblewrapErrorMessage(error: string): string {
+  if (/apt install bubblewrap/i.test(error)) {
+    return error
+  }
+  return (
+    'Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap ' +
+    '(or your distro equivalent: dnf/pacman). Jean Settings → Codex also shows this warning ' +
+    'when bwrap is missing. See https://developers.openai.com/codex/concepts/sandboxing#prerequisites'
+  )
+}
+
 /** Login CLI args for the given backend. */
 export function loginArgsForBackend(
   backend: CliBackend,
@@ -64,7 +89,10 @@ export function loginArgsForBackend(
     case 'claude':
       return supportsAuthCommand ? ['auth', 'login'] : ['login']
     case 'codex':
-      return ['login']
+      // Device-code auth works in Jean's embedded terminal and on headless
+      // servers. Browser callback (`codex login`) often fails without a local
+      // display / callback listener (Codex itself recommends --device-auth).
+      return ['login', '--device-auth']
     case 'opencode':
       return ['auth', 'login']
     case 'cursor':

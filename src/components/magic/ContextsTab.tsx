@@ -43,6 +43,7 @@ interface ContextsTabProps {
   onRenameKeyDown: (e: React.KeyboardEvent, filename: string) => void
   onDeleteContext: (e: React.MouseEvent, context: SavedContext) => void
   onSessionClick: (sessionWithContext: SessionWithContext) => void
+  onGenerateSessionContext?: (sessionWithContext: SessionWithContext) => void
 }
 
 export function ContextsTab({
@@ -78,6 +79,7 @@ export function ContextsTab({
   onRenameKeyDown,
   onDeleteContext,
   onSessionClick,
+  onGenerateSessionContext,
 }: ContextsTabProps) {
   const isEmpty =
     !hasContexts && !hasSessions && !hasAttachedContexts && !isLoading && !error
@@ -143,7 +145,8 @@ export function ContextsTab({
             No saved contexts or sessions available.
             <br />
             <span className="text-sm">
-              Use &quot;Save Context&quot; to save a conversation summary.
+              Use &quot;Save Context&quot; for a summary, or inject another
+              session as an MCP pointer from this tab.
             </span>
           </div>
         ) : (
@@ -179,11 +182,15 @@ export function ContextsTab({
               </>
             )}
 
-            {/* Sessions Section - narrow list style */}
+            {/* Sessions Section — inject lightweight MCP pointer (not full history) */}
             {hasSessions && (
               <>
                 <div className="px-3 py-2 text-xs font-medium text-muted-foreground bg-muted/30 mt-2">
-                  Generate from Session
+                  Sessions
+                </div>
+                <div className="px-3 pb-1 text-[11px] text-muted-foreground">
+                  Click to inject an MCP pointer (agent fetches messages on
+                  demand). File icon generates a full AI summary instead.
                 </div>
                 {filteredEntries.map(entry => {
                   const entryElement = (
@@ -192,6 +199,7 @@ export function ContextsTab({
                       entry={entry}
                       generatingSessionId={generatingSessionId}
                       onSessionClick={onSessionClick}
+                      onGenerateSessionContext={onGenerateSessionContext}
                       selectedIndex={selectedIndex}
                       sessionStartIndex={sessionStartIndex}
                       setSelectedIndex={setSelectedIndex}

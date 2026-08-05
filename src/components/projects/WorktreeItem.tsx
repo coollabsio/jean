@@ -4,7 +4,13 @@ import type {
   IndicatorStatus,
   IndicatorVariant,
 } from '@/components/ui/status-indicator'
-import { ArrowDown, ArrowUp, ChevronDown, GitBranch } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowDownUp,
+  ArrowUp,
+  ChevronDown,
+  GitBranch,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { isBaseSession, type Worktree } from '@/types/projects'
@@ -38,6 +44,7 @@ import {
   fetchWorktreesStatus,
   triggerImmediateGitPoll,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
 import {
   Tooltip,
@@ -613,10 +620,65 @@ export function WorktreeItem({
     [pickRemoteOrRun, worktree.path, worktree.pr_number, projectId]
   )
 
+  const gitSyncButton = preferences?.git_sync_button ?? false
+
+  const handleSync = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+
+      const runSync = async (remote?: string) => {
+        await performGitSync({
+          needsPull: behindCount > 0,
+          needsPush: pushCount > 0,
+          pull: {
+            worktreeId: worktree.id,
+            worktreePath: worktree.path,
+            baseBranch: worktree.base_branch ?? defaultBranch,
+            projectId,
+            remote: worktree.base_remote,
+            onMergeConflict: () => {
+              selectWorktree(worktree.id)
+              setTimeout(() => {
+                window.dispatchEvent(
+                  new CustomEvent('magic-command', {
+                    detail: { command: 'resolve-conflicts' },
+                  })
+                )
+              }, 100)
+            },
+          },
+          prNumber: worktree.pr_number,
+          pushRemote: remote,
+        })
+      }
+
+      if (pushCount > 0 && pushNeedsRemotePicker(worktree.pr_number)) {
+        pickRemoteOrRun(runSync)
+      } else {
+        void runSync()
+      }
+    },
+    [
+      behindCount,
+      pushCount,
+      worktree.id,
+      worktree.path,
+      worktree.base_branch,
+      worktree.base_remote,
+      worktree.pr_number,
+      defaultBranch,
+      projectId,
+      selectWorktree,
+      pickRemoteOrRun,
+    ]
+  )
+
   return (
     <div>
       <WorktreeContextMenu actions={menuActions}>
         <div
+          role="button"
+          tabIndex={0}
           className={cn(
             'group relative flex cursor-pointer items-center gap-1.5 py-1.5 pr-2 overflow-hidden transition-colors duration-150',
             isNarrowSidebar ? 'pl-4' : 'pl-7',
@@ -625,6 +687,12 @@ export function WorktreeItem({
               : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
           )}
           onClick={handleClick}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleClick()
+            }
+          }}
           {...middleClickClose(handleWorktreeMiddleClose)}
           onDoubleClick={handleDoubleClick}
         >
@@ -662,6 +730,7 @@ export function WorktreeItem({
               {/* Chevron for expand/collapse sessions */}
               <button
                 type="button"
+                aria-label={isExpanded ? 'Collapse sessions' : 'Expand sessions'}
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
                 onClick={handleChevronClick}
               >
@@ -686,42 +755,80 @@ export function WorktreeItem({
             </span>
           )}
 
-          {/* Pull badge - shown when behind remote */}
-          {behindCount > 0 && (
+          {/* Sync / Pull / Push badges */}
+          {gitSyncButton && (behindCount > 0 || pushCount > 0) ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={handlePull}
-                  className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                  onClick={handleSync}
+                  className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-500 transition-colors hover:bg-violet-500/20"
                 >
                   <span className="flex items-center gap-0.5">
-                    <ArrowDown className="h-3 w-3" />
-                    {behindCount}
+                    <ArrowDownUp className="h-3 w-3" />
+                    {behindCount > 0 && pushCount > 0
+                      ? `${behindCount}/${pushCount}`
+                      : behindCount > 0
+                        ? behindCount
+                        : pushCount}
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}</TooltipContent>
+              <TooltipContent>
+                {(() => {
+                  const parts: string[] = []
+                  if (behindCount > 0) {
+                    parts.push(
+                      `pull ${behindCount} commit${behindCount > 1 ? 's' : ''}`
+                    )
+                  }
+                  if (pushCount > 0) {
+                    parts.push(
+                      `push ${pushCount} commit${pushCount > 1 ? 's' : ''}`
+                    )
+                  }
+                  return `Sync: ${parts.join(', ')}`
+                })()}
+              </TooltipContent>
             </Tooltip>
-          )}
+          ) : (
+            <>
+              {behindCount > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handlePull}
+                      className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                    >
+                      <span className="flex items-center gap-0.5">
+                        <ArrowDown className="h-3 w-3" />
+                        {behindCount}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}</TooltipContent>
+                </Tooltip>
+              )}
 
-          {/* Push badge - unpushed commits */}
-          {pushCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handlePush}
-                  className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
-                >
-                  <span className="flex items-center gap-0.5">
-                    <ArrowUp className="h-3 w-3" />
-                    {pushCount}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}</TooltipContent>
-            </Tooltip>
+              {pushCount > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handlePush}
+                      className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
+                    >
+                      <span className="flex items-center gap-0.5">
+                        <ArrowUp className="h-3 w-3" />
+                        {pushCount}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{`Push ${pushCount} commit${pushCount > 1 ? 's' : ''} to remote`}</TooltipContent>
+                </Tooltip>
+              )}
+            </>
           )}
 
           {/* Uncommitted changes */}
@@ -748,48 +855,64 @@ export function WorktreeItem({
             isNarrowSidebar ? 'ml-6' : 'ml-9'
           )}
         >
-          {sessionGroups.map(group => (
-            <div key={group.key}>
-              <div className="pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {group.title}{' '}
-                <span className="text-muted-foreground/60">
-                  {group.cards.length}
-                </span>
+          {sessionGroups.map(group => {
+            const groupConfig = statusConfig[group.indicatorStatus]
+            return (
+              <div key={group.key}>
+                <div className="flex items-center gap-1.5 pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <StatusIndicator
+                    status={groupConfig.indicatorStatus}
+                    variant={groupConfig.indicatorVariant}
+                    shape={groupConfig.indicatorShape}
+                    label={group.title}
+                    className="h-1.5 w-1.5 shrink-0"
+                  />
+                  <span>{group.title}</span>
+                  <span className="text-muted-foreground/60">
+                    {group.cards.length}
+                  </span>
+                </div>
+                {group.cards.map(card => {
+                  const config = statusConfig[card.status]
+                  return (
+                    <button
+                      type="button"
+                      key={card.session.id}
+                      className={cn(
+                        'flex w-full items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate text-left',
+                        activeSessionId === card.session.id && isSelected
+                          ? 'text-foreground bg-primary/10 font-medium'
+                          : activeSessionId === card.session.id
+                            ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                      )}
+                      onClick={e => {
+                        e.stopPropagation()
+                        handleSessionSelect(card.session.id)
+                      }}
+                      {...middleClickClose(() =>
+                        handleSessionMiddleClose(card.session)
+                      )}
+                    >
+                      <StatusIndicator
+                        status={config.indicatorStatus}
+                        variant={config.indicatorVariant}
+                        shape={config.indicatorShape}
+                        label={config.label}
+                        className="h-1.5 w-1.5 shrink-0"
+                      />
+                      <span
+                        className="truncate text-xs"
+                        title={`${config.label}: ${card.session.name || 'Untitled'}`}
+                      >
+                        {card.session.name || 'Untitled'}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-              {group.cards.map(card => {
-                const config = statusConfig[card.status]
-                return (
-                  <div
-                    key={card.session.id}
-                    className={cn(
-                      'flex items-center gap-1.5 pl-5 py-1 cursor-pointer text-sm truncate',
-                      activeSessionId === card.session.id && isSelected
-                        ? 'text-foreground bg-primary/10 font-medium'
-                        : activeSessionId === card.session.id
-                          ? 'text-foreground/80 hover:text-foreground hover:bg-accent/50'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
-                    )}
-                    onClick={e => {
-                      e.stopPropagation()
-                      handleSessionSelect(card.session.id)
-                    }}
-                    {...middleClickClose(() =>
-                      handleSessionMiddleClose(card.session)
-                    )}
-                  >
-                    <StatusIndicator
-                      status={config.indicatorStatus}
-                      variant={config.indicatorVariant}
-                      className="h-1.5 w-1.5 shrink-0"
-                    />
-                    <span className="truncate text-xs">
-                      {card.session.name || 'Untitled'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

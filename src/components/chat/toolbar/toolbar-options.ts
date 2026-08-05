@@ -4,6 +4,7 @@ import {
   type ClaudeModel,
 } from '@/types/preferences'
 import type { EffortLevel, ThinkingLevel } from '@/types/chat'
+import { isGeminiModel } from '@/lib/model-utils'
 
 export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] =
   modelOptions.map(option => ({
@@ -109,6 +110,16 @@ export const KIMI_EFFORT_LEVEL_OPTIONS: {
   { value: 'high', label: 'Thinking On', description: 'Enable thinking' },
 ]
 
+export const ADAPTIVE_EFFORT_OPTION: {
+  value: EffortLevel
+  label: string
+  description: string
+} = {
+  value: 'adaptive',
+  label: 'Adaptive/Default',
+  description: 'Model default (no forced level)',
+}
+
 export const THINKING_LEVEL_OPTIONS: {
   value: ThinkingLevel
   label: string
@@ -153,6 +164,21 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
   { value: 'high', label: 'High', description: 'High' },
   { value: 'xhigh', label: 'xHigh', description: 'Extra high' },
 ]
+
+/**
+ * Prepend Adaptive/Default only for Gemini models (native adaptive thinking
+ * when no level is forced). Non-Gemini levels are returned unchanged.
+ */
+export function withAdaptiveEffortOption<
+  T extends { value: string; label: string; description?: string },
+>(
+  levels: T[],
+  model?: string | null
+): (T | typeof ADAPTIVE_EFFORT_OPTION)[] {
+  if (!isGeminiModel(model)) return levels
+  if (levels.some(level => level.value === 'adaptive')) return levels
+  return [ADAPTIVE_EFFORT_OPTION, ...levels]
+}
 
 // Grok supports low/medium/high/xhigh/max natively. ultracode is a Jean
 // main-loop concept (xHigh + workflows), not a Grok CLI effort level.

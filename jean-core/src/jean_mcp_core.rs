@@ -146,10 +146,7 @@ pub fn handle_protocol_message(
 
 pub fn tool_registry() -> Value {
     // Split into multiple json! arrays so the macro does not hit recursion_limit.
-    let mut tools = tool_registry_core()
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let mut tools = tool_registry_core().as_array().cloned().unwrap_or_default();
     if let Some(session) = tool_registry_session().as_array() {
         tools.extend(session.iter().cloned());
     }
@@ -190,7 +187,7 @@ fn tool_registry_session() -> Value {
     json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Create a new chat session in an existing non-archived worktree. Returns the session id needed for send_chat_message. Fails if the worktree is archived — call unarchive_worktree first.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing. Fails immediately if the session or its worktree is archived — call unarchive_session / unarchive_worktree first. Use this to kick off investigations.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing. Fails immediately if the session or its worktree is archived — call unarchive_session / unarchive_worktree first. Use this to kick off investigations. When model/executionMode are omitted, Jean uses the session's selected model and execution mode (set via set_session_model or the Jean UI). Pass model for a one-shot override of this turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string","description":"Optional one-shot model override. When omitted, uses the session selected model (set_session_model / UI)."},"executionMode":{"type":"string","enum":["plan","build","yolo"],"description":"Optional one-shot execution mode. When omitted, uses the session selected execution mode."}},"required":["sessionId","message"],"additionalProperties":false}},
         {"name":"archive_session","description":"Archive a chat session (hide it from the active session list). Prefer this over delete when history may still be useful. Cannot run send_chat_message on an archived session until unarchive_session is called.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"unarchive_session","description":"Restore an archived chat session so it can run again. Also unarchives the parent worktree when it is archived. Call this before send_chat_message if a previous attempt failed because the session was archived.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"get_session_status","description":"Get whether a Jean session is idle/running/resumable/cancelled/error plus latest run metadata. Use after send_chat_message to poll fire-and-forget work.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
@@ -268,8 +265,8 @@ async fn run_tool(
             .map_err(ToolError::internal),
         "add_project" => {
             let path = require_nonempty_str(&args, "path")?;
-            let parent_id = optional_str(&args, "parentId")
-                .or_else(|| optional_str(&args, "parent_id"));
+            let parent_id =
+                optional_str(&args, "parentId").or_else(|| optional_str(&args, "parent_id"));
             let mut payload = serde_json::Map::new();
             payload.insert("path".to_string(), Value::String(path));
             if let Some(parent_id) = parent_id {
@@ -282,8 +279,8 @@ async fn run_tool(
         "clone_project" => {
             let url = require_nonempty_str(&args, "url")?;
             let path = require_nonempty_str(&args, "path")?;
-            let parent_id = optional_str(&args, "parentId")
-                .or_else(|| optional_str(&args, "parent_id"));
+            let parent_id =
+                optional_str(&args, "parentId").or_else(|| optional_str(&args, "parent_id"));
             let mut payload = serde_json::Map::new();
             payload.insert("url".to_string(), Value::String(url));
             payload.insert("path".to_string(), Value::String(path));
@@ -296,8 +293,8 @@ async fn run_tool(
         }
         "init_project" => {
             let path = require_nonempty_str(&args, "path")?;
-            let parent_id = optional_str(&args, "parentId")
-                .or_else(|| optional_str(&args, "parent_id"));
+            let parent_id =
+                optional_str(&args, "parentId").or_else(|| optional_str(&args, "parent_id"));
             let mut payload = serde_json::Map::new();
             payload.insert("path".to_string(), Value::String(path));
             if let Some(parent_id) = parent_id {
@@ -456,8 +453,8 @@ async fn run_tool(
             .map_err(ToolError::internal)
         }
         "list_archived_worktrees" => {
-            let project_id = optional_str(&args, "projectId")
-                .or_else(|| optional_str(&args, "project_id"));
+            let project_id =
+                optional_str(&args, "projectId").or_else(|| optional_str(&args, "project_id"));
             let result = dispatch_command(app, "list_archived_worktrees", json!({}))
                 .await
                 .map_err(ToolError::internal)?;
@@ -484,13 +481,9 @@ async fn run_tool(
         }
         "delete_worktree" => {
             let worktree_id = require_str(&args, "worktreeId")?;
-            dispatch_command(
-                app,
-                "delete_worktree",
-                json!({ "worktreeId": worktree_id }),
-            )
-            .await
-            .map_err(ToolError::internal)?;
+            dispatch_command(app, "delete_worktree", json!({ "worktreeId": worktree_id }))
+                .await
+                .map_err(ToolError::internal)?;
             Ok(deletion_started_result(&worktree_id, "delete"))
         }
         "permanently_delete_worktree" => {
@@ -502,10 +495,7 @@ async fn run_tool(
             )
             .await
             .map_err(ToolError::internal)?;
-            Ok(deletion_started_result(
-                &worktree_id,
-                "permanently_delete",
-            ))
+            Ok(deletion_started_result(&worktree_id, "permanently_delete"))
         }
         "create_worktree" => {
             let project_id = require_str(&args, "projectId")?;
@@ -1170,8 +1160,8 @@ async fn run_tool(
             let worktree_id = require_str(&args, "worktreeId")?;
             ensure_mcp_worktree_not_archived(app, &worktree_id)?;
             let worktree_path = resolve_worktree_path(app, &worktree_id)?;
-            let session_id = optional_str(&args, "sessionId")
-                .or_else(|| optional_str(&args, "session_id"));
+            let session_id =
+                optional_str(&args, "sessionId").or_else(|| optional_str(&args, "session_id"));
             let custom_prompt = optional_str(&args, "customPrompt")
                 .or_else(|| optional_str(&args, "custom_prompt"));
             let model = optional_str(&args, "model");
@@ -1655,7 +1645,11 @@ pub(crate) fn apply_yolo_investigation_fix_directive(
     }
 
     let cleaned = strip_investigation_anti_fix_lines(message);
-    format!("{}\n\n{}\n", cleaned.trim_end(), YOLO_INVESTIGATION_FIX_APPEND)
+    format!(
+        "{}\n\n{}\n",
+        cleaned.trim_end(),
+        YOLO_INVESTIGATION_FIX_APPEND
+    )
 }
 
 fn strip_investigation_anti_fix_lines(prompt: &str) -> String {
@@ -2393,8 +2387,7 @@ mod tests {
         let tools = tool_registry();
         let create_worktree = find_tool(&tools, "create_worktree");
         assert_eq!(
-            create_worktree["inputSchema"]["properties"]["ghsaId"]["type"],
-            "string",
+            create_worktree["inputSchema"]["properties"]["ghsaId"]["type"], "string",
             "create_worktree must expose a ghsaId input for security advisories"
         );
         let description = create_worktree["description"].as_str().unwrap_or_default();
@@ -2403,7 +2396,8 @@ mod tests {
             "create_worktree description must document ghsaId"
         );
         assert!(
-            description.contains("security advisory") || description.contains("security advisories"),
+            description.contains("security advisory")
+                || description.contains("security advisories"),
             "create_worktree description must mention security advisories"
         );
     }
@@ -2501,8 +2495,7 @@ mod tests {
         let worktree = json!({
             "advisory_ghsa_id": "GHSA-xxxx-yyyy-zzzz",
         });
-        let prompt =
-            build_investigation_prompt(&prefs, &worktree, InvestigationKind::Advisory);
+        let prompt = build_investigation_prompt(&prefs, &worktree, InvestigationKind::Advisory);
         assert!(
             prompt.contains("GHSA-xxxx-yyyy-zzzz"),
             "advisory investigation prompt should include the GHSA id"
@@ -2668,21 +2661,18 @@ mod tests {
         }
 
         let archive = find_tool(&tools, "archive_session");
-        assert_eq!(
-            archive["inputSchema"]["required"],
-            json!(["sessionId"])
-        );
+        assert_eq!(archive["inputSchema"]["required"], json!(["sessionId"]));
         let unarchive = find_tool(&tools, "unarchive_session");
-        assert_eq!(
-            unarchive["inputSchema"]["required"],
-            json!(["sessionId"])
+        assert_eq!(unarchive["inputSchema"]["required"], json!(["sessionId"]));
+        let send = find_tool(&tools, "send_chat_message");
+        let send_desc = send["description"].as_str().unwrap_or("");
+        assert!(
+            send_desc.contains("archived"),
+            "send_chat_message description should mention archive rejection"
         );
         assert!(
-            find_tool(&tools, "send_chat_message")["description"]
-                .as_str()
-                .unwrap_or("")
-                .contains("archived"),
-            "send_chat_message description should mention archive rejection"
+            send_desc.contains("selected model"),
+            "send_chat_message description should mention session model fallback"
         );
     }
 
@@ -2778,15 +2768,10 @@ mod tests {
         );
 
         let create_pr = find_tool(&tools, "create_pull_request");
-        assert_eq!(
-            create_pr["inputSchema"]["required"],
-            json!(["worktreeId"])
-        );
-        assert!(
-            create_pr["inputSchema"]["properties"]
-                .get("sessionId")
-                .is_some()
-        );
+        assert_eq!(create_pr["inputSchema"]["required"], json!(["worktreeId"]));
+        assert!(create_pr["inputSchema"]["properties"]
+            .get("sessionId")
+            .is_some());
 
         for limited in [
             "create_commit",
@@ -2839,9 +2824,7 @@ mod tests {
 
         for name in ["delete_worktree", "permanently_delete_worktree"] {
             let tool = find_tool(&tools, name);
-            let description = tool["description"]
-                .as_str()
-                .expect("tool description");
+            let description = tool["description"].as_str().expect("tool description");
 
             assert!(description.contains("background"));
             assert!(description.contains("started"));
@@ -3049,8 +3032,12 @@ mod tests {
         let result = apply_yolo_investigation_fix_directive(prompt, "yolo");
         assert!(result.contains(YOLO_INVESTIGATION_FIX_MARKER));
         assert!(result.contains("After investigation, fix the issue"));
-        assert!(!result.to_ascii_lowercase().contains("if you are in yolo mode"));
-        assert!(!result.to_ascii_lowercase().contains("do not implement fixes"));
+        assert!(!result
+            .to_ascii_lowercase()
+            .contains("if you are in yolo mode"));
+        assert!(!result
+            .to_ascii_lowercase()
+            .contains("do not implement fixes"));
         assert!(result.contains("Propose solution"));
     }
 

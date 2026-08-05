@@ -43,6 +43,7 @@ interface SlashPopoverProps {
   installedBackends?: CliBackend[]
   /** Active session backend — gates backend-native built-ins (/goal). */
   sessionBackend?: CliBackend
+  triggerKind?: 'mixed' | 'command' | 'skill'
 }
 
 const GOAL_BUILTIN: ClaudeCommand = {
@@ -84,6 +85,7 @@ export function SlashPopover({
   handleRef,
   installedBackends,
   sessionBackend,
+  triggerKind = 'mixed',
 }: SlashPopoverProps) {
   const backendGroups = useAllBackendSkills(worktreePath, installedBackends)
   const listRef = useRef<HTMLDivElement>(null)
@@ -93,6 +95,7 @@ export function SlashPopover({
     const items: ListItem[] = []
 
     if (
+      triggerKind !== 'skill' &&
       isAtPromptStart &&
       (sessionBackend === 'codex' || sessionBackend === 'grok')
     ) {
@@ -102,7 +105,7 @@ export function SlashPopover({
     }
 
     for (const group of backendGroups) {
-      if (isAtPromptStart) {
+      if (triggerKind !== 'skill' && isAtPromptStart) {
         fuzzySearchItems(group.commands, searchQuery, 10).forEach(cmd => {
           items.push({
             type: 'command',
@@ -112,18 +115,29 @@ export function SlashPopover({
           })
         })
       }
-      fuzzySearchItems(group.skills, searchQuery, 10).forEach(skill => {
-        items.push({
-          type: 'skill',
-          backend: group.backend,
-          data: skill,
-          pluginName: group.pluginName,
+      if (
+        triggerKind !== 'command' &&
+        (triggerKind === 'mixed' || group.backend === sessionBackend)
+      ) {
+        fuzzySearchItems(group.skills, searchQuery, 10).forEach(skill => {
+          items.push({
+            type: 'skill',
+            backend: group.backend,
+            data: skill,
+            pluginName: group.pluginName,
+          })
         })
-      })
+      }
     }
 
     return items.slice(0, 15)
-  }, [backendGroups, searchQuery, isAtPromptStart, sessionBackend])
+  }, [
+    backendGroups,
+    searchQuery,
+    isAtPromptStart,
+    sessionBackend,
+    triggerKind,
+  ])
 
   const renderGroups = useMemo(() => {
     const groups: RenderGroup[] = []
@@ -263,7 +277,13 @@ export function SlashPopover({
         <Command shouldFilter={false}>
           <CommandList ref={listRef} className="max-h-[250px]">
             {filteredItems.length === 0 ? (
-              <CommandEmpty>No commands or skills found</CommandEmpty>
+              <CommandEmpty>
+                {triggerKind === 'skill'
+                  ? 'No skills found'
+                  : triggerKind === 'command'
+                    ? 'No commands found'
+                    : 'No commands or skills found'}
+              </CommandEmpty>
             ) : (
               <>
                 {renderGroups.map(group => (
@@ -294,7 +314,13 @@ export function SlashPopover({
                           )}
                           <div className="flex flex-col min-w-0">
                             <span className="truncate text-sm font-medium">
-                              /{item.data.name}
+                              {/* Codex skills use $name; other backends keep /name */}
+                              {isCommand
+                                ? '/'
+                                : item.backend === 'codex'
+                                  ? '$'
+                                  : '/'}
+                              {item.data.name}
                             </span>
                             {item.data.description && (
                               <span className="truncate text-xs text-muted-foreground">

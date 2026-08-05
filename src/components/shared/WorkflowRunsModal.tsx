@@ -58,7 +58,11 @@ import {
 } from '@/types/preferences'
 import type { WorkflowRun } from '@/types/github'
 import type { Project, Worktree } from '@/types/projects'
-import { isReusableWorkflowInvestigationSession } from './workflow-run-utils'
+import {
+  getLatestFailedWorkflowRuns,
+  isFailedWorkflowRun,
+  isReusableWorkflowInvestigationSession,
+} from './workflow-run-utils'
 
 function timeAgo(dateString: string): string {
   const seconds = Math.floor(
@@ -71,10 +75,6 @@ function timeAgo(dateString: string): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
-}
-
-function isFailedRun(run: WorkflowRun): boolean {
-  return run.conclusion === 'failure' || run.conclusion === 'startup_failure'
 }
 
 /** Extract the numeric run ID from a GitHub Actions URL */
@@ -128,6 +128,7 @@ const SidebarItem = forwardRef<
 
   return (
     <button
+      type="button"
       ref={ref}
       onClick={onClick}
       className={`w-full text-left rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-accent ${isSelected || isFocused ? 'bg-accent font-medium' : ''}`}
@@ -166,6 +167,9 @@ export function WorkflowRunsModal() {
   const setWorkflowRunsModalOpen = useUIStore(
     state => state.setWorkflowRunsModalOpen
   )
+  const markFailedWorkflowRunsSeen = useUIStore(
+    state => state.markFailedWorkflowRunsSeen
+  )
 
   const {
     data: result,
@@ -188,6 +192,8 @@ export function WorkflowRunsModal() {
   }, [queryClient, workflowRunsModalProjectPath, workflowRunsModalBranch])
 
   const runs = useMemo(() => result?.runs ?? [], [result?.runs])
+  /** Unread failed run IDs for the current modal open (for "New" indicators). */
+  const [unreadOnOpen, setUnreadOnOpen] = useState<Set<number>>(() => new Set())
   const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null)
   const [focusedIndex, setFocusedIndex] = useState(0)
   const [focusedPane, setFocusedPane] = useState<'sidebar' | 'list'>('sidebar')
@@ -197,19 +203,52 @@ export function WorkflowRunsModal() {
   const itemRefs = useRef<(HTMLDivElement | null)[]>([])
   const sidebarItemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
+  // When the user opens workflow runs, mark current latest failures as seen so
+  // badges clear across sidebar / header / worktree menus. Keep a session
+  // snapshot of which IDs were unread so the list can still show "New".
+  useEffect(() => {
+    if (!workflowRunsModalOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUnreadOnOpen(new Set())
+      return
+    }
+    if (runs.length === 0) return
+
+    const seenSet = new Set(useUIStore.getState().seenFailedWorkflowRunIds)
+    const latestFailed = getLatestFailedWorkflowRuns(runs)
+    const unreadRunIds = latestFailed.flatMap(r =>
+      seenSet.has(r.databaseId) ? [] : [r.databaseId]
+    )
+    if (unreadRunIds.length === 0) return
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setUnreadOnOpen(prev => {
+      let changed = false
+      const next = new Set(prev)
+      for (const id of unreadRunIds) {
+        if (!next.has(id)) {
+          next.add(id)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    markFailedWorkflowRunsSeen(unreadRunIds)
+  }, [workflowRunsModalOpen, runs, markFailedWorkflowRunsSeen])
+
   const groups = useMemo(() => {
     const groupMap = new Map<string, WorkflowGroup>()
     for (const run of runs) {
       const existing = groupMap.get(run.workflowName)
       if (existing) {
         existing.totalCount++
-        if (isFailedRun(run)) existing.failedCount++
+        if (isFailedWorkflowRun(run)) existing.failedCount++
       } else {
         // First occurrence per workflow = latest (runs are sorted by date)
         const status: WorkflowGroup['latestStatus'] =
           run.status === 'in_progress' || run.status === 'queued'
             ? 'pending'
-            : isFailedRun(run)
+            : isFailedWorkflowRun(run)
               ? 'failure'
               : run.conclusion === 'success'
                 ? 'success'
@@ -217,7 +256,7 @@ export function WorkflowRunsModal() {
         groupMap.set(run.workflowName, {
           workflowName: run.workflowName,
           totalCount: 1,
-          failedCount: isFailedRun(run) ? 1 : 0,
+          failedCount: isFailedWorkflowRun(run) ? 1 : 0,
           latestStatus: status,
         })
       }
@@ -232,7 +271,19 @@ export function WorkflowRunsModal() {
     return runs.filter(run => run.workflowName === selectedWorkflow)
   }, [runs, selectedWorkflow])
 
-  // Reset focus when modal opens or runs change
+  const scrollFocusedItemIntoView = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      itemRefs.current[index]?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [])
+
+  const scrollSidebarItemIntoView = useCallback((index: number) => {
+    requestAnimationFrame(() => {
+      sidebarItemRefs.current[index]?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [])
+
+  // Reset focus when modal opens or runs change (scroll in the same turn)
   useEffect(() => {
     if (workflowRunsModalOpen) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -244,25 +295,15 @@ export function WorkflowRunsModal() {
 
       setSidebarFocusedIndex(0)
       requestAnimationFrame(() => sidebarRef.current?.focus())
+      scrollFocusedItemIntoView(0)
+      scrollSidebarItemIntoView(0)
     }
-  }, [workflowRunsModalOpen, runs.length])
-
-  // Reset focus when filter changes
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFocusedIndex(0)
-  }, [selectedWorkflow])
-
-  // Scroll focused items into view
-  useEffect(() => {
-    itemRefs.current[focusedIndex]?.scrollIntoView({ block: 'nearest' })
-  }, [focusedIndex])
-
-  useEffect(() => {
-    sidebarItemRefs.current[sidebarFocusedIndex]?.scrollIntoView({
-      block: 'nearest',
-    })
-  }, [sidebarFocusedIndex])
+  }, [
+    workflowRunsModalOpen,
+    runs.length,
+    scrollFocusedItemIntoView,
+    scrollSidebarItemIntoView,
+  ])
 
   const title = useMemo(() => {
     if (workflowRunsModalBranch) {
@@ -577,8 +618,12 @@ export function WorkflowRunsModal() {
     (index: number) => {
       setSelectedWorkflow(sidebarItems[index] ?? null)
       setSidebarFocusedIndex(index)
+      scrollSidebarItemIntoView(index)
+      // Reset list focus with the filter change (no chained effect)
+      setFocusedIndex(0)
+      scrollFocusedItemIntoView(0)
     },
-    [sidebarItems]
+    [sidebarItems, scrollFocusedItemIntoView, scrollSidebarItemIntoView]
   )
 
   const handleKeyDown = useCallback(
@@ -612,20 +657,27 @@ export function WorkflowRunsModal() {
             e.preventDefault()
             setFocusedPane('list')
             setFocusedIndex(0)
+            scrollFocusedItemIntoView(0)
             break
         }
       } else {
         switch (e.key) {
           case 'ArrowDown':
-          case 'j':
+          case 'j': {
             e.preventDefault()
-            setFocusedIndex(i => Math.min(i + 1, displayedRuns.length - 1))
+            const next = Math.min(focusedIndex + 1, displayedRuns.length - 1)
+            setFocusedIndex(next)
+            scrollFocusedItemIntoView(next)
             break
+          }
           case 'ArrowUp':
-          case 'k':
+          case 'k': {
             e.preventDefault()
-            setFocusedIndex(i => Math.max(i - 1, 0))
+            const next = Math.max(focusedIndex - 1, 0)
+            setFocusedIndex(next)
+            scrollFocusedItemIntoView(next)
             break
+          }
           case 'ArrowLeft':
           case 'h':
             e.preventDefault()
@@ -640,7 +692,7 @@ export function WorkflowRunsModal() {
           case 'm': {
             e.preventDefault()
             const run = displayedRuns[focusedIndex]
-            if (run && isFailedRun(run)) handleInvestigate(run)
+            if (run && isFailedWorkflowRun(run)) handleInvestigate(run)
             break
           }
         }
@@ -656,6 +708,7 @@ export function WorkflowRunsModal() {
       handleRunClick,
       handleInvestigate,
       handleRefresh,
+      scrollFocusedItemIntoView,
     ]
   )
 
@@ -701,6 +754,8 @@ export function WorkflowRunsModal() {
         ) : (
           <div
             ref={sidebarRef}
+            role="group"
+            aria-label="Workflow runs"
             tabIndex={0}
             onKeyDown={handleKeyDown}
             className="flex min-h-0 flex-1 flex-col gap-3 outline-none sm:flex-row sm:gap-4"
@@ -736,6 +791,9 @@ export function WorkflowRunsModal() {
                       onClick={() => {
                         setSelectedWorkflow(workflowName)
                         setSidebarFocusedIndex(idx)
+                        scrollSidebarItemIntoView(idx)
+                        setFocusedIndex(0)
+                        scrollFocusedItemIntoView(0)
                       }}
                     />
                   )
@@ -772,10 +830,16 @@ export function WorkflowRunsModal() {
                           <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
                             {run.headBranch}
                           </span>
-                          {isFailedRun(run) && (
+                          {unreadOnOpen.has(run.databaseId) && (
+                            <span className="shrink-0 rounded bg-blue-500/15 px-1 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                              New
+                            </span>
+                          )}
+                          {isFailedWorkflowRun(run) && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
+                                  type="button"
                                   onClick={e => {
                                     e.stopPropagation()
                                     handleInvestigate(run)

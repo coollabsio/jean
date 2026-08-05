@@ -99,6 +99,10 @@ export interface GitHubReviewComment {
   path: string
   startLine?: number
   line?: number
+  /** Whether GitHub considers the review thread outdated (line moved/changed). */
+  isOutdated?: boolean
+  /** Whether the review thread has been marked resolved on GitHub. */
+  isResolved?: boolean
 }
 
 export interface GitHubPullRequestDetail extends GitHubPullRequest {

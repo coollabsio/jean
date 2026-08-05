@@ -199,6 +199,17 @@ export interface GitPullOptions {
   projectId?: string
   remote?: string
   onMergeConflict?: () => void
+  /** Reuse an existing toast id (e.g. from performGitSync) */
+  toastId?: string | number
+  /** Override the loading toast message */
+  loadingMessage?: string
+  /** Override the success toast message */
+  successMessage?: string
+  /**
+   * When true, leave the toast in loading state on success so the caller can
+   * continue a multi-step flow (e.g. push after pull during sync).
+   */
+  keepLoadingOnSuccess?: boolean
 }
 
 /**
@@ -209,8 +220,10 @@ export interface GitPullOptions {
  * - If a build/yolo session is running → show error, refuse to stash
  *
  * All 9 pull locations in the app should use this function.
+ *
+ * @returns true if pull completed successfully, false on failure/conflict
  */
-export async function performGitPull(opts: GitPullOptions): Promise<void> {
+export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
   const {
     worktreeId,
     worktreePath,
@@ -219,9 +232,15 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
     projectId,
     remote,
     onMergeConflict,
+    toastId: existingToastId,
+    loadingMessage,
+    successMessage,
+    keepLoadingOnSuccess,
   } = opts
-  const { toast } = await import('sonner')
-  const { useChatStore } = await import('@/store/chat-store')
+  const [{ toast }, { useChatStore }] = await Promise.all([
+    import('sonner'),
+    import('@/store/chat-store'),
+  ])
 
   const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
 
@@ -229,13 +248,23 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
     setWorktreeLoading(worktreeId, 'commit')
   }
   const label = branchLabel || baseBranch
-  const toastId = toast.loading(`Pulling changes on ${label}...`)
+  const toastId =
+    existingToastId ??
+    toast.loading(loadingMessage ?? `Pulling changes on ${label}...`)
+  if (existingToastId && loadingMessage) {
+    toast.loading(loadingMessage, { id: existingToastId })
+  }
 
   try {
     await gitPull(worktreePath, baseBranch, remote)
     await triggerImmediateGitPoll()
     if (projectId) fetchWorktreesStatus(projectId)
-    toast.success('Changes pulled', { id: toastId })
+    if (keepLoadingOnSuccess) {
+      // Caller continues the flow (e.g. push after pull)
+    } else {
+      toast.success(successMessage ?? 'Changes pulled', { id: toastId })
+    }
+    return true
   } catch (error) {
     const errorStr = String(error)
 
@@ -254,7 +283,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
           'Cannot auto-stash: a build/yolo session is running on this worktree. Stop it first.',
           { id: toastId }
         )
-        return
+        return false
       }
 
       toast.loading('Auto-stashing local changes...', { id: toastId })
@@ -265,9 +294,20 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
         await gitStashPop(worktreePath)
         await triggerImmediateGitPoll()
         if (projectId) fetchWorktreesStatus(projectId)
-        toast.success('Pulled (auto-stashed and restored local changes)', {
-          id: toastId,
-        })
+        if (keepLoadingOnSuccess) {
+          toast.loading(loadingMessage ?? `Syncing ${label}...`, {
+            id: toastId,
+          })
+        } else {
+          toast.success(
+            successMessage ??
+              'Pulled (auto-stashed and restored local changes)',
+            {
+              id: toastId,
+            }
+          )
+        }
+        return true
       } catch (stashError) {
         const stashErrStr = String(stashError)
         if (
@@ -302,8 +342,8 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
                 : stashErrStr,
           })
         }
+        return false
       }
-      return
     }
 
     // Merge conflict path
@@ -326,14 +366,70 @@ export async function performGitPull(opts: GitPullOptions): Promise<void> {
           },
         },
       })
-      return
+      return false
     }
 
     toast.error(`Pull failed: ${errorStr}`, { id: toastId })
+    return false
   } finally {
     if (worktreeId) {
       clearWorktreeLoading(worktreeId)
     }
+  }
+}
+
+export interface GitSyncOptions {
+  /** When true, pull first (if pull fails, push is skipped) */
+  needsPull: boolean
+  /** When true, push after a successful pull (or immediately if no pull) */
+  needsPush: boolean
+  pull: GitPullOptions
+  prNumber?: number
+  /** Remote for push (caller resolves multi-remote pickers first) */
+  pushRemote?: string
+}
+
+/**
+ * One-click git sync: pull (when behind) then push (when ahead).
+ * Uses a single "Syncing …" toast for the whole operation.
+ * Skips push if pull was requested and failed.
+ */
+export async function performGitSync(opts: GitSyncOptions): Promise<void> {
+  const { needsPull, needsPush, pull, prNumber, pushRemote } = opts
+
+  if (!needsPull && !needsPush) return
+
+  const [{ toast }] = await Promise.all([import('sonner')])
+  const label = pull.branchLabel || pull.baseBranch
+  const toastId = toast.loading(`Syncing ${label}...`)
+
+  if (needsPull) {
+    const pulled = await performGitPull({
+      ...pull,
+      toastId,
+      loadingMessage: `Syncing ${label}...`,
+      successMessage: 'Synced with remote',
+      keepLoadingOnSuccess: needsPush,
+    })
+    if (!pulled) return
+  }
+
+  if (!needsPush) return
+
+  try {
+    const result = await gitPush(pull.worktreePath, prNumber, pushRemote)
+    await triggerImmediateGitPoll()
+    if (pull.projectId) fetchWorktreesStatus(pull.projectId)
+    if (result.fellBack) {
+      toast.warning(
+        'Could not push to PR branch, pushed to new branch instead',
+        { id: toastId }
+      )
+    } else {
+      toast.success('Synced with remote', { id: toastId })
+    }
+  } catch (error) {
+    toast.error(`Sync failed: ${error}`, { id: toastId })
   }
 }
 

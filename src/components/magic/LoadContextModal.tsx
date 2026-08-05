@@ -324,6 +324,7 @@ export function LoadContextModal({
         <div className="flex overflow-x-auto border-b border-border scrollbar-hide">
           {displayTabs.map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               tabIndex={-1}
@@ -530,6 +531,7 @@ export function LoadContextModal({
               onRenameKeyDown={handlers.handleRenameKeyDown}
               onDeleteContext={handlers.handleDeleteContext}
               onSessionClick={handlers.handleSessionClick}
+              onGenerateSessionContext={handlers.handleGenerateSessionContext}
             />
           )}
         </div>

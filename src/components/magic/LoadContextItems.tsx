@@ -1,6 +1,7 @@
 import {
   CircleDot,
   Eye,
+  FileText,
   FolderOpen,
   GitPullRequest,
   Loader2,
@@ -37,6 +38,7 @@ export interface SessionWithContext {
   session: Session
   worktreeId: string
   worktreePath: string
+  worktreeName: string
   projectName: string
 }
 
@@ -95,6 +97,8 @@ export function LoadedIssueItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="View context"
               onClick={onView}
               disabled={isDisabled}
               className={cn(
@@ -110,6 +114,8 @@ export function LoadedIssueItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Refresh issue"
               onClick={onRefresh}
               disabled={isDisabled}
               className={cn(
@@ -129,6 +135,8 @@ export function LoadedIssueItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Remove from context"
               onClick={onRemove}
               disabled={isDisabled}
               className={cn(
@@ -198,6 +206,8 @@ export function LoadedPRItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="View context"
               onClick={onView}
               disabled={isDisabled}
               className={cn(
@@ -213,6 +223,8 @@ export function LoadedPRItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Refresh PR"
               onClick={onRefresh}
               disabled={isDisabled}
               className={cn(
@@ -232,6 +244,8 @@ export function LoadedPRItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Remove from context"
               onClick={onRemove}
               disabled={isDisabled}
               className={cn(
@@ -326,6 +340,8 @@ export function LoadedSecurityItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="View context"
               onClick={onView}
               disabled={isDisabled}
               className={cn(
@@ -341,6 +357,8 @@ export function LoadedSecurityItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Refresh alert"
               onClick={onRefresh}
               disabled={isDisabled}
               className={cn(
@@ -360,6 +378,8 @@ export function LoadedSecurityItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Remove from context"
               onClick={onRemove}
               disabled={isDisabled}
               className={cn(
@@ -416,6 +436,7 @@ export function SecurityAlertItem({
       )}
     >
       <button
+        type="button"
         onClick={onClick}
         disabled={isLoading}
         className="flex items-start gap-3 flex-1 min-w-0 focus:outline-none"
@@ -455,6 +476,8 @@ export function SecurityAlertItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
+              aria-label="Preview alert"
             onClick={e => {
               e.stopPropagation()
               onPreview()
@@ -514,6 +537,8 @@ export function LoadedAdvisoryItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="View context"
               onClick={onView}
               disabled={isDisabled}
               className={cn(
@@ -529,6 +554,8 @@ export function LoadedAdvisoryItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Refresh advisory"
               onClick={onRefresh}
               disabled={isDisabled}
               className={cn(
@@ -548,6 +575,8 @@ export function LoadedAdvisoryItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Remove from context"
               onClick={onRemove}
               disabled={isDisabled}
               className={cn(
@@ -605,6 +634,7 @@ export function AdvisoryItem({
       )}
     >
       <button
+        type="button"
         onClick={onClick}
         disabled={isLoading}
         className="flex items-start gap-3 flex-1 min-w-0 focus:outline-none"
@@ -643,6 +673,8 @@ export function AdvisoryItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
+              aria-label="Preview advisory"
             onClick={e => {
               e.stopPropagation()
               onPreview()
@@ -695,6 +727,7 @@ export function IssueItem({
       )}
     >
       <button
+        type="button"
         onClick={onClick}
         disabled={isLoading}
         className="flex items-start gap-3 flex-1 min-w-0 focus:outline-none"
@@ -743,6 +776,8 @@ export function IssueItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
+              aria-label="Preview issue"
             onClick={e => {
               e.stopPropagation()
               onPreview()
@@ -793,6 +828,7 @@ export function PRItem({
       )}
     >
       <button
+        type="button"
         onClick={onClick}
         disabled={isLoading}
         className="flex items-start gap-3 flex-1 min-w-0 focus:outline-none"
@@ -853,6 +889,8 @@ export function PRItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
+              aria-label="Preview PR"
             onClick={e => {
               e.stopPropagation()
               onPreview()
@@ -922,6 +960,7 @@ export function ContextItem({
             onChange={e => setEditValue(e.target.value)}
             onBlur={onRenameSubmit}
             onKeyDown={onRenameKeyDown}
+            aria-label="Rename context"
             className="w-full text-base font-medium bg-transparent border-b border-primary outline-none md:text-sm"
           />
           <div className="flex items-center gap-2 mt-0.5">
@@ -935,43 +974,50 @@ export function ContextItem({
   }
 
   return (
-    <button
+    <div
       data-load-item-index={index}
-      onClick={onClick}
       onMouseEnter={onMouseEnter}
-      disabled={isLoading}
       className={cn(
         'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors group',
-        'hover:bg-accent focus:outline-none',
+        'hover:bg-accent',
         isSelected && 'bg-accent',
-        isLoading && 'opacity-50 cursor-not-allowed'
+        isLoading && 'opacity-50'
       )}
     >
-      {isLoading ? (
-        <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
-      ) : (
-        <FolderOpen className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium truncate">
-            {context.name || context.slug || 'Untitled'}
-          </span>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={isLoading}
+        className="flex items-start gap-3 flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
+      >
+        {isLoading ? (
+          <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
+        ) : (
+          <FolderOpen className="h-4 w-4 mt-0.5 text-blue-500 flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium truncate">
+              {context.name || context.slug || 'Untitled'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-xs text-muted-foreground font-medium truncate">
+              {context.project_name}
+            </span>
+            <span className="text-xs text-muted-foreground/50">·</span>
+            <span className="text-xs text-muted-foreground">
+              {formatSize(context.size)}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="text-xs text-muted-foreground font-medium truncate">
-            {context.project_name}
-          </span>
-          <span className="text-xs text-muted-foreground/50">·</span>
-          <span className="text-xs text-muted-foreground">
-            {formatSize(context.size)}
-          </span>
-        </div>
-      </div>
+      </button>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Preview"
               onClick={onView}
               className="p-1 rounded hover:bg-muted focus:outline-none"
             >
@@ -983,6 +1029,8 @@ export function ContextItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Rename"
               onClick={onStartEdit}
               className="p-1 rounded hover:bg-muted focus:outline-none"
             >
@@ -994,6 +1042,8 @@ export function ContextItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Delete"
               onClick={onDelete}
               className="p-1 rounded hover:bg-destructive/10 focus:outline-none"
             >
@@ -1003,7 +1053,7 @@ export function ContextItem({
           <TooltipContent>Delete</TooltipContent>
         </Tooltip>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -1046,6 +1096,8 @@ export function AttachedContextItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="View context"
               onClick={onView}
               disabled={isRemoving}
               className={cn(
@@ -1061,6 +1113,8 @@ export function AttachedContextItem({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
+              type="button"
+              aria-label="Remove from context"
               onClick={onRemove}
               disabled={isRemoving}
               className={cn(
@@ -1090,6 +1144,7 @@ interface SessionGroupProps {
   entry: AllSessionsEntry
   generatingSessionId: string | null
   onSessionClick: (sessionWithContext: SessionWithContext) => void
+  onGenerateSessionContext?: (sessionWithContext: SessionWithContext) => void
   selectedIndex: number
   sessionStartIndex: number
   setSelectedIndex: (index: number) => void
@@ -1099,6 +1154,7 @@ export function SessionGroup({
   entry,
   generatingSessionId,
   onSessionClick,
+  onGenerateSessionContext,
   selectedIndex,
   sessionStartIndex,
   setSelectedIndex,
@@ -1119,44 +1175,77 @@ export function SessionGroup({
           const isDisabled = !hasMessages || generatingSessionId !== null
           const isGenerating = generatingSessionId === session.id
           const flatIndex = sessionStartIndex + idx
+          const sessionWithContext: SessionWithContext = {
+            session,
+            worktreeId: entry.worktree_id,
+            worktreePath: entry.worktree_path,
+            worktreeName: entry.worktree_name,
+            projectName: entry.project_name,
+          }
 
           return (
-            <button
+            <div
               key={session.id}
               data-load-item-index={flatIndex}
               className={cn(
                 'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
-                'hover:bg-accent focus:outline-none',
+                'hover:bg-accent',
                 flatIndex === selectedIndex && 'bg-accent',
-                isDisabled && 'opacity-50 cursor-not-allowed'
+                isDisabled && 'opacity-50'
               )}
-              onClick={() =>
-                onSessionClick({
-                  session,
-                  worktreeId: entry.worktree_id,
-                  worktreePath: entry.worktree_path,
-                  projectName: entry.project_name,
-                })
-              }
               onMouseEnter={() => setSelectedIndex(flatIndex)}
-              disabled={isDisabled}
             >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
-              ) : (
-                <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+              <button
+                type="button"
+                className={cn(
+                  'flex flex-1 items-start gap-3 min-w-0 text-left focus:outline-none',
+                  isDisabled && 'cursor-not-allowed'
+                )}
+                onClick={() => onSessionClick(sessionWithContext)}
+                disabled={isDisabled}
+                title="Inject session as MCP context pointer"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">
+                    {session.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {hasMessages
+                      ? `${session.messages.length} messages · inject pointer`
+                      : 'No messages'}
+                  </div>
+                </div>
+              </button>
+              {onGenerateSessionContext && hasMessages && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        'p-1 rounded hover:bg-background/80 text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5',
+                        isDisabled && 'cursor-not-allowed opacity-50'
+                      )}
+                      onClick={e => {
+                        e.stopPropagation()
+                        onGenerateSessionContext(sessionWithContext)
+                      }}
+                      disabled={isDisabled}
+                      aria-label="Generate full context summary"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    Generate full context summary (AI)
+                  </TooltipContent>
+                </Tooltip>
               )}
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">
-                  {session.name}
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  {hasMessages
-                    ? `${session.messages.length} messages`
-                    : 'No messages'}
-                </div>
-              </div>
-            </button>
+            </div>
           )
         })}
       </div>

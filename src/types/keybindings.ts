@@ -1,9 +1,11 @@
 // Keybinding action identifiers - extensible for future shortcuts
+import { isNativeApp } from '@/lib/environment'
 import { isClientMacOS } from '@/lib/platform'
 
 export type KeybindingAction =
   | 'focus_chat_input'
   | 'toggle_left_sidebar'
+  | 'toggle_file_browser'
   | 'open_preferences'
   | 'open_commit_modal'
   | 'open_git_diff'
@@ -65,6 +67,7 @@ export interface KeybindingDefinition {
 export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   focus_chat_input: 'mod+l',
   toggle_left_sidebar: 'mod+b',
+  toggle_file_browser: 'mod+shift+b',
   open_preferences: 'mod+comma',
   open_commit_modal: 'mod+shift+c',
   open_git_diff: 'mod+g',
@@ -121,6 +124,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     label: 'Toggle left sidebar',
     description: 'Show or hide the projects sidebar',
     default_shortcut: 'mod+b',
+    category: 'navigation',
+  },
+  {
+    action: 'toggle_file_browser',
+    label: 'Toggle file browser',
+    description: 'Show or hide the worktree file browser',
+    default_shortcut: 'mod+shift+b',
     category: 'navigation',
   },
   {
@@ -461,6 +471,19 @@ export function formatShortcutDisplay(
     .join(' + ')
 }
 
+/**
+ * Primary modifier for "mod" shortcuts.
+ * - macOS native app: Command (metaKey) — Control must pass through to terminals
+ *   (e.g. Ctrl+T) instead of opening a new session (issue #615)
+ * - macOS web: Control (browser intercepts Cmd)
+ * - Windows/Linux: Control
+ */
+export function isModKeyEvent(
+  e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey'>
+): boolean {
+  return isClientMacOS && isNativeApp() ? e.metaKey : e.ctrlKey
+}
+
 // Helper to parse keyboard event into shortcut string
 export function eventToShortcutString(e: KeyboardEvent): ShortcutString | null {
   // Ignore modifier-only presses
@@ -468,8 +491,15 @@ export function eventToShortcutString(e: KeyboardEvent): ShortcutString | null {
     return null
   }
 
+  // On macOS native, Control chords are not app "mod" shortcuts. Returning null
+  // lets them reach focused terminals (Ctrl+T, Ctrl+R, …) instead of matching
+  // mod+t / mod+r / etc. Issue #615.
+  if (isClientMacOS && isNativeApp() && e.ctrlKey && !e.metaKey) {
+    return null
+  }
+
   const parts: string[] = []
-  if (e.metaKey || e.ctrlKey) parts.push('mod')
+  if (isModKeyEvent(e)) parts.push('mod')
   if (e.shiftKey) parts.push('shift')
   if (e.altKey) parts.push('alt')
 

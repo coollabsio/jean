@@ -102,18 +102,20 @@ export function useLinearTeams(
 }
 
 /**
- * Hook to list Linear issues for a project
+ * Hook to list Linear issues for a project.
+ *
+ * Always calls the backend when a project is selected (same pattern as Sentry).
+ * Missing/invalid keys surface as auth errors so the UI can show LinearAuthError
+ * instead of an empty "no issues" state.
  */
 export function useLinearIssues(
   projectId: string | null,
   options?: { enabled?: boolean }
 ) {
-  const hasLinearAccess = useHasLinearAccess(projectId)
-
   return useQuery({
     queryKey: linearQueryKeys.issues(projectId ?? ''),
     queryFn: async (): Promise<LinearIssueListResult> => {
-      if (!isTauri() || !projectId || !hasLinearAccess) {
+      if (!projectId) {
         return { issues: [] }
       }
 
@@ -130,7 +132,7 @@ export function useLinearIssues(
         throw error
       }
     },
-    enabled: (options?.enabled ?? true) && !!projectId && hasLinearAccess,
+    enabled: (options?.enabled ?? true) && !!projectId,
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 10,
     retry: 1,
@@ -145,12 +147,10 @@ export function useSearchLinearIssues(
   query: string,
   options?: { enabled?: boolean }
 ) {
-  const hasLinearAccess = useHasLinearAccess(projectId)
-
   return useQuery({
     queryKey: linearQueryKeys.issueSearch(projectId ?? '', query),
     queryFn: async (): Promise<LinearIssue[]> => {
-      if (!isTauri() || !projectId || !query.trim() || !hasLinearAccess) {
+      if (!projectId || !query.trim()) {
         return []
       }
 
@@ -167,11 +167,7 @@ export function useSearchLinearIssues(
         throw error
       }
     },
-    enabled:
-      (options?.enabled ?? true) &&
-      !!projectId &&
-      !!query.trim() &&
-      hasLinearAccess,
+    enabled: (options?.enabled ?? true) && !!projectId && !!query.trim(),
     staleTime: 1000 * 60 * 1,
     gcTime: 1000 * 60 * 5,
     retry: 1,

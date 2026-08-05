@@ -1536,6 +1536,65 @@ describe('useStreamingEvents replay dedupe', () => {
     ).toBeUndefined()
   })
 
+  it('does not double snapshot content when Grok re-emits tool_block for the same id', async () => {
+    // Reproduces web reconnect while Grok is mid-turn: the running snapshot is
+    // hydrated with dedupe blocks, then the WS buffer replays tool_use/tool_block
+    // pairs — including a second tool_block for the same id from tool_call_update.
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:tool_block')).toBe(true)
+    )
+
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Before tool. ',
+      },
+    })
+    registeredListeners.get('chat:tool_block')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        tool_call_id: 'tool-1',
+      },
+    })
+    // Grok ACP tool_call_update re-emits the same tool_block.
+    registeredListeners.get('chat:tool_block')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        tool_call_id: 'tool-1',
+      },
+    })
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'After tool.',
+      },
+    })
+
+    expect(useChatStore.getState().streamingContents['session-1']).toBe(
+      'Before tool. After tool.'
+    )
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [
+        { type: 'text', text: 'Before tool. ' },
+        { type: 'tool_use', tool_call_id: 'tool-1' },
+        { type: 'text', text: 'After tool.' },
+      ]
+    )
+    // Must not become: Before, tool, After, Before, tool, After
+    const blocks = useChatStore.getState().streamingContentBlocks['session-1']
+    const textBlocks = blocks?.filter(b => b.type === 'text') ?? []
+    expect(textBlocks).toHaveLength(2)
+  })
+
   it('keeps deduplicating snapshot output when replay contains unpersisted thinking', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)

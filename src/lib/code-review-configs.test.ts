@@ -3,6 +3,7 @@ import {
   codeReviewConfigKey,
   getCodeReviewSessionName,
   resolveCodeReviewConfigs,
+  resolveCodeReviewFixMode,
   startCodeReviewsSequentially,
 } from './code-review-configs'
 
@@ -80,7 +81,9 @@ describe('code review configurations', () => {
         fallbackBackend: 'claude',
         fallbackModel: 'claude-sonnet-5',
       })
-    ).toEqual([{ backend: 'claude', model: 'claude-sonnet-5' }])
+    ).toEqual([
+      { backend: 'claude', model: 'claude-sonnet-5', fix_mode: 'plan' },
+    ])
   })
 
   it('identifies duplicate backend and model pairs', () => {
@@ -93,5 +96,11 @@ describe('code review configurations', () => {
     expect(
       getCodeReviewSessionName({ backend: 'codex', model: 'gpt-5.6-sol' })
     ).toBe('Code Review · Codex · gpt-5.6-sol')
+  })
+
+  it('resolves per-reviewer fix mode with global fallback', () => {
+    expect(resolveCodeReviewFixMode({ fix_mode: 'yolo' })).toBe('yolo')
+    expect(resolveCodeReviewFixMode({ fix_mode: null }, 'yolo')).toBe('yolo')
+    expect(resolveCodeReviewFixMode(undefined)).toBe('plan')
   })
 })

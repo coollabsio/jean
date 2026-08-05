@@ -98,9 +98,11 @@ Web Access binds a normal TCP port (default **3456**). For access beyond the
 local machine, prefer a private mesh VPN rather than exposing the port to the
 public internet:
 
-- **[Tailscale](https://tailscale.com/)** (recommended) - bind Jean to the
-  Tailscale IP (or use the installer's `--host tailscale` preset) and open the
-  URL from any device on your tailnet
+- **[Tailscale](https://tailscale.com/)** (recommended) - prefer
+  `jean-server --host 127.0.0.1` plus `tailscale serve --bg 3456` so the
+  browser gets real HTTPS (clipboard and other secure-context APIs work).
+  Binding the Tailscale IP directly (`--host tailscale`) is HTTP-only and
+  browsers will treat it as an insecure origin.
 - Other options: WireGuard, ZeroTier, SSH tunnel, or a reverse proxy with TLS
   in front of `127.0.0.1`
 

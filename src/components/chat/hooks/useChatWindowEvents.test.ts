@@ -4,6 +4,7 @@ import { useChatWindowEvents } from './useChatWindowEvents'
 import { useUIStore } from '@/store/ui-store'
 import { useChatStore } from '@/store/chat-store'
 import { invoke } from '@/lib/transport'
+import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => false,
@@ -162,6 +163,45 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
     expect(document.activeElement).toBe(params.inputRef.current)
   })
 
+  it('does not steal focus from a button when the window is re-activated', () => {
+    const params = renderUseChatWindowEvents()
+    const button = document.createElement('button')
+    document.body.appendChild(button)
+    button.focus()
+    const cleanupFocusRestore = installWindowKeyboardFocusRestore()
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(document.activeElement).toBe(button)
+    expect(document.activeElement).not.toBe(params.inputRef.current)
+    cleanupFocusRestore()
+  })
+
+  it('re-asserts focus inside an open dialog without focusing chat input', () => {
+    const params = renderUseChatWindowEvents()
+    const chatInput = params.inputRef.current
+    if (!chatInput) throw new Error('expected chat input ref')
+    const chatFocusSpy = vi.spyOn(chatInput, 'focus')
+    chatFocusSpy.mockClear()
+
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('data-state', 'open')
+    const dialogInput = document.createElement('input')
+    dialog.appendChild(dialogInput)
+    document.body.appendChild(dialog)
+    dialogInput.focus()
+    const dialogFocusSpy = vi.spyOn(dialogInput, 'focus')
+    const cleanupFocusRestore = installWindowKeyboardFocusRestore()
+
+    window.dispatchEvent(new Event('focus'))
+
+    expect(dialogFocusSpy).toHaveBeenCalledWith({ preventScroll: true })
+    expect(document.activeElement).toBe(dialogInput)
+    expect(chatFocusSpy).not.toHaveBeenCalled()
+    cleanupFocusRestore()
+  })
+
   it('opens the new session mode picker for CMD+T events', () => {
     renderUseChatWindowEvents()
 
@@ -174,7 +214,6 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
       intent: 'picker',
     })
   })
-
 
   it('saves browser grabbed context as a named pasted text attachment', async () => {
     vi.mocked(invoke).mockResolvedValueOnce({

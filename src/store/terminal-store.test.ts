@@ -234,6 +234,20 @@ describe('TerminalStore', () => {
       )
     })
 
+    it('keeps the Jean session id on native CLI terminals', () => {
+      const terminalId = useTerminalStore
+        .getState()
+        .addTerminal('worktree-1', 'codex', 'Codex', {
+          kind: 'session',
+          sessionId: 'session-codex-1',
+        })
+
+      const terminal = useTerminalStore
+        .getState()
+        .terminals['worktree-1']?.find(item => item.id === terminalId)
+      expect(terminal?.sessionId).toBe('session-codex-1')
+    })
+
     it('reorders panel terminals while preserving session terminals and active terminal', () => {
       const { addTerminal, reorderPanelTerminals } = useTerminalStore.getState()
 

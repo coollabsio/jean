@@ -339,6 +339,10 @@ export function useCodexInstallProgress(): [
 /**
  * Combined hook for Codex CLI setup flow
  */
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_codex_cli_version_exists', { version })
+}
+
 export function useCodexCliSetup() {
   const status = useCodexCliStatus()
   const versions = useAvailableCodexVersions()
@@ -370,8 +374,6 @@ export function useCodexCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_codex_cli_version_exists', { version })
 
   return {
     status: status.data,

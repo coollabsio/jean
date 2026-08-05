@@ -173,6 +173,7 @@ const serverLg = () => true
 
 export function FloatingDock() {
   const chatToolbarMounted = useUIStore(state => state.chatToolbarMounted)
+  const reviewSurfaceMounted = useUIStore(state => state.reviewSurfaceMounted)
   const isMobile = useIsMobile()
   const isLg = useSyncExternalStore(subscribeLg, snapshotLg, serverLg)
   const { data: preferences } = usePreferences()
@@ -341,14 +342,12 @@ export function FloatingDock() {
   )
 
   const toggleMenu = useCallback(() => {
-    setMenuOpen(prev => {
-      const next = !prev
-      if (next) {
-        setResumeCommand(getActiveResumeCommand())
-      }
-      return next
-    })
-  }, [getActiveResumeCommand])
+    const next = !menuOpen
+    setMenuOpen(next)
+    if (next) {
+      setResumeCommand(getActiveResumeCommand())
+    }
+  }, [menuOpen, getActiveResumeCommand])
 
   const handleCopyResumeCommand = useCallback(() => {
     const commandToCopy = getActiveResumeCommand() ?? resumeCommand
@@ -461,7 +460,10 @@ export function FloatingDock() {
   // the chat textarea.
   // Terminal sessions are full-screen inside the chat bounds and have no
   // bottom input/toolbar, so the corner dock would cover terminal output.
-  if (chatToolbarMounted || isTerminalSession) return null
+  // Full-width review replaces chat (no toolbar) and puts Send buttons at the
+  // bottom — the dock would sit on top of those actions.
+  if (chatToolbarMounted || isTerminalSession || reviewSurfaceMounted)
+    return null
 
   return (
     <div

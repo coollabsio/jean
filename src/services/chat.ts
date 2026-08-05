@@ -38,9 +38,16 @@ import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
+import {
+  bareCommandForBackend,
+  isBareCliCommand,
+  preferResolvedCliCommand,
+  resolveBackendCliPath,
+} from '@/services/cli-binary'
 import type {
   StoredReviewResults,
   Worktree,
@@ -214,15 +221,25 @@ export async function reconnectNativeCliSession(
     showToast = true,
     markOpened = true,
   } = options ?? {}
-  const resume = getResumeArgs(session)
-  const launch =
+  // When terminal_command is a bare name (e.g. jean-managed grok not on PATH),
+  // resolve to the absolute path from check_*_cli_installed.
+  const resolvedCommand = await resolveBackendCliPath(session.backend)
+  const resume = getResumeArgs(session, { resolvedCommand })
+  let launch =
     resume ??
     (!isNativeTerminalBackend(session.backend)
       ? {
-          command: session.terminal_command ?? '',
+          command: preferResolvedCliCommand(
+            session.terminal_command,
+            bareCommandForBackend(session.backend),
+            resolvedCommand
+          ),
           args: session.terminal_command_args ?? [],
         }
       : null)
+  if (launch && resolvedCommand && isBareCliCommand(launch.command)) {
+    launch = { ...launch, command: resolvedCommand }
+  }
   if (!launch?.command) {
     if (showToast) toast.error('No command available to reconnect this session')
     return
@@ -251,6 +268,7 @@ export async function reconnectNativeCliSession(
       commandArgs: launch.args,
       activate: false,
       openPanel: false,
+      sessionId: session.id,
     }
   )
 
@@ -449,9 +467,13 @@ export async function prefetchSessions(
     })
     queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
 
-    // Restore reviewingSessions, waitingForInputSessionIds, sessionLabels, reviewResults,
-    // fixedFindings, and selected execution modes.
+    // Restore reviewingSessions, status overrides, waitingForInputSessionIds,
+    // sessionLabels, reviewResults, fixedFindings, and selected execution modes.
     const reviewingUpdates: Record<string, boolean> = {}
+    const statusOverrideUpdates: Record<
+      string,
+      'idle' | 'review' | 'completed' | 'cancelled'
+    > = {}
     const waitingUpdates: Record<string, boolean> = {}
     const executionModeUpdates: Record<string, ExecutionMode> = {}
     const primarySurfaceUpdates: Record<string, 'chat' | 'terminal'> = {}
@@ -464,8 +486,20 @@ export async function prefetchSessions(
     > = {}
     const fixedFindingsUpdates: Record<string, Set<string>> = {}
     for (const session of sessions.sessions) {
-      if (session.is_reviewing) {
+      const override = session.status_override
+      if (
+        override === 'idle' ||
+        override === 'review' ||
+        override === 'completed' ||
+        override === 'cancelled'
+      ) {
+        statusOverrideUpdates[session.id] = override
+        if (override === 'review') {
+          reviewingUpdates[session.id] = true
+        }
+      } else if (session.is_reviewing) {
         reviewingUpdates[session.id] = true
+        statusOverrideUpdates[session.id] = 'review'
       }
       // Only restore waiting state if the session's last run is actually active,
       // OR if it's a completed run parked for user input (plan approval, or an
@@ -534,6 +568,12 @@ export async function prefetchSessions(
       storeUpdates.reviewingSessions = {
         ...currentState.reviewingSessions,
         ...reviewingUpdates,
+      }
+    }
+    if (Object.keys(statusOverrideUpdates).length > 0) {
+      storeUpdates.sessionStatusOverrides = {
+        ...currentState.sessionStatusOverrides,
+        ...statusOverrideUpdates,
       }
     }
     if (Object.keys(waitingUpdates).length > 0) {
@@ -944,6 +984,7 @@ export function useUpdateSessionState() {
       pendingPermissionDenials,
       pendingCodexCommandApprovalRequests,
       pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
       pendingCodexUserInputRequests,
       pendingCodexMcpElicitationRequests,
       pendingCodexDynamicToolCallRequests,
@@ -988,6 +1029,17 @@ export function useUpdateSessionState() {
         item_id: string
         permissions: unknown
         reason?: string | null
+      }[]
+      pendingOpencodePermissionRequests?: {
+        request_id: string
+        opencode_session_id: string
+        permission: string
+        patterns: string[]
+        always: string[]
+        metadata?: unknown
+        tool_call_id?: string | null
+        working_dir?: string | null
+        api_version?: string
       }[]
       pendingCodexUserInputRequests?: {
         rpc_id: number
@@ -1038,6 +1090,7 @@ export function useUpdateSessionState() {
         pendingPermissionDenials,
         pendingCodexCommandApprovalRequests,
         pendingCodexPermissionRequests,
+        pendingOpencodePermissionRequests,
         pendingCodexUserInputRequests,
         pendingCodexMcpElicitationRequests,
         pendingCodexDynamicToolCallRequests,
@@ -1115,6 +1168,7 @@ export function useCloseSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
       // Switch to the new active session — but only if the caller hasn't already
@@ -1197,6 +1251,7 @@ export function useArchiveSession() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
       // Switch to the new active session — but only if the caller hasn't already
@@ -2094,6 +2149,7 @@ export function useClearSessionHistory() {
 
       // Clear all session-scoped state
       useChatStore.getState().clearSessionState(sessionId)
+      clearSessionScrollState(sessionId)
 
       toast.success('Chat history cleared')
     },
@@ -2630,9 +2686,10 @@ export function formatAnswersAsNaturalLanguage(
     const question = questions[answer.questionIndex]
     if (!question) continue
 
-    const selectedLabels = answer.selectedOptions
-      .map(idx => question.options[idx]?.label)
-      .filter(Boolean)
+    const selectedLabels = answer.selectedOptions.flatMap(idx => {
+      const label = question.options[idx]?.label
+      return label ? [label] : []
+    })
 
     if (selectedLabels.length > 0 || answer.customText) {
       let text = `For "${question.question}"`

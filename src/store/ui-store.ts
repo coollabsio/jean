@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import type { CliType } from '@/lib/cli-update'
+import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
 
 export type PreferencePane =
   | 'general'
@@ -86,6 +87,12 @@ export type CliLoginModalType =
 interface UIState {
   leftSidebarVisible: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
+  /** File browser (worktree explorer) visibility */
+  fileBrowserVisible: boolean
+  /** File browser width in pixels, persisted across sessions */
+  fileBrowserSize: number
+  /** Absolute path of file open in the global FileContentModal (null = closed) */
+  viewingFilePath: string | null
   rightSidebarVisible: boolean
   commandPaletteOpen: boolean
   preferencesOpen: boolean
@@ -118,6 +125,11 @@ interface UIState {
   workflowRunsModalOpen: boolean
   workflowRunsModalProjectPath: string | null
   workflowRunsModalBranch: string | null
+  /**
+   * GitHub Actions run database IDs already viewed by the user.
+   * Failed-workflow badges only count IDs not in this list.
+   */
+  seenFailedWorkflowRunIds: number[]
   cliUpdateModalOpen: boolean
   cliUpdateModalType: CliUpdateModalType
   cliLoginModalOpen: boolean
@@ -148,6 +160,9 @@ interface UIState {
   /** Whether the chat toolbar is mounted — used to hide the global FloatingDock
    *  because its burger-menu counterpart now lives in the chat toolbar. */
   chatToolbarMounted: boolean
+  /** Whether the full-width review results surface is mounted — used to hide the
+   *  global FloatingDock so it does not overlap the review Send buttons. */
+  reviewSurfaceMounted: boolean
   /** Which worktree the session chat modal is for (for magic command worktree resolution) */
   sessionChatModalWorktreeId: string | null
   /** Per-session primary surface shown inside the chat bounds */
@@ -191,6 +206,10 @@ interface UIState {
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
   setLeftSidebarSize: (size: number) => void
+  toggleFileBrowser: () => void
+  setFileBrowserVisible: (visible: boolean) => void
+  setFileBrowserSize: (size: number) => void
+  setViewingFilePath: (path: string | null) => void
   toggleRightSidebar: () => void
   setRightSidebarVisible: (visible: boolean) => void
   toggleCommandPalette: () => void
@@ -232,6 +251,8 @@ interface UIState {
     projectPath?: string | null,
     branch?: string | null
   ) => void
+  markFailedWorkflowRunsSeen: (runIds: number[]) => void
+  setSeenFailedWorkflowRunIds: (runIds: number[]) => void
   openCliUpdateModal: (type: Exclude<CliUpdateModalType, null>) => void
   closeCliUpdateModal: () => void
   openCliLoginModal: (
@@ -273,6 +294,7 @@ interface UIState {
   openNewSessionModeModal: (target: NewSessionModeTarget) => void
   closeNewSessionModeModal: () => void
   setChatToolbarMounted: (mounted: boolean) => void
+  setReviewSurfaceMounted: (mounted: boolean) => void
   setGitDiffModalOpen: (open: boolean) => void
   toggleGitDiffSelectedFile: (filePath: string) => void
   clearGitDiffSelectedFiles: () => void
@@ -307,6 +329,9 @@ export const useUIStore = create<UIState>()(
     (set, get) => ({
       leftSidebarVisible: false,
       leftSidebarSize: 250, // Default width in pixels
+      fileBrowserVisible: false,
+      fileBrowserSize: 280,
+      viewingFilePath: null,
       rightSidebarVisible: false,
       commandPaletteOpen: false,
       preferencesOpen: false,
@@ -331,6 +356,7 @@ export const useUIStore = create<UIState>()(
       workflowRunsModalOpen: false,
       workflowRunsModalProjectPath: null,
       workflowRunsModalBranch: null,
+      seenFailedWorkflowRunIds: [],
       cliUpdateModalOpen: false,
       cliUpdateModalType: null,
       cliLoginModalOpen: false,
@@ -353,6 +379,7 @@ export const useUIStore = create<UIState>()(
       sessionTerminalIds: {},
       newSessionModeTarget: null,
       chatToolbarMounted: false,
+      reviewSurfaceMounted: false,
       gitDiffModalOpen: false,
       gitDiffSelectedFiles: new Set<string>(),
       planDialogOpen: false,
@@ -398,6 +425,39 @@ export const useUIStore = create<UIState>()(
             state.leftSidebarSize === size ? state : { leftSidebarSize: size },
           undefined,
           'setLeftSidebarSize'
+        ),
+
+      toggleFileBrowser: () =>
+        set(
+          state => ({ fileBrowserVisible: !state.fileBrowserVisible }),
+          undefined,
+          'toggleFileBrowser'
+        ),
+
+      setFileBrowserVisible: visible =>
+        set(
+          state =>
+            state.fileBrowserVisible === visible
+              ? state
+              : { fileBrowserVisible: visible },
+          undefined,
+          'setFileBrowserVisible'
+        ),
+
+      setFileBrowserSize: size =>
+        set(
+          state =>
+            state.fileBrowserSize === size ? state : { fileBrowserSize: size },
+          undefined,
+          'setFileBrowserSize'
+        ),
+
+      setViewingFilePath: path =>
+        set(
+          state =>
+            state.viewingFilePath === path ? state : { viewingFilePath: path },
+          undefined,
+          'setViewingFilePath'
         ),
 
       setRightSidebarVisible: visible =>
@@ -608,6 +668,31 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'setWorkflowRunsModalOpen'
+        ),
+
+      markFailedWorkflowRunsSeen: runIds =>
+        set(
+          state => {
+            if (runIds.length === 0) return state
+            const next = mergeSeenFailedWorkflowRunIds(
+              state.seenFailedWorkflowRunIds,
+              runIds
+            )
+            if (next === state.seenFailedWorkflowRunIds) return state
+            return { seenFailedWorkflowRunIds: next }
+          },
+          undefined,
+          'markFailedWorkflowRunsSeen'
+        ),
+
+      setSeenFailedWorkflowRunIds: runIds =>
+        set(
+          state =>
+            state.seenFailedWorkflowRunIds === runIds
+              ? state
+              : { seenFailedWorkflowRunIds: runIds },
+          undefined,
+          'setSeenFailedWorkflowRunIds'
         ),
 
       openCliUpdateModal: type =>
@@ -1003,6 +1088,13 @@ export const useUIStore = create<UIState>()(
           state.chatToolbarMounted === mounted
             ? state
             : { chatToolbarMounted: mounted }
+        ),
+
+      setReviewSurfaceMounted: (mounted: boolean) =>
+        set(state =>
+          state.reviewSurfaceMounted === mounted
+            ? state
+            : { reviewSurfaceMounted: mounted }
         ),
 
       setGitDiffModalOpen: (open: boolean) =>

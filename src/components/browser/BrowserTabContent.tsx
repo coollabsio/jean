@@ -68,7 +68,9 @@ export const BrowserTabContent = memo(function BrowserTabContent({
   // Mirror isActive for closures (flushBounds, ResizeObserver) — when inactive,
   // they must not push real bounds and undo our off-screen parking.
   const isActiveRef = useRef(isActive)
-  isActiveRef.current = isActive
+  useLayoutEffect(() => {
+    isActiveRef.current = isActive
+  })
 
   // Read URL once at mount (subsequent updates handled by Rust → React events)
   const initialUrl = useBrowserStore(

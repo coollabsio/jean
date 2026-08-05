@@ -11,6 +11,9 @@ import {
 
 const processAttachmentFile = vi.fn()
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>
+const { slashPopoverMock } = vi.hoisted(() => ({
+  slashPopoverMock: vi.fn(() => null),
+}))
 
 const storeState = {
   inputDrafts: {} as Record<string, string>,
@@ -36,7 +39,7 @@ vi.mock('./FileMentionPopover', () => ({
 }))
 
 vi.mock('./SlashPopover', () => ({
-  SlashPopover: () => null,
+  SlashPopover: slashPopoverMock,
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -84,6 +87,71 @@ describe('ChatInput attachments', () => {
     storeState.addPendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
     storeState.inputDrafts = {}
+    slashPopoverMock.mockClear()
+  })
+
+  it('opens the skill picker when typing $ for a Codex session', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+        selectedBackend="codex"
+        installedBackends={['codex']}
+      />
+    )
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '$', selectionStart: 1 },
+    })
+
+    expect(slashPopoverMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        open: true,
+        searchQuery: '',
+        triggerKind: 'skill',
+      }),
+      undefined
+    )
+  })
+
+  it('does not open the skill picker when typing $ for a non-Codex session', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+        selectedBackend="claude"
+        installedBackends={['claude']}
+      />
+    )
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '$', selectionStart: 1 },
+    })
+
+    expect(slashPopoverMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ open: false }),
+      undefined
+    )
   })
 
   it('registers attach handler and forwards selected files to the processor', async () => {
@@ -343,5 +411,107 @@ describe('ChatInput attachments', () => {
       )
     })
     expect(textarea.value).toBe('')
+  })
+})
+
+describe('ChatInput IME composition (issue #584)', () => {
+  beforeEach(() => {
+    processAttachmentFile.mockReset()
+    invokeMock.mockReset()
+    storeState.setInputDraft.mockReset()
+    storeState.getPendingFiles.mockReset()
+    storeState.getPendingFiles.mockReturnValue([])
+    storeState.removePendingFile.mockReset()
+    storeState.addPendingFile.mockReset()
+    storeState.addPendingSkill.mockReset()
+    storeState.addPendingImage.mockReset()
+    storeState.addPendingTextFile.mockReset()
+    storeState.inputDrafts = {}
+  })
+
+  const renderWithSubmit = () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+    const onSubmit = vi.fn()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+      />
+    )
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    return { textarea, onSubmit }
+  }
+
+  it('submits on normal Enter when not composing', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = 'hello'
+    fireEvent.change(textarea, { target: { value: 'hello' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit when Enter confirms IME composition (isComposing)', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = 'こんにちは'
+    fireEvent.change(textarea, { target: { value: 'こんにちは' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      isComposing: true,
+    })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('こんにちは')
+  })
+
+  it('does not submit on Safari/WKWebView IME Enter (keyCode 229, isComposing false)', () => {
+    // compositionend can run before keydown on Safari, so isComposing is
+    // already false; keyCode 229 still marks the event as IME-handled.
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = '日本語'
+    fireEvent.change(textarea, { target: { value: '日本語' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 229,
+      isComposing: false,
+    })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('日本語')
+  })
+
+  it('submits on the Enter after composition has finished', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    textarea.value = '日本語'
+    fireEvent.change(textarea, { target: { value: '日本語' } })
+
+    // Confirm composition (must not submit)
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 229,
+      isComposing: false,
+    })
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // Second Enter sends the message
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 })

@@ -5,6 +5,17 @@ GTK, or display-server dependency. `jean-core` owns shared state, commands,
 events, persistence, projects, chat backends, terminals, background work, and
 the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 
+## Agent browser (AI + manual login)
+
+jean-server has no embedded WebView. For an AI-controlled browser where you log
+in manually once and agents reuse cookies, Jean uses **vercel-labs/agent-browser**
+with a Jean-managed Chromium profile (`AGENT_BROWSER_PROFILE` under app data).
+
+- Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser**, then install MCP into backends
+- Host prerequisite: `npm` on PATH (Jean downloads agent-browser + Chromium into app data)
+- Manual fallback: `npm install -g agent-browser && agent-browser install`
+- Design: `docs/developer/server-agent-browser.md`
+
 ## Start locally
 
 When running a debug binary directly, build the browser bundle first. Jean
@@ -116,6 +127,27 @@ sudo ./scripts/install-jean-server.sh --uninstall -y
 If systemd is not available, the script still installs the binary + env file and
 prints an OpenRC example unit.
 
+## Codex on Linux (bubblewrap sandbox)
+
+Codex's Linux sandbox needs [bubblewrap](https://github.com/containers/bubblewrap)
+(`bwrap`) either:
+
+1. **System package** (recommended on servers):
+
+   ```bash
+   sudo apt install bubblewrap   # Debian/Ubuntu
+   # sudo dnf install bubblewrap  # Fedora/RHEL
+   ```
+
+2. **Bundled helper** next to the Codex binary at `codex-resources/bwrap`
+   (Jean-managed installs download this automatically when available).
+
+Without either, sandboxed shell / `apply_patch` tools fail. Jean surfaces a
+warning in **Settings → Codex** when bubblewrap is missing.
+
+**Auth on headless/servers:** Jean's Codex login uses `codex login --device-auth`
+(device code + URL). Browser callback login does not work without a local display.
+
 ## Install the local development build
 
 Install the Linux build dependencies once on Ubuntu:
@@ -216,9 +248,16 @@ browser terminals can find tools installed by shell setup scripts (for example
 - The server Docker image is published by the Server Release workflow as
   `ghcr.io/<owner>/<repo>-server:<tag>`.
 - The image launches `jean-server` directly and contains no GTK/WebKit/Xvfb packages.
+- Runtime packages include `ca-certificates`, `curl`, `git`, `openssh-client`, and
+  the official **GitHub CLI (`gh`)** so onboarding and GitHub integration can run
+  without a separate install step. Prefer the **System PATH** CLI source in
+  onboarding/Settings when using the container image.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
 - Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
 - Put TLS/auth in front of the container for internet exposure.
+- For Tailscale access from a browser, prefer `tailscale serve` (HTTPS) in front
+  of `127.0.0.1` rather than plain `http://100.x.y.z` — browsers block the
+  clipboard API and other secure-context features on non-localhost HTTP.
 
 Example command:
 

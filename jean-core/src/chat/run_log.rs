@@ -70,6 +70,8 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let claude_sid = claude_session_id.map(|s| s.to_string());
 
+        let mut checkpoint_id: Option<String> = None;
+
         with_metadata_mut(
             &self.app,
             &self.session_id,
@@ -83,6 +85,7 @@ impl RunLogWriter {
                     run.assistant_message_id = Some(assistant_message_id.to_string());
                     run.claude_session_id = claude_sid.clone();
                     run.usage = usage.clone();
+                    checkpoint_id = run.checkpoint_id.clone();
                 }
 
                 // Update metadata's claude_session_id for resumption
@@ -93,6 +96,21 @@ impl RunLogWriter {
                 Ok(())
             },
         )?;
+
+        // Capture end-of-turn tree + file list for the AI checkpoint.
+        if let Some(cp_id) = checkpoint_id {
+            if let Err(e) = crate::projects::checkpoints::finalize_checkpoint(
+                &self.app,
+                &self.worktree_id,
+                &cp_id,
+            ) {
+                log::warn!(
+                    "[Checkpoint] finalize on complete failed run={} cp={}: {e}",
+                    self.run_id,
+                    cp_id
+                );
+            }
+        }
 
         log::trace!("Run completed: {}", self.run_id);
         Ok(())
@@ -109,6 +127,7 @@ impl RunLogWriter {
         let run_id = self.run_id.clone();
         let asst_id = assistant_message_id.map(|s| s.to_string());
         let claude_sid = claude_session_id.map(|s| s.to_string());
+        let mut checkpoint_id: Option<String> = None;
 
         with_metadata_mut(
             &self.app,
@@ -118,6 +137,7 @@ impl RunLogWriter {
             self.order,
             |metadata| {
                 if let Some(run) = metadata.find_run_mut(&run_id) {
+                    checkpoint_id = run.checkpoint_id.clone();
                     run.status = RunStatus::Cancelled;
                     run.ended_at = Some(now);
                     run.cancelled = true;
@@ -133,6 +153,21 @@ impl RunLogWriter {
                 Ok(())
             },
         )?;
+
+        // Still finalize so the user can review / restore partial AI changes.
+        if let Some(cp_id) = checkpoint_id {
+            if let Err(e) = crate::projects::checkpoints::finalize_checkpoint(
+                &self.app,
+                &self.worktree_id,
+                &cp_id,
+            ) {
+                log::warn!(
+                    "[Checkpoint] finalize on cancel failed run={} cp={}: {e}",
+                    self.run_id,
+                    cp_id
+                );
+            }
+        }
 
         log::trace!("Run cancelled: {}", self.run_id);
         Ok(())
@@ -390,6 +425,7 @@ pub fn start_run(
         cursor_chat_id: None,
         grok_session_id: None,
         kimi_session_id: None,
+        checkpoint_id: None,
     };
 
     with_metadata_mut(
@@ -1335,22 +1371,89 @@ pub fn load_session_messages_window(
         if run.renders_assistant_message()
             || cancelled_artifact_run_indices.borrow().contains(run_index)
         {
-            let lines = read_run_log(app, session_id, &run.run_id)?;
+            // One corrupt/missing run log must not abort the whole history load —
+            // provider-switch handoff and UI history both depend on partial success.
+            let lines = match read_run_log(app, session_id, &run.run_id) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    log::warn!(
+                        "[LoadMessages] session={session_id} run={} failed to read log: {e}",
+                        run.run_id
+                    );
+                    let mut placeholder = ChatMessage {
+                        id: run
+                            .assistant_message_id
+                            .clone()
+                            .unwrap_or_else(|| format!("missing-{}", run.run_id)),
+                        session_id: session_id.to_string(),
+                        role: MessageRole::Assistant,
+                        content:
+                            "*Assistant response unavailable (run log missing or unreadable).*"
+                                .to_string(),
+                        timestamp: run.ended_at.unwrap_or(run.started_at),
+                        tool_calls: vec![],
+                        content_blocks: vec![],
+                        cancelled: run.cancelled,
+                        plan_approved: false,
+                        model: run.model.clone(),
+                        execution_mode: run.execution_mode.clone(),
+                        thinking_level: run.thinking_level.clone(),
+                        effort_level: run.effort_level.clone(),
+                        recovered: run.recovered,
+                        usage: run.usage.clone(),
+                    };
+                    if run.status == RunStatus::Running {
+                        placeholder.id = format!("running-{}", run.run_id);
+                    }
+                    messages.push(placeholder);
+                    continue;
+                }
+            };
 
             // Parse JSONL content — route by backend.
             // Per-run model is authoritative when present. Only fall back to
             // session-level metadata.backend for legacy runs with no model stored.
             let use_codex_parser = run_uses_codex_history_parser(&metadata.backend, run);
-            let mut assistant_msg = if use_codex_parser {
-                super::codex::parse_codex_run_to_message(&lines, run)?
+            let parse_result = if use_codex_parser {
+                super::codex::parse_codex_run_to_message(&lines, run)
             } else if run_uses_pi_history_parser(&metadata.backend, run) {
-                super::pi::parse_pi_run_to_message(&lines, run)?
+                super::pi::parse_pi_run_to_message(&lines, run)
             } else if run_uses_grok_history_parser(&metadata.backend, run) {
-                super::grok::parse_grok_run_to_message(&lines, run)?
+                super::grok::parse_grok_run_to_message(&lines, run)
             } else if run_uses_kimi_history_parser(&metadata.backend, run) {
-                super::kimi::parse_kimi_run_to_message(&lines, run)?
+                super::kimi::parse_kimi_run_to_message(&lines, run)
             } else {
-                parse_run_to_message(&lines, run)?
+                parse_run_to_message(&lines, run)
+            };
+            let mut assistant_msg = match parse_result {
+                Ok(msg) => msg,
+                Err(e) => {
+                    log::warn!(
+                        "[LoadMessages] session={session_id} run={} failed to parse log: {e}",
+                        run.run_id
+                    );
+                    ChatMessage {
+                        id: run
+                            .assistant_message_id
+                            .clone()
+                            .unwrap_or_else(|| format!("unparsed-{}", run.run_id)),
+                        session_id: session_id.to_string(),
+                        role: MessageRole::Assistant,
+                        content: "*Assistant response unavailable (run log parse failed).*"
+                            .to_string(),
+                        timestamp: run.ended_at.unwrap_or(run.started_at),
+                        tool_calls: vec![],
+                        content_blocks: vec![],
+                        cancelled: run.cancelled,
+                        plan_approved: false,
+                        model: run.model.clone(),
+                        execution_mode: run.execution_mode.clone(),
+                        thinking_level: run.thinking_level.clone(),
+                        effort_level: run.effort_level.clone(),
+                        recovered: run.recovered,
+                        usage: run.usage.clone(),
+                    }
+                }
             };
             let is_cursor_run = run
                 .model
@@ -1454,6 +1557,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         }
     }
 
@@ -1938,6 +2042,7 @@ Move services between instances without downtime.
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            checkpoint_id: None,
         };
 
         let lines = vec![
@@ -2311,6 +2416,9 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                     if completed {
                         run.status = RunStatus::Completed;
                         metadata.is_reviewing = false;
+                        if metadata.status_override.as_deref() == Some("review") {
+                            metadata.status_override = None;
+                        }
 
                         // Recover the provider-owned session id from JSONL so a
                         // turn that completed while Jean was closed keeps its context.
@@ -2420,14 +2528,22 @@ pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &
         BufReader::new(file)
     };
 
+    // Prefer error over result: legacy Grok ACP hosts wrote both, and salvaging
+    // those as completed produced empty "content was not captured" runs (#580).
+    let mut has_result = false;
+    let mut has_error = false;
     for line in reader.lines() {
         if let Ok(line) = line {
+            // Compact JSON from serde_json::json! uses no space after `:`.
+            if line.contains("\"type\":\"error\"") {
+                has_error = true;
+            }
             if line.contains("\"type\":\"result\"") {
-                return true;
+                has_result = true;
             }
         }
     }
-    false
+    has_result && !has_error
 }
 
 /// Extract the Claude session ID from a run's JSONL file.

@@ -23,10 +23,13 @@ import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
 import {
   eventToShortcutString,
+  isModKeyEvent,
   DEFAULT_KEYBINDINGS,
   type KeybindingAction,
   type KeybindingsMap,
 } from '@/types/keybindings'
+import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan',
@@ -53,6 +56,15 @@ export function findKeybindingAction(
   }
 
   return null
+}
+
+export function useWindowKeyboardFocusRestore() {
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    if (!isNativeApp() || isMobile) return
+    return installWindowKeyboardFocusRestore()
+  }, [isMobile])
 }
 
 /**
@@ -336,6 +348,13 @@ function executeKeybindingAction(
       const { leftSidebarVisible, setLeftSidebarVisible } =
         useUIStore.getState()
       setLeftSidebarVisible(!leftSidebarVisible)
+      break
+    }
+    case 'toggle_file_browser': {
+      logger.debug('Keybinding: toggle_file_browser')
+      const { fileBrowserVisible, setFileBrowserVisible } =
+        useUIStore.getState()
+      setFileBrowserVisible(!fileBrowserVisible)
       break
     }
     case 'open_preferences':
@@ -719,6 +738,12 @@ export function useMainWindowEventListeners() {
     }
   }, [preferences?.keybindings])
 
+  // After alt-tab / OS window reactivation, WebViews often leave the document
+  // without keyboard focus until a click. Restore the last focused element
+  // (or chat input / body) so typing and shortcuts like Ctrl/Cmd+L work again.
+  // Issue #577.
+  useWindowKeyboardFocusRestore()
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Convert the keyboard event to our shortcut string format
@@ -799,7 +824,7 @@ export function useMainWindowEventListeners() {
           const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
 
           if (
-            (e.metaKey || e.ctrlKey) &&
+            isModKeyEvent(e) &&
             !e.shiftKey &&
             !e.altKey &&
             digit >= 1 &&
@@ -837,8 +862,9 @@ export function useMainWindowEventListeners() {
         }
       }
 
-      // CMD/Ctrl+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      // Mod+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
+      // Use platform mod (Cmd on macOS native, Ctrl elsewhere) so Ctrl+digit reaches terminals.
+      if (isModKeyEvent(e) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
         const digitMatch = e.code.match(/^Digit(\d)$/)
         const digit = digitMatch?.[1] ? parseInt(digitMatch[1], 10) : NaN
@@ -931,11 +957,32 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
+        listen<{ sessionId: string }>('terminal:working', event => {
+          const sessionId = event.payload?.sessionId
+          if (!sessionId) return
+          const store = useChatStore.getState()
+          store.addSendingSession(sessionId)
+          // Mirror chat turn start: clear waiting so the session shows as running.
+          store.setWaitingForInput(sessionId, false)
+        }),
+
+        listen<{ sessionId: string }>('terminal:attention', event => {
+          const sessionId = event.payload?.sessionId
+          if (!sessionId) return
+          const store = useChatStore.getState()
+          store.removeSendingSession(sessionId)
+          // Mirror chat:done waiting so canvas/list badges update before sessions
+          // cache invalidation lands (terminal sessions have no run transcript).
+          store.setWaitingForInput(sessionId, true)
+        }),
+
         listenLocal('menu-about', async () => {
           logger.debug('About menu event received')
           if (!isNativeApp()) return
-          const { getVersion } = await import('@tauri-apps/api/app')
-          const { message } = await import('@tauri-apps/plugin-dialog')
+          const [{ getVersion }, { message }] = await Promise.all([
+            import('@tauri-apps/api/app'),
+            import('@tauri-apps/plugin-dialog'),
+          ])
           // Show simple about dialog with dynamic version
           const appVersion = await getVersion()
           await message(
@@ -957,7 +1004,10 @@ export function useMainWindowEventListeners() {
             return
           }
           if (ui.isUpdateInstalling) {
-            commandContext.showToast('Update download already in progress', 'info')
+            commandContext.showToast(
+              'Update download already in progress',
+              'info'
+            )
             return
           }
           try {
@@ -992,6 +1042,13 @@ export function useMainWindowEventListeners() {
           const { leftSidebarVisible, setLeftSidebarVisible } =
             useUIStore.getState()
           setLeftSidebarVisible(!leftSidebarVisible)
+        }),
+
+        listenLocal('menu-toggle-file-browser', () => {
+          logger.debug('Toggle file browser menu event received')
+          const { fileBrowserVisible, setFileBrowserVisible } =
+            useUIStore.getState()
+          setFileBrowserVisible(!fileBrowserVisible)
         }),
 
         listenLocal('menu-toggle-right-sidebar', () => {

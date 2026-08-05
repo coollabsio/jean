@@ -7,25 +7,29 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { SentryIssue } from '@/types/sentry'
+import { ItemSelectCheckbox } from './ItemSelectCheckbox'
 
 interface SentryIssueItemProps {
   issue: SentryIssue
   index: number
   isSelected: boolean
   isCreating: boolean
+  isChecked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
 }
 
+const COMPACT_COUNT_FORMAT = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
 function formatCompactCount(value: string | number): string {
   const count = Number(value)
   if (!Number.isFinite(count)) return String(value)
-
-  return new Intl.NumberFormat('en', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(count)
+  return COMPACT_COUNT_FORMAT.format(count)
 }
 
 export function SentryIssueItem({
@@ -33,6 +37,8 @@ export function SentryIssueItem({
   index,
   isSelected,
   isCreating,
+  isChecked = false,
+  onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
@@ -44,15 +50,25 @@ export function SentryIssueItem({
       className={cn(
         'w-full flex items-start gap-2 sm:gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors hover:bg-accent',
         isSelected && 'bg-accent',
+        isChecked && !isSelected && 'bg-accent/50',
         isCreating && 'opacity-50'
       )}
     >
+      {onCheckedChange && (
+        <ItemSelectCheckbox
+          checked={isChecked}
+          disabled={isCreating}
+          ariaLabel={`Select Sentry issue ${issue.shortId}`}
+          onCheckedChange={onCheckedChange}
+        />
+      )}
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground shrink-0" />
       ) : (
         <AlertTriangle className="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />
       )}
       <button
+        type="button"
         onClick={event => onClick(event.metaKey || event.ctrlKey)}
         disabled={isCreating}
         data-testid="sentry-issue-content"
@@ -116,11 +132,13 @@ export function SentryIssueItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
             onClick={event => {
               event.stopPropagation()
               onInvestigate(event.metaKey || event.ctrlKey)
             }}
             disabled={isCreating}
+            aria-label="Investigate"
             className="inline-flex h-6 w-6 items-center justify-center rounded text-foreground/80 hover:bg-muted disabled:opacity-30"
           >
             <Wand2 className="h-3 w-3 dark:text-yellow-400" />

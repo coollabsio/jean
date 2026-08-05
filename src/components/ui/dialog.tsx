@@ -49,6 +49,8 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean
     preventClose?: boolean
+    /** Extra classes for the dimmed overlay (e.g. higher z-index above sheets) */
+    overlayClassName?: string
   }
 >(
   (
@@ -57,14 +59,17 @@ const DialogContent = React.forwardRef<
       children,
       showCloseButton = true,
       preventClose = false,
+      overlayClassName,
       ['aria-describedby']: ariaDescribedBy,
       onEscapeKeyDown: onEscapeKeyDownProp,
+      onInteractOutside: onInteractOutsideProp,
+      onPointerDownOutside: onPointerDownOutsideProp,
       ...props
     },
     ref
   ) => (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         data-slot="dialog-content"
@@ -100,12 +105,21 @@ const DialogContent = React.forwardRef<
           }
           onEscapeKeyDownProp?.(e)
         }}
-        onInteractOutside={preventClose ? e => e.preventDefault() : undefined}
+        onInteractOutside={e => {
+          if (preventClose) {
+            e.preventDefault()
+          }
+          onInteractOutsideProp?.(e)
+        }}
         onPointerDownOutside={e => {
           const target = e.target as HTMLElement
           if (target?.closest?.('[data-tauri-drag-region]')) {
             e.preventDefault()
           }
+          if (preventClose) {
+            e.preventDefault()
+          }
+          onPointerDownOutsideProp?.(e)
         }}
         aria-describedby={ariaDescribedBy}
         {...props}

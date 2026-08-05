@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { isLocalBackend } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
 import { FolderOpen, FolderPlus, Globe } from 'lucide-react'
@@ -200,47 +200,50 @@ export function AddProjectDialog() {
   )
 
   // Keyboard shortcuts: A = add existing, I = initialize new, C = clone
+  const onAddProjectKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    // Don't intercept when another modal is on top
+    const { gitInitModalOpen, cloneModalOpen } = useProjectsStore.getState()
+    if (gitInitModalOpen || cloneModalOpen || browserMode !== null) return
+
+    // Don't intercept when typing in an input field
+    const target = e.target as HTMLElement
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable
+    )
+      return
+
+    if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault()
+      handleAddExisting()
+    } else if (e.key === 'i' || e.key === 'I') {
+      e.preventDefault()
+      handleInitNew()
+    } else if (e.key === 'c' || e.key === 'C') {
+      e.preventDefault()
+      handleCloneRemote()
+    }
+  })
+
   useEffect(() => {
     if (!addProjectDialogOpen || isPending) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept when another modal is on top
-      const { gitInitModalOpen, cloneModalOpen } = useProjectsStore.getState()
-      if (gitInitModalOpen || cloneModalOpen || browserMode !== null) return
-
-      // Don't intercept when typing in an input field
-      const target = e.target as HTMLElement
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      )
-        return
-
-      if (e.key === 'a' || e.key === 'A') {
-        e.preventDefault()
-        handleAddExisting()
-      } else if (e.key === 'i' || e.key === 'I') {
-        e.preventDefault()
-        handleInitNew()
-      } else if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault()
-        handleCloneRemote()
-      }
-    }
+    const handleKeyDown = (e: KeyboardEvent) => onAddProjectKeyDown(e)
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    addProjectDialogOpen,
-    browserMode,
-    isPending,
-    handleAddExisting,
-    handleInitNew,
-    handleCloneRemote,
-  ])
+  }, [addProjectDialogOpen, isPending])
 
   return (
-    <Dialog open={addProjectDialogOpen} onOpenChange={setAddProjectDialogOpen}>
-      <>
+    <>
+      {/*
+        DirectoryBrowser is a sibling Dialog, not nested under New Project.
+        Nested Radix dialogs trap focus poorly and have been implicated in
+        WebView2 freezes when alt-tabbing on Windows (issue #575).
+      */}
+      <Dialog
+        open={addProjectDialogOpen}
+        onOpenChange={setAddProjectDialogOpen}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>New Project</DialogTitle>
@@ -251,6 +254,7 @@ export function AddProjectDialog() {
 
           <div className="grid gap-3 py-4">
             <button
+              type="button"
               onClick={handleAddExisting}
               disabled={isPending}
               className="flex items-start gap-4 rounded-lg border border-border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
@@ -270,6 +274,7 @@ export function AddProjectDialog() {
             </button>
 
             <button
+              type="button"
               onClick={handleInitNew}
               disabled={isPending}
               className="flex items-start gap-4 rounded-lg border border-border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
@@ -289,6 +294,7 @@ export function AddProjectDialog() {
             </button>
 
             <button
+              type="button"
               onClick={handleCloneRemote}
               disabled={isPending}
               className="flex items-start gap-4 rounded-lg border border-border p-4 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
@@ -308,25 +314,25 @@ export function AddProjectDialog() {
             </button>
           </div>
         </DialogContent>
+      </Dialog>
 
-        <DirectoryBrowser
-          open={browserMode !== null}
-          onOpenChange={handleBrowserOpenChange}
-          onSelect={handleBrowserSelect}
-          mode={browserMode ?? 'select'}
-          title={
-            browserMode === 'save'
-              ? 'Create new project'
-              : 'Select existing project'
-          }
-          description={
-            browserMode === 'save'
-              ? 'Choose a parent directory and enter a new project folder name.'
-              : 'Choose an existing git repository folder.'
-          }
-          defaultName={browserMode === 'save' ? 'my-project' : undefined}
-        />
-      </>
-    </Dialog>
+      <DirectoryBrowser
+        open={browserMode !== null}
+        onOpenChange={handleBrowserOpenChange}
+        onSelect={handleBrowserSelect}
+        mode={browserMode ?? 'select'}
+        title={
+          browserMode === 'save'
+            ? 'Create new project'
+            : 'Select existing project'
+        }
+        description={
+          browserMode === 'save'
+            ? 'Choose a parent directory and enter a new project folder name.'
+            : 'Choose an existing git repository folder.'
+        }
+        defaultName={browserMode === 'save' ? 'my-project' : undefined}
+      />
+    </>
   )
 }

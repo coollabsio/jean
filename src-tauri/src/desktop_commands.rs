@@ -20,23 +20,17 @@ fn spawn(command: &str, args: &[String]) -> Result<(), String> {
 }
 
 fn open_url(url: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        spawn("open", &[url])
-    }
-    #[cfg(target_os = "windows")]
-    {
-        spawn(
-            "cmd",
-            &["/c".to_string(), "start".to_string(), String::new(), url],
-        )
-    }
-    #[cfg(target_os = "linux")]
-    {
-        spawn("xdg-open", &[url])
-    }
+    // Shared helper applies CREATE_NO_WINDOW on Windows so the cmd.exe
+    // intermediary for `start` never flashes a console (issue #588).
+    jean_core::open_url_in_browser(&url)
 }
 
+/// Toggle macOS window vibrancy (translucent sidebar material).
+///
+/// Jean starts **opaque by default** (`transparent: false`, no window effects
+/// in `tauri.conf.json`) so text stays sharp on external monitors. Enabling
+/// vibrancy is an explicit Appearance preference that opts into translucent
+/// compositing at runtime.
 #[tauri::command]
 pub async fn set_window_vibrancy(app: AppHandle, enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -158,6 +152,20 @@ pub async fn write_clipboard_text(text: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
         clipboard.set_text(text).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn read_clipboard_text() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+        match clipboard.get_text() {
+            Ok(text) => Ok(text),
+            Err(arboard::Error::ContentNotAvailable) => Ok(String::new()),
+            Err(error) => Err(error.to_string()),
+        }
     })
     .await
     .map_err(|error| error.to_string())?

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -13,8 +14,6 @@ import {
   Archive,
   ChevronDown,
   Copy,
-  Eye,
-  EyeOff,
   GitBranchPlus,
   GitPullRequestArrow,
   Pencil,
@@ -55,6 +54,7 @@ import {
   reconnectNativeCliSession,
   canReconnectSession,
 } from '@/services/chat'
+import { resolveBackendCliPath } from '@/services/cli-binary'
 import { usePreferences } from '@/services/preferences'
 import {
   useWorktree,
@@ -69,6 +69,7 @@ import {
   fetchWorktreesStatus,
   triggerImmediateGitPoll,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
 import { isBaseSession } from '@/types/projects'
 import type { Session } from '@/types/chat'
@@ -93,9 +94,12 @@ import {
   buildNativeClientSessionInput,
   computeSessionCardData,
   getResumeCommand,
+  isActionableWaitingStatus,
   statusConfig,
+  type ManualSessionStatus,
   type SessionCardData,
 } from './session-card-utils'
+import { SessionStatusMenu } from './SessionStatusMenu'
 import {
   buildReorderedSessionIdsWithinStatus,
   resolveModalSessionId,
@@ -142,9 +146,9 @@ function useOffScreenWaiting(
     const viewport = viewportRef.current
     if (!viewport) return
 
-    const waitingIds = sortedCards
-      .filter(c => c.status === 'waiting')
-      .map(c => c.session.id)
+    const waitingIds = sortedCards.flatMap(c =>
+      isActionableWaitingStatus(c.status) ? [c.session.id] : []
+    )
 
     if (waitingIds.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -660,27 +664,33 @@ export function SessionChatModal({
 
   const handleOpenInNativeClient = useCallback(
     (session: Session) => {
-      const input = buildNativeClientSessionInput(
-        session,
-        worktreeId,
-        worktreePath
-      )
-      if (!input) {
-        toast.error('No native resume command is available for this session')
-        return
-      }
+      void (async () => {
+        // Prefer Jean-managed / resolved absolute path so bare names like
+        // `grok` work when the CLI is not on PATH (default jean install).
+        const resolvedCommand = await resolveBackendCliPath(session.backend)
+        const input = buildNativeClientSessionInput(
+          session,
+          worktreeId,
+          worktreePath,
+          { resolvedCommand }
+        )
+        if (!input) {
+          toast.error('No native resume command is available for this session')
+          return
+        }
 
-      createSession.mutate(input, {
-        onSuccess: nativeSession => {
-          useChatStore
-            .getState()
-            .setSelectedBackend(nativeSession.id, input.backend)
-          void reconnectNativeCliSession(nativeSession, worktreeId, {
-            openModal: false,
-            showToast: false,
-          }).then(() => toast.success('Opened in native client'))
-        },
-      })
+        createSession.mutate(input, {
+          onSuccess: nativeSession => {
+            useChatStore
+              .getState()
+              .setSelectedBackend(nativeSession.id, input.backend)
+            void reconnectNativeCliSession(nativeSession, worktreeId, {
+              openModal: false,
+              showToast: false,
+            }).then(() => toast.success('Opened in native client'))
+          },
+        })
+      })()
     },
     [createSession, worktreeId, worktreePath]
   )
@@ -778,7 +788,7 @@ export function SessionChatModal({
       if (!viewport) return
       const { scrollLeft, clientWidth } = viewport
       for (const card of sortedCards) {
-        if (card.status !== 'waiting') continue
+        if (!isActionableWaitingStatus(card.status)) continue
         const el = viewport.querySelector(
           `[data-session-id="${card.session.id}"]`
         ) as HTMLElement | null
@@ -896,6 +906,48 @@ export function SessionChatModal({
     [pickRemoteOrRun, worktree, worktreePath, project]
   )
 
+  const gitSyncButton = preferences?.git_sync_button ?? false
+
+  const handleSync = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+
+      const runSync = async (remote?: string) => {
+        await performGitSync({
+          needsPull: behindCount > 0,
+          needsPush: unpushedCount > 0,
+          pull: {
+            worktreeId,
+            worktreePath,
+            baseBranch: worktree?.base_branch ?? defaultBranch,
+            projectId: project?.id,
+            remote: worktree?.base_remote,
+          },
+          prNumber: worktree?.pr_number,
+          pushRemote: remote,
+        })
+      }
+
+      if (unpushedCount > 0 && pushNeedsRemotePicker(worktree?.pr_number)) {
+        pickRemoteOrRun(runSync)
+      } else {
+        void runSync()
+      }
+    },
+    [
+      behindCount,
+      unpushedCount,
+      worktreeId,
+      worktreePath,
+      worktree?.base_branch,
+      worktree?.base_remote,
+      worktree?.pr_number,
+      defaultBranch,
+      project?.id,
+      pickRemoteOrRun,
+    ]
+  )
+
   const handleUncommittedDiffClick = useCallback(() => {
     window.dispatchEvent(
       new CustomEvent('open-git-diff', { detail: { type: 'uncommitted' } })
@@ -941,39 +993,38 @@ export function SessionChatModal({
   )
 
   // Close on Escape key
+  const onEscapeClose = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return
+    const target = e.target as HTMLElement
+    const portalAncestor = target?.closest?.(
+      '[data-slot="dialog-portal"], [data-slot="alert-dialog-portal"], [data-slot="sheet-portal"]'
+    )
+    const terminalAncestor = target?.closest?.('[data-terminal-root="true"]')
+    const { planDialogOpen, gitDiffModalOpen, contextViewerOpen } =
+      useUIStore.getState()
+
+    // Don't close if PlanDialog is open — let it handle ESC
+    if (planDialogOpen) return
+    // Don't close if GitDiffModal is open — let it handle ESC
+    if (gitDiffModalOpen) return
+    // Don't close if ContextViewerDialog is open — let it handle ESC
+    if (contextViewerOpen) return
+    // Don't close if CloseWorktreeDialog is open — let it handle ESC
+    if (closeConfirmOpen) return
+    // Don't close if ESC originated inside a child dialog/sheet portal
+    if (portalAncestor) return
+    // Don't close if ESC originated inside the pinned terminal
+    if (terminalAncestor) return
+
+    handleClose()
+  })
+
   useEffect(() => {
     if (!isOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const target = e.target as HTMLElement
-        const portalAncestor = target?.closest?.(
-          '[data-slot="dialog-portal"], [data-slot="alert-dialog-portal"], [data-slot="sheet-portal"]'
-        )
-        const terminalAncestor = target?.closest?.(
-          '[data-terminal-root="true"]'
-        )
-        const { planDialogOpen, gitDiffModalOpen, contextViewerOpen } =
-          useUIStore.getState()
-
-        // Don't close if PlanDialog is open — let it handle ESC
-        if (planDialogOpen) return
-        // Don't close if GitDiffModal is open — let it handle ESC
-        if (gitDiffModalOpen) return
-        // Don't close if ContextViewerDialog is open — let it handle ESC
-        if (contextViewerOpen) return
-        // Don't close if CloseWorktreeDialog is open — let it handle ESC
-        if (closeConfirmOpen) return
-        // Don't close if ESC originated inside a child dialog/sheet portal
-        if (portalAncestor) return
-        // Don't close if ESC originated inside the pinned terminal
-        if (terminalAncestor) return
-
-        handleClose()
-      }
-    }
+    const handleKeyDown = (e: KeyboardEvent) => onEscapeClose(e)
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, handleClose, closeConfirmOpen])
+  }, [isOpen])
 
   if (!isOpen || !worktreeId) return null
 
@@ -1084,8 +1135,10 @@ export function SessionChatModal({
                   diffRemoved={isMobile ? 0 : uncommittedRemoved}
                   branchDiffAdded={isBase || isMobile ? 0 : branchDiffAdded}
                   branchDiffRemoved={isBase || isMobile ? 0 : branchDiffRemoved}
+                  syncMode={gitSyncButton}
                   onPull={handlePull}
                   onPush={handlePush}
+                  onSync={handleSync}
                   onDiffClick={handleUncommittedDiffClick}
                   onBranchDiffClick={handleBranchDiffClick}
                 />
@@ -1243,9 +1296,9 @@ export function SessionChatModal({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {runScripts.map((cmd, i) => (
+                          {runScripts.map(cmd => (
                             <DropdownMenuItem
-                              key={i}
+                              key={cmd}
                               onSelect={() => handleRunCommand(cmd)}
                               className="font-mono text-xs"
                             >
@@ -1305,8 +1358,6 @@ export function SessionChatModal({
                         <ContextMenuTrigger asChild>
                           <div
                             data-session-id={session.id}
-                            role="button"
-                            tabIndex={0}
                             draggable={renamingSessionId !== session.id}
                             onDragStart={e =>
                               handleSessionDragStart(e, session.id)
@@ -1318,13 +1369,6 @@ export function SessionChatModal({
                             onDragEnd={() => setDraggedSessionId(null)}
                             onClick={() => handleTabClick(session.id)}
                             onAuxClick={e => handleTabAuxClick(e, session)}
-                            onKeyDown={e => {
-                              if (renamingSessionId === session.id) return
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                handleTabClick(session.id)
-                              }
-                            }}
                             onDoubleClick={() =>
                               handleStartRenameImmediate(
                                 session.id,
@@ -1332,18 +1376,20 @@ export function SessionChatModal({
                               )
                             }
                             className={cn(
-                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors whitespace-nowrap',
+                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors whitespace-nowrap cursor-pointer',
                               isActive
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                               draggedSessionId === session.id && 'opacity-60',
-                              status === 'waiting' &&
+                              isActionableWaitingStatus(status) &&
                                 'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
                             )}
                           >
                             <StatusIndicator
                               status={config.indicatorStatus}
                               variant={config.indicatorVariant}
+                              shape={config.indicatorShape}
+                              label={config.label}
                               className="h-1.5 w-1.5"
                             />
                             {idx < 9 && (
@@ -1363,6 +1409,7 @@ export function SessionChatModal({
                                 }
                                 onPointerDown={e => e.stopPropagation()}
                                 onClick={e => e.stopPropagation()}
+                                aria-label="Rename session"
                                 className="w-full min-w-0 bg-transparent text-base outline-none md:text-xs"
                               />
                             ) : (
@@ -1413,35 +1460,17 @@ export function SessionChatModal({
                             <Tag className="mr-2 h-4 w-4" />
                             {sessionLabel ? 'Remove Label' : 'Add Label'}
                           </ContextMenuItem>
-                          <ContextMenuItem
-                            // "Mark as Idle" only clears the manual reviewing
-                            // flag. When review is driven by AI review_results,
-                            // clearing the flag leaves the session in review —
-                            // no effect — so disable it there.
-                            disabled={
-                              status === 'review' && !!session.review_results
-                            }
-                            onSelect={() => {
-                              const { reviewingSessions, setSessionReviewing } =
-                                useChatStore.getState()
-                              const isReviewing =
-                                reviewingSessions[session.id] ||
-                                !!session.review_results
-                              setSessionReviewing(session.id, !isReviewing)
+                          <SessionStatusMenu
+                            statusOverride={card.statusOverride}
+                            automaticStatus={card.automaticStatus}
+                            onSetStatusOverride={(
+                              next: ManualSessionStatus | null
+                            ) => {
+                              useChatStore
+                                .getState()
+                                .setSessionStatusOverride(session.id, next)
                             }}
-                          >
-                            {status === 'review' ? (
-                              <>
-                                <EyeOff className="mr-2 h-4 w-4" />
-                                Mark as Idle
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="mr-2 h-4 w-4" />
-                                Mark for Review
-                              </>
-                            )}
-                          </ContextMenuItem>
+                          />
                           {resumeCommand && (
                             <>
                               <ContextMenuItem
@@ -1490,6 +1519,18 @@ export function SessionChatModal({
                           >
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => {
+                              void copyToClipboard(session.id)
+                                .then(() => toast.success('Session ID copied'))
+                                .catch(() =>
+                                  toast.error('Failed to copy session ID')
+                                )
+                            }}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy Session ID
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem
