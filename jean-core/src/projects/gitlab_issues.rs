@@ -657,11 +657,127 @@ pub fn create_mr(
     Ok((m.iid, m.web_url))
 }
 
+/// Project-level merge defaults used to pick MR merge options.
+#[derive(Debug, serde::Deserialize)]
+struct GlProjectMergeSettings {
+    #[serde(default)]
+    squash_option: Option<String>,
+    #[serde(default)]
+    remove_source_branch_after_merge: Option<bool>,
+}
+
+struct MrMergeOptions {
+    squash: bool,
+    remove_source_branch: bool,
+}
+
+/// `squash_option` is `never | default_off | default_on | always`. Prefer squash
+/// whenever the project allows it; only `never` (or a missing/unknown value)
+/// disables it.
+fn resolve_squash_from_option(opt: Option<&str>) -> bool {
+    matches!(
+        opt,
+        Some("always") | Some("default_on") | Some("default_off")
+    )
+}
+
+/// Turn an MR's state / draft flag / `detailed_merge_status` into an actionable
+/// error, or `None` when it looks mergeable. Mirrors the mergeability guard on
+/// the GitHub path so users get a clear reason instead of raw glab stderr.
+fn merge_blocked_reason(state: &str, is_draft: bool, merge_status: Option<&str>) -> Option<String> {
+    if state != "opened" {
+        return Some(format!("Merge request is not open (state: {state})"));
+    }
+    if is_draft {
+        return Some("Merge request is a draft; mark it ready before merging".to_string());
+    }
+    match merge_status {
+        Some("conflict")
+        | Some("broken_status")
+        | Some("cannot_be_merged")
+        | Some("cannot_be_merged_recheck") => {
+            Some("Merge request has conflicts that must be resolved first".to_string())
+        }
+        Some("discussions_not_resolved") => {
+            Some("Merge request has unresolved threads that must be resolved first".to_string())
+        }
+        Some("ci_must_pass") | Some("ci_still_running") => {
+            Some("Merge request pipeline must succeed before merging".to_string())
+        }
+        Some("not_approved") => {
+            Some("Merge request needs required approvals before merging".to_string())
+        }
+        Some("draft_status") => {
+            Some("Merge request is a draft; mark it ready before merging".to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Map a raw glab merge failure (405/409/422) to an actionable message.
+fn map_merge_error(err: &str) -> String {
+    if err.contains("405") {
+        "Merge request is not mergeable (draft, closed, or already merged)".to_string()
+    } else if err.contains("409") {
+        "Merge request changed on the server; refresh and try again".to_string()
+    } else if err.contains("422") {
+        "Merge request cannot be merged (unresolved threads or pipeline must succeed)".to_string()
+    } else {
+        err.to_string()
+    }
+}
+
+/// Best-effort read of the project's merge defaults. Falls back to
+/// no-squash / keep-source-branch when the settings can't be read.
+fn resolve_mr_merge_options(app: &AppHandle, project_path: &str, enc: &str) -> MrMergeOptions {
+    let fallback = MrMergeOptions {
+        squash: false,
+        remove_source_branch: false,
+    };
+    let Ok(stdout) = run_glab_api(app, project_path, &format!("projects/{enc}")) else {
+        return fallback;
+    };
+    match serde_json::from_str::<GlProjectMergeSettings>(&stdout) {
+        Ok(s) => MrMergeOptions {
+            squash: resolve_squash_from_option(s.squash_option.as_deref()),
+            remove_source_branch: s.remove_source_branch_after_merge.unwrap_or(false),
+        },
+        Err(_) => fallback,
+    }
+}
+
 /// Merge (accept) a merge request by iid.
+///
+/// Pre-checks mergeability (draft / conflicts / unresolved threads / pipeline)
+/// and applies the project's squash + delete-source-branch defaults, mirroring
+/// the option handling and actionable errors of the GitHub merge path.
 pub fn merge_mr(app: &AppHandle, project_path: &str, mr_number: u32) -> Result<(), String> {
     let enc = gitlab_project_path_encoded(project_path)?;
-    let endpoint = format!("projects/{enc}/merge_requests/{mr_number}/merge");
-    run_glab_api_method(app, project_path, "PUT", &endpoint)?;
+
+    let status = fetch_mr_status_raw(app, project_path, mr_number)?;
+    if let Some(reason) = merge_blocked_reason(
+        &status.state,
+        status.is_draft,
+        status.merge_status.as_deref(),
+    ) {
+        return Err(reason);
+    }
+
+    let opts = resolve_mr_merge_options(app, project_path, &enc);
+    let path = format!("projects/{enc}/merge_requests/{mr_number}/merge");
+    let fields = [
+        ("squash", if opts.squash { "true" } else { "false" }),
+        (
+            "should_remove_source_branch",
+            if opts.remove_source_branch {
+                "true"
+            } else {
+                "false"
+            },
+        ),
+    ];
+    run_glab_api_fields(app, project_path, "PUT", &path, &fields)
+        .map_err(|e| map_merge_error(&e))?;
     Ok(())
 }
 
@@ -747,6 +863,42 @@ mod tests {
         assert_eq!(issue_state_param("all"), None);
         assert_eq!(mr_state_param("merged"), Some("merged"));
         assert_eq!(mr_state_param("all"), None);
+    }
+
+    #[test]
+    fn squash_option_prefers_squash_unless_never() {
+        assert!(resolve_squash_from_option(Some("always")));
+        assert!(resolve_squash_from_option(Some("default_on")));
+        assert!(resolve_squash_from_option(Some("default_off")));
+        assert!(!resolve_squash_from_option(Some("never")));
+        assert!(!resolve_squash_from_option(None));
+        assert!(!resolve_squash_from_option(Some("bogus")));
+    }
+
+    #[test]
+    fn merge_blocked_reason_flags_blockers() {
+        // Non-open state.
+        assert!(merge_blocked_reason("closed", false, Some("mergeable")).is_some());
+        // Draft.
+        assert!(merge_blocked_reason("opened", true, Some("mergeable")).is_some());
+        // Detailed merge-status blockers.
+        assert!(merge_blocked_reason("opened", false, Some("conflict")).is_some());
+        assert!(merge_blocked_reason("opened", false, Some("cannot_be_merged")).is_some());
+        assert!(merge_blocked_reason("opened", false, Some("discussions_not_resolved")).is_some());
+        assert!(merge_blocked_reason("opened", false, Some("ci_must_pass")).is_some());
+        assert!(merge_blocked_reason("opened", false, Some("not_approved")).is_some());
+        // Mergeable / unknown → no block.
+        assert!(merge_blocked_reason("opened", false, Some("mergeable")).is_none());
+        assert!(merge_blocked_reason("opened", false, None).is_none());
+    }
+
+    #[test]
+    fn map_merge_error_translates_http_codes() {
+        assert!(map_merge_error("glab api failed: HTTP 405").contains("not mergeable"));
+        assert!(map_merge_error("glab api failed: HTTP 409").contains("changed on the server"));
+        assert!(map_merge_error("glab api failed: HTTP 422").contains("cannot be merged"));
+        // Unknown errors pass through unchanged.
+        assert_eq!(map_merge_error("some other error"), "some other error");
     }
 
     #[test]
