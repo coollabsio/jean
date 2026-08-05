@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
-use crate::projects::provider::{resolve_git_provider, GitProvider};
+use crate::projects::provider::{resolve_git_provider, unconfigured_provider_error, GitProvider};
 
 /// True when the project resolves to the GitLab provider, so the GitHub
 /// commands below should delegate to [`super::gitlab_issues`].
@@ -173,6 +173,10 @@ pub async fn list_github_issues(
 
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::list_issues(&app, &project_path, state).await;
+    }
+    // Don't silently run gh against an unclassifiable self-hosted host.
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
     }
 
     let gh = resolve_gh_binary(&app);
@@ -1574,6 +1578,10 @@ pub async fn list_github_prs(
 
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::list_mrs(&app, &project_path, state).await;
+    }
+    // Don't silently run gh against an unclassifiable self-hosted host.
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
     }
 
     let gh = resolve_gh_binary(&app);
