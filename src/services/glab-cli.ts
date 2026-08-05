@@ -18,9 +18,9 @@ import type {
   GlabInstallProgress,
 } from '@/types/glab-cli'
 
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 
 /**
  * Check if an error is a GitLab CLI authentication or installation error

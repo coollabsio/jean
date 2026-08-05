@@ -51,6 +51,7 @@ export function CliUpdateModal() {
         queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
       } else if (cliUpdateModalType === 'glab') {
         queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.all })
+        queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
       } else if (cliUpdateModalType === 'codex') {
         queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.all })
       } else if (cliUpdateModalType === 'opencode') {

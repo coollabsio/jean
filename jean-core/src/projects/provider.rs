@@ -154,7 +154,10 @@ pub fn extract_repo_path(remote_url: &str) -> Option<String> {
 pub fn detect_provider_from_url(remote_url: &str) -> Option<(GitProvider, String)> {
     let host = extract_host(remote_url)?;
     let lower = host.to_ascii_lowercase();
-    let provider = if lower == "github.com" || lower.ends_with(".github.com") {
+    // Symmetric host matching: classify by substring for both providers so
+    // self-hosted instances (GitHub Enterprise `github.acme.com`, self-hosted
+    // `gitlab.acme.com`) are detected the same way.
+    let provider = if lower == "github.com" || lower.contains("github") {
         GitProvider::Github
     } else if lower == "gitlab.com" || lower.contains("gitlab") {
         GitProvider::Gitlab
@@ -184,7 +187,9 @@ pub fn unconfigured_provider_error(repo_path: &str) -> Option<String> {
     if detect_provider_from_url(&origin).is_some() {
         return None;
     }
-    let host = extract_host(&origin).unwrap_or(origin);
+    // Local-path / file:// origins have no host to classify — not an ambiguous
+    // provider, so don't propose a bogus `"host": "<path>"`.
+    let host = extract_host(&origin)?;
     Some(format!(
         "Could not determine the git host provider for '{host}'. Add a provider block to \
          jean.json, e.g. \"provider\": {{ \"git\": \"gitlab\", \"host\": \"{host}\" }}."
@@ -226,10 +231,23 @@ pub fn resolve_git_provider(repo_path: &str) -> (GitProvider, String) {
     // the provider's default host.
     let host = cfg
         .and_then(|c| c.host)
+        .map(|h| normalize_host(&h))
         .or_else(|| origin.as_deref().and_then(extract_host))
         .unwrap_or_else(|| provider.default_host().to_string());
 
     (provider, host)
+}
+
+/// Normalize a user-supplied host from `jean.json` (`provider.host`): strip any
+/// `scheme://`, `user@`, path, and trailing slash so it's a bare host suitable
+/// for `GITLAB_HOST` / `glab --hostname`. A verbatim `https://gitlab.example.com`
+/// would otherwise break every `glab` call.
+fn normalize_host(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let after_scheme = trimmed.rsplit("://").next().unwrap_or(trimmed);
+    let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    host.trim_end_matches('/').to_string()
 }
 
 /// Resolved provider info surfaced to the frontend.

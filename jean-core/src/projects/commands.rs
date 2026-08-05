@@ -2160,10 +2160,9 @@ pub async fn create_worktree(
                             log::warn!("Background: Failed to create git-context directory: {e}");
                         } else {
                             // Fetch the diff if not already present
-                            let gh = resolve_gh_binary(&app_clone);
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&project_path, ctx.number, &gh).ok();
+                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -2996,10 +2995,9 @@ pub async fn create_worktree_from_existing_branch(
                             log::warn!("Background: Failed to create git-context directory: {e}");
                         } else {
                             // Fetch the diff if not already present
-                            let gh = resolve_gh_binary(&app_clone);
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&project_path, ctx.number, &gh).ok();
+                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -3742,12 +3740,7 @@ pub async fn checkout_pr(
                                     submitted_at: r.submitted_at,
                                 })
                                 .collect(),
-                            diff: get_pr_diff(
-                                &project_path,
-                                pr_number,
-                                &resolve_gh_binary(&app_clone),
-                            )
-                            .ok(),
+                            diff: get_pr_diff(&app_clone, &project_path, pr_number).ok(),
                         };
 
                         let context_file =
@@ -5462,15 +5455,24 @@ pub async fn open_pull_request(
 
     // Use the worktree path for the PR creation; open against the worktree base
     // (not only the project default) so stacked branches target the right base.
-    let gh = resolve_gh_binary(&app);
-    let result = git::open_pull_request(
-        &worktree.path,
-        title.as_deref(),
-        body.as_deref(),
-        draft.unwrap_or(false),
-        Some(&base_branch),
-        &gh,
-    )?;
+    let result = if resolve_git_provider(&worktree.path).0 == GitProvider::Gitlab {
+        crate::projects::gitlab_issues::open_mr_web(
+            &app,
+            &worktree.path,
+            draft.unwrap_or(false),
+            Some(&base_branch),
+        )?
+    } else {
+        let gh = resolve_gh_binary(&app);
+        git::open_pull_request(
+            &worktree.path,
+            title.as_deref(),
+            body.as_deref(),
+            draft.unwrap_or(false),
+            Some(&base_branch),
+            &gh,
+        )?
+    };
 
     log::trace!(
         "Successfully opened pull request for worktree: {}",
@@ -6496,12 +6498,26 @@ fn parse_pr_view_link(output: &[u8]) -> Result<Option<DetectPrResponse>, String>
     }))
 }
 
-/// Resolve PR number/url/title via `gh pr view <number>`.
+/// Resolve PR/MR number/url/title by number (via `gh pr view` or the GitLab API).
 fn view_pr_link_by_number(
     app: &AppHandle,
     worktree_path: &str,
     pr_number: u32,
 ) -> Result<Option<DetectPrResponse>, String> {
+    if resolve_git_provider(worktree_path).0 == GitProvider::Gitlab {
+        return match crate::projects::gitlab_issues::get_mr_brief(app, worktree_path, pr_number) {
+            Ok((num, url, title)) => Ok(Some(DetectPrResponse {
+                pr_number: num,
+                pr_url: url,
+                title,
+            })),
+            Err(e) => {
+                log::warn!("glab MR !{pr_number} lookup failed: {e}");
+                Ok(None)
+            }
+        };
+    }
+
     let gh = resolve_gh_binary(app);
     let output = gh_command(&gh, worktree_path)
         .args([
@@ -6664,6 +6680,12 @@ pub async fn trigger_coderabbit_pr_review(
     pr_number: Option<u32>,
 ) -> Result<TriggerCodeRabbitPrReviewResponse, String> {
     log::trace!("Triggering CodeRabbit PR review for: {worktree_path}");
+
+    if resolve_git_provider(&worktree_path).0 == GitProvider::Gitlab {
+        return Err(
+            "Triggering a CodeRabbit review from Jean isn't supported on GitLab yet.".to_string(),
+        );
+    }
 
     let gh = resolve_gh_binary(&app);
     let target_pr_number =
@@ -7690,6 +7712,18 @@ fn parse_pr_output(output: &str) -> Result<(u32, String), String> {
     Ok((pr_number, url))
 }
 
+/// Persist a PR/MR link (`number` + `url`) onto the worktree matching `path`.
+/// Best-effort: logs on failure and never returns an error to the caller.
+fn save_worktree_pr_link_by_path(app: &AppHandle, worktree_path: &str, pr_number: u32, pr_url: &str) {
+    if let Ok(mut data) = load_projects_data(app) {
+        if let Some(wt) = data.worktrees.iter_mut().find(|w| w.path == worktree_path) {
+            wt.pr_number = Some(pr_number);
+            wt.pr_url = Some(pr_url.to_string());
+            let _ = save_projects_data(app, &data);
+        }
+    }
+}
+
 /// Create a PR with AI-generated title and body
 ///
 /// This command:
@@ -7990,6 +8024,7 @@ pub async fn create_pr_with_ai_content(
                     &current_branch,
                 ) {
                     Ok(Some((num, url, title))) => {
+                        save_worktree_pr_link_by_path(&app, &worktree_path, num, &url);
                         return Ok(CreatePrResponse {
                             pr_number: num,
                             pr_url: url,
@@ -8004,6 +8039,7 @@ pub async fn create_pr_with_ai_content(
         };
 
         log::trace!("Successfully created MR !{pr_number}: {pr_url}");
+        save_worktree_pr_link_by_path(&app, &worktree_path, pr_number, &pr_url);
         return Ok(CreatePrResponse {
             pr_number,
             pr_url,

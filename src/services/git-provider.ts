@@ -9,10 +9,10 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
-import { hasBackend } from '@/lib/environment'
+import { hasBackendTransport } from '@/lib/environment'
 import type { GitProvider } from '@/types/provider'
 
-const isTauri = hasBackend
+const isTauri = hasBackendTransport
 
 export interface GitProviderInfo {
   provider: GitProvider

@@ -201,6 +201,7 @@ function CliLoginModalContent({
           queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
         } else if (cliType === 'glab') {
           queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.all })
+          queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
         } else if (cliType === 'codex') {
           queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.all })
         } else if (cliType === 'opencode') {

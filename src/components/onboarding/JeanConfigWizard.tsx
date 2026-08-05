@@ -36,7 +36,9 @@ function JeanConfigWizardContent() {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const saveConfig = useSaveJeanConfig()
-  const { data: existingConfig } = useJeanConfig(project?.path ?? null)
+  const { data: existingConfig, isLoading: isConfigLoading } = useJeanConfig(
+    project?.path ?? null
+  )
 
   const [setupScript, setSetupScript] = useState('')
   const [teardownScript, setTeardownScript] = useState('')
@@ -345,7 +347,9 @@ function JeanConfigWizardContent() {
           <Button
             className="h-11 min-w-20 sm:h-9"
             onClick={handleSave}
-            disabled={!hasContent || saveConfig.isPending}
+            // Wait for the existing config to load before saving so we don't
+            // spread `undefined` and drop a pre-existing `provider` block.
+            disabled={!hasContent || saveConfig.isPending || isConfigLoading}
           >
             Save
           </Button>

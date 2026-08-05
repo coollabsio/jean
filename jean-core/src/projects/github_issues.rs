@@ -1783,6 +1783,10 @@ pub async fn get_pr_review_comments(
 ) -> Result<Vec<GitHubReviewComment>, String> {
     log::trace!("Getting review comments for PR #{pr_number} in {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_mr_review_comments(&app, &project_path, pr_number);
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
     let query = r#"
@@ -1953,25 +1957,30 @@ pub fn format_pr_context_markdown(ctx: &PullRequestContext) -> String {
 ///
 /// Returns the diff as a string, truncated to 100KB if too large.
 pub fn get_pr_diff(
+    app: &AppHandle,
     project_path: &str,
     pr_number: u32,
-    gh_binary: &std::path::Path,
 ) -> Result<String, String> {
     log::debug!("Fetching diff for PR #{pr_number} in {project_path}");
 
-    let output = gh_command(gh_binary, project_path)
-        .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
+    let diff = if is_gitlab_project(project_path) {
+        super::gitlab_issues::get_mr_diff(app, project_path, pr_number)?
+    } else {
+        let gh_binary = resolve_gh_binary(app);
+        let output = gh_command(&gh_binary, project_path)
+            .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
+            .output()
+            .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::debug!("gh pr diff failed: {stderr}");
-        // Return empty string on failure (diff might not be available)
-        return Ok(String::new());
-    }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::debug!("gh pr diff failed: {stderr}");
+            // Return empty string on failure (diff might not be available)
+            return Ok(String::new());
+        }
+        String::from_utf8_lossy(&output.stdout).to_string()
+    };
 
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
     log::debug!("Got diff for PR #{pr_number}: {} bytes", diff.len());
 
     // Truncate if > 100KB
@@ -1985,10 +1994,9 @@ pub fn get_pr_diff(
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(MAX_DIFF_SIZE.min(diff.len()));
         Ok(format!(
-            "{}...\n\n[Diff truncated at 100KB - {} bytes total. Run `gh pr diff {}` to see the full diff.]",
+            "{}...\n\n[Diff truncated at 100KB - {} bytes total.]",
             &diff[..end],
             diff.len(),
-            pr_number
         ))
     } else {
         Ok(diff)
@@ -2011,13 +2019,11 @@ pub async fn load_pr_context(
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
 
-    let gh = resolve_gh_binary(&app);
-
     // Fetch PR data from GitHub
     let pr = get_github_pr(app.clone(), project_path.clone(), pr_number).await?;
 
     // Fetch the diff
-    let diff = get_pr_diff(&project_path, pr_number, &gh).ok();
+    let diff = get_pr_diff(&app, &project_path, pr_number).ok();
 
     // Create PR context
     let ctx = PullRequestContext {

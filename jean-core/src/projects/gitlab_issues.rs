@@ -25,8 +25,9 @@ use crate::glab_cli::config::resolve_glab_binary;
 use crate::projects::provider::{extract_repo_path, resolve_git_provider};
 
 /// Neutral fallback color for labels surfaced from list endpoints (which return
-/// only label names, not colors).
-const DEFAULT_LABEL_COLOR: &str = "#8b949e";
+/// only label names, not colors). Bare hex (no leading `#`) to match GitHub's
+/// label color format — the frontend prefixes `#` itself.
+const DEFAULT_LABEL_COLOR: &str = "8b949e";
 
 // =============================================================================
 // glab invocation
@@ -238,6 +239,29 @@ struct GlNote {
     created_at: String,
     #[serde(default)]
     system: bool,
+    #[serde(default)]
+    resolved: bool,
+    #[serde(default)]
+    position: Option<GlNotePosition>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GlDiscussion {
+    #[serde(default)]
+    notes: Vec<GlNote>,
+}
+
+/// Diff position on a GitLab discussion note (present only on inline/diff notes).
+#[derive(Debug, serde::Deserialize)]
+struct GlNotePosition {
+    #[serde(default)]
+    new_path: Option<String>,
+    #[serde(default)]
+    old_path: Option<String>,
+    #[serde(default)]
+    new_line: Option<u32>,
+    #[serde(default)]
+    old_line: Option<u32>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -770,6 +794,118 @@ fn resolve_mr_merge_options(app: &AppHandle, project_path: &str, enc: &str) -> M
         },
         Err(_) => fallback,
     }
+}
+
+/// Fetch a merge request's inline (diff) review comments by mapping GitLab
+/// discussion notes with a diff `position` onto GitHub's review-comment shape.
+/// Non-diff notes and system notes are skipped.
+pub fn get_mr_review_comments(
+    app: &AppHandle,
+    project_path: &str,
+    mr_number: u32,
+) -> Result<Vec<super::github_issues::GitHubReviewComment>, String> {
+    let enc = gitlab_project_path_encoded(project_path)?;
+    let endpoint =
+        format!("projects/{enc}/merge_requests/{mr_number}/discussions?per_page=100");
+    let stdout = run_glab_api(app, project_path, &endpoint)?;
+    let discussions: Vec<GlDiscussion> = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse glab MR discussions: {e}"))?;
+
+    let mut out = Vec::new();
+    for d in discussions {
+        // A resolved thread means every diff note in it is resolved.
+        let resolved = d.notes.iter().any(|n| n.resolved);
+        for note in d.notes {
+            if note.system {
+                continue;
+            }
+            let Some(pos) = note.position else { continue };
+            let path = pos
+                .new_path
+                .clone()
+                .or_else(|| pos.old_path.clone())
+                .unwrap_or_default();
+            out.push(super::github_issues::GitHubReviewComment {
+                author: map_author(note.author),
+                body: note.body,
+                created_at: note.created_at,
+                diff_hunk: String::new(),
+                path,
+                start_line: None,
+                line: pos.new_line.or(pos.old_line),
+                is_outdated: false,
+                is_resolved: note.resolved || resolved,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Push the current branch and open the GitLab "new merge request" page in the
+/// browser via `glab mr create --fill --web` (the counterpart to
+/// `gh pr create --web`). Title/body are left to the browser form.
+pub fn open_mr_web(
+    app: &AppHandle,
+    project_path: &str,
+    draft: bool,
+    base_branch: Option<&str>,
+) -> Result<String, String> {
+    // Push current branch first so the MR has a source.
+    let _ = crate::platform::wsl_aware_command("git", Some(Path::new(project_path)))
+        .args(["push", "-u", "origin", "HEAD"])
+        .output();
+
+    let glab = resolve_glab_binary(app);
+    let (_provider, host) = resolve_git_provider(project_path);
+
+    let mut args: Vec<String> = vec![
+        "mr".into(),
+        "create".into(),
+        "--fill".into(),
+        "--web".into(),
+    ];
+    if let Some(base) = base_branch.filter(|b| !b.trim().is_empty()) {
+        args.push("--target-branch".into());
+        args.push(base.to_string());
+    }
+    if draft {
+        args.push("--draft".into());
+    }
+
+    let output = glab_command(&glab, project_path)
+        .env("GITLAB_HOST", host)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("Failed to run glab mr create: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_glab_auth_error(&stderr) {
+            return Err("GitLab CLI not authenticated. Run 'glab auth login' first.".to_string());
+        }
+        return Err(format!("Failed to open merge request: {stderr}"));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Fetch a merge request's unified diff via `glab mr diff`.
+/// Returns an empty string on failure (parity with the `gh pr diff` path, which
+/// treats a missing diff as non-fatal).
+pub fn get_mr_diff(app: &AppHandle, project_path: &str, mr_number: u32) -> Result<String, String> {
+    let glab = resolve_glab_binary(app);
+    let (_provider, host) = resolve_git_provider(project_path);
+    let output = glab_command(&glab, project_path)
+        .env("GITLAB_HOST", host)
+        .args(["mr", "diff", &mr_number.to_string()])
+        .output()
+        .map_err(|e| format!("Failed to run glab mr diff: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::debug!("glab mr diff failed: {stderr}");
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Merge (accept) a merge request by iid.

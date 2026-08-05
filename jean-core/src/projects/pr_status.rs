@@ -169,6 +169,9 @@ fn parse_pr_state(s: &str) -> PrState {
     match s.to_uppercase().as_str() {
         "MERGED" => PrState::Merged,
         "CLOSED" => PrState::Closed,
+        // GitLab MRs can be "locked" (open but discussion-locked). Treat as open
+        // since there's no distinct display state and the MR is still active.
+        "OPEN" | "OPENED" | "LOCKED" => PrState::Open,
         _ => PrState::Open,
     }
 }

@@ -271,23 +271,6 @@ pub async fn check_glab_cli_version_exists(version: String) -> Result<bool, Stri
     Ok(!release.assets.links.is_empty())
 }
 
-/// Resolve a GitLab API token from environment variables.
-///
-/// Only environment variables are consulted — `glab` manages its own stored
-/// credentials, which our shell-outs use directly. This is provided for future
-/// raw-REST-API callers (e.g. security scanning).
-pub fn resolve_gitlab_api_token() -> Option<String> {
-    for key in ["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "GL_TOKEN"] {
-        if let Ok(value) = std::env::var(key) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
-
 /// Cached versions structure for disk persistence
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedGlabVersions {

@@ -70,6 +70,12 @@ interface GitHubItemsTabProps {
   onLogin: () => void
   isCliInstalled: boolean
   provider?: GitProvider
+  /**
+   * Whether the git-host provider has been resolved. While false the provider
+   * still defaults to `github`, so we defer the auth-error branch to avoid a
+   * transient "Sign in to GitHub" flash on GitLab projects.
+   */
+  providerResolved?: boolean
 }
 
 export function GitHubItemsTab({
@@ -93,6 +99,7 @@ export function GitHubItemsTab({
   onLogin,
   isCliInstalled,
   provider = 'github',
+  providerResolved = true,
 }: GitHubItemsTabProps) {
   const labels = providerLabels(provider)
   const isIssues = config.kind === 'issues'
@@ -216,7 +223,14 @@ export function GitHubItemsTab({
           </div>
         )}
 
+        {error && !providerResolved && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
         {error &&
+          providerResolved &&
           ((provider === 'gitlab' ? isGlabAuthError(error) : isGhAuthError(error)) ? (
             provider === 'gitlab' ? (
               <GlabAuthError onLogin={onLogin} isGlabInstalled={isCliInstalled} />
