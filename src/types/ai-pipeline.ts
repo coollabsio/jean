@@ -54,6 +54,8 @@ export interface AiPipelineTask {
   tags: string[]
   /** `urgent` | `high` | `normal` | `low`. */
   priority?: string
+  /** ClickUp due date, epoch milliseconds as a string. */
+  dueDate?: string
   /** Last ClickUp update, epoch milliseconds as a string. */
   updatedAt?: string
   pr?: AiPipelinePr
@@ -61,7 +63,7 @@ export interface AiPipelineTask {
 
 /** The two pickable buckets, fetched in one round-trip. */
 export interface AiPipelineTaskLists {
-  /** `to review` / `in review` tickets whose PR is ready (non-draft). */
+  /** `to review` / `in review` tickets with a matching PR. */
   review: AiPipelineTask[]
   /** `stuck` tickets, with or without a PR. */
   stuck: AiPipelineTask[]

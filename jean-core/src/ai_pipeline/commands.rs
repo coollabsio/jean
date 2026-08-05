@@ -24,9 +24,10 @@ use crate::projects::git::get_github_url;
 use crate::projects::storage::load_projects_data;
 use crate::projects::types::Worktree;
 use crate::projects::{
-    assign_clickup_task_to_me, checkout_pr, create_worktree, get_clickup_me, get_clickup_task,
-    load_clickup_config, merge_github_pr, parse_clickup_task_id_from_branch,
-    prepare_github_pr_for_merge, resolve_clickup_token, update_clickup_task_status, ClickUpTask,
+    assign_clickup_task_to_me, checkout_pr, clickup_task_id_for_worktree, create_worktree,
+    get_clickup_me, get_clickup_task, load_clickup_config, merge_github_pr,
+    parse_clickup_task_id_from_branch, prepare_github_pr_for_merge, resolve_clickup_token,
+    update_clickup_task_status, ClickUpTask,
 };
 
 /// ClickUp statuses that mark a ticket ready to pick up for review/merge.
@@ -106,6 +107,9 @@ pub struct AiPipelineTask {
     /// ClickUp priority (`urgent` | `high` | `normal` | `low`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
+    /// ClickUp due date, epoch milliseconds as a string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
     /// Last ClickUp update, epoch milliseconds as a string.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
@@ -119,7 +123,7 @@ pub struct AiPipelineTask {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiPipelineTaskLists {
-    /// `to review` / `in review` tickets whose PR is ready (non-draft).
+    /// `to review` / `in review` tickets with a matching PR.
     pub review: Vec<AiPipelineTask>,
     /// `stuck` tickets, with or without a PR.
     pub stuck: Vec<AiPipelineTask>,
@@ -309,12 +313,8 @@ fn parse_gh_prs(value: &serde_json::Value, repo_slug: &str, label: &str) -> Vec<
 /// Build the `task_id -> PR` join map. Pure so it is unit-tested. PRs without a
 /// `CU-<id>` task id can't be joined and are always dropped.
 ///
-/// `include_drafts` splits the two buckets: a review ticket needs a **ready**
-/// PR (a draft means the pipeline hasn't finished), while a STUCK ticket is
-/// precisely the case where the draft PR is what you want to pick up.
-fn pr_by_task(prs: &[AiPipelinePr], include_drafts: bool) -> HashMap<String, AiPipelinePr> {
+fn pr_by_task(prs: &[AiPipelinePr]) -> HashMap<String, AiPipelinePr> {
     prs.iter()
-        .filter(|pr| include_drafts || !pr.is_draft)
         .filter_map(|pr| pr.clickup_task_id.clone().map(|id| (id, pr.clone())))
         .collect()
 }
@@ -730,8 +730,20 @@ pub async fn list_ai_pipeline_tasks(
     let slug = repo_slug_for_path(&project_path)?;
     let value = fetch_repo_prs_json(&app, &slug)?;
     let prs = parse_gh_prs(&value, &slug, &label);
-    let ready_pr_by_task = pr_by_task(&prs, false);
-    let any_pr_by_task = pr_by_task(&prs, true);
+    let pr_by_task = pr_by_task(&prs);
+
+    // A ticket already represented by a current (non-archived) worktree is no
+    // longer pickable from the pipeline list.
+    let projects = load_projects_data(&app)?;
+    let mut current_worktree_task_ids = HashSet::new();
+    for worktree in projects.worktrees_for_project(&project_id) {
+        if worktree.archived_at.is_some() {
+            continue;
+        }
+        if let Some(task_id) = clickup_task_id_for_worktree(&app, worktree)? {
+            current_worktree_task_ids.insert(task_id.to_ascii_lowercase());
+        }
+    }
 
     // Pickable ClickUp tickets + the current user (assignment filter).
     let me = get_clickup_me(app.clone(), Some(project_id.clone())).await?;
@@ -740,6 +752,9 @@ pub async fn list_ai_pipeline_tasks(
     let mut review: Vec<AiPipelineTask> = Vec::new();
     let mut stuck: Vec<AiPipelineTask> = Vec::new();
     for task in tasks {
+        if current_worktree_task_ids.contains(&task.id.to_ascii_lowercase()) {
+            continue;
+        }
         let assignee_ids: Vec<i64> = task.assignees.iter().map(|a| a.id).collect();
         let status = task.status.as_ref().map(|s| s.status.as_str());
         let Some((bucket, assigned_to_me)) = task_inclusion(status, &assignee_ids, me.id) else {
@@ -747,13 +762,13 @@ pub async fn list_ai_pipeline_tasks(
         };
 
         let pr = match bucket {
-            // Repo scoping + resume target: a review ticket without a ready PR
-            // in this repo has nothing to pick up.
-            TaskBucket::Review => match ready_pr_by_task.get(&task.id) {
+            // Repo scoping + resume target: a review ticket without a PR in
+            // this repo has nothing to pick up. Draft state is informational.
+            TaskBucket::Review => match pr_by_task.get(&task.id) {
                 Some(pr) => Some(pr.clone()),
                 None => continue,
             },
-            TaskBucket::Stuck => any_pr_by_task.get(&task.id).cloned(),
+            TaskBucket::Stuck => pr_by_task.get(&task.id).cloned(),
         };
 
         let item = AiPipelineTask {
@@ -764,6 +779,7 @@ pub async fn list_ai_pipeline_tasks(
             url: task.url.clone(),
             tags: task.tags.iter().map(|t| t.name.clone()).collect(),
             priority: task.priority.as_ref().map(|p| p.priority.clone()),
+            due_date: task.due_date.clone(),
             updated_at: task.date_updated.clone(),
             pr,
         };
@@ -773,28 +789,35 @@ pub async fn list_ai_pipeline_tasks(
         }
     }
 
-    // Mine first, then newest PR first — every review item has a PR.
-    review.sort_by(|a, b| {
-        b.assigned_to_me
-            .cmp(&a.assigned_to_me)
-            .then_with(|| pr_created_at(b).cmp(pr_created_at(a)))
-    });
-    // Stuck items may have no PR, so recency comes from ClickUp (epoch ms).
-    stuck.sort_by(|a, b| {
-        b.assigned_to_me
-            .cmp(&a.assigned_to_me)
-            .then_with(|| updated_ms(b).cmp(&updated_ms(a)))
-    });
+    sort_pipeline_tasks(&mut review);
+    sort_pipeline_tasks(&mut stuck);
     Ok(AiPipelineTaskLists { review, stuck })
 }
 
-/// PR creation timestamp (ISO-8601, sorts lexicographically), empty when the
-/// ticket has no PR.
-fn pr_created_at(task: &AiPipelineTask) -> &str {
-    task.pr
-        .as_ref()
-        .map(|pr| pr.created_at.as_str())
-        .unwrap_or("")
+fn sort_pipeline_tasks(tasks: &mut [AiPipelineTask]) {
+    tasks.sort_by(|a, b| {
+        due_date_ms(a)
+            .cmp(&due_date_ms(b))
+            .then_with(|| priority_rank(a).cmp(&priority_rank(b)))
+            .then_with(|| updated_ms(b).cmp(&updated_ms(a)))
+    });
+}
+
+fn due_date_ms(task: &AiPipelineTask) -> i64 {
+    task.due_date
+        .as_deref()
+        .and_then(|date| date.parse().ok())
+        .unwrap_or(i64::MAX)
+}
+
+fn priority_rank(task: &AiPipelineTask) -> u8 {
+    match task.priority.as_deref() {
+        Some("urgent") => 0,
+        Some("high") => 1,
+        Some("normal") => 2,
+        Some("low") => 3,
+        _ => 4,
+    }
 }
 
 /// ClickUp `date_updated` as a number (the API sends epoch ms as a string).
@@ -965,6 +988,25 @@ pub async fn finish_ai_pipeline_pr(
 mod tests {
     use super::*;
 
+    fn test_pipeline_task(
+        task_id: &str,
+        due_date: Option<&str>,
+        priority: Option<&str>,
+    ) -> AiPipelineTask {
+        AiPipelineTask {
+            task_id: task_id.to_string(),
+            name: task_id.to_string(),
+            status: Some("to review".to_string()),
+            assigned_to_me: false,
+            url: None,
+            tags: Vec::new(),
+            priority: priority.map(String::from),
+            due_date: due_date.map(String::from),
+            updated_at: None,
+            pr: None,
+        }
+    }
+
     #[test]
     fn pickable_tasks_query_includes_subtasks() {
         let path = pickable_tasks_path("46575365");
@@ -1097,8 +1139,7 @@ mod tests {
     }
 
     #[test]
-    fn stuck_join_keeps_draft_prs() {
-        // A stuck ticket's PR is typically still a draft — that's the point.
+    fn join_keeps_draft_prs() {
         let payload = serde_json::json!([
             {
                 "number": 1,
@@ -1112,8 +1153,7 @@ mod tests {
             }
         ]);
         let prs = parse_gh_prs(&payload, "Spottt/planexpo", "ai-full-flow");
-        assert!(pr_by_task(&prs, true).contains_key("aaa"));
-        assert!(!pr_by_task(&prs, false).contains_key("aaa"));
+        assert!(pr_by_task(&prs).contains_key("aaa"));
     }
 
     #[test]
@@ -1191,8 +1231,8 @@ mod tests {
     }
 
     #[test]
-    fn review_join_excludes_draft_prs() {
-        // Two CU PRs in the same repo: one draft, one ready.
+    fn review_join_includes_draft_prs() {
+        // ClickUp status is authoritative once a matching PR exists.
         let payload = serde_json::json!([
             {
                 "number": 1,
@@ -1216,10 +1256,30 @@ mod tests {
             }
         ]);
         let prs = parse_gh_prs(&payload, "Spottt/planexpo", "ai-full-flow");
-        let by_task = pr_by_task(&prs, false);
+        let by_task = pr_by_task(&prs);
         assert!(by_task.contains_key("bbb"), "non-draft CU PR is pickable");
-        assert!(!by_task.contains_key("aaa"), "draft CU PR is hidden");
-        assert_eq!(by_task.len(), 1);
+        assert!(by_task.contains_key("aaa"), "draft CU PR is pickable too");
+        assert_eq!(by_task.len(), 2);
+    }
+
+    #[test]
+    fn task_sort_prefers_due_date_then_priority() {
+        let mut tasks = vec![
+            test_pipeline_task("no-due-urgent", None, Some("urgent")),
+            test_pipeline_task("later-high", Some("1787000000000"), Some("high")),
+            test_pipeline_task("soon-low", Some("1786000000000"), Some("low")),
+            test_pipeline_task("soon-urgent", Some("1786000000000"), Some("urgent")),
+        ];
+
+        sort_pipeline_tasks(&mut tasks);
+
+        assert_eq!(
+            tasks
+                .iter()
+                .map(|task| task.task_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["soon-urgent", "soon-low", "later-high", "no-due-urgent"]
+        );
     }
 
     #[test]

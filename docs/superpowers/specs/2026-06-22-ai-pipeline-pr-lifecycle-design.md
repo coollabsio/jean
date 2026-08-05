@@ -3,7 +3,7 @@
 > **Révision 2026-07-21** — La liste devient **multi-surface et multi-colonnes** :
 >
 > - une commande unique `list_ai_pipeline_tasks` renvoie **deux buckets** :
->   `review` (`to review`/`in review`, PR **non-draft obligatoire**) et `stuck`
+>   `review` (`to review`/`in review`, PR correspondante requise, draft accepté) et `stuck`
 >   (statut ClickUp `stuck`, **PR optionnelle** — sur les 16 tickets STUCK
 >   observés le 2026-07-21, 6 n'avaient aucune PR et les 10 autres n'avaient
 >   qu'une PR **draft**, d'où le join distinct par bucket) ;

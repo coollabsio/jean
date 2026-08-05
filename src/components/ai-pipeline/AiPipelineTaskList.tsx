@@ -321,7 +321,7 @@ export interface AiPipelineTaskListProps {
 }
 
 /**
- * The pickable pipeline tickets, in two buckets: review (PR ready) and STUCK
+ * The pickable pipeline tickets, in two buckets: review (PR found) and STUCK
  * (PR optional). Shared by the dedicated modal and the New Session tab so both
  * entry points behave identically.
  *
@@ -416,7 +416,7 @@ export function AiPipelineTaskList({
           <div className="space-y-4 pb-2 pr-2">
             <Section
               title="À reprendre"
-              description="TO REVIEW / IN REVIEW · PR prête"
+              description="TO REVIEW / IN REVIEW · PR trouvée"
               tasks={review}
               resumingTaskId={resumingTaskId}
               resumedTaskIds={resumedTaskIds}
