@@ -346,6 +346,49 @@ fn mr_state_param(state: &str) -> Option<&'static str> {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct GlIssueCounts {
+    #[serde(default)]
+    all: u32,
+    #[serde(default)]
+    closed: u32,
+    #[serde(default)]
+    opened: u32,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GlIssueStatisticsInner {
+    counts: GlIssueCounts,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GlIssueStatistics {
+    statistics: GlIssueStatisticsInner,
+}
+
+/// Accurate issue total via GitLab's `issues_statistics` endpoint — the analogue
+/// of GitHub's search `total_count`. Without it the badge would show only the
+/// first page's length (max 100), understating repos with more issues.
+fn fetch_issue_total_count(
+    app: &AppHandle,
+    project_path: &str,
+    enc: &str,
+    state: &str,
+) -> Option<u32> {
+    let stdout = run_glab_api(
+        app,
+        project_path,
+        &format!("projects/{enc}/issues_statistics"),
+    )
+    .ok()?;
+    let s: GlIssueStatistics = serde_json::from_str(&stdout).ok()?;
+    Some(match state {
+        "closed" => s.statistics.counts.closed,
+        "all" => s.statistics.counts.all,
+        _ => s.statistics.counts.opened,
+    })
+}
+
 pub async fn list_issues(
     app: &AppHandle,
     project_path: &str,
@@ -364,7 +407,10 @@ pub async fn list_issues(
         serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse glab issues: {e}"))?;
 
     let issues: Vec<GitHubIssue> = raw.into_iter().map(issue_to_github).collect();
-    let total_count = issues.len() as u32;
+    // Prefer the real repo-wide total; fall back to the page length if the stats
+    // endpoint is unavailable (older GitLab / restricted token).
+    let total_count =
+        fetch_issue_total_count(app, project_path, &enc, &state).unwrap_or(issues.len() as u32);
     Ok(GitHubIssueListResult {
         issues,
         total_count,
@@ -576,8 +622,10 @@ pub fn view_open_mr_for_branch(
     branch: &str,
 ) -> Result<Option<(u32, String, String)>, String> {
     let enc = gitlab_project_path_encoded(project_path)?;
+    // Order newest-first so the pick is deterministic when more than one open MR
+    // shares the source branch — this is the MR linked to the worktree.
     let endpoint = format!(
-        "projects/{enc}/merge_requests?state=opened&source_branch={}&per_page=1",
+        "projects/{enc}/merge_requests?state=opened&source_branch={}&order_by=updated_at&sort=desc&per_page=1",
         pct_encode(branch)
     );
     let stdout = run_glab_api(app, project_path, &endpoint)?;
@@ -841,6 +889,15 @@ mod tests {
         assert_eq!(issue_state_param("all"), None);
         assert_eq!(mr_state_param("merged"), Some("merged"));
         assert_eq!(mr_state_param("all"), None);
+    }
+
+    #[test]
+    fn issue_statistics_parses_counts() {
+        let json = r#"{"statistics":{"counts":{"all":42,"closed":10,"opened":32}}}"#;
+        let s: GlIssueStatistics = serde_json::from_str(json).unwrap();
+        assert_eq!(s.statistics.counts.all, 42);
+        assert_eq!(s.statistics.counts.closed, 10);
+        assert_eq!(s.statistics.counts.opened, 32);
     }
 
     #[test]
