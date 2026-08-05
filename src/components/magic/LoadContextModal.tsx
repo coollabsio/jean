@@ -77,18 +77,23 @@ export function LoadContextModal({
   const { data: preferences } = usePreferences()
 
   // Resolve the project's git host provider for provider-aware auth + wording.
-  const { data: providerInfo } = useProjectGitProvider(worktreePath)
+  const { data: providerInfo, isLoading: isProviderLoading } =
+    useProjectGitProvider(worktreePath)
   const provider = providerInfo?.provider ?? 'github'
+  // Until the provider resolves it defaults to `github`; auth-error UI must wait
+  // for this so a GitLab project never flashes the GitHub sign-in prompt.
+  const providerResolved = !isProviderLoading
   const labels = providerLabels(provider)
   const triggerLogin =
     provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
   const isCliInstalled = provider === 'gitlab' ? isGlabInstalled : isGhInstalled
-  const displayTabs = TABS
-    // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
-    .filter(tab => tab.id !== 'security' || provider !== 'gitlab')
-    .map(tab =>
-      tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
-    )
+  // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
+  const securityTabEnabled = provider !== 'gitlab'
+  const displayTabs = TABS.filter(
+    tab => tab.id !== 'security' || securityTabEnabled
+  ).map(tab =>
+    tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
+  )
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<TabId>('issues')
@@ -135,6 +140,7 @@ export function LoadContextModal({
   // Keyboard navigation
   const { handleKeyDown } = useLoadContextKeyboard({
     activeTab,
+    securityTabEnabled,
     filteredIssues: data.filteredIssues,
     filteredPRs: data.filteredPRs,
     filteredSecurityAlerts: data.filteredSecurityAlerts,
@@ -288,6 +294,14 @@ export function LoadContextModal({
     setSearchQuery('')
   }, [activeTab])
 
+  // Reset to a safe tab when the current one is hidden (e.g. Security on GitLab).
+  const activeTabAvailable = displayTabs.some(tab => tab.id === activeTab)
+  useEffect(() => {
+    if (!activeTabAvailable) {
+      setActiveTab('issues')
+    }
+  }, [activeTabAvailable])
+
   // Focus edit input when editing starts
   useEffect(() => {
     if (handlers.editingFilename && handlers.editInputRef.current) {
@@ -381,6 +395,7 @@ export function LoadContextModal({
               onLogin={triggerLogin}
               isCliInstalled={isCliInstalled}
               provider={provider}
+              providerResolved={providerResolved}
             />
           )}
 
@@ -416,6 +431,7 @@ export function LoadContextModal({
               onLogin={triggerLogin}
               isCliInstalled={isCliInstalled}
               provider={provider}
+              providerResolved={providerResolved}
             />
           )}
 

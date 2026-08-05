@@ -309,16 +309,14 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
         .arg(NPM_PACKAGE)
         .output()
         .map_err(|e| {
-            format!("Failed to run npm install for agent-browser (is npm on PATH?): {e}")
+            format!(
+                "Failed to run npm install for agent-browser (is npm on PATH?): {e}"
+            )
         })?;
 
     if !npm_output.status.success() {
-        let stderr = String::from_utf8_lossy(&npm_output.stderr)
-            .trim()
-            .to_string();
-        let stdout = String::from_utf8_lossy(&npm_output.stdout)
-            .trim()
-            .to_string();
+        let stderr = String::from_utf8_lossy(&npm_output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&npm_output.stdout).trim().to_string();
         return Err(format!(
             "npm install agent-browser failed: {}",
             if stderr.is_empty() { stdout } else { stderr }
@@ -340,9 +338,11 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
     if cfg!(target_os = "linux") {
         install_cmd.arg("--with-deps");
     }
-    let chromium_output = install_cmd
-        .output()
-        .map_err(|e| format!("Failed to run `agent-browser install` for Chromium download: {e}"))?;
+    let chromium_output = install_cmd.output().map_err(|e| {
+        format!(
+            "Failed to run `agent-browser install` for Chromium download: {e}"
+        )
+    })?;
 
     if !chromium_output.status.success() {
         // Retry without --with-deps (flag may not exist on older versions).
@@ -351,12 +351,8 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
             .output()
             .map_err(|e| format!("Failed to run `agent-browser install`: {e}"))?;
         if !retry.status.success() {
-            let stderr = String::from_utf8_lossy(&chromium_output.stderr)
-                .trim()
-                .to_string();
-            let stdout = String::from_utf8_lossy(&chromium_output.stdout)
-                .trim()
-                .to_string();
+            let stderr = String::from_utf8_lossy(&chromium_output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&chromium_output.stdout).trim().to_string();
             let retry_err = String::from_utf8_lossy(&retry.stderr).trim().to_string();
             return Err(format!(
                 "agent-browser install (Chromium) failed: {}",
@@ -372,7 +368,9 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
     let profile = profile_path(app)?;
     let resolved = resolve_agent_browser_binary(app);
     if !resolved.installed {
-        return Err("agent-browser install finished but binary still not detected".to_string());
+        return Err(
+            "agent-browser install finished but binary still not detected".to_string(),
+        );
     }
     let entry = McpEntry::new(
         resolved
@@ -466,8 +464,8 @@ fn enable_in_preferences(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(format!("Failed to read preferences: {e}")),
     };
-    let mut prefs: Value =
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse preferences: {e}"))?;
+    let mut prefs: Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse preferences: {e}"))?;
 
     let Some(obj) = prefs.as_object_mut() else {
         return Ok(());

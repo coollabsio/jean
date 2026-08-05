@@ -13,6 +13,8 @@ type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear'
 
 interface UseLoadContextKeyboardOptions {
   activeTab: TabId
+  /** Whether the Security tab is available (hidden for GitLab projects). */
+  securityTabEnabled: boolean
   filteredIssues: GitHubIssue[]
   filteredPRs: GitHubPullRequest[]
   filteredSecurityAlerts: DependabotAlert[]
@@ -38,6 +40,7 @@ interface UseLoadContextKeyboardOptions {
 
 export function useLoadContextKeyboard({
   activeTab,
+  securityTabEnabled,
   filteredIssues,
   filteredPRs,
   filteredSecurityAlerts,
@@ -83,7 +86,10 @@ export function useLoadContextKeyboard({
         }
         if (key === '4') {
           e.preventDefault()
-          onTabChange('security')
+          // Security tab is hidden for GitLab projects — ignore its shortcut.
+          if (securityTabEnabled) {
+            onTabChange('security')
+          }
           return
         }
         if (key === '5') {
@@ -270,6 +276,7 @@ export function useLoadContextKeyboard({
     },
     [
       activeTab,
+      securityTabEnabled,
       filteredIssues,
       filteredPRs,
       filteredSecurityAlerts,

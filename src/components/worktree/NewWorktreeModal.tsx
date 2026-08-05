@@ -334,6 +334,7 @@ export function NewWorktreeModal() {
                 onLogin={triggerLogin}
                 isCliInstalled={isCliInstalled}
                 provider={provider}
+                providerResolved={providerResolved}
               />
             )}
 
@@ -363,6 +364,7 @@ export function NewWorktreeModal() {
                 onLogin={triggerLogin}
                 isCliInstalled={isCliInstalled}
                 provider={provider}
+                providerResolved={providerResolved}
               />
             )}
 

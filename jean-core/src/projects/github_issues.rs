@@ -95,6 +95,9 @@ pub async fn list_github_labels(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::list_labels(&app, &project_path).await;
     }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
@@ -271,6 +274,9 @@ pub async fn search_github_issues(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::search_issues(&app, &project_path, query).await;
     }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
@@ -325,6 +331,9 @@ pub async fn get_github_issue_by_number(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_issue_by_number(&app, &project_path, issue_number).await;
     }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
@@ -369,6 +378,9 @@ pub async fn get_github_issue(
 
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_issue_detail(&app, &project_path, issue_number).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
     }
 
     let gh = resolve_gh_binary(&app);
@@ -1638,6 +1650,9 @@ pub async fn search_github_prs(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::search_mrs(&app, &project_path, query).await;
     }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
@@ -1692,6 +1707,9 @@ pub async fn get_github_pr_by_number(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_mr_by_number(&app, &project_path, pr_number).await;
     }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
@@ -1736,6 +1754,9 @@ pub async fn get_github_pr(
 
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_mr_detail(&app, &project_path, pr_number).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
     }
 
     let gh = resolve_gh_binary(&app);

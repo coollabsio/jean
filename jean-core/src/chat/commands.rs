@@ -8849,7 +8849,9 @@ pub fn approve_codex_command(
 /// commands often only allow `accept` + `cancel`). Jean still lets the user
 /// promote the session to YOLO; the frontend then sends `decision: "accept"`
 /// plus `promoteToYolo: true` so residual prompts are auto-accepted (#626).
-pub(crate) fn prepare_codex_command_approval_response(response: &mut serde_json::Value) -> bool {
+pub(crate) fn prepare_codex_command_approval_response(
+    response: &mut serde_json::Value,
+) -> bool {
     let promote_to_yolo = response
         .as_object_mut()
         .and_then(|obj| {
@@ -10030,7 +10032,10 @@ mod tests {
 
     #[tokio::test]
     async fn read_file_base64_encodes_bytes_outside_project_roots() {
-        let dir = std::env::temp_dir().join(format!("jean-read-file-base64-{}", Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "jean-read-file-base64-{}",
+            Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("login.png");
         // Minimal valid-looking PNG header bytes (not a full image)
@@ -10056,10 +10061,7 @@ mod tests {
         assert!(prepare_codex_command_approval_response(&mut response));
         // Jean-only flag must be stripped before forwarding to Codex.
         assert!(response.get("promoteToYolo").is_none());
-        assert_eq!(
-            response.get("decision").and_then(|d| d.as_str()),
-            Some("accept")
-        );
+        assert_eq!(response.get("decision").and_then(|d| d.as_str()), Some("accept"));
     }
 
     #[test]
