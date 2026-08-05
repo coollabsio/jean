@@ -1412,7 +1412,12 @@ mod tests {
         let diff = get_git_diff(repo.to_str().unwrap(), "uncommitted", None, None)
             .expect("diff with non-ascii path should succeed");
 
-        assert_eq!(diff.files.len(), 1, "expected one changed file, got: {:?}", diff.files);
+        assert_eq!(
+            diff.files.len(),
+            1,
+            "expected one changed file, got: {:?}",
+            diff.files
+        );
         assert_eq!(diff.files[0].path, filename);
         assert!(
             diff.raw_patch.contains(filename),

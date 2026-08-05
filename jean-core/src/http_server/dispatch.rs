@@ -2791,7 +2791,8 @@ pub async fn dispatch_command(
         }
         "install_agent_browser_mcp" => {
             let backends: Option<Vec<String>> = from_field_opt(&args, "backends")?;
-            let result = crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
+            let result =
+                crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
             emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
             to_value(result)
         }

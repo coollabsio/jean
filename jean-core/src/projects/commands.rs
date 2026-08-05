@@ -5541,10 +5541,7 @@ fn is_skipped_file_browser_dir(name: &str) -> bool {
 /// `vendor/` or a deep monorepo package) used to exhaust the budget before
 /// sibling top-level directories were discovered, so the file browser looked
 /// nearly empty compared to editors like Zed.
-fn list_worktree_files_sync(
-    worktree_path: &str,
-    max: usize,
-) -> Result<Vec<WorktreeFile>, String> {
+fn list_worktree_files_sync(worktree_path: &str, max: usize) -> Result<Vec<WorktreeFile>, String> {
     let root = Path::new(worktree_path);
     if !root.is_dir() {
         // Missing/stale path while switching projects — return empty, not an error.
@@ -13626,8 +13623,11 @@ mod tests {
         std::fs::create_dir_all(&project_legacy_skill).expect("legacy project skill dir");
         std::fs::write(user_skill.join("SKILL.md"), "# User skill\n").expect("user skill");
         std::fs::write(project_skill.join("SKILL.md"), "# Project skill\n").expect("project skill");
-        std::fs::write(project_legacy_skill.join("SKILL.md"), "# Legacy project skill\n")
-            .expect("legacy project skill");
+        std::fs::write(
+            project_legacy_skill.join("SKILL.md"),
+            "# Legacy project skill\n",
+        )
+        .expect("legacy project skill");
 
         let skills = collect_codex_skills(&home, Some(&worktree));
         let names: Vec<_> = skills.into_iter().map(|skill| skill.name).collect();
