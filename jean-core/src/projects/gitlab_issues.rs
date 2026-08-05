@@ -22,7 +22,7 @@ use super::github_issues::{
     GitHubLabel, GitHubPullRequest, GitHubPullRequestDetail,
 };
 use crate::glab_cli::config::resolve_glab_binary;
-use crate::projects::provider::{extract_host, resolve_git_provider};
+use crate::projects::provider::{extract_repo_path, resolve_git_provider};
 
 /// Neutral fallback color for labels surfaced from list endpoints (which return
 /// only label names, not colors).
@@ -134,32 +134,10 @@ fn run_glab_api_fields(
 fn gitlab_project_path_encoded(project_path: &str) -> Result<String, String> {
     let remote = origin_remote_url(project_path)
         .ok_or_else(|| "No origin remote found for this repository".to_string())?;
-    let host = extract_host(&remote)
-        .ok_or_else(|| format!("Could not parse host from remote: {remote}"))?;
-
-    // Strip scheme + host (and any scp `git@host:` prefix), then `.git`.
-    let path = if let Some(rest) = remote.strip_prefix("git@") {
-        // git@host:group/repo.git
-        rest.split_once(':').map(|(_, p)| p.to_string())
-    } else if remote.contains("://") {
-        remote
-            .split("://")
-            .nth(1)
-            .and_then(|after| after.split_once('/').map(|(_, p)| p.to_string()))
-    } else {
-        None
-    };
-
-    let path = path
-        .ok_or_else(|| format!("Could not parse project path from remote: {remote}"))?
-        .trim_end_matches('/')
-        .trim_end_matches(".git")
-        .to_string();
-
-    if path.is_empty() {
-        return Err(format!("Empty project path parsed from remote on {host}"));
-    }
-
+    // Reuse the shared remote parser so every scp `user@host:` form is accepted
+    // (not just `git@`) — kept in one place alongside `extract_host`.
+    let path = extract_repo_path(&remote)
+        .ok_or_else(|| format!("Could not parse project path from remote: {remote}"))?;
     Ok(pct_encode(&path))
 }
 

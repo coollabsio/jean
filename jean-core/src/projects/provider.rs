@@ -118,6 +118,35 @@ pub fn extract_host(remote_url: &str) -> Option<String> {
     }
 }
 
+/// Extract the `owner/repo` (or `group/subgroup/repo`) path from any common git
+/// remote URL form — no scheme/host, no trailing `.git` or slash.
+///
+/// Mirrors [`extract_host`] so both parsers accept the same URL shapes (crucially
+/// any `user@host:` scp form, not just `git@`).
+pub fn extract_repo_path(remote_url: &str) -> Option<String> {
+    let url = remote_url.trim();
+    if url.is_empty() {
+        return None;
+    }
+
+    // scp-like syntax `[user@]host:owner/repo(.git)` (no scheme); path is after `:`.
+    // Scheme-based `<scheme>://[user@]host[:port]/owner/repo(.git)`; path is after
+    // the authority's first `/`.
+    let raw = if !url.contains("://") {
+        url.split_once(':').map(|(_, p)| p)?
+    } else {
+        let after_scheme = url.split("://").nth(1)?;
+        after_scheme.split_once('/').map(|(_, p)| p)?
+    };
+
+    let path = raw.trim_end_matches('/').trim_end_matches(".git");
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
 /// Detect the provider + host from a raw git remote URL.
 ///
 /// Returns `None` for hosts we can't classify (e.g. a self-hosted GitLab on a
@@ -259,6 +288,39 @@ mod tests {
             Some("git.company.com")
         );
         assert_eq!(extract_host("").as_deref(), None);
+    }
+
+    #[test]
+    fn extract_repo_path_handles_all_forms() {
+        assert_eq!(
+            extract_repo_path("https://github.com/owner/repo.git").as_deref(),
+            Some("owner/repo")
+        );
+        assert_eq!(
+            extract_repo_path("git@github.com:owner/repo.git").as_deref(),
+            Some("owner/repo")
+        );
+        // Non-`git@` scp user (the deploy@… bug the shared parser fixes).
+        assert_eq!(
+            extract_repo_path("deploy@gitlab.example.com:group/repo.git").as_deref(),
+            Some("group/repo")
+        );
+        // Nested groups + no `.git`.
+        assert_eq!(
+            extract_repo_path("ssh://git@gitlab.com/group/sub/repo").as_deref(),
+            Some("group/sub/repo")
+        );
+        // Scheme with port.
+        assert_eq!(
+            extract_repo_path("ssh://git@git.company.com:2222/group/repo.git").as_deref(),
+            Some("group/repo")
+        );
+        // Trailing slash.
+        assert_eq!(
+            extract_repo_path("https://gitlab.com/group/repo/").as_deref(),
+            Some("group/repo")
+        );
+        assert_eq!(extract_repo_path("").as_deref(), None);
     }
 
     #[test]
