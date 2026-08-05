@@ -88,6 +88,47 @@ fn run_glab_api_method(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Run `glab api --method <METHOD> <path> --raw-field k=v …`, passing params in
+/// the request body instead of the URL query.
+///
+/// `--raw-field` adds each value as a JSON-encoded *string* to the POST body, so
+/// large values (e.g. AI-generated MR descriptions) never hit GitLab's ~8 KB
+/// request-line limit — the cause of intermittent 414s when body was in the URL.
+fn run_glab_api_fields(
+    app: &AppHandle,
+    project_path: &str,
+    method: &str,
+    path: &str,
+    fields: &[(&str, &str)],
+) -> Result<String, String> {
+    let glab = resolve_glab_binary(app);
+    let (_provider, host) = resolve_git_provider(project_path);
+
+    let mut cmd = glab_command(&glab, project_path);
+    cmd.env("GITLAB_HOST", host)
+        .args(["api", "--method", method, path]);
+    for (key, value) in fields {
+        cmd.arg("--raw-field").arg(format!("{key}={value}"));
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run glab api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_glab_auth_error(&stderr) {
+            return Err("GitLab CLI not authenticated. Run 'glab auth login' first.".to_string());
+        }
+        if stderr.contains("404") {
+            return Err("Not found. Is this a GitLab repository?".to_string());
+        }
+        return Err(format!("glab api failed: {stderr}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 /// Resolve the GitLab project full path (`group/subgroup/repo`) from the repo's
 /// origin remote, URL-encoded for use in a `projects/:id` API path.
 fn gitlab_project_path_encoded(project_path: &str) -> Result<String, String> {
@@ -601,14 +642,16 @@ pub fn create_mr(
     body: &str,
 ) -> Result<(u32, String), String> {
     let enc = gitlab_project_path_encoded(project_path)?;
-    let endpoint = format!(
-        "projects/{enc}/merge_requests?source_branch={}&target_branch={}&title={}&description={}",
-        pct_encode(source_branch),
-        pct_encode(target_branch),
-        pct_encode(title),
-        pct_encode(body),
-    );
-    let stdout = run_glab_api_method(app, project_path, "POST", &endpoint)?;
+    // Params go in the POST body (via --raw-field), not the URL query, so long
+    // AI-generated descriptions don't blow past GitLab's request-line limit (414).
+    let path = format!("projects/{enc}/merge_requests");
+    let fields = [
+        ("source_branch", source_branch),
+        ("target_branch", target_branch),
+        ("title", title),
+        ("description", body),
+    ];
+    let stdout = run_glab_api_fields(app, project_path, "POST", &path, &fields)?;
     let m: GlMr =
         serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse created MR: {e}"))?;
     Ok((m.iid, m.web_url))
