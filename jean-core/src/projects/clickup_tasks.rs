@@ -62,6 +62,9 @@ pub struct ClickUpTask {
     /// so it is renamed explicitly (this struct is otherwise camelCase).
     #[serde(default, rename = "date_updated")]
     pub date_updated: Option<String>,
+    /// Due date, epoch milliseconds as a string.
+    #[serde(default, rename = "due_date")]
+    pub due_date: Option<String>,
 }
 
 /// A ClickUp tag (only the name matters to us).
