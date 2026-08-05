@@ -13363,6 +13363,15 @@ pub async fn set_project_avatar(_app: AppHandle, _project_id: String) -> Result<
     Err("Project avatar file selection is only available in the desktop app".to_string())
 }
 
+fn project_avatar_destination_name(project_id: &str, extension: &str) -> String {
+    format!("{project_id}-{}.{}", Uuid::new_v4(), extension)
+}
+
+fn is_project_avatar_file(file_name: &str, project_id: &str) -> bool {
+    file_name.starts_with(&format!("{project_id}."))
+        || file_name.starts_with(&format!("{project_id}-"))
+}
+
 pub async fn set_project_avatar_from_path(
     app: AppHandle,
     project_id: String,
@@ -13374,13 +13383,15 @@ pub async fn set_project_avatar_from_path(
         .unwrap_or("png")
         .to_lowercase();
     let avatars_dir = get_avatars_dir(&app)?;
-    let destination_name = format!("{project_id}.{extension}");
+    let destination_name = project_avatar_destination_name(&project_id, &extension);
     let destination_path = avatars_dir.join(&destination_name);
 
-    for extension in ["png", "jpg", "jpeg", "webp", "gif"] {
-        let old_file = avatars_dir.join(format!("{project_id}.{extension}"));
-        if old_file.exists() {
-            let _ = std::fs::remove_file(old_file);
+    if let Ok(entries) = std::fs::read_dir(&avatars_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            if is_project_avatar_file(&file_name.to_string_lossy(), &project_id) {
+                let _ = std::fs::remove_file(entry.path());
+            }
         }
     }
 
@@ -14320,6 +14331,17 @@ mod tests {
         attach_default_avatar(&mut project);
 
         assert_eq!(project.default_avatar_path, None);
+    }
+
+    #[test]
+    fn project_avatar_replacements_get_a_fresh_file_name() {
+        let first = project_avatar_destination_name("project-1", "png");
+        let second = project_avatar_destination_name("project-1", "png");
+
+        assert_ne!(first, second);
+        assert!(is_project_avatar_file(&first, "project-1"));
+        assert!(is_project_avatar_file("project-1.png", "project-1"));
+        assert!(!is_project_avatar_file(&first, "project-10"));
     }
 
     #[test]
