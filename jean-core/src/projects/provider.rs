@@ -164,6 +164,33 @@ pub fn detect_provider_from_url(remote_url: &str) -> Option<(GitProvider, String
     Some((provider, host))
 }
 
+/// An actionable error when a repo's provider can't be resolved unambiguously.
+///
+/// Jean defaults to GitHub when a host can't be auto-classified, so a self-hosted
+/// GitLab on a custom domain (e.g. `git.company.com`, no "gitlab" in the name)
+/// silently runs `gh` and the user gets confusing GitHub errors. Returns `Some`
+/// only for that ambiguous case — an origin remote exists, its host is
+/// unclassifiable, and jean.json sets no explicit `provider.git` — so callers on
+/// the GitHub path can surface a pointer to the provider block instead.
+///
+/// Returns `None` (no error) when a provider is configured, the host is
+/// classifiable, or there's no origin remote at all (local-only worktree).
+pub fn unconfigured_provider_error(repo_path: &str) -> Option<String> {
+    let cfg = crate::projects::git::read_jean_config(repo_path).and_then(|c| c.provider);
+    if cfg.and_then(|c| c.git).is_some() {
+        return None;
+    }
+    let origin = get_origin_remote_url(repo_path)?;
+    if detect_provider_from_url(&origin).is_some() {
+        return None;
+    }
+    let host = extract_host(&origin).unwrap_or(origin);
+    Some(format!(
+        "Could not determine the git host provider for '{host}'. Add a provider block to \
+         jean.json, e.g. \"provider\": {{ \"git\": \"gitlab\", \"host\": \"{host}\" }}."
+    ))
+}
+
 /// Raw `origin` remote URL (unnormalized), or `None` if unavailable.
 fn get_origin_remote_url(repo_path: &str) -> Option<String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
