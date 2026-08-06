@@ -56,8 +56,7 @@ pub fn apply_linux_webkit_env() {
 
     // Full software compositing is opt-in: it avoids some driver bugs but can
     // peg low-power CPUs (issue #129). Users can also set the env var directly.
-    if safe_graphics_requested() && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none()
-    {
+    if safe_graphics_requested() && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
         // SAFETY: same startup-only rationale as above.
         unsafe {
             std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
