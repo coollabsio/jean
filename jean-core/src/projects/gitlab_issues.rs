@@ -805,8 +805,7 @@ pub fn get_mr_review_comments(
     mr_number: u32,
 ) -> Result<Vec<super::github_issues::GitHubReviewComment>, String> {
     let enc = gitlab_project_path_encoded(project_path)?;
-    let endpoint =
-        format!("projects/{enc}/merge_requests/{mr_number}/discussions?per_page=100");
+    let endpoint = format!("projects/{enc}/merge_requests/{mr_number}/discussions?per_page=100");
     let stdout = run_glab_api(app, project_path, &endpoint)?;
     let discussions: Vec<GlDiscussion> = serde_json::from_str(&stdout)
         .map_err(|e| format!("Failed to parse glab MR discussions: {e}"))?;
@@ -927,7 +926,7 @@ pub fn merge_mr(app: &AppHandle, project_path: &str, mr_number: u32) -> Result<(
 
     let opts = resolve_mr_merge_options(app, project_path, &enc);
     let path = format!("projects/{enc}/merge_requests/{mr_number}/merge");
-    let fields = [
+    let mut fields: Vec<(&str, &str)> = vec![
         ("squash", if opts.squash { "true" } else { "false" }),
         (
             "should_remove_source_branch",
@@ -938,6 +937,12 @@ pub fn merge_mr(app: &AppHandle, project_path: &str, mr_number: u32) -> Result<(
             },
         ),
     ];
+    // Some instances (e.g. self-hosted 19.x) reject the merge with
+    // "SHA must be provided" unless the head SHA is passed; it's a harmless
+    // safety check on instances that don't require it.
+    if let Some(sha) = status.sha.as_deref() {
+        fields.push(("sha", sha));
+    }
     run_glab_api_fields(app, project_path, "PUT", &path, &fields)
         .map_err(|e| map_merge_error(&e))?;
     Ok(())
@@ -949,12 +954,21 @@ pub struct MrStatusRaw {
     pub is_draft: bool,
     pub pipeline_status: Option<String>,
     pub merge_status: Option<String>,
+    /// Head commit SHA — required as the `sha` merge param on instances that
+    /// enforce it (e.g. self-hosted 19.x). `None` when the API omits it.
+    pub sha: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct GlPipeline {
     #[serde(default)]
     status: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GlDiffRefs {
+    #[serde(default)]
+    head_sha: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -973,6 +987,19 @@ struct GlMrStatus {
     pipeline: Option<GlPipeline>,
     #[serde(default)]
     head_pipeline: Option<GlPipeline>,
+    #[serde(default)]
+    sha: Option<String>,
+    #[serde(default)]
+    diff_refs: Option<GlDiffRefs>,
+}
+
+/// Pick the MR head SHA: prefer the top-level `sha`, fall back to
+/// `diff_refs.head_sha` (both point at the same commit; instances vary in which
+/// they populate).
+fn pick_head_sha(top_sha: Option<String>, diff_refs_head: Option<String>) -> Option<String> {
+    top_sha
+        .filter(|s| !s.is_empty())
+        .or(diff_refs_head.filter(|s| !s.is_empty()))
 }
 
 /// Fetch the pipeline + mergeability signals for an MR (for status polling).
@@ -997,12 +1024,14 @@ pub fn fetch_mr_status_raw(
         .and_then(|p| p.status)
         .or_else(|| m.pipeline.and_then(|p| p.status));
     let merge_status = m.detailed_merge_status.or(m.merge_status);
+    let sha = pick_head_sha(m.sha, m.diff_refs.and_then(|d| d.head_sha));
 
     Ok(MrStatusRaw {
         state: m.state,
         is_draft: m.draft || m.work_in_progress,
         pipeline_status,
         merge_status,
+        sha,
     })
 }
 
@@ -1025,6 +1054,56 @@ mod tests {
         assert_eq!(issue_state_param("all"), None);
         assert_eq!(mr_state_param("merged"), Some("merged"));
         assert_eq!(mr_state_param("all"), None);
+    }
+
+    #[test]
+    fn pick_head_sha_prefers_top_then_diff_refs() {
+        // Top-level sha wins.
+        assert_eq!(
+            pick_head_sha(Some("aaa".into()), Some("bbb".into())).as_deref(),
+            Some("aaa")
+        );
+        // Falls back to diff_refs.head_sha.
+        assert_eq!(
+            pick_head_sha(None, Some("bbb".into())).as_deref(),
+            Some("bbb")
+        );
+        // Empty top-level is ignored, falls back.
+        assert_eq!(
+            pick_head_sha(Some(String::new()), Some("bbb".into())).as_deref(),
+            Some("bbb")
+        );
+        // Nothing available.
+        assert_eq!(pick_head_sha(None, None), None);
+        assert_eq!(
+            pick_head_sha(Some(String::new()), Some(String::new())),
+            None
+        );
+    }
+
+    #[test]
+    fn mr_status_parses_sha_from_both_shapes() {
+        // Top-level sha.
+        let json = r#"{"state":"opened","sha":"deadbeef"}"#;
+        let m: GlMrStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            pick_head_sha(m.sha, m.diff_refs.and_then(|d| d.head_sha)).as_deref(),
+            Some("deadbeef")
+        );
+        // diff_refs.head_sha fallback.
+        let json = r#"{"state":"opened","diff_refs":{"head_sha":"cafef00d"}}"#;
+        let m: GlMrStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            pick_head_sha(m.sha, m.diff_refs.and_then(|d| d.head_sha)).as_deref(),
+            Some("cafef00d")
+        );
+        // Neither present → None (older/omitting instances).
+        let json = r#"{"state":"opened"}"#;
+        let m: GlMrStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            pick_head_sha(m.sha, m.diff_refs.and_then(|d| d.head_sha)),
+            None
+        );
     }
 
     #[test]
