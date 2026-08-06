@@ -101,6 +101,17 @@ export const KIMI_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'kimi/default', label: 'Configured default' },
 ]
 
+// Real agy model ids (verified via `agy models` on 1.1.9).
+export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'antigravity/gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)' },
+  { value: 'antigravity/gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
+  {
+    value: 'antigravity/gemini-3.5-flash-medium',
+    label: 'Gemini 3.5 Flash (Medium)',
+  },
+  { value: 'antigravity/claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+]
+
 export const KIMI_EFFORT_LEVEL_OPTIONS: {
   value: EffortLevel
   label: string

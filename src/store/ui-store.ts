@@ -13,6 +13,7 @@ export type PreferencePane =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'antigravity'
   | 'github'
   | 'coderabbit'
   | 'appearance'

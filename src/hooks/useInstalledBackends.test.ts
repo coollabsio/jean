@@ -15,6 +15,7 @@ const BACKENDS: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'antigravity',
 ]
 
 const status = Object.fromEntries(
@@ -70,6 +71,10 @@ vi.mock('@/services/grok-cli', () => ({
 vi.mock('@/services/kimi-cli', () => ({
   useKimiCliStatus: () => statusQuery('kimi'),
   useKimiCliAuth: () => authQuery('kimi'),
+}))
+vi.mock('@/services/antigravity-cli', () => ({
+  useAntigravityCliStatus: () => statusQuery('antigravity'),
+  useAntigravityCliAuth: () => authQuery('antigravity'),
 }))
 
 describe('isBackendUsable', () => {

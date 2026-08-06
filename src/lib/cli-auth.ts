@@ -121,6 +121,7 @@ const STATUS_COMMANDS: Partial<
   commandcode: { command: 'check_commandcode_cli_installed' },
   grok: { command: 'check_grok_cli_installed' },
   kimi: { command: 'check_kimi_cli_installed' },
+  antigravity: { command: 'check_antigravity_cli_installed' },
 }
 
 /**

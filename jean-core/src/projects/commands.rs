@@ -1434,6 +1434,7 @@ fn clear_session_runtime_state(session: &mut Session) {
     session.commandcode_session_id = None;
     session.grok_session_id = None;
     session.kimi_session_id = None;
+    session.antigravity_session_id = None;
     session.is_reviewing = false;
     if session.status_override.as_deref() == Some("review") {
         session.status_override = None;
@@ -1502,6 +1503,7 @@ fn prepare_forked_metadata(
     metadata.commandcode_session_id = None;
     metadata.grok_session_id = None;
     metadata.kimi_session_id = None;
+    metadata.antigravity_session_id = None;
     metadata.session_naming_completed = false;
     metadata.archived_at = None;
     metadata.archived_by_base_close = None;

@@ -99,6 +99,11 @@ import {
   grokCliQueryKeys,
 } from '@/services/grok-cli'
 import {
+  useAntigravityCliStatus,
+  useAntigravityCliAuth,
+  antigravityCliQueryKeys,
+} from '@/services/antigravity-cli'
+import {
   useKimiCliStatus,
   useKimiCliAuth,
   useKimiPathDetection,
@@ -253,6 +258,7 @@ type PreferencesPaneScope =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'antigravity'
   | 'github'
   | 'coderabbit'
 
@@ -288,6 +294,10 @@ const backendPaneMeta = {
   kimi: {
     description:
       'Configure the Kimi Code CLI, default model, and native ACP session behavior.',
+  },
+  antigravity: {
+    description:
+      'Configure the Antigravity CLI (`agy`), resolved from your system PATH or a Jean-managed install.',
   },
 } satisfies Partial<
   Record<PreferencesPaneScope, { description: React.ReactNode }>
@@ -439,6 +449,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     useCommandCodeCliStatus()
   const { data: grokStatus, isLoading: isGrokLoading } = useGrokCliStatus()
   const { data: kimiStatus, isLoading: isKimiLoading } = useKimiCliStatus()
+  const { data: antigravityStatus, isLoading: isAntigravityLoading } =
+    useAntigravityCliStatus()
   const isGhPathSource = preferences?.gh_cli_source === 'path'
   const { data: ghVersions, isLoading: isGhVersionsLoading } =
     useAvailableGhVersions({ enabled: isGhPathSource && !!ghStatus?.installed })
@@ -523,6 +535,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const { data: kimiAuth, isLoading: isKimiAuthLoading } = useKimiCliAuth({
     enabled: !!kimiStatus?.installed,
   })
+  const { data: antigravityAuth, isLoading: isAntigravityAuthLoading } =
+    useAntigravityCliAuth({ enabled: !!antigravityStatus?.installed })
+  const handleAntigravityInstall = async () => {
+    const toastId = toast.loading('Installing Antigravity CLI…')
+    try {
+      await invoke('install_antigravity_cli', {})
+      await queryClient.invalidateQueries({
+        queryKey: antigravityCliQueryKeys.all,
+      })
+      toast.success('Antigravity CLI installed', { id: toastId })
+    } catch (error) {
+      toast.error(`Antigravity install failed: ${error}`, { id: toastId })
+    }
+  }
+  const handleAntigravityUninstall = async () => {
+    const toastId = toast.loading('Removing Antigravity CLI…')
+    try {
+      await invoke('uninstall_antigravity_cli', {})
+      await queryClient.invalidateQueries({
+        queryKey: antigravityCliQueryKeys.all,
+      })
+      toast.success('Antigravity CLI removed', { id: toastId })
+    } catch (error) {
+      toast.error(`Antigravity uninstall failed: ${error}`, { id: toastId })
+    }
+  }
   const { data: availableOpencodeModels } = useAvailableOpencodeModels({
     enabled: !!opencodeStatus?.installed,
   })
@@ -3534,6 +3572,80 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         </SettingsSection>
       )}
 
+      {scope === 'antigravity' && (
+        <SettingsSection
+          title="Antigravity CLI"
+          anchorId="pref-antigravity-section-cli"
+          variant="card"
+          actions={
+            antigravityStatus?.installed ? (
+              isAntigravityAuthLoading ? (
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="size-3 animate-spin" />
+                  Checking...
+                </span>
+              ) : antigravityAuth?.authenticated ? (
+                <span className="text-sm text-muted-foreground">Signed in</span>
+              ) : (
+                <span className="text-sm text-muted-foreground">
+                  Not signed in
+                </span>
+              )
+            ) : (
+              <Button size="sm" onClick={handleAntigravityInstall}>
+                Install
+              </Button>
+            )
+          }
+        >
+          <div className="space-y-4">
+            <InlineField
+              label={antigravityStatus?.installed ? 'Version' : 'Status'}
+              description="Enables Antigravity (Gemini) sessions through the `agy` CLI in headless stream-json mode."
+            >
+              {isAntigravityLoading ? (
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              ) : antigravityStatus?.installed ? (
+                <span className="text-sm text-muted-foreground">
+                  {antigravityStatus.version ?? 'Installed'}
+                </span>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    Not found in PATH
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAntigravityInstall}
+                  >
+                    Install now
+                  </Button>
+                </div>
+              )}
+            </InlineField>
+            {antigravityAuth?.error && !antigravityAuth.authenticated && (
+              <p className="text-xs text-muted-foreground">
+                {antigravityAuth.error}
+              </p>
+            )}
+            {antigravityStatus?.installed && (
+              <InlineField
+                label="Managed install"
+                description="Antigravity is a standalone binary resolved from PATH or a Jean-managed install."
+              >
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleAntigravityUninstall}
+                >
+                  Uninstall managed
+                </Button>
+              </InlineField>
+            )}
+          </div>
+        </SettingsSection>
+      )}
       {scope === 'grok' && (
         <>
           <SettingsSection

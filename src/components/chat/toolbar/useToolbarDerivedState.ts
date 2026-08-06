@@ -5,6 +5,7 @@ import type {
   CustomCliProfile,
 } from '@/types/preferences'
 import {
+  ANTIGRAVITY_MODEL_OPTIONS,
   CURSOR_MODEL_OPTIONS,
   COMMANDCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
@@ -31,6 +32,7 @@ interface UseToolbarDerivedStateArgs {
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
   kimiModelOptions?: { value: string; label: string }[]
+  antigravityModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
   installedBackends?: CliBackend[]
   availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
@@ -53,6 +55,7 @@ const DEFAULT_INSTALLED_BACKENDS: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'antigravity',
 ]
 
 function mergeCatalogOptions(
@@ -84,6 +87,7 @@ export function buildBackendModelSections({
   commandcodeModelOptions,
   grokModelOptions,
   kimiModelOptions,
+  antigravityModelOptions,
 }: {
   installedBackends: CliBackend[]
   claudeModelOptions: { value: string; label: string }[]
@@ -94,6 +98,7 @@ export function buildBackendModelSections({
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
   kimiModelOptions?: { value: string; label: string }[]
+  antigravityModelOptions?: { value: string; label: string }[]
 }): BackendModelSection[] {
   const sections: BackendModelSection[] = []
 
@@ -134,6 +139,12 @@ export function buildBackendModelSections({
         label: 'Kimi Code',
         options: kimiModelOptions ?? KIMI_MODEL_OPTIONS,
       })
+    } else if (backend === 'antigravity') {
+      sections.push({
+        backend,
+        label: 'Antigravity',
+        options: antigravityModelOptions ?? ANTIGRAVITY_MODEL_OPTIONS,
+      })
     }
   }
 
@@ -151,6 +162,7 @@ export function useToolbarDerivedState({
   customCliProfiles,
   grokModelOptions,
   kimiModelOptions,
+  antigravityModelOptions,
   installedBackends = DEFAULT_INSTALLED_BACKENDS,
   availableMcpServers = EMPTY_MCP_SERVERS,
   enabledMcpServers = EMPTY_ENABLED_MCP_SERVERS,
@@ -162,6 +174,7 @@ export function useToolbarDerivedState({
   const isCommandCode = selectedBackend === 'commandcode'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
+  const isAntigravity = selectedBackend === 'antigravity'
 
   const { data: modelCatalog } = useModelCatalog()
 
@@ -245,6 +258,11 @@ export function useToolbarDerivedState({
     'kimi',
     kimiModelOptions ?? KIMI_MODEL_OPTIONS
   )
+  const resolvedAntigravityModelOptions = mergeCatalogOptions(
+    modelCatalog,
+    'antigravity',
+    antigravityModelOptions ?? ANTIGRAVITY_MODEL_OPTIONS
+  )
 
   const backendModelSections = useMemo(
     () =>
@@ -258,6 +276,7 @@ export function useToolbarDerivedState({
         commandcodeModelOptions: resolvedCommandCodeModelOptions,
         grokModelOptions: resolvedGrokModelOptions,
         kimiModelOptions: resolvedKimiModelOptions,
+        antigravityModelOptions: resolvedAntigravityModelOptions,
       }),
     [
       claudeModelOptions,
@@ -267,6 +286,7 @@ export function useToolbarDerivedState({
       resolvedCommandCodeModelOptions,
       resolvedGrokModelOptions,
       resolvedKimiModelOptions,
+      resolvedAntigravityModelOptions,
       resolvedOpencodeModelOptions,
       resolvedPiModelOptions,
     ]
@@ -280,6 +300,7 @@ export function useToolbarDerivedState({
     if (isCommandCode) return resolvedCommandCodeModelOptions
     if (isGrok) return resolvedGrokModelOptions
     if (isKimi) return resolvedKimiModelOptions
+    if (isAntigravity) return resolvedAntigravityModelOptions
     return claudeModelOptions
   }, [
     claudeModelOptions,
@@ -290,11 +311,13 @@ export function useToolbarDerivedState({
     isCommandCode,
     isGrok,
     isKimi,
+    isAntigravity,
     isOpencode,
     resolvedCommandCodeModelOptions,
     resolvedCursorModelOptions,
     resolvedGrokModelOptions,
     resolvedKimiModelOptions,
+    resolvedAntigravityModelOptions,
     resolvedOpencodeModelOptions,
     resolvedPiModelOptions,
   ])
@@ -339,8 +362,10 @@ export function useToolbarDerivedState({
     piModelOptions: resolvedPiModelOptions,
     grokModelOptions: resolvedGrokModelOptions,
     kimiModelOptions: resolvedKimiModelOptions,
+    antigravityModelOptions: resolvedAntigravityModelOptions,
     isGrok,
     isKimi,
+    isAntigravity,
     selectedModelLabel,
     selectedModelReasoning,
   }

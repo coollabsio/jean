@@ -114,6 +114,7 @@ import {
   isCursorModel,
   isGrokModel,
   isKimiModel,
+  isAntigravityModel,
   isPiModel,
   type MagicPrompts,
   type MagicPromptModels,
@@ -637,7 +638,7 @@ function getMagicPromptModelReasoning(
   if (profile) return null
   const reasoning = getCatalogModelReasoning(catalog, backend, model)
   if (reasoning !== undefined) return reasoning
-  return ['opencode', 'pi', 'grok', 'kimi'].includes(backend)
+  return ['opencode', 'pi', 'grok', 'kimi', 'antigravity'].includes(backend)
     ? BACKEND_EFFORT_FALLBACK
     : undefined
 }
@@ -880,6 +881,8 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
         return isGrokModel(model)
       case 'kimi':
         return isKimiModel(model)
+      case 'antigravity':
+        return isAntigravityModel(model)
       case 'claude':
         return (
           !isCodexModel(model) &&
@@ -888,7 +891,8 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           !isPiModel(model) &&
           !isCommandCodeModel(model) &&
           !isGrokModel(model) &&
-          !isKimiModel(model)
+          !isKimiModel(model) &&
+          !isAntigravityModel(model)
         )
       default:
         return true
