@@ -49,9 +49,7 @@ vi.mock('@pierre/diffs/react', () => ({
 }))
 
 vi.mock('@pierre/diffs/edit', () => ({
-  Editor: class Editor {
-    constructor() {}
-  },
+  Editor: vi.fn(),
 }))
 
 const patch = `Index: src/example.ts
