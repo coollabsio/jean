@@ -7775,7 +7775,12 @@ fn parse_pr_output(output: &str) -> Result<(u32, String), String> {
 
 /// Persist a PR/MR link (`number` + `url`) onto the worktree matching `path`.
 /// Best-effort: logs on failure and never returns an error to the caller.
-fn save_worktree_pr_link_by_path(app: &AppHandle, worktree_path: &str, pr_number: u32, pr_url: &str) {
+fn save_worktree_pr_link_by_path(
+    app: &AppHandle,
+    worktree_path: &str,
+    pr_number: u32,
+    pr_url: &str,
+) {
     if let Ok(mut data) = load_projects_data(app) {
         if let Some(wt) = data.worktrees.iter_mut().find(|w| w.path == worktree_path) {
             wt.pr_number = Some(pr_number);

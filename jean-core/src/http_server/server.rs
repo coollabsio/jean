@@ -476,10 +476,8 @@ async fn load_active_sessions_windowed(
         return std::collections::HashMap::new();
     }
 
-    let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> = worktrees
-        .iter()
-        .map(|wt| (wt.id.as_str(), wt))
-        .collect();
+    let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> =
+        worktrees.iter().map(|wt| (wt.id.as_str(), wt)).collect();
 
     let session_futures: Vec<_> = active_session_ids
         .iter()
@@ -593,32 +591,33 @@ async fn init_handler(
             let app = state.app.clone();
             let worktrees = worktrees.clone();
             async move {
-                let futures: Vec<_> = worktrees
-                    .into_iter()
-                    .map(|wt| {
-                        let app = app.clone();
-                        async move {
-                            let worktree_id = wt.id.clone();
-                            let sessions = crate::chat::get_sessions(
-                                app,
-                                worktree_id.clone(),
-                                wt.path,
-                                None,
-                                Some(true),
-                            )
-                            .await
-                            .unwrap_or_else(|_| crate::chat::types::WorktreeSessions {
-                                worktree_id: worktree_id.clone(),
-                                sessions: vec![],
-                                active_session_id: None,
-                                default_model: None,
-                                version: 2,
-                                branch_naming_completed: false,
-                            });
-                            (worktree_id, sessions)
-                        }
-                    })
-                    .collect();
+                let futures: Vec<_> =
+                    worktrees
+                        .into_iter()
+                        .map(|wt| {
+                            let app = app.clone();
+                            async move {
+                                let worktree_id = wt.id.clone();
+                                let sessions = crate::chat::get_sessions(
+                                    app,
+                                    worktree_id.clone(),
+                                    wt.path,
+                                    None,
+                                    Some(true),
+                                )
+                                .await
+                                .unwrap_or_else(|_| crate::chat::types::WorktreeSessions {
+                                    worktree_id: worktree_id.clone(),
+                                    sessions: vec![],
+                                    active_session_id: None,
+                                    default_model: None,
+                                    version: 2,
+                                    branch_naming_completed: false,
+                                });
+                                (worktree_id, sessions)
+                            }
+                        })
+                        .collect();
                 futures_util::future::join_all(futures)
                     .await
                     .into_iter()

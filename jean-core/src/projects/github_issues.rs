@@ -1977,11 +1977,7 @@ pub fn format_pr_context_markdown(ctx: &PullRequestContext) -> String {
 /// Get the diff for a PR using `gh pr diff`
 ///
 /// Returns the diff as a string, truncated to 100KB if too large.
-pub fn get_pr_diff(
-    app: &AppHandle,
-    project_path: &str,
-    pr_number: u32,
-) -> Result<String, String> {
+pub fn get_pr_diff(app: &AppHandle, project_path: &str, pr_number: u32) -> Result<String, String> {
     log::debug!("Fetching diff for PR #{pr_number} in {project_path}");
 
     let diff = if is_gitlab_project(project_path) {
