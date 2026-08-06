@@ -994,7 +994,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     [mobileWorkflowRuns?.runs, seenFailedWorkflowRunIds]
   )
 
-  // Get worktrees
+  // Get worktrees (+ seed session lists in the same backend round-trip)
   const { data: worktrees = [], isLoading: worktreesLoading } =
     useWorktrees(projectId)
 
@@ -1070,7 +1070,9 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     [projectLabels, projectPinnedLabels, assignedWorktreeLabels]
   )
 
-  // Load sessions for all worktrees dynamically using useQueries
+  // Load sessions for all worktrees dynamically using useQueries.
+  // Bootstrap (via useWorktrees → bootstrap_project) seeds these keys; staleTime
+  // avoids an immediate N-way refetch waterfall over WebSocket on project open.
   const sessionQueries = useQueries({
     queries: readyWorktrees.map(wt => ({
       queryKey: [...chatQueryKeys.sessions(wt.id), 'with-counts'],
@@ -1090,6 +1092,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         })
       },
       enabled: !!wt.id && !!wt.path,
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 5,
     })),
   })
 

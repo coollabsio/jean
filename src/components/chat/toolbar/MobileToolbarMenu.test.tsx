@@ -43,6 +43,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />
@@ -52,6 +53,9 @@ describe('MobileToolbarMenu', () => {
 
     expect(screen.getByText('Save Context')).toBeInTheDocument()
     expect(screen.getByText('Commit & Push')).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: /sync/i })
+    ).toBeInTheDocument()
     expect(screen.getByText('Pull')).toBeInTheDocument()
     expect(screen.getByText('Push')).toBeInTheDocument()
     expect(screen.getByText('Review')).toBeInTheDocument()
@@ -83,6 +87,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />
@@ -125,6 +130,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />
@@ -166,6 +172,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />
@@ -203,6 +210,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />
@@ -214,6 +222,37 @@ describe('MobileToolbarMenu', () => {
     await user.click(screen.getByText('Revert Commit'))
 
     expect(onRevertLastCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows sync in the sync section and invokes its handler', async () => {
+    const user = userEvent.setup()
+    const handleSyncClick = vi.fn()
+
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasPrContexts={false}
+        onSaveContext={vi.fn()}
+        onLoadContext={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handleSyncClick={handleSyncClick}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+    await user.click(screen.getByRole('menuitem', { name: /sync/i }))
+
+    expect(handleSyncClick).toHaveBeenCalledTimes(1)
   })
 
   it('does not expose the desktop Magic modal from the mobile actions menu', async () => {
@@ -235,6 +274,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />

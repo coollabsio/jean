@@ -5,7 +5,8 @@ describe('web connecting overlay', () => {
   const source = readFileSync(`${process.cwd()}/src/App.tsx`, 'utf8')
 
   it('uses the same opaque theme background as initial loading', () => {
-    expect(source).toContain('webBackend && !wsConnected && !wsAuthError')
+    // Single loading gate: preload OR (WS not ready without preloaded data)
+    expect(source).toContain('!wsConnected && !wsAuthError && !hasPreloadedData()')
     expect(source).toContain(
       'fixed inset-0 z-[70] flex items-center justify-center bg-background'
     )
@@ -17,9 +18,12 @@ describe('web connecting overlay', () => {
 
   it('uses the same centered loading layout for opening and reconnecting', () => {
     expect(source).toContain('function WebLoadingScreen({ label }')
+    // One loading screen path (preload and WS-fallback share it) — no stacked phases
     expect(
       source.match(/<WebLoadingScreen label="Loading Jean\.\.\." \/>/g)
-    ).toHaveLength(2)
+    ).toHaveLength(1)
+    expect(source).toContain('connectTransport()')
+    expect(source).toContain('blockOnWs')
     expect(source).not.toContain('Jean is loading...')
     expect(source).not.toContain('Reconnecting to Jean...')
     expect(source).not.toContain('animate-spin')

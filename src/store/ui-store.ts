@@ -314,7 +314,20 @@ interface UIState {
   setChatSearchOpen: (open: boolean) => void
   githubDashboardOpen: boolean
   setGitHubDashboardOpen: (open: boolean) => void
+  /**
+   * Zen mode: full-screen the active session chat.
+   * Hides session tabs, modal action chrome, and sidebars.
+   */
+  zenMode: boolean
+  toggleZenMode: () => void
+  setZenMode: (enabled: boolean) => void
 }
+
+/** Snapshot of chrome visibility restored when leaving zen mode. */
+let zenModeChromeSnapshot: {
+  leftSidebarVisible: boolean
+  fileBrowserVisible: boolean
+} | null = null
 
 // Store callback outside Zustand state to avoid serialization issues with
 // devtools and deep-comparison utilities (functions are not serializable).
@@ -395,6 +408,41 @@ export const useUIStore = create<UIState>()(
       availableCliUpdates: [],
       chatSearchOpen: false,
       githubDashboardOpen: false,
+      zenMode: false,
+      toggleZenMode: () => {
+        const { zenMode } = get()
+        get().setZenMode(!zenMode)
+      },
+      setZenMode: enabled =>
+        set(
+          state => {
+            if (state.zenMode === enabled) return state
+            if (enabled) {
+              zenModeChromeSnapshot = {
+                leftSidebarVisible: state.leftSidebarVisible,
+                fileBrowserVisible: state.fileBrowserVisible,
+              }
+              return {
+                zenMode: true,
+                leftSidebarVisible: false,
+                fileBrowserVisible: false,
+              }
+            }
+            const snap = zenModeChromeSnapshot
+            zenModeChromeSnapshot = null
+            return {
+              zenMode: false,
+              ...(snap
+                ? {
+                    leftSidebarVisible: snap.leftSidebarVisible,
+                    fileBrowserVisible: snap.fileBrowserVisible,
+                  }
+                : {}),
+            }
+          },
+          undefined,
+          'setZenMode'
+        ),
       toggleLeftSidebar: () =>
         set(
           state => ({ leftSidebarVisible: !state.leftSidebarVisible }),

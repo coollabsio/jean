@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@/test/test-utils'
 import { MessageDiffModal, undoEdit, patchFromEdits } from './MessageDiffModal'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
 let tauriAvailable = false
 let mockFileContent: string | undefined = undefined
@@ -44,6 +44,13 @@ vi.mock('@pierre/diffs/react', () => ({
   FileDiff: ({ fileDiff }: { fileDiff: unknown }) => {
     const [initialFileDiff] = useState(fileDiff)
     return <div data-testid="file-diff">{JSON.stringify(initialFileDiff)}</div>
+  },
+  EditProvider: ({ children }: { children: ReactNode }) => children,
+}))
+
+vi.mock('@pierre/diffs/edit', () => ({
+  Editor: class Editor {
+    constructor() {}
   },
 }))
 

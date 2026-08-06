@@ -3,6 +3,11 @@ import { createPatch } from 'diff'
 import { parsePatchFiles } from '@pierre/diffs'
 import { FileDiff } from '@pierre/diffs/react'
 import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
+import {
   FileText,
   Columns2,
   Rows3,
@@ -263,19 +268,16 @@ export function MessageDiffModal({
 
   const fileDiffOptions = useMemo(
     () => ({
-      theme: {
-        dark: preferences?.syntax_theme_dark ?? 'vitesse-black',
-        light: preferences?.syntax_theme_light ?? 'github-light',
-      },
+      theme: pierreThemePair(
+        preferences?.syntax_theme_dark,
+        preferences?.syntax_theme_light
+      ),
       themeType: resolvedThemeType,
       diffStyle,
       overflow: 'wrap' as const,
       enableLineSelection: false,
       disableFileHeader: true,
-      unsafeCSS: `
-        pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-        * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
-      `,
+      unsafeCSS: PIERRE_UNSAFE_CSS,
     }),
     [
       resolvedThemeType,
@@ -405,11 +407,14 @@ export function MessageDiffModal({
             </div>
           ) : currentChangeFile ? (
             <DiffBlock fileName={relativePath}>
-              <FileDiff
-                key={currentChangeKey}
-                fileDiff={currentChangeFile}
-                options={fileDiffOptions}
-              />
+              <PierreEditProvider>
+                <FileDiff
+                  key={currentChangeKey}
+                  fileDiff={currentChangeFile}
+                  options={fileDiffOptions}
+                  edit
+                />
+              </PierreEditProvider>
             </DiffBlock>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

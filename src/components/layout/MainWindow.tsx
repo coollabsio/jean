@@ -309,16 +309,18 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
+  const zenMode = useUIStore(state => state.zenMode)
+
   // Compute window title based on selected project/worktree
-  // On mobile, show only project name (worktree name is in the content header)
+  // On mobile / zen mode, show only project name (session chrome is minimal)
   const windowTitle = useMemo(() => {
     if (!project || !worktree) return 'Jean'
-    if (isMobile) return project.name
+    if (isMobile || zenMode) return project.name
     const branchSuffix =
       worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
 
     return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile])
+  }, [project, worktree, isMobile, zenMode])
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project

@@ -1066,6 +1066,67 @@ pub async fn list_worktrees(app: AppHandle, project_id: String) -> Result<Vec<Wo
     Ok(worktrees)
 }
 
+/// One-shot project open payload: worktrees + session lists (with message counts).
+/// Avoids the frontend waterfall of `list_worktrees` then N× `get_sessions` over WS.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBootstrap {
+    pub worktrees: Vec<Worktree>,
+    pub sessions_by_worktree: HashMap<String, crate::chat::types::WorktreeSessions>,
+}
+
+/// Load worktrees and per-worktree session lists for a project in one round-trip.
+/// Sessions are fetched in parallel with message counts (canvas needs them).
+pub async fn bootstrap_project(
+    app: AppHandle,
+    project_id: String,
+) -> Result<ProjectBootstrap, String> {
+    log::trace!("Bootstrapping project canvas data: {project_id}");
+
+    let worktrees = list_worktrees(app.clone(), project_id).await?;
+
+    let session_futures: Vec<_> = worktrees
+        .iter()
+        .map(|wt| {
+            let app = app.clone();
+            let worktree_id = wt.id.clone();
+            let worktree_path = wt.path.clone();
+            async move {
+                let sessions = crate::chat::get_sessions(
+                    app,
+                    worktree_id.clone(),
+                    worktree_path,
+                    None,       // include_archived
+                    Some(true), // include_message_counts
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("bootstrap_project: get_sessions failed for {worktree_id}: {e}");
+                    crate::chat::types::WorktreeSessions {
+                        worktree_id: worktree_id.clone(),
+                        sessions: vec![],
+                        active_session_id: None,
+                        default_model: None,
+                        version: 2,
+                        branch_naming_completed: false,
+                    }
+                });
+                (worktree_id, sessions)
+            }
+        })
+        .collect();
+
+    let sessions_by_worktree = futures_util::future::join_all(session_futures)
+        .await
+        .into_iter()
+        .collect();
+
+    Ok(ProjectBootstrap {
+        worktrees,
+        sessions_by_worktree,
+    })
+}
+
 /// Get a single worktree by ID
 pub async fn get_worktree(app: AppHandle, worktree_id: String) -> Result<Worktree, String> {
     log::trace!("Getting worktree: {worktree_id}");

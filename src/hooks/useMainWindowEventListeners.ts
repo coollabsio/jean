@@ -357,6 +357,11 @@ function executeKeybindingAction(
       setFileBrowserVisible(!fileBrowserVisible)
       break
     }
+    case 'toggle_zen_mode': {
+      logger.debug('Keybinding: toggle_zen_mode')
+      useUIStore.getState().toggleZenMode()
+      break
+    }
     case 'open_preferences':
       logger.debug('Keybinding: open_preferences')
       commandContext.openPreferences()

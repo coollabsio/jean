@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   ArrowDownToLine,
+  ArrowDownUp,
   ArrowUpToLine,
   BookmarkPlus,
   Bug,
@@ -44,6 +45,7 @@ interface MobileToolbarMenuProps {
   onReview: () => void
   onMerge: () => void
   onMergePr: () => void
+  handleSyncClick: () => void
   handlePullClick: () => void
   handlePushClick: () => void
 }
@@ -62,6 +64,7 @@ export function MobileToolbarMenu({
   onReview,
   onMerge,
   onMergePr,
+  handleSyncClick,
   handlePullClick,
   handlePushClick,
 }: MobileToolbarMenuProps) {
@@ -203,6 +206,18 @@ export function MobileToolbarMenu({
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Sync
         </div>
+        <DropdownMenuItem onClick={handleSyncClick}>
+          <ArrowDownUp className="h-4 w-4" />
+          Sync
+          <span
+            className={cn(
+              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+              isMobile && 'hidden'
+            )}
+          >
+            T
+          </span>
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={handlePullClick}>
           <ArrowDownToLine className="h-4 w-4" />
           Pull

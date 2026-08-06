@@ -735,9 +735,16 @@ function App() {
     [queryClient]
   )
 
-  // Preload initial data via HTTP for web view (faster than waiting for WebSocket)
+  // Preload initial data via HTTP while opening the WebSocket in parallel.
+  // Previously these were sequential (HTTP → then WS), which doubled the
+  // "Loading Jean..." wall time on web access.
   useEffect(() => {
     if (!webBackend) return
+
+    if (!hasStartedTransportRef.current) {
+      hasStartedTransportRef.current = true
+      connectTransport()
+    }
 
     const initialSelectedProjectId =
       peekWebReloadState()?.projectId ??
@@ -853,8 +860,9 @@ function App() {
   // Keep Codex usage UI fresh when the app-server pushes account rate-limit updates.
   useCodexUsageUpdateListener()
 
-  // Browser mode: only open WebSocket after preload + listener registration.
-  // This lets us replay buffered server events before live events start arriving.
+  // Browser mode: WebSocket starts in parallel with HTTP preload (see above).
+  // Bootstrap replay events are ingested into the transport buffer before live
+  // listeners attach; WS buffers events until React listeners register.
   // Native remote clients keep the shell and show RemoteConnectionRecovery —
   // dismiss open overlays so they cannot trap pointer events (issue #623).
   // Pure web-access reloads so in-memory UI state is rebuilt cleanly.
@@ -871,12 +879,6 @@ function App() {
       window.location.reload()
     })
   }, [captureWebReloadState, webBackend])
-
-  useEffect(() => {
-    if (!webBackend || isPreloading || hasStartedTransportRef.current) return
-    hasStartedTransportRef.current = true
-    connectTransport()
-  }, [isPreloading, webBackend])
 
   // Global queue processor - must be at App level so queued messages execute
   // even when the worktree is not focused (ChatWindow unmounted)
@@ -1628,10 +1630,18 @@ function App() {
   // Show loading screen while preloading initial data (web view only).
   // QuitConfirmationDialog stays mounted so X/quit can still confirm or
   // destroy the native window while the overlay is up.
-  if (isPreloading) {
+  //
+  // When HTTP preload succeeds we render the shell immediately — invokes queue
+  // until the WebSocket finishes connecting (started in parallel). Only block
+  // on WS when preload failed and we have nothing to show.
+  const blockOnWs =
+    webBackend && !wsConnected && !wsAuthError && !hasPreloadedData()
+
+  if (isPreloading || blockOnWs) {
     return (
       <>
         <WebLoadingScreen label="Loading Jean..." />
+        {webBackend && <WsAuthErrorOverlay />}
         {isNativeApp() && <QuitConfirmationDialog />}
       </>
     )
@@ -1641,9 +1651,6 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <MainWindow />
-        {webBackend && !wsConnected && !wsAuthError && (
-          <WebLoadingScreen label="Loading Jean..." />
-        )}
         {webBackend && <WsAuthErrorOverlay />}
         {/* App-level dialog so quit confirmation wins over loading overlay
             even if MainWindow's copy is covered / not yet mounted. */}

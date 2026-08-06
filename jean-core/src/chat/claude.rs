@@ -182,7 +182,7 @@ pub struct ErrorEvent {
 pub struct CancelledEvent {
     pub session_id: String,
     pub worktree_id: String, // Kept for backward compatibility
-    pub undo_send: bool, // True if user message should be restored to input (instant cancellation)
+    pub undo_send: bool, // True only when the prompt never started (restore to input)
     pub emitted_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,

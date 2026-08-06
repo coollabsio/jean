@@ -205,6 +205,9 @@ export function WorktreeList({
         })
       },
       enabled: !!wt.id && !!wt.path,
+      // Prefer bootstrap/init-seeded cache; avoid N-way WS refetch on open
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 5,
     })),
   })
 

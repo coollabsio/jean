@@ -148,6 +148,7 @@ export function useUIStatePersistence() {
       leftSidebarVisible,
       fileBrowserSize,
       fileBrowserVisible,
+      zenMode,
       sessionTerminalIds,
       sessionPrimarySurface,
       seenFailedWorkflowRunIds,
@@ -203,6 +204,7 @@ export function useUIStatePersistence() {
       left_sidebar_visible: leftSidebarVisible,
       file_browser_size: fileBrowserSize,
       file_browser_visible: fileBrowserVisible,
+      zen_mode: zenMode,
       active_session_ids: activeSessionIds,
       input_drafts: inputDrafts,
       pending_images: serializePendingImages(pendingImages),
@@ -353,6 +355,10 @@ export function useUIStatePersistence() {
         visible: uiState.file_browser_visible,
       })
       useUIStore.getState().setFileBrowserVisible(uiState.file_browser_visible)
+    }
+
+    if (uiState.zen_mode !== undefined) {
+      useUIStore.getState().setZenMode(uiState.zen_mode)
     }
 
     // Restore active project first (selectProject clears selectedWorktreeId)
@@ -1045,6 +1051,7 @@ export function useUIStatePersistence() {
     let prevLeftSidebarVisible = useUIStore.getState().leftSidebarVisible
     let prevFileBrowserSize = useUIStore.getState().fileBrowserSize
     let prevFileBrowserVisible = useUIStore.getState().fileBrowserVisible
+    let prevZenMode = useUIStore.getState().zenMode
     let prevSessionTerminalIds = useUIStore.getState().sessionTerminalIds
     let prevSessionPrimarySurface = useUIStore.getState().sessionPrimarySurface
     let prevSeenFailedWorkflowRunIds =
@@ -1132,6 +1139,7 @@ export function useUIStatePersistence() {
         state.fileBrowserSize !== prevFileBrowserSize
       const fileBrowserVisibilityChanged =
         state.fileBrowserVisible !== prevFileBrowserVisible
+      const zenModeChanged = state.zenMode !== prevZenMode
       const sessionTerminalIdsChanged =
         state.sessionTerminalIds !== prevSessionTerminalIds
       const sessionPrimarySurfaceChanged =
@@ -1144,6 +1152,7 @@ export function useUIStatePersistence() {
         visibilityChanged ||
         fileBrowserSizeChanged ||
         fileBrowserVisibilityChanged ||
+        zenModeChanged ||
         sessionTerminalIdsChanged ||
         sessionPrimarySurfaceChanged ||
         seenFailedWorkflowRunIdsChanged
@@ -1152,6 +1161,7 @@ export function useUIStatePersistence() {
         prevLeftSidebarVisible = state.leftSidebarVisible
         prevFileBrowserSize = state.fileBrowserSize
         prevFileBrowserVisible = state.fileBrowserVisible
+        prevZenMode = state.zenMode
         prevSessionTerminalIds = state.sessionTerminalIds
         prevSessionPrimarySurface = state.sessionPrimarySurface
         prevSeenFailedWorkflowRunIds = state.seenFailedWorkflowRunIds

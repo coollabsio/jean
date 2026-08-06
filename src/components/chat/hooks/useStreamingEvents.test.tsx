@@ -898,6 +898,71 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
   })
 
+  it('does not restore input when cancelling an already-running prompt with no streamed content yet', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [
+        {
+          id: 'current-user',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'already running',
+          timestamp: 3,
+          tool_calls: [],
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      streamingContents: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+      activeToolCalls: {},
+      sendingSessionIds: { 'session-1': true },
+      sendStartedAt: { 'session-1': 1000 },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+      lastSentMessages: { 'session-1': 'already running' },
+      inputDrafts: { 'session-1': '' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: 2000,
+      },
+    })
+
+    const session = queryClient.getQueryData<{
+      messages: { id: string; role: string; content: string }[]
+    }>(['chat', 'session', 'session-1'])
+
+    // Prompt already started — keep the user message, do not put it back in input.
+    expect(session?.messages.map(message => message.id)).toEqual([
+      'current-user',
+      'cancelled-session-1-2000',
+    ])
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
+    expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
+      undefined
+    )
+  })
+
   it('restores an instant-cancelled prompt while keeping prior history visible', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)
