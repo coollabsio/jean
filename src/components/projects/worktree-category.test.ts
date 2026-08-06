@@ -26,7 +26,7 @@ function signals(
 }
 
 describe('classifyWorktreeCategory', () => {
-  it('place toujours ce qui attend une décision humaine en premier', () => {
+  it('donne la priorité au standby sur une décision humaine en attente', () => {
     expect(
       classifyWorktreeCategory(
         signals({
@@ -36,10 +36,10 @@ describe('classifyWorktreeCategory', () => {
           standbyUntil: NOW + 3600,
         })
       )
-    ).toBe('needs_brain')
+    ).toBe('standby')
   })
 
-  it('classe une IA active avant un standby enregistré', () => {
+  it('donne la priorité au standby sur une IA active', () => {
     expect(
       classifyWorktreeCategory(
         signals({
@@ -48,7 +48,21 @@ describe('classifyWorktreeCategory', () => {
           standbyUntil: NOW + 3600,
         })
       )
-    ).toBe('ai_running')
+    ).toBe('standby')
+  })
+
+  it('donne la priorité au standby sur une CI en cours', () => {
+    expect(
+      classifyWorktreeCategory(
+        signals({
+          standbyReason: 'Retour métier',
+          standbyUntil: NOW + 3600,
+          hasPullRequest: true,
+          ciOverallStatus: 'BUILDING',
+          previewStatus: 'STALE',
+        })
+      )
+    ).toBe('standby')
   })
 
   it('respecte un standby métier actif et réveille un standby expiré', () => {

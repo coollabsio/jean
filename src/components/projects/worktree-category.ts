@@ -53,6 +53,16 @@ export function classifyWorktreeCategory({
   now,
 }: WorktreeCategorySignals): WorktreeCategory {
   if (
+    isActiveStandby({
+      reason: standbyReason,
+      until: standbyUntil,
+      now,
+    })
+  ) {
+    return 'standby'
+  }
+
+  if (
     ciOverallStatus === 'BUILDING' ||
     ciOverallStatus === 'QUEUED' ||
     previewStatus === 'STALE'
@@ -63,16 +73,6 @@ export function classifyWorktreeCategory({
   if (hasHumanAttention) return 'needs_brain'
   if (hasAiActivity) return 'ai_running'
   if (worktreeStatus === 'pending') return 'monitoring'
-
-  if (
-    isActiveStandby({
-      reason: standbyReason,
-      until: standbyUntil,
-      now,
-    })
-  ) {
-    return 'standby'
-  }
 
   if (worktreeStatus === 'error') return 'needs_brain'
 
