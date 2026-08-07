@@ -650,6 +650,7 @@ pub async fn dispatch_command(
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
             let review_type: Option<String> = field_opt(&args, "reviewType", "review_type")?;
             let session_id: Option<String> = field_opt(&args, "sessionId", "session_id")?;
+            let surface: Option<String> = from_field_opt(&args, "surface")?;
             let result = crate::projects::start_review_job(
                 app.clone(),
                 worktree_id,
@@ -663,6 +664,7 @@ pub async fn dispatch_command(
                 reasoning_effort,
                 review_type,
                 session_id,
+                surface,
             )
             .await?;
             to_value(result)

@@ -53,12 +53,14 @@ import {
   DEFAULT_MAGIC_PROMPT_MODES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  resolveMagicPromptSurface,
   type CliBackend,
   type AppPreferences,
   type MagicCodeReviewConfig,
 } from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
 import { useMagicPromptRunner } from './useMagicPromptRunner'
+import { attachBackendTerminalLaunch } from '@/lib/magic-prompt-terminal'
 import {
   resolveCodeReviewConfigs,
   startCodeReviewsSequentially,
@@ -1009,7 +1011,7 @@ export function useGitOperations({
       }
 
       try {
-        const { job } = await invoke<StartReviewJobResponse>(
+        const { job, terminalLaunch } = await invoke<StartReviewJobResponse>(
           'start_review_job',
           {
             worktreeId: activeWorktreeId,
@@ -1038,8 +1040,24 @@ export function useGitOperations({
             reviewRunId,
             reviewType: source === 'coderabbit-cli' ? 'all' : null,
             sessionId: reviewSessionId,
+            surface: resolveMagicPromptSurface(
+              preferences?.magic_prompt_surfaces,
+              'code_review_surface',
+              preferences?.default_magic_prompt_surface
+            ),
           }
         )
+
+        // Rust created the session and is watching for the result file; the
+        // terminal itself can only be minted here.
+        if (terminalLaunch) {
+          attachBackendTerminalLaunch({
+            launch: terminalLaunch,
+            worktreeId: activeWorktreeId,
+            label: reviewLabel,
+            backend: reviewConfig?.backend as CliBackend | undefined,
+          })
+        }
 
         if (job.sessionId) {
           const { setActiveSession, clearActiveWorktree } =
