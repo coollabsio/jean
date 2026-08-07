@@ -3277,21 +3277,22 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               />
             </InlineField>
 
-            {preferences?.codex_multi_agent_enabled && (
-              <InlineField
-                label="Max agent threads"
-                description="Maximum concurrent subagents (1–8)"
-              >
-                <Input
-                  type="number"
-                  min={1}
-                  max={8}
-                  className="w-20"
-                  value={preferences?.codex_max_agent_threads ?? 3}
-                  onChange={e => handleCodexMaxThreadsChange(e.target.value)}
-                />
-              </InlineField>
-            )}
+            {preferences?.codex_multi_agent_enabled &&
+              !preferences?.quota_saver_enabled && (
+                <InlineField
+                  label="Max agent threads"
+                  description="Maximum concurrent subagents (1–8)"
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={8}
+                    className="w-20"
+                    value={preferences?.codex_max_agent_threads ?? 3}
+                    onChange={e => handleCodexMaxThreadsChange(e.target.value)}
+                  />
+                </InlineField>
+              )}
           </div>
         </SettingsSection>
       )}

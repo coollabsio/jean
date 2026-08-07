@@ -1006,8 +1006,37 @@ mod tests {
     }
 
     #[test]
-    fn quota_saver_is_opt_in() {
+    fn quota_saver_is_on_for_fresh_installs_and_off_for_existing_ones() {
+        // Fresh machine: cheap defaults out of the box.
+        assert!(super::fresh_install_preferences().quota_saver_enabled);
+
+        // A preferences.json written before this change has no
+        // `quota_saver_enabled` key at all. It must keep the old behaviour on
+        // upgrade, so nobody silently loses Jean MCP tools or sub-agents.
+        let mut pre_upgrade = serde_json::to_value(AppPreferences::default()).unwrap();
+        assert!(pre_upgrade
+            .as_object_mut()
+            .unwrap()
+            .remove("quota_saver_enabled")
+            .is_some());
+
+        let existing: AppPreferences = serde_json::from_value(pre_upgrade).unwrap();
+        assert!(!existing.quota_saver_enabled);
         assert!(!AppPreferences::default().quota_saver_enabled);
+    }
+
+    #[test]
+    fn fresh_install_preferences_only_differ_by_quota_saver() {
+        let fresh = super::fresh_install_preferences();
+        let baseline = AppPreferences {
+            quota_saver_enabled: fresh.quota_saver_enabled,
+            ..AppPreferences::default()
+        };
+
+        assert_eq!(
+            serde_json::to_value(&fresh).unwrap(),
+            serde_json::to_value(&baseline).unwrap()
+        );
     }
 
     #[test]
@@ -3093,10 +3122,23 @@ pub fn get_preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Synchronous helper to load AppPreferences (for use in non-async Rust code).
+/// Preferences for a machine that has never run Jean before.
+///
+/// Quota Saver is on here but its serde fallback stays `false`, so a fresh
+/// install gets the cheap defaults while an existing `preferences.json` — which
+/// has no `quota_saver_enabled` key — keeps working exactly as before instead of
+/// silently losing Jean MCP tools, sub-agents and recaps on upgrade.
+fn fresh_install_preferences() -> AppPreferences {
+    AppPreferences {
+        quota_saver_enabled: true,
+        ..AppPreferences::default()
+    }
+}
+
 pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> {
     let prefs_path = get_preferences_path(app)?;
     if !prefs_path.exists() {
-        let mut preferences = AppPreferences::default();
+        let mut preferences = fresh_install_preferences();
         maybe_auto_select_system_cli_preferences(app, &mut preferences, None);
         return Ok(preferences);
     }
@@ -3117,8 +3159,8 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     let prefs_path = get_preferences_path(&app)?;
 
     if !prefs_path.exists() {
-        log::trace!("Preferences file not found, using defaults");
-        let mut preferences = AppPreferences::default();
+        log::trace!("Preferences file not found, using fresh-install defaults");
+        let mut preferences = fresh_install_preferences();
         if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None) {
             if let Ok(json) = serde_json::to_string_pretty(&preferences) {
                 let _ = std::fs::write(&prefs_path, json);
