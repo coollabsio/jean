@@ -2038,7 +2038,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
   // Investigate issue/PR and workflow run handlers
   const {
     handleInvestigate,
-    handleInvestigateWorkflowRun,
     handleReviewComments,
   } = useInvestigateHandlers({
     activeSessionId,
@@ -2174,7 +2173,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handleMerge,
     handleMergePr,
     handleResolveConflicts,
-    handleInvestigateWorkflowRun,
     handleInvestigate,
     handleReviewComments,
     isModal,

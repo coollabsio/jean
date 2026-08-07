@@ -25,7 +25,6 @@ function renderUseMagicCommands(
     handleMerge: vi.fn(),
     handleMergePr: vi.fn(),
     handleResolveConflicts: vi.fn(),
-    handleInvestigateWorkflowRun: vi.fn(),
     handleInvestigate: vi.fn(),
     handleReviewComments: vi.fn(),
     ...overrides,

@@ -151,6 +151,7 @@ export function buildMagicPromptCommandArgs({
   yolo,
   nativeSessionId,
   modelArgs = [],
+  contextArgs = [],
 }: {
   backend: CliBackend
   delivery: PromptDelivery
@@ -158,6 +159,8 @@ export function buildMagicPromptCommandArgs({
   nativeSessionId?: string
   /** From `resolve_terminal_model_args`; empty means "use the CLI default". */
   modelArgs?: string[]
+  /** From `prepare_backend_terminal_context`; empty when unsupported. */
+  contextArgs?: string[]
 }): string[] {
   const args: string[] = []
   if (yolo) args.push(...(YOLO_ARGS_BY_BACKEND[backend] ?? []))
@@ -165,6 +168,8 @@ export function buildMagicPromptCommandArgs({
     args.push('--session-id', nativeSessionId)
   }
   args.push(...modelArgs)
+  args.push(...contextArgs)
+  // Positional prompt must stay last, after every flag.
   args.push(...delivery.promptArgs)
   return args
 }
@@ -177,6 +182,51 @@ export function buildMagicPromptCommandArgs({
  * remaps fast variants, grok maps retired ids forward) and are already
  * implemented there for headless runs. A second copy here would drift.
  */
+/**
+ * Backends whose CLI can accept Jean's combined context/system prompt.
+ *
+ * Mirrors `TerminalContextBackend::parse` in jean-core. grok and kimi have no
+ * equivalent mechanism, so a terminal run there gets the CLI's own context only.
+ */
+const CONTEXT_CAPABLE_BACKENDS: ReadonlySet<CliBackend> = new Set<CliBackend>([
+  'claude',
+  'codex',
+  'opencode',
+  'cursor',
+  'pi',
+  'commandcode',
+])
+
+/**
+ * Args that carry Jean's system prompt and loaded context into the CLI.
+ *
+ * Same mechanism the native CLI session picker uses — `--append-system-prompt-file`
+ * for Claude, `--config base_instructions=` for Codex. Without it a terminal run
+ * loses Jean's instructions entirely, which is the gap the "Runs in" note warns
+ * about.
+ */
+async function resolveContextArgs(
+  backend: CliBackend,
+  sessionId: string,
+  worktreeId: string
+): Promise<string[]> {
+  if (!CONTEXT_CAPABLE_BACKENDS.has(backend)) return []
+  try {
+    const prepared = await invoke<{ commandArgs: string[] }>(
+      'prepare_backend_terminal_context',
+      { sessionId, worktreeId, backend }
+    )
+    return prepared?.commandArgs ?? []
+  } catch (error) {
+    // Losing Jean's context is worse than ideal but not worth failing the run.
+    logger.warn('Could not prepare Jean context for terminal session', {
+      backend,
+      error,
+    })
+    return []
+  }
+}
+
 async function resolveModelArgs(
   backend: CliBackend,
   model: string | undefined
@@ -348,11 +398,27 @@ export async function launchMagicPromptTerminal({
     nativeSessionId,
   })
 
+  // Context args are resolved after the session exists (they are keyed by
+  // session id) and are deliberately not persisted: the session stores base
+  // args, and context is re-prepared on each launch. Same split the native CLI
+  // session picker uses, so a resumed session picks up fresh context.
+  const contextArgs = await resolveContextArgs(backend, session.id, worktreeId)
+  const launchArgs = contextArgs.length
+    ? buildMagicPromptCommandArgs({
+        backend,
+        delivery,
+        yolo,
+        nativeSessionId,
+        modelArgs,
+        contextArgs,
+      })
+    : commandArgs
+
   const terminalId = useTerminalStore
     .getState()
     .addTerminal(worktreeId, command, label, {
       kind: 'session',
-      commandArgs,
+      commandArgs: launchArgs,
       activate: false,
       openPanel: false,
       sessionId: session.id,
