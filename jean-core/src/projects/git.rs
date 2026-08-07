@@ -1553,6 +1553,12 @@ fn remove_dir_all_with_retry(path: &Path) -> std::io::Result<()> {
             Ok(()) => return Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    // Generated files can leave owner-owned directories read-only
+                    // (for example after a container teardown). Restore only the
+                    // owner's permissions, then let the normal retry remove them.
+                    let _ = restore_owner_directory_permissions(path);
+                }
                 if attempt >= WORKTREE_RM_ATTEMPTS || !is_transient_dir_removal_error(&e) {
                     return Err(e);
                 }
@@ -1565,6 +1571,33 @@ fn remove_dir_all_with_retry(path: &Path) -> std::io::Result<()> {
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn restore_owner_directory_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_dir() {
+        return Ok(());
+    }
+
+    let mode = metadata.permissions().mode();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o700))?;
+
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            restore_owner_directory_permissions(&entry.path())?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restore_owner_directory_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Remove a git worktree
@@ -2749,6 +2782,27 @@ mod tests {
         let missing = dir.path().join("does-not-exist");
         // An already-absent path must be treated as success, not an error.
         remove_dir_all_with_retry(&missing).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_remove_dir_all_with_retry_repairs_read_only_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("worktree");
+        let generated = root.join("generated/cache");
+        std::fs::create_dir_all(&generated).unwrap();
+        std::fs::write(generated.join("data.bin"), b"data").unwrap();
+        std::fs::set_permissions(
+            root.join("generated"),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+
+        remove_dir_all_with_retry(&root).unwrap();
+
+        assert!(!root.exists());
     }
 
     #[test]
