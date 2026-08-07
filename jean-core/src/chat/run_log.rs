@@ -15,7 +15,7 @@ use super::storage::{
 };
 use super::types::{
     is_claude_compaction_summary_text, Backend, ChatMessage, ContentBlock, LoadedMessages,
-    MessageRole, RunEntry, RunStatus, ToolCall, UsageData,
+    MessageRole, RunEntry, RunStatus, SessionMetadata, ToolCall, UsageData,
 };
 
 // ============================================================================
@@ -350,6 +350,30 @@ impl RunLogWriter {
     }
 }
 
+fn reconcile_completed_running_runs(
+    metadata: &mut SessionMetadata,
+    ended_at: u64,
+    mut has_result: impl FnMut(&str) -> bool,
+) -> bool {
+    let mut reconciled = false;
+
+    for run in &mut metadata.runs {
+        if run.status != RunStatus::Running || !has_result(&run.run_id) {
+            continue;
+        }
+
+        run.status = RunStatus::Completed;
+        run.ended_at = Some(ended_at);
+        run.recovered = true;
+        if run.assistant_message_id.is_none() {
+            run.assistant_message_id = Some(Uuid::new_v4().to_string());
+        }
+        reconciled = true;
+    }
+
+    reconciled
+}
+
 /// Start a new run - creates JSONL file and updates metadata
 #[allow(clippy::too_many_arguments)]
 pub fn start_run(
@@ -435,6 +459,18 @@ pub fn start_run(
         session_name,
         order,
         |metadata| {
+            // The JSONL journal is the source of truth. If final metadata
+            // persistence was interrupted after a result was written, repair
+            // the stale Running status before applying the duplicate guard.
+            if reconcile_completed_running_runs(metadata, now, |run_id| {
+                jsonl_has_result_line(app, session_id, run_id)
+            }) {
+                metadata.is_reviewing = false;
+                if metadata.status_override.as_deref() == Some("review") {
+                    metadata.status_override = None;
+                }
+            }
+
             // Guard: if there's already a Running run, reject to prevent duplicates.
             // This is a safety net — the primary guard is in send_chat_message.
             let has_running = metadata.runs.iter().any(|r| r.status == RunStatus::Running);
@@ -1531,6 +1567,7 @@ pub fn load_session_messages_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::SessionMetadata;
 
     fn sample_run() -> RunEntry {
         RunEntry {
@@ -1581,6 +1618,35 @@ mod tests {
             recovered: false,
             usage: None,
         }
+    }
+
+    #[test]
+    fn completed_jsonl_run_does_not_block_the_next_run() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.status = RunStatus::Running;
+        run.ended_at = None;
+        run.assistant_message_id = None;
+        metadata.runs.push(run);
+
+        let reconciled =
+            reconcile_completed_running_runs(&mut metadata, 42, |run_id| run_id == "run-123");
+
+        assert!(reconciled);
+        let run = metadata.find_run("run-123").unwrap();
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(run.ended_at, Some(42));
+        assert!(run.recovered);
+        assert!(run.assistant_message_id.is_some());
+        assert!(!metadata
+            .runs
+            .iter()
+            .any(|run| run.status == RunStatus::Running));
     }
 
     #[test]
