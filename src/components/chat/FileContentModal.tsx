@@ -158,8 +158,6 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
       if (signal.cancelled) return
       setContent(fileContent)
       setEditedContent(fileContent)
-      // Open in edit mode by default (matches mobile file browser)
-      setIsEditing(true)
     } catch (err) {
       if (signal.cancelled) return
       setError(err instanceof Error ? err.message : String(err))
