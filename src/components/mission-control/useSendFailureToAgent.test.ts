@@ -89,4 +89,25 @@ describe('buildFailurePrompt', () => {
     expect(prompt).toMatch(/push/i)
     expect(prompt).toMatch(/force-push/i)
   })
+
+  it('requires the exact Jenkins failures to be rerun before pushing', () => {
+    const prompt = buildFailurePrompt(
+      report({
+        failedTests: [
+          {
+            className: 'WidgetRepo',
+            name: 'admin sees all widgets',
+            message: 'Expected 3 widgets',
+          },
+        ],
+        failedTestCount: 1,
+      }),
+      context
+    )
+
+    expect(prompt).toMatch(/relance exactement chaque test en échec/i)
+    expect(prompt).toMatch(/filtre.*fichier.*nom/i)
+    expect(prompt).toMatch(/commande.*résultat/i)
+    expect(prompt).toMatch(/avant de commit/i)
+  })
 })

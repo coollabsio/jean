@@ -99,10 +99,12 @@ ${tests}${log}
 
 1. Analyse le log et les tests en échec ci-dessus — ils viennent du build Jenkins, tu n'as rien à récupérer.
 2. Localise la cause dans le code du worktree courant.
-3. Si c'est un vrai bug ou une erreur de compilation : corrige-le, puis lance les tests pertinents.
-4. Si les tests passent, crée un commit clair et pousse-le sur la branche courante afin de relancer la CI.
-5. N'utilise jamais force-push et ne pousse jamais sur main/master. Si la branche distante a avancé de manière incompatible, arrête-toi et explique le blocage.
-6. Si c'est un test instable (flaky) ou un problème d'infra CI : dis-le explicitement et propose la fiabilisation, ne bricole pas le test pour le faire passer et ne crée pas de commit vide.
+3. Si c'est un vrai bug ou une erreur de compilation : corrige-le.
+4. Après la correction, relance exactement chaque test en échec listé dans <failing-tests>, avec le filtre le plus précis offert par le runner (fichier et nom du test). Ne te contente pas d'une suite générique. Si la commande n'est pas évidente, inspecte les scripts et la configuration du dépôt pour la construire.
+5. Lance ensuite les autres vérifications strictement pertinentes pour les fichiers modifiés. Dans ton récapitulatif, donne chaque commande exécutée et son résultat.
+6. Seulement si ces tests précis passent, et avant de commit, crée un commit clair puis pousse-le sur la branche courante afin de relancer la CI.
+7. N'utilise jamais force-push et ne pousse jamais sur main/master. Si la branche distante a avancé de manière incompatible, arrête-toi et explique le blocage.
+8. Si c'est un test instable (flaky) ou un problème d'infra CI : dis-le explicitement et propose la fiabilisation, ne bricole pas le test pour le faire passer et ne crée pas de commit vide.
 
 </instructions>`
 }
