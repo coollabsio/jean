@@ -290,6 +290,45 @@ async function waitForTerminalStart(terminalId: string): Promise<boolean> {
 }
 
 /**
+ * Attach a terminal to a session the backend already created.
+ *
+ * Used by the code-review bridge: `start_review_job` owns the session, prompt
+ * and result watcher, then returns the launch for the UI to spawn — terminals
+ * only exist in the frontend store.
+ */
+export function attachBackendTerminalLaunch({
+  launch,
+  worktreeId,
+  label,
+  backend,
+}: {
+  launch: { command: string; args: string[]; sessionId: string }
+  worktreeId: string
+  label: string
+  backend?: CliBackend
+}): string {
+  const terminalId = useTerminalStore
+    .getState()
+    .addTerminal(worktreeId, launch.command, label, {
+      kind: 'session',
+      commandArgs: launch.args,
+      activate: false,
+      openPanel: false,
+      sessionId: launch.sessionId,
+    })
+
+  const uiStore = useUIStore.getState()
+  uiStore.setSessionPrimarySurface(launch.sessionId, 'terminal')
+  uiStore.setSessionTerminalId(launch.sessionId, terminalId)
+
+  const chatStore = useChatStore.getState()
+  chatStore.setActiveSession(worktreeId, launch.sessionId)
+  if (backend) chatStore.setSelectedBackend(launch.sessionId, backend)
+
+  return terminalId
+}
+
+/**
  * Create a session without the React Query mutation.
  *
  * For callers outside the React tree (background investigation). Hook callers

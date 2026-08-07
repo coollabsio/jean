@@ -96,6 +96,26 @@ and already implemented there for headless runs:
 Four private fns became `pub(crate)` to allow reuse. 10 tests in
 `terminal::commands::tests`.
 
+## Code review bridge (done)
+
+`start_review_job` gains `surface`. On "terminal" it skips the headless runner
+and instead: reserves `<app_data>/reviews/<review_run_id>.json`, refuses if that
+path is inside the worktree, builds the terminal-variant prompt (schema inline,
+diff NOT inlined -- the live agent reads it), spawns a watcher, and returns
+`terminalLaunch { command, args, sessionId }`.
+
+The frontend mints the terminal via `attachBackendTerminalLaunch`, because
+terminals only exist in the frontend store. Both review call sites are wired:
+`use-command-context.ts` and `useGitOperations.handleReview`.
+
+Watcher outcomes map onto the existing job path, so ReviewResultsPanel, review
+history and finding counts behave identically to a headless run:
+- Completed -> `mark_completed` + `update_review_session_entry`
+- Malformed -> `mark_failed` with the raw body attached
+- TimedOut (15 min) -> `mark_failed`
+
+coderabbit-cli is excluded; it is not a Jean-driven agent.
+
 ## Remaining work
 
 - [ ] 4 — background investigation: needs the guard before
