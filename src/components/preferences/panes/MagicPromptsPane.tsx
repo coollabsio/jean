@@ -104,6 +104,10 @@ import {
   type MagicPromptReasoningEfforts,
   type MagicPromptProviders,
   type MagicPromptBackends,
+  type MagicPromptSurfaces,
+  type MagicPromptSurface,
+  DEFAULT_MAGIC_PROMPT_SURFACES,
+  resolveMagicPromptSurface,
   type MagicPromptModel,
   type MagicPromptModes,
   type MagicPromptExecutionMode,
@@ -121,6 +125,22 @@ import {
 } from '@/lib/code-review-configs'
 import { getMagicPromptModelReasoning } from './magic-prompt-reasoning'
 
+/**
+ * CLIs that can host a magic prompt as an interactive TUI.
+ *
+ * Cursor is absent: it has no verified way to carry an initial prompt into an
+ * interactive session the way the others do.
+ */
+const TERMINAL_PRESET_BACKENDS: CliBackend[] = [
+  'claude',
+  'codex',
+  'opencode',
+  'pi',
+  'commandcode',
+  'grok',
+  'kimi',
+]
+
 interface VariableInfo {
   name: string
   description: string
@@ -132,6 +152,13 @@ interface PromptConfig {
   effortKey?: keyof MagicPromptReasoningEfforts
   providerKey?: keyof MagicPromptProviders
   backendKey?: keyof MagicPromptBackends
+  /**
+   * Present only for prompts that can run in a terminal. Prompts whose output
+   * Jean consumes as a value (commit message, PR content, release notes,
+   * session naming, context summary) have no key here — a TUI returns a screen,
+   * not a string.
+   */
+  surfaceKey?: keyof MagicPromptSurfaces
   modeKey?: keyof MagicPromptModes
   label: string
   description: string
@@ -155,6 +182,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_issue_effort',
         providerKey: 'investigate_issue_provider',
         backendKey: 'investigate_issue_backend',
+        surfaceKey: 'investigate_issue_surface',
         modeKey: 'investigate_issue_mode',
         label: 'Investigate Issue',
         description:
@@ -178,6 +206,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_pr_effort',
         providerKey: 'investigate_pr_provider',
         backendKey: 'investigate_pr_backend',
+        surfaceKey: 'investigate_pr_surface',
         modeKey: 'investigate_pr_mode',
         label: 'Investigate PR',
         description:
@@ -201,6 +230,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_workflow_run_effort',
         providerKey: 'investigate_workflow_run_provider',
         backendKey: 'investigate_workflow_run_backend',
+        surfaceKey: 'investigate_workflow_run_surface',
         modeKey: 'investigate_workflow_run_mode',
         label: 'Investigate Workflow Run',
         description:
@@ -230,6 +260,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_security_alert_effort',
         providerKey: 'investigate_security_alert_provider',
         backendKey: 'investigate_security_alert_backend',
+        surfaceKey: 'investigate_security_alert_surface',
         modeKey: 'investigate_security_alert_mode',
         label: 'Investigate Dependabot Alert',
         description:
@@ -254,6 +285,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_advisory_effort',
         providerKey: 'investigate_advisory_provider',
         backendKey: 'investigate_advisory_backend',
+        surfaceKey: 'investigate_advisory_surface',
         modeKey: 'investigate_advisory_mode',
         label: 'Investigate Security Advisory',
         description: 'Prompt for investigating repository security advisories.',
@@ -276,6 +308,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_linear_issue_effort',
         providerKey: 'investigate_linear_issue_provider',
         backendKey: 'investigate_linear_issue_backend',
+        surfaceKey: 'investigate_linear_issue_surface',
         modeKey: 'investigate_linear_issue_mode',
         label: 'Investigate Linear Issue',
         description:
@@ -303,6 +336,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_sentry_issue_effort',
         providerKey: 'investigate_sentry_issue_provider',
         backendKey: 'investigate_sentry_issue_backend',
+        surfaceKey: 'investigate_sentry_issue_surface',
         modeKey: 'investigate_sentry_issue_mode',
         label: 'Investigate Sentry Issue',
         description:
@@ -335,6 +369,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'code_review_effort',
         providerKey: 'code_review_provider',
         backendKey: 'code_review_backend',
+        surfaceKey: 'code_review_surface',
         label: 'Code Review',
         description:
           'Prompt for AI-powered code review of your changes. Each reviewer row has its own Mode for sessions created when sending that reviewer’s findings to chat.',
@@ -359,6 +394,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'review_comments_effort',
         providerKey: 'review_comments_provider',
         backendKey: 'review_comments_backend',
+        surfaceKey: 'review_comments_surface',
         modeKey: 'review_comments_mode',
         label: 'Review Comments',
         description:
@@ -444,6 +480,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'resolve_conflicts_effort',
         providerKey: 'resolve_conflicts_provider',
         backendKey: 'resolve_conflicts_backend',
+        surfaceKey: 'resolve_conflicts_surface',
         modeKey: 'resolve_conflicts_mode',
         label: 'Resolve Conflicts',
         description: 'Instructions appended to conflict resolution prompts.',
@@ -854,6 +891,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     ? (currentModes[selectedConfig.modeKey] ??
       DEFAULT_MAGIC_PROMPT_MODES[selectedConfig.modeKey])
     : undefined
+  const currentSurface = selectedConfig.surfaceKey
+    ? resolveMagicPromptSurface(
+        preferences?.magic_prompt_surfaces,
+        selectedConfig.surfaceKey,
+        preferences?.default_magic_prompt_surface
+      )
+    : undefined
   // Resolve effective backend for model filtering: per-operation override > global default_backend
   const effectiveBackend =
     currentBackend ?? preferences?.default_backend ?? 'claude'
@@ -1058,12 +1102,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       ? codeReviewConfigs.some(config => config.backend === 'claude')
       : effectiveBackend === 'claude')
   const hasPromptConfigControls =
-    selectedKey !== 'code_review' &&
+    currentSurface !== undefined ||
+    (selectedKey !== 'code_review' &&
     (currentBackend !== undefined ||
       showProviderControl ||
       Boolean(currentModel) ||
       Boolean(selectedConfig.effortKey) ||
-      Boolean(currentMode))
+      Boolean(currentMode)))
 
   const saveCodeReviewConfigs = useCallback(
     (configs: MagicCodeReviewConfig[]) => {
@@ -1374,6 +1419,46 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       codeReviewConfigs,
       selectedConfig.providerKey,
       selectedConfig.effortKey,
+    ]
+  )
+
+  /**
+   * One control for "where does this run", because the two questions are not
+   * independent: choosing a terminal *is* choosing the CLI. Values are `chat`
+   * or `terminal:<backend>`, and picking a terminal writes the backend too, so
+   * the Backend row can disappear rather than ask again.
+   */
+  const handleSurfaceChange = useCallback(
+    (value: string) => {
+      if (!preferences || !selectedConfig.surfaceKey) return
+      const [surface, backend] = value.split(':') as [
+        MagicPromptSurface,
+        CliBackend | undefined,
+      ]
+
+      const patch: Parameters<typeof patchPreferences.mutate>[0] = {
+        magic_prompt_surfaces: {
+          ...DEFAULT_MAGIC_PROMPT_SURFACES,
+          ...preferences.magic_prompt_surfaces,
+          [selectedConfig.surfaceKey]: surface,
+        },
+      }
+
+      if (surface === 'terminal' && backend && selectedConfig.backendKey) {
+        patch.magic_prompt_backends = {
+          ...currentBackends,
+          [selectedConfig.backendKey]: backend,
+        }
+      }
+
+      patchPreferences.mutate(patch)
+    },
+    [
+      preferences,
+      patchPreferences,
+      selectedConfig.surfaceKey,
+      selectedConfig.backendKey,
+      currentBackends,
     ]
   )
 
@@ -1962,7 +2047,51 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 </Button>
               </div>
             )}
-            {selectedKey !== 'code_review' && currentBackend !== undefined && (
+            {currentSurface !== undefined && (
+              <div
+                data-testid="magic-prompt-surface-control"
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
+              >
+                <span className="text-xs text-muted-foreground">Runs in</span>
+                <Select
+                  value={
+                    currentSurface === 'terminal'
+                      ? `terminal:${effectiveBackend}`
+                      : 'chat'
+                  }
+                  onValueChange={handleSurfaceChange}
+                >
+                  <SelectTrigger
+                    aria-label="Runs in"
+                    size="sm"
+                    className="w-full min-w-0 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="chat">Jean Chat</SelectItem>
+                    {TERMINAL_PRESET_BACKENDS.filter(backend =>
+                      installedBackends.includes(backend)
+                    ).map(backend => (
+                      <SelectItem key={backend} value={`terminal:${backend}`}>
+                        {getBackendPlainLabel(backend)} terminal
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {currentSurface === 'terminal' && (
+                  <p className="col-start-2 text-[11px] leading-4 text-muted-foreground">
+                    Terminal runs use the CLI&apos;s own configuration. Jean&apos;s
+                    system prompt, MCP servers, parallel execution prompt, and AI
+                    language apply to Jean Chat only.
+                  </p>
+                )}
+              </div>
+            )}
+            {/* Hidden in terminal mode: the "Runs in" choice already named the CLI. */}
+            {selectedKey !== 'code_review' &&
+              currentBackend !== undefined &&
+              currentSurface !== 'terminal' && (
               <div
                 data-testid="magic-prompt-backend-control"
                 className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"

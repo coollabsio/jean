@@ -54,8 +54,11 @@ import {
   DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
+  resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  type CliBackend,
 } from '@/types/preferences'
+import { maybeRunMagicPromptInTerminal } from '@/lib/magic-prompt-surface'
 import type { WorkflowRun } from '@/types/github'
 import type { Project, Worktree } from '@/types/projects'
 import {
@@ -497,6 +500,29 @@ export function WorkflowRunsModal() {
         selectWorktree(worktreeId)
       }
 
+      // After the worktree switch (so the terminal opens in view) but before any
+      // session is created — the terminal path creates its own.
+      if (
+        await maybeRunMagicPromptInTerminal({
+          preferences,
+          surfaceKey: 'investigate_workflow_run_surface',
+          prompt,
+          backend: (resolveMagicPromptBackend(
+            preferences?.magic_prompt_backends,
+            'investigate_workflow_run_backend',
+            preferences?.default_backend
+          ) ?? investigateBackend) as CliBackend,
+          label: 'Investigate Failure',
+          model: investigateModel,
+          worktreeId,
+          worktreePath,
+          executionMode: investigateMode,
+          createSession: createSession.mutateAsync,
+        })
+      ) {
+        return
+      }
+
       const sendInvestigateToSession = (sessionId: string) => {
         setActiveSession(worktreeId, sessionId)
 
@@ -624,6 +650,7 @@ export function WorkflowRunsModal() {
       setSessionModel,
       setSessionProvider,
       preferences,
+      createSession.mutateAsync,
     ]
   )
 

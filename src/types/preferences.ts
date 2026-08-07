@@ -1300,6 +1300,67 @@ export const CLOSE_CONFIRM_BYPASS_MODIFIERS = [
 export const DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER: CloseConfirmBypassModifier =
   'none'
 
+/**
+ * Where a magic prompt runs: the Jean Chat headless runner, or a native CLI
+ * session in an embedded terminal.
+ */
+export type MagicPromptSurface = 'chat' | 'terminal'
+
+/**
+ * Per-prompt surface overrides for magic prompts.
+ * null = use the global default_magic_prompt_surface.
+ * Field names use snake_case to match Rust struct exactly.
+ *
+ * Only prompts that produce a conversation the user would want to watch or
+ * steer get a key here. Prompts whose output Jean consumes as a value —
+ * commit_message, pr_content, release_notes, session_naming, context_summary —
+ * stay headless: a TUI returns a screen, not a string.
+ */
+export interface MagicPromptSurfaces {
+  investigate_issue_surface: MagicPromptSurface | null
+  investigate_pr_surface: MagicPromptSurface | null
+  investigate_workflow_run_surface: MagicPromptSurface | null
+  investigate_security_alert_surface: MagicPromptSurface | null
+  investigate_advisory_surface: MagicPromptSurface | null
+  investigate_linear_issue_surface: MagicPromptSurface | null
+  investigate_sentry_issue_surface: MagicPromptSurface | null
+  review_comments_surface: MagicPromptSurface | null
+  resolve_conflicts_surface: MagicPromptSurface | null
+  final_review_surface: MagicPromptSurface | null
+  code_review_surface: MagicPromptSurface | null
+}
+
+/** Default surfaces (null = use the global default_magic_prompt_surface) */
+export const DEFAULT_MAGIC_PROMPT_SURFACES: MagicPromptSurfaces = {
+  investigate_issue_surface: null,
+  investigate_pr_surface: null,
+  investigate_workflow_run_surface: null,
+  investigate_security_alert_surface: null,
+  investigate_advisory_surface: null,
+  investigate_linear_issue_surface: null,
+  investigate_sentry_issue_surface: null,
+  review_comments_surface: null,
+  resolve_conflicts_surface: null,
+  final_review_surface: null,
+  code_review_surface: null,
+}
+
+/**
+ * Resolve the surface for a magic prompt.
+ * Explicit per-prompt surface wins. When unset/null, fall back to the global
+ * default supplied by the caller, and finally to 'chat' so existing installs
+ * keep today's behavior.
+ */
+export function resolveMagicPromptSurface(
+  surfaces: MagicPromptSurfaces | undefined,
+  key: keyof MagicPromptSurfaces,
+  globalDefaultSurface: MagicPromptSurface | null | undefined
+): MagicPromptSurface {
+  const merged = { ...DEFAULT_MAGIC_PROMPT_SURFACES, ...surfaces }
+  const value = merged[key]
+  return value ?? globalDefaultSurface ?? 'chat'
+}
+
 // Types that match the Rust AppPreferences struct
 // Only contains settings that should be persisted to disk
 // Note: Field names use snake_case to match Rust struct exactly
@@ -1338,6 +1399,8 @@ export interface AppPreferences {
   magic_code_review_configs?: MagicCodeReviewConfig[] // Up to five backend/model/reasoning review runners
   magic_prompt_providers: MagicPromptProviders // Per-prompt provider overrides (null = use default_provider)
   magic_prompt_backends: MagicPromptBackends // Per-prompt backend overrides (null = use project/global default_backend)
+  magic_prompt_surfaces: MagicPromptSurfaces // Per-prompt surface overrides (null = use default_magic_prompt_surface)
+  default_magic_prompt_surface: MagicPromptSurface // Where magic prompts run when no per-prompt override is set
   magic_prompt_efforts: MagicPromptReasoningEfforts // Per-prompt reasoning effort overrides (null = model default)
   magic_prompt_modes: MagicPromptModes // Per-prompt execution modes for magic prompts that send chat turns
   file_edit_mode: FileEditMode // How to edit files: inline (Pierre) or external (VS Code, etc.)
@@ -2514,6 +2577,8 @@ export const defaultPreferences: AppPreferences = {
   magic_code_review_configs: [],
   magic_prompt_providers: DEFAULT_MAGIC_PROMPT_PROVIDERS,
   magic_prompt_backends: DEFAULT_MAGIC_PROMPT_BACKENDS,
+  magic_prompt_surfaces: DEFAULT_MAGIC_PROMPT_SURFACES,
+  default_magic_prompt_surface: 'chat', // Default: Jean Chat, unchanged from before surfaces existed
   magic_prompt_efforts: DEFAULT_MAGIC_PROMPT_EFFORTS,
   magic_prompt_modes: DEFAULT_MAGIC_PROMPT_MODES,
   file_edit_mode: 'inline',
