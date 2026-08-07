@@ -41,3 +41,6 @@ docs/superpowers/
 src-server/target/
 jean-core/target/
 jean-core/Cargo.lock
+
+# Agent working notes (plans, audits)
+.ai/
