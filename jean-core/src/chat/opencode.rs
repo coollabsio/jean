@@ -1080,7 +1080,7 @@ fn choose_model(all_providers: &serde_json::Value) -> Option<(String, String)> {
     None
 }
 
-fn parse_provider_model(model: Option<&str>) -> Option<(String, String)> {
+pub(crate) fn parse_provider_model(model: Option<&str>) -> Option<(String, String)> {
     let raw = model?.trim();
     if raw.is_empty() {
         return None;

@@ -58,6 +58,7 @@ import {
   type MagicCodeReviewConfig,
 } from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
+import { useMagicPromptRunner } from './useMagicPromptRunner'
 import {
   resolveCodeReviewConfigs,
   startCodeReviewsSequentially,
@@ -167,6 +168,8 @@ export function useGitOperations({
   mcpServersDataRef,
   enabledMcpServersRef,
 }: UseGitOperationsParams): UseGitOperationsReturn {
+  const { tryRunInTerminal } = useMagicPromptRunner()
+
   // Merge dialog state
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [pendingMergeWorktree, setPendingMergeWorktree] =
@@ -411,6 +414,22 @@ export function useGitOperations({
       DEFAULT_MAGIC_PROMPT_MODES.final_review_mode
     const prompt =
       preferences?.magic_prompts?.final_review ?? DEFAULT_FINAL_REVIEW_PROMPT
+
+    // Before create_session — the terminal path creates its own.
+    if (
+      await tryRunInTerminal({
+        surfaceKey: 'final_review_surface',
+        prompt,
+        backend,
+        model,
+        label: 'Final review',
+        worktreeId: activeWorktreeId,
+        worktreePath: activeWorktreePath,
+        executionMode,
+      })
+    ) {
+      return
+    }
 
     try {
       const session = await invoke<Session>('create_session', {
@@ -1294,28 +1313,8 @@ export function useGitOperations({
             }
           )
 
-          const { setActiveSession, copySessionSettings, activeSessionIds } =
-            useChatStore.getState()
-          const currentSessionId = activeSessionIds[activeWorktreeId]
-
-          const newSession = await invoke<Session>('create_session', {
-            worktreeId: activeWorktreeId,
-            worktreePath: worktree.path,
-            name: 'PR: resolve conflicts',
-          })
-
-          if (currentSessionId)
-            copySessionSettings(currentSessionId, newSession.id)
-          const conflictSelection = resolveConflictSessionSelection(override)
-          applyResolveConflictSessionSelection(
-            newSession.id,
-            activeWorktreeId,
-            worktree.path,
-            override
-          )
-
-          setActiveSession(activeWorktreeId, newSession.id)
-
+          // Prompt is built before the session so a terminal run does not
+          // strand an empty "PR: resolve conflicts" chat tab.
           const conflictFiles = prResult.conflicts.join('\n- ')
           const diffSection = prResult.conflict_diff
             ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${prResult.conflict_diff}\n\`\`\``
@@ -1333,6 +1332,43 @@ Conflicts in these files:
 - ${conflictFiles}${diffSection}
 
 ${resolveInstructions}`
+
+          const conflictSelection = resolveConflictSessionSelection(override)
+
+          if (
+            await tryRunInTerminal({
+              surfaceKey: 'resolve_conflicts_surface',
+              prompt: conflictPrompt,
+              backend: conflictSelection.backend,
+              label: 'PR: resolve conflicts',
+              worktreeId: activeWorktreeId,
+              worktreePath: worktree.path,
+              executionMode: conflictSelection.executionMode,
+            })
+          ) {
+            return
+          }
+
+          const { setActiveSession, copySessionSettings, activeSessionIds } =
+            useChatStore.getState()
+          const currentSessionId = activeSessionIds[activeWorktreeId]
+
+          const newSession = await invoke<Session>('create_session', {
+            worktreeId: activeWorktreeId,
+            worktreePath: worktree.path,
+            name: 'PR: resolve conflicts',
+          })
+
+          if (currentSessionId)
+            copySessionSettings(currentSessionId, newSession.id)
+          applyResolveConflictSessionSelection(
+            newSession.id,
+            activeWorktreeId,
+            worktree.path,
+            override
+          )
+
+          setActiveSession(activeWorktreeId, newSession.id)
 
           sendConflictResolutionPrompt({
             session: newSession,
@@ -1362,32 +1398,8 @@ ${resolveInstructions}`
           description: 'Opening conflict resolution session...',
         })
 
-        const { setActiveSession, copySessionSettings, activeSessionIds } =
-          useChatStore.getState()
-        const currentSessionId = activeSessionIds[activeWorktreeId]
-
-        // Create a NEW session tab for conflict resolution
-        const newSession = await invoke<Session>('create_session', {
-          worktreeId: activeWorktreeId,
-          worktreePath: worktree.path,
-          name: 'Resolve conflicts',
-        })
-
-        // Inherit model/mode/thinking settings from current session
-        if (currentSessionId)
-          copySessionSettings(currentSessionId, newSession.id)
-        const conflictSelection = resolveConflictSessionSelection(override)
-        applyResolveConflictSessionSelection(
-          newSession.id,
-          activeWorktreeId,
-          worktree.path,
-          override
-        )
-
-        // Set the new session as active
-        setActiveSession(activeWorktreeId, newSession.id)
-
-        // Build conflict resolution prompt with diff details
+        // Prompt is built before the session so a terminal run does not strand
+        // an empty "Resolve conflicts" chat tab.
         const conflictFiles = result.conflicts.join('\n- ')
         const diffSection = result.conflict_diff
           ? `\n\nHere is the diff showing the conflict details:\n\n\`\`\`diff\n${result.conflict_diff}\n\`\`\``
@@ -1403,6 +1415,46 @@ Conflicts in these files:
 - ${conflictFiles}${diffSection}
 
 ${resolveInstructions}`
+
+        const conflictSelection = resolveConflictSessionSelection(override)
+
+        if (
+          await tryRunInTerminal({
+            surfaceKey: 'resolve_conflicts_surface',
+            prompt: conflictPrompt,
+            backend: conflictSelection.backend,
+            label: 'Resolve conflicts',
+            worktreeId: activeWorktreeId,
+            worktreePath: worktree.path,
+            executionMode: conflictSelection.executionMode,
+          })
+        ) {
+          return
+        }
+
+        const { setActiveSession, copySessionSettings, activeSessionIds } =
+          useChatStore.getState()
+        const currentSessionId = activeSessionIds[activeWorktreeId]
+
+        // Create a NEW session tab for conflict resolution
+        const newSession = await invoke<Session>('create_session', {
+          worktreeId: activeWorktreeId,
+          worktreePath: worktree.path,
+          name: 'Resolve conflicts',
+        })
+
+        // Inherit model/mode/thinking settings from current session
+        if (currentSessionId)
+          copySessionSettings(currentSessionId, newSession.id)
+        applyResolveConflictSessionSelection(
+          newSession.id,
+          activeWorktreeId,
+          worktree.path,
+          override
+        )
+
+        // Set the new session as active
+        setActiveSession(activeWorktreeId, newSession.id)
 
         sendConflictResolutionPrompt({
           session: newSession,
@@ -1435,6 +1487,7 @@ ${resolveInstructions}`
       applyResolveConflictSessionSelection,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
+      tryRunInTerminal,
     ]
   )
 

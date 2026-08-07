@@ -144,7 +144,7 @@ fn build_prompt(system_context: Option<&str>, message: &str, mode: &str) -> Stri
     prompt
 }
 
-fn normalize_model_for_cli(model: Option<&str>) -> Option<String> {
+pub(crate) fn normalize_model_for_cli(model: Option<&str>) -> Option<String> {
     let model = model.map(str::trim).filter(|value| !value.is_empty())?;
     if model == "commandcode/default" || model == "default" {
         return None;

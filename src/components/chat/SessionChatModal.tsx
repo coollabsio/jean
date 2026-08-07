@@ -86,6 +86,7 @@ import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
 import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { DevToolsDropdown } from './DevToolsDropdown'
+import { TerminalMagicButton } from './TerminalMagicButton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1258,6 +1259,9 @@ export function SessionChatModal({
                             session={currentSession}
                           />
                         )}
+                        {/* Terminal sessions have no composer, so the magic
+                            button lives here instead. Renders null for chat. */}
+                        <TerminalMagicButton sessionId={currentSessionId} />
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button

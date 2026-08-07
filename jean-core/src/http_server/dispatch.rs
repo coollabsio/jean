@@ -2056,6 +2056,12 @@ pub async fn dispatch_command(
             crate::terminal::terminal_write(parsed.terminal_id, parsed.data).await?;
             Ok(Value::Null)
         }
+        "resolve_terminal_model_args" => {
+            let backend: String = field(&args, "backend", "backend")?;
+            let model: Option<String> = field_opt(&args, "model", "model")?;
+            let result = crate::terminal::resolve_terminal_model_args(backend, model).await;
+            to_value(result)
+        }
         "terminal_resize" => {
             let parsed = parse_terminal_resize_args(&args)?;
             crate::terminal::terminal_resize(parsed.terminal_id, parsed.cols, parsed.rows).await?;

@@ -39,6 +39,8 @@ import {
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
 import type { CliBackend } from '@/types/preferences'
+import { YOLO_ARGS_BY_BACKEND } from '@/lib/magic-prompt-terminal'
+import { bareCommandForBackend } from '@/services/cli-binary'
 import { usePreferences } from '@/services/preferences'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
@@ -57,24 +59,6 @@ const BACKEND_ORDER: CliBackend[] = [
   'kimi',
 ]
 
-const backendCommands: Record<CliBackend, string> = {
-  codex: 'codex',
-  claude: 'claude',
-  opencode: 'opencode',
-  cursor: 'cursor-agent',
-  pi: 'pi',
-  commandcode: 'commandcode',
-  grok: 'grok',
-  kimi: 'kimi',
-}
-
-const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
-  claude: ['--permission-mode', 'bypassPermissions'],
-  codex: ['--dangerously-bypass-approvals-and-sandbox'],
-  cursor: ['--yolo', '--sandbox', 'disabled'],
-  grok: ['--always-approve', '--sandbox', 'off'],
-  kimi: ['--yolo'],
-}
 
 export function NewSessionModeModal() {
   const target = useUIStore(state => state.newSessionModeTarget)
@@ -146,7 +130,7 @@ export function NewSessionModeModal() {
         backend,
         shortcut: String(index + 2),
         installed: Boolean(status.installed),
-        command: status.path ?? backendCommands[backend],
+        command: status.path ?? bareCommandForBackend(backend),
       }
     }).filter(choice => choice.installed)
   }, [
@@ -185,7 +169,7 @@ export function NewSessionModeModal() {
     return (
       installedBackendChoices.find(
         choice => choice.backend === nativePickerKind
-      )?.command ?? backendCommands[nativePickerKind]
+      )?.command ?? bareCommandForBackend(nativePickerKind)
     )
   }, [installedBackendChoices, nativePickerKind])
 

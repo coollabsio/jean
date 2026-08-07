@@ -16,7 +16,10 @@ import {
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
   resolveMagicPromptProvider,
+  type CliBackend,
+  type MagicPromptSurfaces,
 } from '@/types/preferences'
+import { maybeRunMagicPromptInTerminal } from '@/lib/magic-prompt-surface'
 import { logger } from '@/lib/logger'
 import { useQueryClient } from '@tanstack/react-query'
 import { projectsQueryKeys } from '@/services/projects'
@@ -29,6 +32,27 @@ type InvestigationType =
   | 'advisory'
   | 'linear-issue'
   | 'sentry-issue'
+
+const SURFACE_KEY_BY_TYPE: Record<
+  InvestigationType,
+  keyof MagicPromptSurfaces
+> = {
+  issue: 'investigate_issue_surface',
+  pr: 'investigate_pr_surface',
+  'security-alert': 'investigate_security_alert_surface',
+  advisory: 'investigate_advisory_surface',
+  'linear-issue': 'investigate_linear_issue_surface',
+  'sentry-issue': 'investigate_sentry_issue_surface',
+}
+
+const BACKGROUND_INVESTIGATION_LABEL: Record<InvestigationType, string> = {
+  issue: 'Investigate Issue',
+  pr: 'Investigate PR',
+  'security-alert': 'Investigate Security Alert',
+  advisory: 'Investigate Advisory',
+  'linear-issue': 'Investigate Linear Issue',
+  'sentry-issue': 'Investigate Sentry Issue',
+}
 
 /**
  * Headless hook for starting investigations on auto-investigate worktrees.
@@ -552,6 +576,27 @@ async function processBackgroundInvestigation(
     await buildPrompt(worktreeId, type, preferences, projectId),
     executionMode
   )
+
+  // Auto-investigation fires on worktree creation, so it must honor the same
+  // surface preference as the manual investigate commands.
+  if (
+    await maybeRunMagicPromptInTerminal({
+      preferences,
+      surfaceKey: SURFACE_KEY_BY_TYPE[type],
+      prompt,
+      backend: backend as CliBackend,
+      label: BACKGROUND_INVESTIGATION_LABEL[type],
+      model: selectedModel,
+      worktreeId,
+      worktreePath,
+      executionMode,
+    })
+  ) {
+    queryClient.invalidateQueries({
+      queryKey: chatQueryKeys.sessions(worktreeId),
+    })
+    return
+  }
 
   const result = await invoke<{
     sessionId: string

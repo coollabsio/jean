@@ -21,6 +21,7 @@ import {
   DEFAULT_MAGIC_PROMPT_MODES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  resolveMagicPromptSurface,
 } from '@/types/preferences'
 import type { Project, Worktree } from '@/types/projects'
 import type {
@@ -30,8 +31,38 @@ import type {
   Session,
   McpServerInfo,
 } from '@/types/chat'
-import type { AppPreferences } from '@/types/preferences'
+import type {
+  AppPreferences,
+  CliBackend,
+  MagicPromptSurfaces,
+} from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
+import { useMagicPromptRunner } from './useMagicPromptRunner'
+
+/** Surface preference key and terminal tab label per investigate type. */
+const INVESTIGATE_SURFACE: Record<
+  'issue' | 'pr' | 'security-alert' | 'advisory' | 'linear-issue' | 'sentry-issue',
+  { key: keyof MagicPromptSurfaces; label: string }
+> = {
+  issue: { key: 'investigate_issue_surface', label: 'Investigate Issue' },
+  pr: { key: 'investigate_pr_surface', label: 'Investigate PR' },
+  'security-alert': {
+    key: 'investigate_security_alert_surface',
+    label: 'Investigate Security Alert',
+  },
+  advisory: {
+    key: 'investigate_advisory_surface',
+    label: 'Investigate Advisory',
+  },
+  'linear-issue': {
+    key: 'investigate_linear_issue_surface',
+    label: 'Investigate Linear Issue',
+  },
+  'sentry-issue': {
+    key: 'investigate_sentry_issue_surface',
+    label: 'Investigate Sentry Issue',
+  },
+}
 
 // Re-export for the caller
 export interface WorkflowRunDetail {
@@ -117,6 +148,7 @@ export function useInvestigateHandlers({
   worktreeProjectId,
 }: UseInvestigateHandlersParams) {
   const queryClient = useQueryClient()
+  const { tryRunInTerminal } = useMagicPromptRunner()
 
   const primeSessionSelection = useCallback(
     (
@@ -429,6 +461,41 @@ export function useInvestigateHandlers({
       // and strip any anti-fix wording from the template/custom prompt.
       prompt = applyYoloInvestigationFixDirective(prompt, investigateMode)
 
+      const investigateIsCustom = Boolean(
+        investigateProvider && investigateProvider !== '__anthropic__'
+      )
+      const investigateUseAdaptive =
+        !investigateIsCustom &&
+        supportsAdaptiveThinking(investigateModel, cliVersion)
+
+      const investigateBackend =
+        override?.backend ??
+        resolveMagicPromptBackend(
+          preferences?.magic_prompt_backends,
+          backendKey,
+          defaultBackend
+        ) ??
+        resolveBackend(investigateModel)
+
+      // Resolved before any chat-session state is primed: a terminal run owns
+      // its own session, so priming this one first would leave a stray
+      // "sending" session behind.
+      const surface = INVESTIGATE_SURFACE[type]
+      if (
+        await tryRunInTerminal({
+          surfaceKey: surface.key,
+          prompt,
+          backend: investigateBackend as CliBackend,
+          label: surface.label,
+          model: investigateModel,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          executionMode: investigateMode,
+        })
+      ) {
+        return
+      }
+
       const {
         addSendingSession,
         setLastSentMessage,
@@ -451,22 +518,6 @@ export function useInvestigateHandlers({
         worktreePath: activeWorktreePath,
         provider: investigateProvider,
       })
-
-      const investigateIsCustom = Boolean(
-        investigateProvider && investigateProvider !== '__anthropic__'
-      )
-      const investigateUseAdaptive =
-        !investigateIsCustom &&
-        supportsAdaptiveThinking(investigateModel, cliVersion)
-
-      const investigateBackend =
-        override?.backend ??
-        resolveMagicPromptBackend(
-          preferences?.magic_prompt_backends,
-          backendKey,
-          defaultBackend
-        ) ??
-        resolveBackend(investigateModel)
 
       // Prefer Magic Prompt effort override; fall back to session effort only for
       // Claude adaptive thinking. Effort-based backends (Grok/Codex/Pi/OpenCode)
@@ -585,6 +636,7 @@ export function useInvestigateHandlers({
       worktreeProjectId,
       defaultBackend,
       primeSessionSelection,
+      tryRunInTerminal,
     ]
   )
 
@@ -837,6 +889,22 @@ export function useInvestigateHandlers({
       const project = projects?.find(p => p.path === detail.projectPath)
       if (project) expandProject(project.id)
 
+      // After the worktree switch (so the terminal opens in view) but before
+      // createSession — the terminal path creates its own session.
+      if (
+        await tryRunInTerminal({
+          surfaceKey: 'investigate_workflow_run_surface',
+          prompt,
+          backend: investigateBackend as CliBackend,
+          label: 'Investigate Failure',
+          worktreeId,
+          worktreePath,
+          executionMode: investigateMode,
+        })
+      ) {
+        return
+      }
+
       createSession.mutate(
         { worktreeId, worktreePath },
         {
@@ -897,6 +965,7 @@ export function useInvestigateHandlers({
       enabledMcpServersRef,
       defaultBackend,
       primeSessionSelection,
+      tryRunInTerminal,
     ]
   )
 
@@ -943,6 +1012,33 @@ export function useInvestigateHandlers({
         options?.executionMode ??
         preferences?.magic_prompt_modes?.review_comments_mode ??
         DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode
+
+      // One terminal per prompt, mirroring the one-session-per-prompt chat
+      // behavior below. Sequential so the tabs open in a predictable order.
+      if (
+        resolveMagicPromptSurface(
+          preferences?.magic_prompt_surfaces,
+          'review_comments_surface',
+          preferences?.default_magic_prompt_surface
+        ) === 'terminal'
+      ) {
+        for (const [index, prompt] of prompts.entries()) {
+          await tryRunInTerminal({
+            surfaceKey: 'review_comments_surface',
+            prompt,
+            backend: reviewCommentsBackend as CliBackend,
+            model: reviewCommentsModel,
+            label:
+              prompts.length > 1
+                ? `Review comments ${index + 1}`
+                : 'Review comments',
+            worktreeId,
+            worktreePath,
+            executionMode: requestedExecutionMode,
+          })
+        }
+        return
+      }
 
       // Helper to send the message once we have a session ID
       const sendInSession = (sessionId: string, prompt: string) => {

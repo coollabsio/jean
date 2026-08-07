@@ -224,6 +224,10 @@ pub struct AppPreferences {
     #[serde(default)]
     pub magic_prompt_backends: MagicPromptBackends, // Per-prompt backend overrides (None = use project/global default_backend)
     #[serde(default)]
+    pub magic_prompt_surfaces: MagicPromptSurfaces, // Per-prompt surface overrides (None = use default_magic_prompt_surface)
+    #[serde(default = "default_magic_prompt_surface")]
+    pub default_magic_prompt_surface: String, // Where magic prompts run: "chat" or "terminal"
+    #[serde(default)]
     pub magic_prompt_efforts: MagicPromptReasoningEfforts, // Per-prompt reasoning effort overrides
     #[serde(default)]
     pub magic_prompt_modes: MagicPromptModes, // Per-prompt execution modes for chat-style magic prompts
@@ -685,6 +689,12 @@ fn default_backend() -> String {
 }
 
 fn default_new_session_kind() -> String {
+    "chat".to_string()
+}
+
+/// Magic prompts run in Jean Chat unless the user opts into a terminal, so
+/// existing installs keep the behavior they had before surfaces existed.
+fn default_magic_prompt_surface() -> String {
     "chat".to_string()
 }
 
@@ -2281,6 +2291,42 @@ pub struct MagicPromptBackends {
     pub review_comments_backend: Option<String>,
 }
 
+/// Per-prompt surface overrides for magic prompts.
+///
+/// `None` = use the global `default_magic_prompt_surface`. Values are "chat"
+/// (Jean Chat headless runner) or "terminal" (native CLI session in an embedded
+/// terminal).
+///
+/// Only prompts that produce a conversation the user would want to watch or
+/// steer have a key here. Prompts whose output Jean consumes as a value —
+/// commit_message, pr_content, release_notes, session_naming, context_summary —
+/// stay headless: a TUI returns a screen, not a string.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MagicPromptSurfaces {
+    #[serde(default)]
+    pub investigate_issue_surface: Option<String>,
+    #[serde(default)]
+    pub investigate_pr_surface: Option<String>,
+    #[serde(default)]
+    pub investigate_workflow_run_surface: Option<String>,
+    #[serde(default)]
+    pub investigate_security_alert_surface: Option<String>,
+    #[serde(default)]
+    pub investigate_advisory_surface: Option<String>,
+    #[serde(default)]
+    pub investigate_linear_issue_surface: Option<String>,
+    #[serde(default)]
+    pub investigate_sentry_issue_surface: Option<String>,
+    #[serde(default)]
+    pub review_comments_surface: Option<String>,
+    #[serde(default)]
+    pub resolve_conflicts_surface: Option<String>,
+    #[serde(default)]
+    pub final_review_surface: Option<String>,
+    #[serde(default)]
+    pub code_review_surface: Option<String>,
+}
+
 /// Per-prompt reasoning effort overrides for magic prompts (None = use model default)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptReasoningEfforts {
@@ -2540,6 +2586,8 @@ impl Default for AppPreferences {
             magic_code_review_configs: Vec::new(),
             magic_prompt_providers: MagicPromptProviders::default(),
             magic_prompt_backends: MagicPromptBackends::default(),
+            magic_prompt_surfaces: MagicPromptSurfaces::default(),
+            default_magic_prompt_surface: default_magic_prompt_surface(),
             magic_prompt_efforts: MagicPromptReasoningEfforts::default(),
             magic_prompt_modes: MagicPromptModes::default(),
             magic_models_auto_initialized: false,

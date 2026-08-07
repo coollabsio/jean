@@ -1,6 +1,6 @@
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@/test/test-utils'
+import { fireEvent, render, screen, within } from '@/test/test-utils'
 import { defaultPreferences } from '@/types/preferences'
 import { MagicPromptsPane } from './MagicPromptsPane'
 
@@ -363,9 +363,13 @@ describe('MagicPromptsPane', () => {
     expect(screen.queryByRole('button', { name: 'Claude Defaults' })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Apply preset' }))
+    // Presets sit behind a surface submenu. Radix opens SubTrigger on pointer
+    // events, so hover rather than click.
+    await user.hover(screen.getByRole('menuitem', { name: 'Jean Chat' }))
 
+    // Submenu content mounts asynchronously, so await the first lookup.
     expect(
-      screen.getByRole('menuitem', { name: 'Claude Defaults' })
+      await screen.findByRole('menuitem', { name: 'Claude Defaults' })
     ).toBeVisible()
     expect(screen.getByRole('menuitem', { name: 'GPT 5.6 Sol' })).toBeVisible()
     expect(
@@ -382,9 +386,7 @@ describe('MagicPromptsPane', () => {
       screen.getByRole('menuitem', { name: 'GPT 5.6 Terra Fast' })
     ).toBeVisible()
 
-    await user.click(
-      screen.getByRole('menuitem', { name: 'GPT 5.6 Luna Fast' })
-    )
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'GPT 5.6 Luna Fast' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -417,7 +419,8 @@ describe('MagicPromptsPane', () => {
     render(<MagicPromptsPane />)
 
     await user.click(screen.getByRole('button', { name: 'Apply preset' }))
-    await user.click(screen.getByRole('menuitem', { name: 'GPT 5.6 Sol' }))
+    await user.hover(screen.getByRole('menuitem', { name: 'Jean Chat' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'GPT 5.6 Sol' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -438,7 +441,8 @@ describe('MagicPromptsPane', () => {
     render(<MagicPromptsPane />)
 
     await user.click(screen.getByRole('button', { name: 'Apply preset' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Grok Defaults' }))
+    await user.hover(screen.getByRole('menuitem', { name: 'Jean Chat' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Grok Defaults' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({

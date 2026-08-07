@@ -637,7 +637,7 @@ fn strip_ansi(input: &str) -> String {
 /// Default Grok model used when no Grok-specific model is supplied.
 pub const GROK_DEFAULT_MODEL: &str = "grok-4.5";
 
-fn raw_grok_model(model: Option<&str>) -> Option<&str> {
+pub(crate) fn raw_grok_model(model: Option<&str>) -> Option<&str> {
     match model.map(|value| value.strip_prefix("grok/").unwrap_or(value)) {
         // Map legacy Grok CLI defaults to the currently available model.
         Some("grok-build-0.1") | Some("grok-composer-2.5-fast") => Some("grok-4.5"),

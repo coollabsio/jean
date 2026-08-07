@@ -19,6 +19,8 @@ import {
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  resolveMagicPromptSurface,
+  DEFAULT_MAGIC_PROMPT_SURFACES,
 } from './preferences'
 
 describe('magic prompt preference resolvers', () => {
@@ -36,6 +38,63 @@ describe('magic prompt preference resolvers', () => {
 
   it('enables web access sounds by default for backwards compatibility', () => {
     expect(defaultPreferences.web_access_sounds_enabled).toBe(true)
+  })
+
+  it('runs magic prompts in Jean Chat unless the user opts out', () => {
+    // Existing installs must behave exactly as they did before surfaces existed.
+    expect(defaultPreferences.default_magic_prompt_surface).toBe('chat')
+    expect(
+      Object.values(DEFAULT_MAGIC_PROMPT_SURFACES).every(
+        value => value === null
+      )
+    ).toBe(true)
+  })
+
+  it('prefers a per-prompt surface over the global default', () => {
+    expect(
+      resolveMagicPromptSurface(
+        { ...DEFAULT_MAGIC_PROMPT_SURFACES, code_review_surface: 'terminal' },
+        'code_review_surface',
+        'chat'
+      )
+    ).toBe('terminal')
+
+    // ...and the other direction, so a global 'terminal' can be overridden back.
+    expect(
+      resolveMagicPromptSurface(
+        { ...DEFAULT_MAGIC_PROMPT_SURFACES, code_review_surface: 'chat' },
+        'code_review_surface',
+        'terminal'
+      )
+    ).toBe('chat')
+  })
+
+  it('falls back to the global default when no per-prompt surface is set', () => {
+    expect(
+      resolveMagicPromptSurface(
+        DEFAULT_MAGIC_PROMPT_SURFACES,
+        'investigate_workflow_run_surface',
+        'terminal'
+      )
+    ).toBe('terminal')
+  })
+
+  it('falls back to chat when prefs predate surfaces entirely', () => {
+    // Saved prefs from an older build have no surfaces object at all.
+    expect(
+      resolveMagicPromptSurface(undefined, 'resolve_conflicts_surface', null)
+    ).toBe('chat')
+    expect(
+      resolveMagicPromptSurface(undefined, 'resolve_conflicts_surface', undefined)
+    ).toBe('chat')
+  })
+
+  it('fills in keys missing from partially-saved surface prefs', () => {
+    // A prefs file written before a key existed still resolves that key.
+    const partial = { code_review_surface: 'terminal' } as never
+    expect(resolveMagicPromptSurface(partial, 'final_review_surface', 'chat')).toBe(
+      'chat'
+    )
   })
 
   it('enables finished session animation by default', () => {
@@ -125,7 +184,7 @@ describe('magic prompt preference resolvers', () => {
   it('provides dedicated defaults for Sentry investigations', () => {
     expect(
       defaultPreferences.magic_prompt_models.investigate_sentry_issue_model
-    ).toBe('claude-opus-4-8[1m]')
+    ).toBe('claude-opus-5')
     expect(
       defaultPreferences.magic_prompt_modes.investigate_sentry_issue_mode
     ).toBe('plan')
