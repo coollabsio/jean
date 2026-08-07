@@ -8,7 +8,7 @@ import React, {
 } from 'react'
 import { invoke } from '@/lib/transport'
 import { loginArgsForBackend } from '@/lib/cli-auth'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Check, ChevronsUpDown, Play } from 'lucide-react'
 import { Label } from '@/components/ui/label'
@@ -204,6 +204,11 @@ import {
 } from '@/components/chat/toolbar/toolbar-utils'
 import { playNotificationSound } from '@/lib/sounds'
 import { CLIENT_BUILD_INFO } from '@/lib/build-info'
+import { getActiveRemoteConnection } from '@/lib/remote-connections'
+import {
+  fetchRemoteServerInfo,
+  formatJeanVersionLabel,
+} from '@/lib/remote-version'
 import type { ThinkingLevel, EffortLevel } from '@/types/chat'
 import { hasBackend, isNativeApp } from '@/lib/environment'
 import { isWindows, openExternal } from '@/lib/platform'
@@ -308,6 +313,23 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 }) => {
   const isGeneralScope = scope === 'general'
   const queryClient = useQueryClient()
+  const activeRemoteConnection = getActiveRemoteConnection()
+  const { data: remoteServerInfo, isLoading: isRemoteServerInfoLoading } =
+    useQuery({
+      queryKey: ['remote-server-info', activeRemoteConnection?.id],
+      queryFn: () => {
+        if (!activeRemoteConnection) {
+          throw new Error('No remote Jean server is connected.')
+        }
+        return fetchRemoteServerInfo(
+          activeRemoteConnection.url,
+          activeRemoteConnection.token
+        )
+      },
+      enabled: isGeneralScope && activeRemoteConnection !== null,
+      staleTime: 60_000,
+    })
+  const remoteServerVersion = remoteServerInfo?.appVersion
   const { data: preferences } = usePreferences()
   const { data: modelCatalog } = useModelCatalog()
   const codexReasoning = getCatalogModelReasoning(
@@ -1045,75 +1067,75 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
-  // Default backend: only installed AND authenticated backends are selectable.
+  // Default backend: show all installed CLIs (issue #627/#649). Auth is enforced
+  // at send time / backend settings — hiding unauthenticated backends made Claude
+  // (and others) disappear from Defaults when auth probes were false-negative.
   const stored = preferences?.default_backend ?? 'claude'
-  const claudeUsable = !!cliStatus?.installed && !!claudeAuth?.authenticated
-  const codexUsable = !!codexStatus?.installed && !!codexAuth?.authenticated
-  const opencodeUsable =
-    !!opencodeStatus?.installed && !!opencodeAuth?.authenticated
-  const cursorUsable = !!cursorStatus?.installed && !!cursorAuth?.authenticated
-  const piUsable = !!piStatus?.installed && !!piAuth?.authenticated
-  const commandcodeUsable =
-    !!commandcodeStatus?.installed && !!commandcodeAuth?.authenticated
-  const grokUsable = !!grokStatus?.installed && !!grokAuth?.authenticated
-  const kimiUsable = !!kimiStatus?.installed && !!kimiAuth?.authenticated
+  const claudeInstalled = !!cliStatus?.installed
+  const codexInstalled = !!codexStatus?.installed
+  const opencodeInstalled = !!opencodeStatus?.installed
+  const cursorInstalled = !!cursorStatus?.installed
+  const piInstalled = !!piStatus?.installed
+  const commandcodeInstalled = !!commandcodeStatus?.installed
+  const grokInstalled = !!grokStatus?.installed
+  const kimiInstalled = !!kimiStatus?.installed
   const installedBackendOptions = useMemo(
     () =>
       backendOptions.filter(option =>
         option.value === 'claude'
-          ? claudeUsable
+          ? claudeInstalled
           : option.value === 'codex'
-            ? codexUsable
+            ? codexInstalled
             : option.value === 'opencode'
-              ? opencodeUsable
+              ? opencodeInstalled
               : option.value === 'cursor'
-                ? cursorUsable
+                ? cursorInstalled
                 : option.value === 'pi'
-                  ? piUsable
+                  ? piInstalled
                   : option.value === 'commandcode'
-                    ? commandcodeUsable
+                    ? commandcodeInstalled
                     : option.value === 'grok'
-                      ? grokUsable
+                      ? grokInstalled
                       : option.value === 'kimi'
-                        ? kimiUsable
+                        ? kimiInstalled
                         : false
       ),
     [
-      claudeUsable,
-      codexUsable,
-      opencodeUsable,
-      cursorUsable,
-      piUsable,
-      commandcodeUsable,
-      grokUsable,
-      kimiUsable,
+      claudeInstalled,
+      codexInstalled,
+      opencodeInstalled,
+      cursorInstalled,
+      piInstalled,
+      commandcodeInstalled,
+      grokInstalled,
+      kimiInstalled,
     ]
   )
 
   const effectiveBackend = useMemo(() => {
-    const usable: Record<string, boolean | undefined> = {
-      claude: claudeUsable,
-      codex: codexUsable,
-      opencode: opencodeUsable,
-      cursor: cursorUsable,
-      pi: piUsable,
-      commandcode: commandcodeUsable,
-      grok: grokUsable,
-      kimi: kimiUsable,
+    const installed: Record<string, boolean | undefined> = {
+      claude: claudeInstalled,
+      codex: codexInstalled,
+      opencode: opencodeInstalled,
+      cursor: cursorInstalled,
+      pi: piInstalled,
+      commandcode: commandcodeInstalled,
+      grok: grokInstalled,
+      kimi: kimiInstalled,
     }
-    if (usable[stored]) return stored
+    if (installed[stored]) return stored
     const first = installedBackendOptions[0]
     return first?.value ?? stored
   }, [
     stored,
-    claudeUsable,
-    codexUsable,
-    opencodeUsable,
-    cursorUsable,
-    piUsable,
-    commandcodeUsable,
-    grokUsable,
-    kimiUsable,
+    claudeInstalled,
+    codexInstalled,
+    opencodeInstalled,
+    cursorInstalled,
+    piInstalled,
+    commandcodeInstalled,
+    grokInstalled,
+    kimiInstalled,
     installedBackendOptions,
   ])
 
@@ -5029,22 +5051,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </InlineField>
 
               <InlineField
-                label="Combined git sync button"
-                description="Replace separate Pull and Push badges with one Sync button that does both"
-              >
-                <Switch
-                  checked={preferences?.git_sync_button ?? false}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        git_sync_button: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
                 label="Auto-save context"
                 description="Automatically save session context after each AI response"
               >
@@ -5247,11 +5253,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             anchorId="pref-general-section-version"
           >
             <div className="space-y-4">
-              <InlineField label="Jean" description="Application version">
+              <InlineField
+                label={activeRemoteConnection ? 'Jean Client' : 'Jean'}
+                description="Application version"
+              >
                 <span className="font-mono text-sm text-muted-foreground">
                   v{CLIENT_BUILD_INFO.appVersion}
                 </span>
               </InlineField>
+
+              {activeRemoteConnection && (
+                <InlineField
+                  label="Jean Server"
+                  description="Connected remote server version"
+                >
+                  <span className="font-mono text-sm text-muted-foreground">
+                    {isRemoteServerInfoLoading
+                      ? 'Loading…'
+                      : formatJeanVersionLabel(remoteServerVersion)}
+                  </span>
+                </InlineField>
+              )}
 
               {CLIENT_BUILD_INFO.gitSha && (
                 <InlineField

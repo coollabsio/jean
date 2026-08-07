@@ -104,113 +104,117 @@ export function TitleBar({
         )}
         {/* Left Action Buttons */}
         {!zenMode && (
-        <div
-          className={cn(
-            'relative z-10 flex items-center gap-1 pt-1',
-            native && isClientMacOS ? 'pl-[80px]' : 'pl-2'
-          )}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={toggleLeftSidebar}
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
-              >
-                {leftSidebarVisible ? (
-                  <PanelLeftClose className="size-3.5" />
-                ) : (
-                  <PanelLeft className="size-3.5" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {leftSidebarVisible ? 'Hide' : 'Show'} Left Sidebar{' '}
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {sidebarShortcut}
-              </kbd>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={toggleFileBrowser}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
-                  fileBrowserVisible && 'text-foreground bg-muted/50'
-                )}
-                aria-pressed={fileBrowserVisible}
-                aria-label={
-                  fileBrowserVisible ? 'Hide file browser' : 'Show file browser'
-                }
-                data-testid="toggle-file-browser"
-              >
-                <FolderTree className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {fileBrowserShortcut}
-              </kbd>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={commandContext.openPreferences}
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
-              >
-                <Settings className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Settings{' '}
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {formatShortcutDisplay(
-                  (preferences?.keybindings?.open_preferences ||
-                    DEFAULT_KEYBINDINGS.open_preferences) as string
-                )}
-              </kbd>
-            </TooltipContent>
-          </Tooltip>
-          {!isMobile && (
+          <div
+            className={cn(
+              'relative z-10 flex items-center gap-1 pt-1',
+              native && isClientMacOS ? 'pl-[80px]' : 'pl-2'
+            )}
+          >
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={() =>
-                    openExternal('https://github.com/coollabsio/jean')
-                  }
+                  onClick={toggleLeftSidebar}
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
                 >
-                  <Github className="size-3.5" />
+                  {leftSidebarVisible ? (
+                    <PanelLeftClose className="size-3.5" />
+                  ) : (
+                    <PanelLeft className="size-3.5" />
+                  )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>GitHub</TooltipContent>
+              <TooltipContent>
+                {leftSidebarVisible ? 'Hide' : 'Show'} Left Sidebar{' '}
+                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                  {sidebarShortcut}
+                </kbd>
+              </TooltipContent>
             </Tooltip>
-          )}
-          {native && <RemoteConnectionsDialog />}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={() => openExternal('https://jean.build/sponsorships/')}
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-pink-500 hover:text-pink-400"
-              >
-                <Heart className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Sponsor</TooltipContent>
-          </Tooltip>
-        </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={toggleFileBrowser}
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
+                    fileBrowserVisible && 'text-foreground bg-muted/50'
+                  )}
+                  aria-pressed={fileBrowserVisible}
+                  aria-label={
+                    fileBrowserVisible
+                      ? 'Hide file browser'
+                      : 'Show file browser'
+                  }
+                  data-testid="toggle-file-browser"
+                >
+                  <FolderTree className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                  {fileBrowserShortcut}
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={commandContext.openPreferences}
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                >
+                  <Settings className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Settings{' '}
+                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                  {formatShortcutDisplay(
+                    (preferences?.keybindings?.open_preferences ||
+                      DEFAULT_KEYBINDINGS.open_preferences) as string
+                  )}
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+            {!isMobile && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() =>
+                      openExternal('https://github.com/coollabsio/jean')
+                    }
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                  >
+                    <Github className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>GitHub</TooltipContent>
+              </Tooltip>
+            )}
+            {native && <RemoteConnectionsDialog />}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() =>
+                    openExternal('https://jean.build/sponsorships/')
+                  }
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-none text-pink-500 hover:text-pink-400"
+                >
+                  <Heart className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Sponsor</TooltipContent>
+            </Tooltip>
+          </div>
         )}
       </div>
 
@@ -352,7 +356,10 @@ function CliUpdatesIndicator() {
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <button type="button" className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer">
+            <button
+              type="button"
+              className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+            >
               <Download className="size-3" />
               <span>{updates.length}</span>
             </button>

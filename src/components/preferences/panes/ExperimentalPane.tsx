@@ -33,6 +33,25 @@ export const ExperimentalPane: React.FC = () => {
       </div>
 
       <SettingsSection
+        title="Features"
+        anchorId="pref-experimental-section-features"
+      >
+        <div className="space-y-4">
+          <InlineField
+            label="Combined git sync button"
+            description="Replace separate Pull and Push badges with one Sync button that does both"
+          >
+            <Switch
+              checked={preferences?.git_sync_button ?? false}
+              onCheckedChange={checked => {
+                patchPreferences.mutate({ git_sync_button: checked })
+              }}
+            />
+          </InlineField>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
         title="Developer Tools"
         anchorId="pref-experimental-section-developer-tools"
       >

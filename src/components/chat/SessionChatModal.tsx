@@ -51,6 +51,7 @@ import { useUIStore } from '@/store/ui-store'
 import {
   useSessions,
   useCreateSession,
+  useClearSessionHistory,
   useRenameSession,
   useReorderSessions,
   reconnectNativeCliSession,
@@ -309,7 +310,7 @@ export function SessionChatModal({
 
     viewport.addEventListener('wheel', handleWheel, { passive: false })
     return () => viewport.removeEventListener('wheel', handleWheel)
-  }, [sessions.length])
+  }, [sessions.length, zenMode])
 
   // Active session from store
   const activeSessionId = useChatStore(
@@ -429,6 +430,7 @@ export function SessionChatModal({
   // Rename session state
   const renameSession = useRenameSession()
   const createSession = useCreateSession()
+  const clearSessionHistory = useClearSessionHistory()
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
     null
   )
@@ -665,6 +667,28 @@ export function SessionChatModal({
       intent: 'picker',
     })
   }, [worktreeId, worktreePath])
+
+  const handleClearContext = useCallback(() => {
+    if (!currentSessionId || clearSessionHistory.isPending) return
+    clearSessionHistory.mutate(
+      {
+        worktreeId,
+        worktreePath,
+        sessionId: currentSessionId,
+      },
+      {
+        onSuccess: () =>
+          window.dispatchEvent(new CustomEvent('focus-chat-input')),
+      }
+    )
+  }, [clearSessionHistory, currentSessionId, worktreeId, worktreePath])
+
+  useEffect(() => {
+    if (!isOpen) return
+    window.addEventListener('clear-session-context', handleClearContext)
+    return () =>
+      window.removeEventListener('clear-session-context', handleClearContext)
+  }, [handleClearContext, isOpen])
 
   const handleOpenInNativeClient = useCallback(
     (session: Session) => {
@@ -1094,240 +1118,197 @@ export function SessionChatModal({
         )}
         <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Mobile zen: title + exit live on the TitleBar single line */}
-          {!(zenMode && isMobile) && (
-          <div className="shrink-0 border-b sm:text-left">
-            <div
-              className={cn(
-                'flex items-center justify-between gap-2 px-4 py-2',
-                MODAL_TERMINAL_PRIMARY_ROW_CLASS
-              )}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
-                  {zenMode ? (
-                    <button
-                      type="button"
-                      className="text-foreground text-lg font-semibold hover:opacity-80 transition-opacity cursor-pointer"
-                      onClick={toggleZenMode}
-                      title="Exit zen mode"
-                    >
-                      {project?.name ??
-                        (isBase
-                          ? 'Base Session'
-                          : (worktree?.name ?? 'Worktree'))}
-                    </button>
-                  ) : (
-                    <>
-                      {project && !isMobile && (
-                        <span className="text-muted-foreground font-normal">
-                          <button
-                            type="button"
-                            className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
-                            onClick={handleClose}
-                          >
-                            {project.name}
-                          </button>
-                          <span className="mx-1.5 text-muted-foreground/50">
-                            ›
-                          </span>
+          {!zenMode && (
+            <div className="shrink-0 border-b sm:text-left">
+              <div
+                className={cn(
+                  'flex items-center justify-between gap-2 px-4 py-2',
+                  MODAL_TERMINAL_PRIMARY_ROW_CLASS
+                )}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
+                    {project && !isMobile && (
+                      <span className="text-muted-foreground font-normal">
+                        <button
+                          type="button"
+                          className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
+                          onClick={handleClose}
+                        >
+                          {project.name}
+                        </button>
+                        <span className="mx-1.5 text-muted-foreground/50">
+                          ›
                         </span>
-                      )}
-                      {isBase
-                        ? 'Base Session'
-                        : (worktree?.name ?? 'Worktree')}
-                    </>
-                  )}
-                </h2>
-                {!zenMode && stackedBaseBranch && (
-                  <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                    <GitBranchPlus className="h-2.5 w-2.5" />
-                    <span className="max-w-16 sm:max-w-40 truncate">
-                      {stackedBaseBranch}
-                    </span>
-                    {stackedOnPR && (
-                      <>
-                        <span className="text-border">·</span>
-                        <GitPullRequestArrow className="h-2.5 w-2.5" />#
-                        {stackedOnPR.number}
-                      </>
+                      </span>
                     )}
-                  </span>
-                )}
-                {!zenMode && (
-                  <GitStatusBadges
-                    behindCount={behindCount}
-                    unpushedCount={unpushedCount}
-                    diffAdded={isMobile ? 0 : uncommittedAdded}
-                    diffRemoved={isMobile ? 0 : uncommittedRemoved}
-                    branchDiffAdded={isBase || isMobile ? 0 : branchDiffAdded}
-                    branchDiffRemoved={
-                      isBase || isMobile ? 0 : branchDiffRemoved
-                    }
-                    syncMode={gitSyncButton}
-                    onPull={handlePull}
-                    onPush={handlePush}
-                    onSync={handleSync}
-                    onDiffClick={handleUncommittedDiffClick}
-                    onBranchDiffClick={handleBranchDiffClick}
-                  />
-                )}
-                {!zenMode && project && (
-                  <div className="hidden items-center gap-2 md:flex">
-                    <NewIssuesBadge
-                      projectPath={project.path}
-                      projectId={project.id}
-                    />
-                    <OpenPRsBadge
-                      projectPath={project.path}
-                      projectId={project.id}
-                    />
-                    <FailedRunsBadge projectPath={project.path} />
-                  </div>
-                )}
-                {!zenMode && worktree && project && (
-                  <WorktreeDropdownMenu
-                    worktree={worktree}
-                    projectId={project.id}
-                    projectPath={project.path}
-                    uncommittedAdded={uncommittedAdded}
-                    uncommittedRemoved={uncommittedRemoved}
-                    branchDiffAdded={isBase ? 0 : branchDiffAdded}
-                    branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
-                    onUncommittedDiffClick={handleUncommittedDiffClick}
-                    onBranchDiffClick={handleBranchDiffClick}
-                  />
-                )}
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      aria-label={zenMode ? 'Exit zen mode' : 'Enter zen mode'}
-                      aria-pressed={zenMode}
-                      data-testid="toggle-zen-mode"
-                      onClick={toggleZenMode}
-                    >
-                      {zenMode ? (
-                        <Minimize2 className="h-3 w-3" />
-                      ) : (
-                        <Maximize2 className="h-3 w-3" />
+                    {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
+                  </h2>
+                  {!zenMode && stackedBaseBranch && (
+                    <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                      <GitBranchPlus className="h-2.5 w-2.5" />
+                      <span className="max-w-16 sm:max-w-40 truncate">
+                        {stackedBaseBranch}
+                      </span>
+                      {stackedOnPR && (
+                        <>
+                          <span className="text-border">·</span>
+                          <GitPullRequestArrow className="h-2.5 w-2.5" />#
+                          {stackedOnPR.number}
+                        </>
                       )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {zenMode ? 'Exit zen mode' : 'Zen mode'}{' '}
-                    <kbd className="ml-1 text-[0.625rem] opacity-60">
-                      {formatShortcutDisplay(
-                        preferences?.keybindings?.toggle_zen_mode ??
-                          DEFAULT_KEYBINDINGS.toggle_zen_mode
-                      )}
-                    </kbd>
-                  </TooltipContent>
-                </Tooltip>
-                {!zenMode && (
-                  <>
-                    {/* Desktop: inline action buttons */}
-                    <div className="hidden sm:flex items-center gap-1">
-                      <OpenInButton
-                        worktreePath={worktreePath}
-                        branch={worktree?.branch}
+                    </span>
+                  )}
+                  {!zenMode && (
+                    <GitStatusBadges
+                      behindCount={behindCount}
+                      unpushedCount={unpushedCount}
+                      diffAdded={isMobile ? 0 : uncommittedAdded}
+                      diffRemoved={isMobile ? 0 : uncommittedRemoved}
+                      branchDiffAdded={isBase || isMobile ? 0 : branchDiffAdded}
+                      branchDiffRemoved={
+                        isBase || isMobile ? 0 : branchDiffRemoved
+                      }
+                      syncMode={gitSyncButton}
+                      onPull={handlePull}
+                      onPush={handlePush}
+                      onSync={handleSync}
+                      onDiffClick={handleUncommittedDiffClick}
+                      onBranchDiffClick={handleBranchDiffClick}
+                    />
+                  )}
+                  {!zenMode && project && (
+                    <div className="hidden items-center gap-2 md:flex">
+                      <NewIssuesBadge
+                        projectPath={project.path}
+                        projectId={project.id}
                       />
-                      <ScriptsButton
-                        projectId={worktree?.project_id}
-                        worktreePath={worktreePath}
-                        onRun={handlePackageScript}
+                      <OpenPRsBadge
+                        projectPath={project.path}
+                        projectId={project.id}
                       />
-                      {currentSessionId && (
-                        <DevToolsDropdown
-                          sessionId={currentSessionId}
-                          worktreeId={worktreeId}
+                      <FailedRunsBadge projectPath={project.path} />
+                    </div>
+                  )}
+                  {!zenMode && worktree && project && (
+                    <WorktreeDropdownMenu
+                      worktree={worktree}
+                      projectId={project.id}
+                      projectPath={project.path}
+                      uncommittedAdded={uncommittedAdded}
+                      uncommittedRemoved={uncommittedRemoved}
+                      branchDiffAdded={isBase ? 0 : branchDiffAdded}
+                      branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
+                      onUncommittedDiffClick={handleUncommittedDiffClick}
+                      onBranchDiffClick={handleBranchDiffClick}
+                    />
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {isMobile && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          aria-label={
+                            zenMode ? 'Exit zen mode' : 'Enter zen mode'
+                          }
+                          aria-pressed={zenMode}
+                          data-testid="toggle-zen-mode"
+                          onClick={toggleZenMode}
+                        >
+                          {zenMode ? (
+                            <Minimize2 className="h-3 w-3" />
+                          ) : (
+                            <Maximize2 className="h-3 w-3" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {zenMode ? 'Exit zen mode' : 'Zen mode'}{' '}
+                        <kbd className="ml-1 text-[0.625rem] opacity-60">
+                          {formatShortcutDisplay(
+                            preferences?.keybindings?.toggle_zen_mode ??
+                              DEFAULT_KEYBINDINGS.toggle_zen_mode
+                          )}
+                        </kbd>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                  {!zenMode && (
+                    <>
+                      {/* Desktop: inline action buttons */}
+                      <div className="hidden sm:flex items-center gap-1">
+                        <OpenInButton
                           worktreePath={worktreePath}
-                          session={currentSession}
+                          branch={worktree?.branch}
                         />
-                      )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            aria-label="Toggle terminal"
-                            onClick={() => {
-                              useTerminalStore
-                                .getState()
-                                .toggleModalTerminal(worktreeId)
-                            }}
-                          >
-                            <Terminal className="h-3 w-3" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Terminal{' '}
-                          <kbd className="ml-1 text-[0.625rem] opacity-60">
-                            {terminalShortcut}
-                          </kbd>
-                        </TooltipContent>
-                      </Tooltip>
-                      {isNativeApp() && (
+                        <ScriptsButton
+                          projectId={worktree?.project_id}
+                          worktreePath={worktreePath}
+                          onRun={handlePackageScript}
+                        />
+                        {currentSessionId && (
+                          <DevToolsDropdown
+                            sessionId={currentSessionId}
+                            worktreeId={worktreeId}
+                            worktreePath={worktreePath}
+                            session={currentSession}
+                          />
+                        )}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-7 px-2 text-xs"
-                              aria-label="Toggle browser"
+                              aria-label="Toggle terminal"
                               onClick={() => {
-                                useBrowserStore
+                                useTerminalStore
                                   .getState()
-                                  .toggleModal(worktreeId)
+                                  .toggleModalTerminal(worktreeId)
                               }}
                             >
-                              <Globe className="h-3 w-3" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Browser</TooltipContent>
-                        </Tooltip>
-                      )}
-                      {runScripts.length === 1 && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              aria-label="Run"
-                              onClick={handleRun}
-                            >
-                              <Play
-                                className={`h-3 w-3 ${hasFailedTerminal ? 'text-red-500' : hasRunningTerminal ? 'text-amber-500 dark:text-yellow-400 animate-icon-glow' : ''}`}
-                              />
+                              <Terminal className="h-3 w-3" />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {hasFailedTerminal
-                              ? 'Crashed'
-                              : hasRunningTerminal
-                                ? 'Running'
-                                : 'Run'}{' '}
+                            Terminal{' '}
                             <kbd className="ml-1 text-[0.625rem] opacity-60">
-                              {runShortcut}
+                              {terminalShortcut}
                             </kbd>
                           </TooltipContent>
                         </Tooltip>
-                      )}
-                      {runScripts.length > 1 && (
-                        <div className="flex items-center">
+                        {isNativeApp() && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-7 rounded-r-none px-2 text-xs"
-                                aria-label="Run first command"
+                                className="h-7 px-2 text-xs"
+                                aria-label="Toggle browser"
+                                onClick={() => {
+                                  useBrowserStore
+                                    .getState()
+                                    .toggleModal(worktreeId)
+                                }}
+                              >
+                                <Globe className="h-3 w-3" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Browser</TooltipContent>
+                          </Tooltip>
+                        )}
+                        {runScripts.length === 1 && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                aria-label="Run"
                                 onClick={handleRun}
                               >
                                 <Play
@@ -1340,44 +1321,72 @@ export function SessionChatModal({
                                 ? 'Crashed'
                                 : hasRunningTerminal
                                   ? 'Running'
-                                  : 'Run first command'}{' '}
+                                  : 'Run'}{' '}
                               <kbd className="ml-1 text-[0.625rem] opacity-60">
                                 {runShortcut}
                               </kbd>
                             </TooltipContent>
                           </Tooltip>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 rounded-l-none border-l border-border/50 px-1 text-xs"
-                                aria-label="Choose run command"
-                              >
-                                <ChevronDown className="h-3 w-3" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {runScripts.map(cmd => (
-                                <DropdownMenuItem
-                                  key={cmd}
-                                  onSelect={() => handleRunCommand(cmd)}
-                                  className="font-mono text-xs"
+                        )}
+                        {runScripts.length > 1 && (
+                          <div className="flex items-center">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 rounded-r-none px-2 text-xs"
+                                  aria-label="Run first command"
+                                  onClick={handleRun}
                                 >
-                                  {cmd}
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      )}
-                    </div>
-                    <ModalCloseButton onClick={handleClose} />
-                  </>
-                )}
+                                  <Play
+                                    className={`h-3 w-3 ${hasFailedTerminal ? 'text-red-500' : hasRunningTerminal ? 'text-amber-500 dark:text-yellow-400 animate-icon-glow' : ''}`}
+                                  />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {hasFailedTerminal
+                                  ? 'Crashed'
+                                  : hasRunningTerminal
+                                    ? 'Running'
+                                    : 'Run first command'}{' '}
+                                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                                  {runShortcut}
+                                </kbd>
+                              </TooltipContent>
+                            </Tooltip>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 rounded-l-none border-l border-border/50 px-1 text-xs"
+                                  aria-label="Choose run command"
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {runScripts.map(cmd => (
+                                  <DropdownMenuItem
+                                    key={cmd}
+                                    onSelect={() => handleRunCommand(cmd)}
+                                    className="font-mono text-xs"
+                                  >
+                                    {cmd}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        )}
+                      </div>
+                      <ModalCloseButton onClick={handleClose} />
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
           )}
 
           {/* Session tabs — hidden in zen mode for an immersive chat surface */}

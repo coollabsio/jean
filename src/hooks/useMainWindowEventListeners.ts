@@ -199,6 +199,13 @@ export function shouldAllowKeybindingThroughOpenOverlay(
 ): boolean {
   // GitDiffModal is intentionally a full-screen workflow overlay, but users
   // still need the global "Open in..." picker from there (Cmd/Ctrl+O).
+  if (
+    uiState.sessionChatModalOpen &&
+    (action === 'toggle_zen_mode' || action === 'clear_session_context')
+  ) {
+    return true
+  }
+
   return action === 'open_in_modal' && uiState.gitDiffModalOpen
 }
 
@@ -362,6 +369,10 @@ function executeKeybindingAction(
       useUIStore.getState().toggleZenMode()
       break
     }
+    case 'clear_session_context':
+      logger.debug('Keybinding: clear_session_context')
+      window.dispatchEvent(new CustomEvent('clear-session-context'))
+      break
     case 'open_preferences':
       logger.debug('Keybinding: open_preferences')
       commandContext.openPreferences()

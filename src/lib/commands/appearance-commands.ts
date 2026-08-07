@@ -1,4 +1,4 @@
-import { Sun, Moon, Monitor, Minimize2, Maximize2 } from 'lucide-react'
+import { Sun, Moon, Monitor, Maximize2 } from 'lucide-react'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
 
@@ -20,19 +20,6 @@ export const appearanceCommands: AppCommand[] = [
     execute: () => {
       useUIStore.getState().toggleZenMode()
     },
-    isAvailable: () => !useUIStore.getState().zenMode,
-  },
-  {
-    id: 'zen-mode.exit',
-    label: 'Exit Zen Mode',
-    icon: Minimize2,
-    group: 'appearance',
-    keywords: ['zen', 'focus', 'exit', 'leave', 'fullscreen'],
-
-    execute: () => {
-      useUIStore.getState().setZenMode(false)
-    },
-    isAvailable: () => useUIStore.getState().zenMode,
   },
   {
     id: 'theme.light',

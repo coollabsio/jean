@@ -26,6 +26,11 @@ export function RemoteConnectionRecovery({
     dismissTransientUi()
   }, [])
 
+  useEffect(() => {
+    const retryTimer = window.setInterval(reloadPage, 10_000)
+    return () => window.clearInterval(retryTimer)
+  }, [])
+
   return (
     // z-[100] sits above dialogs (70) and menus/popovers (80).
     <div className="fixed inset-x-0 bottom-0 top-8 z-[100] flex items-center justify-center bg-background">

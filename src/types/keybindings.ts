@@ -47,6 +47,7 @@ export type KeybindingAction =
   | 'open_usage_dropdown'
   | 'search_chat'
   | 'toggle_zen_mode'
+  | 'clear_session_context'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -110,6 +111,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_usage_dropdown: 'mod+u',
   search_chat: 'mod+f',
   toggle_zen_mode: 'mod+shift+z',
+  clear_session_context: 'mod+shift+k',
 }
 
 // UI definitions for the settings pane
@@ -312,6 +314,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
       'Full-screen the active session: hide session tabs and top chrome',
     default_shortcut: 'mod+shift+z',
     category: 'navigation',
+  },
+  {
+    action: 'clear_session_context',
+    label: 'Clear session context',
+    description: 'Clear the current chat history and start with fresh context',
+    default_shortcut: 'mod+shift+k',
+    category: 'chat',
   },
   {
     action: 'toggle_session_label',

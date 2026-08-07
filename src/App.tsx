@@ -287,6 +287,17 @@ function App() {
           }
         })
 
+        // Jean-managed Codex 0.147+ needs a sibling code-mode host. Older Jean
+        // versions did not install it, so repair only that missing helper after
+        // updating Jean instead of downloading the full Codex CLI again.
+        try {
+          await invoke('install_missing_codex_code_mode_host')
+        } catch (codexError) {
+          logger.warn('Failed to install missing Codex code-mode host', {
+            error: codexError,
+          })
+        }
+
         // Package is on disk; app must relaunch. Clear the download handle and
         // record ready state so further UI actions relaunch instead of re-downloading.
         pendingUpdateRef.current = null

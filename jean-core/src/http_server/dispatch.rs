@@ -2848,6 +2848,11 @@ pub async fn dispatch_command(
             crate::codex_cli::install_codex_cli(app.clone(), version).await?;
             Ok(Value::Null)
         }
+        "install_missing_codex_code_mode_host" => {
+            let installed =
+                crate::codex_cli::install_missing_codex_code_mode_host(app.clone()).await?;
+            to_value(installed)
+        }
         "uninstall_codex_cli" => {
             crate::codex_cli::uninstall_codex_cli(app.clone()).await?;
             Ok(Value::Null)

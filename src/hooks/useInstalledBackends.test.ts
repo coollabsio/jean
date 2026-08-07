@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import {
   isBackendUsable,
+  useBackendAuthStatuses,
   useInstalledBackends,
 } from '@/hooks/useInstalledBackends'
 import type { CliBackend } from '@/types/preferences'
@@ -91,7 +92,7 @@ describe('useInstalledBackends', () => {
     }
   })
 
-  it('excludes installed backends that are not authenticated', () => {
+  it('includes installed backends even when not authenticated (issue #627/#649)', () => {
     status.claude.installed = true
     auth.claude.authenticated = false
     status.codex.installed = true
@@ -99,27 +100,53 @@ describe('useInstalledBackends', () => {
 
     const { result } = renderHook(() => useInstalledBackends())
 
-    expect(result.current.installedBackends).toEqual(['codex'])
+    expect(result.current.installedBackends).toEqual(['claude', 'codex'])
     expect(result.current.isLoading).toBe(false)
   })
 
-  it('includes all backends that are both installed and authenticated', () => {
+  it('includes all installed backends regardless of auth', () => {
     status.claude.installed = true
     auth.claude.authenticated = true
     status.opencode.installed = true
     auth.opencode.authenticated = true
     status.cursor.installed = true
-    // cursor not authenticated
+    // cursor not authenticated — still listed
 
     const { result } = renderHook(() => useInstalledBackends())
 
-    expect(result.current.installedBackends).toEqual(['claude', 'opencode'])
+    expect(result.current.installedBackends).toEqual([
+      'claude',
+      'opencode',
+      'cursor',
+    ])
   })
 
-  it('returns empty when nothing is ready', () => {
-    status.claude.installed = true
-    // not authenticated
+  it('returns empty when nothing is installed', () => {
+    status.claude.installed = false
     const { result } = renderHook(() => useInstalledBackends())
     expect(result.current.installedBackends).toEqual([])
+  })
+})
+
+describe('useBackendAuthStatuses', () => {
+  beforeEach(() => {
+    for (const backend of BACKENDS) {
+      status[backend].installed = false
+      auth[backend].authenticated = false
+    }
+  })
+
+  it('reports auth only for installed backends', () => {
+    status.claude.installed = true
+    auth.claude.authenticated = false
+    status.opencode.installed = true
+    auth.opencode.authenticated = true
+
+    const { result } = renderHook(() => useBackendAuthStatuses())
+
+    expect(result.current.authByBackend.claude).toBe(false)
+    expect(result.current.authByBackend.opencode).toBe(true)
+    expect(result.current.authByBackend.codex).toBeUndefined()
+    expect(result.current.isLoading).toBe(false)
   })
 })

@@ -92,6 +92,26 @@ describe('GeneralPane settings structure', () => {
     expect(grokSection).not.toContain('grokCliQueryKeys.auth()')
   })
 
+  // Regression #627/#649: default backend picker must list installed CLIs even
+  // when auth probes return false (login is gated at send time instead).
+  it('filters default backend options by install status only, not auth', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+
+    expect(source).toContain('const claudeInstalled = !!cliStatus?.installed')
+    expect(source).toContain('const codexInstalled = !!codexStatus?.installed')
+    expect(source).toContain(
+      'const opencodeInstalled = !!opencodeStatus?.installed'
+    )
+    expect(source).not.toMatch(
+      /claudeInstalled\s*=\s*!!cliStatus\?\.installed\s*&&\s*!!claudeAuth\?\.authenticated/
+    )
+    expect(source).not.toContain('claudeUsable')
+    expect(source).toContain('installedBackendOptions.map(option =>')
+  })
+
   it('renders build and yolo reasoning overrides from model capabilities', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
@@ -154,6 +174,15 @@ describe('GeneralPane settings structure', () => {
     expect(versionSectionIndex).toBeGreaterThan(-1)
     expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
       'CLIENT_BUILD_INFO.appVersion'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      "label={activeRemoteConnection ? 'Jean Client' : 'Jean'}"
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'label="Jean Server"'
+    )
+    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
+      'remoteServerVersion'
     )
     expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
       'CLIENT_BUILD_INFO.gitSha'

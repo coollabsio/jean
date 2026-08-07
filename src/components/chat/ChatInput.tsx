@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { Textarea } from '@/components/ui/textarea'
 import { Kbd } from '@/components/ui/kbd'
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
+import { cn } from '@/lib/utils'
 import { getFilename, getExtension } from '@/lib/path-utils'
 import type {
   PendingFile,
@@ -51,6 +53,8 @@ import {
   parsePlainTextPromptMetadata,
   type PromptAttachmentMetadata,
 } from './message-content-utils'
+import { isModKeyEvent } from '@/types/keybindings'
+import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
 
 /** Threshold for saving pasted text as file (2000 chars) */
 const TEXT_PASTE_THRESHOLD = 2000
@@ -63,7 +67,10 @@ interface ChatInputProps {
   executionMode: ExecutionMode
   canSwitchBackendWithTab?: boolean
   focusChatShortcut: string
-  onSubmit: (e: React.FormEvent) => void
+  onSubmit: (
+    e: React.FormEvent,
+    options?: { forceSteer?: boolean }
+  ) => void
   onCancel: () => void
   onSwitchBackendWithTab?: () => void
   onCommandExecute?: (command: ClaudeCommand) => void
@@ -74,6 +81,7 @@ interface ChatInputProps {
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   installedBackends?: CliBackend[]
   selectedBackend?: CliBackend
+  onSteerModifierChange?: (active: boolean) => void
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -95,8 +103,10 @@ export const ChatInput = memo(function ChatInput({
   inputRef,
   installedBackends,
   selectedBackend,
+  onSteerModifierChange,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
+  const zenMode = useUIStore(state => state.zenMode)
   const resizeTextarea = useAutoResize(inputRef)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -504,6 +514,12 @@ export const ChatInput = memo(function ChatInput({
         return
       }
 
+      const forceSteer =
+        isSending &&
+        isSteerCapableBackend(selectedBackend) &&
+        isModKeyEvent(e)
+      onSteerModifierChange?.(forceSteer)
+
       // When file mention popover is open, handle navigation
       if (fileMentionOpen) {
         if (e.ctrlKey && e.shiftKey && e.key === 'ArrowLeft') {
@@ -629,7 +645,7 @@ export const ChatInput = memo(function ChatInput({
             .getState()
             .setInputDraft(activeSessionId, valueRef.current)
         }
-        onSubmit(e)
+        onSubmit(e, forceSteer ? { forceSteer: true } : undefined)
         // Clear input immediately (don't wait for store subscription)
         valueRef.current = ''
         setShowHint(true)
@@ -651,6 +667,8 @@ export const ChatInput = memo(function ChatInput({
       onSwitchBackendWithTab,
       isMobile,
       resizeTextarea,
+      selectedBackend,
+      onSteerModifierChange,
     ]
   )
 
@@ -1257,13 +1275,20 @@ export const ChatInput = memo(function ChatInput({
         defaultValue=""
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        onKeyUp={e => {
+          if (!isModKeyEvent(e)) onSteerModifierChange?.(false)
+        }}
+        onBlur={() => onSteerModifierChange?.(false)}
         onPaste={handlePaste}
         disabled={false}
-        className="min-h-[40px] max-h-[50vh] w-full resize-none overflow-x-hidden overflow-y-auto border-0 dark:bg-transparent p-0 font-mono text-base shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm"
+        className={cn(
+          'min-h-[40px] w-full resize-none overflow-x-hidden overflow-y-auto border-0 dark:bg-transparent p-0 font-mono text-base placeholder:text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm',
+          zenMode ? 'h-10 max-h-10' : 'max-h-[50vh]'
+        )}
         rows={1}
         autoFocus={!isMobile}
       />
-      {showHint && (
+      {showHint && !zenMode && (
         <span className="absolute top-0 right-0 hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground opacity-40">
           <Kbd>{focusChatShortcut}</Kbd>
           <span>to focus</span>
