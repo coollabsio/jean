@@ -2219,9 +2219,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 </Select>
                 {currentSurface === 'terminal' && (
                   <p className="col-start-2 text-[11px] leading-4 text-muted-foreground">
-                    Terminal runs use the CLI&apos;s own configuration. Jean&apos;s
-                    system prompt, MCP servers, parallel execution prompt, and AI
-                    language apply to Jean Chat only.
+                    Terminal runs get Jean&apos;s system prompt and loaded
+                    context. MCP servers, the parallel execution prompt, and AI
+                    language still apply to Jean Chat only.
                   </p>
                 )}
               </div>

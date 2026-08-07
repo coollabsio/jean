@@ -32,7 +32,6 @@ interface MagicCommandHandlers {
   handleMerge: () => void
   handleMergePr: () => void
   handleResolveConflicts: (override?: InvestigateOverride) => void
-  handleInvestigateWorkflowRun: (detail: WorkflowRunDetail) => void
   handleInvestigate: (
     type: 'issue' | 'pr' | 'advisory',
     override?: InvestigateOverride
@@ -74,7 +73,6 @@ export function useMagicCommands({
   handleMerge,
   handleMergePr,
   handleResolveConflicts,
-  handleInvestigateWorkflowRun,
   handleInvestigate,
   handleReviewComments,
   isModal = false,
@@ -96,8 +94,7 @@ export function useMagicCommands({
     handleMerge,
     handleMergePr,
     handleResolveConflicts,
-    handleInvestigateWorkflowRun,
-    handleInvestigate,
+      handleInvestigate,
     handleReviewComments,
   })
 
@@ -119,8 +116,7 @@ export function useMagicCommands({
       handleMerge,
       handleMergePr,
       handleResolveConflicts,
-      handleInvestigateWorkflowRun,
-      handleInvestigate,
+          handleInvestigate,
       handleReviewComments,
     }
   })
@@ -202,9 +198,6 @@ export function useMagicCommands({
             ).type ?? 'issue',
             (rest as { override?: InvestigateOverride }).override
           )
-          break
-        case 'investigate-workflow-run':
-          handlers.handleInvestigateWorkflowRun(rest as WorkflowRunDetail)
           break
         case 'review-comments': {
           const detail = rest as {

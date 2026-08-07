@@ -192,6 +192,42 @@ describe('buildMagicPromptCommandArgs', () => {
     expect(args).not.toContain('Review this branch.')
   })
 
+  it('keeps the positional prompt last, after model and context flags', () => {
+    // Claude reads the trailing positional as the prompt; a flag after it would
+    // be swallowed as prompt text.
+    const delivery = plan({ backend: 'claude' })
+    const args = buildMagicPromptCommandArgs({
+      backend: 'claude',
+      delivery,
+      yolo: false,
+      nativeSessionId: 'abc-123',
+      modelArgs: ['--model', 'claude-opus-5'],
+      contextArgs: ['--append-system-prompt-file', '/tmp/ctx.md'],
+    })
+
+    expect(args).toEqual([
+      '--session-id',
+      'abc-123',
+      '--model',
+      'claude-opus-5',
+      '--append-system-prompt-file',
+      '/tmp/ctx.md',
+      'Review this branch.',
+    ])
+    expect(args.at(-1)).toBe('Review this branch.')
+  })
+
+  it('omits context args entirely when none are supplied', () => {
+    const delivery = plan({ backend: 'codex' })
+    const args = buildMagicPromptCommandArgs({
+      backend: 'codex',
+      delivery,
+      yolo: false,
+    })
+
+    expect(args).toEqual(['Review this branch.'])
+  })
+
   it('drops yolo flags for backends that define none', () => {
     const delivery = plan({ backend: 'opencode' })
     const args = buildMagicPromptCommandArgs({

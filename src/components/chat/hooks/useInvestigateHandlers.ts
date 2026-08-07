@@ -3,9 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
-import { useProjectsStore } from '@/store/projects-store'
 import { chatQueryKeys } from '@/services/chat'
-import { projectsQueryKeys } from '@/services/projects'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
@@ -14,7 +12,6 @@ import {
   DEFAULT_INVESTIGATE_PR_PROMPT,
   DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
-  DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
   DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
@@ -23,7 +20,6 @@ import {
   resolveMagicPromptProvider,
   resolveMagicPromptSurface,
 } from '@/types/preferences'
-import type { Project, Worktree } from '@/types/projects'
 import type {
   ThinkingLevel,
   EffortLevel,
@@ -62,16 +58,6 @@ const INVESTIGATE_SURFACE: Record<
     key: 'investigate_sentry_issue_surface',
     label: 'Investigate Sentry Issue',
   },
-}
-
-// Re-export for the caller
-export interface WorkflowRunDetail {
-  workflowName: string
-  runUrl: string
-  runId: string
-  branch: string
-  displayTitle: string
-  projectPath?: string | null
 }
 
 interface UseInvestigateHandlersParams {
@@ -640,335 +626,6 @@ export function useInvestigateHandlers({
     ]
   )
 
-  const handleInvestigateWorkflowRun = useCallback(
-    async (detail: WorkflowRunDetail) => {
-      const customPrompt = preferences?.magic_prompts?.investigate_workflow_run
-      const template =
-        customPrompt && customPrompt.trim()
-          ? customPrompt
-          : DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT
-
-      const investigateModel =
-        preferences?.magic_prompt_models?.investigate_workflow_run_model ??
-        selectedModelRef.current
-      const investigateMode =
-        preferences?.magic_prompt_modes?.investigate_workflow_run_mode ??
-        DEFAULT_MAGIC_PROMPT_MODES.investigate_workflow_run_mode
-      const prompt = applyYoloInvestigationFixDirective(
-        template
-          .replace(/\{workflowName\}/g, detail.workflowName)
-          .replace(/\{runUrl\}/g, detail.runUrl)
-          .replace(/\{runId\}/g, detail.runId)
-          .replace(/\{branch\}/g, detail.branch)
-          .replace(/\{displayTitle\}/g, detail.displayTitle),
-        investigateMode
-      )
-      const investigateProvider = resolveMagicPromptProvider(
-        preferences?.magic_prompt_providers,
-        'investigate_workflow_run_provider',
-        preferences?.default_provider
-      )
-      const { customProfileName: resolvedInvestigateProfile } =
-        resolveCustomProfile(investigateModel, investigateProvider)
-
-      // Find the right worktree for this branch
-      let targetWorktreeId: string | null = null
-      let targetWorktreePath: string | null = null
-
-      if (detail.projectPath) {
-        const projects = await queryClient.fetchQuery({
-          queryKey: projectsQueryKeys.list(),
-          queryFn: () => invoke<Project[]>('list_projects'),
-          staleTime: 1000 * 60,
-        })
-        const project = projects?.find(p => p.path === detail.projectPath)
-
-        if (project) {
-          let worktrees: Worktree[] = []
-          try {
-            worktrees = await queryClient.fetchQuery({
-              queryKey: projectsQueryKeys.worktrees(project.id),
-              queryFn: () =>
-                invoke<Worktree[]>('list_worktrees', {
-                  projectId: project.id,
-                }),
-              staleTime: 1000 * 60,
-            })
-          } catch (err) {
-            console.error('[INVESTIGATE-WF] Failed to fetch worktrees:', err)
-          }
-
-          const isUsable = (w: Worktree) => !w.status || w.status === 'ready'
-
-          if (worktrees.length > 0) {
-            const matching = worktrees.find(
-              w => w.branch === detail.branch && isUsable(w)
-            )
-            if (matching) {
-              targetWorktreeId = matching.id
-              targetWorktreePath = matching.path
-            } else {
-              const base = worktrees.find(w => isUsable(w))
-              if (base) {
-                targetWorktreeId = base.id
-                targetWorktreePath = base.path
-              }
-            }
-          }
-
-          if (!targetWorktreeId) {
-            try {
-              const baseSession = await invoke<Worktree>(
-                'create_base_session',
-                { projectId: project.id }
-              )
-              queryClient.invalidateQueries({
-                queryKey: projectsQueryKeys.worktrees(project.id),
-              })
-              targetWorktreeId = baseSession.id
-              targetWorktreePath = baseSession.path
-            } catch (error) {
-              console.error(
-                '[INVESTIGATE-WF] Failed to create base session:',
-                error
-              )
-              toast.error(`Failed to open base session: ${error}`)
-              return
-            }
-          }
-        }
-      }
-
-      // Final fallback: use active worktree
-      if (!targetWorktreeId || !targetWorktreePath) {
-        targetWorktreeId = activeWorktreeIdRef.current ?? null
-        targetWorktreePath = activeWorktreePathRef.current ?? null
-      }
-
-      if (!targetWorktreeId || !targetWorktreePath) {
-        console.error('[INVESTIGATE-WF] No worktree found at all, aborting')
-        toast.error('No worktree found for this branch')
-        return
-      }
-
-      const worktreeId = targetWorktreeId
-      const worktreePath = targetWorktreePath
-
-      const projectsForBackend = queryClient.getQueryData<Project[]>(
-        projectsQueryKeys.list()
-      )
-      const projectForBackend = projectsForBackend?.find(
-        p => p.path === detail.projectPath
-      )
-
-      const investigateIsCustom = Boolean(
-        investigateProvider && investigateProvider !== '__anthropic__'
-      )
-      const investigateUseAdaptive =
-        !investigateIsCustom &&
-        supportsAdaptiveThinking(investigateModel, cliVersion)
-
-      const investigateBackend =
-        resolveMagicPromptBackend(
-          preferences?.magic_prompt_backends,
-          'investigate_workflow_run_backend',
-          projectForBackend?.default_backend ?? defaultBackend
-        ) ?? resolveBackend(investigateModel)
-
-      // Prefer Magic Prompt effort override (e.g. Medium for Grok). Never fall
-      // through to Claude thinking levels for effort-based backends.
-      const investigateEffort =
-        (preferences?.magic_prompt_efforts?.investigate_workflow_run_effort as
-          | EffortLevel
-          | null
-          | undefined) ??
-        (investigateUseAdaptive ? selectedEffortLevelRef.current : undefined)
-      const usesEffortBackend =
-        investigateBackend === 'codex' ||
-        investigateBackend === 'opencode' ||
-        investigateBackend === 'pi' ||
-        investigateBackend === 'grok' ||
-        investigateBackend === 'kimi' ||
-        investigateUseAdaptive
-      const investigateThinkingLevel = usesEffortBackend
-        ? undefined
-        : selectedThinkingLevelRef.current
-
-      const sendInvestigateMessage = (targetSessionId: string) => {
-        const {
-          addSendingSession,
-          setLastSentMessage,
-          setError,
-          setSelectedModel,
-          setSelectedProvider,
-          setExecutingMode,
-          setEffortLevel,
-        } = useChatStore.getState()
-
-        setLastSentMessage(targetSessionId, prompt)
-        setError(targetSessionId, null)
-        addSendingSession(targetSessionId)
-        setSelectedModel(targetSessionId, investigateModel)
-        setSelectedProvider(targetSessionId, investigateProvider)
-        setExecutingMode(targetSessionId, investigateMode)
-        if (investigateEffort) {
-          setEffortLevel(targetSessionId, investigateEffort)
-        }
-
-        setSessionBackend.mutate({
-          sessionId: targetSessionId,
-          worktreeId,
-          worktreePath,
-          backend: investigateBackend,
-        })
-        setSessionModel.mutate({
-          sessionId: targetSessionId,
-          worktreeId,
-          worktreePath,
-          model: investigateModel,
-        })
-        setSessionProvider.mutate({
-          sessionId: targetSessionId,
-          worktreeId,
-          worktreePath,
-          provider: investigateProvider,
-        })
-        {
-          const {
-            setSelectedBackend: setZustandBackend,
-            setSelectedModel: setZustandModel,
-          } = useChatStore.getState()
-          setZustandBackend(targetSessionId, investigateBackend)
-          setZustandModel(targetSessionId, investigateModel)
-        }
-        primeSessionSelection(
-          targetSessionId,
-          investigateBackend,
-          investigateModel,
-          investigateProvider
-        )
-
-        sendMessage.mutate(
-          {
-            sessionId: targetSessionId,
-            worktreeId,
-            worktreePath,
-            message: prompt,
-            model: investigateModel,
-            executionMode: investigateMode,
-            thinkingLevel: investigateThinkingLevel,
-            effortLevel: investigateEffort,
-            mcpConfig: buildMcpConfigJson(
-              mcpServersDataRef.current ?? [],
-              enabledMcpServersRef.current,
-              investigateBackend
-            ),
-            customProfileName: resolvedInvestigateProfile,
-            parallelExecutionPrompt:
-              preferences?.parallel_execution_prompt_enabled
-                ? (preferences.magic_prompts?.parallel_execution ??
-                  DEFAULT_PARALLEL_EXECUTION_PROMPT)
-                : undefined,
-            chromeEnabled: preferences?.chrome_enabled ?? false,
-            aiLanguage: preferences?.ai_language,
-            backend: investigateBackend,
-          },
-          { onSettled: () => inputRef.current?.focus() }
-        )
-      }
-
-      // Switch to the target worktree, create a new session, then send the prompt
-      const { setActiveWorktree, setActiveSession } = useChatStore.getState()
-      const { selectWorktree, expandProject } = useProjectsStore.getState()
-      setActiveWorktree(worktreeId, worktreePath)
-      selectWorktree(worktreeId)
-
-      const projects = queryClient.getQueryData<Project[]>(
-        projectsQueryKeys.list()
-      )
-      const project = projects?.find(p => p.path === detail.projectPath)
-      if (project) expandProject(project.id)
-
-      // After the worktree switch (so the terminal opens in view) but before
-      // createSession — the terminal path creates its own session.
-      if (
-        await tryRunInTerminal({
-          surfaceKey: 'investigate_workflow_run_surface',
-          prompt,
-          backend: investigateBackend as CliBackend,
-          label: 'Investigate Failure',
-          worktreeId,
-          worktreePath,
-          executionMode: investigateMode,
-        })
-      ) {
-        return
-      }
-
-      createSession.mutate(
-        { worktreeId, worktreePath },
-        {
-          onSuccess: session => {
-            useChatStore
-              .getState()
-              .setSelectedBackend(session.id, investigateBackend)
-            useChatStore
-              .getState()
-              .setSelectedModel(session.id, investigateModel)
-            useChatStore
-              .getState()
-              .setSelectedProvider(session.id, investigateProvider)
-            primeSessionSelection(
-              session.id,
-              investigateBackend,
-              investigateModel,
-              investigateProvider
-            )
-            setActiveSession(worktreeId, session.id)
-            sendInvestigateMessage(session.id)
-          },
-          onError: error => {
-            console.error('[INVESTIGATE-WF] Failed to create session:', error)
-            toast.error(`Failed to create session: ${error}`)
-          },
-        }
-      )
-    },
-    [
-      sendMessage,
-      createSession,
-      queryClient,
-      preferences?.magic_prompts?.investigate_workflow_run,
-      preferences?.magic_prompt_models?.investigate_workflow_run_model,
-      preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
-      preferences?.magic_prompts?.parallel_execution,
-      preferences?.magic_prompt_providers,
-      preferences?.magic_prompt_backends,
-      preferences?.magic_prompt_modes,
-      preferences?.magic_prompt_efforts,
-      preferences?.chrome_enabled,
-      preferences?.ai_language,
-      setSessionProvider,
-      setSessionBackend,
-      setSessionModel,
-      resolveCustomProfile,
-      cliVersion,
-      inputRef,
-      activeWorktreeIdRef,
-      activeWorktreePathRef,
-      selectedModelRef,
-      selectedThinkingLevelRef,
-      selectedEffortLevelRef,
-      executionModeRef,
-      mcpServersDataRef,
-      enabledMcpServersRef,
-      defaultBackend,
-      primeSessionSelection,
-      tryRunInTerminal,
-    ]
-  )
-
   const handleReviewComments = useCallback(
     async (
       promptOrPrompts: string | string[],
@@ -1215,7 +872,6 @@ export function useInvestigateHandlers({
 
   return {
     handleInvestigate,
-    handleInvestigateWorkflowRun,
     handleReviewComments,
   }
 }
