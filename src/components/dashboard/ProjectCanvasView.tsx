@@ -44,6 +44,7 @@ import {
   ExternalLink,
   Folder,
   FolderOpen,
+  FolderTree,
   Home,
   Terminal,
   Trash2,
@@ -171,6 +172,11 @@ import {
 import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { usePreferences } from '@/services/preferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
@@ -901,6 +907,8 @@ function WorktreeSectionHeader({
 
 export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const { data: preferences } = usePreferences()
+  const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
+  const toggleFileBrowser = useUIStore(state => state.toggleFileBrowser)
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -3049,6 +3057,37 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-2 sm:py-3 border-b border-border/30 sm:min-h-[61px]">
             <div className="flex flex-col shrink-0">
               <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={toggleFileBrowser}
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        'h-6 w-6 shrink-0 text-foreground/70 hover:text-foreground',
+                        fileBrowserVisible && 'text-foreground bg-muted/50'
+                      )}
+                      aria-pressed={fileBrowserVisible}
+                      aria-label={
+                        fileBrowserVisible
+                          ? 'Hide file browser'
+                          : 'Show file browser'
+                      }
+                      data-testid="toggle-file-browser"
+                    >
+                      <FolderTree className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+                    <kbd className="ml-1 text-[0.625rem] opacity-60">
+                      {formatShortcutDisplay(
+                        preferences?.keybindings?.toggle_file_browser ??
+                          DEFAULT_KEYBINDINGS.toggle_file_browser
+                      )}
+                    </kbd>
+                  </TooltipContent>
+                </Tooltip>
                 <h2 className="truncate text-lg font-semibold">
                   {project.name}
                 </h2>
