@@ -66,22 +66,34 @@ fn build_system_prompt_parts(
         parts.push(format!("Respond to the user in {lang}."));
     }
 
-    let global_prompt = prefs
+    let quota_saver = prefs
         .as_ref()
-        .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref()))
-        .unwrap_or_else(crate::default_global_system_prompt);
-    parts.push(global_prompt);
+        .is_some_and(|prefs| prefs.quota_saver_enabled);
 
+    // Sub-agent policy first so a user-authored global prompt can override it.
     if prefs
         .as_ref()
-        .is_some_and(|prefs| prefs.parallel_execution_prompt_enabled)
+        .is_some_and(|prefs| prefs.fanout_prompting_active())
     {
         let parallel_prompt = prefs
             .as_ref()
             .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.parallel_execution.as_deref()))
             .unwrap_or_else(crate::default_parallel_execution_prompt);
         parts.push(parallel_prompt);
+    } else {
+        parts.push(crate::NO_SUBAGENT_INSTRUCTION.to_string());
     }
+
+    let default_global_prompt = if quota_saver {
+        crate::default_lean_global_system_prompt
+    } else {
+        crate::default_global_system_prompt
+    };
+    let global_prompt = prefs
+        .as_ref()
+        .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref()))
+        .unwrap_or_else(default_global_prompt);
+    parts.push(global_prompt);
 
     if let Ok(data) = load_projects_data(app) {
         if let Some(worktree) = data.find_worktree(worktree_id) {

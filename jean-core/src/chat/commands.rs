@@ -84,7 +84,12 @@ Jean may hand this plan to a zero-context agent in a new worktree. Status lines 
 - Include: goal/outcome, key decisions from the interview, concrete files/areas to touch, ordered implementation steps with enough approach detail, risks/edge cases, and how to verify.
 - Prefer a structured body (headings/bullets). Concise writing is good; incomplete handoff plans are not.
 - After answering questions, re-emit the full detailed body in a complete `<proposed_plan>` block — never end on explanation-only or checklist-only content.";
-const DEFAULT_PARALLEL_EXECUTION_PROMPT: &str = r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
+const DEFAULT_PARALLEL_EXECUTION_PROMPT: &str = r#"### Subagent Strategy to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+
+In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
 
@@ -1226,20 +1231,24 @@ async fn queued_message_to_send_request(
                 })
         })
     });
-    let parallel_execution_prompt = json_string(queued, "parallelExecutionPrompt").or_else(|| {
-        prefs.as_ref().and_then(|p| {
-            if p.parallel_execution_prompt_enabled {
-                Some(
-                    p.magic_prompts
-                        .parallel_execution
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_PARALLEL_EXECUTION_PROMPT.to_string()),
-                )
-            } else {
-                None
-            }
+    // Quota Saver wins over a per-run override: one prompt must stay one agent run.
+    let quota_saver = prefs.as_ref().is_some_and(|p| p.quota_saver_enabled);
+    let parallel_execution_prompt = json_string(queued, "parallelExecutionPrompt")
+        .or_else(|| {
+            prefs.as_ref().and_then(|p| {
+                if p.fanout_prompting_active() {
+                    Some(
+                        p.magic_prompts
+                            .parallel_execution
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_PARALLEL_EXECUTION_PROMPT.to_string()),
+                    )
+                } else {
+                    None
+                }
+            })
         })
-    });
+        .filter(|_| !quota_saver);
     let ai_language = json_string(queued, "aiLanguage").or_else(|| {
         prefs
             .as_ref()
@@ -3320,10 +3329,12 @@ pub async fn send_chat_message(
             }
         }
     }
-    // Read Codex multi-agent preferences
+    // Read Codex multi-agent preferences. Quota Saver overrides the stored
+    // switch here rather than rewriting it, same as fan-out prompting.
     if effective_backend == Backend::Codex {
         if let Ok(prefs) = crate::load_preferences(app.clone()).await {
-            codex_multi_agent_enabled = prefs.codex_multi_agent_enabled;
+            codex_multi_agent_enabled =
+                prefs.codex_multi_agent_enabled && !prefs.quota_saver_enabled;
             if codex_multi_agent_enabled {
                 codex_max_agent_threads = Some(prefs.codex_max_agent_threads.clamp(1, 8));
             }
