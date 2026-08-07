@@ -1,8 +1,7 @@
-use ignore::WalkBuilder;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1066,6 +1065,67 @@ pub async fn list_worktrees(app: AppHandle, project_id: String) -> Result<Vec<Wo
     Ok(worktrees)
 }
 
+/// One-shot project open payload: worktrees + session lists (with message counts).
+/// Avoids the frontend waterfall of `list_worktrees` then N× `get_sessions` over WS.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBootstrap {
+    pub worktrees: Vec<Worktree>,
+    pub sessions_by_worktree: HashMap<String, crate::chat::types::WorktreeSessions>,
+}
+
+/// Load worktrees and per-worktree session lists for a project in one round-trip.
+/// Sessions are fetched in parallel with message counts (canvas needs them).
+pub async fn bootstrap_project(
+    app: AppHandle,
+    project_id: String,
+) -> Result<ProjectBootstrap, String> {
+    log::trace!("Bootstrapping project canvas data: {project_id}");
+
+    let worktrees = list_worktrees(app.clone(), project_id).await?;
+
+    let session_futures: Vec<_> = worktrees
+        .iter()
+        .map(|wt| {
+            let app = app.clone();
+            let worktree_id = wt.id.clone();
+            let worktree_path = wt.path.clone();
+            async move {
+                let sessions = crate::chat::get_sessions(
+                    app,
+                    worktree_id.clone(),
+                    worktree_path,
+                    None,       // include_archived
+                    Some(true), // include_message_counts
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("bootstrap_project: get_sessions failed for {worktree_id}: {e}");
+                    crate::chat::types::WorktreeSessions {
+                        worktree_id: worktree_id.clone(),
+                        sessions: vec![],
+                        active_session_id: None,
+                        default_model: None,
+                        version: 2,
+                        branch_naming_completed: false,
+                    }
+                });
+                (worktree_id, sessions)
+            }
+        })
+        .collect();
+
+    let sessions_by_worktree = futures_util::future::join_all(session_futures)
+        .await
+        .into_iter()
+        .collect();
+
+    Ok(ProjectBootstrap {
+        worktrees,
+        sessions_by_worktree,
+    })
+}
+
 /// Get a single worktree by ID
 pub async fn get_worktree(app: AppHandle, worktree_id: String) -> Result<Worktree, String> {
     log::trace!("Getting worktree: {worktree_id}");
@@ -1143,6 +1203,7 @@ pub async fn get_worktree_diff(
     let base_remote = worktree.base_remote.clone();
     let base_branch = worktree.base_branch.unwrap_or(project_default_branch);
     let has_head = git_has_head(&worktree.path);
+    // -c core.quotePath=false so non-ASCII paths are raw UTF-8 (issue #631).
     let mut args = match diff_type.as_str() {
         "uncommitted" => {
             let diff_base = if has_head {
@@ -1151,12 +1212,16 @@ pub async fn get_worktree_diff(
                 "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
             };
             vec![
+                "-c".to_string(),
+                "core.quotePath=false".to_string(),
                 "diff".to_string(),
                 diff_base.to_string(),
                 "--unified=3".to_string(),
             ]
         }
         "branch" => vec![
+            "-c".to_string(),
+            "core.quotePath=false".to_string(),
             "diff".to_string(),
             "--unified=3".to_string(),
             format!(
@@ -1377,6 +1442,7 @@ fn clear_session_runtime_state(session: &mut Session) {
     session.waiting_for_input_type = None;
     session.pending_permission_denials.clear();
     session.pending_codex_permission_requests.clear();
+    session.pending_opencode_permission_requests.clear();
     session.pending_codex_command_approval_requests.clear();
     session.pending_codex_user_input_requests.clear();
     session.pending_codex_mcp_elicitation_requests.clear();
@@ -1441,6 +1507,7 @@ fn prepare_forked_metadata(
     metadata.archived_by_base_close = None;
     metadata.pending_permission_denials.clear();
     metadata.pending_codex_permission_requests.clear();
+    metadata.pending_opencode_permission_requests.clear();
     metadata.pending_codex_command_approval_requests.clear();
     metadata.pending_codex_user_input_requests.clear();
     metadata.pending_codex_mcp_elicitation_requests.clear();
@@ -5441,15 +5508,27 @@ pub async fn open_pull_request(
 
     let worktree = data
         .find_worktree(&worktree_id)
-        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
+        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?
+        .clone();
+    let project = data
+        .find_project(&worktree.project_id)
+        .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
 
-    // Use the worktree path for the PR creation
+    let base_branch = select_target_branch(
+        None,
+        worktree.base_branch.as_deref(),
+        &project.default_branch,
+    );
+
+    // Use the worktree path for the PR creation; open against the worktree base
+    // (not only the project default) so stacked branches target the right base.
     let gh = resolve_gh_binary(&app);
     let result = git::open_pull_request(
         &worktree.path,
         title.as_deref(),
         body.as_deref(),
         draft.unwrap_or(false),
+        Some(&base_branch),
         &gh,
     )?;
 
@@ -5471,82 +5550,144 @@ pub struct WorktreeFile {
     pub is_dir: bool,
 }
 
-/// List files in a worktree, respecting .gitignore
-/// Returns files sorted alphabetically, limited to prevent performance issues
-pub async fn list_worktree_files(
-    worktree_path: String,
-    max_files: Option<usize>,
+/// Directory names skipped while listing worktree files.
+///
+/// Gitignored files (e.g. `.env`) are intentionally included so the file
+/// browser can open them. Heavy dependency/build trees are still skipped so
+/// listing stays usable under the max-files cap.
+///
+/// `vendor` (Composer/PHP and some Go layouts) must be skipped: a single
+/// Laravel `vendor/` tree can exceed the max-files cap alone, which used to
+/// truncate the walk mid-tree and hide most project source directories.
+fn is_skipped_file_browser_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | ".turbo"
+            | ".cache"
+            | "coverage"
+            | "__pycache__"
+            | ".venv"
+            | "venv"
+            | "elm-stuff"
+            | "vendor"
+            | "Pods"
+            | "bower_components"
+            | ".gradle"
+            | ".pnpm-store"
+            | "site-packages"
+            | ".tox"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".sass-cache"
+            | "DerivedData"
+            | ".dart_tool"
+            | ".parcel-cache"
+            | ".svelte-kit"
+            | ".vercel"
+            | ".output"
+    )
+}
+
+/// Synchronous breadth-first listing used by [`list_worktree_files`].
+///
+/// BFS is intentional: with a max-files cap, depth-first walks (e.g. into
+/// `vendor/` or a deep monorepo package) used to exhaust the budget before
+/// sibling top-level directories were discovered, so the file browser looked
+/// nearly empty compared to editors like Zed.
+fn list_worktree_files_sync(
+    worktree_path: &str,
+    max: usize,
 ) -> Result<Vec<WorktreeFile>, String> {
-    log::trace!("Listing files in worktree: {worktree_path}");
+    let root = Path::new(worktree_path);
+    if !root.is_dir() {
+        // Missing/stale path while switching projects — return empty, not an error.
+        log::debug!("Worktree path is not a directory (skipping list): {worktree_path}");
+        return Ok(Vec::new());
+    }
 
-    let max = max_files.unwrap_or(5000);
-    let mut files = Vec::new();
+    let mut files: Vec<WorktreeFile> = Vec::new();
+    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    queue.push_back(root.to_path_buf());
 
-    // Use ignore crate's WalkBuilder which respects .gitignore by default
-    let walker = WalkBuilder::new(&worktree_path)
-        .hidden(false) // Include hidden files (user may want .env.example etc)
-        .git_ignore(true) // Respect .gitignore
-        .git_global(true) // Respect global gitignore
-        .git_exclude(true) // Respect .git/info/exclude
-        .require_git(false) // Work even if not a git repo
-        .build();
-
-    let worktree_path_ref = Path::new(&worktree_path);
-
-    for entry in walker {
+    while let Some(dir) = queue.pop_front() {
         if files.len() >= max {
             break;
         }
 
-        let entry = match entry {
-            Ok(e) => e,
+        let read = match fs::read_dir(&dir) {
+            Ok(r) => r,
             Err(e) => {
-                log::warn!("Failed to read entry: {e}");
+                log::warn!("Failed to read directory {}: {e}", dir.display());
                 continue;
             }
         };
 
-        let path = entry.path();
+        // Stable order within each directory so BFS truncation is deterministic.
+        let mut entries: Vec<fs::DirEntry> = read.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.file_name());
 
-        // Skip the root directory itself
-        if path == worktree_path_ref {
-            continue;
+        for entry in entries {
+            if files.len() >= max {
+                break;
+            }
+
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if is_skipped_file_browser_dir(name_str.as_ref()) {
+                continue;
+            }
+
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(e) => {
+                    log::warn!("Failed to read file type for {}: {e}", path.display());
+                    continue;
+                }
+            };
+
+            // Do not follow symlinks when deciding to recurse (avoids loops /
+            // walking outside the worktree). Symlink-to-dir is listed as a
+            // non-directory leaf so the tree stays finite.
+            let entry_is_dir = file_type.is_dir() && !file_type.is_symlink();
+
+            let relative = match path.strip_prefix(root) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            // Normalize to forward slashes so UI/API paths are platform-stable
+            // (Windows Path::to_string_lossy() uses backslashes).
+            let relative_str = relative.to_string_lossy().replace('\\', "/");
+            if relative_str.is_empty() {
+                continue;
+            }
+
+            let extension = if entry_is_dir {
+                String::new()
+            } else {
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+
+            files.push(WorktreeFile {
+                relative_path: relative_str,
+                extension,
+                is_dir: entry_is_dir,
+            });
+
+            if entry_is_dir {
+                queue.push_back(path);
+            }
         }
-
-        // Skip .git directory and its contents
-        if path.components().any(|c| c.as_os_str() == ".git") {
-            continue;
-        }
-
-        let entry_is_dir = path.is_dir();
-
-        // Get relative path
-        let relative = match path.strip_prefix(worktree_path_ref) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        let relative_str = relative.to_string_lossy().to_string();
-
-        // Skip empty paths
-        if relative_str.is_empty() {
-            continue;
-        }
-
-        let extension = if entry_is_dir {
-            String::new()
-        } else {
-            path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_string()
-        };
-
-        files.push(WorktreeFile {
-            relative_path: relative_str,
-            extension,
-            is_dir: entry_is_dir,
-        });
     }
 
     // Sort: directories first, then alphabetically within each group
@@ -5555,6 +5696,29 @@ pub async fn list_worktree_files(
             .cmp(&a.is_dir)
             .then_with(|| a.relative_path.cmp(&b.relative_path))
     });
+
+    Ok(files)
+}
+
+/// List files in a worktree for the file browser and @-mentions.
+///
+/// Includes hidden and gitignored files (e.g. `.env`) so users can open them
+/// from the sidebar. Skips `.git` and common heavy dependency/build directories
+/// (including `vendor` / `node_modules`). Walks breadth-first so a max-files
+/// cap still leaves a complete shallow project tree.
+/// Returns files sorted alphabetically, limited to prevent performance issues.
+pub async fn list_worktree_files(
+    worktree_path: String,
+    max_files: Option<usize>,
+) -> Result<Vec<WorktreeFile>, String> {
+    log::trace!("Listing files in worktree: {worktree_path}");
+
+    let max = max_files.unwrap_or(5000);
+    // Filesystem walk is sync and can be large; keep it off the async runtime
+    // so project switches (which re-list) cannot stall other Tauri commands.
+    let files = tokio::task::spawn_blocking(move || list_worktree_files_sync(&worktree_path, max))
+        .await
+        .map_err(|e| format!("Failed to list worktree files: {e}"))??;
 
     log::trace!("Found {} files in worktree", files.len());
     Ok(files)
@@ -5851,13 +6015,17 @@ pub async fn get_pr_prompt(app: AppHandle, worktree_path: String) -> Result<Stri
         .find(|w| w.path == worktree_path)
         .ok_or_else(|| format!("Worktree not found: {worktree_path}"))?;
 
-    // Find the project to get default_branch
+    // Prefer worktree base (stacked / non-default branch) over project default
     let project = data
         .find_project(&worktree.project_id)
         .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
 
-    let target_branch = &project.default_branch;
-    let context = git::generate_pr_context(&worktree_path, target_branch)?;
+    let target_branch = select_target_branch(
+        None,
+        worktree.base_branch.as_deref(),
+        &project.default_branch,
+    );
+    let context = git::generate_pr_context(&worktree_path, &target_branch)?;
 
     let mut prompt = format!(
         r#"The user likes the state of the code and wants to open a PR.
@@ -5942,12 +6110,16 @@ pub async fn get_review_prompt(
         .find(|w| w.path == worktree_path)
         .ok_or_else(|| format!("Worktree not found: {worktree_path}"))?;
 
-    // Find the project to get default_branch
+    // Prefer worktree base (stacked / non-default branch) over project default
     let project = data
         .find_project(&worktree.project_id)
         .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
 
-    let target_branch = &project.default_branch;
+    let target_branch = select_target_branch(
+        None,
+        worktree.base_branch.as_deref(),
+        &project.default_branch,
+    );
     let current_branch = git::get_current_branch(&worktree_path)?;
 
     // Get the full git diff (origin/target...HEAD)
@@ -5980,9 +6152,10 @@ pub async fn get_review_prompt(
         return Err(format!("Git log failed: {stderr}"));
     };
 
-    // Get uncommitted changes (staged + unstaged for tracked files)
+    // Get uncommitted changes (staged + unstaged for tracked files).
+    // core.quotePath=false: raw UTF-8 paths for non-ASCII names (#631).
     let uncommitted_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["diff", "HEAD"])
+        .args(["-c", "core.quotePath=false", "diff", "HEAD"])
         .output()
         .map_err(|e| format!("Failed to run git diff HEAD: {e}"))?;
 
@@ -5992,9 +6165,15 @@ pub async fn get_review_prompt(
         String::new() // Not an error if no uncommitted changes
     };
 
-    // Get list of untracked files
+    // Get list of untracked files (raw UTF-8 paths — #631)
     let untracked_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["ls-files", "--others", "--exclude-standard"])
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|e| format!("Failed to list untracked files: {e}"))?;
 
@@ -6639,9 +6818,7 @@ fn cleanup_unused_pr_remotes(
 
     for remote in candidates {
         if remote_still_referenced_by_other_worktrees(data, exclude_worktree_id, &remote) {
-            log::trace!(
-                "Keeping remote '{remote}' — still referenced by another worktree"
-            );
+            log::trace!("Keeping remote '{remote}' — still referenced by another worktree");
             continue;
         }
         git::try_remove_ephemeral_remote(repo_path, &remote);
@@ -6665,8 +6842,8 @@ fn detect_ephemeral_pr_push_target(
 
 #[cfg(test)]
 mod pr_remote_cleanup_tests {
-    use super::*;
     use super::super::types::ProjectsData;
+    use super::*;
 
     fn minimal_worktree(
         id: &str,
@@ -6746,13 +6923,7 @@ mod pr_remote_cleanup_tests {
             ],
         };
 
-        cleanup_unused_pr_remotes(
-            &data,
-            "clearing",
-            path,
-            Some("fork-drop"),
-            Some("main"),
-        );
+        cleanup_unused_pr_remotes(&data, "clearing", path, Some("fork-drop"), Some("main"));
 
         assert!(!git::remote_exists(path, "fork-drop"));
         assert!(git::remote_exists(path, "fork-keep"));
@@ -7593,12 +7764,18 @@ pub async fn create_pr_with_ai_content(
         .find_project(&worktree.project_id)
         .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
 
-    let target_branch = &project.default_branch;
+    // Prefer the worktree's base (e.g. feature branch when stacked) over the
+    // project default so PRs open against the branch the worktree was created from.
+    let target_branch = select_target_branch(
+        None,
+        worktree.base_branch.as_deref(),
+        &project.default_branch,
+    );
     let current_branch = git::get_current_branch(&worktree_path)?;
     check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     // Check if we're on the target branch (can't create PR to same branch)
-    if current_branch == *target_branch {
+    if current_branch == target_branch {
         return Err(format!(
             "Cannot create PR: current branch '{current_branch}' is the same as target branch"
         ));
@@ -7771,7 +7948,7 @@ pub async fn create_pr_with_ai_content(
         &app,
         &worktree_path,
         &current_branch,
-        target_branch,
+        &target_branch,
         custom_prompt.as_deref(),
         model.as_deref(),
         &context_content,
@@ -7823,14 +8000,14 @@ pub async fn create_pr_with_ai_content(
     log::trace!("Generated PR title: {}", pr_content.title);
     check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
-    // Create the PR using gh CLI
-    log::trace!("Creating PR with gh CLI");
+    // Create the PR using gh CLI (base = worktree base branch when set)
+    log::trace!("Creating PR with gh CLI against base branch: {target_branch}");
     let output = gh_command(&gh, &worktree_path)
         .args([
             "pr",
             "create",
             "--base",
-            target_branch,
+            &target_branch,
             "--title",
             &pr_content.title,
             "--body",
@@ -9667,7 +9844,11 @@ fn generate_review(
         .map_err(|e| format!("Failed to parse review response: {e}"))
 }
 
-fn select_review_target_branch(
+/// Resolve the git/PR target branch for a worktree.
+///
+/// Priority: linked PR base → worktree `base_branch` (branch the worktree was
+/// created from) → project default. Empty strings are treated as missing.
+fn select_target_branch(
     linked_pr_base: Option<&str>,
     worktree_base: Option<&str>,
     project_default: &str,
@@ -9727,7 +9908,7 @@ pub async fn run_review_with_ai(
     } else {
         None
     };
-    let target_branch = select_review_target_branch(
+    let target_branch = select_target_branch(
         linked_pr_base.as_deref(),
         worktree_base.as_deref(),
         &project_default,
@@ -9739,9 +9920,10 @@ pub async fn run_review_with_ai(
     // Get commit history (non-fatal — same reason)
     let commits = get_branch_commits(&worktree_path, &target_branch, "HEAD").unwrap_or_default();
 
-    // Get uncommitted changes (staged + unstaged for tracked files)
+    // Get uncommitted changes (staged + unstaged for tracked files).
+    // core.quotePath=false: raw UTF-8 paths for non-ASCII names (#631).
     let uncommitted_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["diff", "HEAD"])
+        .args(["-c", "core.quotePath=false", "diff", "HEAD"])
         .output()
         .map_err(|e| format!("Failed to get uncommitted diff: {e}"))?;
 
@@ -9752,9 +9934,15 @@ pub async fn run_review_with_ai(
         String::new()
     };
 
-    // Get untracked files
+    // Get untracked files (raw UTF-8 paths — #631)
     let untracked_output = wsl_aware_command("git", Some(Path::new(&worktree_path)))
-        .args(["ls-files", "--others", "--exclude-standard"])
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|e| format!("Failed to list untracked files: {e}"))?;
 
@@ -10138,6 +10326,7 @@ async fn update_review_session_state(
         None,
         None,
         None,
+        None, // pending_opencode_permission_requests
         None,
         None,
         None,
@@ -11502,12 +11691,17 @@ pub async fn merge_worktree_to_base(
         }
     }
 
-    // Perform the merge in main repo
+    // Merge into the worktree's base branch (not always the project default)
+    let base_branch = select_target_branch(
+        None,
+        worktree.base_branch.as_deref(),
+        &project.default_branch,
+    );
     let merge_result = git::merge_branch_to_base(
         &project.path,
         &worktree.path,
         &worktree.branch,
-        &project.default_branch,
+        &base_branch,
         merge_type,
     );
 
@@ -12888,22 +13082,36 @@ pub async fn list_claude_skills(worktree_path: Option<String>) -> Result<Vec<Cla
     Ok(skills)
 }
 
-/// List Codex CLI skills from ~/.codex/skills/
-pub async fn list_codex_skills() -> Result<Vec<ClaudeSkill>, String> {
-    log::trace!("Listing Codex CLI skills");
-
+fn collect_codex_skills(home: &Path, worktree: Option<&Path>) -> Vec<ClaudeSkill> {
     let mut skills_map = std::collections::HashMap::new();
 
-    if let Some(home) = get_home_dir() {
-        collect_skills_from_dir(&home.join(".codex").join("skills"), &mut skills_map);
-        collect_skills_from_dir(
-            &jean_global_backend_skills_dir(&home, "codex"),
-            &mut skills_map,
-        );
+    // Current Agents Skills locations (user + project)
+    collect_skills_from_dir(&home.join(".agents").join("skills"), &mut skills_map);
+    // Legacy Codex user location
+    collect_skills_from_dir(&home.join(".codex").join("skills"), &mut skills_map);
+    // Jean-managed mirror used for cross-backend installs
+    collect_skills_from_dir(
+        &jean_global_backend_skills_dir(home, "codex"),
+        &mut skills_map,
+    );
+    if let Some(worktree) = worktree {
+        collect_skills_from_dir(&worktree.join(".agents").join("skills"), &mut skills_map);
+        // Some projects still keep Codex skills under .codex/skills
+        collect_skills_from_dir(&worktree.join(".codex").join("skills"), &mut skills_map);
     }
 
     let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
     skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
+/// List Codex CLI skills from the current Codex and legacy Jean locations.
+pub async fn list_codex_skills(worktree_path: Option<String>) -> Result<Vec<ClaudeSkill>, String> {
+    log::trace!("Listing Codex CLI skills");
+
+    let skills = get_home_dir()
+        .map(|home| collect_codex_skills(&home, worktree_path.as_deref().map(Path::new)))
+        .unwrap_or_default();
     log::trace!("Found {} Codex CLI skills", skills.len());
     Ok(skills)
 }
@@ -13369,6 +13577,31 @@ mod tests {
     use crate::chat::types::Backend;
     use std::path::Path;
 
+    #[test]
+    fn codex_skills_include_agents_user_and_project_directories() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let home = temp.path().join("home");
+        let worktree = temp.path().join("repo");
+        let user_skill = home.join(".agents/skills/user-skill");
+        let project_skill = worktree.join(".agents/skills/project-skill");
+        let project_legacy_skill = worktree.join(".codex/skills/legacy-project-skill");
+        std::fs::create_dir_all(&user_skill).expect("user skill dir");
+        std::fs::create_dir_all(&project_skill).expect("project skill dir");
+        std::fs::create_dir_all(&project_legacy_skill).expect("legacy project skill dir");
+        std::fs::write(user_skill.join("SKILL.md"), "# User skill\n").expect("user skill");
+        std::fs::write(project_skill.join("SKILL.md"), "# Project skill\n").expect("project skill");
+        std::fs::write(project_legacy_skill.join("SKILL.md"), "# Legacy project skill\n")
+            .expect("legacy project skill");
+
+        let skills = collect_codex_skills(&home, Some(&worktree));
+        let names: Vec<_> = skills.into_iter().map(|skill| skill.name).collect();
+
+        assert_eq!(
+            names,
+            vec!["legacy-project-skill", "project-skill", "user-skill"]
+        );
+    }
+
     fn run_test_git(repo: &Path, args: &[&str]) {
         let output = silent_command("git")
             .args(args)
@@ -13394,6 +13627,145 @@ mod tests {
         let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
         assert!(format_open_error("vscodium", &other)
             .starts_with("Failed to open VSCodium ('codium'):"));
+    }
+
+    #[test]
+    fn is_skipped_file_browser_dir_covers_heavy_trees() {
+        assert!(is_skipped_file_browser_dir(".git"));
+        assert!(is_skipped_file_browser_dir("node_modules"));
+        assert!(is_skipped_file_browser_dir("target"));
+        assert!(is_skipped_file_browser_dir("vendor"));
+        assert!(is_skipped_file_browser_dir("Pods"));
+        assert!(!is_skipped_file_browser_dir(".env"));
+        assert!(!is_skipped_file_browser_dir("src"));
+        assert!(!is_skipped_file_browser_dir("app"));
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_includes_gitignored_env_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        std::fs::write(root.join(".gitignore"), ".env\nnode_modules/\nvendor/\n")
+            .expect("gitignore");
+        std::fs::write(root.join(".env"), "SECRET=1\n").expect(".env");
+        std::fs::write(root.join(".env.example"), "SECRET=\n").expect(".env.example");
+        std::fs::write(root.join("README.md"), "hi\n").expect("readme");
+        std::fs::create_dir_all(root.join("node_modules/pkg")).expect("node_modules");
+        std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports=1\n")
+            .expect("nested node_modules file");
+        std::fs::create_dir_all(root.join("vendor/pkg")).expect("vendor");
+        std::fs::write(root.join("vendor/pkg/autoload.php"), "<?php\n").expect("vendor file");
+        std::fs::create_dir_all(root.join("src")).expect("src");
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("main");
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), None)
+            .await
+            .expect("list files");
+        let paths: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+
+        assert!(
+            paths.contains(&".env"),
+            "gitignored .env should be listed: {paths:?}"
+        );
+        assert!(
+            paths.contains(&".env.example"),
+            "hidden .env.example should be listed: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"README.md"),
+            "tracked file missing: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"src/main.rs"),
+            "nested file missing: {paths:?}"
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|p| *p == "node_modules" || p.starts_with("node_modules/")),
+            "node_modules should be pruned: {paths:?}"
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|p| *p == "vendor" || p.starts_with("vendor/")),
+            "vendor should be pruned: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| *p == ".git" || p.starts_with(".git/")),
+            ".git directory should be pruned: {paths:?}"
+        );
+        assert!(
+            paths.contains(&".gitignore"),
+            ".gitignore itself should still be listed: {paths:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_respects_max_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        for i in 0..10 {
+            std::fs::write(root.join(format!("f{i}.txt")), "x\n").expect("write file");
+        }
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), Some(3))
+            .await
+            .expect("list files");
+        assert_eq!(files.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_bfs_keeps_top_level_when_capped() {
+        // Regression: DFS into a deep heavy tree used to exhaust max_files and
+        // hide sibling top-level dirs (file browser looked nearly empty).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("app/deep/nested")).expect("app");
+        std::fs::write(root.join("app/deep/nested/leaf.php"), "<?php\n").expect("leaf");
+        std::fs::create_dir_all(root.join("bootstrap")).expect("bootstrap");
+        std::fs::write(root.join("bootstrap/app.php"), "<?php\n").expect("bootstrap file");
+        // Many files under a late-alphabet deep tree (would dominate a DFS budget)
+        std::fs::create_dir_all(root.join("zzz/deep")).expect("zzz");
+        for i in 0..50 {
+            std::fs::write(root.join("zzz/deep").join(format!("f{i}.txt")), "x\n")
+                .expect("zzz file");
+        }
+        std::fs::write(root.join("README.md"), "hi\n").expect("readme");
+
+        let files = list_worktree_files(root.to_string_lossy().to_string(), Some(8))
+            .await
+            .expect("list files");
+        let paths: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+
+        assert!(
+            paths.iter().any(|p| *p == "app" || p.starts_with("app/")),
+            "top-level app should appear under cap: {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| *p == "bootstrap" || p.starts_with("bootstrap/")),
+            "top-level bootstrap should appear under cap: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"README.md"),
+            "top-level README should appear under cap: {paths:?}"
+        );
+        assert_eq!(files.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn list_worktree_files_missing_path_returns_empty() {
+        let files = list_worktree_files(
+            "/tmp/jean-file-browser-path-that-does-not-exist-xyz".to_string(),
+            Some(10),
+        )
+        .await
+        .expect("missing path should not error");
+        assert!(files.is_empty());
     }
 
     #[test]
@@ -13546,24 +13918,30 @@ mod tests {
     }
 
     #[test]
-    fn review_target_branch_prefers_linked_pr_base() {
+    fn target_branch_prefers_linked_pr_base() {
         assert_eq!(
-            select_review_target_branch(Some("v4.x"), Some("develop"), "next"),
+            select_target_branch(Some("v4.x"), Some("develop"), "next"),
             "v4.x"
         );
     }
 
     #[test]
-    fn review_target_branch_falls_back_to_worktree_base() {
+    fn target_branch_falls_back_to_worktree_base() {
         assert_eq!(
-            select_review_target_branch(None, Some("develop"), "next"),
+            select_target_branch(None, Some("develop"), "next"),
             "develop"
         );
     }
 
     #[test]
-    fn review_target_branch_falls_back_to_project_default() {
-        assert_eq!(select_review_target_branch(None, None, "next"), "next");
+    fn target_branch_falls_back_to_project_default() {
+        assert_eq!(select_target_branch(None, None, "next"), "next");
+    }
+
+    #[test]
+    fn target_branch_ignores_empty_worktree_base() {
+        assert_eq!(select_target_branch(None, Some("  "), "main"), "main");
+        assert_eq!(select_target_branch(None, Some(""), "main"), "main");
     }
 
     #[test]

@@ -5,11 +5,12 @@ import { useUIStore } from '@/store/ui-store'
 import { invoke } from '@/lib/transport'
 import { SingleTerminalView, TerminalView } from './TerminalView'
 
-const { mockInvoke, initTerminal, fit, focus } = vi.hoisted(() => ({
+const { mockInvoke, initTerminal, fit, focus, isNativeApp } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
   initTerminal: vi.fn().mockResolvedValue(undefined),
   fit: vi.fn(),
   focus: vi.fn(),
+  isNativeApp: vi.fn(() => false),
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -28,9 +29,19 @@ vi.mock('@/hooks/useTerminalThemeSync', () => ({
   useTerminalBackgroundColor: () => '#000000',
 }))
 
+vi.mock('@/lib/environment', () => ({
+  isNativeApp: () => isNativeApp(),
+}))
+
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => false,
+}))
+
 vi.mock('@/lib/terminal-instances', () => ({
   disposeTerminal: vi.fn(),
   disposePanelWorktreeTerminals: vi.fn(),
+  writeTerminalInput: vi.fn(),
+  focusTerminal: vi.fn(),
 }))
 
 class ResizeObserverMock {
@@ -140,6 +151,38 @@ describe('SingleTerminalView', () => {
     )
 
     await waitFor(() => expect(initTerminal).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows the special-keys bar on web access', async () => {
+    isNativeApp.mockReturnValue(false)
+
+    render(
+      <SingleTerminalView
+        terminalId="terminal-1"
+        worktreeId="worktree-1"
+        worktreePath="/tmp/worktree-1"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId('terminal-extra-keys-bar')).toBeTruthy()
+    )
+  })
+
+  it('hides the special-keys bar on native desktop', () => {
+    isNativeApp.mockReturnValue(true)
+
+    render(
+      <SingleTerminalView
+        terminalId="terminal-1"
+        worktreeId="worktree-1"
+        worktreePath="/tmp/worktree-1"
+        isActive
+      />
+    )
+
+    expect(screen.queryByTestId('terminal-extra-keys-bar')).toBeNull()
   })
 })
 
@@ -397,8 +440,14 @@ describe('TerminalView tab middle-click', () => {
     )
 
   const getTab = (label: string) => {
-    const tab = screen.getByText(label).closest('button')
-    if (!tab) throw new Error(`Tab button for "${label}" not found`)
+    // Tab chrome is a clickable div (sibling of the close button) so nested
+    // interactive a11y rules are satisfied — not a single outer <button>.
+    const labelEl = screen.getByText(label)
+    const tab =
+      labelEl.closest('[draggable="true"]') ??
+      labelEl.closest('.cursor-pointer') ??
+      labelEl.parentElement
+    if (!tab) throw new Error(`Tab for "${label}" not found`)
     return tab
   }
 

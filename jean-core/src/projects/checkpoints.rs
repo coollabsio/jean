@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::platform::wsl_aware_command;
 
 use super::git::resolve_git_dirs;
-use super::git_status::{parse_unified_diff, DiffFile, GitDiff};
+use super::git_status::{parse_unified_diff, DiffFile, GitDiff, GIT_NO_QUOTE_PATH_ARGS};
 
 /// Max checkpoints retained per worktree (oldest pruned first).
 const MAX_CHECKPOINTS_PER_WORKTREE: usize = 100;
@@ -186,10 +186,22 @@ fn truncate_preview(message: &str) -> String {
 // Git helpers
 // ============================================================================
 
+fn git_index_env_path(index: &Path) -> std::path::PathBuf {
+    // Git for Windows rejects `\\?\` extended paths in GIT_INDEX_FILE.
+    let s = index.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return std::path::PathBuf::from(rest);
+    }
+    index.to_path_buf()
+}
+
 fn git_output(repo_path: &str, args: &[&str], index_file: Option<&Path>) -> Result<String, String> {
     let mut cmd = wsl_aware_command("git", Some(Path::new(repo_path)));
     if let Some(index) = index_file {
-        cmd.env("GIT_INDEX_FILE", index);
+        cmd.env("GIT_INDEX_FILE", git_index_env_path(index));
     }
     let output = cmd
         .args(args)
@@ -334,7 +346,10 @@ fn delete_checkpoint_refs(repo_path: &str, id: &str) {
 
 /// Diff two trees/commits (or a commit vs working tree when `to` is None).
 fn diff_commits(repo_path: &str, from: &str, to: Option<&str>) -> Result<GitDiff, String> {
-    let mut args = vec!["diff", "--unified=3", from];
+    // Emit raw UTF-8 paths so frontend patch parsers work with non-ASCII names (#631).
+    let mut args = Vec::with_capacity(6);
+    args.extend_from_slice(GIT_NO_QUOTE_PATH_ARGS);
+    args.extend_from_slice(&["diff", "--unified=3", from]);
     if let Some(to_ref) = to {
         args.push(to_ref);
     }
@@ -396,9 +411,16 @@ fn diff_commits(repo_path: &str, from: &str, to: Option<&str>) -> Result<GitDiff
 }
 
 fn list_untracked_relative(repo_path: &str) -> Vec<String> {
+    // Raw UTF-8 paths — see GIT_NO_QUOTE_PATH_ARGS / #631.
     let Ok(stdout) = git_output(
         repo_path,
-        &["ls-files", "--others", "--exclude-standard"],
+        &[
+            "-c",
+            "core.quotePath=false",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ],
         None,
     ) else {
         return Vec::new();
@@ -613,7 +635,7 @@ pub fn list_checkpoints(app: &AppHandle, worktree_id: &str) -> Result<Vec<AiChec
     let mut store = load_store(app, worktree_id)?;
     store
         .checkpoints
-        .sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        .sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(store.checkpoints)
 }
 
@@ -1060,9 +1082,7 @@ pub fn analyze_checkpoint_restore(
                 status: RestorePathStatus::ConflictedLaterActivity,
                 turn_status,
                 later_session_ids: later_sessions,
-                reason: Some(
-                    "Later agent turn(s) in this worktree also modified this file".into(),
-                ),
+                reason: Some("Later agent turn(s) in this worktree also modified this file".into()),
             });
             continue;
         }
@@ -1078,9 +1098,7 @@ pub fn analyze_checkpoint_restore(
                     status: RestorePathStatus::ConflictedWorkingTree,
                     turn_status,
                     later_session_ids: Vec::new(),
-                    reason: Some(
-                        "Working tree no longer matches this turn's end state".into(),
-                    ),
+                    reason: Some("Working tree no longer matches this turn's end state".into()),
                 });
                 continue;
             }
@@ -1504,7 +1522,8 @@ pub async fn restore_ai_checkpoint_turn(
 ) -> Result<RestoreTurnResult, String> {
     let mode = match mode.as_str() {
         "allTurnFiles" | "all_turn_files" | "all" => RestoreTurnMode::AllTurnFiles,
-        "cleanOnly" | "clean_only" | "clean" | _ => RestoreTurnMode::CleanOnly,
+        "cleanOnly" | "clean_only" | "clean" => RestoreTurnMode::CleanOnly,
+        _ => RestoreTurnMode::CleanOnly,
     };
     restore_checkpoint_turn(&app, &worktree_id, &checkpoint_id, mode)
 }
@@ -1840,8 +1859,7 @@ pub async fn propose_ai_checkpoint_restore(
     model: Option<String>,
     reasoning_effort: Option<String>,
 ) -> Result<CheckpointRestoreProposal, String> {
-    let (analysis, contexts) =
-        build_conflict_file_contexts(&app, &worktree_id, &checkpoint_id)?;
+    let (analysis, contexts) = build_conflict_file_contexts(&app, &worktree_id, &checkpoint_id)?;
     let clean_paths: Vec<String> = analysis
         .paths
         .iter()
@@ -1866,10 +1884,7 @@ pub async fn propose_ai_checkpoint_restore(
     let checkpoint = get_checkpoint(&app, &worktree_id, &checkpoint_id)?;
     let files_block = format_conflict_files_block(&contexts);
     let prompt = CHECKPOINT_RESTORE_PROMPT
-        .replace(
-            "{user_message}",
-            &checkpoint.user_message_preview,
-        )
+        .replace("{user_message}", &checkpoint.user_message_preview)
         .replace("{files_block}", &files_block);
 
     let working_dir = Some(Path::new(checkpoint.worktree_path.as_str()));
@@ -1927,7 +1942,9 @@ mod tests {
         run_git(repo, &["init", "--initial-branch", "main"]);
         run_git(repo, &["config", "user.email", "test@example.com"]);
         run_git(repo, &["config", "user.name", "Test"]);
-        // Avoid "detected dubious ownership" in some CI sandboxes.
+        // Keep LF as-is so restore assertions match written content on Windows
+        // (global core.autocrlf=true would otherwise checkout as CRLF).
+        run_git(repo, &["config", "core.autocrlf", "false"]);
         run_git(repo, &["config", "core.safecrlf", "false"]);
         std::fs::write(repo.join("README.md"), "hello\n").unwrap();
         run_git(repo, &["add", "."]);

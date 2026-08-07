@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from 'react'
 import { useUIStore } from '@/store/ui-store'
 import { ChevronUp, ChevronDown, X } from 'lucide-react'
 
@@ -139,26 +145,40 @@ export function ChatSearchBar({ scrollContainerRef }: ChatSearchBarProps) {
     setChatSearchOpen(false)
   }, [clearHighlights, setChatSearchOpen])
 
+  // Stable event fns — always see latest performSearch/close without re-subscribing.
+  const onDebouncedSearch = useEffectEvent((searchQuery: string) => {
+    performSearch(searchQuery)
+  })
+  const onChatSearchToggle = useEffectEvent(() => {
+    if (!chatSearchOpen) return
+    if (document.activeElement === inputRef.current) {
+      close()
+    } else {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  })
+
   // Debounced search
   useEffect(() => {
     if (!chatSearchOpen) return
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      performSearch(query)
+      onDebouncedSearch(query)
     }, 150)
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, chatSearchOpen, performSearch])
+  }, [query, chatSearchOpen])
 
   // Re-run search when DOM content changes (new messages, re-renders)
   useEffect(() => {
     if (!chatSearchOpen || !query || !scrollContainerRef.current) return
 
     const observer = new MutationObserver(() => {
-      performSearch(query)
+      onDebouncedSearch(query)
     })
     observer.observe(scrollContainerRef.current, {
       childList: true,
@@ -166,7 +186,7 @@ export function ChatSearchBar({ scrollContainerRef }: ChatSearchBarProps) {
       characterData: true,
     })
     return () => observer.disconnect()
-  }, [chatSearchOpen, query, scrollContainerRef, performSearch])
+  }, [chatSearchOpen, query, scrollContainerRef])
 
   // Focus input when opened
   useEffect(() => {
@@ -180,18 +200,10 @@ export function ChatSearchBar({ scrollContainerRef }: ChatSearchBarProps) {
 
   // Listen for toggle event (re-focus or close)
   useEffect(() => {
-    const handler = () => {
-      if (!chatSearchOpen) return
-      if (document.activeElement === inputRef.current) {
-        close()
-      } else {
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }
-    }
+    const handler = () => onChatSearchToggle()
     window.addEventListener('chat-search-toggle', handler)
     return () => window.removeEventListener('chat-search-toggle', handler)
-  }, [chatSearchOpen, close])
+  }, [])
 
   // Cleanup on unmount (session switch)
   useEffect(() => {
@@ -234,6 +246,7 @@ export function ChatSearchBar({ scrollContainerRef }: ChatSearchBarProps) {
         value={query}
         onChange={e => setQuery(e.target.value)}
         placeholder="Find in chat..."
+        aria-label="Find in chat"
         className="w-40 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground md:text-xs"
       />
       {query && (

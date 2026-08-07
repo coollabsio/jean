@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { invoke } from '@/lib/transport'
 import {
   Loader2,
@@ -43,6 +50,12 @@ import type {
 
 type Phase = 'loading' | 'select'
 type CommentTab = 'inline' | 'conversation'
+/** Default shows only open (non-resolved, non-outdated) inline review threads. */
+type InlineCommentFilter = 'open' | 'all'
+
+function isOpenReviewComment(comment: GitHubReviewComment): boolean {
+  return !comment.isOutdated && !comment.isResolved
+}
 
 /** Unified conversation item — either a PR comment or a review with body */
 type ConversationItem =
@@ -115,24 +128,30 @@ function renderInlineMarkdown(line: string): ReactNode[] {
   // Tokenize for **bold**, *italic* / _italic_, `code`. Emojis/text untouched.
   const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`)/g
   const parts = line.split(pattern).filter(p => p !== '')
-  return parts.map((part, i) => {
+  const seen = new Map<string, number>()
+  return parts.map(part => {
+    const baseKey = part
+    const n = seen.get(baseKey) ?? 0
+    seen.set(baseKey, n + 1)
+    const key = n === 0 ? baseKey : `${baseKey}#${n}`
+
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={i} className="font-semibold">
+        <strong key={key} className="font-semibold">
           {part.slice(2, -2)}
         </strong>
       )
     }
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
       return (
-        <em key={i} className="italic">
+        <em key={key} className="italic">
           {part.slice(1, -1)}
         </em>
       )
     }
     if (part.startsWith('_') && part.endsWith('_') && part.length > 2) {
       return (
-        <em key={i} className="italic">
+        <em key={key} className="italic">
           {part.slice(1, -1)}
         </em>
       )
@@ -140,14 +159,14 @@ function renderInlineMarkdown(line: string): ReactNode[] {
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <code
-          key={i}
+          key={key}
           className="rounded bg-muted px-1 py-0.5 text-[0.875em] font-mono"
         >
           {part.slice(1, -1)}
         </code>
       )
     }
-    return <span key={i}>{part}</span>
+    return <span key={key}>{part}</span>
   })
 }
 
@@ -247,6 +266,8 @@ export function ReviewCommentsDialog() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [diffExpanded, setDiffExpanded] = useState<Set<number>>(new Set())
+  const [inlineFilter, setInlineFilter] =
+    useState<InlineCommentFilter>('open')
 
   // Conversation comments state
   const [conversationItems, setConversationItems] = useState<
@@ -267,6 +288,7 @@ export function ReviewCommentsDialog() {
     setSelected(new Set())
     setExpanded(new Set())
     setDiffExpanded(new Set())
+    setInlineFilter('open')
     setActiveIndex(0)
     setConversationItems([])
     setConversationSelected(new Set())
@@ -290,13 +312,20 @@ export function ReviewCommentsDialog() {
         }),
       ])
 
-      // Inline code comments
+      // Inline code comments (open + resolved/outdated; UI filters open by default)
       const sortedInlineComments = sortByNewestDate(
         inlineResult,
         comment => comment.createdAt
       )
       setComments(sortedInlineComments)
-      setSelected(new Set(sortedInlineComments.map((_, i) => i)))
+      // Pre-select only open threads — resolved/outdated stay unselected
+      setSelected(
+        new Set(
+          sortedInlineComments.flatMap((comment, i) =>
+            isOpenReviewComment(comment) ? [i] : []
+          )
+        )
+      )
 
       // Build conversation items: PR comments + non-empty review bodies
       const items: ConversationItem[] = []
@@ -316,7 +345,7 @@ export function ReviewCommentsDialog() {
       setConversationSelected(new Set(sortedConversationItems.map((_, i) => i)))
 
       // Default to whichever tab has content; prefer inline
-      if (inlineResult.length === 0 && items.length > 0) {
+      if (sortedInlineComments.length === 0 && items.length > 0) {
         setTab('conversation')
       } else {
         setTab('inline')
@@ -396,36 +425,72 @@ export function ReviewCommentsDialog() {
     })
   }, [])
 
-  // Toggle all for active tab
-  const activeItems = tab === 'inline' ? comments : conversationItems
-  const activeSelected = tab === 'inline' ? selected : conversationSelected
-  const allSelected =
-    activeItems.length > 0 && activeSelected.size === activeItems.length
+  // Filtered inline list — open by default, with optional All view
+  const openInlineCount = useMemo(
+    () => comments.filter(isOpenReviewComment).length,
+    [comments]
+  )
+  const filteredInlineEntries = useMemo(() => {
+    return comments.flatMap((comment, index) =>
+      inlineFilter === 'all' || isOpenReviewComment(comment)
+        ? [{ comment, index }]
+        : []
+    )
+  }, [comments, inlineFilter])
+  const filteredInlineIndexes = useMemo(
+    () => filteredInlineEntries.map(entry => entry.index),
+    [filteredInlineEntries]
+  )
+  const filteredInlineSelectedCount = useMemo(
+    () => filteredInlineIndexes.filter(index => selected.has(index)).length,
+    [filteredInlineIndexes, selected]
+  )
 
+  // Toggle all for active tab (operates on currently visible items)
+  const activeItemsLength =
+    tab === 'inline' ? filteredInlineEntries.length : conversationItems.length
+  const activeSelectedCount =
+    tab === 'inline' ? filteredInlineSelectedCount : conversationSelected.size
+  const allSelected =
+    activeItemsLength > 0 && activeSelectedCount === activeItemsLength
+
+  // Clamp during render so filter/list shrinks never leave an out-of-range index
+  const safeActiveIndex =
+    activeItemsLength === 0 ? 0 : Math.min(activeIndex, activeItemsLength - 1)
+
+  const focusActiveRow = useCallback(
+    (index: number) => {
+      const row = activeRowRefs.current[`${tab}-${index}`]
+      row?.focus({ preventScroll: true })
+      row?.scrollIntoView?.({ block: 'nearest' })
+    },
+    [tab]
+  )
+
+  // Reset selection cursor when the visible list identity changes
   useEffect(() => {
     setActiveIndex(0)
-  }, [tab])
-
-  useEffect(() => {
-    if (activeItems.length === 0) {
-      if (activeIndex !== 0) setActiveIndex(0)
-      return
-    }
-    if (activeIndex >= activeItems.length) {
-      setActiveIndex(activeItems.length - 1)
-    }
-  }, [activeIndex, activeItems.length])
-
-  useEffect(() => {
-    const row = activeRowRefs.current[`${tab}-${activeIndex}`]
-    row?.focus({ preventScroll: true })
-    row?.scrollIntoView?.({ block: 'nearest' })
-  }, [tab, activeIndex])
+    requestAnimationFrame(() => focusActiveRow(0))
+  }, [tab, inlineFilter, focusActiveRow])
 
   const toggleAll = useCallback(() => {
     if (tab === 'inline') {
-      if (selected.size === comments.length) setSelected(new Set())
-      else setSelected(new Set(comments.map((_, i) => i)))
+      const visible = filteredInlineIndexes
+      const allVisibleSelected =
+        visible.length > 0 && visible.every(index => selected.has(index))
+      if (allVisibleSelected) {
+        setSelected(prev => {
+          const next = new Set(prev)
+          for (const index of visible) next.delete(index)
+          return next
+        })
+      } else {
+        setSelected(prev => {
+          const next = new Set(prev)
+          for (const index of visible) next.add(index)
+          return next
+        })
+      }
     } else {
       if (conversationSelected.size === conversationItems.length)
         setConversationSelected(new Set())
@@ -433,8 +498,8 @@ export function ReviewCommentsDialog() {
     }
   }, [
     tab,
-    selected.size,
-    comments.length,
+    filteredInlineIndexes,
+    selected,
     conversationSelected.size,
     conversationItems.length,
   ])
@@ -457,15 +522,22 @@ export function ReviewCommentsDialog() {
 
   const getSelectedFormattedComments = useCallback((): string[] => {
     if (tab === 'inline') {
-      return comments
-        .filter((_, i) => selected.has(i))
-        .map(formatInlineReviewComment)
+      // Only send currently visible + selected comments (respects Open/All filter)
+      return filteredInlineEntries.flatMap(({ index, comment }) =>
+        selected.has(index) ? [formatInlineReviewComment(comment)] : []
+      )
     }
 
-    return conversationItems
-      .filter((_, i) => conversationSelected.has(i))
-      .map(formatConversationReviewItem)
-  }, [tab, comments, selected, conversationItems, conversationSelected])
+    return conversationItems.flatMap((item, i) =>
+      conversationSelected.has(i) ? [formatConversationReviewItem(item)] : []
+    )
+  }, [
+    tab,
+    filteredInlineEntries,
+    selected,
+    conversationItems,
+    conversationSelected,
+  ])
 
   const reviewCommentsExecutionMode =
     preferences?.magic_prompt_modes?.review_comments_mode ??
@@ -563,37 +635,51 @@ export function ReviewCommentsDialog() {
         return
       }
 
-      if (activeItems.length === 0) return
+      if (activeItemsLength === 0) return
 
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setActiveIndex(index => Math.min(index + 1, activeItems.length - 1))
+        const next = Math.min(safeActiveIndex + 1, activeItemsLength - 1)
+        setActiveIndex(next)
+        requestAnimationFrame(() => focusActiveRow(next))
         return
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault()
-        setActiveIndex(index => Math.max(index - 1, 0))
+        const next = Math.max(safeActiveIndex - 1, 0)
+        setActiveIndex(next)
+        requestAnimationFrame(() => focusActiveRow(next))
         return
       }
 
       if (event.key === 'Enter') {
         event.preventDefault()
-        if (tab === 'inline') toggleExpand(activeIndex)
-        else toggleConversationExpand(activeIndex)
+        if (tab === 'inline') {
+          const originalIndex = filteredInlineEntries[safeActiveIndex]?.index
+          if (originalIndex !== undefined) toggleExpand(originalIndex)
+        } else {
+          toggleConversationExpand(safeActiveIndex)
+        }
         return
       }
 
       if (event.key === ' ') {
         event.preventDefault()
-        if (tab === 'inline') toggleSelect(activeIndex)
-        else toggleConversationSelect(activeIndex)
+        if (tab === 'inline') {
+          const originalIndex = filteredInlineEntries[safeActiveIndex]?.index
+          if (originalIndex !== undefined) toggleSelect(originalIndex)
+        } else {
+          toggleConversationSelect(safeActiveIndex)
+        }
       }
     },
     [
-      activeIndex,
-      activeItems.length,
+      safeActiveIndex,
+      activeItemsLength,
+      focusActiveRow,
       error,
+      filteredInlineEntries,
       handleSendSeparately,
       handleSendToChat,
       phase,
@@ -662,7 +748,15 @@ export function ReviewCommentsDialog() {
                 }}
               >
                 <Code className="size-3" />
-                Code Comments ({comments.length})
+                Code Comments (
+                {inlineFilter === 'open'
+                  ? openInlineCount
+                  : comments.length}
+                {inlineFilter === 'open' &&
+                openInlineCount !== comments.length
+                  ? ` open`
+                  : ''}
+                )
               </Button>
               <Button
                 variant={tab === 'conversation' ? 'default' : 'outline'}
@@ -682,7 +776,7 @@ export function ReviewCommentsDialog() {
             <div className="flex items-center justify-between gap-3 px-1 pb-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>
-                  {activeSelected.size} of {activeItems.length} selected
+                  {activeSelectedCount} of {activeItemsLength} selected
                 </span>
                 <span className="hidden items-center gap-1 sm:inline-flex">
                   <Kbd className="h-4 min-w-0 px-1 text-[10px]">↑/↓</Kbd>
@@ -697,43 +791,68 @@ export function ReviewCommentsDialog() {
                   select
                 </span>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 shrink-0 text-xs"
-                onClick={toggleAll}
-              >
-                {allSelected ? 'Deselect All' : 'Select All'}
-              </Button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {tab === 'inline' && comments.length > 0 && (
+                  <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                    <Button
+                      variant={inlineFilter === 'open' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setInlineFilter('open')}
+                      data-testid="review-filter-open"
+                    >
+                      Open ({openInlineCount})
+                    </Button>
+                    <Button
+                      variant={inlineFilter === 'all' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setInlineFilter('all')}
+                      data-testid="review-filter-all"
+                    >
+                      All ({comments.length})
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 shrink-0 text-xs"
+                  onClick={toggleAll}
+                >
+                  {allSelected ? 'Deselect All' : 'Select All'}
+                </Button>
+              </div>
             </div>
 
             {/* Inline code comments tab */}
-            {tab === 'inline' && comments.length > 0 && (
+            {tab === 'inline' && filteredInlineEntries.length > 0 && (
               <ScrollArea className="flex-1 min-h-0 border rounded-md">
                 <div className="divide-y">
-                  {comments.map((comment, index) => {
+                  {filteredInlineEntries.map(({ comment, index }, rowIndex) => {
                     const isExpanded = expanded.has(index)
                     const isDiffExpanded = diffExpanded.has(index)
                     const lineInfo = comment.line ? `:${comment.line}` : ''
                     const date = formatCommentDate(comment.createdAt)
                     const preview = previewLine(comment.body)
-
-                    const isActive = activeIndex === index
+                    const isActive = safeActiveIndex === rowIndex
 
                     return (
                       <div
                         key={index}
                         ref={node => {
-                          activeRowRefs.current[`inline-${index}`] = node
+                          activeRowRefs.current[`inline-${rowIndex}`] = node
                         }}
                         data-active={isActive}
-                        tabIndex={isActive ? 0 : -1}
-                        data-testid={`review-comment-row-inline-${index}`}
+                        data-testid={`review-comment-row-inline-${rowIndex}`}
                         className={cn(
                           'px-3 py-2.5 outline-none transition-colors',
                           isActive && 'bg-accent/40 ring-1 ring-ring/50'
                         )}
-                        onClick={() => setActiveIndex(index)}
+                        onClick={() => {
+                          setActiveIndex(rowIndex)
+                          requestAnimationFrame(() => focusActiveRow(rowIndex))
+                        }}
                       >
                         <div className="flex items-start gap-2">
                           <Checkbox
@@ -763,6 +882,17 @@ export function ReviewCommentsDialog() {
                                     </span>
                                   )}
                                 </p>
+                                {comment.isResolved && (
+                                  <span className="inline-flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-green-500/15 text-green-600 dark:text-green-400">
+                                    <CheckCircle2 className="size-2.5" />
+                                    Resolved
+                                  </span>
+                                )}
+                                {comment.isOutdated && (
+                                  <span className="inline-flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground">
+                                    Outdated
+                                  </span>
+                                )}
                               </div>
                               <div className="mt-1 pl-5 flex items-center gap-2 text-xs min-w-0">
                                 <code className="font-mono text-muted-foreground truncate">
@@ -810,12 +940,24 @@ export function ReviewCommentsDialog() {
             )}
 
             {/* Inline tab empty state */}
-            {tab === 'inline' && comments.length === 0 && (
+            {tab === 'inline' && filteredInlineEntries.length === 0 && (
               <div className="flex flex-col items-center justify-center gap-2 py-12 flex-1">
                 <Code className="size-8 text-muted-foreground/40" />
                 <p className="text-sm text-muted-foreground">
-                  No inline code comments on this PR
+                  {comments.length === 0
+                    ? 'No inline code comments on this PR'
+                    : 'No open review comments — switch to All to see resolved or outdated ones'}
                 </p>
+                {comments.length > 0 && inlineFilter === 'open' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-1"
+                    onClick={() => setInlineFilter('all')}
+                  >
+                    Show all ({comments.length})
+                  </Button>
+                )}
               </div>
             )}
 
@@ -831,22 +973,28 @@ export function ReviewCommentsDialog() {
                       getConversationItemDate(item)
                     )
 
-                    const isActive = activeIndex === index
+                    const isActive = safeActiveIndex === index
+                    const conversationKey =
+                      item.kind === 'comment'
+                        ? `comment:${item.data.author.login}:${item.data.created_at}:${body.slice(0, 80)}`
+                        : `review:${item.data.author.login}:${item.data.submittedAt ?? ''}:${item.data.state}:${body.slice(0, 80)}`
 
                     return (
                       <div
-                        key={index}
+                        key={conversationKey}
                         ref={node => {
                           activeRowRefs.current[`conversation-${index}`] = node
                         }}
                         data-active={isActive}
-                        tabIndex={isActive ? 0 : -1}
                         data-testid={`review-comment-row-conversation-${index}`}
                         className={cn(
                           'px-3 py-2.5 outline-none transition-colors',
                           isActive && 'bg-accent/40 ring-1 ring-ring/50'
                         )}
-                        onClick={() => setActiveIndex(index)}
+                        onClick={() => {
+                          setActiveIndex(index)
+                          requestAnimationFrame(() => focusActiveRow(index))
+                        }}
                       >
                         <div className="flex items-start gap-2">
                           <Checkbox
@@ -921,7 +1069,7 @@ export function ReviewCommentsDialog() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={activeSelected.size === 0 || isSending}
+                disabled={activeSelectedCount === 0 || isSending}
                 onClick={handleSendSeparately}
               >
                 {isSending ? (
@@ -929,7 +1077,7 @@ export function ReviewCommentsDialog() {
                 ) : (
                   <MessagesSquare className="size-3.5 mr-1.5" />
                 )}
-                Send Separately ({activeSelected.size})
+                Send Separately ({activeSelectedCount})
                 <KbdGroup className="ml-1.5 hidden sm:inline-flex">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⇧</Kbd>
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘↵</Kbd>
@@ -937,7 +1085,7 @@ export function ReviewCommentsDialog() {
               </Button>
               <Button
                 size="sm"
-                disabled={activeSelected.size === 0 || isSending}
+                disabled={activeSelectedCount === 0 || isSending}
                 onClick={handleSendToChat}
               >
                 {isSending ? (
@@ -945,7 +1093,7 @@ export function ReviewCommentsDialog() {
                 ) : (
                   <MessageSquare className="size-3.5 mr-1.5" />
                 )}
-                Send to Chat ({activeSelected.size})
+                Send to Chat ({activeSelectedCount})
                 <KbdGroup className="ml-1.5 hidden sm:inline-flex">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘</Kbd>
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">↵</Kbd>

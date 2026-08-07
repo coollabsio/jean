@@ -158,6 +158,20 @@ pub async fn write_clipboard_text(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn read_clipboard_text() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+        match clipboard.get_text() {
+            Ok(text) => Ok(text),
+            Err(arboard::Error::ContentNotAvailable) => Ok(String::new()),
+            Err(error) => Err(error.to_string()),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn save_dropped_image(
     runtime: State<'_, CoreRuntime>,
     source_path: String,

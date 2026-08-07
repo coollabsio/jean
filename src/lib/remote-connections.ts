@@ -29,6 +29,17 @@ export interface RemoteConnectionInput {
   sshPort?: number
 }
 
+/** Parse a user-entered SSH port string; empty → undefined. Throws on invalid. */
+export function parseOptionalSshPort(raw: string): number | undefined {
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  const port = Number(trimmed)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('SSH port must be an integer between 1 and 65535.')
+  }
+  return port
+}
+
 const subscribers = new Set<() => void>()
 let connectionsSnapshot: RemoteConnection[] = readConnections()
 const savedActiveConnection =

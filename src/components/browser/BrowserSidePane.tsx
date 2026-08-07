@@ -60,6 +60,10 @@ export const BrowserSidePane = memo(function BrowserSidePane() {
     <>
       {/* Resize handle (1px visual + wider hit area) */}
       <div
+        role="separator"
+        tabIndex={-1}
+        aria-orientation="vertical"
+        aria-label="Resize browser pane"
         className="relative h-full w-px shrink-0 bg-border"
         onMouseDown={handleResizeStart}
       >

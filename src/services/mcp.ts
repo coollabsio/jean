@@ -220,12 +220,12 @@ export function getNewServersToAutoEnable(
 ): string[] {
   const enabledSet = new Set(currentEnabled)
   const knownSet = new Set(knownServers)
-  return allServers
-    .filter(s => {
-      const key = mcpKey(s.backend, s.name)
-      return !s.disabled && !enabledSet.has(key) && !knownSet.has(key)
-    })
-    .map(s => mcpKey(s.backend, s.name))
+  return allServers.flatMap(s => {
+    const key = mcpKey(s.backend, s.name)
+    return !s.disabled && !enabledSet.has(key) && !knownSet.has(key)
+      ? [key]
+      : []
+  })
 }
 
 /**

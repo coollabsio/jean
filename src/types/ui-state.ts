@@ -28,6 +28,7 @@ export interface PersistedTerminalInstance {
   command_args?: string[] | null
   label: string
   kind?: 'panel' | 'session'
+  session_id?: string | null
 }
 
 export interface BrowserTabPersisted {
@@ -71,6 +72,8 @@ export interface UIState {
   file_browser_size?: number
   /** File browser sidebar visibility, defaults to false */
   file_browser_visible?: boolean
+  /** Whether the session chat is using the reduced-chrome zen layout */
+  zen_mode?: boolean
   /** Active session ID per worktree (for restoring open tabs) */
   active_session_ids: Record<string, string>
   /** Unsent chat textarea content per session */
@@ -163,6 +166,7 @@ export const defaultUIState: UIState = {
   left_sidebar_visible: false,
   file_browser_size: 280,
   file_browser_visible: false,
+  zen_mode: false,
   active_session_ids: {},
   input_drafts: {},
   pending_images: {},

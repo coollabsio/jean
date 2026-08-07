@@ -4,6 +4,9 @@ import { invoke } from '@/lib/transport'
 import { middleClickClose } from '@/lib/middle-click'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { useVisualViewportBottomInset } from '@/hooks/useVisualViewportBottomInset'
+import { isNativeApp } from '@/lib/environment'
 import {
   isPanelTerminal,
   useTerminalStore,
@@ -29,6 +32,8 @@ import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
 import { useTerminalImageDrop } from './hooks/useTerminalImageDrop'
 import { MODAL_TERMINAL_SECONDARY_ROW_CLASS } from './modal-terminal-layout'
+import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
+import { TerminalArrowGesture } from './TerminalArrowGesture'
 import '@xterm/xterm/css/xterm.css'
 
 const EMPTY_TERMINALS: TerminalInstance[] = []
@@ -59,8 +64,17 @@ const TerminalTabContent = memo(function TerminalTabContent({
   isCollapsed?: boolean
   isWorktreeActive?: boolean
 }) {
+  const rootRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const terminalBg = useTerminalBackgroundColor()
+  const isMobile = useIsMobile()
+  // Soft-keyboard special keys + arrow gesture: web access always, plus narrow viewports.
+  const showExtraKeys = !isNativeApp() || isMobile
+  const keyboardInset = useVisualViewportBottomInset(
+    rootRef,
+    showExtraKeys && isActive
+  )
   const { isDraggingImage, dropHandlers } = useTerminalImageDrop(terminal.id)
   const { initTerminal, fit, focus } = useTerminal({
     terminalId: terminal.id,
@@ -68,6 +82,7 @@ const TerminalTabContent = memo(function TerminalTabContent({
     worktreePath,
     command: terminal.command,
     commandArgs: terminal.commandArgs,
+    sessionId: terminal.sessionId,
   })
   const initialized = useRef(false)
   const canAttach = isActive && !isCollapsed && isWorktreeActive
@@ -114,21 +129,61 @@ const TerminalTabContent = memo(function TerminalTabContent({
     }
   }, [canAttach, fit, focus])
 
+  // Soft keyboard open/close changes our padding → re-fit the emulator.
+  useEffect(() => {
+    if (!canAttach || !initialized.current) return
+    const timeoutId = setTimeout(() => fit(), 50)
+    return () => clearTimeout(timeoutId)
+  }, [keyboardInset, canAttach, fit])
+
   return (
     <div
+      ref={rootRef}
       data-terminal-id={terminal.id}
-      className={cn('relative h-full w-full p-2', !isActive && 'hidden')}
-      style={{ backgroundColor: terminalBg }}
+      data-keyboard-inset={keyboardInset > 0 ? keyboardInset : undefined}
+      className={cn(
+        'relative flex h-full w-full flex-col',
+        !isActive && 'hidden'
+      )}
+      style={{
+        backgroundColor: terminalBg,
+        // Lift the extra-keys bar (and shrink the emulator) above the soft keyboard.
+        // box-sizing:border-box is global — padding reduces content box, not outer size.
+        paddingBottom: keyboardInset > 0 ? keyboardInset : undefined,
+      }}
       onDragOver={dropHandlers.onDragOver}
       onDragLeave={dropHandlers.onDragLeave}
       onDrop={dropHandlers.onDrop}
     >
-      <div ref={containerRef} className="h-full w-full overflow-hidden" />
-      {isDraggingImage && (
-        <div className="pointer-events-none absolute inset-2 z-10 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-foreground">
-          <Terminal className="h-5 w-5" aria-hidden />
-          <span>Drop image to insert its path</span>
-        </div>
+      {/* Pad chrome sits above the emulator so long-press arrows never cover text. */}
+      {showExtraKeys && isActive && (
+        <TerminalArrowGesture
+          terminalId={terminal.id}
+          surfaceRef={surfaceRef}
+          enabled={canAttach}
+        />
+      )}
+      <div
+        ref={surfaceRef}
+        className={cn(
+          'relative min-h-0 flex-1 touch-manipulation p-2',
+          // Avoid iOS callout / accidental selection while using the long-press pad.
+          isMobile && 'select-none [-webkit-touch-callout:none]'
+        )}
+      >
+        <div ref={containerRef} className="h-full w-full overflow-hidden" />
+        {isDraggingImage && (
+          <div className="pointer-events-none absolute inset-2 z-10 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-foreground">
+            <Terminal className="h-5 w-5" aria-hidden />
+            <span>Drop image to insert its path</span>
+          </div>
+        )}
+      </div>
+      {showExtraKeys && isActive && (
+        <TerminalExtraKeysBar
+          terminalId={terminal.id}
+          keyboardOpen={keyboardInset > 0}
+        />
       )}
     </div>
   )
@@ -284,7 +339,7 @@ export function TerminalView({
   )
 
   const handleTerminalDragStart = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, terminalId: string) => {
+    (e: React.DragEvent<HTMLElement>, terminalId: string) => {
       setDraggedTerminalId(terminalId)
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', terminalId)
@@ -293,7 +348,7 @@ export function TerminalView({
   )
 
   const handleTerminalDragOver = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>) => {
+    (e: React.DragEvent<HTMLElement>) => {
       if (!draggedTerminalId) return
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
@@ -302,7 +357,7 @@ export function TerminalView({
   )
 
   const handleTerminalDrop = useCallback(
-    (e: React.DragEvent<HTMLButtonElement>, targetTerminalId: string) => {
+    (e: React.DragEvent<HTMLElement>, targetTerminalId: string) => {
       e.preventDefault()
       const sourceId =
         draggedTerminalId || e.dataTransfer.getData('text/plain') || null
@@ -459,9 +514,8 @@ export function TerminalView({
               index < 9 ? formatShortcutDisplay(`mod+${index + 1}`) : null
 
             return (
-              <button
+              <div
                 key={terminal.id}
-                type="button"
                 draggable
                 onDragStart={e => handleTerminalDragStart(e, terminal.id)}
                 onDragOver={handleTerminalDragOver}
@@ -470,7 +524,7 @@ export function TerminalView({
                 onClick={() => handleSelectTerminal(terminal.id)}
                 {...middleClickClose(e => void handleCloseTerminal(e, terminal.id))}
                 className={cn(
-                  'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors',
+                  'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors cursor-pointer',
                   isActive
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
@@ -495,26 +549,18 @@ export function TerminalView({
                   </Kbd>
                 )}
                 {/* Close button - always visible */}
-                <span
-                  role="button"
-                  tabIndex={0}
+                <button
+                  type="button"
+                  aria-label="Close terminal"
                   onClick={e => handleCloseTerminal(e, terminal.id)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      handleCloseTerminal(
-                        e as unknown as React.MouseEvent,
-                        terminal.id
-                      )
-                    }
-                  }}
                   className={cn(
                     'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100',
                     isActive && 'opacity-50'
                   )}
                 >
                   <X className="h-3 w-3" />
-                </span>
-              </button>
+                </button>
+              </div>
             )
           })}
         </div>

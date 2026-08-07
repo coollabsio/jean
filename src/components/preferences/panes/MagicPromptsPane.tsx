@@ -694,23 +694,29 @@ const CODEX_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] = [
   { value: 'gpt-5.4-fast', label: 'GPT 5.4 Fast' },
   { value: 'gpt-5.4-mini', label: 'GPT 5.4 Mini' },
   { value: 'gpt-5.4-mini-fast', label: 'GPT 5.4 Mini Fast' },
-  ...codexModelOptions
-    .filter(
-      o =>
-        ![
-          'gpt-5.6-sol',
-          'gpt-5.6-terra',
-          'gpt-5.6-luna',
-          'gpt-5.5',
-          'gpt-5.4',
-          'gpt-5.4-mini',
-        ].includes(o.value) // Already listed above
-    )
-    .map(o => ({ value: o.value as MagicPromptModel, label: o.label })),
+  ...codexModelOptions.flatMap(o =>
+    [
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ].includes(o.value) // Already listed above
+      ? []
+      : [{ value: o.value as MagicPromptModel, label: o.label }]
+  ),
 ]
 
 interface MagicPromptsPaneProps {
   searchTargetPromptKey?: keyof MagicPrompts | null
+}
+
+function formatOpenCodeLabel(value: string) {
+  const formatted = formatOpencodeModelLabel(value)
+  return value.startsWith('opencode/')
+    ? formatted.replace(/\s+\(OpenCode\)$/, '')
+    : formatted
 }
 
 export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
@@ -749,13 +755,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       })),
     [modelCatalog]
   )
-
-  const formatOpenCodeLabel = (value: string) => {
-    const formatted = formatOpencodeModelLabel(value)
-    return value.startsWith('opencode/')
-      ? formatted.replace(/\s+\(OpenCode\)$/, '')
-      : formatted
-  }
 
   const opencodeModelOptions = useMemo(() => {
     const models = availableOpencodeModels?.length
@@ -1809,6 +1808,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 const promptIsModified = currentPrompts[config.key] !== null
                 return (
                   <button
+                    type="button"
                     key={config.key}
                     onClick={() => setSelectedKey(config.key)}
                     id={getMagicPromptItemId(config.key)}
@@ -1870,7 +1870,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   return (
                     <div
                       data-testid={`magic-code-review-config-${index}`}
-                      key={`${codeReviewConfigKey(config)}-${index}`}
+                      key={codeReviewConfigKey(config)}
                       className="flex flex-col gap-2 rounded-lg border border-border/60 p-2.5"
                     >
                       <div className="flex h-7 items-center justify-between">

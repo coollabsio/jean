@@ -9,6 +9,7 @@ import {
   BellDot,
   Download,
   Pencil,
+  RotateCcw,
 } from 'lucide-react'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
@@ -174,6 +175,19 @@ export const projectCommands: AppCommand[] = [
     execute: context => {
       context.openUnreadSessions()
     },
+  },
+
+  {
+    id: 'clear-session-context',
+    label: 'Clear Context',
+    description: 'Clear the current chat history and start with fresh context',
+    icon: RotateCcw,
+    group: 'sessions',
+    keywords: ['session', 'chat', 'clear', 'context', 'history', 'reset'],
+
+    isAvailable: context => context.hasActiveSession(),
+
+    execute: context => context.clearSessionHistory(),
   },
 
   {

@@ -39,7 +39,7 @@ function mergeJsonConfig(
         value as Record<string, unknown>
       )
     } else if (value === null) {
-      delete merged[key]
+      Reflect.deleteProperty(merged, key)
     } else {
       merged[key] = value
     }

@@ -35,6 +35,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod agent_browser;
 mod auto_fix;
 mod background_tasks;
 mod chat;
@@ -193,6 +194,8 @@ pub struct AppPreferences {
     pub ui_font: String, // Font family for UI: inter, geist, system
     #[serde(default = "default_chat_font")]
     pub chat_font: String, // Font family for chat: jetbrains-mono, fira-code, source-code-pro, inter, geist, roboto, lato
+    #[serde(default = "default_font_weight")]
+    pub font_weight: String, // Overall font weight: light, normal, medium
     #[serde(default = "default_git_poll_interval")]
     pub git_poll_interval: u64, // Git status polling interval in seconds (10-600)
     #[serde(default = "default_remote_poll_interval")]
@@ -228,7 +231,7 @@ pub struct AppPreferences {
     #[serde(default)]
     pub magic_models_auto_initialized: bool, // Whether magic prompt models were auto-set based on installed backends
     #[serde(default = "default_file_edit_mode")]
-    pub file_edit_mode: String, // How to edit files: inline (CodeMirror) or external (VS Code, etc.)
+    pub file_edit_mode: String, // How to edit files: inline (Pierre) or external (VS Code, etc.)
     #[serde(default)]
     pub ai_language: String, // Preferred language for AI responses (empty = default)
     #[serde(default = "default_allow_web_tools_in_plan_mode")]
@@ -261,6 +264,9 @@ pub struct AppPreferences {
     pub auto_save_context: bool, // Auto-save context after each session completion
     #[serde(default = "default_auto_pull_base_branch")]
     pub auto_pull_base_branch: bool, // Auto-pull base branch before creating a new worktree
+    /// When true, show a single Sync button instead of separate Pull and Push badges
+    #[serde(default)]
+    pub git_sync_button: bool,
     #[serde(default = "default_auto_archive_on_pr_merged")]
     pub auto_archive_on_pr_merged: bool, // Auto-archive worktrees when their PR is merged
     #[serde(default)]
@@ -554,6 +560,10 @@ fn default_chat_font() -> String {
     "geist".to_string()
 }
 
+fn default_font_weight() -> String {
+    "normal".to_string()
+}
+
 fn default_model() -> String {
     "claude-opus-4-8[1m]".to_string()
 }
@@ -640,7 +650,7 @@ fn default_syntax_theme_light() -> String {
 }
 
 fn default_file_edit_mode() -> String {
-    "inline".to_string() // Default to Jean's CodeMirror inline editor
+    "inline".to_string() // Default to Jean's Pierre inline editor
 }
 
 fn default_parallel_execution_prompt_enabled() -> bool {
@@ -1183,6 +1193,17 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!prefs.has_seen_external_display_zoom_tip);
+    }
+
+    #[test]
+    fn app_preferences_default_font_weight_for_new_and_missing_prefs() {
+        assert_eq!(AppPreferences::default().font_weight, "normal");
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        prefs_json.as_object_mut().unwrap().remove("font_weight");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert_eq!(prefs.font_weight, "normal");
     }
 
     #[test]
@@ -2526,6 +2547,7 @@ impl Default for AppPreferences {
             chat_font_size: 16,
             ui_font: default_ui_font(),
             chat_font: default_chat_font(),
+            font_weight: default_font_weight(),
             git_poll_interval: default_git_poll_interval(),
             remote_poll_interval: default_remote_poll_interval(),
             keybindings: default_keybindings(),
@@ -2560,6 +2582,7 @@ impl Default for AppPreferences {
             removal_behavior: default_removal_behavior(),
             auto_save_context: default_auto_save_context(),
             auto_pull_base_branch: default_auto_pull_base_branch(),
+            git_sync_button: false,
             auto_archive_on_pr_merged: default_auto_archive_on_pr_merged(),
             debug_mode_enabled: false,
             default_effort_level: default_effort_level(),
@@ -2690,6 +2713,10 @@ pub struct UIState {
     /// File browser sidebar visibility, defaults to false
     #[serde(default)]
     pub file_browser_visible: Option<bool>,
+
+    /// Whether the session chat is using the reduced-chrome zen layout
+    #[serde(default)]
+    pub zen_mode: Option<bool>,
 
     /// Active session ID per worktree (for restoring open tabs)
     #[serde(default)]
@@ -2849,6 +2876,8 @@ pub struct TerminalInstancePersisted {
     pub label: String,
     #[serde(default)]
     pub kind: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2900,6 +2929,7 @@ impl Default for UIState {
             left_sidebar_visible: None,
             file_browser_size: None,
             file_browser_visible: None,
+            zen_mode: None,
             active_session_ids: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
             pending_images: std::collections::HashMap::new(),

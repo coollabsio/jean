@@ -1,3 +1,4 @@
+mod attention;
 mod commands;
 mod pty;
 mod registry;

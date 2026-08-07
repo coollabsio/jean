@@ -130,12 +130,13 @@ export function SessionDebugPanel({
         <TooltipTrigger asChild>
           <div className="text-muted-foreground truncate">
             sessions file:{' '}
-            <span
-              className="text-foreground/70 cursor-pointer hover:underline"
+            <button
+              type="button"
+              className="text-foreground/70 cursor-pointer hover:underline bg-transparent border-0 p-0 font-inherit text-inherit"
               onClick={() => onFileClick?.(debugInfo.sessions_file)}
             >
               ...{debugInfo.sessions_file.slice(-60)}
-            </span>
+            </button>
           </div>
         </TooltipTrigger>
         <TooltipContent>{debugInfo.sessions_file}</TooltipContent>
@@ -156,13 +157,14 @@ export function SessionDebugPanel({
           <div className="text-muted-foreground truncate">
             manifest:{' '}
             {debugInfo.manifest_file ? (
-              <span
-                className="text-foreground/70 cursor-pointer hover:underline"
+              <button
+                type="button"
+                className="text-foreground/70 cursor-pointer hover:underline bg-transparent border-0 p-0 font-inherit text-inherit"
                 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 onClick={() => onFileClick?.(debugInfo.manifest_file!)}
               >
                 ...{debugInfo.manifest_file.slice(-55)}
-              </span>
+              </button>
             ) : (
               <span className="text-foreground/70">none</span>
             )}
@@ -177,13 +179,14 @@ export function SessionDebugPanel({
           <TooltipTrigger asChild>
             <div className="text-muted-foreground truncate">
               claude jsonl:{' '}
-              <span
-                className="text-foreground/70 cursor-pointer hover:underline"
+              <button
+                type="button"
+                className="text-foreground/70 cursor-pointer hover:underline bg-transparent border-0 p-0 font-inherit text-inherit"
                 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 onClick={() => onFileClick?.(debugInfo.claude_jsonl_file!)}
               >
                 ...{debugInfo.claude_jsonl_file.slice(-55)}
-              </span>
+              </button>
             </div>
           </TooltipTrigger>
           <TooltipContent>{debugInfo.claude_jsonl_file}</TooltipContent>
@@ -224,9 +227,10 @@ export function SessionDebugPanel({
         ) : (
           <div className="space-y-1 ml-2">
             {debugInfo.run_log_files.map(file => (
-              <div
+              <button
+                type="button"
                 key={file.run_id}
-                className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1"
+                className="flex w-full items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 bg-transparent border-0 p-0 text-left font-inherit text-inherit"
                 onClick={() => onFileClick?.(file.path)}
               >
                 <FileText className="size-4 text-muted-foreground shrink-0" />
@@ -246,7 +250,7 @@ export function SessionDebugPanel({
                 <span className="text-foreground truncate">
                   {file.user_message_preview}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         )}

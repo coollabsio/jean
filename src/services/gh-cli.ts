@@ -269,6 +269,10 @@ export function useGhInstallProgress(): [GhInstallProgress | null, () => void] {
 /**
  * Combined hook for gh CLI setup flow
  */
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_gh_cli_version_exists', { version })
+}
+
 export function useGhCliSetup() {
   const status = useGhCliStatus()
   const versions = useAvailableGhVersions()
@@ -303,8 +307,6 @@ export function useGhCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_gh_cli_version_exists', { version })
 
   return {
     status: status.data,

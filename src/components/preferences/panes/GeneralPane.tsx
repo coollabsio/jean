@@ -7,7 +7,8 @@ import React, {
   type FC,
 } from 'react'
 import { invoke } from '@/lib/transport'
-import { useQueryClient } from '@tanstack/react-query'
+import { loginArgsForBackend } from '@/lib/cli-auth'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Check, ChevronsUpDown, Play } from 'lucide-react'
 import { Label } from '@/components/ui/label'
@@ -206,6 +207,11 @@ import {
 } from '@/components/chat/toolbar/toolbar-utils'
 import { playNotificationSound } from '@/lib/sounds'
 import { CLIENT_BUILD_INFO } from '@/lib/build-info'
+import { getActiveRemoteConnection } from '@/lib/remote-connections'
+import {
+  fetchRemoteServerInfo,
+  formatJeanVersionLabel,
+} from '@/lib/remote-version'
 import type { ThinkingLevel, EffortLevel } from '@/types/chat'
 import { hasBackend, isNativeApp } from '@/lib/environment'
 import { isWindows, openExternal } from '@/lib/platform'
@@ -303,11 +309,35 @@ const backendPaneMeta = {
   Record<PreferencesPaneScope, { description: React.ReactNode }>
 >
 
+function formatOpenCodeModelLabelForSettings(value: string) {
+  const formatted = formatOpencodeModelLabel(value)
+  return value.startsWith('opencode/')
+    ? formatted.replace(/\s+\(OpenCode\)$/, '')
+    : formatted
+}
+
 export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   scope = 'general',
 }) => {
   const isGeneralScope = scope === 'general'
   const queryClient = useQueryClient()
+  const activeRemoteConnection = getActiveRemoteConnection()
+  const { data: remoteServerInfo, isLoading: isRemoteServerInfoLoading } =
+    useQuery({
+      queryKey: ['remote-server-info', activeRemoteConnection?.id],
+      queryFn: () => {
+        if (!activeRemoteConnection) {
+          throw new Error('No remote Jean server is connected.')
+        }
+        return fetchRemoteServerInfo(
+          activeRemoteConnection.url,
+          activeRemoteConnection.token
+        )
+      },
+      enabled: isGeneralScope && activeRemoteConnection !== null,
+      staleTime: 60_000,
+    })
+  const remoteServerVersion = remoteServerInfo?.appVersion
   const { data: preferences } = usePreferences()
   const { data: modelCatalog } = useModelCatalog()
   const codexReasoning = getCatalogModelReasoning(
@@ -1030,83 +1060,55 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
-  // Default backend: only installed AND authenticated backends are selectable.
+  // Default backend: show all installed CLIs (issue #627/#649). Auth is enforced
+  // at send time / backend settings — hiding unauthenticated backends made Claude
+  // (and others) disappear from Defaults when auth probes were false-negative.
   const stored = preferences?.default_backend ?? 'claude'
-  const claudeUsable = !!cliStatus?.installed && !!claudeAuth?.authenticated
-  const codexUsable = !!codexStatus?.installed && !!codexAuth?.authenticated
-  const opencodeUsable =
-    !!opencodeStatus?.installed && !!opencodeAuth?.authenticated
-  const cursorUsable = !!cursorStatus?.installed && !!cursorAuth?.authenticated
-  const piUsable = !!piStatus?.installed && !!piAuth?.authenticated
-  const commandcodeUsable =
-    !!commandcodeStatus?.installed && !!commandcodeAuth?.authenticated
-  const grokUsable = !!grokStatus?.installed && !!grokAuth?.authenticated
-  const kimiUsable = !!kimiStatus?.installed && !!kimiAuth?.authenticated
-  const devinUsable = !!devinStatus?.installed && !!devinAuth?.authenticated
-  const installedBackendOptions = useMemo(
-    () =>
-      backendOptions.filter(option =>
-        option.value === 'claude'
-          ? claudeUsable
-          : option.value === 'codex'
-            ? codexUsable
-            : option.value === 'opencode'
-              ? opencodeUsable
-              : option.value === 'cursor'
-                ? cursorUsable
-                : option.value === 'pi'
-                  ? piUsable
-                  : option.value === 'commandcode'
-                    ? commandcodeUsable
-                    : option.value === 'grok'
-                      ? grokUsable
-                      : option.value === 'kimi'
-                        ? kimiUsable
-                        : option.value === 'devin'
-                          ? devinUsable
-                          : false
-      ),
+  const claudeInstalled = !!cliStatus?.installed
+  const codexInstalled = !!codexStatus?.installed
+  const opencodeInstalled = !!opencodeStatus?.installed
+  const cursorInstalled = !!cursorStatus?.installed
+  const piInstalled = !!piStatus?.installed
+  const commandcodeInstalled = !!commandcodeStatus?.installed
+  const grokInstalled = !!grokStatus?.installed
+  const kimiInstalled = !!kimiStatus?.installed
+  const devinInstalled = !!devinStatus?.installed
+
+  const installedByBackend = useMemo<Partial<Record<CliBackend, boolean>>>(
+    () => ({
+      claude: claudeInstalled,
+      codex: codexInstalled,
+      opencode: opencodeInstalled,
+      cursor: cursorInstalled,
+      pi: piInstalled,
+      commandcode: commandcodeInstalled,
+      grok: grokInstalled,
+      kimi: kimiInstalled,
+      devin: devinInstalled,
+    }),
     [
-      claudeUsable,
-      codexUsable,
-      opencodeUsable,
-      cursorUsable,
-      piUsable,
-      commandcodeUsable,
-      grokUsable,
-      kimiUsable,
-      devinUsable,
+      claudeInstalled,
+      codexInstalled,
+      opencodeInstalled,
+      cursorInstalled,
+      piInstalled,
+      commandcodeInstalled,
+      grokInstalled,
+      kimiInstalled,
+      devinInstalled,
     ]
   )
 
+  const installedBackendOptions = useMemo(
+    () => backendOptions.filter(option => !!installedByBackend[option.value]),
+    [installedByBackend]
+  )
+
   const effectiveBackend = useMemo(() => {
-    const usable: Record<string, boolean | undefined> = {
-      claude: claudeUsable,
-      codex: codexUsable,
-      opencode: opencodeUsable,
-      cursor: cursorUsable,
-      pi: piUsable,
-      commandcode: commandcodeUsable,
-      grok: grokUsable,
-      kimi: kimiUsable,
-      devin: devinUsable,
-    }
-    if (usable[stored]) return stored
+    if (installedByBackend[stored]) return stored
     const first = installedBackendOptions[0]
     return first?.value ?? stored
-  }, [
-    stored,
-    claudeUsable,
-    codexUsable,
-    opencodeUsable,
-    cursorUsable,
-    piUsable,
-    commandcodeUsable,
-    grokUsable,
-    kimiUsable,
-    devinUsable,
-    installedBackendOptions,
-  ])
+  }, [stored, installedByBackend, installedBackendOptions])
 
   const handleCodexModelChange = (value: CodexModel) => {
     if (preferences) {
@@ -1191,12 +1193,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
   const selectedOpenCodeModel =
     preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
-  const formatOpenCodeModelLabelForSettings = (value: string) => {
-    const formatted = formatOpencodeModelLabel(value)
-    return value.startsWith('opencode/')
-      ? formatted.replace(/\s+\(OpenCode\)$/, '')
-      : formatted
-  }
   const openCodeModelOptions = (
     availableOpencodeModels?.length
       ? availableOpencodeModels
@@ -1241,12 +1237,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const selectedKimiModel = preferences?.selected_kimi_model ?? 'kimi/default'
   const kimiModelOptions: { value: KimiModel; label: string }[] = [
     ...(KIMI_MODEL_OPTIONS as { value: KimiModel; label: string }[]),
-    ...(availableKimiModels ?? [])
-      .filter(model => model.id !== 'default')
-      .map(model => ({
-        value: `kimi/${model.id}` as KimiModel,
-        label: model.isDefault ? `${model.label} (default)` : model.label,
-      })),
+    ...(availableKimiModels ?? []).flatMap(model =>
+      model.id === 'default'
+        ? []
+        : [
+            {
+              value: `kimi/${model.id}` as KimiModel,
+              label: model.isDefault ? `${model.label} (default)` : model.label,
+            },
+          ]
+    ),
   ]
   const selectedKimiModelLabel =
     kimiModelOptions.find(option => option.value === selectedKimiModel)
@@ -1619,8 +1619,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingCodexAuth(false)
     }
 
-    // Not authenticated, open login modal
-    openCliLoginModal('codex', codexStatus.path, ['login'])
+    // Not authenticated, open login modal (device-code auth for terminal/headless)
+    openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
   }, [codexStatus?.path, openCliLoginModal, queryClient])
 
   const handleCodeRabbitLogin = useCallback(async () => {
@@ -1682,7 +1682,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
   const handleCodexRelogin = useCallback(() => {
     if (!codexStatus?.path) return
-    openCliLoginModal('codex', codexStatus.path, ['login'])
+    openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
   }, [codexStatus?.path, openCliLoginModal])
 
   const handleOpenCodeRelogin = useCallback(() => {
@@ -1910,7 +1910,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           : [install.command, ...install.args].join(' ')
       copyToClipboard(command)
       toast.success('Devin CLI install command copied', {
-        description: 'Run it in a terminal, then restart Jean or refresh status.',
+        description:
+          'Run it in a terminal, then restart Jean or refresh status.',
       })
     } catch (error) {
       toast.error('Failed to load Devin install command', {
@@ -2040,6 +2041,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.claude_cli_source === 'path'
@@ -2199,6 +2201,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.gh_cli_source === 'path'
@@ -2356,6 +2359,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.coderabbit_cli_source === 'path'
@@ -2517,6 +2521,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.codex_cli_source === 'path'
@@ -2570,6 +2575,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <p className="text-xs text-muted-foreground px-1">
                 Install with Jean, or install <code>codex</code> yourself in
                 your environment — we&apos;ll detect it on your PATH.
+              </p>
+            )}
+            {codexStatus?.installed && codexStatus.sandbox_ready === false && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 px-1">
+                {codexStatus.sandbox_message ??
+                  'Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap'}
               </p>
             )}
           </div>
@@ -2680,6 +2691,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.opencode_cli_source === 'path'
@@ -2816,6 +2828,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           cursorPathDetection?.path ?? cursorStatus?.path
@@ -2922,6 +2935,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.pi_cli_source === 'path'
@@ -3048,6 +3062,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={() =>
                         handleCopyPath(
                           preferences?.commandcode_cli_source === 'path'
@@ -3693,6 +3708,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.grok_cli_source === 'path'
@@ -3884,6 +3900,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           handleCopyPath(
                             preferences?.kimi_cli_source === 'path'
@@ -5262,11 +5279,27 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             anchorId="pref-general-section-version"
           >
             <div className="space-y-4">
-              <InlineField label="Jean" description="Application version">
+              <InlineField
+                label={activeRemoteConnection ? 'Jean Client' : 'Jean'}
+                description="Application version"
+              >
                 <span className="font-mono text-sm text-muted-foreground">
                   v{CLIENT_BUILD_INFO.appVersion}
                 </span>
               </InlineField>
+
+              {activeRemoteConnection && (
+                <InlineField
+                  label="Jean Server"
+                  description="Connected remote server version"
+                >
+                  <span className="font-mono text-sm text-muted-foreground">
+                    {isRemoteServerInfoLoading
+                      ? 'Loading…'
+                      : formatJeanVersionLabel(remoteServerVersion)}
+                  </span>
+                </InlineField>
+              )}
 
               {CLIENT_BUILD_INFO.gitSha && (
                 <InlineField

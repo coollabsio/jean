@@ -465,43 +465,56 @@ const INIT_REPLAY_EVENT_CAP: usize = 200;
 type WorktreesByProject = std::collections::HashMap<String, Vec<crate::projects::types::Worktree>>;
 type SessionsByWorktree = std::collections::HashMap<String, crate::chat::types::WorktreeSessions>;
 
-async fn load_selected_project_bootstrap(
+/// Load windowed chat history for focused sessions that belong to the given
+/// worktrees. Runs independently of session-list loading so init can overlap both.
+async fn load_active_sessions_windowed(
     app: AppHandle,
-    project_id: String,
-) -> (WorktreesByProject, SessionsByWorktree) {
-    let worktrees = crate::projects::list_worktrees(app.clone(), project_id.clone())
-        .await
-        .unwrap_or_default();
+    worktrees: &[crate::projects::types::Worktree],
+    active_session_ids: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, crate::chat::types::Session> {
+    if active_session_ids.is_empty() || worktrees.is_empty() {
+        return std::collections::HashMap::new();
+    }
 
-    let sessions_futures: Vec<_> = worktrees
+    let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> = worktrees
         .iter()
-        .map(|wt| {
-            let app = app.clone();
-            let worktree_id = wt.id.clone();
-            let worktree_path = wt.path.clone();
-            async move {
-                let sessions = crate::chat::get_sessions(
-                    app,
-                    worktree_id.clone(),
-                    worktree_path,
-                    None,       // include_archived
-                    Some(true), // include_message_counts
-                )
-                .await
-                .unwrap_or_default();
-                (worktree_id, sessions)
-            }
+        .map(|wt| (wt.id.as_str(), wt))
+        .collect();
+
+    let session_futures: Vec<_> = active_session_ids
+        .iter()
+        .filter_map(|(worktree_id, session_id)| {
+            worktree_map.get(worktree_id.as_str()).map(|wt| {
+                let app = app.clone();
+                let wt_id = worktree_id.clone();
+                let wt_path = wt.path.clone();
+                let sess_id = session_id.clone();
+                async move {
+                    match crate::chat::get_session(
+                        app,
+                        wt_id,
+                        wt_path,
+                        sess_id.clone(),
+                        Some(INIT_MESSAGE_WINDOW),
+                    )
+                    .await
+                    {
+                        Ok(session) => Some((sess_id, session)),
+                        Err(e) => {
+                            log::warn!("Failed to load active session {sess_id}: {e}");
+                            None
+                        }
+                    }
+                }
+            })
         })
         .collect();
 
-    let sessions_by_worktree = futures_util::future::join_all(sessions_futures)
+    futures_util::future::join_all(session_futures)
         .await
         .into_iter()
-        .collect();
-
-    let mut worktrees_by_project = std::collections::HashMap::new();
-    worktrees_by_project.insert(project_id, worktrees);
-    (worktrees_by_project, sessions_by_worktree)
+        .flatten()
+        .collect()
 }
 
 /// Initial data endpoint. Returns only the data needed to render the view the
@@ -558,18 +571,76 @@ async fn init_handler(
         .as_deref()
         .and_then(|id| projects.iter().find(|p| p.id == id && !p.is_folder));
 
-    // Fetch worktrees + sessions (counts only) ONLY for the selected project.
-    // All other projects' worktrees/sessions are lazy-loaded by the frontend
-    // when the user navigates.
-    let (worktrees_by_project, sessions_by_worktree): (WorktreesByProject, SessionsByWorktree) =
-        if let Some(project) = selected_project {
-            load_selected_project_bootstrap(state.app.clone(), project.id.clone()).await
-        } else {
-            (
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            )
+    // Fetch worktrees first (cheap JSON read), then overlap session lists with
+    // windowed active-session messages so /api/init is one parallel disk phase.
+    // Other projects stay lazy-loaded by the frontend on navigation.
+    let (worktrees_by_project, sessions_by_worktree, mut active_sessions): (
+        WorktreesByProject,
+        SessionsByWorktree,
+        std::collections::HashMap<String, crate::chat::types::Session>,
+    ) = if let Some(project) = selected_project {
+        let project_id = project.id.clone();
+        let worktrees = crate::projects::list_worktrees(state.app.clone(), project_id.clone())
+            .await
+            .unwrap_or_default();
+
+        let active_ids = ui_state
+            .as_ref()
+            .map(|ui| ui.active_session_ids.clone())
+            .unwrap_or_default();
+
+        let sessions_future = {
+            let app = state.app.clone();
+            let worktrees = worktrees.clone();
+            async move {
+                let futures: Vec<_> = worktrees
+                    .into_iter()
+                    .map(|wt| {
+                        let app = app.clone();
+                        async move {
+                            let worktree_id = wt.id.clone();
+                            let sessions = crate::chat::get_sessions(
+                                app,
+                                worktree_id.clone(),
+                                wt.path,
+                                None,
+                                Some(true),
+                            )
+                            .await
+                            .unwrap_or_else(|_| crate::chat::types::WorktreeSessions {
+                                worktree_id: worktree_id.clone(),
+                                sessions: vec![],
+                                active_session_id: None,
+                                default_model: None,
+                                version: 2,
+                                branch_naming_completed: false,
+                            });
+                            (worktree_id, sessions)
+                        }
+                    })
+                    .collect();
+                futures_util::future::join_all(futures)
+                    .await
+                    .into_iter()
+                    .collect::<SessionsByWorktree>()
+            }
         };
+
+        let active_future =
+            load_active_sessions_windowed(state.app.clone(), &worktrees, &active_ids);
+
+        let (sessions_by_worktree, active_sessions) = tokio::join!(sessions_future, active_future);
+
+        let mut worktrees_by_project = std::collections::HashMap::new();
+        worktrees_by_project.insert(project_id, worktrees);
+        (worktrees_by_project, sessions_by_worktree, active_sessions)
+    } else {
+        (
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+        )
+    };
 
     // Only worktrees in the selected project are "known" for validation/cleanup.
     // Entries in ui_state.active_session_ids for worktrees outside this scope
@@ -604,6 +675,10 @@ async fn init_handler(
 
         for worktree_id in stale_keys {
             let old_id = ui.active_session_ids.remove(&worktree_id);
+            // Drop the invalid windowed payload if we raced it with session lists.
+            if let Some(ref stale_id) = old_id {
+                active_sessions.remove(stale_id);
+            }
             let fallback_session_id = sessions_by_worktree
                 .get(&worktree_id)
                 .and_then(|ws| ws.sessions.iter().find(|s| s.archived_at.is_none()))
@@ -628,7 +703,53 @@ async fn init_handler(
         }
     }
 
+    // If cleanup replaced a stale id with a fallback, load that session now
+    // (uncommon path — only when the focused session was deleted/archived).
     if !cleaned_active_sessions.is_empty() {
+        let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> =
+            worktrees_by_project
+                .values()
+                .flat_map(|wts| wts.iter())
+                .map(|wt| (wt.id.as_str(), wt))
+                .collect();
+
+        let fallback_futures: Vec<_> = cleaned_active_sessions
+            .iter()
+            .filter_map(|(worktree_id, fallback_id)| {
+                let session_id = fallback_id.as_ref()?;
+                let wt = worktree_map.get(worktree_id.as_str())?;
+                let app = state.app.clone();
+                let wt_path = wt.path.clone();
+                let sess_id = session_id.clone();
+                let wt_id = worktree_id.clone();
+                Some(async move {
+                    match crate::chat::get_session(
+                        app,
+                        wt_id,
+                        wt_path,
+                        sess_id.clone(),
+                        Some(INIT_MESSAGE_WINDOW),
+                    )
+                    .await
+                    {
+                        Ok(session) => Some((sess_id, session)),
+                        Err(e) => {
+                            log::warn!("Failed to load fallback active session {sess_id}: {e}");
+                            None
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for (sess_id, session) in futures_util::future::join_all(fallback_futures)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            active_sessions.insert(sess_id, session);
+        }
+
         match crate::load_ui_state(state.app.clone()).await {
             Ok(mut latest_ui_state) => {
                 let mut persisted_cleanup = false;
@@ -673,57 +794,6 @@ async fn init_handler(
             }
         }
     }
-
-    // Fetch windowed chat history for active sessions that belong to the
-    // selected project. Other active sessions load on-demand when the user
-    // switches projects/worktrees.
-    let active_sessions: std::collections::HashMap<String, crate::chat::types::Session> =
-        if let Some(ref ui) = ui_state {
-            let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> =
-                worktrees_by_project
-                    .values()
-                    .flat_map(|wts| wts.iter())
-                    .map(|wt| (wt.id.as_str(), wt))
-                    .collect();
-
-            let session_futures: Vec<_> = ui
-                .active_session_ids
-                .iter()
-                .filter_map(|(worktree_id, session_id)| {
-                    worktree_map.get(worktree_id.as_str()).map(|wt| {
-                        let app = state.app.clone();
-                        let wt_id = worktree_id.clone();
-                        let wt_path = wt.path.clone();
-                        let sess_id = session_id.clone();
-                        async move {
-                            match crate::chat::get_session(
-                                app,
-                                wt_id,
-                                wt_path,
-                                sess_id.clone(),
-                                Some(INIT_MESSAGE_WINDOW),
-                            )
-                            .await
-                            {
-                                Ok(session) => Some((sess_id, session)),
-                                Err(e) => {
-                                    log::warn!("Failed to load active session {sess_id}: {e}");
-                                    None
-                                }
-                            }
-                        }
-                    })
-                })
-                .collect();
-
-            futures_util::future::join_all(session_futures)
-                .await
-                .into_iter()
-                .flatten()
-                .collect()
-        } else {
-            std::collections::HashMap::new()
-        };
 
     // Serialize projects (always included)
     if let Ok(val) = serde_json::to_value(&projects) {

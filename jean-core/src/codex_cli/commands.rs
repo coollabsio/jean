@@ -50,6 +50,13 @@ pub struct CodexCliStatus {
     pub installed: bool,
     pub version: Option<String>,
     pub path: Option<String>,
+    /// Linux only: whether Codex can find bubblewrap (`bwrap`) for its sandbox.
+    /// `None` on macOS/Windows or when Codex is not installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_ready: Option<bool>,
+    /// Install guidance when `sandbox_ready` is `Some(false)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_message: Option<String>,
 }
 
 /// Auth status of the Codex CLI
@@ -905,6 +912,101 @@ pub async fn refresh_codex_app_server_auth_tokens(
     })
 }
 
+/// Package-manager hint for installing system bubblewrap on Linux.
+fn bubblewrap_install_hint() -> String {
+    if std::path::Path::new("/etc/debian_version").exists() {
+        "Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap"
+            .to_string()
+    } else if std::path::Path::new("/etc/fedora-release").exists()
+        || std::path::Path::new("/etc/redhat-release").exists()
+    {
+        "Codex sandbox requires bubblewrap. Install it with: sudo dnf install bubblewrap"
+            .to_string()
+    } else if std::path::Path::new("/etc/arch-release").exists() {
+        "Codex sandbox requires bubblewrap. Install it with: sudo pacman -S bubblewrap".to_string()
+    } else {
+        "Codex sandbox requires bubblewrap (bwrap). Install it via your package manager \
+         (e.g. `sudo apt install bubblewrap` on Debian/Ubuntu)."
+            .to_string()
+    }
+}
+
+/// True when `bwrap` is on PATH (host).
+fn host_has_system_bwrap() -> bool {
+    crate::platform::silent_command("bwrap")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// True when Jean-managed / Codex-adjacent `codex-resources/bwrap` exists next to the binary.
+fn bundled_bwrap_exists(binary_path: &std::path::Path) -> bool {
+    binary_path
+        .parent()
+        .map(|dir| dir.join("codex-resources").join("bwrap").is_file())
+        .unwrap_or(false)
+}
+
+/// Linux sandbox readiness for a Codex binary on the host (non-WSL).
+fn linux_sandbox_status_for_host_binary(
+    binary_path: &std::path::Path,
+) -> (Option<bool>, Option<String>) {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = binary_path;
+        (None, None)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if host_has_system_bwrap() || bundled_bwrap_exists(binary_path) {
+            (Some(true), None)
+        } else {
+            (Some(false), Some(bubblewrap_install_hint()))
+        }
+    }
+}
+
+/// Linux sandbox readiness when Codex runs inside WSL.
+fn linux_sandbox_status_for_wsl_binary(
+    distro: &str,
+    binary_path: &str,
+) -> (Option<bool>, Option<String>) {
+    // System bwrap inside the distro
+    if crate::platform::check_wsl_tool(distro, "bwrap") {
+        return (Some(true), None);
+    }
+    // Bundled helper next to Jean-managed binary
+    if let Some(parent) = std::path::Path::new(binary_path).parent() {
+        let bundled = parent
+            .join("codex-resources")
+            .join("bwrap")
+            .to_string_lossy()
+            .to_string();
+        if crate::platform::wsl_file_executable(distro, &bundled) {
+            return (Some(true), None);
+        }
+    }
+    (
+        Some(false),
+        Some(
+            "Codex sandbox requires bubblewrap inside WSL. Install it with: \
+             sudo apt install bubblewrap (or your distro's equivalent)."
+                .to_string(),
+        ),
+    )
+}
+
+fn empty_codex_status() -> CodexCliStatus {
+    CodexCliStatus {
+        installed: false,
+        version: None,
+        path: None,
+        sandbox_ready: None,
+        sandbox_message: None,
+    }
+}
+
 /// Check if Codex CLI is installed and get its status
 pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus, String> {
     log::debug!("check_codex_cli_installed: starting");
@@ -924,11 +1026,7 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
             crate::platform::check_wsl_tool(&wsl.distro, &tool)
         };
         if !installed {
-            return Ok(CodexCliStatus {
-                installed: false,
-                version: None,
-                path: None,
-            });
+            return Ok(empty_codex_status());
         }
         let version = crate::platform::wsl_tool_version(&wsl.distro, &tool).and_then(|v| {
             let cleaned = v
@@ -943,10 +1041,14 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
                 Some(cleaned)
             }
         });
+        let (sandbox_ready, sandbox_message) =
+            linux_sandbox_status_for_wsl_binary(&wsl.distro, &tool);
         return Ok(CodexCliStatus {
             installed: true,
             version,
             path: Some(tool),
+            sandbox_ready,
+            sandbox_message,
         });
     }
 
@@ -955,11 +1057,7 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
             "check_codex_cli_installed: binary not found at {:?}",
             binary_path
         );
-        return Ok(CodexCliStatus {
-            installed: false,
-            version: None,
-            path: None,
-        });
+        return Ok(empty_codex_status());
     }
 
     // Get version
@@ -999,16 +1097,21 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
         }
     };
 
+    let (sandbox_ready, sandbox_message) = linux_sandbox_status_for_host_binary(&binary_path);
+
     let status = CodexCliStatus {
         installed: true,
         version: version.clone(),
         path: Some(binary_path.to_string_lossy().to_string()),
+        sandbox_ready,
+        sandbox_message,
     };
     log::debug!(
-        "check_codex_cli_installed: returning installed={} version={:?} path={:?}",
+        "check_codex_cli_installed: returning installed={} version={:?} path={:?} sandbox_ready={:?}",
         status.installed,
         status.version,
-        status.path
+        status.path,
+        status.sandbox_ready
     );
 
     Ok(status)
@@ -1752,11 +1855,44 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_bytes)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
+        // Best-effort: ship bundled bubblewrap next to the binary so sandboxed
+        // shell/apply_patch works without a system `apt install bubblewrap`.
+        if let Err(e) = install_linux_bwrap_helper(
+            &app,
+            &version,
+            target,
+            None,
+            Some((&wsl.distro, &unix_path)),
+        )
+        .await
+        {
+            log::warn!("Could not install bundled Codex bubblewrap into WSL: {e}");
+        }
+        // Best-effort: ship code-mode host next to codex. Codex 0.147+ has
+        // features.code_mode_host stable and spawns this sibling binary for
+        // local tool execution — without it, sessions fail with ENOENT.
+        if let Err(e) = install_code_mode_host_helper(
+            &app,
+            &version,
+            target,
+            None,
+            Some((&wsl.distro, &unix_path)),
+        )
+        .await
+        {
+            log::warn!("Could not install Codex code-mode host into WSL: {e}");
+        }
         emit_progress(&app, "complete", "Installation complete!", 100);
         log::trace!("Codex CLI installed successfully at WSL:{unix_path}");
         return Ok(());
     }
 
+    // Create the install dir on all platforms. Path is used for Windows helpers
+    // and Linux bubblewrap; macOS only needs the side effect of ensuring the dir.
+    #[cfg_attr(
+        not(any(windows, target_os = "linux")),
+        allow(unused_variables)
+    )]
     let cli_dir = ensure_cli_dir(&app)?;
     let binary_path = get_cli_binary_path(&app)?;
 
@@ -1796,7 +1932,7 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
         );
     }
     #[cfg(not(windows))]
-    let _ = (&cli_dir, &windows_helpers);
+    let _ = &windows_helpers;
 
     // Emit progress: installing
     emit_progress(&app, "installing", "Installing Codex CLI...", 65);
@@ -1813,6 +1949,28 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
             .map_err(|e| format!("Failed to set binary permissions: {e}"))?;
     }
 
+    // Linux: best-effort install of Codex's bundled bubblewrap next to the
+    // binary (`codex-resources/bwrap`). GitHub release tarballs ship the main
+    // CLI only; sandbox needs system bwrap OR this helper.
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(e) =
+            install_linux_bwrap_helper(&app, &version, target, Some(&cli_dir), None).await
+        {
+            log::warn!("Could not install bundled Codex bubblewrap: {e}");
+        }
+    }
+
+    // All platforms: best-effort install of `codex-code-mode-host` next to the
+    // main binary. Official releases ship it as a separate asset (or inside
+    // codex-package-*); Jean previously only extracted the main CLI, so Codex
+    // 0.147+ failed to spawn the host (ENOENT) during tool execution.
+    if let Err(e) =
+        install_code_mode_host_helper(&app, &version, target, Some(&cli_dir), None).await
+    {
+        log::warn!("Could not install Codex code-mode host: {e}");
+    }
+
     // Remove macOS quarantine attribute
     #[cfg(target_os = "macos")]
     {
@@ -1820,6 +1978,13 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
             .args(["-d", "com.apple.quarantine"])
             .arg(&binary_path)
             .output();
+        let host_path = cli_dir.join("codex-code-mode-host");
+        if host_path.exists() {
+            let _ = silent_command("xattr")
+                .args(["-d", "com.apple.quarantine"])
+                .arg(&host_path)
+                .output();
+        }
     }
 
     // Emit progress: verifying
@@ -1891,6 +2056,15 @@ pub async fn uninstall_codex_cli(app: AppHandle) -> Result<(), String> {
 
 /// Extract the codex binary bytes from a tar.gz archive (Linux/macOS release).
 fn extract_tar_gz_binary_bytes(archive_content: &[u8], target: &str) -> Result<Vec<u8>, String> {
+    let expected_name = format!("codex-{target}");
+    extract_tar_gz_entry_by_file_name(archive_content, &expected_name)
+}
+
+/// Extract a single file from a tar.gz by exact file name (basename match).
+fn extract_tar_gz_entry_by_file_name(
+    archive_content: &[u8],
+    expected_name: &str,
+) -> Result<Vec<u8>, String> {
     use flate2::read::GzDecoder;
     use std::io::{Cursor, Read};
     use tar::Archive;
@@ -1898,10 +2072,6 @@ fn extract_tar_gz_binary_bytes(archive_content: &[u8], target: &str) -> Result<V
     let cursor = Cursor::new(archive_content);
     let decoder = GzDecoder::new(cursor);
     let mut archive = Archive::new(decoder);
-
-    // Match only the main codex binary (e.g. "codex-aarch64-apple-darwin"),
-    // not helper binaries like codex-command-runner or codex-windows-sandbox-setup.
-    let expected_name = format!("codex-{target}");
 
     for entry in archive
         .entries()
@@ -1917,14 +2087,367 @@ fn extract_tar_gz_binary_bytes(archive_content: &[u8], target: &str) -> Result<V
                 let mut content = Vec::new();
                 entry
                     .read_to_end(&mut content)
-                    .map_err(|e| format!("Failed to read binary from archive: {e}"))?;
+                    .map_err(|e| format!("Failed to read '{expected_name}' from archive: {e}"))?;
                 return Ok(content);
             }
         }
     }
 
     Err(format!(
-        "Codex binary '{expected_name}' not found in tar.gz archive"
+        "File '{expected_name}' not found in tar.gz archive"
+    ))
+}
+
+/// Linux sandbox helper asset names for a Codex target triple.
+///
+/// Official Codex releases ship `bwrap-{linux-target}.tar.gz` separately from
+/// the main CLI tarball. Codex looks for `codex-resources/bwrap` next to the
+/// executable when system bubblewrap is missing.
+fn bwrap_asset_candidates(target: &str) -> Vec<CodexAssetCandidate> {
+    // Only Linux targets have bubblewrap helpers.
+    if !target.contains("linux") {
+        return Vec::new();
+    }
+    // Prefer musl static bwrap; fall back to gnu if present.
+    let mut names = Vec::new();
+    if target.contains("x86_64") {
+        names.push("x86_64-unknown-linux-musl");
+        names.push("x86_64-unknown-linux-gnu");
+    } else if target.contains("aarch64") {
+        names.push("aarch64-unknown-linux-musl");
+        names.push("aarch64-unknown-linux-gnu");
+    } else {
+        names.push(target);
+    }
+    names
+        .into_iter()
+        .map(|binary_target| CodexAssetCandidate {
+            name: format!("bwrap-{binary_target}.tar.gz"),
+            binary_target: binary_target.to_string(),
+            format: CodexArchiveFormat::TarGz,
+        })
+        .collect()
+}
+
+/// Download and install Codex's bundled bubblewrap next to the Jean-managed binary.
+///
+/// Best-effort: callers log and continue on failure so install still succeeds
+/// when the asset is missing (older releases) or network fails. Users can still
+/// `sudo apt install bubblewrap` for a system-wide fix.
+async fn install_linux_bwrap_helper(
+    app: &AppHandle,
+    version: &str,
+    target: &str,
+    host_cli_dir: Option<&std::path::Path>,
+    wsl_binary: Option<(&str, &str)>, // (distro, codex unix path)
+) -> Result<(), String> {
+    let candidates = bwrap_asset_candidates(target);
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    let (download_url, asset_candidate) = find_asset_url(app, version, &candidates).await?;
+    log::info!("Downloading Codex bubblewrap helper from {download_url}");
+
+    let client = reqwest::Client::builder()
+        .user_agent("Jean-App/1.0")
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client for bwrap: {e}"))?;
+
+    let response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download bubblewrap helper: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to download bubblewrap helper: HTTP {}",
+            response.status()
+        ));
+    }
+    let archive_content = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read bubblewrap archive: {e}"))?;
+
+    let expected_name = format!("bwrap-{}", asset_candidate.binary_target);
+    let bwrap_bytes = extract_tar_gz_entry_by_file_name(&archive_content, &expected_name)?;
+
+    if let Some((distro, codex_unix_path)) = wsl_binary {
+        let parent = std::path::Path::new(codex_unix_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        let resources_dir = format!("{parent}/codex-resources");
+        let bwrap_path = format!("{resources_dir}/bwrap");
+        // Ensure directory exists inside WSL
+        let mkdir = crate::platform::silent_command("wsl.exe")
+            .args(["-d", distro, "--", "mkdir", "-p", &resources_dir])
+            .output()
+            .map_err(|e| format!("Failed to create WSL codex-resources dir: {e}"))?;
+        if !mkdir.status.success() {
+            return Err(format!(
+                "Failed to create WSL codex-resources dir: {}",
+                String::from_utf8_lossy(&mkdir.stderr)
+            ));
+        }
+        crate::platform::wsl_write_bytes(distro, &bwrap_path, &bwrap_bytes)
+            .map_err(|e| format!("Failed to write bwrap into WSL: {e}"))?;
+        crate::platform::wsl_chmod_exec(distro, &bwrap_path)?;
+        log::info!("Installed bundled Codex bubblewrap at WSL:{bwrap_path}");
+        return Ok(());
+    }
+
+    let cli_dir = host_cli_dir
+        .ok_or_else(|| "Missing host CLI directory for bubblewrap install".to_string())?;
+    let resources_dir = cli_dir.join("codex-resources");
+    std::fs::create_dir_all(&resources_dir)
+        .map_err(|e| format!("Failed to create codex-resources directory: {e}"))?;
+    let bwrap_path = resources_dir.join("bwrap");
+    crate::platform::write_binary_file(&bwrap_path, &bwrap_bytes)
+        .map_err(|e| format!("Failed to write bundled bwrap: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&bwrap_path)
+            .map_err(|e| format!("Failed to get bwrap metadata: {e}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bwrap_path, perms)
+            .map_err(|e| format!("Failed to set bwrap permissions: {e}"))?;
+    }
+    log::info!("Installed bundled Codex bubblewrap at {:?}", bwrap_path);
+    Ok(())
+}
+
+/// Installed file name for the Codex code-mode host sibling binary.
+#[cfg(windows)]
+const CODE_MODE_HOST_BINARY_NAME: &str = "codex-code-mode-host.exe";
+#[cfg(not(windows))]
+const CODE_MODE_HOST_BINARY_NAME: &str = "codex-code-mode-host";
+
+/// Asset candidates for the separate `codex-code-mode-host` release artifact.
+///
+/// Official Codex releases (0.144+) ship this as a sibling of the main CLI:
+/// `codex-code-mode-host-{target}.tar.gz` / `.exe.zip`. Codex looks for
+/// `codex-code-mode-host` next to `current_exe()` when `features.code_mode_host`
+/// is enabled (stable in 0.147+).
+fn code_mode_host_asset_candidates(target: &str) -> Vec<CodexAssetCandidate> {
+    let targets: Vec<&str> = match target {
+        "x86_64-unknown-linux-musl" | "x86_64-unknown-linux-gnu" => {
+            vec!["x86_64-unknown-linux-musl", "x86_64-unknown-linux-gnu"]
+        }
+        "aarch64-unknown-linux-musl" | "aarch64-unknown-linux-gnu" => {
+            vec!["aarch64-unknown-linux-musl", "aarch64-unknown-linux-gnu"]
+        }
+        other => vec![other],
+    };
+
+    targets
+        .into_iter()
+        .map(|binary_target| {
+            if binary_target.contains("windows") {
+                CodexAssetCandidate {
+                    name: format!("codex-code-mode-host-{binary_target}.exe.zip"),
+                    binary_target: binary_target.to_string(),
+                    format: CodexArchiveFormat::Zip,
+                }
+            } else {
+                CodexAssetCandidate {
+                    name: format!("codex-code-mode-host-{binary_target}.tar.gz"),
+                    binary_target: binary_target.to_string(),
+                    format: CodexArchiveFormat::TarGz,
+                }
+            }
+        })
+        .collect()
+}
+
+fn codex_requires_code_mode_host(version: &str) -> bool {
+    let mut parts = version.trim_start_matches('v').split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(minor) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    major > 0 || minor >= 147
+}
+
+/// Install only the missing code-mode host required by Jean-managed Codex
+/// 0.147+. Returns true when the helper was installed.
+pub async fn install_missing_codex_code_mode_host(app: AppHandle) -> Result<bool, String> {
+    let preferences = crate::load_preferences_sync(&app)?;
+    if preferences.codex_cli_source != "jean" {
+        return Ok(false);
+    }
+    if !super::config::jean_managed_installed(&app) {
+        return Ok(false);
+    }
+
+    let status = check_codex_cli_installed(app.clone()).await?;
+    let Some(version) = status.version else {
+        return Ok(false);
+    };
+    if !status.installed || !codex_requires_code_mode_host(&version) {
+        return Ok(false);
+    }
+
+    let wsl = crate::platform::get_wsl_config();
+    let target = resolve_codex_runtime_target()?;
+    if wsl.enabled {
+        let codex_path = super::config::get_wsl_cli_binary_path(&wsl.distro)?;
+        let parent = std::path::Path::new(&codex_path)
+            .parent()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        let host_path = format!("{parent}/codex-code-mode-host");
+        if crate::platform::wsl_file_executable(&wsl.distro, &host_path) {
+            return Ok(false);
+        }
+        install_code_mode_host_helper(
+            &app,
+            &version,
+            target,
+            None,
+            Some((&wsl.distro, &codex_path)),
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    let cli_dir = get_cli_dir(&app)?;
+    let host_path = cli_dir.join(CODE_MODE_HOST_BINARY_NAME);
+    if host_path.exists() {
+        return Ok(false);
+    }
+    install_code_mode_host_helper(&app, &version, target, Some(&cli_dir), None).await?;
+
+    #[cfg(target_os = "macos")]
+    let _ = silent_command("xattr")
+        .args(["-d", "com.apple.quarantine"])
+        .arg(&host_path)
+        .output();
+
+    Ok(true)
+}
+
+/// Download and install `codex-code-mode-host` next to the Jean-managed binary.
+///
+/// Best-effort: callers log and continue on failure so install still succeeds
+/// when the asset is missing (older releases) or network fails.
+async fn install_code_mode_host_helper(
+    app: &AppHandle,
+    version: &str,
+    target: &str,
+    host_cli_dir: Option<&std::path::Path>,
+    wsl_binary: Option<(&str, &str)>, // (distro, codex unix path)
+) -> Result<(), String> {
+    let candidates = code_mode_host_asset_candidates(target);
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    let (download_url, asset_candidate) = find_asset_url(app, version, &candidates).await?;
+    log::info!("Downloading Codex code-mode host from {download_url}");
+
+    let client = reqwest::Client::builder()
+        .user_agent("Jean-App/1.0")
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client for code-mode host: {e}"))?;
+
+    let response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download code-mode host: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to download code-mode host: HTTP {}",
+            response.status()
+        ));
+    }
+    let archive_content = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read code-mode host archive: {e}"))?;
+
+    let host_bytes = match asset_candidate.format {
+        CodexArchiveFormat::TarGz => {
+            let expected_name = format!("codex-code-mode-host-{}", asset_candidate.binary_target);
+            extract_tar_gz_entry_by_file_name(&archive_content, &expected_name)?
+        }
+        CodexArchiveFormat::Zip => {
+            let expected_name =
+                format!("codex-code-mode-host-{}.exe", asset_candidate.binary_target);
+            extract_zip_entry_by_file_name(&archive_content, &expected_name)?
+        }
+    };
+
+    if let Some((distro, codex_unix_path)) = wsl_binary {
+        let parent = std::path::Path::new(codex_unix_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        let host_path = format!("{parent}/codex-code-mode-host");
+        crate::platform::wsl_write_bytes(distro, &host_path, &host_bytes)
+            .map_err(|e| format!("Failed to write code-mode host into WSL: {e}"))?;
+        crate::platform::wsl_chmod_exec(distro, &host_path)?;
+        log::info!("Installed Codex code-mode host at WSL:{host_path}");
+        return Ok(());
+    }
+
+    let cli_dir = host_cli_dir
+        .ok_or_else(|| "Missing host CLI directory for code-mode host install".to_string())?;
+    let host_path = cli_dir.join(CODE_MODE_HOST_BINARY_NAME);
+    crate::platform::write_binary_file(&host_path, &host_bytes)
+        .map_err(|e| format!("Failed to write code-mode host: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&host_path)
+            .map_err(|e| format!("Failed to get code-mode host metadata: {e}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&host_path, perms)
+            .map_err(|e| format!("Failed to set code-mode host permissions: {e}"))?;
+    }
+    log::info!("Installed Codex code-mode host at {:?}", host_path);
+    Ok(())
+}
+
+/// Extract a single file from a zip by exact file name (basename match).
+fn extract_zip_entry_by_file_name(
+    archive_content: &[u8],
+    expected_name: &str,
+) -> Result<Vec<u8>, String> {
+    use std::io::{Cursor, Read};
+
+    let cursor = Cursor::new(archive_content);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("Failed to open zip archive: {e}"))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read zip entry: {e}"))?;
+        let name = file.name().to_string();
+        let file_name = std::path::Path::new(&name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if file_name == expected_name {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)
+                .map_err(|e| format!("Failed to read zip entry '{expected_name}': {e}"))?;
+            return Ok(bytes);
+        }
+    }
+
+    Err(format!(
+        "File '{expected_name}' not found in zip archive"
     ))
 }
 
@@ -2059,6 +2582,127 @@ mod tests {
             zip.write_all(bytes).expect("write zip entry");
         }
         zip.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn bwrap_asset_candidates_for_linux_musl_targets() {
+        let x64 = bwrap_asset_candidates("x86_64-unknown-linux-musl");
+        assert_eq!(
+            x64.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec![
+                "bwrap-x86_64-unknown-linux-musl.tar.gz",
+                "bwrap-x86_64-unknown-linux-gnu.tar.gz",
+            ]
+        );
+        let arm = bwrap_asset_candidates("aarch64-unknown-linux-musl");
+        assert_eq!(
+            arm.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec![
+                "bwrap-aarch64-unknown-linux-musl.tar.gz",
+                "bwrap-aarch64-unknown-linux-gnu.tar.gz",
+            ]
+        );
+        assert!(bwrap_asset_candidates("aarch64-apple-darwin").is_empty());
+        assert!(bwrap_asset_candidates("x86_64-pc-windows-msvc").is_empty());
+    }
+
+    #[test]
+    fn code_mode_host_asset_candidates_for_common_targets() {
+        let linux = code_mode_host_asset_candidates("aarch64-unknown-linux-musl");
+        assert_eq!(
+            linux.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec![
+                "codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz",
+                "codex-code-mode-host-aarch64-unknown-linux-gnu.tar.gz",
+            ]
+        );
+        assert!(linux.iter().all(|c| c.format == CodexArchiveFormat::TarGz));
+
+        let mac = code_mode_host_asset_candidates("aarch64-apple-darwin");
+        assert_eq!(
+            mac.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["codex-code-mode-host-aarch64-apple-darwin.tar.gz"]
+        );
+
+        let win = code_mode_host_asset_candidates("x86_64-pc-windows-msvc");
+        assert_eq!(
+            win.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["codex-code-mode-host-x86_64-pc-windows-msvc.exe.zip"]
+        );
+        assert!(win.iter().all(|c| c.format == CodexArchiveFormat::Zip));
+    }
+
+    #[test]
+    fn code_mode_host_is_required_from_codex_0_147() {
+        assert!(!codex_requires_code_mode_host("0.146.1"));
+        assert!(codex_requires_code_mode_host("0.147.0"));
+        assert!(codex_requires_code_mode_host("0.148.0-beta.1"));
+        assert!(codex_requires_code_mode_host("1.0.0"));
+        assert!(!codex_requires_code_mode_host("unknown"));
+    }
+
+    #[test]
+    fn extract_zip_entry_by_file_name_finds_host() {
+        let zip_bytes = make_test_zip(&[
+            (
+                "codex-code-mode-host-x86_64-pc-windows-msvc.exe",
+                b"HOST_BYTES",
+            ),
+            ("README.txt", b"ignore"),
+        ]);
+        let extracted = extract_zip_entry_by_file_name(
+            &zip_bytes,
+            "codex-code-mode-host-x86_64-pc-windows-msvc.exe",
+        )
+        .expect("extract host");
+        assert_eq!(extracted, b"HOST_BYTES");
+    }
+
+    #[test]
+    fn bubblewrap_install_hint_mentions_package_manager() {
+        let hint = bubblewrap_install_hint();
+        assert!(hint.to_lowercase().contains("bubblewrap"));
+        assert!(
+            hint.contains("apt")
+                || hint.contains("dnf")
+                || hint.contains("pacman")
+                || hint.contains("package manager")
+        );
+    }
+
+    #[test]
+    fn extract_tar_gz_entry_by_file_name_finds_bwrap() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use tar::Builder;
+
+        let mut archive_buf = Vec::new();
+        {
+            let enc = GzEncoder::new(&mut archive_buf, Compression::none());
+            let mut builder = Builder::new(enc);
+            let mut header = tar::Header::new_gnu();
+            let data = b"BWRAP_BYTES";
+            header.set_size(data.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder
+                .append_data(
+                    &mut header,
+                    "bwrap-aarch64-unknown-linux-musl",
+                    data.as_slice(),
+                )
+                .expect("append");
+            builder
+                .into_inner()
+                .expect("finish tar")
+                .finish()
+                .expect("gzip");
+        }
+
+        let extracted =
+            extract_tar_gz_entry_by_file_name(&archive_buf, "bwrap-aarch64-unknown-linux-musl")
+                .expect("extract bwrap");
+        assert_eq!(extracted, b"BWRAP_BYTES");
     }
 
     #[test]

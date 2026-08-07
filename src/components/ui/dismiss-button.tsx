@@ -33,9 +33,9 @@ export function DismissButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
+          aria-label={tooltip}
           onClick={onClick}
           className={cn(
             'inline-flex items-center justify-center rounded-full p-0.5 transition-colors',
@@ -44,7 +44,7 @@ export function DismissButton({
           )}
         >
           <X className={iconSize} />
-        </span>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
         {tooltip}

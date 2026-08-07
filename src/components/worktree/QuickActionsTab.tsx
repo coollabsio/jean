@@ -62,6 +62,8 @@ export interface QuickActionsTabProps {
 }
 
 const INVALID_BRANCH_CHAR = /[\s:?*~^[\\]/
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_BRANCHES: string[] = []
 
 function isInvalidBranchName(trimmed: string): boolean {
   if (trimmed.length === 0) return false
@@ -86,7 +88,7 @@ export function QuickActionsTab({
   remotes,
   projectPath,
   defaultBranch,
-  branches = [],
+  branches = EMPTY_BRANCHES,
   isLoadingBranches = false,
 }: QuickActionsTabProps) {
   const [customBranchName, setCustomBranchName] = useState('')
@@ -105,9 +107,11 @@ export function QuickActionsTab({
     () =>
       new Set(
         favoritePrefix
-          ? favoriteKeys
-              .filter(key => key.startsWith(favoritePrefix))
-              .map(key => key.slice(favoritePrefix.length))
+          ? favoriteKeys.flatMap(key =>
+              key.startsWith(favoritePrefix)
+                ? [key.slice(favoritePrefix.length)]
+                : []
+            )
           : []
       ),
     [favoriteKeys, favoritePrefix]
@@ -234,6 +238,7 @@ export function QuickActionsTab({
             type="button"
             role="combobox"
             aria-expanded={baseBranchOpen}
+            aria-controls="quick-actions-base-branch-list"
             aria-label="Base branch"
             disabled={isCreating}
             className={cn(
@@ -252,6 +257,7 @@ export function QuickActionsTab({
           </button>
         </PopoverTrigger>
         <PopoverContent
+          id="quick-actions-base-branch-list"
           className="p-0 w-[220px]"
           align="center"
           onWheel={e => e.stopPropagation()}
@@ -366,6 +372,7 @@ export function QuickActionsTab({
             const RemoteIcon = index === 0 ? Plus : GitFork
             return (
               <button
+                type="button"
                 key={remote.name}
                 onClick={() => handleCreateClick(baseBranch)}
                 disabled={isCreating || isInvalid || !effectiveBaseBranch}
@@ -407,6 +414,7 @@ export function QuickActionsTab({
           <>
             {/* Base Session button */}
             <button
+              type="button"
               onClick={onBaseSession}
               disabled={isCreating}
               className={cn(
@@ -457,6 +465,7 @@ export function QuickActionsTab({
               {baseBranchPicker}
               {branchNameInput}
               <button
+                type="button"
                 onClick={() => handleCreateClick()}
                 disabled={isCreating || isInvalid}
                 className={cn(

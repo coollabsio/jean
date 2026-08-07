@@ -55,15 +55,12 @@ describe('terminal primary surface modal regression', () => {
     const source = readSource('src/components/chat/ChatWindow.tsx')
 
     expect(source).toMatch(/if\s*\(\s*isSessionSwitching\s*\)\s*return/)
+    // Guard uses a local `autoReconnecting` alias of the lazy-init ref set.
     expect(source).toMatch(
-      /if\s*\(\s*autoReconnectingRef\.current\.has\s*\(\s*deferredSessionId\s*\)\s*\)\s*return/
+      /if\s*\(\s*autoReconnecting\.has\s*\(\s*deferredSessionId\s*\)\s*\)\s*return/
     )
-    expect(source).toMatch(
-      /autoReconnectingRef\.current\.add\s*\(\s*sessionId\s*\)/
-    )
-    expect(source).toMatch(
-      /autoReconnectingRef\.current\.delete\s*\(\s*sessionId\s*\)/
-    )
+    expect(source).toMatch(/autoReconnecting\.add\s*\(\s*sessionId\s*\)/)
+    expect(source).toMatch(/autoReconnecting\.delete\s*\(\s*sessionId\s*\)/)
   })
 
   it('shows a safe recovery state instead of an empty chat for legacy sessions', () => {
@@ -84,6 +81,14 @@ describe('terminal primary surface modal regression', () => {
     expect(end).toBeGreaterThan(start)
     expect(handleReviewFixSource).toContain('createSession.mutateAsync')
     expect(handleReviewFixSource).toContain('sendMessage.mutate')
+    // Must not switch the active tab (background fix sessions)
     expect(handleReviewFixSource).not.toContain('setActiveSession')
+    // Issue #630: custom MiniMax/etc. profiles must ride along with the fix turn
+    expect(handleReviewFixSource).toContain('resolveMagicPromptProvider')
+    expect(handleReviewFixSource).toContain('code_review_provider')
+    expect(handleReviewFixSource).toContain('customProfileName')
+    // Prefer multi-review selected reviewer backend/model when provided
+    expect(handleReviewFixSource).toContain('options?.backend')
+    expect(handleReviewFixSource).toContain('options?.model')
   })
 })

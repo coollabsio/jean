@@ -95,12 +95,23 @@ const TagInput = React.forwardRef<HTMLDivElement, TagInputProps>(
     return (
       <div
         ref={ref}
+        role="group"
+        aria-label="Tags"
         className={cn(
           'border-input placeholder:text-muted-foreground focus-within:border-ring focus-within:ring-ring/50 flex min-h-9 w-full rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] md:text-sm',
           disabled && 'cursor-not-allowed opacity-50',
           className
         )}
         onClick={handleContainerClick}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            // Don't steal keys from the nested input; only activate when the group itself is targeted.
+            if (e.target === e.currentTarget) {
+              e.preventDefault()
+              handleContainerClick()
+            }
+          }
+        }}
         {...props}
       >
         <div className="flex flex-1 flex-wrap items-center gap-1 py-1">

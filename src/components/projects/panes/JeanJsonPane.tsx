@@ -34,9 +34,11 @@ export function JeanJsonPane({
 
   const [localSetup, setLocalSetup] = useState('')
   const [localTeardown, setLocalTeardown] = useState('')
-  const [localRun, setLocalRun] = useState<string[]>([''])
+  const [localRun, setLocalRun] = useState<{ id: string; value: string }[]>(
+    () => [{ id: crypto.randomUUID(), value: '' }]
+  )
   const [localPorts, setLocalPorts] = useState<
-    { port: string; label: string; host: string }[]
+    { id: string; port: string; label: string; host: string }[]
   >([])
   const [synced, setSynced] = useState(false)
 
@@ -47,11 +49,17 @@ export function JeanJsonPane({
       setLocalSetup(jeanConfig.scripts.setup ?? '')
       setLocalTeardown(jeanConfig.scripts.teardown ?? '')
       const scripts = normalizeRunScripts(jeanConfig.scripts.run)
-      setLocalRun(scripts.length > 0 ? scripts : [''])
+      setLocalRun(
+        (scripts.length > 0 ? scripts : ['']).map(value => ({
+          id: crypto.randomUUID(),
+          value,
+        }))
+      )
 
       const ports = jeanConfig.ports ?? []
       setLocalPorts(
         ports.map(p => ({
+          id: crypto.randomUUID(),
           port: String(p.port),
           label: p.label,
           host: p.host ?? '',
@@ -63,10 +71,21 @@ export function JeanJsonPane({
   }, [jeanConfig])
 
   const originalRunScripts = normalizeRunScripts(jeanConfig?.scripts.run)
-  const currentRunFiltered = localRun.filter(s => s.trim())
-  const currentPortsFiltered = localPorts.filter(
-    p => p.port.trim() && p.label.trim()
-  )
+  const currentRunFiltered: string[] = []
+  for (const s of localRun) {
+    if (s.value.trim()) currentRunFiltered.push(s.value)
+  }
+  const currentPortsFiltered: { port: string; label: string; host: string }[] =
+    []
+  for (const p of localPorts) {
+    if (p.port.trim() && p.label.trim()) {
+      currentPortsFiltered.push({
+        port: p.port,
+        label: p.label,
+        host: p.host,
+      })
+    }
+  }
   const originalPorts = (jeanConfig?.ports ?? []).map(p => ({
     port: String(p.port),
     label: p.label,
@@ -85,19 +104,26 @@ export function JeanJsonPane({
       currentPortsFiltered.length > 0
 
   const handleSave = useCallback(() => {
-    const filtered = localRun.filter(s => s.trim())
+    const filtered: string[] = []
+    for (const s of localRun) {
+      if (s.value.trim()) filtered.push(s.value)
+    }
     let run: string | string[] | null = null
     if (filtered.length === 1) run = filtered[0] ?? null
     else if (filtered.length > 1) run = filtered
 
-    const validPorts = localPorts
-      .filter(p => p.port.trim() && p.label.trim())
-      .map(p => ({
-        port: Number(p.port),
-        label: p.label.trim(),
-        host: p.host.trim() || undefined,
-      }))
-      .filter(p => !isNaN(p.port) && p.port > 0 && p.port <= 65535)
+    const validPorts = localPorts.flatMap(p => {
+      if (!p.port.trim() || !p.label.trim()) return []
+      const port = Number(p.port)
+      if (isNaN(port) || port <= 0 || port > 65535) return []
+      return [
+        {
+          port,
+          label: p.label.trim(),
+          host: p.host.trim() || undefined,
+        },
+      ]
+    })
 
     saveJeanConfig.mutate({
       projectPath,
@@ -144,14 +170,14 @@ export function JeanJsonPane({
           </div>
           <div className="space-y-1.5">
             <Label className="text-sm">Run</Label>
-            {localRun.map((cmd, i) => (
-              <div key={i} className="flex items-center gap-1">
+            {localRun.map((entry, i) => (
+              <div key={entry.id} className="flex items-center gap-1">
                 <Input
                   placeholder="e.g. npm run dev"
-                  value={cmd}
+                  value={entry.value}
                   onChange={e => {
                     const next = [...localRun]
-                    next[i] = e.target.value
+                    next[i] = { ...entry, value: e.target.value }
                     setLocalRun(next)
                   }}
                   className="font-mono text-base md:text-sm"
@@ -162,7 +188,7 @@ export function JeanJsonPane({
                     size="icon"
                     className="h-8 w-8 shrink-0"
                     onClick={() =>
-                      setLocalRun(localRun.filter((_, j) => j !== i))
+                      setLocalRun(localRun.filter(s => s.id !== entry.id))
                     }
                   >
                     <X className="h-3.5 w-3.5" />
@@ -174,7 +200,12 @@ export function JeanJsonPane({
               variant="ghost"
               size="sm"
               className="h-7 text-xs"
-              onClick={() => setLocalRun([...localRun, ''])}
+              onClick={() =>
+                setLocalRun([
+                  ...localRun,
+                  { id: crypto.randomUUID(), value: '' },
+                ])
+              }
             >
               <Plus className="mr-1 h-3 w-3" />
               Add command
@@ -186,7 +217,7 @@ export function JeanJsonPane({
           <div className="space-y-1.5">
             <Label className="text-sm">Ports</Label>
             {localPorts.map((entry, i) => (
-              <div key={i} className="flex items-center gap-1">
+              <div key={entry.id} className="flex items-center gap-1">
                 <Input
                   placeholder="Port"
                   type="number"
@@ -223,7 +254,7 @@ export function JeanJsonPane({
                   size="icon"
                   className="h-8 w-8 shrink-0"
                   onClick={() =>
-                    setLocalPorts(localPorts.filter((_, j) => j !== i))
+                    setLocalPorts(localPorts.filter(p => p.id !== entry.id))
                   }
                 >
                   <X className="h-3.5 w-3.5" />
@@ -237,7 +268,12 @@ export function JeanJsonPane({
               onClick={() =>
                 setLocalPorts([
                   ...localPorts,
-                  { port: '', label: '', host: '' },
+                  {
+                    id: crypto.randomUUID(),
+                    port: '',
+                    label: '',
+                    host: '',
+                  },
                 ])
               }
             >

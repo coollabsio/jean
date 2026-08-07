@@ -38,12 +38,19 @@ import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
 import { useIsMobile } from '@/hooks/use-mobile'
 
+/** Optional reviewer identity so fix sessions use the same backend/model. */
+export interface ReviewFixOptions {
+  backend?: string
+  model?: string
+}
+
 interface ReviewResultsPanelProps {
   sessionId: string
   isReviewing?: boolean
   onSendFix?: (
     message: string | string[],
-    executionMode: 'plan' | 'yolo'
+    executionMode: 'plan' | 'yolo',
+    options?: ReviewFixOptions
   ) => void
 }
 
@@ -309,34 +316,31 @@ export function ReviewResultsPanel({
 
   const fixableIndices = useMemo(
     () =>
-      sortedFindings
-        .filter(({ finding }) => isFixableFinding(finding))
-        .map(({ originalIndex }) => originalIndex),
+      sortedFindings.flatMap(({ finding, originalIndex }) =>
+        isFixableFinding(finding) ? [originalIndex] : []
+      ),
     [sortedFindings]
   )
+
+  // Clamp during render so list shrinks never leave an out-of-range index
+  const safeActiveIndex =
+    sortedFindings.length === 0
+      ? 0
+      : Math.min(activeIndex, sortedFindings.length - 1)
+
+  const focusActiveRow = useCallback((index: number) => {
+    const row = activeRowRefs.current[index]
+    row?.focus({ preventScroll: true })
+    row?.scrollIntoView?.({ block: 'nearest' })
+  }, [])
 
   // Default-select all fixable findings when results/reviewer change
   useEffect(() => {
     setSelected(new Set(fixableIndices))
     setExpanded(new Set())
     setActiveIndex(0)
-  }, [sessionId, effectiveReviewKey, fixableIndices.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (sortedFindings.length === 0) {
-      if (activeIndex !== 0) setActiveIndex(0)
-      return
-    }
-    if (activeIndex >= sortedFindings.length) {
-      setActiveIndex(sortedFindings.length - 1)
-    }
-  }, [activeIndex, sortedFindings.length])
-
-  useEffect(() => {
-    const row = activeRowRefs.current[activeIndex]
-    row?.focus({ preventScroll: true })
-    row?.scrollIntoView?.({ block: 'nearest' })
-  }, [activeIndex])
+    requestAnimationFrame(() => focusActiveRow(0))
+  }, [sessionId, effectiveReviewKey, fixableIndices.join(','), focusActiveRow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleReviewSelect = useCallback((key: string) => {
     setSelectedReviewKey(key)
@@ -394,6 +398,14 @@ export function ReviewResultsPanel({
     )
   }, [sortedFindings, selected])
 
+  const reviewFixOptions = useMemo((): ReviewFixOptions | undefined => {
+    if (!selectedReviewEntry) return undefined
+    return {
+      backend: selectedReviewEntry.backend,
+      model: selectedReviewEntry.model,
+    }
+  }, [selectedReviewEntry])
+
   const handleSendToChat = useCallback(() => {
     if (!onSendFix) return
     const selectedFindings = getSelectedFindings()
@@ -404,12 +416,19 @@ export function ReviewResultsPanel({
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
         formatCombinedFindingsMessage(selectedFindings),
-        fixExecutionMode
+        fixExecutionMode,
+        reviewFixOptions
       )
     } finally {
       setIsSending(false)
     }
-  }, [fixExecutionMode, getSelectedFindings, markSelectedFixed, onSendFix])
+  }, [
+    fixExecutionMode,
+    getSelectedFindings,
+    markSelectedFixed,
+    onSendFix,
+    reviewFixOptions,
+  ])
 
   const handleSendSeparately = useCallback(() => {
     if (!onSendFix) return
@@ -421,12 +440,19 @@ export function ReviewResultsPanel({
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
         selectedFindings.map(({ finding }) => formatFindingMessage(finding)),
-        fixExecutionMode
+        fixExecutionMode,
+        reviewFixOptions
       )
     } finally {
       setIsSending(false)
     }
-  }, [fixExecutionMode, getSelectedFindings, markSelectedFixed, onSendFix])
+  }, [
+    fixExecutionMode,
+    getSelectedFindings,
+    markSelectedFixed,
+    onSendFix,
+    reviewFixOptions,
+  ])
 
   const handlePanelKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -443,35 +469,40 @@ export function ReviewResultsPanel({
 
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setActiveIndex(index => Math.min(index + 1, sortedFindings.length - 1))
+        const next = Math.min(safeActiveIndex + 1, sortedFindings.length - 1)
+        setActiveIndex(next)
+        requestAnimationFrame(() => focusActiveRow(next))
         return
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault()
-        setActiveIndex(index => Math.max(index - 1, 0))
+        const next = Math.max(safeActiveIndex - 1, 0)
+        setActiveIndex(next)
+        requestAnimationFrame(() => focusActiveRow(next))
         return
       }
 
       if (event.key === 'Enter') {
         event.preventDefault()
-        const item = sortedFindings[activeIndex]
+        const item = sortedFindings[safeActiveIndex]
         if (item) toggleExpand(item.originalIndex)
         return
       }
 
       if (event.key === ' ') {
         event.preventDefault()
-        const item = sortedFindings[activeIndex]
+        const item = sortedFindings[safeActiveIndex]
         if (item && isFixableFinding(item.finding)) {
           toggleSelect(item.originalIndex)
         }
       }
     },
     [
-      activeIndex,
+      focusActiveRow,
       handleSendSeparately,
       handleSendToChat,
+      safeActiveIndex,
       sortedFindings,
       toggleExpand,
       toggleSelect,
@@ -566,6 +597,8 @@ export function ReviewResultsPanel({
   return (
     <div
       className="relative flex h-full min-w-0 flex-col overflow-hidden bg-background outline-none"
+      role="region"
+      aria-label="Review findings"
       tabIndex={0}
       onKeyDown={handlePanelKeyDown}
     >
@@ -646,7 +679,7 @@ export function ReviewResultsPanel({
                 const isExpanded = expanded.has(originalIndex)
                 const isSelected = selected.has(originalIndex)
                 const isFixed = isFindingFixed(finding, originalIndex)
-                const isActive = activeIndex === listIndex
+                const isActive = safeActiveIndex === listIndex
                 const canSelect = isFixableFinding(finding)
                 const lineInfo = finding.line ? `:${finding.line}` : ''
                 const severityConfig = getSeverityConfig(finding.severity)
@@ -660,13 +693,15 @@ export function ReviewResultsPanel({
                     }}
                     data-active={isActive}
                     data-testid={`review-finding-row-${originalIndex}`}
-                    tabIndex={isActive ? 0 : -1}
                     className={cn(
                       'px-3 py-2.5 outline-none transition-colors',
                       isActive && 'bg-accent/40 ring-1 ring-ring/50',
                       isFixed && 'opacity-60'
                     )}
-                    onClick={() => setActiveIndex(listIndex)}
+                    onClick={() => {
+                      setActiveIndex(listIndex)
+                      requestAnimationFrame(() => focusActiveRow(listIndex))
+                    }}
                   >
                     <div className="flex items-start gap-2">
                       <Checkbox

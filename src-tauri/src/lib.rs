@@ -395,6 +395,7 @@ pub fn run() {
             desktop_commands::send_native_notification,
             desktop_commands::read_clipboard_image,
             desktop_commands::write_clipboard_text,
+            desktop_commands::read_clipboard_text,
             desktop_commands::save_dropped_image,
             desktop_commands::open_file_in_default_app,
             desktop_commands::open_worktree_in_finder,

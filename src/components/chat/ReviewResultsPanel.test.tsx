@@ -68,9 +68,12 @@ describe('ReviewResultsPanel', () => {
 
     render(<ReviewResultsPanel sessionId="session-1" />)
 
-    // Collapsed by default — expand to see details
+    // Collapsed by default — expand via the title control inside the row
+    const row = screen.getByTestId('review-finding-row-0')
     await userEvent.click(
-      screen.getByRole('button', { name: /null access after guard removal/i })
+      within(row).getByRole('button', {
+        name: /null access after guard removal/i,
+      })
     )
 
     expect(screen.getByText('Correctness')).toBeInTheDocument()
@@ -393,7 +396,10 @@ describe('ReviewResultsPanel', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /send to chat \(1\)/i })
     )
-    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'plan')
+    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'plan', {
+      backend: 'claude',
+      model: 'claude-fable-5',
+    })
 
     onSendFix.mockClear()
     await userEvent.click(screen.getByRole('combobox'))
@@ -403,7 +409,10 @@ describe('ReviewResultsPanel', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /send to chat \(1\)/i })
     )
-    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'yolo')
+    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'yolo', {
+      backend: 'codex',
+      model: 'gpt-5.6-sol',
+    })
   })
 
   it('falls back to global code_review_fix_mode when reviewer has no fix_mode', async () => {
@@ -441,7 +450,11 @@ describe('ReviewResultsPanel', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /send to chat \(1\)/i })
     )
-    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'yolo')
+    expect(onSendFix).toHaveBeenCalledWith(
+      expect.any(String),
+      'yolo',
+      undefined
+    )
   })
 
   it('supports select all / deselect all', async () => {

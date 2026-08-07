@@ -310,7 +310,7 @@ export function MainWindow() {
     : null
 
   // Compute window title based on selected project/worktree
-  // On mobile, show only project name (worktree name is in the content header)
+  // On mobile, show only the project name to fit the compact title bar.
   const windowTitle = useMemo(() => {
     if (!project || !worktree) return 'Jean'
     if (isMobile) return project.name
@@ -328,8 +328,7 @@ export function MainWindow() {
     return {
       worktreeId: worktree.id,
       worktreePath: worktree.path,
-      baseBranch:
-        worktree.base_branch ?? project.default_branch ?? 'main',
+      baseBranch: worktree.base_branch ?? project.default_branch ?? 'main',
       prNumber: worktree.pr_number,
       prUrl: worktree.pr_url,
     }
@@ -581,6 +580,10 @@ export function MainWindow() {
         {/* Desktop: custom resize handle for left sidebar */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize left sidebar"
             className="relative h-full w-px bg-border"
             onMouseDown={handleResizeStart}
           >
@@ -605,6 +608,10 @@ export function MainWindow() {
         {/* Desktop: resize handle for file browser */}
         {!isMobile && fileBrowserVisible && isInitialized && (
           <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize file browser"
             className="relative h-full w-px bg-border"
             onMouseDown={handleFileBrowserResizeStart}
           >

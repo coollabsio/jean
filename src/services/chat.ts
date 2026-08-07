@@ -42,6 +42,12 @@ import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
+import {
+  bareCommandForBackend,
+  isBareCliCommand,
+  preferResolvedCliCommand,
+  resolveBackendCliPath,
+} from '@/services/cli-binary'
 import type {
   StoredReviewResults,
   Worktree,
@@ -215,15 +221,25 @@ export async function reconnectNativeCliSession(
     showToast = true,
     markOpened = true,
   } = options ?? {}
-  const resume = getResumeArgs(session)
-  const launch =
+  // When terminal_command is a bare name (e.g. jean-managed grok not on PATH),
+  // resolve to the absolute path from check_*_cli_installed.
+  const resolvedCommand = await resolveBackendCliPath(session.backend)
+  const resume = getResumeArgs(session, { resolvedCommand })
+  let launch =
     resume ??
     (!isNativeTerminalBackend(session.backend)
       ? {
-          command: session.terminal_command ?? '',
+          command: preferResolvedCliCommand(
+            session.terminal_command,
+            bareCommandForBackend(session.backend),
+            resolvedCommand
+          ),
           args: session.terminal_command_args ?? [],
         }
       : null)
+  if (launch && resolvedCommand && isBareCliCommand(launch.command)) {
+    launch = { ...launch, command: resolvedCommand }
+  }
   if (!launch?.command) {
     if (showToast) toast.error('No command available to reconnect this session')
     return
@@ -252,6 +268,7 @@ export async function reconnectNativeCliSession(
       commandArgs: launch.args,
       activate: false,
       openPanel: false,
+      sessionId: session.id,
     }
   )
 
@@ -967,6 +984,7 @@ export function useUpdateSessionState() {
       pendingPermissionDenials,
       pendingCodexCommandApprovalRequests,
       pendingCodexPermissionRequests,
+      pendingOpencodePermissionRequests,
       pendingCodexUserInputRequests,
       pendingCodexMcpElicitationRequests,
       pendingCodexDynamicToolCallRequests,
@@ -1011,6 +1029,17 @@ export function useUpdateSessionState() {
         item_id: string
         permissions: unknown
         reason?: string | null
+      }[]
+      pendingOpencodePermissionRequests?: {
+        request_id: string
+        opencode_session_id: string
+        permission: string
+        patterns: string[]
+        always: string[]
+        metadata?: unknown
+        tool_call_id?: string | null
+        working_dir?: string | null
+        api_version?: string
       }[]
       pendingCodexUserInputRequests?: {
         rpc_id: number
@@ -1061,6 +1090,7 @@ export function useUpdateSessionState() {
         pendingPermissionDenials,
         pendingCodexCommandApprovalRequests,
         pendingCodexPermissionRequests,
+        pendingOpencodePermissionRequests,
         pendingCodexUserInputRequests,
         pendingCodexMcpElicitationRequests,
         pendingCodexDynamicToolCallRequests,
@@ -2656,9 +2686,10 @@ export function formatAnswersAsNaturalLanguage(
     const question = questions[answer.questionIndex]
     if (!question) continue
 
-    const selectedLabels = answer.selectedOptions
-      .map(idx => question.options[idx]?.label)
-      .filter(Boolean)
+    const selectedLabels = answer.selectedOptions.flatMap(idx => {
+      const label = question.options[idx]?.label
+      return label ? [label] : []
+    })
 
     if (selectedLabels.length > 0 || answer.customText) {
       let text = `For "${question.question}"`

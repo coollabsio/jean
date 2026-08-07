@@ -22,7 +22,13 @@ export const skillQueryKeys = {
       'commands',
       worktreePath ?? 'global',
     ] as const,
-  codexSkills: () => [...skillQueryKeys.all, 'codex', 'skills'] as const,
+  codexSkills: (worktreePath?: string | null) =>
+    [
+      ...skillQueryKeys.all,
+      'codex',
+      'skills',
+      worktreePath ?? 'global',
+    ] as const,
   opencodeSkills: () => [...skillQueryKeys.all, 'opencode', 'skills'] as const,
   cursorSkills: () => [...skillQueryKeys.all, 'cursor', 'skills'] as const,
   piSkills: () => [...skillQueryKeys.all, 'pi', 'skills'] as const,
@@ -90,7 +96,8 @@ function useBackendSkills(
     | 'list_commandcode_skills'
     | 'list_grok_skills',
   queryKey: readonly unknown[],
-  label: string
+  label: string,
+  args: Record<string, unknown> = {}
 ) {
   return useQuery({
     queryKey,
@@ -99,7 +106,7 @@ function useBackendSkills(
 
       try {
         logger.debug(`Loading ${label} skills`)
-        const skills = await invoke<ClaudeSkill[]>(command, {})
+        const skills = await invoke<ClaudeSkill[]>(command, args)
         logger.info(`${label} skills loaded`, { count: skills.length })
         return skills
       } catch (error) {
@@ -112,12 +119,13 @@ function useBackendSkills(
   })
 }
 
-export function useCodexSkills() {
+export function useCodexSkills(worktreePath?: string | null) {
   return useBackendSkills(
     'codex',
     'list_codex_skills',
-    skillQueryKeys.codexSkills(),
-    'Codex CLI'
+    skillQueryKeys.codexSkills(worktreePath),
+    'Codex CLI',
+    { worktreePath: worktreePath ?? undefined }
   )
 }
 
@@ -205,7 +213,7 @@ export function useAllBackendSkills(
 ): BackendSkillsGroup[] {
   const claudeSkills = useClaudeSkills(worktreePath)
   const claudeCommands = useClaudeCommands(worktreePath)
-  const codexSkills = useCodexSkills()
+  const codexSkills = useCodexSkills(worktreePath)
   const opencodeSkills = useOpenCodeSkills()
   const cursorSkills = useCursorSkills()
   const piSkills = usePiSkills()

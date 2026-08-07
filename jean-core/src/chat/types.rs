@@ -485,6 +485,50 @@ pub struct CodexPermissionRequestEvent {
     pub request: CodexPermissionRequest,
 }
 
+/// Pending OpenCode permission request awaiting user response
+///
+/// OpenCode emits `permission.asked` / `permission.v2.asked` SSE events when a
+/// tool needs approval (e.g. external_directory access outside the worktree).
+/// Jean surfaces these to the frontend and replies via the OpenCode Permission API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenCodePermissionRequest {
+    /// OpenCode permission request ID (used in POST /permission/{id}/reply)
+    pub request_id: String,
+    /// OpenCode session that owns the request (may be a child/subagent session)
+    pub opencode_session_id: String,
+    /// Permission kind (v1 `permission`) or action (v2 `action`), e.g. "external_directory"
+    pub permission: String,
+    /// Patterns/resources the request covers (paths, globs, command prefixes, …)
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    /// Patterns that "always" would approve for the rest of the OpenCode session
+    #[serde(default)]
+    pub always: Vec<String>,
+    /// Optional tool-specific metadata from OpenCode
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// Tool call ID when the request is tool-triggered
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// Working directory to scope the OpenCode instance (`?directory=`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    /// API version: "v1" (default) or "v2"
+    #[serde(default = "default_opencode_permission_api_version")]
+    pub api_version: String,
+}
+
+fn default_opencode_permission_api_version() -> String {
+    "v1".to_string()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenCodePermissionRequestEvent {
+    pub session_id: String,
+    pub worktree_id: String,
+    pub request: OpenCodePermissionRequest,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CodexCommandApprovalRequestEvent {
     pub session_id: String,
@@ -782,6 +826,9 @@ pub struct Session {
     /// Pending Codex permission requests awaiting user approval
     #[serde(default)]
     pub pending_codex_permission_requests: Vec<CodexPermissionRequest>,
+    /// Pending OpenCode permission requests awaiting user approval
+    #[serde(default)]
+    pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -948,6 +995,7 @@ impl Session {
             review_results: None,
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
+            pending_opencode_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
@@ -1125,7 +1173,8 @@ impl SessionMetadata {
             .runs
             .last()
             .map(|r| r.ended_at.unwrap_or(r.started_at))
-            .unwrap_or(self.created_at);
+            .unwrap_or(self.created_at)
+            .max(self.terminal_activity_at.unwrap_or(0));
         let last_message_at = self.runs.last().map(|r| r.ended_at.unwrap_or(r.started_at));
         Session {
             id: self.id.clone(),
@@ -1166,6 +1215,7 @@ impl SessionMetadata {
             review_results: self.review_results.clone(),
             pending_permission_denials: self.pending_permission_denials.clone(),
             pending_codex_permission_requests: self.pending_codex_permission_requests.clone(),
+            pending_opencode_permission_requests: self.pending_opencode_permission_requests.clone(),
             pending_codex_command_approval_requests: self
                 .pending_codex_command_approval_requests
                 .clone(),
@@ -1231,6 +1281,8 @@ impl SessionMetadata {
         self.review_results = session.review_results.clone();
         self.pending_permission_denials = session.pending_permission_denials.clone();
         self.pending_codex_permission_requests = session.pending_codex_permission_requests.clone();
+        self.pending_opencode_permission_requests =
+            session.pending_opencode_permission_requests.clone();
         self.pending_codex_command_approval_requests =
             session.pending_codex_command_approval_requests.clone();
         self.pending_codex_user_input_requests = session.pending_codex_user_input_requests.clone();
@@ -1623,6 +1675,9 @@ pub struct SessionMetadata {
     /// Pending Codex permission requests awaiting user approval
     #[serde(default)]
     pub pending_codex_permission_requests: Vec<CodexPermissionRequest>,
+    /// Pending OpenCode permission requests awaiting user approval
+    #[serde(default)]
+    pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -1692,6 +1747,10 @@ pub struct SessionMetadata {
     /// Display label for the terminal tab/session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_label: Option<String>,
+    /// Last lifecycle signal from a native terminal backend. Native terminal
+    /// sessions have no Jean run entries, so this drives their freshness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_activity_at: Option<u64>,
 
     /// Run history - each entry corresponds to one Claude CLI execution
     #[serde(default)]
@@ -1801,6 +1860,7 @@ impl SessionMetadata {
             review_results: None,
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
+            pending_opencode_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
@@ -1822,6 +1882,7 @@ impl SessionMetadata {
             terminal_command: None,
             terminal_command_args: vec![],
             terminal_label: None,
+            terminal_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
             version: 1,
@@ -2245,6 +2306,20 @@ mod tests {
             session.terminal_command_args
         );
         assert_eq!(restored.terminal_label.as_deref(), Some("Codex"));
+    }
+
+    #[test]
+    fn native_terminal_activity_drives_session_freshness_without_runs() {
+        let mut metadata = SessionMetadata::new(
+            "session-1".to_string(),
+            "wt-1".to_string(),
+            "Codex".to_string(),
+            0,
+        );
+        metadata.created_at = 100;
+        metadata.terminal_activity_at = Some(200);
+
+        assert_eq!(metadata.to_session().updated_at, 200);
     }
 
     #[test]

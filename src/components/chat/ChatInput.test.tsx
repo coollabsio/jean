@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
 import { invoke } from '@/lib/transport'
+import { useUIStore } from '@/store/ui-store'
 import {
   appendPromptMetadataToPlainText,
   encodePromptAttachmentMetadata,
@@ -11,6 +12,10 @@ import {
 
 const processAttachmentFile = vi.fn()
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>
+const { mobileState, slashPopoverMock } = vi.hoisted(() => ({
+  mobileState: { value: false },
+  slashPopoverMock: vi.fn(() => null),
+}))
 
 const storeState = {
   inputDrafts: {} as Record<string, string>,
@@ -24,7 +29,7 @@ const storeState = {
 }
 
 vi.mock('@/hooks/use-mobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => mobileState.value,
 }))
 
 vi.mock('./attachment-processing', () => ({
@@ -36,7 +41,7 @@ vi.mock('./FileMentionPopover', () => ({
 }))
 
 vi.mock('./SlashPopover', () => ({
-  SlashPopover: () => null,
+  SlashPopover: slashPopoverMock,
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -73,6 +78,8 @@ describe('ChatInput attachments', () => {
   }
 
   beforeEach(() => {
+    mobileState.value = false
+    useUIStore.setState({ zenMode: false })
     processAttachmentFile.mockReset()
     invokeMock.mockReset()
     storeState.setInputDraft.mockReset()
@@ -84,6 +91,71 @@ describe('ChatInput attachments', () => {
     storeState.addPendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
     storeState.inputDrafts = {}
+    slashPopoverMock.mockClear()
+  })
+
+  it('opens the skill picker when typing $ for a Codex session', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+        selectedBackend="codex"
+        installedBackends={['codex']}
+      />
+    )
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '$', selectionStart: 1 },
+    })
+
+    expect(slashPopoverMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        open: true,
+        searchQuery: '',
+        triggerKind: 'skill',
+      }),
+      undefined
+    )
+  })
+
+  it('does not open the skill picker when typing $ for a non-Codex session', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+
+    render(
+      <ChatInput
+        activeSessionId="session-1"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="build"
+        focusChatShortcut="⌘K"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+        selectedBackend="claude"
+        installedBackends={['claude']}
+      />
+    )
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '$', selectionStart: 1 },
+    })
+
+    expect(slashPopoverMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ open: false }),
+      undefined
+    )
   })
 
   it('registers attach handler and forwards selected files to the processor', async () => {
@@ -163,6 +235,35 @@ describe('ChatInput attachments', () => {
     )
     expect(textarea.className).toContain('[overflow-wrap:anywhere]')
     expect(textarea.parentElement).toHaveClass('min-w-0')
+  })
+
+  it('caps the textarea height in mobile zen mode', () => {
+    mobileState.value = true
+    useUIStore.setState({ zenMode: true })
+
+    const textarea = renderInput()
+
+    expect(textarea).toHaveClass('h-12', 'max-h-12')
+    expect(textarea).not.toHaveClass('max-h-[50vh]')
+  })
+
+  it('uses a compact textarea height in desktop zen mode', () => {
+    useUIStore.setState({ zenMode: true })
+
+    const textarea = renderInput()
+
+    expect(textarea).toHaveClass('h-12', 'max-h-12')
+    expect(textarea).not.toHaveClass('max-h-[50vh]')
+    expect(screen.queryByText('to focus')).not.toBeInTheDocument()
+  })
+
+  it('uses smaller placeholder text on mobile', () => {
+    mobileState.value = true
+
+    const textarea = renderInput()
+
+    expect(textarea).toHaveClass('placeholder:text-sm')
+    expect(textarea).toHaveClass('text-base')
   })
 
   it('updates the session draft store immediately so disk saves can be debounced', () => {
@@ -361,7 +462,11 @@ describe('ChatInput IME composition (issue #584)', () => {
     storeState.inputDrafts = {}
   })
 
-  const renderWithSubmit = () => {
+  const renderWithSubmit = (props?: {
+    isSending?: boolean
+    selectedBackend?: 'codex'
+    onSteerModifierChange?: (active: boolean) => void
+  }) => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
     const onSubmit = vi.fn()
@@ -370,13 +475,15 @@ describe('ChatInput IME composition (issue #584)', () => {
       <ChatInput
         activeSessionId="session-1"
         activeWorktreePath="/tmp/worktree"
-        isSending={false}
+        isSending={props?.isSending ?? false}
         executionMode="build"
         focusChatShortcut="⌘K"
         onSubmit={onSubmit}
         onCancel={vi.fn()}
         formRef={formRef}
         inputRef={inputRef}
+        selectedBackend={props?.selectedBackend}
+        onSteerModifierChange={props?.onSteerModifierChange}
       />
     )
 
@@ -392,6 +499,49 @@ describe('ChatInput IME composition (issue #584)', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits as a steer when the primary modifier is held', () => {
+    const onSteerModifierChange = vi.fn()
+    const { textarea, onSubmit } = renderWithSubmit({
+      isSending: true,
+      selectedBackend: 'codex',
+      onSteerModifierChange,
+    })
+    textarea.value = 'steer this'
+    fireEvent.change(textarea, { target: { value: 'steer this' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      ctrlKey: true,
+    })
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
+      forceSteer: true,
+    })
+    expect(onSteerModifierChange).toHaveBeenCalledWith(true)
+  })
+
+  it('submits as a steer when Command+Enter is held', () => {
+    const { textarea, onSubmit } = renderWithSubmit({
+      isSending: true,
+      selectedBackend: 'codex',
+    })
+    textarea.value = 'steer this'
+    fireEvent.change(textarea, { target: { value: 'steer this' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      metaKey: true,
+    })
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
+      forceSteer: true,
+    })
   })
 
   it('does not submit when Enter confirms IME composition (isComposing)', () => {

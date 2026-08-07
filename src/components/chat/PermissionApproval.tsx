@@ -186,16 +186,16 @@ export function PermissionApproval({
   }, [])
 
   const handleApprove = useCallback(() => {
-    const patterns = uniqueDenials
-      .filter((_, i) => selectedIndices.has(i))
-      .map(formatToolPattern)
+    const patterns = uniqueDenials.flatMap((denial, i) =>
+      selectedIndices.has(i) ? [formatToolPattern(denial)] : []
+    )
     onApprove(sessionId, patterns)
   }, [sessionId, uniqueDenials, selectedIndices, onApprove])
 
   const handleApproveYolo = useCallback(() => {
-    const patterns = uniqueDenials
-      .filter((_, i) => selectedIndices.has(i))
-      .map(formatToolPattern)
+    const patterns = uniqueDenials.flatMap((denial, i) =>
+      selectedIndices.has(i) ? [formatToolPattern(denial)] : []
+    )
     onApproveYolo?.(sessionId, patterns)
   }, [sessionId, uniqueDenials, selectedIndices, onApproveYolo])
 

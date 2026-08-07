@@ -21,14 +21,15 @@ interface SentryIssueItemProps {
   onInvestigate: (background: boolean) => void
 }
 
+const COMPACT_COUNT_FORMAT = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
 function formatCompactCount(value: string | number): string {
   const count = Number(value)
   if (!Number.isFinite(count)) return String(value)
-
-  return new Intl.NumberFormat('en', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(count)
+  return COMPACT_COUNT_FORMAT.format(count)
 }
 
 export function SentryIssueItem({
@@ -67,6 +68,7 @@ export function SentryIssueItem({
         <AlertTriangle className="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />
       )}
       <button
+        type="button"
         onClick={event => onClick(event.metaKey || event.ctrlKey)}
         disabled={isCreating}
         data-testid="sentry-issue-content"
@@ -130,11 +132,13 @@ export function SentryIssueItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            type="button"
             onClick={event => {
               event.stopPropagation()
               onInvestigate(event.metaKey || event.ctrlKey)
             }}
             disabled={isCreating}
+            aria-label="Investigate"
             className="inline-flex h-6 w-6 items-center justify-center rounded text-foreground/80 hover:bg-muted disabled:opacity-30"
           >
             <Wand2 className="h-3 w-3 dark:text-yellow-400" />

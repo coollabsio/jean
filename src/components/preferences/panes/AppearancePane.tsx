@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
@@ -15,19 +15,19 @@ import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import {
   uiFontOptions,
   chatFontOptions,
+  fontWeightOptions,
   syntaxThemeDarkOptions,
   syntaxThemeLightOptions,
-  fileEditModeOptions,
   terminalBackgroundOptions,
   FONT_SIZE_DEFAULT,
-  ZOOM_LEVEL_DEFAULT,
+  FONT_WEIGHT_DEFAULT,
   uiFontScaleTicks,
   chatFontScaleTicks,
   zoomLevelTicks,
   type UIFont,
   type ChatFont,
+  type FontWeight,
   type SyntaxTheme,
-  type FileEditMode,
   type TerminalBackgroundMode,
 } from '@/types/preferences'
 import { getModifierSymbol, isClientMacOS } from '@/lib/platform'
@@ -35,6 +35,7 @@ import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { isValidHex } from '@/lib/terminal-theme'
+import { useClientZoom } from '@/lib/client-zoom'
 import { SettingsSection } from '../SettingsSection'
 
 const InlineField: React.FC<{
@@ -81,11 +82,30 @@ export const AppearancePane: React.FC = () => {
   const patchPreferences = usePatchPreferences()
   const [isVibrancyPending, setIsVibrancyPending] = useState(false)
 
-  // Zoom uses commit-only saving to avoid flickering the webview during drag.
-  // localZoom tracks slider position, preferences are saved only on release.
-  const desktopZoom = preferences?.zoom_level ?? ZOOM_LEVEL_DEFAULT
-  const savedMobileZoom = preferences?.mobile_zoom_level ?? ZOOM_LEVEL_DEFAULT
-  const syncZoomLevels = preferences?.sync_zoom_levels ?? true
+  // Zoom is client-local (issue #622) — not written to shared AppPreferences.
+  // Commit-only slider updates avoid flickering the webview during drag.
+  const zoomSeed = useMemo(
+    () =>
+      preferences
+        ? {
+            zoom_level: preferences.zoom_level,
+            mobile_zoom_level: preferences.mobile_zoom_level,
+            sync_zoom_levels: preferences.sync_zoom_levels,
+          }
+        : null,
+    [
+      preferences?.zoom_level,
+      preferences?.mobile_zoom_level,
+      preferences?.sync_zoom_levels,
+      preferences == null,
+    ]
+  )
+  const {
+    zoom_level: desktopZoom,
+    mobile_zoom_level: savedMobileZoom,
+    sync_zoom_levels: syncZoomLevels,
+    updateZoom,
+  } = useClientZoom(zoomSeed)
   const [localDesktopZoom, setLocalDesktopZoom] = useState<number | null>(null)
   const [localMobileZoom, setLocalMobileZoom] = useState<number | null>(null)
   const desktopZoomValue = localDesktopZoom ?? desktopZoom
@@ -114,17 +134,17 @@ export const AppearancePane: React.FC = () => {
     (target: 'desktop' | 'mobile', value: number) => {
       if (target === 'desktop') {
         setLocalDesktopZoom(null)
-        patchPreferences.mutate(
+        updateZoom(
           syncZoomLevels
             ? { zoom_level: value, mobile_zoom_level: value }
             : { zoom_level: value }
         )
       } else {
         setLocalMobileZoom(null)
-        patchPreferences.mutate({ mobile_zoom_level: value })
+        updateZoom({ mobile_zoom_level: value })
       }
     },
-    [patchPreferences, syncZoomLevels]
+    [syncZoomLevels, updateZoom]
   )
 
   const handleSyncZoomLevelsChange = useCallback(
@@ -132,17 +152,24 @@ export const AppearancePane: React.FC = () => {
       const shouldSync = checked === true
       setLocalDesktopZoom(null)
       setLocalMobileZoom(null)
-      patchPreferences.mutate({
+      updateZoom({
         sync_zoom_levels: shouldSync,
         mobile_zoom_level: desktopZoom,
       })
     },
-    [desktopZoom, patchPreferences]
+    [desktopZoom, updateZoom]
   )
 
   const handleFontChange = useCallback(
     (field: 'ui_font' | 'chat_font', value: UIFont | ChatFont) => {
       patchPreferences.mutate({ [field]: value })
+    },
+    [patchPreferences]
+  )
+
+  const handleFontWeightChange = useCallback(
+    (value: FontWeight) => {
+      patchPreferences.mutate({ font_weight: value })
     },
     [patchPreferences]
   )
@@ -231,13 +258,6 @@ export const AppearancePane: React.FC = () => {
     // Resync the field to the persisted value (discards invalid drafts).
     setCustomColorDraft(null)
   }, [customColorDraft, patchPreferences])
-
-  const handleFileEditModeChange = useCallback(
-    (value: FileEditMode) => {
-      patchPreferences.mutate({ file_edit_mode: value })
-    },
-    [patchPreferences]
-  )
 
   const handleVibrancyChange = useCallback(
     async (checked: boolean) => {
@@ -481,6 +501,30 @@ export const AppearancePane: React.FC = () => {
               </SelectContent>
             </Select>
           </InlineField>
+
+          <InlineField
+            label="Font weight"
+            description="Overall text weight for UI and chat. Light softens emphasis for long reading, especially in dark mode."
+          >
+            <Select
+              value={preferences?.font_weight ?? FONT_WEIGHT_DEFAULT}
+              onValueChange={value =>
+                handleFontWeightChange(value as FontWeight)
+              }
+              disabled={patchPreferences.isPending}
+            >
+              <SelectTrigger className="w-full sm:w-80">
+                <SelectValue placeholder="Select weight" />
+              </SelectTrigger>
+              <SelectContent>
+                {fontWeightOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </InlineField>
         </div>
       </SettingsSection>
 
@@ -522,7 +566,6 @@ export const AppearancePane: React.FC = () => {
               id="sync-zoom-levels"
               checked={syncZoomLevels}
               onCheckedChange={handleSyncZoomLevelsChange}
-              disabled={patchPreferences.isPending}
             />
             <Label
               htmlFor="sync-zoom-levels"
@@ -534,20 +577,18 @@ export const AppearancePane: React.FC = () => {
 
           <ScalingField
             label="Desktop zoom level"
-            description="Adjust the interface size on desktop screens"
+            description="Adjust the interface size on this device (not shared with remote clients)"
           >
             <Slider
               ticks={zoomLevelTicks}
               value={desktopZoomValue}
               onValueChange={setLocalDesktopZoom}
               onValueCommit={value => handleZoomCommit('desktop', value)}
-              disabled={patchPreferences.isPending}
             />
             <p className="text-xs text-muted-foreground">
               You can change the zoom level with {modKey} +/- and reset to the
               default zoom with {modKey}+0. On external monitors, prefer 100%
-              for the sharpest text; non-100% zoom can look soft on 1×
-              displays.
+              for the sharpest text; non-100% zoom can look soft on 1× displays.
             </p>
           </ScalingField>
 
@@ -556,7 +597,7 @@ export const AppearancePane: React.FC = () => {
             description={
               syncZoomLevels
                 ? 'Synced with the desktop zoom level'
-                : 'Adjust the interface size on mobile screens'
+                : 'Adjust the interface size on this device (not shared with remote clients)'
             }
           >
             <Slider
@@ -564,40 +605,9 @@ export const AppearancePane: React.FC = () => {
               value={mobileZoomValue}
               onValueChange={setLocalMobileZoom}
               onValueCommit={value => handleZoomCommit('mobile', value)}
-              disabled={syncZoomLevels || patchPreferences.isPending}
+              disabled={syncZoomLevels}
             />
           </ScalingField>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection
-        title="File Viewer"
-        anchorId="pref-appearance-section-file-viewer"
-      >
-        <div className="space-y-4">
-          <InlineField
-            label="Edit files in"
-            description="How to edit files when viewing them in Jean"
-          >
-            <Select
-              value={preferences?.file_edit_mode ?? 'inline'}
-              onValueChange={value =>
-                handleFileEditModeChange(value as FileEditMode)
-              }
-              disabled={patchPreferences.isPending}
-            >
-              <SelectTrigger className="w-full sm:w-80">
-                <SelectValue placeholder="Select mode" />
-              </SelectTrigger>
-              <SelectContent>
-                {fileEditModeOptions.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </InlineField>
         </div>
       </SettingsSection>
     </div>

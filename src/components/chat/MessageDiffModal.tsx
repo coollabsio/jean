@@ -3,6 +3,11 @@ import { createPatch } from 'diff'
 import { parsePatchFiles } from '@pierre/diffs'
 import { FileDiff } from '@pierre/diffs/react'
 import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
+import {
   FileText,
   Columns2,
   Rows3,
@@ -84,7 +89,72 @@ function replaceLast(
   )
 }
 
+/**
+ * Undo one Edit tool application while reverse-replaying history newest-first.
+ *
+ * Forward Edit replaces `oldStr` with `newStr`. Reverse:
+ * - Non-empty `newStr`: replace the last occurrence of `newStr` with `oldStr`
+ * - Empty `newStr` (content deleted): if the file is now empty, restore `oldStr`
+ *   (the common "AI emptied the whole file" case). Partial deletions without a
+ *   known index cannot be uniquely reversed and are left unchanged so the
+ *   caller can fall back to a direct old→new patch.
+ */
+export function undoEdit(
+  content: string,
+  oldStr: string,
+  newStr: string
+): string {
+  if (newStr === '') {
+    // Whole-file (or remaining-content) deletion ends in an empty buffer.
+    if (content === '' && oldStr !== '') {
+      return oldStr
+    }
+    return content
+  }
+  if (content.includes(newStr)) {
+    return replaceLast(content, newStr, oldStr)
+  }
+  return content
+}
+
+/**
+ * Build a unified patch from Edit tool old/new strings when reverse-replay
+ * from on-disk content cannot reconstruct the before/after states (e.g. empty
+ * new_string partial deletes, or missing intermediate text).
+ */
+export function patchFromEdits(
+  relativePath: string,
+  edits: EditTool[]
+): string | null {
+  if (edits.length === 0) return null
+
+  // Single edit: direct old → new is exact.
+  if (edits.length === 1) {
+    const only = edits[0]
+    if (!only) return null
+    const oldStr = only.input.old_string ?? ''
+    const newStr = only.input.new_string ?? ''
+    if (oldStr === newStr) return null
+    return createPatch(relativePath, oldStr, newStr, '', '', { context: 3 })
+  }
+
+  // Multi-edit: reverse-apply on an empty after-state only works when the final
+  // result is empty (all content removed). Otherwise show the last edit only —
+  // better than a blank viewer.
+  const last = edits[edits.length - 1]
+  if (!last) return null
+  const lastOld = last.input.old_string ?? ''
+  const lastNew = last.input.new_string ?? ''
+  if (lastOld !== lastNew) {
+    return createPatch(relativePath, lastOld, lastNew, '', '', { context: 3 })
+  }
+  return null
+}
+
 type DiffStyle = 'split' | 'unified'
+
+/** Stable default so omit/undefined doesn't allocate a new [] each render. */
+const EMPTY_SUBSEQUENT_EDITS: EditTool[] = []
 
 interface MessageDiffModalProps {
   isOpen: boolean
@@ -102,7 +172,7 @@ export function MessageDiffModal({
   onClose,
   filePath,
   edits,
-  subsequentEdits = [],
+  subsequentEdits = EMPTY_SUBSEQUENT_EDITS,
   worktreePath,
   patch,
 }: MessageDiffModalProps) {
@@ -146,30 +216,39 @@ export function MessageDiffModal({
         return null
       }
     }
-    if (!fileContent) return null
+    // Empty string is a valid file (AI emptied it). Only skip while loading /
+    // before the query has resolved (undefined).
+    if (fileContent === undefined) return null
     try {
       // Step 1: undo subsequent messages' edits → get file state right after THIS message
       let afterThis = fileContent
       for (const edit of [...subsequentEdits].reverse()) {
         const oldStr = edit.input.old_string ?? ''
         const newStr = edit.input.new_string ?? ''
-        if (newStr && afterThis.includes(newStr)) {
-          afterThis = replaceLast(afterThis, newStr, oldStr)
-        }
+        afterThis = undoEdit(afterThis, oldStr, newStr)
       }
       // Step 2: undo this message's edits → get file state before THIS message
       let beforeThis = afterThis
       for (const edit of [...edits].reverse()) {
         const oldStr = edit.input.old_string ?? ''
         const newStr = edit.input.new_string ?? ''
-        if (newStr && beforeThis.includes(newStr)) {
-          beforeThis = replaceLast(beforeThis, newStr, oldStr)
-        }
+        beforeThis = undoEdit(beforeThis, oldStr, newStr)
       }
-      const patch = createPatch(relativePath, beforeThis, afterThis, '', '', {
-        context: 3,
-      })
-      const patches = parsePatchFiles(patch)
+
+      let rawPatch: string | null = null
+      if (beforeThis !== afterThis) {
+        rawPatch = createPatch(relativePath, beforeThis, afterThis, '', '', {
+          context: 3,
+        })
+      } else {
+        // Reverse-replay produced no change (common when new_string is empty
+        // but the file is not fully empty, or content drifted). Fall back to
+        // a patch built from the Edit tool strings so the viewer is not blank.
+        rawPatch = patchFromEdits(relativePath, edits)
+      }
+
+      if (!rawPatch) return null
+      const patches = parsePatchFiles(rawPatch)
       return patches[0]?.files[0] ?? null
     } catch {
       return null
@@ -189,19 +268,16 @@ export function MessageDiffModal({
 
   const fileDiffOptions = useMemo(
     () => ({
-      theme: {
-        dark: preferences?.syntax_theme_dark ?? 'vitesse-black',
-        light: preferences?.syntax_theme_light ?? 'github-light',
-      },
+      theme: pierreThemePair(
+        preferences?.syntax_theme_dark,
+        preferences?.syntax_theme_light
+      ),
       themeType: resolvedThemeType,
       diffStyle,
       overflow: 'wrap' as const,
       enableLineSelection: false,
       disableFileHeader: true,
-      unsafeCSS: `
-        pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-        * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
-      `,
+      unsafeCSS: PIERRE_UNSAFE_CSS,
     }),
     [
       resolvedThemeType,
@@ -211,6 +287,7 @@ export function MessageDiffModal({
     ]
   )
 
+  // No query invalidation: opens file in OS editor only (no app cache change)
   const openFileMutation = useMutation({
     mutationFn: () =>
       invoke('open_file_in_default_app', {
@@ -330,11 +407,14 @@ export function MessageDiffModal({
             </div>
           ) : currentChangeFile ? (
             <DiffBlock fileName={relativePath}>
-              <FileDiff
-                key={currentChangeKey}
-                fileDiff={currentChangeFile}
-                options={fileDiffOptions}
-              />
+              <PierreEditProvider>
+                <FileDiff
+                  key={currentChangeKey}
+                  fileDiff={currentChangeFile}
+                  options={fileDiffOptions}
+                  edit
+                />
+              </PierreEditProvider>
             </DiffBlock>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

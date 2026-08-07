@@ -138,6 +138,15 @@ Additional systems (no dedicated docs yet):
   terminal session from the session-tab context menu; the original chat session
   remains unchanged.
 
+  **Codex terminal attention.** Full-screen Codex terminals receive a
+  session-scoped `notify` override for the official `agent-turn-complete`
+  event. Jean tails that notification file, persists the Codex thread id and
+  terminal activity timestamp, marks the session waiting, invalidates session
+  caches, and emits `terminal:attention`. Submitting terminal input clears the
+  waiting state. The backing Jean `sessionId` must therefore be carried through
+  terminal creation, native-session reconnect, frontend terminal persistence,
+  `start_terminal`, and both native/WebSocket transports.
+
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
   panel/side/drawer and modal terminals survive a full browser refresh. Three
   pieces cooperate:

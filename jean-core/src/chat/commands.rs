@@ -578,7 +578,7 @@ fn find_neighbor_non_archived_session_id(
     None
 }
 
-fn emit_sessions_cache_invalidation(app: &AppHandle) {
+pub(crate) fn emit_sessions_cache_invalidation(app: &AppHandle) {
     if let Err(e) = app.emit_all(
         "cache:invalidate",
         &serde_json::json!({ "keys": ["sessions"] }),
@@ -1652,6 +1652,7 @@ pub async fn update_session_state(
     fixed_findings: Option<Vec<String>>,
     pending_permission_denials: Option<Vec<super::types::PermissionDenial>>,
     pending_codex_permission_requests: Option<Vec<super::types::CodexPermissionRequest>>,
+    pending_opencode_permission_requests: Option<Vec<super::types::OpenCodePermissionRequest>>,
     pending_codex_command_approval_requests: Option<Vec<super::types::CodexCommandApprovalRequest>>,
     pending_codex_user_input_requests: Option<Vec<super::types::CodexUserInputRequest>>,
     pending_codex_mcp_elicitation_requests: Option<Vec<super::types::CodexMcpElicitationRequest>>,
@@ -1691,6 +1692,9 @@ pub async fn update_session_state(
             if let Some(v) = pending_codex_permission_requests {
                 session.pending_codex_permission_requests = v;
             }
+            if let Some(v) = pending_opencode_permission_requests {
+                session.pending_opencode_permission_requests = v;
+            }
             if let Some(v) = pending_codex_command_approval_requests {
                 session.pending_codex_command_approval_requests = v;
             }
@@ -1720,7 +1724,12 @@ pub async fn update_session_state(
             }
             if let Some(v) = status_override {
                 match &v {
-                    Some(status) if !matches!(status.as_str(), "idle" | "review" | "completed" | "cancelled") => {
+                    Some(status)
+                        if !matches!(
+                            status.as_str(),
+                            "idle" | "review" | "completed" | "cancelled"
+                        ) =>
+                    {
                         return Err(format!(
                             "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
                         ));
@@ -2506,8 +2515,8 @@ pub async fn set_active_session(
 }
 
 /// Update the last_opened_at timestamp on a session's metadata.
-/// View-only: never mutates waiting/review state — explicit user actions
-/// (approve/reject/answer) are the only path out of waiting.
+/// Viewing a native-terminal session acknowledges its attention signal. Chat
+/// sessions keep their actionable waiting state until the user answers it.
 ///
 /// Emits `cache:invalidate` for sessions so native + web clients refresh
 /// unread/finished-session state (e.g. web marks read → native bell clears).
@@ -2520,6 +2529,10 @@ pub async fn set_session_last_opened(app: AppHandle, session_id: String) -> Resu
             .unwrap_or_default()
             .as_secs();
         metadata.last_opened_at = Some(now);
+        if metadata.primary_surface.as_deref() == Some("terminal") {
+            metadata.waiting_for_input = false;
+            metadata.waiting_for_input_type = None;
+        }
         save_metadata(&app, &metadata)?;
         // Broadcast so other clients (native ↔ web) drop stale last_opened_at.
         emit_sessions_cache_invalidation(&app);
@@ -2551,6 +2564,10 @@ pub async fn set_sessions_last_opened_bulk(
     for session_id in &session_ids {
         if let Ok(Some(mut metadata)) = load_metadata(&app, session_id) {
             metadata.last_opened_at = Some(now);
+            if metadata.primary_surface.as_deref() == Some("terminal") {
+                metadata.waiting_for_input = false;
+                metadata.waiting_for_input_type = None;
+            }
             if let Err(error) = save_metadata(&app, &metadata) {
                 result = Err(error);
                 break;
@@ -2560,6 +2577,99 @@ pub async fn set_sessions_last_opened_bulk(
     }
 
     finish_bulk_update(updated, result, || emit_sessions_cache_invalidation(&app))
+}
+
+/// Auto-name a native terminal session from its first prompt. Terminal
+/// sessions do not have Jean run messages, so the backend lifecycle signal is
+/// their naming entry point.
+pub async fn trigger_terminal_session_naming(
+    app: AppHandle,
+    session_id: String,
+    first_prompt: String,
+) {
+    if first_prompt.trim().is_empty() {
+        return;
+    }
+    let Ok(Some(metadata)) = load_metadata(&app, &session_id) else {
+        return;
+    };
+    let worktree_id = metadata.worktree_id;
+    let Ok(projects) = load_projects_data(&app) else {
+        return;
+    };
+    let Some(worktree) = projects.find_worktree(&worktree_id).cloned() else {
+        return;
+    };
+    let worktree_path = worktree.path.clone();
+    let Ok(sessions) = load_sessions(&app, &worktree_path, &worktree_id) else {
+        return;
+    };
+    let generate_branch_candidate = !sessions.branch_naming_completed;
+    let generate_session_candidate = sessions
+        .find_session(&session_id)
+        .is_some_and(|session| !session.session_naming_completed);
+    if !generate_branch_candidate && !generate_session_candidate {
+        return;
+    }
+
+    let Ok(preferences) = crate::load_preferences(app.clone()).await else {
+        return;
+    };
+    let generate_branch = generate_branch_candidate
+        && preferences.auto_branch_naming
+        && should_auto_name_branch(Some(&worktree));
+    let generate_session = generate_session_candidate && preferences.auto_session_naming;
+    if generate_branch || generate_session {
+        let existing_branch_names = if generate_branch {
+            projects
+                .worktrees
+                .iter()
+                .map(|worktree| worktree.name.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        spawn_naming_task(
+            app.clone(),
+            NamingRequest {
+                session_id: session_id.clone(),
+                worktree_id: worktree_id.clone(),
+                worktree_path: PathBuf::from(&worktree_path),
+                first_message: first_prompt,
+                model: preferences.magic_prompt_models.session_naming_model.clone(),
+                existing_branch_names,
+                generate_session_name: generate_session,
+                generate_branch_name: generate_branch,
+                custom_session_prompt: generate_session
+                    .then(|| preferences.magic_prompts.session_naming.clone())
+                    .flatten(),
+                custom_profile_name: preferences
+                    .magic_prompt_providers
+                    .session_naming_provider
+                    .clone(),
+                backend_override: preferences
+                    .magic_prompt_backends
+                    .session_naming_backend
+                    .clone(),
+                reasoning_effort: preferences
+                    .magic_prompt_efforts
+                    .session_naming_effort
+                    .clone(),
+            },
+        );
+    }
+
+    let _ = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if generate_branch_candidate {
+            sessions.branch_naming_completed = true;
+        }
+        if generate_session_candidate {
+            if let Some(session) = sessions.find_session_mut(&session_id) {
+                session.session_naming_completed = true;
+            }
+        }
+        Ok(())
+    });
 }
 
 // ============================================================================
@@ -3523,10 +3633,17 @@ pub async fn send_chat_message(
                         );
                     }
                 }
+                // Skill badge attachments inject absolute SKILL.md paths that
+                // Codex must be able to read. Include current + legacy skill roots.
                 if let Some(home) = dirs::home_dir() {
-                    let codex_skills_dir = home.join(".codex").join("skills");
-                    if codex_skills_dir.exists() {
-                        codex_add_dirs.push(codex_skills_dir.to_string_lossy().to_string());
+                    for skills_dir in [
+                        home.join(".agents").join("skills"),
+                        home.join(".codex").join("skills"),
+                        home.join(".jean").join("skills").join("codex"),
+                    ] {
+                        if skills_dir.exists() {
+                            codex_add_dirs.push(skills_dir.to_string_lossy().to_string());
+                        }
                     }
                 }
 
@@ -6115,6 +6232,14 @@ pub async fn write_clipboard_text(_text: String) -> Result<(), String> {
     Err("Native clipboard access is only available in the desktop app".to_string())
 }
 
+/// Read text from the native system clipboard.
+///
+/// Same-machine fallback for terminal paste when the browser Clipboard API is
+/// unavailable. Remote jean-server has no host clipboard access.
+pub async fn read_clipboard_text() -> Result<String, String> {
+    Err("Native clipboard access is only available in the desktop app".to_string())
+}
+
 /// Save a dropped image file to the app data directory
 ///
 /// Takes a source file path (from Tauri's drag-drop event) and copies it
@@ -6523,6 +6648,65 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
 
     // Read the file content
     std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
+}
+
+/// Binary file payload for UI preview (images outside project asset scope, etc.).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBase64Content {
+    pub data: String,
+    pub mime_type: String,
+}
+
+fn mime_type_from_path(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        Some("ico") => "image/x-icon",
+        Some("avif") => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Read a file as base64 for binary preview (e.g. images under /tmp).
+///
+/// Same size limit as `read_file_content`. Used when asset:// and
+/// /api/project-files cannot serve paths outside project roots.
+pub async fn read_file_base64(path: String) -> Result<FileBase64Content, String> {
+    log::trace!("Reading file as base64: {path}");
+
+    let file_path = std::path::PathBuf::from(&path);
+
+    if !file_path.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
+
+    const MAX_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+    if metadata.len() > MAX_SIZE {
+        return Err(format!(
+            "File too large: {} bytes (max {} bytes)",
+            metadata.len(),
+            MAX_SIZE
+        ));
+    }
+
+    let bytes = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
+    let mime_type = mime_type_from_path(&file_path).to_string();
+    let data = STANDARD.encode(bytes);
+
+    Ok(FileBase64Content { data, mime_type })
 }
 
 /// Write file content to disk
@@ -7507,16 +7691,26 @@ fn execute_summarization_claude(
 
     // Parse the JSON response
     serde_json::from_str(&text_content).map_err(|e| {
-        let preview = if text_content.len() > 200 {
-            format!("{}...", &text_content[..200])
-        } else {
-            text_content.to_string()
-        };
+        // Truncate by chars so a recoverable parse error never panics on
+        // multi-byte UTF-8 (byte index 200 may fall inside a character).
+        let preview = truncate_error_preview(&text_content, 200);
         log::error!(
             "Failed to parse JSON response: {e}, content preview: {preview}, full stdout: {stdout}"
         );
         format!("Failed to parse structured response: {e}")
     })
+}
+
+/// Build a short log preview of content that failed JSON parsing.
+/// Always safe for multi-byte UTF-8; never panics on a mid-character boundary.
+pub(crate) fn truncate_error_preview(text: &str, max_chars: usize) -> String {
+    let mut iter = text.chars();
+    let preview: String = iter.by_ref().take(max_chars).collect();
+    if iter.next().is_some() {
+        format!("{preview}...")
+    } else {
+        preview
+    }
 }
 
 /// Generate a context summary from a session's messages in the background
@@ -8719,16 +8913,42 @@ pub fn approve_codex_command(
     send_codex_response(rpc_id, serde_json::json!({ "decision": decision }))
 }
 
-pub fn respond_codex_command_approval(
-    session_id: String,
-    rpc_id: u64,
-    response: serde_json::Value,
-) -> Result<(), String> {
+/// Strip Jean-only YOLO promote flags from a command-approval response and
+/// return whether mid-turn auto-approve should be enabled for the session.
+///
+/// Codex may omit `acceptForSession` from `availableDecisions` (unknown
+/// commands often only allow `accept` + `cancel`). Jean still lets the user
+/// promote the session to YOLO; the frontend then sends `decision: "accept"`
+/// plus `promoteToYolo: true` so residual prompts are auto-accepted (#626).
+pub(crate) fn prepare_codex_command_approval_response(
+    response: &mut serde_json::Value,
+) -> bool {
+    let promote_to_yolo = response
+        .as_object_mut()
+        .and_then(|obj| {
+            obj.remove("promoteToYolo")
+                .or_else(|| obj.remove("promote_to_yolo"))
+        })
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let is_accept_for_session = response
         .get("decision")
         .and_then(|d| d.as_str())
         .is_some_and(|d| d == "acceptForSession");
-    if is_accept_for_session {
+
+    promote_to_yolo || is_accept_for_session
+}
+
+pub fn respond_codex_command_approval(
+    session_id: String,
+    rpc_id: u64,
+    mut response: serde_json::Value,
+) -> Result<(), String> {
+    if prepare_codex_command_approval_response(&mut response) {
+        // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
+        // prompts for the rest of this session without waiting for the next turn
+        // (issue #328 / #626).
         super::registry::set_codex_yolo_auto_approve(&session_id, true);
     }
     send_codex_response(rpc_id, response)
@@ -9817,6 +10037,35 @@ pub async fn answer_opencode_question(
     .map_err(|e| format!("Task join error: {e}"))?
 }
 
+/// Reply to a pending OpenCode permission request (once / always / reject).
+/// Unblocks the in-flight tool that triggered the permission ask (issue #625).
+pub async fn respond_opencode_permission(
+    app: AppHandle,
+    worktree_path: String,
+    request_id: String,
+    reply: String,
+    message: Option<String>,
+    opencode_session_id: Option<String>,
+    api_version: Option<String>,
+) -> Result<(), String> {
+    let working_dir = worktree_path;
+    let app_clone = app.clone();
+
+    tokio::task::spawn_blocking(move || {
+        super::opencode::respond_opencode_permission(
+            &app_clone,
+            &working_dir,
+            &request_id,
+            &reply,
+            message,
+            opencode_session_id.as_deref(),
+            api_version.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9830,6 +10079,72 @@ mod tests {
         assert_eq!(event.session_id, "session-1");
         assert_eq!(event.worktree_id, "worktree-1");
         assert_eq!(event.error, "rate limit reached");
+    }
+
+    #[test]
+    fn mime_type_from_path_detects_common_images() {
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("/tmp/shot.PNG")),
+            "image/png"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("photo.jpeg")),
+            "image/jpeg"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("x.webp")),
+            "image/webp"
+        );
+        assert_eq!(
+            mime_type_from_path(std::path::Path::new("notes.txt")),
+            "application/octet-stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_base64_encodes_bytes_outside_project_roots() {
+        let dir = std::env::temp_dir().join(format!(
+            "jean-read-file-base64-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("login.png");
+        // Minimal valid-looking PNG header bytes (not a full image)
+        let bytes: &[u8] = b"\x89PNG\r\n\x1a\nfake-image-bytes";
+        std::fs::write(&path, bytes).unwrap();
+
+        let result = read_file_base64(path.to_string_lossy().to_string())
+            .await
+            .expect("read_file_base64 should succeed for /tmp path");
+
+        assert_eq!(result.mime_type, "image/png");
+        assert_eq!(result.data, STANDARD.encode(bytes));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_promotes_yolo_without_accept_for_session() {
+        let mut response = serde_json::json!({
+            "decision": "accept",
+            "promoteToYolo": true,
+        });
+        assert!(prepare_codex_command_approval_response(&mut response));
+        // Jean-only flag must be stripped before forwarding to Codex.
+        assert!(response.get("promoteToYolo").is_none());
+        assert_eq!(response.get("decision").and_then(|d| d.as_str()), Some("accept"));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_accept_for_session_promotes() {
+        let mut response = serde_json::json!({ "decision": "acceptForSession" });
+        assert!(prepare_codex_command_approval_response(&mut response));
+    }
+
+    #[test]
+    fn prepare_codex_command_approval_plain_accept_does_not_promote() {
+        let mut response = serde_json::json!({ "decision": "accept" });
+        assert!(!prepare_codex_command_approval_response(&mut response));
     }
 
     fn naming_test_worktree(branch: &str, base_branch: Option<&str>) -> Worktree {
@@ -10878,5 +11193,28 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
             opencode.opencode_session_id.as_deref(),
             Some("opencode-session")
         );
+    }
+
+    #[test]
+    fn truncate_error_preview_handles_non_ascii_without_panic() {
+        // Multi-byte chars; previously `&text[..200]` paniced mid-character.
+        let text = "日".repeat(100); // 300 bytes, 100 chars
+        let preview = truncate_error_preview(&text, 200);
+        // Cap is by char count here (200), so full text fits and no ellipsis.
+        assert_eq!(preview, text);
+        assert!(!preview.ends_with("..."));
+
+        let long = "日".repeat(250);
+        let preview = truncate_error_preview(&long, 200);
+        assert!(preview.ends_with("..."));
+        assert_eq!(preview.chars().count(), 200 + 3); // 200 chars + "..."
+        assert!(preview.is_char_boundary(preview.len() - 3));
+    }
+
+    #[test]
+    fn truncate_error_preview_ascii_adds_ellipsis_when_long() {
+        let text = "a".repeat(250);
+        let preview = truncate_error_preview(&text, 200);
+        assert_eq!(preview, format!("{}...", "a".repeat(200)));
     }
 }

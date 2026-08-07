@@ -33,21 +33,6 @@ function attachmentCount(msg: QueuedMessage): number {
   )
 }
 
-function canEditQueuedMessage(msg: QueuedMessage): boolean {
-  const backend = msg.backend ?? 'claude'
-  // Steer-capable backends auto-drain queued prompts into the running turn
-  // (attachments are path refs in the steered text), so hide edit for those.
-  if (
-    backend === 'codex' ||
-    backend === 'opencode' ||
-    backend === 'pi' ||
-    backend === 'grok'
-  ) {
-    return false
-  }
-  return true
-}
-
 /**
  * Collapsible list of queued prompts shown at the top of the chat window.
  *
@@ -171,9 +156,8 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
         <CollapsibleContent>
           <div
             ref={listRef}
-            role="listbox"
+            role="list"
             aria-label="Queued prompts"
-            aria-activedescendant={`queued-prompt-${selectedIndex}`}
             tabIndex={0}
             onKeyDown={handleKeyDown}
             className="max-h-48 overflow-y-auto border-t border-border/50 outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -189,8 +173,8 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   ref={el => {
                     rowRefs.current[index] = el
                   }}
-                  role="option"
-                  aria-selected={isSelected}
+                  role="listitem"
+                  aria-current={isSelected ? 'true' : undefined}
                   onClick={() => setSelectedIndex(index)}
                   className={cn(
                     'group flex items-center gap-2 px-3 py-1.5 text-xs cursor-default',
@@ -270,24 +254,22 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                       </>
                     ) : (
                       <>
-                        {canEditQueuedMessage(msg) && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                aria-label="Edit queued prompt"
-                                onClick={e => {
-                                  e.stopPropagation()
-                                  startEditing(msg)
-                                }}
-                                className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>Edit queued prompt</TooltipContent>
-                          </Tooltip>
-                        )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label="Edit queued prompt"
+                              onClick={e => {
+                                e.stopPropagation()
+                                startEditing(msg)
+                              }}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Edit queued prompt</TooltipContent>
+                        </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button

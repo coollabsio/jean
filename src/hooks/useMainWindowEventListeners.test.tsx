@@ -48,7 +48,7 @@ vi.mock('@/lib/transport', () => ({
 }))
 
 vi.mock('@/lib/environment', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  ...((await importOriginal()) as object),
   isNativeApp: () => mockEnvironment.native,
 }))
 
@@ -550,6 +550,20 @@ describe('dialog overlay keybinding passthrough', () => {
       )
     ).toBe(false)
   })
+
+  it.each(['toggle_zen_mode', 'clear_session_context'] as const)(
+    'allows %s through the open session chat modal',
+    action => {
+      useUIStore.setState({ sessionChatModalOpen: true })
+
+      expect(
+        shouldAllowKeybindingThroughOpenOverlay(
+          action,
+          useUIStore.getState()
+        )
+      ).toBe(true)
+    }
+  )
 })
 
 describe('applySessionRenamedToCaches', () => {

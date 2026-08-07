@@ -107,6 +107,7 @@ export function LinearItemsTab({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() => onViewLoaded(ctx)}
                         aria-label={`View context for ${ctx.identifier}`}
                         className="p-1 rounded hover:bg-accent-foreground/10"
@@ -119,10 +120,12 @@ export function LinearItemsTab({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() =>
                           onRefreshLoaded(ctx.identifier, ctx.identifier)
                         }
                         disabled={loadingLinearIds.has(ctx.identifier)}
+                        aria-label={`Refresh ${ctx.identifier}`}
                         className="p-1 rounded hover:bg-accent-foreground/10 disabled:opacity-50"
                       >
                         {loadingLinearIds.has(ctx.identifier) ? (
@@ -137,8 +140,10 @@ export function LinearItemsTab({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        type="button"
                         onClick={() => onRemoveLoaded(ctx.identifier)}
                         disabled={removingLinearIds.has(ctx.identifier)}
+                        aria-label={`Remove ${ctx.identifier}`}
                         className="p-1 rounded hover:bg-destructive/10 disabled:opacity-50"
                       >
                         {removingLinearIds.has(ctx.identifier) ? (
@@ -166,6 +171,7 @@ export function LinearItemsTab({
               ref={searchInputRef}
               type="text"
               placeholder="Search issues by identifier, title, or description..."
+              aria-label="Search Linear issues"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-9 h-8 text-base md:text-sm"
@@ -174,8 +180,10 @@ export function LinearItemsTab({
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 onClick={onRefresh}
                 disabled={isRefetching}
+                aria-label="Refresh issues"
                 className={cn(
                   'flex items-center justify-center h-8 w-8 rounded-md border border-border',
                   'hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring',
@@ -250,6 +258,7 @@ export function LinearItemsTab({
           <div className="py-1">
             {filteredIssues.map((issue, index) => (
               <button
+                type="button"
                 key={issue.id}
                 data-load-item-index={index}
                 onMouseEnter={() => setSelectedIndex(index)}

@@ -236,6 +236,10 @@ export function useOpencodeInstallProgress(): [
 }
 export const useOpenCodeInstallProgress = useOpencodeInstallProgress
 
+function checkManualVersion(version: string) {
+  return invoke<boolean>('check_opencode_cli_version_exists', { version })
+}
+
 export function useOpencodeCliSetup() {
   const status = useOpencodeCliStatus()
   const versions = useAvailableOpencodeVersions()
@@ -253,8 +257,6 @@ export function useOpencodeCliSetup() {
     })
   }
 
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_opencode_cli_version_exists', { version })
 
   return {
     status: status.data,

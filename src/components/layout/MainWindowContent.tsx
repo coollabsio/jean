@@ -26,6 +26,7 @@ import {
 } from '@/lib/terminal-gesture'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
+import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -150,13 +151,7 @@ export function MainWindowContent({
   }, [showAddButton, setAddProjectDialogOpen])
 
   const nonChatContent = selectedProjectId ? (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-          Loading project…
-        </div>
-      }
-    >
+    <Suspense fallback={<JeanLoadingScreen />}>
       <ProjectCanvasView
         key={selectedProjectId}
         projectId={selectedProjectId}

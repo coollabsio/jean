@@ -302,9 +302,7 @@ pub async fn attach_session_reference(
     );
     let name = Some(format!("Session: {session_name}"));
 
-    log::trace!(
-        "Attaching session reference '{source_session_id}' to session {target_session_id}"
-    );
+    log::trace!("Attaching session reference '{source_session_id}' to session {target_session_id}");
 
     let app_data_dir = app
         .path()
@@ -354,9 +352,7 @@ pub async fn attach_session_reference(
         .map_err(|e| format!("Failed to convert time: {e}"))?
         .as_secs();
 
-    log::trace!(
-        "Attached session reference '{source_session_id}' to session {target_session_id}"
-    );
+    log::trace!("Attached session reference '{source_session_id}' to session {target_session_id}");
 
     Ok(AttachedSavedContext {
         slug,
@@ -372,20 +368,13 @@ mod tests {
 
     #[test]
     fn session_reference_slug_is_stable() {
-        assert_eq!(
-            session_reference_slug("abc-123"),
-            "session-ref-abc-123"
-        );
+        assert_eq!(session_reference_slug("abc-123"), "session-ref-abc-123");
     }
 
     #[test]
     fn session_reference_content_points_at_mcp_not_full_history() {
-        let content = build_session_reference_content(
-            "sess-42",
-            "Fix login bug",
-            "jean",
-            "issue-596",
-        );
+        let content =
+            build_session_reference_content("sess-42", "Fix login bug", "jean", "issue-596");
 
         assert!(content.contains("# Session: Fix login bug"));
         assert!(content.contains("`sess-42`"));

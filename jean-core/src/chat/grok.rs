@@ -143,16 +143,141 @@ fn normalize_todo_status(raw: &str) -> &'static str {
     }
 }
 
+/// Normalize one Grok/Claude-style todo item to Jean's Todo shape:
+/// `{ id?, content, activeForm, status }`.
+///
+/// Grok `todo_write` with `merge: true` often sends status-only patches like
+/// `{ "id": "5", "content": null, "status": "completed" }`. Those must be kept
+/// (content may be empty) so stream-level merge can update the prior snapshot.
+fn normalize_todo_item_value(item: &Value) -> Option<Value> {
+    let map = item.as_object()?;
+    let id = map.get("id").cloned().filter(|v| !v.is_null());
+    let content = map
+        .get("content")
+        .or_else(|| map.get("text"))
+        .or_else(|| map.get("title"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    // Status-only merge patches have id + status and null/missing content.
+    if content.is_none() && id.is_none() {
+        return None;
+    }
+    let content = content.unwrap_or_default();
+    let active_form = map
+        .get("activeForm")
+        .or_else(|| map.get("active_form"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| content.clone());
+    let status = map
+        .get("status")
+        .and_then(Value::as_str)
+        .map(normalize_todo_status)
+        .unwrap_or("pending");
+
+    let mut out = serde_json::Map::new();
+    if let Some(id) = id {
+        out.insert("id".to_string(), id);
+    }
+    out.insert("content".to_string(), Value::String(content));
+    out.insert("activeForm".to_string(), Value::String(active_form));
+    out.insert("status".to_string(), Value::String(status.to_string()));
+    Some(Value::Object(out))
+}
+
 /// Normalize Grok/Claude-style todo items to Jean's Todo shape:
 /// `{ content, activeForm, status }` (status is pending|in_progress|completed|cancelled).
 fn normalize_todos_array(todos: &Value) -> Value {
     let Some(items) = todos.as_array() else {
         return todos.clone();
     };
-    let normalized: Vec<Value> = items
+    let normalized: Vec<Value> = items.iter().filter_map(normalize_todo_item_value).collect();
+    Value::Array(normalized)
+}
+
+/// Merge Grok TodoWrite patches into an accumulated snapshot.
+///
+/// When `merge` is false the incoming list fully replaces the snapshot.
+/// When `merge` is true, items are upserted by `id` (status always updates;
+/// empty content keeps the previous label). Without ids, non-empty content
+/// items append.
+fn merge_todo_snapshot(existing: &[Value], incoming: &Value, merge: bool) -> Vec<Value> {
+    let incoming_items: Vec<Value> = match normalize_todos_array(incoming) {
+        Value::Array(items) => items,
+        _ => Vec::new(),
+    };
+    if !merge || existing.is_empty() {
+        // Full replace — drop status-only stubs that still have empty content
+        // (no prior snapshot to fill labels from).
+        return incoming_items
+            .into_iter()
+            .filter(|item| {
+                item.get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| !s.is_empty())
+            })
+            .collect();
+    }
+
+    let mut result = existing.to_vec();
+    for item in incoming_items {
+        let id = item.get("id").cloned();
+        let new_content_empty = item
+            .get("content")
+            .and_then(Value::as_str)
+            .is_none_or(|s| s.is_empty());
+
+        if let Some(id) = id {
+            if let Some(pos) = result.iter().position(|existing_item| existing_item.get("id") == Some(&id))
+            {
+                let prev = result[pos].as_object().cloned().unwrap_or_default();
+                let mut merged = prev;
+                if let Some(status) = item.get("status").cloned() {
+                    merged.insert("status".to_string(), status);
+                }
+                if !new_content_empty {
+                    if let Some(content) = item.get("content").cloned() {
+                        merged.insert("content".to_string(), content.clone());
+                        let active = item
+                            .get("activeForm")
+                            .cloned()
+                            .unwrap_or(content);
+                        merged.insert("activeForm".to_string(), active);
+                    }
+                }
+                result[pos] = Value::Object(merged);
+            } else if !new_content_empty {
+                result.push(item);
+            }
+        } else if !new_content_empty {
+            result.push(item);
+        }
+    }
+    result
+}
+
+const GROK_ACP_PLAN_TODO_TOOL_ID: &str = "grok-acp-plan";
+
+/// Convert ACP `sessionUpdate: "plan"` entries into a synthetic TodoWrite call.
+///
+/// Grok Build mirrors todo state as full plan snapshots:
+/// `{ "sessionUpdate": "plan", "entries": [{ "content", "priority", "status" }] }`.
+/// These are the most reliable full-list updates (including intermediate status
+/// changes) and must not be ignored.
+fn extract_acp_plan_todo_write(update: &Value) -> Option<ParsedToolCall> {
+    let entries = update.get("entries")?.as_array()?;
+    if entries.is_empty() {
+        return None;
+    }
+    let todos: Vec<Value> = entries
         .iter()
-        .filter_map(|item| {
-            let map = item.as_object()?;
+        .enumerate()
+        .filter_map(|(idx, entry)| {
+            let map = entry.as_object()?;
             let content = map
                 .get("content")
                 .or_else(|| map.get("text"))
@@ -161,32 +286,65 @@ fn normalize_todos_array(todos: &Value) -> Value {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())?
                 .to_string();
-            let active_form = map
-                .get("activeForm")
-                .or_else(|| map.get("active_form"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(content.as_str())
-                .to_string();
             let status = map
                 .get("status")
                 .and_then(Value::as_str)
                 .map(normalize_todo_status)
                 .unwrap_or("pending");
-
-            let mut out = serde_json::Map::new();
-            // Preserve id when present (Grok includes it; Claude usually does not).
-            if let Some(id) = map.get("id").cloned().filter(|v| !v.is_null()) {
-                out.insert("id".to_string(), id);
-            }
-            out.insert("content".to_string(), Value::String(content));
-            out.insert("activeForm".to_string(), Value::String(active_form));
-            out.insert("status".to_string(), Value::String(status.to_string()));
-            Some(Value::Object(out))
+            // Prefer explicit id; otherwise stable 1-based index so merge patches match.
+            let id = map
+                .get("id")
+                .and_then(|v| match v {
+                    Value::String(s) if !s.is_empty() => Some(s.clone()),
+                    Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| (idx + 1).to_string());
+            Some(serde_json::json!({
+                "id": id,
+                "content": content,
+                "activeForm": content,
+                "status": status,
+            }))
         })
         .collect();
-    Value::Array(normalized)
+    if todos.is_empty() {
+        return None;
+    }
+    Some(ParsedToolCall {
+        id: GROK_ACP_PLAN_TODO_TOOL_ID.to_string(),
+        name: "TodoWrite".to_string(),
+        input: serde_json::json!({
+            "todos": todos,
+            "merge": false,
+        }),
+    })
+}
+
+/// Apply Grok TodoWrite / ACP plan state onto a running snapshot and rewrite the
+/// tool call input so the UI always sees a full merged list.
+fn apply_todo_write_snapshot(
+    tool: &mut ParsedToolCall,
+    todo_snapshot: &mut Vec<Value>,
+) {
+    if tool.name != "TodoWrite" {
+        return;
+    }
+    let merge = tool
+        .input
+        .get("merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let incoming = tool
+        .input
+        .get("todos")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(vec![]));
+    *todo_snapshot = merge_todo_snapshot(todo_snapshot, &incoming, merge);
+    let map = input_as_object_mut(&mut tool.input);
+    map.insert("todos".to_string(), Value::Array(todo_snapshot.clone()));
+    // Snapshot is complete after merge; avoid double-merge on the frontend.
+    map.insert("merge".to_string(), Value::Bool(false));
 }
 
 fn input_as_object_mut(input: &mut Value) -> &mut serde_json::Map<String, Value> {
@@ -1103,6 +1261,9 @@ where
     let mut content = String::new();
     let mut content_blocks = Vec::new();
     let mut tool_calls = Vec::new();
+    // Accumulated Grok todo list so merge:true patches and ACP plan updates
+    // keep full content labels across the turn.
+    let mut todo_snapshot: Vec<Value> = Vec::new();
     let mut session_id = initial_session_id.unwrap_or_default().to_string();
     let mut usage = None;
     let mut error: Option<String> = None;
@@ -1182,14 +1343,16 @@ where
                     }
                 }
                 Some("tool_call") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut tool_calls, &tool_call);
                         ensure_tool_use(&mut content_blocks, &tool_call.id);
                         on_tool_use(&tool_call);
                     }
                 }
                 Some("tool_call_update") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut tool_calls, &tool_call);
                         ensure_tool_use(&mut content_blocks, &tool_call.id);
                         on_tool_use(&tool_call);
@@ -1200,6 +1363,14 @@ where
                     ) {
                         set_tool_result(&mut tool_calls, &tool_use_id, &output);
                         on_tool_result(&tool_use_id, &output);
+                    }
+                }
+                Some("plan") => {
+                    if let Some(mut tool_call) = extract_acp_plan_todo_write(update) {
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
+                        upsert_tool_call(&mut tool_calls, &tool_call);
+                        ensure_tool_use(&mut content_blocks, &tool_call.id);
+                        on_tool_use(&tool_call);
                     }
                 }
                 _ => {}
@@ -1241,7 +1412,8 @@ where
                 }
             }
             "tool_call" | "tool_use" | "tool" => {
-                if let Some(tool_call) = extract_tool_call_event(&parsed) {
+                if let Some(mut tool_call) = extract_tool_call_event(&parsed) {
+                    apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                     upsert_tool_call(&mut tool_calls, &tool_call);
                     ensure_tool_use(&mut content_blocks, &tool_call.id);
                     on_tool_use(&tool_call);
@@ -3725,6 +3897,9 @@ fn send_grok_acp_prompt(
         usage: None,
         error: None,
     };
+    // Accumulated Grok todo list so merge:true patches and ACP plan updates
+    // keep full content labels across the turn (live ACP path).
+    let mut todo_snapshot: Vec<Value> = Vec::new();
     let mut chunk_coalescer = ChunkCoalescer::new();
     let mut line = String::new();
     loop {
@@ -3791,26 +3966,28 @@ fn send_grok_acp_prompt(
                     }
                 }
                 Some("tool_call") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
                         flush_coalesced_chunks(
                             app,
                             jean_session_id,
                             worktree_id,
                             &mut chunk_coalescer,
                         );
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut response.tool_calls, &tool_call);
                         ensure_tool_use(&mut response.content_blocks, &tool_call.id);
                         emit_tool_use(app, jean_session_id, worktree_id, &tool_call);
                     }
                 }
                 Some("tool_call_update") => {
-                    if let Some(tool_call) = extract_acp_tool_call(update) {
+                    if let Some(mut tool_call) = extract_acp_tool_call(update) {
                         flush_coalesced_chunks(
                             app,
                             jean_session_id,
                             worktree_id,
                             &mut chunk_coalescer,
                         );
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
                         upsert_tool_call(&mut response.tool_calls, &tool_call);
                         ensure_tool_use(&mut response.content_blocks, &tool_call.id);
                         emit_tool_use(app, jean_session_id, worktree_id, &tool_call);
@@ -3827,6 +4004,20 @@ fn send_grok_acp_prompt(
                         );
                         set_tool_result(&mut response.tool_calls, &tool_use_id, &output);
                         emit_tool_result(app, jean_session_id, worktree_id, &tool_use_id, &output);
+                    }
+                }
+                Some("plan") => {
+                    if let Some(mut tool_call) = extract_acp_plan_todo_write(update) {
+                        flush_coalesced_chunks(
+                            app,
+                            jean_session_id,
+                            worktree_id,
+                            &mut chunk_coalescer,
+                        );
+                        apply_todo_write_snapshot(&mut tool_call, &mut todo_snapshot);
+                        upsert_tool_call(&mut response.tool_calls, &tool_call);
+                        ensure_tool_use(&mut response.content_blocks, &tool_call.id);
+                        emit_tool_use(app, jean_session_id, worktree_id, &tool_call);
                     }
                 }
                 _ => {}
@@ -4777,13 +4968,14 @@ mod tests {
 
     #[test]
     fn plan_mode_allows_terminal_create() {
+        let cwd = std::env::temp_dir();
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 10,
             "method": "terminal/create",
             "params": {
                 "command": "echo research-ok",
-                "cwd": "/tmp",
+                "cwd": cwd.to_string_lossy(),
             },
         });
         let mut output = Vec::new();
@@ -5510,6 +5702,101 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         });
         assert_eq!(todos2.name, "TodoWrite");
         assert_eq!(todos2.input["todos"][0]["activeForm"], "A");
+    }
+
+    #[test]
+    fn merge_todo_snapshot_applies_status_only_patches() {
+        let initial = serde_json::json!([
+            {"id": "1", "content": "Explore", "status": "in_progress"},
+            {"id": "2", "content": "Identify", "status": "pending"},
+            {"id": "3", "content": "Fix", "status": "pending"}
+        ]);
+        let snapshot = merge_todo_snapshot(&[], &initial, false);
+        assert_eq!(snapshot.len(), 3);
+        assert_eq!(snapshot[0]["status"], "in_progress");
+
+        // Grok merge:true with null content — only statuses change
+        let patch = serde_json::json!([
+            {"id": "1", "content": null, "status": "completed"},
+            {"id": "2", "content": null, "status": "completed"},
+            {"id": "3", "content": null, "status": "in_progress"}
+        ]);
+        let merged = merge_todo_snapshot(&snapshot, &patch, true);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0]["content"], "Explore");
+        assert_eq!(merged[0]["status"], "completed");
+        assert_eq!(merged[1]["content"], "Identify");
+        assert_eq!(merged[1]["status"], "completed");
+        assert_eq!(merged[2]["content"], "Fix");
+        assert_eq!(merged[2]["status"], "in_progress");
+
+        // Partial merge with only one id
+        let last = serde_json::json!([{"id": "3", "status": "completed"}]);
+        let done = merge_todo_snapshot(&merged, &last, true);
+        assert_eq!(done.len(), 3);
+        assert_eq!(done[2]["status"], "completed");
+        assert_eq!(done[2]["content"], "Fix");
+    }
+
+    #[test]
+    fn extract_acp_plan_todo_write_maps_entries() {
+        let update = serde_json::json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                {"content": "Explore existing browser tests", "priority": "medium", "status": "completed"},
+                {"content": "Add shared helpers", "priority": "medium", "status": "in_progress"},
+                {"content": "Write core tests", "priority": "medium", "status": "pending"}
+            ]
+        });
+        let tool = extract_acp_plan_todo_write(&update).expect("plan tool");
+        assert_eq!(tool.id, GROK_ACP_PLAN_TODO_TOOL_ID);
+        assert_eq!(tool.name, "TodoWrite");
+        assert_eq!(tool.input["todos"].as_array().unwrap().len(), 3);
+        assert_eq!(tool.input["todos"][0]["status"], "completed");
+        assert_eq!(tool.input["todos"][1]["status"], "in_progress");
+        assert_eq!(tool.input["todos"][0]["id"], "1");
+        assert_eq!(tool.input["todos"][1]["content"], "Add shared helpers");
+    }
+
+    #[test]
+    fn parse_grok_stream_merges_todo_write_and_plan_updates() {
+        let input = r#"
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t-todo-1","title":"todo_write","rawInput":{"merge":false,"todos":[{"id":"1","content":"Explore","status":"in_progress"},{"id":"2","content":"Fix","status":"pending"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-todo-1","title":"Updating plan","kind":"think","rawInput":{"variant":"TodoWrite","merge":false,"todos":[{"id":"1","content":"Explore","status":"in_progress"},{"id":"2","content":"Fix","status":"pending"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan","entries":[{"content":"Explore","priority":"medium","status":"in_progress"},{"content":"Fix","priority":"medium","status":"pending"}]}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t-todo-2","title":"todo_write","rawInput":{"merge":true,"todos":[{"id":"1","status":"completed"},{"id":"2","status":"in_progress"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-todo-2","title":"Updating plan","rawInput":{"variant":"TodoWrite","merge":true,"todos":[{"id":"1","content":null,"status":"completed"},{"id":"2","content":null,"status":"in_progress"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan","entries":[{"content":"Explore","priority":"medium","status":"completed"},{"content":"Fix","priority":"medium","status":"in_progress"}]}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t-todo-3","title":"todo_write","rawInput":{"merge":true,"todos":[{"id":"2","status":"completed"}]}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan","entries":[{"content":"Explore","priority":"medium","status":"completed"},{"content":"Fix","priority":"medium","status":"completed"}]}}}
+"#;
+        let response =
+            parse_grok_stream_inner(std::io::Cursor::new(input.as_bytes()), Some("s")).unwrap();
+
+        // Latest TodoWrite (plan synthetic id wins if last) should have both items completed
+        let todos = response
+            .tool_calls
+            .iter()
+            .rev()
+            .find(|tc| tc.name == "TodoWrite")
+            .expect("TodoWrite present");
+        let items = todos.input["todos"].as_array().expect("todos array");
+        assert_eq!(items.len(), 2, "merge must keep full list, got: {items:?}");
+        assert_eq!(items[0]["content"], "Explore");
+        assert_eq!(items[0]["status"], "completed");
+        assert_eq!(items[1]["content"], "Fix");
+        assert_eq!(items[1]["status"], "completed");
+
+        // Intermediate merge tool call (t-todo-2) should already be expanded
+        let mid = response
+            .tool_calls
+            .iter()
+            .find(|tc| tc.id == "t-todo-2")
+            .expect("mid todo");
+        assert_eq!(mid.input["todos"].as_array().unwrap().len(), 2);
+        assert_eq!(mid.input["todos"][0]["status"], "completed");
+        assert_eq!(mid.input["todos"][0]["content"], "Explore");
+        assert_eq!(mid.input["todos"][1]["status"], "in_progress");
     }
 
     #[test]

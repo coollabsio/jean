@@ -28,9 +28,11 @@ export function ScriptsButton({
   const favoritePrefix = projectId ? `${projectId}:` : null
   const favoriteScriptNames = new Set(
     favoritePrefix
-      ? favoriteKeys
-          .filter(key => key.startsWith(favoritePrefix))
-          .map(key => key.slice(favoritePrefix.length))
+      ? favoriteKeys.flatMap(key =>
+          key.startsWith(favoritePrefix)
+            ? [key.slice(favoritePrefix.length)]
+            : []
+        )
       : []
   )
   const sortedScripts = [...scripts].sort(

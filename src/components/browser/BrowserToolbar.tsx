@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -46,14 +53,25 @@ function normalizeUrl(input: string): string {
 const TabPill = memo(function TabPill({
   tab,
   isActive,
-  onClick,
+  onSelect,
   onClose,
 }: {
   tab: BrowserTab
   isActive: boolean
-  onClick: () => void
-  onClose: () => void
+  onSelect: (tabId: string) => void
+  onClose: (tabId: string) => void
 }) {
+  const handleClick = useCallback(() => {
+    onSelect(tab.id)
+  }, [onSelect, tab.id])
+  const handleClose = useCallback(
+    (e: MouseEvent) => {
+      e.stopPropagation()
+      onClose(tab.id)
+    },
+    [onClose, tab.id]
+  )
+
   let host = ''
   try {
     host = new URL(tab.url).host
@@ -69,22 +87,27 @@ const TabPill = memo(function TabPill({
           ? 'border-border bg-background text-foreground'
           : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-muted'
       )}
-      onClick={onClick}
       title={tab.title || tab.url}
     >
-      {tab.isLoading ? (
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-      ) : (
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
-      )}
-      <span className="truncate">{label}</span>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={isActive}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
+        onClick={handleClick}
+        title={tab.title || tab.url}
+      >
+        {tab.isLoading ? (
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+        ) : (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+        )}
+        <span className="truncate">{label}</span>
+      </button>
       <button
         type="button"
         className="ml-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded opacity-60 hover:bg-muted-foreground/20 hover:opacity-100"
-        onClick={e => {
-          e.stopPropagation()
-          onClose()
-        }}
+        onClick={handleClose}
         aria-label="Close tab"
       >
         <X className="h-3 w-3" />
@@ -104,18 +127,21 @@ export const BrowserToolbar = memo(function BrowserToolbar({
   )
   const activeTab = tabs.find(t => t.id === activeTabId) ?? null
 
-  const [draftUrl, setDraftUrl] = useState(displayUrl(activeTab?.url ?? ''))
+  const activeUrl = activeTab?.url ?? ''
+  const [draftUrl, setDraftUrl] = useState(() => displayUrl(activeUrl))
   const [editing, setEditing] = useState(false)
+  // Track last synced (url, editing) so external navigations and blur refresh the
+  // draft without an effect. Hide synthetic DEFAULT_NEW_TAB_URL data: URLs.
+  const [synced, setSynced] = useState({ url: activeUrl, editing: false })
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // When the active tab's URL changes externally (navigation), update the draft
-  // unless the user is currently editing the input. Hide the synthetic
-  // DEFAULT_NEW_TAB_URL data: URL — show an empty input instead.
-  useEffect(() => {
+  // Adjust state during render (React-recommended) instead of effect-as-handler.
+  if (activeUrl !== synced.url || editing !== synced.editing) {
+    setSynced({ url: activeUrl, editing })
     if (!editing) {
-      setDraftUrl(displayUrl(activeTab?.url ?? ''))
+      setDraftUrl(displayUrl(activeUrl))
     }
-  }, [activeTab?.url, editing])
+  }
 
   // Auto-focus URL input when switching to (or opening) a blank tab so users
   // can start typing immediately.
@@ -269,8 +295,8 @@ export const BrowserToolbar = memo(function BrowserToolbar({
             key={tab.id}
             tab={tab}
             isActive={tab.id === activeTabId}
-            onClick={() => handleSelectTab(tab.id)}
-            onClose={() => handleCloseTab(tab.id)}
+            onSelect={handleSelectTab}
+            onClose={handleCloseTab}
           />
         ))}
         <Button

@@ -95,6 +95,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     })
     useUIStore.setState({
       uiStateInitialized: false,
+      zenMode: false,
       sessionTerminalIds: {},
       sessionPrimarySurface: {},
     })
@@ -135,6 +136,27 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
         'session-1': 'first unsent message',
         'session-2': 'second unsent message',
       })
+    })
+  })
+
+  it('restores zen mode after a reload', async () => {
+    mockUseUIState.mockReturnValue({
+      data: buildUiState({ zen_mode: true }),
+      isSuccess: true,
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useUIStore.getState().zenMode).toBe(true)
     })
   })
 
@@ -240,6 +262,30 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     )
   })
 
+  it('debounces persistence when zen mode changes', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useUIStore.getState().uiStateInitialized).toBe(true)
+    })
+
+    useUIStore.getState().setZenMode(true)
+
+    await waitFor(() => {
+      expect(mockSaveUIState).toHaveBeenCalledWith(
+        expect.objectContaining({ zen_mode: true })
+      )
+    })
+  })
+
   it('debounces persistence when pending images or text files change', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -335,6 +381,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
               command_args: null,
               label: 'Shell',
               kind: 'panel',
+              session_id: null,
             },
             {
               id: 'persisted-2',
@@ -520,6 +567,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
               command_args: null,
               label: 'Shell',
               kind: 'panel',
+              session_id: null,
             },
             {
               id: 'fallback-session',
@@ -527,6 +575,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
               command_args: ['resume', 'abc123'],
               label: 'Codex',
               kind: 'session',
+              session_id: 'session-1',
             },
           ],
         },
@@ -576,6 +625,10 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     expect(terminalState.activeTerminalIds['worktree-1']).toBe('fallback-panel')
     expect(terminalState.runningTerminals.has('fallback-panel')).toBe(true)
     expect(terminalState.runningTerminals.has('fallback-session')).toBe(true)
+    expect(terminalState.terminals['worktree-1']?.[0]?.sessionId).toBeUndefined()
+    expect(terminalState.terminals['worktree-1']?.[1]?.sessionId).toBe(
+      'session-1'
+    )
     expect(terminalState.terminalPanelOpen['worktree-1']).toBe(true)
     expect(terminalState.terminalVisible).toBe(true)
     expect(useUIStore.getState().sessionTerminalIds['session-1']).toBe(

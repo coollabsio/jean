@@ -83,6 +83,14 @@ export default defineConfig(async () => ({
           ) {
             return 'markdown'
           }
+          // Pierre edit mode is only needed when a code editor / editable diff opens.
+          if (
+            id.includes('@pierre/diffs/edit') ||
+            id.includes('@pierre/diffs/dist/edit') ||
+            id.includes('@pierre/diffs/dist/editor')
+          ) {
+            return 'pierre-edit'
+          }
           if (id.includes('@tauri-apps')) return 'tauri'
 
           return undefined

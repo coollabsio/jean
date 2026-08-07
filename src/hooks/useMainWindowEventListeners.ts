@@ -199,6 +199,13 @@ export function shouldAllowKeybindingThroughOpenOverlay(
 ): boolean {
   // GitDiffModal is intentionally a full-screen workflow overlay, but users
   // still need the global "Open in..." picker from there (Cmd/Ctrl+O).
+  if (
+    uiState.sessionChatModalOpen &&
+    (action === 'toggle_zen_mode' || action === 'clear_session_context')
+  ) {
+    return true
+  }
+
   return action === 'open_in_modal' && uiState.gitDiffModalOpen
 }
 
@@ -357,6 +364,15 @@ function executeKeybindingAction(
       setFileBrowserVisible(!fileBrowserVisible)
       break
     }
+    case 'toggle_zen_mode': {
+      logger.debug('Keybinding: toggle_zen_mode')
+      useUIStore.getState().toggleZenMode()
+      break
+    }
+    case 'clear_session_context':
+      logger.debug('Keybinding: clear_session_context')
+      window.dispatchEvent(new CustomEvent('clear-session-context'))
+      break
     case 'open_preferences':
       logger.debug('Keybinding: open_preferences')
       commandContext.openPreferences()
@@ -957,11 +973,32 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
+        listen<{ sessionId: string }>('terminal:working', event => {
+          const sessionId = event.payload?.sessionId
+          if (!sessionId) return
+          const store = useChatStore.getState()
+          store.addSendingSession(sessionId)
+          // Mirror chat turn start: clear waiting so the session shows as running.
+          store.setWaitingForInput(sessionId, false)
+        }),
+
+        listen<{ sessionId: string }>('terminal:attention', event => {
+          const sessionId = event.payload?.sessionId
+          if (!sessionId) return
+          const store = useChatStore.getState()
+          store.removeSendingSession(sessionId)
+          // Mirror chat:done waiting so canvas/list badges update before sessions
+          // cache invalidation lands (terminal sessions have no run transcript).
+          store.setWaitingForInput(sessionId, true)
+        }),
+
         listenLocal('menu-about', async () => {
           logger.debug('About menu event received')
           if (!isNativeApp()) return
-          const { getVersion } = await import('@tauri-apps/api/app')
-          const { message } = await import('@tauri-apps/plugin-dialog')
+          const [{ getVersion }, { message }] = await Promise.all([
+            import('@tauri-apps/api/app'),
+            import('@tauri-apps/plugin-dialog'),
+          ])
           // Show simple about dialog with dynamic version
           const appVersion = await getVersion()
           await message(

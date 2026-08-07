@@ -66,6 +66,7 @@ describe('SendCancelButton', () => {
       screen.getByRole('button', { name: /skip to next/i })
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument()
+    expect(screen.getByText('Enter')).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /^steer$/i })
     ).not.toBeInTheDocument()
@@ -85,8 +86,43 @@ describe('SendCancelButton', () => {
 
     expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^steer$/i })).toBeInTheDocument()
+    expect(screen.getByText('Enter')).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /^queue$/i })
     ).not.toBeInTheDocument()
+  })
+
+  it('renders the modifier shortcut when steer is temporarily forced', () => {
+    render(
+      <SendCancelButton
+        isSending
+        canSend
+        willSteer
+        steerWithModifier
+        queuedMessageCount={0}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /^steer$/i })).toHaveTextContent(
+      '⌘↵'
+    )
+  })
+
+  it('renders the primary send/cancel action before queue or steer', () => {
+    render(
+      <SendCancelButton
+        isSending
+        canSend
+        queuedMessageCount={0}
+        onCancel={vi.fn()}
+      />
+    )
+
+    const queue = screen.getByRole('button', { name: /^queue$/i })
+    const cancel = screen.getByRole('button', { name: /cancel/i })
+    expect(
+      cancel.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })

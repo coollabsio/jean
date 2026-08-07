@@ -64,7 +64,11 @@ export function ReviewFindingBlock({
   onSelectionChange,
   disabled = false,
 }: ReviewFindingBlockProps) {
-  const [isExpanded, setIsExpanded] = useState(!isFixed)
+  // User toggle only — default expansion follows isFixed without copying it into state.
+  // null means "use default": expanded when unfixed, collapsed when fixed.
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null)
+  const isExpanded = expandedOverride ?? !isFixed
+  const setIsExpanded = (open: boolean) => setExpandedOverride(open)
   const [isFixing, setIsFixing] = useState(false)
   // Selected option: '0', '1', etc. for suggestions, or CUSTOM_OPTION for custom
   const [selectedOption, setSelectedOption] = useState<string>('0')
@@ -338,26 +342,28 @@ export function ReviewFindingsList({
   const handleFixAll = async () => {
     setIsFixingAll(true)
     try {
-      const unfixedFindings = findings
-        .map((finding, index) => ({ finding, index }))
-        .filter(
-          ({ finding, index }) => !isFixedFn(getFindingKey(finding, index))
-        )
-        .map(({ finding, index }) => {
-          const selected = selectedSuggestions[index]
-          let suggestion: string | undefined
-          if (selected === CUSTOM_OPTION) {
-            // Custom suggestions would need to be tracked separately - for now use first suggestion
-            suggestion = finding.suggestions[0]?.code
-          } else if (selected !== undefined) {
-            const idx = parseInt(selected, 10)
-            suggestion = finding.suggestions[idx]?.code
-          } else {
-            // Default to first suggestion
-            suggestion = finding.suggestions[0]?.code
-          }
-          return { finding, suggestion }
-        })
+      const unfixedFindings: {
+        finding: ReviewFinding
+        suggestion?: string
+      }[] = []
+      for (let index = 0; index < findings.length; index++) {
+        const finding = findings[index]
+        if (!finding) continue
+        if (isFixedFn(getFindingKey(finding, index))) continue
+        const selected = selectedSuggestions[index]
+        let suggestion: string | undefined
+        if (selected === CUSTOM_OPTION) {
+          // Custom suggestions would need to be tracked separately - for now use first suggestion
+          suggestion = finding.suggestions[0]?.code
+        } else if (selected !== undefined) {
+          const idx = parseInt(selected, 10)
+          suggestion = finding.suggestions[idx]?.code
+        } else {
+          // Default to first suggestion
+          suggestion = finding.suggestions[0]?.code
+        }
+        unfixedFindings.push({ finding, suggestion })
+      }
       await onFixAll(unfixedFindings)
     } finally {
       setIsFixingAll(false)

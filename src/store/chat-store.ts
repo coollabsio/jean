@@ -18,6 +18,7 @@ import {
   type PermissionDenial,
   type CodexCommandApprovalRequest,
   type CodexPermissionRequest,
+  type OpenCodePermissionRequest,
   type CodexUserInputRequest,
   type CodexMcpElicitationRequest,
   type CodexDynamicToolCallRequest,
@@ -233,6 +234,7 @@ interface ChatUIState {
     CodexCommandApprovalRequest[]
   >
   pendingCodexPermissionRequests: Record<string, CodexPermissionRequest[]>
+  pendingOpencodePermissionRequests: Record<string, OpenCodePermissionRequest[]>
   pendingCodexUserInputRequests: Record<string, CodexUserInputRequest[]>
   pendingCodexMcpElicitationRequests: Record<
     string,
@@ -627,6 +629,14 @@ interface ChatUIState {
   getPendingCodexPermissionRequests: (
     sessionId: string
   ) => CodexPermissionRequest[]
+  setPendingOpencodePermissionRequests: (
+    sessionId: string,
+    requests: OpenCodePermissionRequest[]
+  ) => void
+  clearPendingOpencodePermissionRequests: (sessionId: string) => void
+  getPendingOpencodePermissionRequests: (
+    sessionId: string
+  ) => OpenCodePermissionRequest[]
   setPendingCodexUserInputRequests: (
     sessionId: string,
     requests: CodexUserInputRequest[]
@@ -763,6 +773,7 @@ export const useChatStore = create<ChatUIState>()(
       pendingPermissionDenials: {},
       pendingCodexCommandApprovalRequests: {},
       pendingCodexPermissionRequests: {},
+      pendingOpencodePermissionRequests: {},
       pendingCodexUserInputRequests: {},
       pendingCodexMcpElicitationRequests: {},
       pendingCodexDynamicToolCallRequests: {},
@@ -1032,13 +1043,14 @@ export const useChatStore = create<ChatUIState>()(
               return state
             }
 
-            const nextOverrides = { ...state.sessionStatusOverrides }
+            let nextOverrides = { ...state.sessionStatusOverrides }
             let reviewingSessions = state.reviewingSessions
             let waitingForInputSessionIds = state.waitingForInputSessionIds
             let pendingPlanMessageIds = state.pendingPlanMessageIds
 
             if (status === null) {
-              delete nextOverrides[sessionId]
+              const { [sessionId]: _removed, ...restOverrides } = nextOverrides
+              nextOverrides = restOverrides
             } else {
               nextOverrides[sessionId] = status
             }
@@ -2066,9 +2078,15 @@ export const useChatStore = create<ChatUIState>()(
                 0) > 0 ||
               (state.pendingCodexDynamicToolCallRequests[sessionId]?.length ??
                 0) > 0
+            const hasOpencodePermissions =
+              (state.pendingOpencodePermissionRequests[sessionId]?.length ??
+                0) > 0
             if (
               modeUnchanged &&
-              (mode !== 'yolo' || (!hasClassicDenials && !hasCodexApprovals))
+              (mode !== 'yolo' ||
+                (!hasClassicDenials &&
+                  !hasCodexApprovals &&
+                  !hasOpencodePermissions))
             ) {
               return state
             }
@@ -2107,6 +2125,31 @@ export const useChatStore = create<ChatUIState>()(
               newState.pendingCodexUserInputRequests = restUserInputs
               newState.pendingCodexMcpElicitationRequests = restMcp
               newState.pendingCodexDynamicToolCallRequests = restDynamic
+            }
+            if (mode === 'yolo' && hasOpencodePermissions) {
+              const pending =
+                state.pendingOpencodePermissionRequests[sessionId] ?? []
+              const { [sessionId]: _oc, ...restOpencode } =
+                state.pendingOpencodePermissionRequests
+              newState.pendingOpencodePermissionRequests = restOpencode
+              // Auto-approve in-flight OpenCode permission prompts so switching
+              // to YOLO mid-turn unblocks the session (issue #625).
+              for (const req of pending) {
+                const replyDir = req.working_dir?.trim()
+                if (!replyDir) continue
+                void invoke('respond_opencode_permission', {
+                  worktreePath: replyDir,
+                  requestId: req.request_id,
+                  reply: 'always',
+                  opencodeSessionId: req.opencode_session_id,
+                  apiVersion: req.api_version ?? 'v1',
+                }).catch(err => {
+                  console.error(
+                    '[chat-store] Failed to auto-approve OpenCode permission on yolo switch:',
+                    err
+                  )
+                })
+              }
             }
             return newState
           },
@@ -3026,6 +3069,36 @@ export const useChatStore = create<ChatUIState>()(
       getPendingCodexPermissionRequests: sessionId =>
         get().pendingCodexPermissionRequests[sessionId] ?? [],
 
+      setPendingOpencodePermissionRequests: (sessionId, requests) =>
+        set(
+          state => {
+            const current = state.pendingOpencodePermissionRequests[sessionId]
+            if (!current && requests.length === 0) return state
+            return {
+              pendingOpencodePermissionRequests: {
+                ...state.pendingOpencodePermissionRequests,
+                [sessionId]: requests,
+              },
+            }
+          },
+          undefined,
+          'setPendingOpencodePermissionRequests'
+        ),
+
+      clearPendingOpencodePermissionRequests: sessionId =>
+        set(
+          state => {
+            const { [sessionId]: _, ...rest } =
+              state.pendingOpencodePermissionRequests
+            return { pendingOpencodePermissionRequests: rest }
+          },
+          undefined,
+          'clearPendingOpencodePermissionRequests'
+        ),
+
+      getPendingOpencodePermissionRequests: sessionId =>
+        get().pendingOpencodePermissionRequests[sessionId] ?? [],
+
       setPendingCodexUserInputRequests: (sessionId, requests) =>
         set(
           state => {
@@ -3179,9 +3252,11 @@ export const useChatStore = create<ChatUIState>()(
               state.waitingForInputSessionIds
             const { [sessionId]: _reviewing, ...reviewingSessions } =
               state.reviewingSessions
-            const nextStatusOverrides = { ...state.sessionStatusOverrides }
+            let nextStatusOverrides = { ...state.sessionStatusOverrides }
             if (nextStatusOverrides[sessionId] === 'review') {
-              delete nextStatusOverrides[sessionId]
+              const { [sessionId]: _status, ...restStatusOverrides } =
+                nextStatusOverrides
+              nextStatusOverrides = restStatusOverrides
             }
             const { [sessionId]: _sp, ...streamingPlanApprovals } =
               state.streamingPlanApprovals
@@ -3238,6 +3313,10 @@ export const useChatStore = create<ChatUIState>()(
             } = state.pendingCodexCommandApprovalRequests
             const { [sessionId]: _cpr, ...pendingCodexPermissionRequests } =
               state.pendingCodexPermissionRequests
+            const {
+              [sessionId]: _opr,
+              ...pendingOpencodePermissionRequests
+            } = state.pendingOpencodePermissionRequests
             const { [sessionId]: _cui, ...pendingCodexUserInputRequests } =
               state.pendingCodexUserInputRequests
             const {
@@ -3264,6 +3343,7 @@ export const useChatStore = create<ChatUIState>()(
               pendingPermissionDenials,
               pendingCodexCommandApprovalRequests,
               pendingCodexPermissionRequests,
+              pendingOpencodePermissionRequests,
               pendingCodexUserInputRequests,
               pendingCodexMcpElicitationRequests,
               pendingCodexDynamicToolCallRequests,
@@ -3389,6 +3469,8 @@ export const useChatStore = create<ChatUIState>()(
               state.pendingCodexCommandApprovalRequests
             const { [sessionId]: _permissionReqs, ...restPermissionReqs } =
               state.pendingCodexPermissionRequests
+            const { [sessionId]: _opencodeReqs, ...restOpencodeReqs } =
+              state.pendingOpencodePermissionRequests
             const { [sessionId]: _userInputReqs, ...restUserInputReqs } =
               state.pendingCodexUserInputRequests
             const { [sessionId]: _mcpReqs, ...restMcpReqs } =
@@ -3424,6 +3506,7 @@ export const useChatStore = create<ChatUIState>()(
               pendingPermissionDenials: restDenials,
               pendingCodexCommandApprovalRequests: restCommandReqs,
               pendingCodexPermissionRequests: restPermissionReqs,
+              pendingOpencodePermissionRequests: restOpencodeReqs,
               pendingCodexUserInputRequests: restUserInputReqs,
               pendingCodexMcpElicitationRequests: restMcpReqs,
               pendingCodexDynamicToolCallRequests: restDynamicReqs,

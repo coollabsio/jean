@@ -6,9 +6,15 @@ import type {
   DiffLineAnnotation,
   FileDiffMetadata,
 } from '@pierre/diffs'
+import type { EditorOptions } from '@pierre/diffs/edit'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
 import type { SyntaxTheme } from '@/types/preferences'
+import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
 
 /** A comment attached to a line range in a diff */
 export interface DiffComment {
@@ -31,6 +37,10 @@ export interface MemoizedFileDiffProps {
   syntaxThemeLight: SyntaxTheme
   diffStyle: 'split' | 'unified'
   enableLineSelection?: boolean
+  /** Enable Pierre edit mode on the new-file side (default true). */
+  edit?: boolean
+  /** Editor callbacks (e.g. onChange) when edit is enabled. */
+  editorOptions?: EditorOptions<DiffComment>
   onLineSelected: (range: SelectedLineRange | null) => void
   onRemoveComment: (id: string) => void
 }
@@ -62,6 +72,8 @@ export const MemoizedFileDiff = memo(
     syntaxThemeLight,
     diffStyle,
     enableLineSelection: enableLineSelectionProp = true,
+    edit = true,
+    editorOptions,
     onLineSelected,
     onRemoveComment,
   }: MemoizedFileDiffProps) {
@@ -71,20 +83,14 @@ export const MemoizedFileDiff = memo(
     // Memoize options to keep reference stable
     const options = useMemo(
       () => ({
-        theme: {
-          dark: syntaxThemeDark,
-          light: syntaxThemeLight,
-        },
+        theme: pierreThemePair(syntaxThemeDark, syntaxThemeLight),
         themeType,
         diffStyle,
         overflow: 'wrap' as const,
         enableLineSelection: enableLineSelectionProp,
         onLineSelected,
         disableFileHeader: true, // We render file info in sidebar
-        unsafeCSS: `
-      pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-      * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
-    `,
+        unsafeCSS: PIERRE_UNSAFE_CSS,
       }),
       [
         themeType,
@@ -108,6 +114,7 @@ export const MemoizedFileDiff = memo(
             onClick={() =>
               annotation.metadata && onRemoveComment(annotation.metadata.id)
             }
+            aria-label="Remove comment"
             className="ml-auto p-0.5 text-muted-foreground hover:text-foreground"
           >
             <X className="h-3 w-3" />
@@ -179,6 +186,18 @@ export const MemoizedFileDiff = memo(
               </>
             )}
           </div>
+        ) : edit ? (
+          <PierreEditProvider>
+            <FileDiff
+              fileDiff={fileDiff}
+              lineAnnotations={annotations}
+              selectedLines={selectedLines}
+              options={options}
+              renderAnnotation={renderAnnotation}
+              edit
+              editorOptions={editorOptions}
+            />
+          </PierreEditProvider>
         ) : (
           <FileDiff
             fileDiff={fileDiff}
@@ -214,6 +233,8 @@ export const MemoizedFileDiff = memo(
       prevProps.syntaxThemeDark === nextProps.syntaxThemeDark &&
       prevProps.syntaxThemeLight === nextProps.syntaxThemeLight &&
       prevProps.diffStyle === nextProps.diffStyle &&
+      prevProps.edit === nextProps.edit &&
+      prevProps.editorOptions === nextProps.editorOptions &&
       prevProps.onLineSelected === nextProps.onLineSelected &&
       prevProps.onRemoveComment === nextProps.onRemoveComment
     )

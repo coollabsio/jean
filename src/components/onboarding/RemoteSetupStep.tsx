@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import {
   addRemoteConnection,
   markConnectionSwitch,
+  parseOptionalSshPort,
   parseRemoteConnectionInput,
   selectConnection,
 } from '@/lib/remote-connections'
@@ -80,16 +81,6 @@ export function RemoteSetupStep({
       unlisten?.()
     }
   }, [installing, native])
-
-  const parseOptionalSshPort = (raw: string): number | undefined => {
-    const trimmed = raw.trim()
-    if (!trimmed) return undefined
-    const port = Number(trimmed)
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error('SSH port must be an integer between 1 and 65535.')
-    }
-    return port
-  }
 
   const handleUrlSubmit = async (event: FormEvent) => {
     event.preventDefault()

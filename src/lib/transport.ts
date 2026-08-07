@@ -7,7 +7,12 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { isNativeApp, setWebAccessEnabled, setWsConnected } from './environment'
+import {
+  isNativeApp,
+  isNativeOpenAllowed,
+  setWebAccessEnabled,
+  setWsConnected,
+} from './environment'
 import { generateId } from './uuid'
 import { isServerWindows } from './platform'
 import { getActiveRemoteConnection } from './remote-connections'
@@ -149,6 +154,7 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'send_native_notification',
   'read_clipboard_image',
   'write_clipboard_text',
+  'read_clipboard_text',
   'save_dropped_image',
   'open_file_in_default_app',
   'open_worktree_in_finder',
@@ -187,6 +193,7 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'send_native_notification',
   'read_clipboard_image',
   'write_clipboard_text',
+  'read_clipboard_text',
   // Quit confirmation must query the local process registry — remote sessions
   // survive client exit, and the remote WS may be down while loading/switching.
   'has_running_sessions',
@@ -230,9 +237,11 @@ export async function invoke<T>(
     return null as T
   }
 
-  // Native app + remote Jean: open remote paths in local Zed via ssh://.
-  // Must stay on the local Tauri shell (not the remote WebSocket dispatch).
-  if (isNativeApp() && usesWebSocketBackend()) {
+  // Native app + remote Jean: open remote paths in local Zed via ssh://
+  // when the remote host cannot launch apps itself. Prefer the backend's
+  // native-open path when available (e.g. headless on WSL, --allow-native-open)
+  // so we don't bypass the WSL launcher with a broken Windows-side ssh:// remap.
+  if (isNativeApp() && usesWebSocketBackend() && !isNativeOpenAllowed()) {
     const remote = getActiveRemoteConnection()
     if (remote) {
       const remapped = prepareRemoteEditorOpenArgs(command, args, remote)
@@ -661,6 +670,12 @@ class WsTransport {
 
     this.ws.onmessage = event => {
       this._lastInbound = Date.now()
+      // Fast path: server app-level heartbeat is a fixed string every ~20s.
+      // Skip JSON.parse on the idle hot path (browser cannot observe protocol
+      // ping/pong, so these text frames are the liveness signal).
+      if (event.data === '{"type":"heartbeat"}') {
+        return
+      }
       try {
         const msg: WsMessage = JSON.parse(event.data)
         this.handleMessage(msg)

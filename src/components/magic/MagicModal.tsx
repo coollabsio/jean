@@ -1,6 +1,7 @@
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
 import {
   ArrowDownToLine,
+  ArrowDownUp,
   ArrowUpToLine,
   GitCommitHorizontal,
   GitBranchPlus,
@@ -74,6 +75,7 @@ import {
   triggerImmediateGitPoll,
   fetchWorktreesStatus,
   performGitPull,
+  performGitSync,
 } from '@/services/git-status'
 import type {
   RevertCommitResponse,
@@ -133,6 +135,7 @@ type MagicOption =
   | 'commit-and-push'
   | 'pull'
   | 'push'
+  | 'sync'
   | 'open-pr'
   | 'link-pr'
   | 'update-pr'
@@ -160,6 +163,7 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'revert-last-commit',
   'pull',
   'push',
+  'sync',
   'open-pr',
   'link-pr',
   'update-pr',
@@ -180,6 +184,7 @@ const DIRECT_MAGIC_GIT_OPTIONS = new Set<MagicOption>([
   'commit',
   'commit-and-push',
   'push',
+  'sync',
 ])
 
 interface MagicOptionItem {
@@ -291,6 +296,7 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
     {
       header: 'Sync',
       options: [
+        { id: 'sync', label: 'Sync', icon: ArrowDownUp, key: 'T' },
         { id: 'pull', label: 'Pull', icon: ArrowDownToLine, key: 'D' },
         { id: 'push', label: 'Push', icon: ArrowUpToLine, key: 'U' },
       ],
@@ -384,6 +390,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   w: 'fork-session',
   c: 'commit',
   p: 'commit-and-push',
+  t: 'sync',
   d: 'pull',
   u: 'push',
   o: 'open-pr',
@@ -1162,19 +1169,7 @@ export function MagicModal() {
     setCustomInvestigateModel(nextModel)
   }, [getInvestigateModelOptions, installedBackends, investigateDefaults])
 
-  useEffect(() => {
-    if (!customInvestigateModelOptions.length) return
-    if (
-      !customInvestigateModelOptions.some(
-        option => option.value === customInvestigateModel
-      )
-    ) {
-      const firstOption = customInvestigateModelOptions[0]
-      if (firstOption) {
-        setCustomInvestigateModel(firstOption.value)
-      }
-    }
-  }, [customInvestigateModel, customInvestigateModelOptions])
+  // Invalid customInvestigateModel is handled by effectiveCustomInvestigateModel
 
   useEffect(() => {
     if (!resolveDialogOpen) {
@@ -1196,19 +1191,7 @@ export function MagicModal() {
     setCustomResolveModel(nextModel)
   }, [getResolveModelOptions, installedBackends, resolveDefaults])
 
-  useEffect(() => {
-    if (!customResolveModelOptions.length) return
-    if (
-      !customResolveModelOptions.some(
-        option => option.value === customResolveModel
-      )
-    ) {
-      const firstOption = customResolveModelOptions[0]
-      if (firstOption) {
-        setCustomResolveModel(firstOption.value)
-      }
-    }
-  }, [customResolveModel, customResolveModelOptions])
+  // Invalid customResolveModel is handled by effectiveCustomResolveModel
 
   // Direct git execution for when ChatWindow isn't rendered (project canvas)
   const executeGitDirectly = useCallback(
@@ -1338,6 +1321,28 @@ export function MagicModal() {
               projectId: worktree.project_id ?? undefined,
               remote: remote ?? worktree.base_remote,
               onMergeConflict: () => executeGitDirectly('resolve-conflicts'),
+            })
+          })
+          break
+        }
+        case 'sync': {
+          // Always pull then push (explicit menu action, not badge-gated by ahead/behind).
+          await pickRemoteOrRun(async remote => {
+            await performGitSync({
+              needsPull: true,
+              needsPush: true,
+              pull: {
+                worktreeId: selectedWorktreeId,
+                worktreePath: worktree.path,
+                baseBranch:
+                  worktree.base_branch ?? project?.default_branch ?? 'main',
+                branchLabel: worktree.branch,
+                projectId: worktree.project_id ?? undefined,
+                remote: remote ?? worktree.base_remote,
+                onMergeConflict: () => executeGitDirectly('resolve-conflicts'),
+              },
+              prNumber: worktree.pr_number,
+              pushRemote: remote,
             })
           })
           break
@@ -2699,6 +2704,7 @@ ${resolveInstructions}`
 
                         return (
                           <button
+                            type="button"
                             key={option.id}
                             onClick={() =>
                               !isDisabled && executeAction(option.id)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isUserTurnFinished,
   messageHasFileEdits,
   turnHasFileEdits,
 } from './CheckpointTurnRestoreButton'
@@ -69,5 +70,42 @@ describe('CheckpointTurnRestoreButton helpers', () => {
     ]
     expect(turnHasFileEdits(messages, 0)).toBe(true)
     expect(turnHasFileEdits(messages, 2)).toBe(false)
+  })
+
+  it('treats a turn as finished when a later user message exists', () => {
+    const messages = [
+      msg('u1', 'user'),
+      msg('a1', 'assistant', [
+        {
+          id: 't1',
+          name: 'FileChange',
+          input: [{ path: 'a.ts', diff: '+x' }],
+        },
+      ]),
+      msg('u2', 'user'),
+    ]
+    expect(isUserTurnFinished(messages, 0, true)).toBe(true)
+    expect(isUserTurnFinished(messages, 0, false)).toBe(true)
+  })
+
+  it('hides unfinished open turns while the session is still sending', () => {
+    const messages = [
+      msg('u1', 'user'),
+      msg('a1', 'assistant', [
+        {
+          id: 't1',
+          name: 'Write',
+          input: { file_path: 'a.ts', content: 'x' },
+        },
+      ]),
+    ]
+    expect(isUserTurnFinished(messages, 0, true)).toBe(false)
+    expect(isUserTurnFinished(messages, 0, false)).toBe(true)
+  })
+
+  it('treats a lone user message as unfinished while sending', () => {
+    const messages = [msg('u1', 'user')]
+    expect(isUserTurnFinished(messages, 0, true)).toBe(false)
+    expect(isUserTurnFinished(messages, 0, false)).toBe(true)
   })
 })

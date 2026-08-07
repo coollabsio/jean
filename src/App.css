@@ -60,6 +60,9 @@
   --chat-font-size: 16px;
   --chat-line-height: 1.5;
   --app-zoom: 1;
+  /* Font weights (defaults, overridden by JS based on preferences) */
+  --ui-font-weight: 400;
+  --chat-font-weight: 400;
   /* Chat font family (can be monospace or sans-serif) */
   --font-family-chat:
     'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
@@ -506,6 +509,7 @@
 body {
   font-family: var(--font-family-sans) !important;
   font-size: var(--ui-font-size) !important;
+  font-weight: var(--ui-font-weight) !important;
   line-height: var(--ui-line-height) !important;
 }
 

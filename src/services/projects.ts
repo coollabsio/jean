@@ -24,6 +24,7 @@ import type {
   WorktreeBranchExistsEvent,
   WorktreeSetupCompleteEvent,
 } from '@/types/projects'
+import type { WorktreeSessions } from '@/types/chat'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
@@ -84,8 +85,59 @@ export function useProjects() {
   })
 }
 
+/** One-shot project open payload (worktrees + session lists with counts). */
+export interface ProjectBootstrap {
+  worktrees: Worktree[]
+  sessionsByWorktree: Record<string, WorktreeSessions>
+}
+
 /**
- * Hook to list worktrees for a specific project
+ * Fetch worktrees + all session lists in one backend round-trip and seed
+ * TanStack caches so ProjectCanvasView does not waterfall N get_sessions.
+ */
+export async function fetchAndSeedProjectBootstrap(
+  projectId: string,
+  queryClient: ReturnType<typeof useQueryClient>
+): Promise<Worktree[]> {
+  const { chatQueryKeys } = await import('@/services/chat')
+
+  logger.debug('Bootstrapping project canvas data', { projectId })
+  const bootstrap = await invoke<ProjectBootstrap>('bootstrap_project', {
+    projectId,
+  })
+
+  const previous = queryClient.getQueryData<Worktree[]>(
+    projectsQueryKeys.worktrees(projectId)
+  )
+  const merged = mergeWorktreesPreservingOptimistic(
+    bootstrap.worktrees ?? [],
+    previous
+  )
+  queryClient.setQueryData(projectsQueryKeys.worktrees(projectId), merged)
+
+  const sessionsByWorktree = bootstrap.sessionsByWorktree ?? {}
+  for (const [worktreeId, sessions] of Object.entries(sessionsByWorktree)) {
+    queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
+    queryClient.setQueryData(
+      [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+      sessions
+    )
+  }
+
+  logger.info('Project bootstrap loaded', {
+    projectId,
+    worktrees: merged.length,
+    sessionGroups: Object.keys(sessionsByWorktree).length,
+  })
+  return merged
+}
+
+/**
+ * Hook to list worktrees for a specific project.
+ *
+ * Uses `bootstrap_project` so session lists (with message counts) are seeded in
+ * the same round-trip. That removes the worktrees → N× get_sessions waterfall
+ * when opening a project over WebSocket (sidebar + canvas share this cache key).
  */
 export function useWorktrees(projectId: string | null) {
   const queryClient = useQueryClient()
@@ -98,24 +150,36 @@ export function useWorktrees(projectId: string | null) {
       }
 
       try {
-        logger.debug('Loading worktrees for project', { projectId })
-        const worktrees = await invoke<Worktree[]>('list_worktrees', {
+        return await fetchAndSeedProjectBootstrap(projectId, queryClient)
+      } catch (error) {
+        // Older servers / partial deploy: fall back to worktrees-only.
+        logger.warn('bootstrap_project failed, falling back to list_worktrees', {
+          error,
           projectId,
         })
-        // Pending creations are client-only until git finishes; keep them when
-        // something else invalidates this query mid-create (issue #528).
-        const previous = queryClient.getQueryData<Worktree[]>(
-          projectsQueryKeys.worktrees(projectId)
-        )
-        const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
-        logger.info('Worktrees loaded successfully', {
-          count: worktrees.length,
-          pendingPreserved: merged.length - worktrees.length,
-        })
-        return merged
-      } catch (error) {
-        logger.error('Failed to load worktrees', { error, projectId })
-        return preserveQueryCacheOnError(error)
+        try {
+          logger.debug('Loading worktrees for project', { projectId })
+          const worktrees = await invoke<Worktree[]>('list_worktrees', {
+            projectId,
+          })
+          // Pending creations are client-only until git finishes; keep them when
+          // something else invalidates this query mid-create (issue #528).
+          const previous = queryClient.getQueryData<Worktree[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
+          const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
+          logger.info('Worktrees loaded successfully', {
+            count: worktrees.length,
+            pendingPreserved: merged.length - worktrees.length,
+          })
+          return merged
+        } catch (fallbackError) {
+          logger.error('Failed to load worktrees', {
+            error: fallbackError,
+            projectId,
+          })
+          return preserveQueryCacheOnError(fallbackError)
+        }
       }
     },
     enabled: !!projectId,
@@ -342,6 +406,8 @@ export function useInitGitInFolder() {
       logger.info('Git initialized successfully', { path: result })
       return result
     },
+    // No query invalidation: git init is a pre-project filesystem step; the
+    // caller continues project creation and owns subsequent cache updates.
     onError: error => {
       const message =
         typeof error === 'string'
@@ -1000,7 +1066,9 @@ export function useWorktreeEvents() {
               // worktree is now on the server. Promote single-worktree cache
               // and register the path so auto-investigate can start.
               const serverWorktree = queryClient
-                .getQueryData<Worktree[]>(projectsQueryKeys.worktrees(projectId))
+                .getQueryData<
+                  Worktree[]
+                >(projectsQueryKeys.worktrees(projectId))
                 ?.find(w => w.id === worktreeId && w.status !== 'pending')
               if (serverWorktree) {
                 handleWorktreeReady(serverWorktree, queryClient, false)
@@ -2022,6 +2090,7 @@ export function useOpenBranchOnGitHub() {
 
       logger.info('Opened branch on GitHub')
     },
+    // No query invalidation: opens external browser only (no app state change)
     onError: error => {
       const message =
         error instanceof Error
@@ -2128,6 +2197,7 @@ export function useOpenWorktreeInFinder() {
       await invoke('open_worktree_in_finder', { worktreePath })
       logger.info(`Opened worktree in ${getFileManagerName()}`)
     },
+    // No query invalidation: OS file manager side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2157,6 +2227,7 @@ export function useOpenProjectWorktreesFolder() {
       await invoke('open_project_worktrees_folder', { projectId })
       logger.info('Opened project worktrees folder')
     },
+    // No query invalidation: OS file manager side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2190,6 +2261,7 @@ export function useOpenWorktreeInTerminal() {
       await invoke('open_worktree_in_terminal', { worktreePath, terminal })
       logger.info('Opened worktree in Terminal')
     },
+    // No query invalidation: OS terminal side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2223,6 +2295,7 @@ export function useOpenWorktreeInEditor() {
       await invoke('open_worktree_in_editor', { worktreePath, editor })
       logger.info('Opened worktree in Editor')
     },
+    // No query invalidation: OS editor side effect only
     onError: error => {
       const message =
         error instanceof Error
@@ -2406,6 +2479,8 @@ export function useTerminalListeningPorts(enabled: boolean) {
  * Hook to commit changes in a worktree
  */
 export function useCommitChanges() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: async ({
       worktreeId,
@@ -2429,9 +2504,19 @@ export function useCommitChanges() {
       logger.info('Changes committed successfully', { commitHash })
       return commitHash
     },
-    onSuccess: commitHash => {
+    onSuccess: (commitHash, { worktreeId }) => {
       const shortHash = commitHash.slice(0, 7)
       toast.success(`Changes committed`, { description: shortHash })
+      // Refresh git status after commit (dynamic import avoids circular dep
+      // with git-status → projects)
+      void import('@/services/git-status').then(
+        ({ gitStatusQueryKeys, triggerImmediateGitPoll }) => {
+          queryClient.invalidateQueries({
+            queryKey: gitStatusQueryKeys.worktree(worktreeId),
+          })
+          void triggerImmediateGitPoll()
+        }
+      )
     },
     onError: error => {
       // Tauri invoke errors come as strings directly
@@ -2486,6 +2571,7 @@ export function useOpenProjectOnGitHub() {
 
       logger.info('Opened project on GitHub')
     },
+    // No query invalidation: opens external browser only
     onError: error => {
       const message =
         error instanceof Error
@@ -2869,10 +2955,11 @@ export function useReorderWorktrees() {
 
       // Optimistically update the cache
       if (previousWorktrees) {
+        const worktreeById = new Map(previousWorktrees.map(w => [w.id, w]))
         const orderById = new Map<string, number>()
         let nextOrder = 1
         for (const worktreeId of worktreeIds) {
-          const worktree = previousWorktrees.find(w => w.id === worktreeId)
+          const worktree = worktreeById.get(worktreeId)
           if (worktree && worktree.session_type !== 'base') {
             orderById.set(worktreeId, nextOrder)
             nextOrder += 1

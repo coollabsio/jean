@@ -29,6 +29,7 @@ import {
   addRemoteConnection,
   getActiveConnectionId,
   markConnectionSwitch,
+  parseOptionalSshPort,
   parseRemoteConnectionInput,
   removeRemoteConnection,
   selectConnection,
@@ -36,6 +37,7 @@ import {
   useRemoteConnections,
   type RemoteConnection,
 } from '@/lib/remote-connections'
+import { DISMISS_TRANSIENT_UI_EVENT } from '@/lib/dismiss-transient-ui'
 import {
   checkRemoteVersionCompatibility,
   fetchRemoteServerInfo,
@@ -191,6 +193,17 @@ export function RemoteConnectionsDialog({
       window.removeEventListener('open-remote-connections', handleOpen)
   }, [connections])
 
+  // Close when remote connection recovery dismisses transient UI (#623).
+  useEffect(() => {
+    const handleDismiss = () => {
+      setOpen(false)
+      setEditingId(null)
+    }
+    window.addEventListener(DISMISS_TRANSIENT_UI_EVENT, handleDismiss)
+    return () =>
+      window.removeEventListener(DISMISS_TRANSIENT_UI_EVENT, handleDismiss)
+  }, [])
+
   useEffect(() => {
     if (!open || !installing || !native) return
     let disposed = false
@@ -236,16 +249,6 @@ export function RemoteConnectionsDialog({
     setError(null)
     setProgress(null)
     setInstalling(false)
-  }
-
-  const parseOptionalSshPort = (raw: string): number | undefined => {
-    const trimmed = raw.trim()
-    if (!trimmed) return undefined
-    const port = Number(trimmed)
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error('SSH port must be an integer between 1 and 65535.')
-    }
-    return port
   }
 
   const connectionInputFromUrlForm = () => {
@@ -458,7 +461,11 @@ export function RemoteConnectionsDialog({
           )}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      {/* Above RemoteConnectionRecovery (z-100) so Edit connection works while offline. */}
+      <DialogContent
+        className="sm:max-w-md z-[110]"
+        overlayClassName="z-[110]"
+      >
         <DialogHeader>
           <DialogTitle>Jean connections</DialogTitle>
           <DialogDescription>

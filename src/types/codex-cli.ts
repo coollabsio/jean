@@ -6,6 +6,13 @@ export interface CodexCliStatus {
   installed: boolean
   version: string | null
   path: string | null
+  /**
+   * Linux only: whether Codex can find bubblewrap (`bwrap`) for its sandbox.
+   * Omitted/null on macOS/Windows or when not installed.
+   */
+  sandbox_ready?: boolean | null
+  /** Install guidance when sandbox_ready is false. */
+  sandbox_message?: string | null
 }
 
 export interface CodexAuthStatus {

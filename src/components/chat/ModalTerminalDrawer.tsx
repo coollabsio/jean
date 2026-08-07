@@ -112,7 +112,13 @@ export const ModalTerminalDrawer = memo(function ModalTerminalDrawer({
       data-terminal-root="true"
       className="relative flex h-full min-h-0 min-w-0 flex-col gap-0 bg-background"
     >
-      <div className={resizeHandleClass} onMouseDown={handleResizeStart} />
+      <div
+        role="separator"
+        tabIndex={-1}
+        aria-label="Resize terminal drawer"
+        className={resizeHandleClass}
+        onMouseDown={handleResizeStart}
+      />
 
       <div className="shrink-0 border-b">
         <div

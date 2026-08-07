@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   draggable,
   dropTargetForElements,
@@ -35,12 +42,12 @@ import { DropIndicator } from '@/components/drag-and-drop/DropIndicator'
 const MAX_NESTING_DEPTH = 3
 
 function getDepth(projects: Project[], itemId: string): number {
+  const projectById = new Map(projects.map(p => [p.id, p]))
   let depth = 0
-  let current = projects.find(p => p.id === itemId)
+  let current = projectById.get(itemId)
   while (current?.parent_id) {
     depth++
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    current = projects.find(p => p.id === current!.parent_id)
+    current = projectById.get(current.parent_id)
   }
   return depth
 }
@@ -66,8 +73,9 @@ function canMoveIntoFolder({
 }): boolean {
   if (activeId === folderId) return false
 
-  const activeItem = projects.find(p => p.id === activeId)
-  const folder = projects.find(p => p.id === folderId)
+  const projectById = new Map(projects.map(p => [p.id, p]))
+  const activeItem = projectById.get(activeId)
+  const folder = projectById.get(folderId)
   if (!activeItem || !folder || !isFolder(folder)) return false
 
   const folderDepth = getDepth(projects, folderId)
@@ -80,7 +88,7 @@ function canMoveIntoFolder({
     let currentParent = folder.parent_id
     while (currentParent) {
       if (currentParent === activeId) return false
-      const parent = projects.find(p => p.id === currentParent)
+      const parent = projectById.get(currentParent)
       currentParent = parent?.parent_id
     }
   }
@@ -369,11 +377,11 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
 
   // IDs for bulk expand/collapse actions (across all nesting levels)
   const allFolderIds = useMemo(
-    () => projects.filter(isFolder).map(p => p.id),
+    () => projects.flatMap(p => (isFolder(p) ? [p.id] : [])),
     [projects]
   )
   const allProjectIds = useMemo(
-    () => projects.filter(p => !isFolder(p)).map(p => p.id),
+    () => projects.flatMap(p => (!isFolder(p) ? [p.id] : [])),
     [projects]
   )
 
@@ -618,8 +626,8 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
     clearDragState()
   }, [clearDragState])
 
-  useEffect(() => {
-    const getDocumentTarget = (event: DragEvent) => {
+  const onDocumentDragOver = useEffectEvent((event: DragEvent) => {
+    const getDocumentTarget = () => {
       const element = document.elementFromPoint(
         event.clientX,
         event.clientY
@@ -627,63 +635,68 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
       return element?.closest('[data-pdnd-tree-id]') as HTMLElement | null
     }
 
-    const handleDocumentDragOver = (event: DragEvent) => {
-      const draggingId = activeIdRef.current
-      if (!draggingId) return
-      const target = getDocumentTarget(event)
-      const targetId = target?.dataset.pdndTreeId ?? null
-      if (!target || !targetId || targetId === draggingId) return
+    const draggingId = activeIdRef.current
+    if (!draggingId) return
+    const target = getDocumentTarget()
+    const targetId = target?.dataset.pdndTreeId ?? null
+    if (!target || !targetId || targetId === draggingId) return
 
-      const targetProject = projects.find(p => p.id === targetId)
-      if (!targetProject) return
+    const targetProject = projects.find(p => p.id === targetId)
+    if (!targetProject) return
 
-      event.preventDefault()
-      const rect = target.getBoundingClientRect()
-      const ratio = (event.clientY - rect.top) / Math.max(rect.height, 1)
-      let instruction: Instruction | null
-      if (
-        isFolder(targetProject) &&
-        ratio > 0.25 &&
-        ratio < 0.75 &&
-        canMoveIntoFolder({
-          projects,
-          activeId: draggingId,
-          folderId: targetId,
-        })
-      ) {
-        instruction = {
-          operation: 'combine',
-          blocked: false,
-          axis: 'vertical',
-        }
-      } else {
-        instruction = {
-          operation: ratio < 0.5 ? 'reorder-before' : 'reorder-after',
-          blocked: false,
-          axis: 'vertical',
-        }
+    event.preventDefault()
+    const rect = target.getBoundingClientRect()
+    const ratio = (event.clientY - rect.top) / Math.max(rect.height, 1)
+    let instruction: Instruction | null
+    if (
+      isFolder(targetProject) &&
+      ratio > 0.25 &&
+      ratio < 0.75 &&
+      canMoveIntoFolder({
+        projects,
+        activeId: draggingId,
+        folderId: targetId,
+      })
+    ) {
+      instruction = {
+        operation: 'combine',
+        blocked: false,
+        axis: 'vertical',
       }
-
-      updateDragTargetState(targetId, instruction, draggingId)
+    } else {
+      instruction = {
+        operation: ratio < 0.5 ? 'reorder-before' : 'reorder-after',
+        blocked: false,
+        axis: 'vertical',
+      }
     }
 
-    const handleDocumentDrop = (event: DragEvent) => {
-      const draggingId = activeIdRef.current
-      if (!draggingId) return
-      const fallback = latestDropTargetRef.current
-      if (!fallback.targetId) return
-      event.preventDefault()
-      event.stopPropagation()
-      nativeTreeDropHandledRef.current = true
-      clearDragState()
-      performTreeDrop(draggingId, fallback.targetId, fallback.instruction)
-    }
+    updateDragTargetState(targetId, instruction, draggingId)
+  })
 
-    const handleDocumentDragEnd = () => {
-      const draggingId = activeIdRef.current
-      if (!draggingId) return
-      clearDragState()
-    }
+  const onDocumentDrop = useEffectEvent((event: DragEvent) => {
+    const draggingId = activeIdRef.current
+    if (!draggingId) return
+    const fallback = latestDropTargetRef.current
+    if (!fallback.targetId) return
+    event.preventDefault()
+    event.stopPropagation()
+    nativeTreeDropHandledRef.current = true
+    clearDragState()
+    performTreeDrop(draggingId, fallback.targetId, fallback.instruction)
+  })
+
+  const onDocumentDragEnd = useEffectEvent(() => {
+    const draggingId = activeIdRef.current
+    if (!draggingId) return
+    clearDragState()
+  })
+
+  useEffect(() => {
+    const handleDocumentDragOver = (event: DragEvent) =>
+      onDocumentDragOver(event)
+    const handleDocumentDrop = (event: DragEvent) => onDocumentDrop(event)
+    const handleDocumentDragEnd = () => onDocumentDragEnd()
 
     document.addEventListener('dragover', handleDocumentDragOver, true)
     document.addEventListener('drop', handleDocumentDrop, true)
@@ -694,7 +707,7 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
       document.removeEventListener('drop', handleDocumentDrop, true)
       document.removeEventListener('dragend', handleDocumentDragEnd, true)
     }
-  }, [clearDragState, performTreeDrop, projects, updateDragTargetState])
+  }, [])
 
   useEffect(() => {
     if (!overFolderId || expandedFolderIds.has(overFolderId)) return

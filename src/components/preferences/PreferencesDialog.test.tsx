@@ -164,9 +164,22 @@ describe('PreferencesDialog', () => {
       'Usage',
       'Experimental',
     ])
+    // Separators appear between sections (not before the first "App" section)
     expect(
       navigationMenu.querySelectorAll('[data-sidebar="separator"]')
     ).toHaveLength(5)
+    expect(
+      Array.from(
+        navigationMenu.querySelectorAll('[data-sidebar="group-label"]')
+      ).map(label => label.textContent)
+    ).toEqual([
+      'App',
+      'Backends',
+      'Tools',
+      'Connectivity',
+      'Account',
+      'Advanced',
+    ])
 
     for (const label of ['PI', 'Command Code', 'Devin']) {
       const button = within(navigationMenu).getByText(label).closest('button')

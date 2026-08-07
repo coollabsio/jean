@@ -205,6 +205,9 @@ export function WorktreeList({
         })
       },
       enabled: !!wt.id && !!wt.path,
+      // Prefer bootstrap/init-seeded cache; avoid N-way WS refetch on open
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 5,
     })),
   })
 
@@ -269,9 +272,9 @@ export function WorktreeList({
 
   const draggableIds = useMemo(
     () =>
-      sortedWorktrees
-        .filter(worktree => canReorderWorktree(worktree))
-        .map(worktree => worktree.id),
+      sortedWorktrees.flatMap(worktree =>
+        canReorderWorktree(worktree) ? [worktree.id] : []
+      ),
     [canReorderWorktree, sortedWorktrees]
   )
 
@@ -372,10 +375,8 @@ export function WorktreeList({
         const snapshot = getSnapshotFromWorktreeDropTarget(
           getWorktreeDropTarget(location.current.dropTargets)
         )
-        setDragState(state => {
-          latestDropTargetRef.current = snapshot
-          return applyWorktreeDropSnapshot(state, snapshot)
-        })
+        latestDropTargetRef.current = snapshot
+        setDragState(state => applyWorktreeDropSnapshot(state, snapshot))
       },
       onDrop: ({ source, location }) => {
         if (nativeDropHandledRef.current) {

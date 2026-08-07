@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 
@@ -27,7 +27,7 @@ interface UseCanvasKeyboardNavOptions<T> {
 
 interface UseCanvasKeyboardNavResult {
   /** Refs array for card elements (needed for vertical neighbor finding) */
-  cardRefs: React.MutableRefObject<(HTMLDivElement | null)[]>
+  cardRefs: React.MutableRefObject<(HTMLElement | null)[]>
   /** Scroll selected card into view */
   scrollSelectedIntoView: () => void
 }
@@ -50,16 +50,16 @@ export function useCanvasKeyboardNav<T>({
   enabled,
   onSelectionChange,
 }: UseCanvasKeyboardNavOptions<T>): UseCanvasKeyboardNavResult {
-  const cardRefs = useRef<(HTMLDivElement | null)[]>([])
+  const cardRefs = useRef<(HTMLElement | null)[]>([])
 
   // Use refs to avoid stale closures in event handler
   const selectedIndexRef = useRef(selectedIndex)
-
-  selectedIndexRef.current = selectedIndex
-
   const cardsLengthRef = useRef(cards.length)
 
-  cardsLengthRef.current = cards.length
+  useLayoutEffect(() => {
+    selectedIndexRef.current = selectedIndex
+    cardsLengthRef.current = cards.length
+  })
 
   // Throttle rapid key presses
   const lastKeyTimeRef = useRef(0)

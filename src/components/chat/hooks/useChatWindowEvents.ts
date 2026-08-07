@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type RefObject,
+} from 'react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
@@ -298,7 +304,9 @@ export function useChatWindowEvents({
 
   // ESC: Cancel prompt
   const cancelContextRef = useRef({ activeWorktreeId, activeSessionId })
-  cancelContextRef.current = { activeWorktreeId, activeSessionId }
+  useLayoutEffect(() => {
+    cancelContextRef.current = { activeWorktreeId, activeSessionId }
+  })
 
   useEffect(() => {
     const handler = () => {

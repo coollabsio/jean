@@ -80,6 +80,8 @@ const inlineComments = [
     diffHunk: '@@ -1 +1 @@',
     createdAt: '2026-05-25T10:00:00Z',
     author: { login: 'reviewer' },
+    isOutdated: false,
+    isResolved: false,
   },
   {
     path: 'src/other.ts',
@@ -88,6 +90,28 @@ const inlineComments = [
     diffHunk: '@@ -2 +2 @@',
     createdAt: '2026-05-24T10:00:00Z',
     author: { login: 'second-reviewer' },
+    isOutdated: false,
+    isResolved: false,
+  },
+  {
+    path: 'src/resolved.ts',
+    line: 5,
+    body: 'Already fixed finding',
+    diffHunk: '@@ -3 +3 @@',
+    createdAt: '2026-05-23T10:00:00Z',
+    author: { login: 'bot' },
+    isOutdated: false,
+    isResolved: true,
+  },
+  {
+    path: 'src/outdated.ts',
+    line: 8,
+    body: 'Line moved away',
+    diffHunk: '@@ -4 +4 @@',
+    createdAt: '2026-05-22T10:00:00Z',
+    author: { login: 'bot' },
+    isOutdated: true,
+    isResolved: false,
   },
 ]
 
@@ -277,5 +301,29 @@ describe('ReviewCommentsDialog', () => {
     expect(screen.getByText('⌘')).toBeInTheDocument()
     expect(screen.getAllByText('↵')).not.toHaveLength(0)
     expect(screen.getByText('⇧')).toBeInTheDocument()
+  })
+
+  it('defaults to open review comments and hides resolved/outdated', async () => {
+    const user = userEvent.setup()
+    render(<ReviewCommentsDialog />)
+
+    await screen.findByText('Please fix this')
+
+    // Open filter is default — resolved/outdated bodies stay hidden
+    expect(screen.getByText('2 of 2 selected')).toBeInTheDocument()
+    expect(screen.getByText('Please fix this')).toBeInTheDocument()
+    expect(screen.getByText('Second comment body')).toBeInTheDocument()
+    expect(screen.queryByText('Already fixed finding')).not.toBeInTheDocument()
+    expect(screen.queryByText('Line moved away')).not.toBeInTheDocument()
+    expect(screen.getByTestId('review-filter-open')).toBeInTheDocument()
+
+    // All filter reveals resolved/outdated with status badges
+    await user.click(screen.getByTestId('review-filter-all'))
+    expect(screen.getByText('Already fixed finding')).toBeInTheDocument()
+    expect(screen.getByText('Line moved away')).toBeInTheDocument()
+    expect(screen.getByText('Resolved')).toBeInTheDocument()
+    expect(screen.getByText('Outdated')).toBeInTheDocument()
+    // Only open comments stay pre-selected
+    expect(screen.getByText('2 of 4 selected')).toBeInTheDocument()
   })
 })

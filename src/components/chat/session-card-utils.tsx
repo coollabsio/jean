@@ -13,6 +13,7 @@ import {
   type PermissionDenial,
   type LabelData,
   type CodexPermissionRequest,
+  type OpenCodePermissionRequest,
   type CodexCommandApprovalRequest,
   type CodexUserInputRequest,
   type CodexMcpElicitationRequest,
@@ -23,6 +24,10 @@ import {
   getNativeTerminalResumeLaunch,
   isNativeTerminalBackend,
 } from '@/lib/native-cli-session'
+import {
+  bareCommandForBackend,
+  preferResolvedCliCommand,
+} from '@/services/cli-binary'
 import { findPlanFilePath, resolvePlanContent } from './tool-call-utils'
 
 /**
@@ -265,6 +270,7 @@ export interface ChatStoreState {
   sessionStatusOverrides: Record<string, ManualSessionStatus>
   pendingPermissionDenials: Record<string, PermissionDenial[]>
   pendingCodexPermissionRequests: Record<string, CodexPermissionRequest[]>
+  pendingOpencodePermissionRequests: Record<string, OpenCodePermissionRequest[]>
   pendingCodexCommandApprovalRequests: Record<
     string,
     CodexCommandApprovalRequest[]
@@ -422,6 +428,7 @@ export function computeSessionCardData(
     sessionStatusOverrides,
     pendingPermissionDenials,
     pendingCodexPermissionRequests,
+    pendingOpencodePermissionRequests,
     pendingCodexCommandApprovalRequests,
     pendingCodexUserInputRequests,
     pendingCodexMcpElicitationRequests,
@@ -579,11 +586,16 @@ export function computeSessionCardData(
   const permissionDenialCount =
     sessionDenials.length > 0 ? sessionDenials.length : persistedDenials.length
 
-  // Codex pending approval/input queues (store first, then session persistence)
-  const hasCodexPermission = hasPendingEntries(
-    pendingCodexPermissionRequests[session.id],
-    session.pending_codex_permission_requests
-  )
+  // Codex / OpenCode pending approval/input queues (store first, then session persistence)
+  const hasCodexPermission =
+    hasPendingEntries(
+      pendingCodexPermissionRequests[session.id],
+      session.pending_codex_permission_requests
+    ) ||
+    hasPendingEntries(
+      pendingOpencodePermissionRequests[session.id],
+      session.pending_opencode_permission_requests
+    )
   const hasCodexCommandApproval = hasPendingEntries(
     pendingCodexCommandApprovalRequests[session.id],
     session.pending_codex_command_approval_requests
@@ -765,17 +777,36 @@ export function getResumeSessionId(session: Session): string | null {
  * Resolve the command + args needed to relaunch a native CLI session's terminal
  * resuming the same backend conversation. Prefers the persisted resolved binary
  * path (`terminal_command`) over the bare backend name.
+ *
+ * Pass `resolvedCommand` (from `check_*_cli_installed`) so Jean-managed installs
+ * that are not on PATH launch correctly when opening/reconnecting native
+ * terminal sessions.
  */
 export function getResumeArgs(
-  session: Session
+  session: Session,
+  options?: { resolvedCommand?: string | null }
 ): { command: string; args: string[] } | null {
+  const resolved = options?.resolvedCommand
   const cmd = session.terminal_command || ''
   const nativeLaunch = getNativeTerminalResumeLaunch(session)
-  if (nativeLaunch) return nativeLaunch
+  if (nativeLaunch) {
+    return {
+      command: preferResolvedCliCommand(
+        nativeLaunch.command,
+        bareCommandForBackend(session.backend),
+        resolved
+      ),
+      args: nativeLaunch.args,
+    }
+  }
   const nativeSessionId = getResumeSessionId(session)
   if (isNativeTerminalBackend(session.backend) && nativeSessionId) {
     return {
-      command: cmd || session.backend,
+      command: preferResolvedCliCommand(
+        cmd,
+        session.backend,
+        resolved
+      ),
       args: buildNativeResumeArgs(
         session.backend,
         nativeSessionId,
@@ -785,25 +816,25 @@ export function getResumeArgs(
   }
   if (session.backend === 'cursor' && session.cursor_chat_id) {
     return {
-      command: cmd || 'cursor-agent',
+      command: preferResolvedCliCommand(cmd, 'cursor-agent', resolved),
       args: ['--resume', session.cursor_chat_id],
     }
   }
   if (session.backend === 'pi' && session.pi_session_id) {
     return {
-      command: cmd || 'pi',
+      command: preferResolvedCliCommand(cmd, 'pi', resolved),
       args: ['--session', session.pi_session_id],
     }
   }
   if (session.backend === 'grok' && session.grok_session_id) {
     return {
-      command: cmd || 'grok',
+      command: preferResolvedCliCommand(cmd, 'grok', resolved),
       args: ['--resume', session.grok_session_id],
     }
   }
   if (session.backend === 'kimi' && session.kimi_session_id) {
     return {
-      command: cmd || 'kimi',
+      command: preferResolvedCliCommand(cmd, 'kimi', resolved),
       args: ['--session', session.kimi_session_id],
     }
   }
@@ -813,9 +844,10 @@ export function getResumeArgs(
 export function buildNativeClientSessionInput(
   session: Session,
   worktreeId: string,
-  worktreePath: string
+  worktreePath: string,
+  options?: { resolvedCommand?: string | null }
 ) {
-  const launch = getResumeArgs(session)
+  const launch = getResumeArgs(session, options)
   const nativeSessionId = getResumeSessionId(session)
   if (!launch || !nativeSessionId || !session.backend) return null
 

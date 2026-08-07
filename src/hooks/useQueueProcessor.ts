@@ -34,7 +34,7 @@ export function useQueueProcessor(): void {
   const wsConnected = useWsConnectionStatus()
 
   // Track which sessions we're currently processing to prevent race conditions
-  const processingRef = useRef<Set<string>>(new Set())
+  const processingRef = useRef(new Set<string>())
 
   // Counter to force effect re-evaluation after a mutation settles.
   // Without this, clearing processingRef in onSettled doesn't re-trigger
