@@ -70,8 +70,10 @@ import { useChatStore, DEFAULT_THINKING_LEVEL } from '@/store/chat-store'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { getLabelTextColor } from '@/lib/label-colors'
 import {
+  DEFAULT_PARALLEL_EXECUTION_PROMPT,
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
+  resolveMagicPromptProvider,
   type CliBackend,
 } from '@/types/preferences'
 import type {
@@ -2035,10 +2037,13 @@ export function ChatWindow({
 
   // Opens new session(s) and sends review fix message(s) there.
   // Pass a string for one combined fix, or string[] to send each finding separately.
+  // Prefer the selected reviewer's backend/model (multi-review) so MiniMax/Grok
+  // findings keep the same auth path as the review job (issue #630).
   const handleReviewFix = useCallback(
     async (
       messageOrMessages: string | string[],
-      executionMode: 'plan' | 'yolo'
+      executionMode: 'plan' | 'yolo',
+      options?: { backend?: string; model?: string }
     ) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
@@ -2053,14 +2058,51 @@ export function ChatWindow({
       const store = useChatStore.getState()
       store.setSessionReviewing(activeSessionId, false)
 
-      const backend = resolveMagicPromptBackend(
-        preferences?.magic_prompt_backends,
-        'code_review_backend',
-        preferences?.default_backend
-      )
+      const defaultBackend = (preferences?.default_backend ??
+        'claude') as CliBackend
+      const backend = (options?.backend ??
+        resolveMagicPromptBackend(
+          preferences?.magic_prompt_backends,
+          'code_review_backend',
+          defaultBackend
+        ) ??
+        defaultBackend) as CliBackend
       const model =
+        options?.model ??
         preferences?.magic_prompt_models?.code_review_model ??
         selectedModelRef.current
+      // Code-review magic prompt provider (e.g. MiniMax custom CLI profile).
+      // Without this, Claude fix sessions run unauthenticated OAuth and fail
+      // with "Not logged in · Please run /login" (issue #630).
+      const provider = resolveMagicPromptProvider(
+        preferences?.magic_prompt_providers,
+        'code_review_provider',
+        preferences?.default_provider
+      )
+      const isCustomProvider = Boolean(
+        provider && provider !== '__anthropic__' && provider !== '__default__'
+      )
+      // Claude custom profiles only apply to Claude-compatible backends.
+      const customProfileName =
+        backend === 'claude' && isCustomProvider
+          ? (provider ?? undefined)
+          : undefined
+
+      const usesEffortBackend =
+        backend === 'codex' ||
+        backend === 'opencode' ||
+        backend === 'pi' ||
+        backend === 'grok' ||
+        backend === 'kimi'
+      const effortLevel = usesEffortBackend
+        ? ((preferences?.magic_prompt_efforts?.code_review_effort as
+            | EffortLevel
+            | null
+            | undefined) ?? selectedEffortLevelRef.current)
+        : undefined
+      const thinkingLevel = usesEffortBackend
+        ? undefined
+        : selectedThinkingLevelRef.current
 
       // Sequential on purpose: each session must fully create before the next
       // (TanStack Query per-call onSuccess is unreliable across consecutive
@@ -2071,7 +2113,8 @@ export function ChatWindow({
           newSession = await createSession.mutateAsync({
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
-            backend: backend ?? undefined,
+            name: 'Fix review findings',
+            backend,
           })
         } catch (err) {
           toast.error(`Failed to create session: ${err}`)
@@ -2084,10 +2127,41 @@ export function ChatWindow({
         nextStore.setError(newSession.id, null)
         nextStore.addSendingSession(newSession.id)
         nextStore.setSelectedModel(newSession.id, model)
-        if (backend) {
-          nextStore.setSelectedBackend(newSession.id, backend)
+        nextStore.setSelectedBackend(newSession.id, backend)
+        if (provider !== undefined) {
+          nextStore.setSelectedProvider(newSession.id, provider)
         }
         nextStore.setExecutingMode(newSession.id, executionMode)
+        if (effortLevel) {
+          nextStore.setEffortLevel(newSession.id, effortLevel)
+        }
+        // Map session → worktree without switching the active tab (background fix).
+        useChatStore.setState(s => ({
+          sessionWorktreeMap: {
+            ...s.sessionWorktreeMap,
+            [newSession.id]: activeWorktreeId,
+          },
+        }))
+
+        // Persist so the toolbar matches when the user opens the fix tab.
+        setSessionBackend.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          backend,
+        })
+        setSessionModel.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          model,
+        })
+        setSessionProvider.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          provider,
+        })
 
         sendMessage.mutate({
           sessionId: newSession.id,
@@ -2095,9 +2169,23 @@ export function ChatWindow({
           worktreePath: activeWorktreePath,
           message,
           model,
-          backend: backend ?? undefined,
+          backend,
           executionMode,
-          thinkingLevel: selectedThinkingLevelRef.current,
+          thinkingLevel,
+          effortLevel,
+          customProfileName,
+          mcpConfig: buildMcpConfigJson(
+            mcpServersDataRef.current ?? [],
+            enabledMcpServersRef.current,
+            backend
+          ),
+          parallelExecutionPrompt:
+            preferences?.parallel_execution_prompt_enabled
+              ? (preferences.magic_prompts?.parallel_execution ??
+                DEFAULT_PARALLEL_EXECUTION_PROMPT)
+              : undefined,
+          chromeEnabled: preferences?.chrome_enabled ?? false,
+          aiLanguage: preferences?.ai_language,
         })
       }
     },
@@ -2108,8 +2196,14 @@ export function ChatWindow({
       createSession,
       preferences,
       sendMessage,
+      selectedEffortLevelRef,
       selectedModelRef,
       selectedThinkingLevelRef,
+      setSessionBackend,
+      setSessionModel,
+      setSessionProvider,
+      mcpServersDataRef,
+      enabledMcpServersRef,
     ]
   )
 

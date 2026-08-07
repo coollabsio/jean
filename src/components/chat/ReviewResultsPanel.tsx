@@ -38,12 +38,19 @@ import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
 import { useIsMobile } from '@/hooks/use-mobile'
 
+/** Optional reviewer identity so fix sessions use the same backend/model. */
+export interface ReviewFixOptions {
+  backend?: string
+  model?: string
+}
+
 interface ReviewResultsPanelProps {
   sessionId: string
   isReviewing?: boolean
   onSendFix?: (
     message: string | string[],
-    executionMode: 'plan' | 'yolo'
+    executionMode: 'plan' | 'yolo',
+    options?: ReviewFixOptions
   ) => void
 }
 
@@ -391,6 +398,14 @@ export function ReviewResultsPanel({
     )
   }, [sortedFindings, selected])
 
+  const reviewFixOptions = useMemo((): ReviewFixOptions | undefined => {
+    if (!selectedReviewEntry) return undefined
+    return {
+      backend: selectedReviewEntry.backend,
+      model: selectedReviewEntry.model,
+    }
+  }, [selectedReviewEntry])
+
   const handleSendToChat = useCallback(() => {
     if (!onSendFix) return
     const selectedFindings = getSelectedFindings()
@@ -401,12 +416,19 @@ export function ReviewResultsPanel({
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
         formatCombinedFindingsMessage(selectedFindings),
-        fixExecutionMode
+        fixExecutionMode,
+        reviewFixOptions
       )
     } finally {
       setIsSending(false)
     }
-  }, [fixExecutionMode, getSelectedFindings, markSelectedFixed, onSendFix])
+  }, [
+    fixExecutionMode,
+    getSelectedFindings,
+    markSelectedFixed,
+    onSendFix,
+    reviewFixOptions,
+  ])
 
   const handleSendSeparately = useCallback(() => {
     if (!onSendFix) return
@@ -418,12 +440,19 @@ export function ReviewResultsPanel({
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
         selectedFindings.map(({ finding }) => formatFindingMessage(finding)),
-        fixExecutionMode
+        fixExecutionMode,
+        reviewFixOptions
       )
     } finally {
       setIsSending(false)
     }
-  }, [fixExecutionMode, getSelectedFindings, markSelectedFixed, onSendFix])
+  }, [
+    fixExecutionMode,
+    getSelectedFindings,
+    markSelectedFixed,
+    onSendFix,
+    reviewFixOptions,
+  ])
 
   const handlePanelKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
