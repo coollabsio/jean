@@ -95,7 +95,7 @@ export function GeneralPane({
 
   const { data: preferences } = usePreferences()
   const profiles = preferences?.custom_cli_profiles ?? []
-  // Only show backends the user is logged into (installed + authenticated).
+  // Show all installed backends (auth is checked at send time / backend settings).
   const { installedBackends } = useInstalledBackends()
   const installedBackendsSet = useMemo(
     () => new Set(installedBackends),

@@ -13,22 +13,36 @@ import {
 import type { ExecutionMode, Session } from '@/types/chat'
 import type * as ChatService from '@/services/chat'
 
-const { mockInvoke, mockInstalledBackends } = vi.hoisted(() => ({
-  mockInvoke: vi.fn().mockResolvedValue(undefined),
-  mockInstalledBackends: {
-    installedBackends: [
-      'claude',
-      'codex',
-      'opencode',
-      'cursor',
-      'pi',
-      'commandcode',
-      'grok',
-      'kimi',
-    ] as string[],
-    isLoading: false,
-  },
-}))
+const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
+  vi.hoisted(() => ({
+    mockInvoke: vi.fn().mockResolvedValue(undefined),
+    mockInstalledBackends: {
+      installedBackends: [
+        'claude',
+        'codex',
+        'opencode',
+        'cursor',
+        'pi',
+        'commandcode',
+        'grok',
+        'kimi',
+      ] as string[],
+      isLoading: false,
+    },
+    mockBackendAuthStatuses: {
+      authByBackend: {
+        claude: true,
+        codex: true,
+        opencode: true,
+        cursor: true,
+        pi: true,
+        commandcode: true,
+        grok: true,
+        kimi: true,
+      } as Record<string, boolean | undefined>,
+      isLoading: false,
+    },
+  }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
@@ -36,6 +50,15 @@ vi.mock('@/lib/transport', () => ({
 
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => mockInstalledBackends,
+  useBackendAuthStatuses: () => mockBackendAuthStatuses,
+  isBackendUsable: (
+    installed: boolean | undefined,
+    authenticated: boolean | undefined
+  ) => {
+    if (!installed) return false
+    if (authenticated === undefined) return true
+    return authenticated
+  },
 }))
 
 vi.mock('sonner', () => ({
@@ -167,6 +190,17 @@ function resetInstalledBackendsMock() {
     'kimi',
   ]
   mockInstalledBackends.isLoading = false
+  mockBackendAuthStatuses.authByBackend = {
+    claude: true,
+    codex: true,
+    opencode: true,
+    cursor: true,
+    pi: true,
+    commandcode: true,
+    grok: true,
+    kimi: true,
+  }
+  mockBackendAuthStatuses.isLoading = false
 }
 
 describe('useMessageSending Codex /goal', () => {
@@ -197,7 +231,7 @@ describe('useMessageSending Codex /goal', () => {
     })
   })
 
-  it('blocks send when the selected backend is not authenticated', async () => {
+  it('blocks send when the selected backend is not installed', async () => {
     mockInstalledBackends.installedBackends = ['claude']
     const { result, sendMessage } = renderUseMessageSending({
       inputValue: 'hello',
@@ -211,7 +245,31 @@ describe('useMessageSending Codex /goal', () => {
     })
 
     expect(handleCliAuthError).toHaveBeenCalledWith(
-      expect.stringContaining('codex'),
+      'codex is not installed',
+      'codex'
+    )
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('blocks send when the selected backend is installed but not authenticated', async () => {
+    mockInstalledBackends.installedBackends = ['claude', 'codex']
+    mockBackendAuthStatuses.authByBackend = {
+      ...mockBackendAuthStatuses.authByBackend,
+      codex: false,
+    }
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: 'hello',
+      selectedBackend: 'codex',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(handleCliAuthError).toHaveBeenCalledWith(
+      'codex is not authenticated',
       'codex'
     )
     expect(sendMessage.mutate).not.toHaveBeenCalled()

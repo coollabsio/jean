@@ -38,7 +38,11 @@ import {
   isBackendAutoSteerEnabled,
   isSteerCapableBackend,
 } from '@/lib/backend-auto-steer'
-import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import {
+  isBackendUsable,
+  useBackendAuthStatuses,
+  useInstalledBackends,
+} from '@/hooks/useInstalledBackends'
 
 interface UseMessageSendingParams {
   activeSessionId: string | null | undefined
@@ -114,9 +118,10 @@ export function useMessageSending({
   clearInputDraft,
   clearChatInputState,
 }: UseMessageSendingParams) {
-  // Installed + authenticated backends only — block send when not logged in.
+  // Installed backends for availability; auth map for login gate at send time.
   const { installedBackends, isLoading: backendsLoading } =
     useInstalledBackends()
+  const { authByBackend, isLoading: authLoading } = useBackendAuthStatuses()
 
   // Helper to resolve custom CLI profile name for the active provider.
   // Claude: custom_cli_profiles; Codex: custom_codex_providers (same wire field).
@@ -356,17 +361,28 @@ export function useMessageSending({
         return
       }
 
-      // Block using a model for a backend the user isn't logged into.
-      // Wait for status/auth to resolve so we don't flash false blocks on load.
+      // Block send when the selected backend is not installed, or when auth is
+      // known-unauthenticated. Wait for probes so we don't flash false blocks.
+      // Pickers list all installed backends (issue #627/#649); login is gated here.
+      // Skip the OAuth auth gate when a custom provider/API-key profile is active
+      // — those sessions authenticate via profile credentials, not CLI login.
+      const sendBackend = selectedBackendRef.current
+      const provider = selectedProviderRef.current
+      const usingCustomProvider =
+        !!provider &&
+        provider !== '__anthropic__' &&
+        provider !== '__default__'
+      if (!backendsLoading && !installedBackends.includes(sendBackend)) {
+        handleCliAuthError(`${sendBackend} is not installed`, sendBackend)
+        return
+      }
       if (
+        !usingCustomProvider &&
         !backendsLoading &&
-        !installedBackends.includes(selectedBackendRef.current)
+        !authLoading &&
+        !isBackendUsable(true, authByBackend[sendBackend])
       ) {
-        const unauthenticatedBackend = selectedBackendRef.current
-        handleCliAuthError(
-          `${unauthenticatedBackend} is not authenticated`,
-          unauthenticatedBackend
-        )
+        handleCliAuthError(`${sendBackend} is not authenticated`, sendBackend)
         return
       }
 
@@ -625,6 +641,8 @@ export function useMessageSending({
       activeSessionId,
       activeWorktreeId,
       activeWorktreePath,
+      authByBackend,
+      authLoading,
       backendsLoading,
       clearInputDraft,
       clearChatInputState,
