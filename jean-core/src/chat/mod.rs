@@ -55,7 +55,7 @@ Rules:
 
 pub(crate) fn should_add_recap_instruction(app: &tauri::AppHandle) -> bool {
     crate::load_preferences_sync(app)
-        .map(|preferences| preferences.auto_recaps_enabled)
+        .map(|preferences| preferences.auto_recaps_enabled && !preferences.quota_saver_enabled)
         .unwrap_or(true)
 }
 

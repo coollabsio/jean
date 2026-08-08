@@ -209,6 +209,8 @@ pub struct AppPreferences {
     pub syntax_theme_light: String, // Syntax highlighting theme for light mode
     #[serde(default = "default_parallel_execution_prompt_enabled")]
     pub parallel_execution_prompt_enabled: bool, // Add system prompt to encourage parallel sub-agent execution
+    #[serde(default = "default_quota_saver_enabled")]
+    pub quota_saver_enabled: bool, // One prompt = one agent run: lean system prompt, no fan-out, no Jean MCP tools
     #[serde(default = "default_compact_chat_view_enabled")]
     pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
     #[serde(default = "default_auto_recaps_enabled")]
@@ -652,6 +654,10 @@ fn default_parallel_execution_prompt_enabled() -> bool {
     true // Enabled by default
 }
 
+fn default_quota_saver_enabled() -> bool {
+    false // Opt-in
+}
+
 fn default_compact_chat_view_enabled() -> bool {
     true // Enabled by default
 }
@@ -750,13 +756,30 @@ fn maybe_auto_select_system_cli_preferences(
     changed
 }
 
+/// Keep the sub-agent fan-out switches consistent.
+///
+/// `parallel_execution_prompt_enabled` and `codex_multi_agent_enabled` mirror
+/// each other in *both* directions, so turning fan-out off actually turns it off
+/// everywhere instead of leaving Codex multi-agent latched on.
+///
+/// Quota Saver deliberately does **not** rewrite these. It overrides fan-out at
+/// read time (see `quota_saver_disables_fanout`), so switching it off restores
+/// whatever the user had configured instead of silently destroying it.
 fn normalize_parallel_execution_preferences(preferences: &mut AppPreferences) -> bool {
-    if preferences.parallel_execution_prompt_enabled && !preferences.codex_multi_agent_enabled {
-        preferences.codex_multi_agent_enabled = true;
+    if preferences.codex_multi_agent_enabled != preferences.parallel_execution_prompt_enabled {
+        preferences.codex_multi_agent_enabled = preferences.parallel_execution_prompt_enabled;
         return true;
     }
 
     false
+}
+
+impl AppPreferences {
+    /// Whether sub-agent fan-out prompting is active for a run right now.
+    /// Quota Saver wins over the stored fan-out switch without overwriting it.
+    pub fn fanout_prompting_active(&self) -> bool {
+        self.parallel_execution_prompt_enabled && !self.quota_saver_enabled
+    }
 }
 
 fn default_codex_model() -> String {
@@ -933,6 +956,116 @@ mod tests {
         super::normalize_parallel_execution_preferences(&mut prefs);
 
         assert!(!prefs.codex_multi_agent_enabled);
+    }
+
+    #[test]
+    fn disabling_parallel_prompting_also_disables_codex_multi_agent() {
+        let mut prefs = AppPreferences {
+            parallel_execution_prompt_enabled: false,
+            codex_multi_agent_enabled: true,
+            ..Default::default()
+        };
+
+        assert!(super::normalize_parallel_execution_preferences(&mut prefs));
+
+        assert!(!prefs.codex_multi_agent_enabled);
+    }
+
+    #[test]
+    fn quota_saver_disables_fanout_without_rewriting_the_stored_switches() {
+        let mut prefs = AppPreferences {
+            quota_saver_enabled: true,
+            parallel_execution_prompt_enabled: true,
+            codex_multi_agent_enabled: true,
+            ..Default::default()
+        };
+
+        // Nothing to normalize: the two switches already agree.
+        assert!(!super::normalize_parallel_execution_preferences(&mut prefs));
+
+        // Fan-out is off for runs...
+        assert!(!prefs.fanout_prompting_active());
+        // ...but the user's configured value survives, so turning Quota Saver
+        // back off restores it instead of silently clearing it.
+        assert!(prefs.parallel_execution_prompt_enabled);
+        assert!(prefs.codex_multi_agent_enabled);
+
+        prefs.quota_saver_enabled = false;
+        assert!(prefs.fanout_prompting_active());
+    }
+
+    #[test]
+    fn fanout_stays_off_when_the_user_turned_it_off() {
+        let prefs = AppPreferences {
+            quota_saver_enabled: false,
+            parallel_execution_prompt_enabled: false,
+            ..Default::default()
+        };
+
+        assert!(!prefs.fanout_prompting_active());
+    }
+
+    #[test]
+    fn quota_saver_is_on_for_fresh_installs_and_off_for_existing_ones() {
+        // Fresh machine: cheap defaults out of the box.
+        assert!(super::fresh_install_preferences().quota_saver_enabled);
+
+        // A preferences.json written before this change has no
+        // `quota_saver_enabled` key at all. It must keep the old behaviour on
+        // upgrade, so nobody silently loses Jean MCP tools or sub-agents.
+        let mut pre_upgrade = serde_json::to_value(AppPreferences::default()).unwrap();
+        assert!(pre_upgrade
+            .as_object_mut()
+            .unwrap()
+            .remove("quota_saver_enabled")
+            .is_some());
+
+        let existing: AppPreferences = serde_json::from_value(pre_upgrade).unwrap();
+        assert!(!existing.quota_saver_enabled);
+        assert!(!AppPreferences::default().quota_saver_enabled);
+    }
+
+    #[test]
+    fn fresh_install_preferences_only_differ_by_quota_saver() {
+        let fresh = super::fresh_install_preferences();
+        let baseline = AppPreferences {
+            quota_saver_enabled: fresh.quota_saver_enabled,
+            ..AppPreferences::default()
+        };
+
+        assert_eq!(
+            serde_json::to_value(&fresh).unwrap(),
+            serde_json::to_value(&baseline).unwrap()
+        );
+    }
+
+    #[test]
+    fn subagent_strategy_lives_in_the_parallel_prompt_not_the_global_prompt() {
+        let global = super::default_global_system_prompt();
+        let parallel = super::default_parallel_execution_prompt();
+
+        assert!(!global.contains("Subagent Strategy"));
+        assert!(!global.contains("throw more compute at it via subagents"));
+        assert!(parallel.contains("Subagent Strategy"));
+        assert!(parallel.contains("throw more compute at it via subagents"));
+    }
+
+    #[test]
+    fn lean_global_prompt_drops_the_per_turn_tool_amplifiers() {
+        let lean = super::default_lean_global_system_prompt();
+
+        assert!(!lean.contains("Documentation First"));
+        assert!(!lean.contains("GitHub Issue and Discussion Discovery"));
+        assert!(!lean.contains(".ai/lessons.md"));
+        assert!(!lean.contains("Subagent"));
+        assert!(lean.contains("Jean Worktree Policy"));
+        assert!(lean.len() < super::default_global_system_prompt().len() / 3);
+    }
+
+    #[test]
+    fn no_subagent_instruction_forbids_unrequested_task_calls() {
+        assert!(super::NO_SUBAGENT_INSTRUCTION.contains("Do NOT spawn sub-agents"));
+        assert!(super::NO_SUBAGENT_INSTRUCTION.contains("unless the user explicitly asks"));
     }
 
     #[test]
@@ -1960,8 +2093,43 @@ Address the following review comments from PR #{prNumber}
         .to_string()
 }
 
+/// Instruction injected when sub-agent fan-out is disabled. Counteracts any
+/// remaining "spawn a subagent" habit so one user prompt costs one agent run.
+pub const NO_SUBAGENT_INSTRUCTION: &str = "### Sub-agent policy\n\
+- Do NOT spawn sub-agents (Task calls) unless the user explicitly asks for one. Handle research, exploration, and implementation inline in this turn.\n\
+- A task that has several parts, or is described as thorough or multi-angle, is still a single inline task — not a reason to fan out.";
+
+/// Lean global system prompt used when Quota Saver is on. Keeps the behaviours
+/// that change correctness (planning, simplicity, verification) and drops the
+/// ones that cost extra model calls per turn (WebSearch-first, GitHub issue
+/// discovery, per-turn todo/lessons files, extra self-review passes).
+pub(crate) fn default_lean_global_system_prompt() -> String {
+    r#"### Planning
+- For non-trivial tasks (3+ steps or architectural decisions), plan before implementing unless the execution mode already authorized execution.
+- In plan mode use the backend's native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>`, OpenCode equivalent), not plain text. For unresolved questions prefer the native question UI (AskUserQuestion / request_user_input); if unavailable, ask inline as a short numbered list.
+
+### Execution
+- Keep changes as simple as possible and touch only what is necessary. Do not over-engineer.
+- Find root causes; no temporary fixes.
+- Never mark a task complete without proving it works. Run the tests you can run and report failures verbatim.
+- Include clickable links when mentioning issues, PRs, or other external resources.
+
+### Jean Worktree Policy
+- Do NOT create git worktrees manually unless the user explicitly asks. Use Jean's worktree features.
+- If already in a Jean worktree or base workspace, continue in the current workspace.
+
+### Recap
+- After each finished task, write a few bullet points on how to test the changes."#
+        .to_string()
+}
+
 pub(crate) fn default_parallel_execution_prompt() -> String {
-    r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
+    r#"### Subagent Strategy to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+
+In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
 
@@ -1991,30 +2159,25 @@ fn default_global_system_prompt() -> String {
 - Skip only for trivial edits to code already read this session.
 - Do NOT use Context7 — WebSearch only.
 
-### 3. Subagent Strategy to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One task per subagent for focused execution
-
-### 4. Self-Improvement Loop
+### 3. Self-Improvement Loop
 - After ANY correction from the user: update '.ai/lessons.md' with the pattern
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
 
-### 5. Verification Before Done
+### 4. Verification Before Done
 - Never mark a task complete without proving it works
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
 
-### 6. Demand Elegance (Balanced)
+### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
 - Skip this for simple, obvious fixes - don't over-engineer
 - Challenge your own work before presenting it
 
-### 7. Autonomous Bug Fixing
+### 6. Autonomous Bug Fixing
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests -> then resolve them
 - Zero context switching required from the user
@@ -2533,6 +2696,7 @@ impl Default for AppPreferences {
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
             parallel_execution_prompt_enabled: default_parallel_execution_prompt_enabled(),
+            quota_saver_enabled: default_quota_saver_enabled(),
             compact_chat_view_enabled: default_compact_chat_view_enabled(),
             auto_recaps_enabled: default_auto_recaps_enabled(),
             magic_prompts: MagicPrompts::default(),
@@ -2958,10 +3122,23 @@ pub fn get_preferences_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Synchronous helper to load AppPreferences (for use in non-async Rust code).
+/// Preferences for a machine that has never run Jean before.
+///
+/// Quota Saver is on here but its serde fallback stays `false`, so a fresh
+/// install gets the cheap defaults while an existing `preferences.json` — which
+/// has no `quota_saver_enabled` key — keeps working exactly as before instead of
+/// silently losing Jean MCP tools, sub-agents and recaps on upgrade.
+fn fresh_install_preferences() -> AppPreferences {
+    AppPreferences {
+        quota_saver_enabled: true,
+        ..AppPreferences::default()
+    }
+}
+
 pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> {
     let prefs_path = get_preferences_path(app)?;
     if !prefs_path.exists() {
-        let mut preferences = AppPreferences::default();
+        let mut preferences = fresh_install_preferences();
         maybe_auto_select_system_cli_preferences(app, &mut preferences, None);
         return Ok(preferences);
     }
@@ -2982,8 +3159,8 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     let prefs_path = get_preferences_path(&app)?;
 
     if !prefs_path.exists() {
-        log::trace!("Preferences file not found, using defaults");
-        let mut preferences = AppPreferences::default();
+        log::trace!("Preferences file not found, using fresh-install defaults");
+        let mut preferences = fresh_install_preferences();
         if maybe_auto_select_system_cli_preferences(&app, &mut preferences, None) {
             if let Ok(json) = serde_json::to_string_pretty(&preferences) {
                 let _ = std::fs::write(&prefs_path, json);

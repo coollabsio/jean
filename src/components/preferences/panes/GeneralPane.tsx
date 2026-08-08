@@ -7,6 +7,10 @@ import React, {
   type FC,
 } from 'react'
 import { invoke } from '@/lib/transport'
+import {
+  estimatePromptOverhead,
+  formatOverheadTokens,
+} from '@/lib/prompt-overhead'
 import { loginArgsForBackend } from '@/lib/cli-auth'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -1336,10 +1340,35 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     ? 'Auth check timed out. Try again or run `kimi login` manually.'
     : kimiAuth?.error
 
+  // What Jean itself adds to every backend request, from the toggles below.
+  const promptOverhead = useMemo(
+    () =>
+      estimatePromptOverhead({
+        quotaSaverEnabled: preferences?.quota_saver_enabled ?? false,
+        parallelExecutionPromptEnabled:
+          preferences?.parallel_execution_prompt_enabled ?? true,
+        autoRecapsEnabled: preferences?.auto_recaps_enabled ?? true,
+        jeanMcpEnabled: preferences?.jean_mcp_enabled ?? true,
+        globalSystemPrompt: preferences?.magic_prompts?.global_system_prompt,
+        parallelExecutionPrompt: preferences?.magic_prompts?.parallel_execution,
+      }),
+    [
+      preferences?.quota_saver_enabled,
+      preferences?.parallel_execution_prompt_enabled,
+      preferences?.auto_recaps_enabled,
+      preferences?.jean_mcp_enabled,
+      preferences?.magic_prompts?.global_system_prompt,
+      preferences?.magic_prompts?.parallel_execution,
+    ]
+  )
+
   const handleCodexMultiAgentToggle = (enabled: boolean) => {
     if (preferences) {
+      // Mirrored with the sub-agent fan-out switch — the backend normalizes
+      // these two together, so keep the UI from showing a state it cannot hold.
       patchPreferences.mutate({
         codex_multi_agent_enabled: enabled,
+        parallel_execution_prompt_enabled: enabled,
       })
     }
   }
@@ -3239,26 +3268,31 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               description="Allow Codex to spawn parallel subagents (experimental)"
             >
               <Switch
-                checked={preferences?.codex_multi_agent_enabled ?? false}
+                disabled={preferences?.quota_saver_enabled ?? false}
+                checked={
+                  (preferences?.codex_multi_agent_enabled ?? true) &&
+                  !(preferences?.quota_saver_enabled ?? false)
+                }
                 onCheckedChange={handleCodexMultiAgentToggle}
               />
             </InlineField>
 
-            {preferences?.codex_multi_agent_enabled && (
-              <InlineField
-                label="Max agent threads"
-                description="Maximum concurrent subagents (1–8)"
-              >
-                <Input
-                  type="number"
-                  min={1}
-                  max={8}
-                  className="w-20"
-                  value={preferences?.codex_max_agent_threads ?? 3}
-                  onChange={e => handleCodexMaxThreadsChange(e.target.value)}
-                />
-              </InlineField>
-            )}
+            {preferences?.codex_multi_agent_enabled &&
+              !preferences?.quota_saver_enabled && (
+                <InlineField
+                  label="Max agent threads"
+                  description="Maximum concurrent subagents (1–8)"
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={8}
+                    className="w-20"
+                    value={preferences?.codex_max_agent_threads ?? 3}
+                    onChange={e => handleCodexMaxThreadsChange(e.target.value)}
+                  />
+                </InlineField>
+              )}
           </div>
         </SettingsSection>
       )}
@@ -3904,6 +3938,163 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           anchorId="pref-general-section-defaults"
         >
           <div className="space-y-4">
+            {isNativeApp() && (
+              <InlineField
+                label="Editor"
+                description="App to open worktrees in"
+              >
+                <Select
+                  value={preferences?.editor ?? 'zed'}
+                  onValueChange={handleEditorChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getEditorOptions().map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
+
+            {isNativeApp() && (
+              <InlineField
+                label="Terminal"
+                description="App to open terminals in"
+              >
+                <Select
+                  value={preferences?.terminal ?? 'terminal'}
+                  onValueChange={handleTerminalChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getTerminalOptions().map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
+
+            {isNativeApp() && (
+              <InlineField
+                label="Open In"
+                description="Default app for Open button"
+              >
+                <Select
+                  value={preferences?.open_in ?? 'editor'}
+                  onValueChange={handleOpenInChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {openInDefaultOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
+
+            <InlineField
+              label="New Session"
+              description="Default action for CMD+T"
+            >
+              <Select
+                value={preferences?.default_new_session_kind ?? 'chat'}
+                onValueChange={handleNewSessionKindChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {newSessionKindOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
+              label="Git poll interval"
+              description="Check for branch updates when focused"
+            >
+              <Select
+                value={String(preferences?.git_poll_interval ?? 60)}
+                onValueChange={handleGitPollIntervalChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {gitPollIntervalOptions.map(option => (
+                    <SelectItem key={option.value} value={String(option.value)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
+              label="Remote poll interval"
+              description="Check for PR status updates"
+            >
+              <Select
+                value={String(preferences?.remote_poll_interval ?? 60)}
+                onValueChange={handleRemotePollIntervalChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {remotePollIntervalOptions.map(option => (
+                    <SelectItem key={option.value} value={String(option.value)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+
+            <InlineField
+              label="Auto-update AI backends"
+              description="Install supported AI backend CLI updates, including Command Code, in the background as soon as a new version is detected."
+            >
+              <Switch
+                checked={preferences?.auto_update_ai_backends ?? true}
+                onCheckedChange={checked => {
+                  if (preferences) {
+                    patchPreferences.mutate({
+                      auto_update_ai_backends: checked,
+                    })
+                  }
+                }}
+              />
+            </InlineField>
+          </div>
+        </SettingsSection>
+      )}
+
+      {isGeneralScope && (
+        <SettingsSection
+          title="Jean Chat"
+          anchorId="pref-general-section-jean-chat"
+        >
+          <div className="space-y-4">
             <InlineField
               label="Default backend"
               description="CLI to use for new sessions"
@@ -3947,50 +4138,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectItem value="yolo">Yolo</SelectItem>
                 </SelectContent>
               </Select>
-            </InlineField>
-
-            <InlineField
-              label="Compact chat view"
-              description="Compact answers into one section for a cleaner chat, showing only the last prompt and answer by default."
-            >
-              <Switch
-                checked={preferences?.compact_chat_view_enabled ?? false}
-                onCheckedChange={checked => {
-                  patchPreferences.mutate({
-                    compact_chat_view_enabled: checked,
-                  })
-                }}
-              />
-            </InlineField>
-
-            <InlineField
-              label="Automatic recaps"
-              description="Ask agents to end multi-step turns with a ## Recap section. Existing recaps remain viewable when this is off."
-            >
-              <Switch
-                checked={preferences?.auto_recaps_enabled ?? true}
-                onCheckedChange={checked => {
-                  patchPreferences.mutate({
-                    auto_recaps_enabled: checked,
-                  })
-                }}
-              />
-            </InlineField>
-
-            <InlineField
-              label="Parallel execution prompting"
-              description="Add system prompt encouraging sub-agent parallelization for faster task execution"
-            >
-              <Switch
-                checked={
-                  preferences?.parallel_execution_prompt_enabled ?? false
-                }
-                onCheckedChange={checked => {
-                  patchPreferences.mutate({
-                    parallel_execution_prompt_enabled: checked,
-                  })
-                }}
-              />
             </InlineField>
 
             <InlineField
@@ -4501,150 +4648,92 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               />
             </InlineField>
 
-            {isNativeApp() && (
-              <InlineField
-                label="Editor"
-                description="App to open worktrees in"
-              >
-                <Select
-                  value={preferences?.editor ?? 'zed'}
-                  onValueChange={handleEditorChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getEditorOptions().map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-            )}
-
-            {isNativeApp() && (
-              <InlineField
-                label="Terminal"
-                description="App to open terminals in"
-              >
-                <Select
-                  value={preferences?.terminal ?? 'terminal'}
-                  onValueChange={handleTerminalChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getTerminalOptions().map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-            )}
-
-            {isNativeApp() && (
-              <InlineField
-                label="Open In"
-                description="Default app for Open button"
-              >
-                <Select
-                  value={preferences?.open_in ?? 'editor'}
-                  onValueChange={handleOpenInChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {openInDefaultOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-            )}
-
             <InlineField
-              label="New Session"
-              description="Default action for CMD+T"
-            >
-              <Select
-                value={preferences?.default_new_session_kind ?? 'chat'}
-                onValueChange={handleNewSessionKindChange}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {newSessionKindOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
-
-            <InlineField
-              label="Git poll interval"
-              description="Check for branch updates when focused"
-            >
-              <Select
-                value={String(preferences?.git_poll_interval ?? 60)}
-                onValueChange={handleGitPollIntervalChange}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {gitPollIntervalOptions.map(option => (
-                    <SelectItem key={option.value} value={String(option.value)}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
-
-            <InlineField
-              label="Remote poll interval"
-              description="Check for PR status updates"
-            >
-              <Select
-                value={String(preferences?.remote_poll_interval ?? 60)}
-                onValueChange={handleRemotePollIntervalChange}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {remotePollIntervalOptions.map(option => (
-                    <SelectItem key={option.value} value={String(option.value)}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
-
-            <InlineField
-              label="Auto-update AI backends"
-              description="Install supported AI backend CLI updates, including Command Code, in the background as soon as a new version is detected."
+              label="Compact chat view"
+              description="Compact answers into one section for a cleaner chat, showing only the last prompt and answer by default."
             >
               <Switch
-                checked={preferences?.auto_update_ai_backends ?? true}
+                checked={preferences?.compact_chat_view_enabled ?? false}
                 onCheckedChange={checked => {
-                  if (preferences) {
-                    patchPreferences.mutate({
-                      auto_update_ai_backends: checked,
-                    })
-                  }
+                  patchPreferences.mutate({
+                    compact_chat_view_enabled: checked,
+                  })
+                }}
+              />
+            </InlineField>
+
+            <InlineField
+              label="Automatic recaps"
+              description="Ask agents to end multi-step turns with a ## Recap section. Existing recaps remain viewable when this is off."
+            >
+              <Switch
+                disabled={preferences?.quota_saver_enabled ?? false}
+                checked={
+                  (preferences?.auto_recaps_enabled ?? true) &&
+                  !(preferences?.quota_saver_enabled ?? false)
+                }
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({
+                    auto_recaps_enabled: checked,
+                  })
+                }}
+              />
+            </InlineField>
+
+            <InlineField
+              label="Quota saver — 1 prompt = 1 agent run"
+              description={
+                <>
+                  Sends a lean system prompt, blocks unrequested sub-agents, and
+                  drops the Jean MCP tool schemas and recap block, so one prompt
+                  stays one agent run. Also skips the skills and commands
+                  listing, which is not counted below.
+                  <div className="mt-2 rounded-md border border-border/60 p-2">
+                    <div className="font-medium text-foreground">
+                      Jean overhead:{' '}
+                      {formatOverheadTokens(promptOverhead.totalTokens)} tokens
+                      per request
+                    </div>
+                    <ul className="mt-1 space-y-0.5">
+                      {promptOverhead.rows.map(row => (
+                        <li key={row.label} className="flex justify-between">
+                          <span>{row.label}</span>
+                          <span className="tabular-nums">
+                            {formatOverheadTokens(row.tokens)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              }
+            >
+              <Switch
+                checked={preferences?.quota_saver_enabled ?? false}
+                onCheckedChange={checked => {
+                  // Only this flag is written. The backend overrides fan-out at
+                  // read time, so switching this back off restores whatever the
+                  // user had configured instead of clearing it.
+                  patchPreferences.mutate({ quota_saver_enabled: checked })
+                }}
+              />
+            </InlineField>
+
+            <InlineField
+              label="Sub-agent fan-out"
+              description="Lets one prompt spawn parallel sub-agents. Each sub-agent is a full extra agent run, so this multiplies quota use. Off also disables Codex Multi-Agent."
+            >
+              <Switch
+                disabled={preferences?.quota_saver_enabled ?? false}
+                checked={
+                  (preferences?.parallel_execution_prompt_enabled ?? true) &&
+                  !(preferences?.quota_saver_enabled ?? false)
+                }
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({
+                    parallel_execution_prompt_enabled: checked,
+                    codex_multi_agent_enabled: checked,
+                  })
                 }}
               />
             </InlineField>

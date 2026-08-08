@@ -628,7 +628,35 @@ Respond with ONLY the raw JSON object, no markdown, no code fences, no explanati
 {"session_name": "Your session name here"}
 </output_format>`
 
-export const DEFAULT_PARALLEL_EXECUTION_PROMPT = `In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
+/** Injected when sub-agent fan-out is off (must match NO_SUBAGENT_INSTRUCTION in jean-core) */
+export const NO_SUBAGENT_INSTRUCTION = `### Sub-agent policy
+- Do NOT spawn sub-agents (Task calls) unless the user explicitly asks for one. Handle research, exploration, and implementation inline in this turn.
+- A task that has several parts, or is described as thorough or multi-angle, is still a single inline task — not a reason to fan out.`
+
+/** Global system prompt used when Quota Saver is on (must match default_lean_global_system_prompt in jean-core) */
+export const DEFAULT_LEAN_GLOBAL_SYSTEM_PROMPT = `### Planning
+- For non-trivial tasks (3+ steps or architectural decisions), plan before implementing unless the execution mode already authorized execution.
+- In plan mode use the backend's native plan tool (Claude ExitPlanMode, Codex \`<proposed_plan>\`, OpenCode equivalent), not plain text. For unresolved questions prefer the native question UI (AskUserQuestion / request_user_input); if unavailable, ask inline as a short numbered list.
+
+### Execution
+- Keep changes as simple as possible and touch only what is necessary. Do not over-engineer.
+- Find root causes; no temporary fixes.
+- Never mark a task complete without proving it works. Run the tests you can run and report failures verbatim.
+- Include clickable links when mentioning issues, PRs, or other external resources.
+
+### Jean Worktree Policy
+- Do NOT create git worktrees manually unless the user explicitly asks. Use Jean's worktree features.
+- If already in a Jean worktree or base workspace, continue in the current workspace.
+
+### Recap
+- After each finished task, write a few bullet points on how to test the changes.`
+
+export const DEFAULT_PARALLEL_EXECUTION_PROMPT = `### Subagent Strategy to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+
+In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
 
@@ -654,30 +682,25 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 - Skip only for trivial edits to code already read this session.
 - Do NOT use Context7 — WebSearch only.
 
-### 3. Subagent Strategy to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One task per subagent for focused execution
-
-### 4. Self-Improvement Loop
+### 3. Self-Improvement Loop
 - After ANY correction from the user: update '.ai/lessons.md' with the pattern
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
 
-### 5. Verification Before Done
+### 4. Verification Before Done
 - Never mark a task complete without proving it works
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
 
-### 6. Demand Elegance (Balanced)
+### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
 - Skip this for simple, obvious fixes - don't over-engineer
 - Challenge your own work before presenting it
 
-### 7. Autonomous Bug Fixing
+### 6. Autonomous Bug Fixing
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests -> then resolve them
 - Zero context switching required from the user
@@ -1199,6 +1222,7 @@ export interface AppPreferences {
   syntax_theme_dark: SyntaxTheme // Syntax highlighting theme for dark mode
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
   parallel_execution_prompt_enabled: boolean // Add system prompt to encourage parallel sub-agent execution
+  quota_saver_enabled: boolean // One prompt = one agent run: lean system prompt, no fan-out, no Jean MCP tools
   compact_chat_view_enabled: boolean // Collapse intermediate tool calls/replies into a single ticker line, only showing the latest activity
   auto_recaps_enabled?: boolean // Ask agents to end multi-step/tool turns with a recap
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
@@ -2320,6 +2344,7 @@ export const defaultPreferences: AppPreferences = {
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',
   parallel_execution_prompt_enabled: true, // Default: enabled
+  quota_saver_enabled: false, // Default: disabled (opt-in)
   compact_chat_view_enabled: true, // Default: enabled
   auto_recaps_enabled: true, // Default: enabled
   magic_prompts: DEFAULT_MAGIC_PROMPTS,

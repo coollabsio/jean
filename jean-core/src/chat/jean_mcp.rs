@@ -21,6 +21,11 @@ pub async fn build_jean_mcp_entry(app: &AppHandle, session_id: &str) -> Option<V
     if !prefs.jean_mcp_enabled {
         return None;
     }
+    // Quota Saver: the Jean tool registry is ~5k tokens of schemas on every request
+    // and on every sub-agent. Chat runs skip it; the UI keeps using the socket.
+    if prefs.quota_saver_enabled {
+        return None;
+    }
 
     let (running, socket_path, token) =
         crate::jean_mcp_socket::get_socket_status(app.clone()).await;

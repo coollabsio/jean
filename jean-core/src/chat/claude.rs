@@ -38,30 +38,25 @@ const DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = "\
 - Skip only for trivial edits to code already read this session.\n\
 - Do NOT use Context7 — WebSearch only.\n\
 \n\
-### 3. Subagent Strategy to keep main context window clean\n\
-- Offload research, exploration, and parallel analysis to subagents\n\
-- For complex problems, throw more compute at it via subagents\n\
-- One task per subagent for focused execution\n\
-\n\
-### 4. Self-Improvement Loop\n\
+### 3. Self-Improvement Loop\n\
 - After ANY correction from the user: update '.ai/lessons.md' with the pattern\n\
 - Write rules for yourself that prevent the same mistake\n\
 - Ruthlessly iterate on these lessons until mistake rate drops\n\
 - Review lessons at session start for relevant project\n\
 \n\
-### 5. Verification Before Done\n\
+### 4. Verification Before Done\n\
 - Never mark a task complete without proving it works\n\
 - Diff behavior between main and your changes when relevant\n\
 - Ask yourself: \"Would a staff engineer approve this?\"\n\
 - Run tests, check logs, demonstrate correctness\n\
 \n\
-### 6. Demand Elegance (Balanced)\n\
+### 5. Demand Elegance (Balanced)\n\
 - For non-trivial changes: pause and ask \"is there a more elegant way?\"\n\
 - If a fix feels hacky: \"Knowing everything I know now, implement the elegant solution\"\n\
 - Skip this for simple, obvious fixes - don't over-engineer\n\
 - Challenge your own work before presenting it\n\
 \n\
-### 7. Autonomous Bug Fixing\n\
+### 6. Autonomous Bug Fixing\n\
 - When given a bug report: just fix it. Don't ask for hand-holding\n\
 - Point at logs, errors, failing tests -> then resolve them\n\
 - Zero context switching required from the user\n\
@@ -414,6 +409,14 @@ fn build_claude_args(
     let mut args = Vec::new();
     let mut env_vars = Vec::new();
 
+    // Read preferences once — the system prompt assembly below and Quota Saver
+    // both need them, and re-reading the file per section is wasted IO.
+    let prefs = crate::get_preferences_path(app)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|contents| serde_json::from_str::<crate::AppPreferences>(&contents).ok());
+    let quota_saver = prefs.as_ref().is_some_and(|p| p.quota_saver_enabled);
+
     // Core args
     args.push("--print".to_string());
     args.push("--output-format".to_string());
@@ -472,8 +475,10 @@ fn build_claude_args(
         args.push(dir.clone());
     }
 
-    // Add Claude CLI skills and commands directories (~/.claude/skills and ~/.claude/commands)
-    if let Some(home_dir) = dirs::home_dir() {
+    // Add Claude CLI skills and commands directories (~/.claude/skills and ~/.claude/commands).
+    // Quota Saver skips them: the skill/command listing is pulled into the system
+    // prompt of every request and of every sub-agent.
+    if let Some(home_dir) = dirs::home_dir().filter(|_| !quota_saver) {
         let claude_dir = home_dir.join(".claude");
         for subdir in ["skills", "commands"] {
             let dir_path = claude_dir.join(subdir);
@@ -632,33 +637,40 @@ fn build_claude_args(
         }
     }
 
-    // Global system prompt from preferences (like ~/.claude/CLAUDE.md)
-    // Falls back to DEFAULT_GLOBAL_SYSTEM_PROMPT when not set (null = use default)
-    if let Ok(prefs_path) = crate::get_preferences_path(app) {
-        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-            if let Ok(prefs) = serde_json::from_str::<crate::AppPreferences>(&contents) {
-                let prompt = prefs
-                    .magic_prompts
-                    .global_system_prompt
-                    .as_deref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(DEFAULT_GLOBAL_SYSTEM_PROMPT);
-                system_prompt_parts.push(prompt.to_string());
-            }
-        }
+    // Sub-agent policy first, so a user-authored global prompt below can override it.
+    // With fan-out on this is the parallelization prompt; with it off we inject the
+    // opposite instruction, otherwise nothing counteracts the model's default habit
+    // of spawning Task sub-agents (each one costs a full extra agent run).
+    match parallel_execution_prompt
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        Some(prompt) => system_prompt_parts.push(prompt.to_string()),
+        None => system_prompt_parts.push(crate::NO_SUBAGENT_INSTRUCTION.to_string()),
+    }
+
+    // Global system prompt from preferences (like ~/.claude/CLAUDE.md).
+    // Falls back to the built-in default when not set (null = use default), or to
+    // the lean variant when Quota Saver is on.
+    let default_global_prompt = if quota_saver {
+        crate::default_lean_global_system_prompt()
+    } else {
+        DEFAULT_GLOBAL_SYSTEM_PROMPT.to_string()
+    };
+    if let Some(prefs) = prefs.as_ref() {
+        let prompt = prefs
+            .magic_prompts
+            .global_system_prompt
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or(default_global_prompt);
+        system_prompt_parts.push(prompt);
     }
 
     if let Some(mode_instruction) = execution_mode_instruction(execution_mode) {
         system_prompt_parts.push(mode_instruction.to_string());
-    }
-
-    // Parallel execution prompt - encourages sub-agent parallelization
-    if let Some(prompt) = parallel_execution_prompt {
-        let prompt = prompt.trim();
-        if !prompt.is_empty() {
-            system_prompt_parts.push(prompt.to_string());
-        }
     }
 
     // Per-project custom system prompt + linked project instructions
@@ -1041,6 +1053,13 @@ fn build_claude_args(
                     "Created combined context file with {} sources: {:?}",
                     all_context_paths.len(),
                     combined_file
+                );
+                // Overhead budget: grep the run log for this line to catch
+                // system-prompt regressions (~4 chars ≈ 1 token).
+                log::info!(
+                    "Jean system prompt overhead: {} chars in {} parts (quota_saver={quota_saver})",
+                    combined_content.len(),
+                    system_prompt_parts.len()
                 );
                 args.push("--append-system-prompt-file".to_string());
                 args.push(combined_file.to_string_lossy().to_string());
@@ -2639,6 +2658,12 @@ mod tests {
             .contains("Always implement the simplest maintainable solution"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Clickable References"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("include clickable links when available"));
+    }
+
+    #[test]
+    fn default_global_system_prompt_has_no_subagent_fanout_instructions() {
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Subagent Strategy"));
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("throw more compute at it via subagents"));
     }
 
     #[test]
