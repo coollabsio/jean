@@ -62,6 +62,7 @@ import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
 import { KimiIcon } from '@/components/icons/KimiIcon'
+import { DevinIcon } from '@/components/icons/DevinIcon'
 import type { CliBackend, MagicPrompts } from '@/types/preferences'
 import { GeneralPane } from './panes/GeneralPane'
 import { ClaudePane } from './panes/ClaudePane'
@@ -72,6 +73,7 @@ import { PiPane } from './panes/PiPane'
 import { CommandCodePane } from './panes/CommandCodePane'
 import { GrokPane } from './panes/GrokPane'
 import { KimiPane } from './panes/KimiPane'
+import { DevinPane } from './panes/DevinPane'
 import { GitHubPane } from './panes/GitHubPane'
 import { CodeRabbitPane } from './panes/CodeRabbitPane'
 import { AppearancePane } from './panes/AppearancePane'
@@ -185,6 +187,13 @@ const navigationEntries: NavigationEntry[] = [
   },
   {
     type: 'item',
+    id: 'devin',
+    name: 'Devin',
+    icon: DevinIcon,
+    backend: 'devin',
+  },
+  {
+    type: 'item',
     id: 'github',
     name: 'GitHub CLI',
     icon: Github,
@@ -293,6 +302,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   commandcode: CommandCodeIcon,
   grok: GrokIcon,
   kimi: KimiIcon,
+  devin: DevinIcon,
   github: Github,
   coderabbit: Rabbit,
   opinionated: Sparkles,
@@ -324,6 +334,8 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'PI'
     case 'commandcode':
       return 'Command Code'
+    case 'devin':
+      return 'Devin'
     case 'github':
       return 'GitHub CLI'
     case 'coderabbit':
@@ -915,6 +927,11 @@ export function PreferencesDialog() {
               {activePane === 'kimi' && (
                 <div id="pref-pane-kimi" className="min-w-0 max-w-full">
                   <KimiPane />
+                </div>
+              )}
+              {activePane === 'devin' && (
+                <div id="pref-pane-devin" className="min-w-0 max-w-full">
+                  <DevinPane />
                 </div>
               )}
               {activePane === 'github' && (

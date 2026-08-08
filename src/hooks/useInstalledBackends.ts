@@ -13,6 +13,7 @@ import {
 } from '@/services/commandcode-cli'
 import { useGrokCliStatus, useGrokCliAuth } from '@/services/grok-cli'
 import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
+import { useDevinCliStatus, useDevinCliAuth } from '@/services/devin-cli'
 import type { CliBackend } from '@/types/preferences'
 
 /**
@@ -49,6 +50,7 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
   const commandcode = useCommandCodeCliStatus({ enabled })
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
+  const devin = useDevinCliStatus({ enabled })
 
   const installedBackends = useMemo(() => {
     const backends: CliBackend[] = []
@@ -60,6 +62,7 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     if (commandcode.data?.installed) backends.push('commandcode')
     if (grok.data?.installed) backends.push('grok')
     if (kimi.data?.installed) backends.push('kimi')
+    if (devin.data?.installed) backends.push('devin')
     return backends
   }, [
     claude.data?.installed,
@@ -70,6 +73,7 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     commandcode.data?.installed,
     grok.data?.installed,
     kimi.data?.installed,
+    devin.data?.installed,
   ])
 
   const isLoading =
@@ -80,7 +84,8 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     pi.isLoading ||
     commandcode.isLoading ||
     grok.isLoading ||
-    kimi.isLoading
+    kimi.isLoading ||
+    devin.isLoading
 
   return {
     installedBackends,
@@ -102,6 +107,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const commandcode = useCommandCodeCliStatus({ enabled })
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
+  const devin = useDevinCliStatus({ enabled })
 
   const claudeAuth = useClaudeCliAuth({
     enabled: enabled && !!claude.data?.installed,
@@ -127,6 +133,9 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const kimiAuth = useKimiCliAuth({
     enabled: enabled && !!kimi.data?.installed,
   })
+  const devinAuth = useDevinCliAuth({
+    enabled: enabled && !!devin.data?.installed,
+  })
 
   const authByBackend = useMemo(() => {
     const map: Partial<Record<CliBackend, boolean | undefined>> = {
@@ -146,6 +155,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
         : undefined,
       grok: grok.data?.installed ? grokAuth.data?.authenticated : undefined,
       kimi: kimi.data?.installed ? kimiAuth.data?.authenticated : undefined,
+      devin: devin.data?.installed ? devinAuth.data?.authenticated : undefined,
     }
     return map
   }, [
@@ -165,6 +175,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     grokAuth.data?.authenticated,
     kimi.data?.installed,
     kimiAuth.data?.authenticated,
+    devin.data?.installed,
+    devinAuth.data?.authenticated,
   ])
 
   const isStatusLoading =
@@ -175,7 +187,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     pi.isLoading ||
     commandcode.isLoading ||
     grok.isLoading ||
-    kimi.isLoading
+    kimi.isLoading ||
+    devin.isLoading
 
   const isAuthLoading =
     (!!claude.data?.installed && claudeAuth.isLoading) ||
@@ -185,7 +198,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     (!!pi.data?.installed && piAuth.isLoading) ||
     (!!commandcode.data?.installed && commandcodeAuth.isLoading) ||
     (!!grok.data?.installed && grokAuth.isLoading) ||
-    (!!kimi.data?.installed && kimiAuth.isLoading)
+    (!!kimi.data?.installed && kimiAuth.isLoading) ||
+    (!!devin.data?.installed && devinAuth.isLoading)
 
   return {
     authByBackend,

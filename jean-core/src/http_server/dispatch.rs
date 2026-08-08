@@ -2542,6 +2542,34 @@ pub async fn dispatch_command(
             crate::grok_cli::login_grok_cli_device(app.clone()).await?;
             Ok(Value::Null)
         }
+        "check_devin_cli_installed" => {
+            to_value(crate::devin_cli::check_devin_cli_installed(app.clone()).await?)
+        }
+        "detect_devin_in_path" => {
+            to_value(crate::devin_cli::detect_devin_in_path(app.clone()).await?)
+        }
+        "check_devin_cli_auth" => {
+            to_value(crate::devin_cli::check_devin_cli_auth(app.clone()).await?)
+        }
+        "list_devin_models" => to_value(crate::devin_cli::list_devin_models(app.clone()).await?),
+        "get_available_devin_versions" => {
+            to_value(crate::devin_cli::get_available_devin_versions(app.clone()).await?)
+        }
+        "check_devin_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            to_value(crate::devin_cli::check_devin_cli_version_exists(app.clone(), version).await?)
+        }
+        "get_devin_cli_binary_path" => {
+            to_value(crate::devin_cli::get_devin_cli_binary_path(app.clone()).await?)
+        }
+        "get_devin_install_command" => {
+            to_value(crate::devin_cli::get_devin_install_command(app.clone()).await?)
+        }
+        "install_devin_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::devin_cli::install_devin_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
         "check_kimi_cli_installed" => {
             to_value(crate::kimi_cli::check_kimi_cli_installed(app.clone()).await?)
         }

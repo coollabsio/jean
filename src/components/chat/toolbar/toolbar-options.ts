@@ -101,6 +101,10 @@ export const KIMI_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'kimi/default', label: 'Configured default' },
 ]
 
+export const DEVIN_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'devin/default', label: 'Configured default' },
+]
+
 export const KIMI_EFFORT_LEVEL_OPTIONS: {
   value: EffortLevel
   label: string

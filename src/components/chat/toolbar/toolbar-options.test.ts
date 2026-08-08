@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEVIN_MODEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
@@ -15,6 +16,14 @@ describe('PI_EFFORT_LEVEL_OPTIONS', () => {
       'medium',
       'high',
       'xhigh',
+    ])
+  })
+})
+
+describe('DEVIN_MODEL_OPTIONS', () => {
+  it('exposes the Devin configured default model', () => {
+    expect(DEVIN_MODEL_OPTIONS).toEqual([
+      { value: 'devin/default', label: 'Configured default' },
     ])
   })
 })

@@ -32,6 +32,7 @@ import { usePiCliStatus } from '@/services/pi-cli'
 import { useCommandCodeCliStatus } from '@/services/commandcode-cli'
 import { useGrokCliStatus } from '@/services/grok-cli'
 import { useKimiCliStatus } from '@/services/kimi-cli'
+import { useDevinCliStatus } from '@/services/devin-cli'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import {
@@ -55,6 +56,7 @@ const BACKEND_ORDER: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'devin',
 ]
 
 const backendCommands: Record<CliBackend, string> = {
@@ -66,6 +68,7 @@ const backendCommands: Record<CliBackend, string> = {
   commandcode: 'commandcode',
   grok: 'grok',
   kimi: 'kimi',
+  devin: 'devin',
 }
 
 const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
@@ -74,6 +77,7 @@ const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
   cursor: ['--yolo', '--sandbox', 'disabled'],
   grok: ['--always-approve', '--sandbox', 'off'],
   kimi: ['--yolo'],
+  devin: ['--permission-mode', 'dangerous'],
 }
 
 export function NewSessionModeModal() {
@@ -90,6 +94,7 @@ export function NewSessionModeModal() {
   })
   const grokStatus = useGrokCliStatus({ enabled: target !== null })
   const kimiStatus = useKimiCliStatus({ enabled: target !== null })
+  const devinStatus = useDevinCliStatus({ enabled: target !== null })
   const { data: preferences } = usePreferences()
   const [nativePickerKind, setNativePickerKind] =
     useState<NativeCliSessionKind | null>(null)
@@ -138,6 +143,10 @@ export function NewSessionModeModal() {
         installed: kimiStatus.data?.installed,
         path: kimiStatus.data?.path,
       },
+      devin: {
+        installed: devinStatus.data?.installed,
+        path: devinStatus.data?.path,
+      },
     }
 
     return BACKEND_ORDER.map((backend, index) => {
@@ -158,6 +167,8 @@ export function NewSessionModeModal() {
     commandcodeStatus.data?.path,
     cursorStatus.data?.installed,
     cursorStatus.data?.path,
+    devinStatus.data?.installed,
+    devinStatus.data?.path,
     grokStatus.data?.installed,
     grokStatus.data?.path,
     kimiStatus.data?.installed,
@@ -176,7 +187,8 @@ export function NewSessionModeModal() {
     piStatus.isLoading ||
     commandcodeStatus.isLoading ||
     grokStatus.isLoading ||
-    kimiStatus.isLoading
+    kimiStatus.isLoading ||
+    devinStatus.isLoading
 
   const nativePickerCommand = useMemo(() => {
     if (nativePickerKind === null || nativePickerKind === 'terminal') {

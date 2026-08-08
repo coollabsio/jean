@@ -17,6 +17,7 @@ describe('GeneralPane settings structure', () => {
       'commandcode',
       'grok',
       'kimi',
+      'devin',
     ]) {
       expect(source).toContain(`${backend}: {`)
     }
@@ -39,6 +40,8 @@ describe('GeneralPane settings structure', () => {
       'pref-grok-section-settings',
       'pref-kimi-section-cli',
       'pref-kimi-section-settings',
+      'pref-devin-section-cli',
+      'pref-devin-section-settings',
     ]) {
       const anchorIndex = source.indexOf(`anchorId="${anchorId}"`)
       expect(anchorIndex, anchorId).toBeGreaterThan(-1)
@@ -62,6 +65,24 @@ describe('GeneralPane settings structure', () => {
     expect(kimiSection).toContain('handleKimiAutoSteerToggle')
     expect(kimiSection).toContain('pref-kimi-section-cli')
     expect(kimiSection).toContain('pref-kimi-section-settings')
+  })
+
+  it('renders Devin setup and default model settings', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const devinSection = source.slice(
+      source.indexOf("{scope === 'devin' && ("),
+      source.indexOf('{isGeneralScope && (')
+    )
+
+    expect(devinSection).toContain('devin_cli_source')
+    expect(devinSection).toContain('selectedDevinModel')
+    expect(devinSection).toContain('handleDevinLogin')
+    expect(devinSection).toContain('handleDevinInstallInstructions')
+    expect(devinSection).toContain('pref-devin-section-cli')
+    expect(devinSection).toContain('pref-devin-section-settings')
   })
 
   it('renders the OpenCode auto-steer toggle inside OpenCode settings', () => {

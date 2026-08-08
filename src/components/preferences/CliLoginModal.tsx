@@ -26,6 +26,7 @@ import { piCliQueryKeys } from '@/services/pi-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { kimiCliQueryKeys } from '@/services/kimi-cli'
+import { devinCliQueryKeys } from '@/services/devin-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
@@ -83,6 +84,7 @@ interface CliLoginModalContentProps {
     | 'commandcode'
     | 'grok'
     | 'kimi'
+    | 'devin'
     | 'coderabbit'
     | null
   command: string
@@ -125,7 +127,9 @@ function CliLoginModalContent({
                     ? 'Grok CLI'
                     : cliType === 'kimi'
                       ? 'Kimi Code'
-                      : 'GitHub CLI'
+                      : cliType === 'devin'
+                        ? 'Devin CLI'
+                        : 'GitHub CLI'
   const cliTitle =
     cliType === 'cursor' ||
     cliType === 'pi' ||
@@ -135,8 +139,8 @@ function CliLoginModalContent({
         <BackendLabel backend={cliType} />
         <span>CLI</span>
       </span>
-    ) : cliType === 'kimi' ? (
-      <BackendLabel backend="kimi" />
+    ) : cliType === 'kimi' || cliType === 'devin' ? (
+      <BackendLabel backend={cliType} />
     ) : (
       cliName
     )
@@ -211,6 +215,8 @@ function CliLoginModalContent({
           queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
         } else if (cliType === 'kimi') {
           queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
+        } else if (cliType === 'devin') {
+          queryClient.invalidateQueries({ queryKey: devinCliQueryKeys.all })
         } else if (cliType === 'coderabbit') {
           queryClient.invalidateQueries({
             queryKey: coderabbitCliQueryKeys.all,

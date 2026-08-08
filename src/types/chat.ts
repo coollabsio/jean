@@ -60,6 +60,7 @@ export type Backend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'devin'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -137,7 +138,7 @@ export interface PlanToolInput {
   plan_preview?: string
   explanation?: string
   steps?: PlanStep[]
-  source?: 'claude' | 'codex' | 'grok' | 'kimi'
+  source?: 'claude' | 'codex' | 'grok' | 'kimi' | 'devin'
 }
 
 /**
@@ -239,6 +240,8 @@ export interface Session {
   grok_session_id?: string
   /** Kimi Code ACP session ID for resuming conversations */
   kimi_session_id?: string
+  /** Devin session ID for resuming conversations */
+  devin_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

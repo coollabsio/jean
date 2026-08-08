@@ -62,6 +62,11 @@ import {
   useKimiPathDetection,
 } from '@/services/kimi-cli'
 import {
+  useDevinCliSetup,
+  useDevinCliAuth,
+  useDevinPathDetection,
+} from '@/services/devin-cli'
+import {
   useGhCliSetup,
   useGhCliAuth,
   useGhPathDetection,
@@ -111,6 +116,7 @@ type AIBackend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'devin'
 type CliType = AIBackend | 'gh'
 
 /** Static CLI login arg arrays (module scope — avoid recreating each render) */
@@ -127,6 +133,7 @@ export const AI_BACKENDS: AIBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'devin',
 ]
 
 type OnboardingStep =
@@ -166,6 +173,10 @@ type OnboardingStep =
   | 'kimi-installing'
   | 'kimi-auth-checking'
   | 'kimi-auth-login'
+  | 'devin-setup'
+  | 'devin-installing'
+  | 'devin-auth-checking'
+  | 'devin-auth-login'
   | 'gh-setup'
   | 'gh-installing'
   | 'gh-auth-checking'
@@ -199,6 +210,8 @@ const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
   'grok-auth-login',
   'kimi-setup',
   'kimi-auth-login',
+  'devin-setup',
+  'devin-auth-login',
   'gh-setup',
   'gh-auth-login',
 ] as const
@@ -239,10 +252,17 @@ const backendLabel: Record<CliType, string> = {
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
   kimi: 'Kimi Code CLI',
+  devin: 'Devin CLI',
   gh: 'GitHub CLI',
 }
 
-const BETA_BACKENDS = new Set<AIBackend>(['pi', 'commandcode', 'grok', 'kimi'])
+const BETA_BACKENDS = new Set<AIBackend>([
+  'pi',
+  'commandcode',
+  'grok',
+  'kimi',
+  'devin',
+])
 
 function magicDefaultsForBackend(
   backend: AIBackend
@@ -295,6 +315,7 @@ function stepToBackend(step: OnboardingStep): AIBackend | null {
   if (step.startsWith('commandcode-')) return 'commandcode'
   if (step.startsWith('grok-')) return 'grok'
   if (step.startsWith('kimi-')) return 'kimi'
+  if (step.startsWith('devin-')) return 'devin'
   return null
 }
 
@@ -330,6 +351,7 @@ function OnboardingDialogContent() {
   const commandcodePathDetection = useCommandCodePathDetection()
   const grokPathDetection = useGrokPathDetection()
   const kimiPathDetection = useKimiPathDetection()
+  const devinPathDetection = useDevinPathDetection()
   const codexSetup = useCodexCliSetup()
   const opencodeSetup = useOpenCodeCliSetup()
   const cursorStatus = useCursorCliStatus()
@@ -337,6 +359,7 @@ function OnboardingDialogContent() {
   const commandcodeSetup = useCommandCodeCliSetup()
   const grokSetup = useGrokCliSetup()
   const kimiSetup = useKimiCliSetup()
+  const devinSetup = useDevinCliSetup()
   const ghPathDetection = useGhPathDetection()
   const ghSetup = useGhCliSetup()
 
@@ -356,6 +379,9 @@ function OnboardingDialogContent() {
   })
   const grokAuth = useGrokCliAuth({ enabled: !!grokSetup.status?.installed })
   const kimiAuth = useKimiCliAuth({ enabled: !!kimiSetup.status?.installed })
+  const devinAuth = useDevinCliAuth({
+    enabled: !!devinSetup.status?.installed,
+  })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
 
   const [step, _setStepRaw] = useState<OnboardingStep>('backend-select')
@@ -395,6 +421,7 @@ function OnboardingDialogContent() {
   )
   const [grokVersion, setGrokVersion] = useState<string | null>(null)
   const [kimiVersion, setKimiVersion] = useState<string | null>(null)
+  const [devinVersion, setDevinVersion] = useState<string | null>(null)
   const [ghVersion, setGhVersion] = useState<string | null>(null)
 
   const [claudeInstallFailed, setClaudeInstallFailed] = useState(false)
@@ -405,6 +432,7 @@ function OnboardingDialogContent() {
     useState(false)
   const [grokInstallFailed, setGrokInstallFailed] = useState(false)
   const [kimiInstallFailed, setKimiInstallFailed] = useState(false)
+  const [devinInstallFailed, setDevinInstallFailed] = useState(false)
   const [ghInstallFailed, setGhInstallFailed] = useState(false)
   const [claudePathSelected, setClaudePathSelected] = useState(false)
   const [codexPathSelected, setCodexPathSelected] = useState(false)
@@ -413,6 +441,7 @@ function OnboardingDialogContent() {
   const [commandcodePathSelected, setCommandcodePathSelected] = useState(false)
   const [grokPathSelected, setGrokPathSelected] = useState(false)
   const [kimiPathSelected, setKimiPathSelected] = useState(false)
+  const [devinPathSelected, setDevinPathSelected] = useState(false)
   const [ghPathSelected, setGhPathSelected] = useState(false)
   const [claudeLoginAttempt, setClaudeLoginAttempt] = useState(0)
   const [codexLoginAttempt, setCodexLoginAttempt] = useState(0)
@@ -423,6 +452,7 @@ function OnboardingDialogContent() {
   const [commandcodeLoginAttempt, setCommandcodeLoginAttempt] = useState(0)
   const [grokLoginAttempt, setGrokLoginAttempt] = useState(0)
   const [kimiLoginAttempt, setKimiLoginAttempt] = useState(0)
+  const [devinLoginAttempt, setDevinLoginAttempt] = useState(0)
   const [ghLoginAttempt, setGhLoginAttempt] = useState(0)
 
   const goBack = useCallback(() => {
@@ -471,6 +501,11 @@ function OnboardingDialogContent() {
       setKimiInstallFailed(false)
       return
     }
+    if (current === 'devin-setup' && devinPathSelected) {
+      setDevinPathSelected(false)
+      setDevinInstallFailed(false)
+      return
+    }
     if (current === 'gh-setup' && ghPathSelected) {
       dbg('step: BACK (sub-state) gh-setup installer → picker')
       setGhPathSelected(false)
@@ -478,42 +513,45 @@ function OnboardingDialogContent() {
       return
     }
 
-    const prev = historyStack.at(-1)
-    if (!prev) return
-
-    dbg('step: BACK', stepRef.current, '→', prev)
-    // Reset transient per-CLI state so the user lands on a fresh screen
-    // (re-shows the path/Jean-managed picker, clears any prior install error).
-    if (prev === 'claude-setup') {
-      setClaudePathSelected(false)
-      setClaudeInstallFailed(false)
-    } else if (prev === 'codex-setup') {
-      setCodexPathSelected(false)
-      setCodexInstallFailed(false)
-    } else if (prev === 'opencode-setup') {
-      setOpencodePathSelected(false)
-      setOpencodeInstallFailed(false)
-    } else if (prev === 'pi-setup') {
-      setPiPathSelected(false)
-      setPiInstallFailed(false)
-    } else if (prev === 'commandcode-setup') {
-      setCommandcodePathSelected(false)
-      setCommandcodeInstallFailed(false)
-    } else if (prev === 'grok-setup') {
-      setGrokPathSelected(false)
-      setGrokInstallFailed(false)
-    } else if (prev === 'kimi-setup') {
-      setKimiPathSelected(false)
-      setKimiInstallFailed(false)
-    } else if (prev === 'gh-setup') {
-      setGhPathSelected(false)
-      setGhInstallFailed(false)
-    }
-    stepRef.current = prev
-    _setStepRaw(prev)
-    setHistoryStack(h => h.slice(0, -1))
+    setHistoryStack(h => {
+      const prev = h.at(-1)
+      if (!prev) return h
+      dbg('step: BACK', stepRef.current, '→', prev)
+      // Reset transient per-CLI state so the user lands on a fresh screen
+      // (re-shows the path/Jean-managed picker, clears any prior install error).
+      if (prev === 'claude-setup') {
+        setClaudePathSelected(false)
+        setClaudeInstallFailed(false)
+      } else if (prev === 'codex-setup') {
+        setCodexPathSelected(false)
+        setCodexInstallFailed(false)
+      } else if (prev === 'opencode-setup') {
+        setOpencodePathSelected(false)
+        setOpencodeInstallFailed(false)
+      } else if (prev === 'pi-setup') {
+        setPiPathSelected(false)
+        setPiInstallFailed(false)
+      } else if (prev === 'commandcode-setup') {
+        setCommandcodePathSelected(false)
+        setCommandcodeInstallFailed(false)
+      } else if (prev === 'grok-setup') {
+        setGrokPathSelected(false)
+        setGrokInstallFailed(false)
+      } else if (prev === 'kimi-setup') {
+        setKimiPathSelected(false)
+        setKimiInstallFailed(false)
+      } else if (prev === 'devin-setup') {
+        setDevinPathSelected(false)
+        setDevinInstallFailed(false)
+      } else if (prev === 'gh-setup') {
+        setGhPathSelected(false)
+        setGhInstallFailed(false)
+      }
+      stepRef.current = prev
+      _setStepRaw(prev)
+      return h.slice(0, -1)
+    })
   }, [
-    historyStack,
     claudePathSelected,
     codexPathSelected,
     opencodePathSelected,
@@ -521,6 +559,7 @@ function OnboardingDialogContent() {
     commandcodePathSelected,
     grokPathSelected,
     kimiPathSelected,
+    devinPathSelected,
     ghPathSelected,
   ])
 
@@ -534,6 +573,7 @@ function OnboardingDialogContent() {
     (step === 'commandcode-setup' && commandcodePathSelected) ||
     (step === 'grok-setup' && grokPathSelected) ||
     (step === 'kimi-setup' && kimiPathSelected) ||
+    (step === 'devin-setup' && devinPathSelected) ||
     (step === 'gh-setup' && ghPathSelected)
   const canGoBack =
     (historyStack.length > 0 || hasSubStateBack) &&
@@ -557,6 +597,7 @@ function OnboardingDialogContent() {
   const commandcodeLoginTerminalId = `onboarding-commandcode-login-${loginSessionSeed}-${commandcodeLoginAttempt}`
   const grokLoginTerminalId = `onboarding-grok-login-${loginSessionSeed}-${grokLoginAttempt}`
   const kimiLoginTerminalId = `onboarding-kimi-login-${loginSessionSeed}-${kimiLoginAttempt}`
+  const devinLoginTerminalId = `onboarding-devin-login-${loginSessionSeed}-${devinLoginAttempt}`
   const ghLoginTerminalId = `onboarding-gh-login-${loginSessionSeed}-${ghLoginAttempt}`
 
   const stableClaudeVersions = claudeSetup.versions.filter(v => !v.prerelease)
@@ -570,6 +611,7 @@ function OnboardingDialogContent() {
   )
   const stableGrokVersions = grokSetup.versions.filter(v => !v.prerelease)
   const stableKimiVersions = kimiSetup.versions.filter(v => !v.prerelease)
+  const stableDevinVersions = devinSetup.versions.filter(v => !v.prerelease)
   const stableGhVersions = ghSetup.versions.filter(v => !v.prerelease)
 
   useEffect(() => {
@@ -627,6 +669,14 @@ function OnboardingDialogContent() {
   }, [kimiVersion, stableKimiVersions])
 
   useEffect(() => {
+    if (!devinVersion && stableDevinVersions.length > 0) {
+      queueMicrotask(() =>
+        setDevinVersion(stableDevinVersions[0]?.version ?? null)
+      )
+    }
+  }, [devinVersion, stableDevinVersions])
+
+  useEffect(() => {
     if (!ghVersion && stableGhVersions.length > 0) {
       queueMicrotask(() => setGhVersion(stableGhVersions[0]?.version ?? null))
     }
@@ -656,8 +706,11 @@ function OnboardingDialogContent() {
           !!commandcodeAuth.data?.authenticated
       } else if (backend === 'grok') {
         ready = !!grokSetup.status?.installed && !!grokAuth.data?.authenticated
-      } else {
+      } else if (backend === 'kimi') {
         ready = !!kimiSetup.status?.installed && !!kimiAuth.data?.authenticated
+      } else {
+        ready =
+          !!devinSetup.status?.installed && !!devinAuth.data?.authenticated
       }
       dbg('isBackendReady:', backend, '→', ready)
       return ready
@@ -679,6 +732,8 @@ function OnboardingDialogContent() {
       grokAuth.data?.authenticated,
       kimiSetup.status?.installed,
       kimiAuth.data?.authenticated,
+      devinSetup.status?.installed,
+      devinAuth.data?.authenticated,
     ]
   )
 
@@ -742,6 +797,7 @@ function OnboardingDialogContent() {
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
     kimiSetup.isStatusLoading ||
+    devinSetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
     (codexSetup.status?.installed &&
@@ -755,7 +811,10 @@ function OnboardingDialogContent() {
       (commandcodeAuth.isLoading || commandcodeAuth.isFetching)) ||
     (grokSetup.status?.installed &&
       (grokAuth.isLoading || grokAuth.isFetching)) ||
-    (kimiSetup.status?.installed && (kimiAuth.isLoading || kimiAuth.isFetching))
+    (kimiSetup.status?.installed &&
+      (kimiAuth.isLoading || kimiAuth.isFetching)) ||
+    (devinSetup.status?.installed &&
+      (devinAuth.isLoading || devinAuth.isFetching))
 
   const loadingInitialState =
     claudeSetup.isStatusLoading ||
@@ -766,6 +825,7 @@ function OnboardingDialogContent() {
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
     kimiSetup.isStatusLoading ||
+    devinSetup.isStatusLoading ||
     ghSetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
@@ -782,6 +842,8 @@ function OnboardingDialogContent() {
       (grokAuth.isLoading || grokAuth.isFetching)) ||
     (kimiSetup.status?.installed &&
       (kimiAuth.isLoading || kimiAuth.isFetching)) ||
+    (devinSetup.status?.installed &&
+      (devinAuth.isLoading || devinAuth.isFetching)) ||
     (ghSetup.status?.installed && (ghAuth.isLoading || ghAuth.isFetching))
 
   dbg('loadingInitialState:', loadingInitialState, {
@@ -793,6 +855,7 @@ function OnboardingDialogContent() {
     commandcodeStatusLoading: commandcodeSetup.isStatusLoading,
     grokStatusLoading: grokSetup.isStatusLoading,
     kimiStatusLoading: kimiSetup.isStatusLoading,
+    devinStatusLoading: devinSetup.isStatusLoading,
     ghStatusLoading: ghSetup.isStatusLoading,
     claudeInstalled: claudeSetup.status?.installed,
     codexInstalled: codexSetup.status?.installed,
@@ -802,6 +865,7 @@ function OnboardingDialogContent() {
     commandcodeInstalled: commandcodeSetup.status?.installed,
     grokInstalled: grokSetup.status?.installed,
     kimiInstalled: kimiSetup.status?.installed,
+    devinInstalled: devinSetup.status?.installed,
     ghInstalled: ghSetup.status?.installed,
     claudeAuthLoading: claudeAuth.isLoading,
     codexAuthLoading: codexAuth.isLoading,
@@ -811,6 +875,7 @@ function OnboardingDialogContent() {
     commandcodeAuthLoading: commandcodeAuth.isLoading,
     grokAuthLoading: grokAuth.isLoading,
     kimiAuthLoading: kimiAuth.isLoading,
+    devinAuthLoading: devinAuth.isLoading,
     ghAuthLoading: ghAuth.isLoading,
   })
 
@@ -843,6 +908,7 @@ function OnboardingDialogContent() {
       setCommandcodeInstallFailed(false)
       setGrokInstallFailed(false)
       setKimiInstallFailed(false)
+      setDevinInstallFailed(false)
       setGhInstallFailed(false)
       setClaudePathSelected(false)
       setCodexPathSelected(false)
@@ -852,6 +918,7 @@ function OnboardingDialogContent() {
       setCommandcodePathSelected(false)
       setGrokPathSelected(false)
       setKimiPathSelected(false)
+      setDevinPathSelected(false)
       setGhPathSelected(false)
       setClaudeLoginAttempt(0)
       setCodexLoginAttempt(0)
@@ -862,6 +929,7 @@ function OnboardingDialogContent() {
       setCommandcodeLoginAttempt(0)
       setGrokLoginAttempt(0)
       setKimiLoginAttempt(0)
+      setDevinLoginAttempt(0)
       setGhLoginAttempt(0)
     })
 
@@ -1174,6 +1242,24 @@ function OnboardingDialogContent() {
     kimiAuth.isLoading,
     kimiAuth.isFetching,
     kimiAuth.data?.authenticated,
+    moveToNextBackendOrGh,
+    setStep,
+  ])
+
+  useEffect(() => {
+    if (step !== 'devin-auth-checking') return
+    if (devinAuth.isLoading || devinAuth.isFetching) return
+
+    if (devinAuth.data?.authenticated) {
+      queueMicrotask(() => moveToNextBackendOrGh('devin'))
+    } else {
+      queueMicrotask(() => setStep('devin-auth-login'))
+    }
+  }, [
+    step,
+    devinAuth.isLoading,
+    devinAuth.isFetching,
+    devinAuth.data?.authenticated,
     moveToNextBackendOrGh,
     setStep,
   ])
@@ -1492,6 +1578,32 @@ function OnboardingDialogContent() {
     setStep,
   ])
 
+  const handleDevinJeanSelect = useCallback(() => {
+    setDevinPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { devin_cli_source: 'jean' },
+      {
+        onSuccess: () => {
+          if (devinSetup.status?.installed) {
+            setStep('devin-auth-checking')
+            devinAuth.refetch()
+          }
+        },
+        onError: () => {
+          setDevinPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [
+    preferences,
+    patchPreferences,
+    devinSetup.status?.installed,
+    devinAuth,
+    setStep,
+  ])
+
   const handleGhJeanSelect = useCallback(() => {
     dbg('handleGhJeanSelect: saving gh_cli_source=jean')
     setGhPathSelected(true)
@@ -1673,6 +1785,24 @@ function OnboardingDialogContent() {
     )
   }, [preferences, patchPreferences, kimiAuth, setStep])
 
+  const handleDevinPathSelect = useCallback(() => {
+    setDevinPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { devin_cli_source: 'path' },
+      {
+        onSuccess: () => {
+          setStep('devin-auth-checking')
+          devinAuth.refetch()
+        },
+        onError: () => {
+          setDevinPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [preferences, patchPreferences, devinAuth, setStep])
+
   const handleGhPathSelect = useCallback(() => {
     dbg('handleGhPathSelect: saving gh_cli_source=path')
     setGhPathSelected(true)
@@ -1791,6 +1921,21 @@ function OnboardingDialogContent() {
     })
   }, [kimiVersion, kimiSetup, kimiAuth])
 
+  const handleDevinInstall = useCallback(() => {
+    if (!devinVersion) return
+    setStep('devin-installing')
+    devinSetup.install(devinVersion, {
+      onSuccess: () => {
+        setStep('devin-auth-checking')
+        devinAuth.refetch()
+      },
+      onError: () => {
+        setDevinInstallFailed(true)
+        setStep('devin-setup')
+      },
+    })
+  }, [devinVersion, devinSetup, devinAuth])
+
   const handleGhInstall = useCallback(() => {
     dbg('handleGhInstall: version =', ghVersion)
     if (!ghVersion) return
@@ -1855,6 +2000,11 @@ function OnboardingDialogContent() {
     await kimiAuth.refetch()
   }, [kimiAuth, setStep])
 
+  const handleDevinLoginComplete = useCallback(async () => {
+    setStep('devin-auth-checking')
+    await devinAuth.refetch()
+  }, [devinAuth, setStep])
+
   const handleGhLoginComplete = useCallback(async () => {
     dbg('handleGhLoginComplete: refetching auth')
     setStep('gh-auth-checking')
@@ -1894,6 +2044,10 @@ function OnboardingDialogContent() {
     setKimiLoginAttempt(prev => prev + 1)
   }, [])
 
+  const handleDevinLoginRetry = useCallback(() => {
+    setDevinLoginAttempt(prev => prev + 1)
+  }, [])
+
   const handleGhLoginRetry = useCallback(() => {
     setGhLoginAttempt(prev => prev + 1)
   }, [])
@@ -1907,6 +2061,7 @@ function OnboardingDialogContent() {
     commandcodeSetup.refetchStatus()
     grokSetup.refetchStatus()
     kimiSetup.refetchStatus()
+    devinSetup.refetchStatus()
     ghSetup.refetchStatus()
     // Set the first selected backend as the default so the preference
     // isn't left pointing at an uninstalled backend (e.g. 'claude').
@@ -1939,6 +2094,7 @@ function OnboardingDialogContent() {
     commandcodeSetup,
     grokSetup,
     kimiSetup,
+    devinSetup,
     ghSetup,
     selectedBackends,
     preferences,
@@ -2085,6 +2241,23 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (step === 'devin-setup' || step === 'devin-installing') {
+      return {
+        type: 'devin',
+        title: 'Devin CLI',
+        description: 'Devin CLI enables Devin-backed AI sessions.',
+        versions: stableDevinVersions,
+        isVersionsLoading: devinSetup.isVersionsLoading,
+        isVersionsError: devinSetup.isVersionsError,
+        onRetryVersions: devinSetup.refetchVersions,
+        isInstalling: devinSetup.isInstalling,
+        installError: devinInstallFailed ? devinSetup.installError : null,
+        progress: devinSetup.progress,
+        install: devinSetup.install,
+        currentVersion: devinSetup.status?.version,
+      }
+    }
+
     if (step === 'gh-setup' || step === 'gh-installing') {
       return {
         type: 'gh',
@@ -2118,6 +2291,8 @@ function OnboardingDialogContent() {
     commandcodeSetup.status?.installed && step === 'commandcode-setup'
   const isGrokReinstall = grokSetup.status?.installed && step === 'grok-setup'
   const isKimiReinstall = kimiSetup.status?.installed && step === 'kimi-setup'
+  const isDevinReinstall =
+    devinSetup.status?.installed && step === 'devin-setup'
   const isGhReinstall = ghSetup.status?.installed && step === 'gh-setup'
 
   // When CLI source is 'path', use the path detection result for login command
@@ -2162,6 +2337,11 @@ function OnboardingDialogContent() {
       ? kimiPathDetection.data.path
       : (kimiSetup.status?.path ?? '')
   const kimiLoginArgs = SIMPLE_LOGIN_ARGS
+  const devinLoginCommand =
+    devinPathSelected && devinPathDetection.data?.path
+      ? devinPathDetection.data.path
+      : (devinSetup.status?.path ?? '')
+  const devinLoginArgs = AUTH_LOGIN_ARGS
   const ghLoginCommand =
     ghPathSelected && ghPathDetection.data?.path
       ? ghPathDetection.data.path
@@ -2223,6 +2403,13 @@ function OnboardingDialogContent() {
       path: kimiSetup.status?.path,
       pathSelected: kimiPathSelected,
       detectedPath: kimiPathDetection.data?.path,
+    },
+    devin: {
+      cmd: devinLoginCommand,
+      args: devinLoginArgs,
+      path: devinSetup.status?.path,
+      pathSelected: devinPathSelected,
+      detectedPath: devinPathDetection.data?.path,
     },
     gh: {
       cmd: ghLoginCommand,
@@ -2438,6 +2625,19 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (dialogStep === 'devin-setup' || dialogStep === 'devin-installing') {
+      return {
+        title: isDevinReinstall
+          ? `Change ${backendName} Version`
+          : `Setup ${backendName}`,
+        description: isDevinReinstall
+          ? 'Select a version to install. This will replace the current installation.'
+          : devinPathDetection.data?.found
+            ? 'Choose to use your system Devin CLI or install with Jean.'
+            : 'Select a version to install.',
+      }
+    }
+
     if (
       dialogStep === 'claude-auth-checking' ||
       dialogStep === 'claude-auth-login' ||
@@ -2454,7 +2654,9 @@ function OnboardingDialogContent() {
       dialogStep === 'grok-auth-checking' ||
       dialogStep === 'grok-auth-login' ||
       dialogStep === 'kimi-auth-checking' ||
-      dialogStep === 'kimi-auth-login'
+      dialogStep === 'kimi-auth-login' ||
+      dialogStep === 'devin-auth-checking' ||
+      dialogStep === 'devin-auth-login'
     ) {
       return {
         title: `Authenticate ${backendName}`,
@@ -2477,7 +2679,8 @@ function OnboardingDialogContent() {
       step.startsWith('pi-') ||
       step.startsWith('commandcode-') ||
       step.startsWith('grok-') ||
-      step.startsWith('kimi-')
+      step.startsWith('kimi-') ||
+      step.startsWith('devin-')
     const isGhStep = step.startsWith('gh-')
 
     const backendComplete = !isBackendSelection && !isBackendStep
@@ -2605,6 +2808,7 @@ function OnboardingDialogContent() {
                 commandcodeVersion={commandcodeSetup.status?.version}
                 grokVersion={grokSetup.status?.version}
                 kimiVersion={kimiSetup.status?.version}
+                devinVersion={devinSetup.status?.version}
                 ghVersion={ghSetup.status?.version}
                 onContinue={handleComplete}
               />
@@ -2648,6 +2852,11 @@ function OnboardingDialogContent() {
                 cliName="Kimi Code CLI"
                 progress={cliData.progress}
               />
+            ) : step === 'devin-installing' && cliData ? (
+              <InstallingState
+                cliName="Devin CLI"
+                progress={cliData.progress}
+              />
             ) : step === 'gh-installing' && cliData ? (
               <InstallingState
                 cliName="GitHub CLI"
@@ -2669,6 +2878,8 @@ function OnboardingDialogContent() {
               <AuthCheckingState cliName="Grok CLI" />
             ) : step === 'kimi-auth-checking' ? (
               <AuthCheckingState cliName="Kimi Code CLI" />
+            ) : step === 'devin-auth-checking' ? (
+              <AuthCheckingState cliName="Devin CLI" />
             ) : step === 'gh-auth-checking' ? (
               <AuthCheckingState cliName="GitHub CLI" />
             ) : step === 'claude-setup' && !claudePathSelected ? (
@@ -2773,6 +2984,18 @@ function OnboardingDialogContent() {
                 jeanInstalled={!!kimiSetup.status?.installed}
                 onSelectPath={handleKimiPathSelect}
                 onSelectJean={handleKimiJeanSelect}
+              />
+            ) : step === 'devin-setup' && !devinPathSelected ? (
+              <CliPathSelector
+                cliName="Devin CLI"
+                pathFound={!!devinPathDetection.data?.found}
+                pathVersion={devinPathDetection.data?.version ?? null}
+                pathPath={devinPathDetection.data?.path ?? null}
+                isLoading={devinPathSelected}
+                currentSource={preferences?.devin_cli_source ?? null}
+                jeanInstalled={!!devinSetup.status?.installed}
+                onSelectPath={handleDevinPathSelect}
+                onSelectJean={handleDevinJeanSelect}
               />
             ) : step === 'claude-auth-login' ? (
               claudeLoginCommand ? (
@@ -2886,6 +3109,20 @@ function OnboardingDialogContent() {
               ) : (
                 <AuthCheckingState cliName="Kimi Code CLI" />
               )
+            ) : step === 'devin-auth-login' ? (
+              devinLoginCommand ? (
+                <AuthLoginState
+                  key={devinLoginTerminalId}
+                  cliName="Devin CLI"
+                  terminalId={devinLoginTerminalId}
+                  command={devinLoginCommand}
+                  commandArgs={devinLoginArgs}
+                  onComplete={handleDevinLoginComplete}
+                  onRetry={handleDevinLoginRetry}
+                />
+              ) : (
+                <AuthCheckingState cliName="Devin CLI" />
+              )
             ) : step === 'gh-setup' && !ghPathSelected ? (
               <CliPathSelector
                 cliName="GitHub CLI"
@@ -2932,7 +3169,9 @@ function OnboardingDialogContent() {
                                 ? handleGrokInstall
                                 : cliData.type === 'kimi'
                                   ? handleKimiInstall
-                                  : handleGhInstall
+                                  : cliData.type === 'devin'
+                                    ? handleDevinInstall
+                                    : handleGhInstall
                   }
                 />
               ) : (
@@ -2954,7 +3193,9 @@ function OnboardingDialogContent() {
                                 ? grokVersion
                                 : cliData.type === 'kimi'
                                   ? kimiVersion
-                                  : ghVersion
+                                  : cliData.type === 'devin'
+                                    ? devinVersion
+                                    : ghVersion
                   }
                   currentVersion={
                     (cliData.type === 'claude' && isClaudeReinstall) ||
@@ -2965,6 +3206,7 @@ function OnboardingDialogContent() {
                       isCommandcodeReinstall) ||
                     (cliData.type === 'grok' && isGrokReinstall) ||
                     (cliData.type === 'kimi' && isKimiReinstall) ||
+                    (cliData.type === 'devin' && isDevinReinstall) ||
                     (cliData.type === 'gh' && isGhReinstall)
                       ? cliData.currentVersion
                       : null
@@ -2987,7 +3229,9 @@ function OnboardingDialogContent() {
                                 ? setGrokVersion
                                 : cliData.type === 'kimi'
                                   ? setKimiVersion
-                                  : setGhVersion
+                                  : cliData.type === 'devin'
+                                    ? setDevinVersion
+                                    : setGhVersion
                   }
                   onInstall={
                     cliData.type === 'claude'
@@ -3004,7 +3248,9 @@ function OnboardingDialogContent() {
                                 ? handleGrokInstall
                                 : cliData.type === 'kimi'
                                   ? handleKimiInstall
-                                  : handleGhInstall
+                                  : cliData.type === 'devin'
+                                    ? handleDevinInstall
+                                    : handleGhInstall
                   }
                 />
               )
@@ -3194,6 +3440,7 @@ interface SuccessStateProps {
   commandcodeVersion: string | null | undefined
   grokVersion: string | null | undefined
   kimiVersion: string | null | undefined
+  devinVersion: string | null | undefined
   ghVersion: string | null | undefined
   onContinue: () => void
 }
@@ -3208,6 +3455,7 @@ function SuccessState({
   commandcodeVersion,
   grokVersion,
   kimiVersion,
+  devinVersion,
   ghVersion,
   onContinue,
 }: SuccessStateProps) {
@@ -3228,6 +3476,7 @@ function SuccessState({
           {commandcodeVersion && <p>Command Code CLI: v{commandcodeVersion}</p>}
           {grokVersion && <p>Grok CLI: v{grokVersion}</p>}
           {kimiVersion && <p>Kimi Code CLI: v{kimiVersion}</p>}
+          {devinVersion && <p>Devin CLI: v{devinVersion}</p>}
           {ghVersion && <p>GitHub CLI: v{ghVersion}</p>}
           {!claudeVersion &&
             !codexVersion &&
@@ -3237,6 +3486,7 @@ function SuccessState({
             !commandcodeVersion &&
             !grokVersion &&
             !kimiVersion &&
+            !devinVersion &&
             !ghVersion && <p>Setup complete</p>}
         </div>
       </div>

@@ -285,6 +285,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "commandcode" => Backend::Commandcode,
         "grok" => Backend::Grok,
         "kimi" => Backend::Kimi,
+        "devin" => Backend::Devin,
         _ => Backend::Claude,
     };
 
@@ -307,6 +308,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "commandcode" => Backend::Commandcode,
                         "grok" => Backend::Grok,
                         "kimi" => Backend::Kimi,
+                        "devin" => Backend::Devin,
                         "claude" => Backend::Claude,
                         _ => resolved,
                     };
@@ -333,12 +335,19 @@ pub(crate) fn resolve_magic_prompt_backend(
             "commandcode" => return Backend::Commandcode,
             "grok" => return Backend::Grok,
             "kimi" => return Backend::Kimi,
+            // Devin ACP is wired for interactive chat. One-shot JSON magic
+            // prompts need a separate `devin --print` extractor before they
+            // can safely be enabled.
+            "devin" => return Backend::Claude,
             "codex" => return Backend::Codex,
             "claude" => return Backend::Claude,
             _ => {}
         }
     }
-    resolve_default_backend(app, worktree_id)
+    match resolve_default_backend(app, worktree_id) {
+        Backend::Devin => Backend::Claude,
+        backend => backend,
+    }
 }
 
 fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
@@ -354,6 +363,8 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Grok
     } else if model.starts_with("kimi/") {
         Backend::Kimi
+    } else if model.starts_with("devin/") {
+        Backend::Devin
     } else if crate::is_codex_model(model) {
         Backend::Codex
     } else {
@@ -421,6 +432,7 @@ fn default_model_for_backend(
         Backend::Commandcode => &preferences.selected_commandcode_model,
         Backend::Grok => &preferences.selected_grok_model,
         Backend::Kimi => &preferences.selected_kimi_model,
+        Backend::Devin => &preferences.selected_devin_model,
         Backend::Claude => &preferences.selected_model,
     };
 
@@ -917,6 +929,7 @@ pub async fn create_session(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("devin") => Backend::Devin,
         Some("claude") => Backend::Claude,
         _ => {
             // No explicit backend — check project default, then global preference
@@ -936,6 +949,8 @@ pub async fn create_session(
                     resolved = Backend::Grok;
                 } else if prefs.default_backend == "kimi" {
                     resolved = Backend::Kimi;
+                } else if prefs.default_backend == "devin" {
+                    resolved = Backend::Devin;
                 }
             }
             // Check project-level override
@@ -958,6 +973,7 @@ pub async fn create_session(
                             "commandcode" => Backend::Commandcode,
                             "grok" => Backend::Grok,
                             "kimi" => Backend::Kimi,
+                            "devin" => Backend::Devin,
                             "claude" => Backend::Claude,
                             _ => resolved,
                         };
@@ -2675,6 +2691,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Commandcode => session.commandcode_session_id = Some(sid.to_string()),
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
         Backend::Kimi => session.kimi_session_id = Some(sid.to_string()),
+        Backend::Devin => session.devin_session_id = Some(sid.to_string()),
     }
 }
 
@@ -2963,6 +2980,7 @@ pub async fn send_chat_message(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("devin") => Backend::Devin,
         Some("claude") => Backend::Claude,
         _ => session_backend.clone(),
     };
@@ -3036,6 +3054,9 @@ pub async fn send_chat_message(
     let kimi_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.kimi_session_id.clone());
+    let devin_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.devin_session_id.clone());
     // Command Code has no native resume id; a non-empty sentinel marks that a
     // prior Command Code turn completed in this worktree, so the next run can
     // pass `-c` (cwd-scoped continue) to resume the conversation.
@@ -3316,6 +3337,7 @@ pub async fn send_chat_message(
                     Backend::Commandcode => {}
                     Backend::Grok => {}
                     Backend::Kimi => {}
+                    Backend::Devin => {}
                 }
             }
         }
@@ -3368,6 +3390,7 @@ pub async fn send_chat_message(
     let thread_pi_session_id = pi_session_id.clone();
     let thread_grok_session_id = grok_session_id.clone();
     let thread_kimi_session_id = kimi_session_id.clone();
+    let thread_devin_session_id = devin_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
@@ -4935,6 +4958,42 @@ pub async fn send_chat_message(
                     Err(error) => Err(error),
                 }
             }
+            Backend::Devin => {
+                let system_prompt = build_kimi_system_prompt(
+                    &thread_app,
+                    &thread_worktree_id,
+                    thread_ai_language.as_deref(),
+                    thread_parallel_prompt.as_deref(),
+                );
+                match super::devin::execute_devin(super::devin::DevinExecutionOptions {
+                    app: &thread_app,
+                    jean_session_id: &thread_session_id,
+                    worktree_id: &thread_worktree_id,
+                    working_dir: std::path::Path::new(&thread_working_dir),
+                    existing_devin_session_id: thread_devin_session_id.as_deref(),
+                    model: thread_model.as_deref(),
+                    execution_mode: thread_execution_mode.as_deref(),
+                    message: &thread_message,
+                    system_prompt: system_prompt.as_deref(),
+                    pid_callback: Some(make_pid_callback()),
+                }) {
+                    Ok(response) => Ok((
+                        0,
+                        UnifiedResponse {
+                            content: response.content,
+                            resume_id: response.session_id,
+                            tool_calls: response.tool_calls,
+                            content_blocks: response.content_blocks,
+                            cancelled: response.cancelled,
+                            waiting_for_plan: false,
+                            error_emitted: false,
+                            usage: response.usage,
+                            backend: Backend::Devin,
+                        },
+                    )),
+                    Err(error) => Err(error),
+                }
+            }
         };
 
         let _ = tx.send(result);
@@ -5100,6 +5159,7 @@ pub async fn send_chat_message(
             | Backend::Commandcode
             | Backend::Grok
             | Backend::Kimi
+            | Backend::Devin
     ) && !unified_response.cancelled
         && !skip_synthetic_history
     {
@@ -5299,6 +5359,9 @@ pub async fn send_chat_message(
                         Backend::Kimi => {
                             session.kimi_session_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::Devin => {
+                            session.devin_session_id = Some(resume_id_for_log.clone());
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -5448,6 +5511,9 @@ pub async fn send_chat_message(
                     Backend::Kimi => {
                         session.kimi_session_id = Some(resume_id_for_log.clone());
                     }
+                    Backend::Devin => {
+                        session.devin_session_id = Some(resume_id_for_log.clone());
+                    }
                 }
             }
 
@@ -5553,6 +5619,7 @@ pub async fn clear_session_history(
             session.commandcode_session_id = None;
             session.grok_session_id = None;
             session.kimi_session_id = None;
+            session.devin_session_id = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_effort_level = selected_effort_level;
@@ -5672,6 +5739,7 @@ pub async fn set_session_backend(
                 "commandcode" => super::types::Backend::Commandcode,
                 "grok" => super::types::Backend::Grok,
                 "kimi" => super::types::Backend::Kimi,
+                "devin" => super::types::Backend::Devin,
                 _ => super::types::Backend::Claude,
             };
             log::trace!("Backend selection saved");
@@ -7836,6 +7904,8 @@ pub async fn get_session_debug_info(
     let cursor_chat_id = session.and_then(|s| s.cursor_chat_id.clone());
     let pi_session_id = session.and_then(|s| s.pi_session_id.clone());
     let grok_session_id = session.and_then(|s| s.grok_session_id.clone());
+    let kimi_session_id = session.and_then(|s| s.kimi_session_id.clone());
+    let devin_session_id = session.and_then(|s| s.devin_session_id.clone());
 
     // Try to find Claude CLI's JSONL file
     let claude_jsonl_file = claude_session_id.as_ref().and_then(|sid| {
@@ -7921,7 +7991,8 @@ pub async fn get_session_debug_info(
         pi_session_id,
         commandcode_session_id: None,
         grok_session_id,
-        kimi_session_id: session.and_then(|s| s.kimi_session_id.clone()),
+        kimi_session_id,
+        devin_session_id,
         claude_jsonl_file,
         run_log_files,
         total_usage,
