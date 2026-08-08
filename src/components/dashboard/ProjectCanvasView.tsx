@@ -1974,6 +1974,21 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       const autoOpen = useUIStore.getState().consumeAutoOpenSession(worktreeId)
       if (!autoOpen.shouldOpen) continue
 
+      // A new worktree always gets a Rust-created chat session. When the user
+      // prefers a terminal, hand off to the new-session picker instead of
+      // opening that chat session: with intent 'default' it resolves
+      // default_new_session_kind and auto-starts, so no dialog flashes.
+      const defaultKind = preferences?.default_new_session_kind
+      if (defaultKind && defaultKind !== 'chat') {
+        useUIStore.getState().openNewSessionModeModal({
+          worktreeId,
+          worktreePath: worktree.path,
+          origin: 'canvas',
+          intent: 'default',
+        })
+        break
+      }
+
       // Use specific session if provided, otherwise fall back to first session
       const targetSession = sessionData.sessions[0]
 
@@ -2006,6 +2021,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     readyWorktrees,
     flatCards,
     openWorktreeModal,
+    preferences?.default_new_session_kind,
   ])
 
   // Auto-select session when dashboard opens (visual selection only, no modal unless restore_last_session is on)

@@ -2386,7 +2386,6 @@ export function ChatWindow({
   // Investigate issue/PR and workflow run handlers
   const {
     handleInvestigate,
-    handleInvestigateWorkflowRun,
     handleReviewComments,
   } = useInvestigateHandlers({
     activeSessionId,
@@ -2514,7 +2513,6 @@ export function ChatWindow({
     handleMerge,
     handleMergePr,
     handleResolveConflicts,
-    handleInvestigateWorkflowRun,
     handleInvestigate,
     handleReviewComments,
     isModal,

@@ -9,6 +9,7 @@ pub mod linear_issues;
 mod names;
 pub mod pr_status;
 mod release_notes;
+pub mod review_terminal;
 pub mod saved_contexts;
 pub mod sentry_issues;
 pub mod storage;

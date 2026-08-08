@@ -73,7 +73,7 @@ fn kimi_mode(mode: Option<&str>) -> &'static str {
     }
 }
 
-fn kimi_model(model: Option<&str>) -> Option<&str> {
+pub(crate) fn kimi_model(model: Option<&str>) -> Option<&str> {
     model
         .and_then(|value| value.strip_prefix("kimi/").or(Some(value)))
         .filter(|value| !value.is_empty() && *value != "default")

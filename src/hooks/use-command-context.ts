@@ -14,11 +14,17 @@ import {
   resolveSessionDebugDetails,
 } from '@/lib/session-debug'
 import type { CommandContext } from '@/lib/commands/types'
-import type { AppPreferences, ClaudeModel } from '@/types/preferences'
+import type {
+  AppPreferences,
+  ClaudeModel,
+  CliBackend,
+} from '@/types/preferences'
 import {
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
+  resolveMagicPromptSurface,
 } from '@/types/preferences'
+import { attachBackendTerminalLaunch } from '@/lib/magic-prompt-terminal'
 import type {
   ThinkingLevel,
   ExecutionMode,
@@ -619,9 +625,14 @@ export function useCommandContext(
         fallbackModel:
           preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
       })
+      const reviewSurface = resolveMagicPromptSurface(
+        preferences?.magic_prompt_surfaces,
+        'code_review_surface',
+        preferences?.default_magic_prompt_surface
+      )
       let reviewSessionId: string | undefined
       await startCodeReviewsSequentially(configs, async config => {
-        const { job } = await invoke<StartReviewJobResponse>(
+        const { job, terminalLaunch } = await invoke<StartReviewJobResponse>(
           'start_review_job',
           {
             worktreeId: activeWorktreeId,
@@ -642,8 +653,17 @@ export function useCommandContext(
             reviewRunId: generateId(),
             reviewType: null,
             sessionId: reviewSessionId,
+            surface: reviewSurface,
           }
         )
+        if (terminalLaunch) {
+          attachBackendTerminalLaunch({
+            launch: terminalLaunch,
+            worktreeId: activeWorktreeId,
+            label: 'Code Review',
+            backend: config.backend as CliBackend,
+          })
+        }
         reviewSessionId ??= job.sessionId
       })
       queryClient.invalidateQueries({

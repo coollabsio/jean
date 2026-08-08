@@ -650,6 +650,7 @@ pub async fn dispatch_command(
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
             let review_type: Option<String> = field_opt(&args, "reviewType", "review_type")?;
             let session_id: Option<String> = field_opt(&args, "sessionId", "session_id")?;
+            let surface: Option<String> = from_field_opt(&args, "surface")?;
             let result = crate::projects::start_review_job(
                 app.clone(),
                 worktree_id,
@@ -663,6 +664,7 @@ pub async fn dispatch_command(
                 reasoning_effort,
                 review_type,
                 session_id,
+                surface,
             )
             .await?;
             to_value(result)
@@ -2055,6 +2057,12 @@ pub async fn dispatch_command(
             let parsed = parse_terminal_write_args(&args)?;
             crate::terminal::terminal_write(parsed.terminal_id, parsed.data).await?;
             Ok(Value::Null)
+        }
+        "resolve_terminal_model_args" => {
+            let backend: String = field(&args, "backend", "backend")?;
+            let model: Option<String> = field_opt(&args, "model", "model")?;
+            let result = crate::terminal::resolve_terminal_model_args(backend, model).await;
+            to_value(result)
         }
         "terminal_resize" => {
             let parsed = parse_terminal_resize_args(&args)?;

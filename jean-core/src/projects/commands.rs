@@ -9404,7 +9404,10 @@ fn emit_commit_job_update(app: &AppHandle, job: &CommitJob) {
 // =============================================================================
 
 /// JSON schema for structured code review output
-const REVIEW_SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string","description":"Brief 1-2 sentence summary of the overall changes, including notable good patterns if relevant"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","warning","suggestion"],"description":"Severity level of the finding"},"category":{"type":"string","enum":["security","correctness","data_loss","race_condition","api_contract","serialization","migration","testing","performance","maintainability","repo_standard"],"description":"Primary issue category"},"confidence":{"type":"string","enum":["high","medium"],"description":"Confidence in the finding. Use medium only for high-impact issues with explicitly stated uncertainty."},"blocking":{"type":"boolean","description":"Whether this should block approval until addressed"},"introduced_by_diff":{"type":"boolean","description":"Whether the issue was introduced or materially worsened by the reviewed changes"},"file":{"type":"string","description":"File path where the finding applies"},"line":{"type":"integer","description":"Line number if applicable, 0 if not specific"},"title":{"type":"string","description":"Short title for the finding (max 80 chars)"},"description":{"type":"string","description":"Detailed explanation of the issue and why it matters"},"failure_scenario":{"type":"string","description":"Concrete scenario or input where the issue manifests"},"suggestion":{"type":"string","description":"Minimal actionable code suggestion or fix"}},"required":["severity","category","confidence","blocking","introduced_by_diff","file","line","title","description","failure_scenario","suggestion"],"additionalProperties":false},"description":"List of review findings"},"approval_status":{"type":"string","enum":["approved","changes_requested","needs_discussion"],"description":"Overall review verdict"}},"required":["summary","findings","approval_status"],"additionalProperties":false}"#;
+///
+/// Shared with `review_terminal`, which embeds it directly in the prompt: a TUI
+/// has no `--output-schema` flag to carry it out of band.
+pub(crate) const REVIEW_SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string","description":"Brief 1-2 sentence summary of the overall changes, including notable good patterns if relevant"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["critical","warning","suggestion"],"description":"Severity level of the finding"},"category":{"type":"string","enum":["security","correctness","data_loss","race_condition","api_contract","serialization","migration","testing","performance","maintainability","repo_standard"],"description":"Primary issue category"},"confidence":{"type":"string","enum":["high","medium"],"description":"Confidence in the finding. Use medium only for high-impact issues with explicitly stated uncertainty."},"blocking":{"type":"boolean","description":"Whether this should block approval until addressed"},"introduced_by_diff":{"type":"boolean","description":"Whether the issue was introduced or materially worsened by the reviewed changes"},"file":{"type":"string","description":"File path where the finding applies"},"line":{"type":"integer","description":"Line number if applicable, 0 if not specific"},"title":{"type":"string","description":"Short title for the finding (max 80 chars)"},"description":{"type":"string","description":"Detailed explanation of the issue and why it matters"},"failure_scenario":{"type":"string","description":"Concrete scenario or input where the issue manifests"},"suggestion":{"type":"string","description":"Minimal actionable code suggestion or fix"}},"required":["severity","category","confidence","blocking","introduced_by_diff","file","line","title","description","failure_scenario","suggestion"],"additionalProperties":false},"description":"List of review findings"},"approval_status":{"type":"string","enum":["approved","changes_requested","needs_discussion"],"description":"Overall review verdict"}},"required":["summary","findings","approval_status"],"additionalProperties":false}"#;
 
 /// Prompt template for code review
 const REVIEW_PROMPT: &str = r#"<task>Review the following code changes and provide structured feedback</task>
@@ -10063,6 +10066,75 @@ pub async fn run_review_with_ai(
 #[serde(rename_all = "camelCase")]
 pub struct StartReviewJobResponse {
     pub job: ReviewJob,
+    /// Present when the review runs in a terminal; the frontend launches it.
+    ///
+    /// Terminals live in the frontend store — `start_terminal` only attaches a
+    /// PTY to an id the store already minted — so Rust owns the session, prompt
+    /// and watcher, and hands the launch back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_launch: Option<TerminalLaunch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalLaunch {
+    pub command: String,
+    pub args: Vec<String>,
+    pub session_id: String,
+}
+
+/// Resolve the CLI binary for a backend, for terminal review launches.
+fn resolve_review_cli_binary(app: &AppHandle, backend: &str) -> String {
+    match backend {
+        "codex" => crate::codex_cli::resolve_cli_binary(app)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "codex".to_string()),
+        "opencode" => crate::opencode_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+        "grok" => crate::grok_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+        "kimi" => crate::kimi_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+        "pi" => crate::pi_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+        "commandcode" => crate::commandcode_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+        "cursor" => crate::cursor_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+        _ => crate::claude_cli::resolve_cli_binary(app)
+            .to_string_lossy()
+            .to_string(),
+    }
+}
+
+/// Branch pair a terminal review should compare, mirroring `run_review_with_ai`.
+fn resolve_review_branches(
+    app: &AppHandle,
+    worktree_path: &str,
+) -> Result<(String, String), String> {
+    let data = load_projects_data(app)?;
+    let worktree = data
+        .worktrees
+        .iter()
+        .find(|w| w.path == worktree_path)
+        .ok_or_else(|| format!("Worktree not found: {worktree_path}"))?;
+    let project = data
+        .find_project(&worktree.project_id)
+        .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?;
+
+    let current_branch = git::get_current_branch(worktree_path)?;
+    let target_branch = select_target_branch(
+        None,
+        worktree.base_branch.as_deref(),
+        &project.default_branch,
+    );
+    Ok((current_branch, target_branch))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -10079,6 +10151,7 @@ pub async fn start_review_job(
     reasoning_effort: Option<String>,
     review_type: Option<String>,
     session_id: Option<String>,
+    surface: Option<String>,
 ) -> Result<StartReviewJobResponse, String> {
     let review_run_id = review_run_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let job_id = Uuid::new_v4().to_string();
@@ -10146,6 +10219,142 @@ pub async fn start_review_job(
     }
 
     emit_review_job_update(&app, &job);
+
+    // Terminal surface: the agent runs interactively and writes its verdict to a
+    // file we watch, instead of us capturing a headless process's stdout.
+    if surface.as_deref() == Some("terminal") && source != "coderabbit-cli" {
+        let review_backend = backend.clone().unwrap_or_else(|| "claude".to_string());
+        let result_path = match crate::projects::review_terminal::review_result_path(
+            &app,
+            &review_run_id,
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                REVIEW_JOB_REGISTRY.mark_failed(&job_id, error.clone());
+                return Err(error);
+            }
+        };
+
+        // A review that dirties the tree it is reviewing would corrupt its own
+        // next run, so refuse rather than write inside the worktree.
+        if !crate::projects::review_terminal::is_outside_worktree(&result_path, &worktree_path) {
+            let error = "Review result path must live outside the worktree".to_string();
+            REVIEW_JOB_REGISTRY.mark_failed(&job_id, error.clone());
+            return Err(error);
+        }
+
+        let (current_branch, target_branch) = match resolve_review_branches(&app, &worktree_path) {
+            Ok(pair) => pair,
+            Err(error) => {
+                REVIEW_JOB_REGISTRY.mark_failed(&job_id, error.clone());
+                return Err(error);
+            }
+        };
+
+        let prompt = crate::projects::review_terminal::build_terminal_review_prompt(
+            &current_branch,
+            &target_branch,
+            &result_path,
+            custom_prompt.as_deref(),
+        );
+
+        let command = resolve_review_cli_binary(&app, &review_backend);
+        let mut args =
+            crate::terminal::resolve_terminal_model_args(review_backend.clone(), model.clone())
+                .await;
+        args.push(prompt);
+
+        let watcher_app = app.clone();
+        let watcher_job_id = job_id.clone();
+        let watcher_session_id = session_id.clone();
+        let watcher_worktree_id = worktree_id.clone();
+        let watcher_worktree_path = worktree_path.clone();
+        let watcher_backend = review_backend.clone();
+        let watcher_model = model.clone().unwrap_or_else(|| "default".to_string());
+        let watcher_path = result_path.clone();
+        tauri::async_runtime::spawn(async move {
+            let outcome = crate::projects::review_terminal::watch_for_review_result(
+                &watcher_path,
+                crate::projects::review_terminal::TERMINAL_REVIEW_TIMEOUT,
+            )
+            .await;
+
+            match outcome {
+                crate::projects::review_terminal::TerminalReviewOutcome::Completed(response) => {
+                    if let Some(job) = REVIEW_JOB_REGISTRY.mark_completed(
+                        &watcher_job_id,
+                        watcher_session_id.clone(),
+                        &response,
+                    ) {
+                        let _ = update_review_session_entry(
+                            &watcher_app,
+                            &watcher_worktree_id,
+                            &watcher_worktree_path,
+                            &watcher_session_id,
+                            &watcher_backend,
+                            &watcher_model,
+                            ReviewJobStatus::Completed,
+                            Some(&response),
+                            None,
+                        );
+                        emit_review_job_update(&watcher_app, &job);
+                    }
+                }
+                crate::projects::review_terminal::TerminalReviewOutcome::Malformed {
+                    error,
+                    raw,
+                } => {
+                    // Attach the raw body so a bad write is inspectable rather
+                    // than silently discarded.
+                    let detail = format!("{error}\n\n{raw}");
+                    if let Some(job) = REVIEW_JOB_REGISTRY.mark_failed(&watcher_job_id, detail.clone())
+                    {
+                        let _ = update_review_session_entry(
+                            &watcher_app,
+                            &watcher_worktree_id,
+                            &watcher_worktree_path,
+                            &watcher_session_id,
+                            &watcher_backend,
+                            &watcher_model,
+                            ReviewJobStatus::Failed,
+                            None,
+                            Some(&detail),
+                        );
+                        emit_review_job_update(&watcher_app, &job);
+                    }
+                }
+                crate::projects::review_terminal::TerminalReviewOutcome::TimedOut => {
+                    let detail = "Terminal review timed out before writing a result".to_string();
+                    if let Some(job) = REVIEW_JOB_REGISTRY.mark_failed(&watcher_job_id, detail.clone())
+                    {
+                        let _ = update_review_session_entry(
+                            &watcher_app,
+                            &watcher_worktree_id,
+                            &watcher_worktree_path,
+                            &watcher_session_id,
+                            &watcher_backend,
+                            &watcher_model,
+                            ReviewJobStatus::Failed,
+                            None,
+                            Some(&detail),
+                        );
+                        emit_review_job_update(&watcher_app, &job);
+                    }
+                }
+            }
+
+            crate::projects::review_terminal::cleanup_review_result(&watcher_path);
+        });
+
+        return Ok(StartReviewJobResponse {
+            job,
+            terminal_launch: Some(TerminalLaunch {
+                command,
+                args,
+                session_id,
+            }),
+        });
+    }
 
     let task_app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -10244,7 +10453,10 @@ pub async fn start_review_job(
         }
     });
 
-    Ok(StartReviewJobResponse { job })
+    Ok(StartReviewJobResponse {
+        job,
+        terminal_launch: None,
+    })
 }
 
 fn update_review_session_entry(

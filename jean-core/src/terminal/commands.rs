@@ -185,6 +185,60 @@ pub async fn get_ports(worktree_path: String) -> Vec<crate::projects::types::Por
         .unwrap_or_default()
 }
 
+/// Model-selection args for launching a CLI as an interactive TUI.
+///
+/// Reuses each backend's existing normalizer rather than reimplementing them in
+/// the frontend: the rules are non-obvious (opencode keeps its `opencode/`
+/// prefix when opencode *is* the provider, codex remaps fast variants, grok maps
+/// retired ids forward) and a second copy would drift.
+///
+/// Returns an empty vec when the model is unset or means "CLI default", so the
+/// caller can splice it into an argv list unconditionally.
+pub async fn resolve_terminal_model_args(backend: String, model: Option<String>) -> Vec<String> {
+    let model = model
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let Some(model) = model else {
+        return Vec::new();
+    };
+
+    match backend.as_str() {
+        // Claude accepts Jean's ids verbatim (including `[1m]`); only the
+        // `-fast` suffix is a Jean-side concept.
+        "claude" => {
+            let (actual, _fast) = crate::chat::codex::split_fast_model(&model);
+            vec!["--model".to_string(), actual.to_string()]
+        }
+        "codex" => {
+            let (actual, _fast) = crate::chat::codex::split_fast_model(&model);
+            vec!["--model".to_string(), actual.to_string()]
+        }
+        "opencode" => match crate::chat::opencode::parse_provider_model(Some(&model)) {
+            Some((provider, model_id)) => {
+                vec!["--model".to_string(), format!("{provider}/{model_id}")]
+            }
+            None => Vec::new(),
+        },
+        "grok" => match crate::chat::grok::raw_grok_model(Some(&model)) {
+            Some(value) if !value.is_empty() => {
+                vec!["--model".to_string(), value.to_string()]
+            }
+            _ => Vec::new(),
+        },
+        "kimi" => match crate::chat::kimi::kimi_model(Some(&model)) {
+            Some(value) => vec!["--model".to_string(), value.to_string()],
+            None => Vec::new(),
+        },
+        "commandcode" => match crate::chat::commandcode::normalize_model_for_cli(Some(&model)) {
+            Some(value) => vec!["--model".to_string(), value],
+            None => Vec::new(),
+        },
+        // cursor: no verified interactive --model flag; pi: model is chosen by
+        // the CLI's own config. Leave both to the CLI default.
+        _ => Vec::new(),
+    }
+}
+
 /// Write data to a terminal (stdin)
 pub async fn terminal_write(terminal_id: String, data: String) -> Result<(), String> {
     write_to_terminal(&terminal_id, &data)?;
@@ -469,5 +523,87 @@ mod tests {
         let invalid = tempfile::tempdir().expect("temp dir");
         fs::write(invalid.path().join("package.json"), "not json").expect("write package.json");
         assert!(read_package_scripts(invalid.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn terminal_model_args_are_empty_without_a_model() {
+        assert!(resolve_terminal_model_args("claude".into(), None)
+            .await
+            .is_empty());
+        assert!(resolve_terminal_model_args("claude".into(), Some("  ".into()))
+            .await
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn claude_keeps_jean_model_ids_verbatim() {
+        // The `[1m]` suffix is valid CLI input; only `-fast` is Jean-side.
+        assert_eq!(
+            resolve_terminal_model_args("claude".into(), Some("claude-opus-4-8[1m]".into())).await,
+            vec!["--model".to_string(), "claude-opus-4-8[1m]".to_string()]
+        );
+        assert_eq!(
+            resolve_terminal_model_args("claude".into(), Some("claude-opus-5".into())).await,
+            vec!["--model".to_string(), "claude-opus-5".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_fast_variants_map_to_their_base_model() {
+        assert_eq!(
+            resolve_terminal_model_args("codex".into(), Some("gpt-5.6-luna-fast".into())).await,
+            vec!["--model".to_string(), "gpt-5.6-luna".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn opencode_keeps_its_prefix_when_opencode_is_the_provider() {
+        assert_eq!(
+            resolve_terminal_model_args("opencode".into(), Some("opencode/gpt-5.6-sol".into()))
+                .await,
+            vec!["--model".to_string(), "opencode/gpt-5.6-sol".to_string()]
+        );
+        // ...but strips it when a real provider follows.
+        assert_eq!(
+            resolve_terminal_model_args("opencode".into(), Some("opencode/ollama/Qwen".into()))
+                .await,
+            vec!["--model".to_string(), "ollama/Qwen".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn prefixed_backends_are_stripped() {
+        assert_eq!(
+            resolve_terminal_model_args("grok".into(), Some("grok/grok-4.5".into())).await,
+            vec!["--model".to_string(), "grok-4.5".to_string()]
+        );
+        assert_eq!(
+            resolve_terminal_model_args("kimi".into(), Some("kimi/k2.5".into())).await,
+            vec!["--model".to_string(), "k2.5".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_default_sentinels_yield_no_args() {
+        assert!(
+            resolve_terminal_model_args("commandcode".into(), Some("commandcode/default".into()))
+                .await
+                .is_empty()
+        );
+        assert!(resolve_terminal_model_args("kimi".into(), Some("kimi/default".into()))
+            .await
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn backends_without_a_verified_model_flag_get_none() {
+        assert!(
+            resolve_terminal_model_args("cursor".into(), Some("cursor/auto".into()))
+                .await
+                .is_empty()
+        );
+        assert!(resolve_terminal_model_args("pi".into(), Some("pi/sonnet".into()))
+            .await
+            .is_empty());
     }
 }

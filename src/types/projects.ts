@@ -570,6 +570,17 @@ export interface ReviewJob {
 
 export interface StartReviewJobResponse {
   job: ReviewJob
+  /**
+   * Present when the review runs in a terminal.
+   *
+   * Terminals are minted in the frontend store, so Rust owns the session,
+   * prompt and result watcher and hands the launch back for the UI to spawn.
+   */
+  terminalLaunch?: {
+    command: string
+    args: string[]
+    sessionId: string
+  }
 }
 
 // =============================================================================

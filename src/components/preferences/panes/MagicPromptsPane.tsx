@@ -34,6 +34,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
@@ -120,6 +123,10 @@ import {
   type MagicPromptReasoningEfforts,
   type MagicPromptProviders,
   type MagicPromptBackends,
+  type MagicPromptSurfaces,
+  type MagicPromptSurface,
+  DEFAULT_MAGIC_PROMPT_SURFACES,
+  resolveMagicPromptSurface,
   type MagicPromptModel,
   type MagicPromptModes,
   type MagicPromptExecutionMode,
@@ -128,11 +135,44 @@ import {
   type CustomCliProfile,
 } from '@/types/preferences'
 import { cn } from '@/lib/utils'
-import { BackendLabel } from '@/components/ui/backend-label'
+import {
+  BackendLabel,
+  getBackendPlainLabel,
+} from '@/components/ui/backend-label'
 import {
   codeReviewConfigKey,
   resolveCodeReviewConfigs,
 } from '@/lib/code-review-configs'
+
+/**
+ * Surface half of a preset patch.
+ *
+ * Presets set the *global* surface and clear the per-prompt overrides rather
+ * than writing the same value into all 11 keys: one value to reason about, and
+ * per-prompt entries stay meaningful as deliberate exceptions.
+ */
+/**
+ * CLIs that can host a magic prompt as an interactive TUI.
+ *
+ * Cursor is absent: it has no verified way to carry an initial prompt into an
+ * interactive session the way the others do.
+ */
+const TERMINAL_PRESET_BACKENDS: CliBackend[] = [
+  'claude',
+  'codex',
+  'opencode',
+  'pi',
+  'commandcode',
+  'grok',
+  'kimi',
+]
+
+function surfacePatch(surface: MagicPromptSurface) {
+  return {
+    default_magic_prompt_surface: surface,
+    magic_prompt_surfaces: DEFAULT_MAGIC_PROMPT_SURFACES,
+  }
+}
 
 interface VariableInfo {
   name: string
@@ -145,6 +185,13 @@ interface PromptConfig {
   effortKey?: keyof MagicPromptReasoningEfforts
   providerKey?: keyof MagicPromptProviders
   backendKey?: keyof MagicPromptBackends
+  /**
+   * Present only for prompts that can run in a terminal. Prompts whose output
+   * Jean consumes as a value (commit message, PR content, release notes,
+   * session naming, context summary) have no key here — a TUI returns a screen,
+   * not a string.
+   */
+  surfaceKey?: keyof MagicPromptSurfaces
   modeKey?: keyof MagicPromptModes
   label: string
   description: string
@@ -168,6 +215,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_issue_effort',
         providerKey: 'investigate_issue_provider',
         backendKey: 'investigate_issue_backend',
+        surfaceKey: 'investigate_issue_surface',
         modeKey: 'investigate_issue_mode',
         label: 'Investigate Issue',
         description:
@@ -191,6 +239,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_pr_effort',
         providerKey: 'investigate_pr_provider',
         backendKey: 'investigate_pr_backend',
+        surfaceKey: 'investigate_pr_surface',
         modeKey: 'investigate_pr_mode',
         label: 'Investigate PR',
         description:
@@ -214,6 +263,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_workflow_run_effort',
         providerKey: 'investigate_workflow_run_provider',
         backendKey: 'investigate_workflow_run_backend',
+        surfaceKey: 'investigate_workflow_run_surface',
         modeKey: 'investigate_workflow_run_mode',
         label: 'Investigate Workflow Run',
         description:
@@ -243,6 +293,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_security_alert_effort',
         providerKey: 'investigate_security_alert_provider',
         backendKey: 'investigate_security_alert_backend',
+        surfaceKey: 'investigate_security_alert_surface',
         modeKey: 'investigate_security_alert_mode',
         label: 'Investigate Dependabot Alert',
         description:
@@ -267,6 +318,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_advisory_effort',
         providerKey: 'investigate_advisory_provider',
         backendKey: 'investigate_advisory_backend',
+        surfaceKey: 'investigate_advisory_surface',
         modeKey: 'investigate_advisory_mode',
         label: 'Investigate Security Advisory',
         description: 'Prompt for investigating repository security advisories.',
@@ -289,6 +341,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_linear_issue_effort',
         providerKey: 'investigate_linear_issue_provider',
         backendKey: 'investigate_linear_issue_backend',
+        surfaceKey: 'investigate_linear_issue_surface',
         modeKey: 'investigate_linear_issue_mode',
         label: 'Investigate Linear Issue',
         description:
@@ -316,6 +369,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'investigate_sentry_issue_effort',
         providerKey: 'investigate_sentry_issue_provider',
         backendKey: 'investigate_sentry_issue_backend',
+        surfaceKey: 'investigate_sentry_issue_surface',
         modeKey: 'investigate_sentry_issue_mode',
         label: 'Investigate Sentry Issue',
         description:
@@ -348,6 +402,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'code_review_effort',
         providerKey: 'code_review_provider',
         backendKey: 'code_review_backend',
+        surfaceKey: 'code_review_surface',
         label: 'Code Review',
         description:
           'Prompt for AI-powered code review of your changes. Each reviewer row has its own Mode for sessions created when sending that reviewer’s findings to chat.',
@@ -372,6 +427,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'final_review_effort',
         providerKey: 'final_review_provider',
         backendKey: 'final_review_backend',
+        surfaceKey: 'final_review_surface',
         modeKey: 'final_review_mode',
         label: 'Final Review',
         description:
@@ -386,6 +442,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'review_comments_effort',
         providerKey: 'review_comments_provider',
         backendKey: 'review_comments_backend',
+        surfaceKey: 'review_comments_surface',
         modeKey: 'review_comments_mode',
         label: 'Review Comments',
         description:
@@ -471,6 +528,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         effortKey: 'resolve_conflicts_effort',
         providerKey: 'resolve_conflicts_provider',
         backendKey: 'resolve_conflicts_backend',
+        surfaceKey: 'resolve_conflicts_surface',
         modeKey: 'resolve_conflicts_mode',
         label: 'Resolve Conflicts',
         description: 'Instructions appended to conflict resolution prompts.',
@@ -860,6 +918,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     ? (currentModes[selectedConfig.modeKey] ??
       DEFAULT_MAGIC_PROMPT_MODES[selectedConfig.modeKey])
     : undefined
+  const currentSurface = selectedConfig.surfaceKey
+    ? resolveMagicPromptSurface(
+        preferences?.magic_prompt_surfaces,
+        selectedConfig.surfaceKey,
+        preferences?.default_magic_prompt_surface
+      )
+    : undefined
   // Resolve effective backend for model filtering: per-operation override > global default_backend
   const effectiveBackend =
     currentBackend ?? preferences?.default_backend ?? 'claude'
@@ -1042,12 +1107,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       ? codeReviewConfigs.some(config => config.backend === 'claude')
       : effectiveBackend === 'claude')
   const hasPromptConfigControls =
-    selectedKey !== 'code_review' &&
+    currentSurface !== undefined ||
+    (selectedKey !== 'code_review' &&
     (currentBackend !== undefined ||
       showProviderControl ||
       Boolean(currentModel) ||
       Boolean(selectedConfig.effortKey) ||
-      Boolean(currentMode))
+      Boolean(currentMode)))
 
   const saveCodeReviewConfigs = useCallback(
     (configs: MagicCodeReviewConfig[]) => {
@@ -1361,6 +1427,46 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     ]
   )
 
+  /**
+   * One control for "where does this run", because the two questions are not
+   * independent: choosing a terminal *is* choosing the CLI. Values are `chat`
+   * or `terminal:<backend>`, and picking a terminal writes the backend too, so
+   * the Backend row can disappear rather than ask again.
+   */
+  const handleSurfaceChange = useCallback(
+    (value: string) => {
+      if (!preferences || !selectedConfig.surfaceKey) return
+      const [surface, backend] = value.split(':') as [
+        MagicPromptSurface,
+        CliBackend | undefined,
+      ]
+
+      const patch: Parameters<typeof patchPreferences.mutate>[0] = {
+        magic_prompt_surfaces: {
+          ...DEFAULT_MAGIC_PROMPT_SURFACES,
+          ...preferences.magic_prompt_surfaces,
+          [selectedConfig.surfaceKey]: surface,
+        },
+      }
+
+      if (surface === 'terminal' && backend && selectedConfig.backendKey) {
+        patch.magic_prompt_backends = {
+          ...currentBackends,
+          [selectedConfig.backendKey]: backend,
+        }
+      }
+
+      patchPreferences.mutate(patch)
+    },
+    [
+      preferences,
+      patchPreferences,
+      selectedConfig.surfaceKey,
+      selectedConfig.backendKey,
+      currentBackends,
+    ]
+  )
+
   const handleBackendChange = useCallback(
     (backend: string) => {
       if (!preferences || !selectedConfig.backendKey) return
@@ -1452,9 +1558,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     [preferences, patchPreferences, currentModes, selectedConfig.modeKey]
   )
 
-  const handleApplyClaudeDefaults = useCallback(() => {
+  const handleApplyClaudeDefaults = useCallback((surface: MagicPromptSurface) => {
     if (!preferences) return
     patchPreferences.mutate({
+      ...surfacePatch(surface),
       magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,
       magic_code_review_configs: [
         makeCodeReviewConfig(
@@ -1474,7 +1581,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   }, [preferences, patchPreferences, modelCatalog])
 
   const handleApplyCodexDefaults = useCallback(
-    (models: MagicPromptModels) => {
+    (models: MagicPromptModels, surface: MagicPromptSurface) => {
       if (!preferences) return
       const presetModels = {
         ...models,
@@ -1482,6 +1589,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           CODEX_56_LUNA_FAST_DEFAULT_MAGIC_PROMPT_MODELS.commit_message_model,
       }
       patchPreferences.mutate({
+        ...surfacePatch(surface),
         magic_prompt_models: presetModels,
         magic_code_review_configs: [
           makeCodeReviewConfig(modelCatalog, 'codex', models.code_review_model),
@@ -1501,18 +1609,21 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   )
 
   const handleApplyLegacyCodexDefaults = useCallback(
-    () => handleApplyCodexDefaults(CODEX_DEFAULT_MAGIC_PROMPT_MODELS),
+    (surface: MagicPromptSurface) =>
+      handleApplyCodexDefaults(CODEX_DEFAULT_MAGIC_PROMPT_MODELS, surface),
     [handleApplyCodexDefaults]
   )
 
   const handleApplyCodexFastDefaults = useCallback(
-    () => handleApplyCodexDefaults(CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS),
+    (surface: MagicPromptSurface) =>
+      handleApplyCodexDefaults(CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS, surface),
     [handleApplyCodexDefaults]
   )
 
-  const handleApplyOpenCodeDefaults = useCallback(() => {
+  const handleApplyOpenCodeDefaults = useCallback((surface: MagicPromptSurface) => {
     if (!preferences) return
     patchPreferences.mutate({
+      ...surfacePatch(surface),
       magic_prompt_models: OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
       magic_code_review_configs: [
         makeCodeReviewConfig(
@@ -1530,9 +1641,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     })
   }, [preferences, patchPreferences, modelCatalog])
 
-  const handleApplyPiDefaults = useCallback(() => {
+  const handleApplyPiDefaults = useCallback((surface: MagicPromptSurface) => {
     if (!preferences) return
     patchPreferences.mutate({
+      ...surfacePatch(surface),
       magic_prompt_models: PI_DEFAULT_MAGIC_PROMPT_MODELS,
       magic_code_review_configs: [
         makeCodeReviewConfig(
@@ -1550,9 +1662,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     })
   }, [preferences, patchPreferences, modelCatalog])
 
-  const handleApplyCommandCodeDefaults = useCallback(() => {
+  const handleApplyCommandCodeDefaults = useCallback((surface: MagicPromptSurface) => {
     if (!preferences) return
     patchPreferences.mutate({
+      ...surfacePatch(surface),
       magic_prompt_models: COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
       magic_code_review_configs: [
         makeCodeReviewConfig(
@@ -1566,9 +1679,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     })
   }, [preferences, patchPreferences])
 
-  const handleApplyGrokDefaults = useCallback(() => {
+  const handleApplyGrokDefaults = useCallback((surface: MagicPromptSurface) => {
     if (!preferences) return
     patchPreferences.mutate({
+      ...surfacePatch(surface),
       magic_prompt_models: GROK_DEFAULT_MAGIC_PROMPT_MODELS,
       magic_code_review_configs: [
         makeCodeReviewConfig(
@@ -1587,9 +1701,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     })
   }, [preferences, patchPreferences, modelCatalog])
 
-  const handleApplyKimiDefaults = useCallback(() => {
+  const handleApplyKimiDefaults = useCallback((surface: MagicPromptSurface) => {
     if (!preferences) return
     patchPreferences.mutate({
+      ...surfacePatch(surface),
       magic_prompt_models: KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
       magic_code_review_configs: [
         makeCodeReviewConfig(
@@ -1606,6 +1721,102 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       ),
     })
   }, [preferences, patchPreferences, modelCatalog])
+
+  /**
+   * Preset entries for one surface.
+   *
+   * `backend` is set only for terminal submenus, where it filters the list to
+   * that CLI's presets. Jean Chat gets everything, because it can run any
+   * backend headlessly.
+   */
+  const renderPresetItems = useCallback(
+    (surface: MagicPromptSurface, backend?: CliBackend) => {
+      const show = (candidate: CliBackend) =>
+        (backend === undefined || backend === candidate) &&
+        installedBackends.includes(candidate)
+
+      const items: React.ReactNode[] = []
+
+      if (show('claude')) {
+        items.push(
+          <DropdownMenuItem
+            key="claude"
+            onSelect={() => handleApplyClaudeDefaults(surface)}
+          >
+            Claude Defaults
+          </DropdownMenuItem>
+        )
+      }
+
+      if (show('codex')) {
+        const codexPresets: [string, MagicPromptModels][] = [
+          ['GPT 5.6 Sol', CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS],
+          ['GPT 5.6 Sol Fast', CODEX_56_SOL_FAST_DEFAULT_MAGIC_PROMPT_MODELS],
+          ['GPT 5.6 Luna', CODEX_56_LUNA_DEFAULT_MAGIC_PROMPT_MODELS],
+          ['GPT 5.6 Luna Fast', CODEX_56_LUNA_FAST_DEFAULT_MAGIC_PROMPT_MODELS],
+          ['GPT 5.6 Terra', CODEX_56_TERRA_DEFAULT_MAGIC_PROMPT_MODELS],
+          [
+            'GPT 5.6 Terra Fast',
+            CODEX_56_TERRA_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
+          ],
+        ]
+        for (const [label, models] of codexPresets) {
+          items.push(
+            <DropdownMenuItem
+              key={label}
+              onSelect={() => handleApplyCodexDefaults(models, surface)}
+            >
+              {label}
+            </DropdownMenuItem>
+          )
+        }
+        items.push(
+          <DropdownMenuItem
+            key="codex-legacy"
+            onSelect={() => handleApplyLegacyCodexDefaults(surface)}
+          >
+            Codex Defaults
+          </DropdownMenuItem>,
+          <DropdownMenuItem
+            key="codex-fast"
+            onSelect={() => handleApplyCodexFastDefaults(surface)}
+          >
+            Codex (Fast) Defaults
+          </DropdownMenuItem>
+        )
+      }
+
+      const simple: [CliBackend, string, (s: MagicPromptSurface) => void][] = [
+        ['opencode', 'OpenCode Defaults', handleApplyOpenCodeDefaults],
+        ['pi', 'Pi Defaults', handleApplyPiDefaults],
+        ['commandcode', 'Command Code Defaults', handleApplyCommandCodeDefaults],
+        ['grok', 'Grok Defaults', handleApplyGrokDefaults],
+        ['kimi', 'Kimi Code Defaults', handleApplyKimiDefaults],
+      ]
+      for (const [candidate, label, handler] of simple) {
+        if (!show(candidate)) continue
+        items.push(
+          <DropdownMenuItem key={candidate} onSelect={() => handler(surface)}>
+            {label}
+          </DropdownMenuItem>
+        )
+      }
+
+      return items
+    },
+    [
+      installedBackends,
+      handleApplyClaudeDefaults,
+      handleApplyCodexDefaults,
+      handleApplyLegacyCodexDefaults,
+      handleApplyCodexFastDefaults,
+      handleApplyOpenCodeDefaults,
+      handleApplyPiDefaults,
+      handleApplyCommandCodeDefaults,
+      handleApplyGrokDefaults,
+      handleApplyKimiDefaults,
+    ]
+  )
 
   // Flush pending save when switching prompts
   const prevSelectedKeyRef = useRef(selectedKey)
@@ -1648,116 +1859,30 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem
-              onSelect={handleApplyClaudeDefaults}
-              disabled={!installedBackends.includes('claude')}
-            >
-              Claude Defaults
-            </DropdownMenuItem>
+            {/*
+              Surface first, then presets. In terminal mode the surface is tied
+              to one CLI, so only that CLI's presets are offered — a Codex model
+              preset under "Claude terminal" would be nonsense.
+            */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Jean Chat</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {renderPresetItems('chat')}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() =>
-                handleApplyCodexDefaults(
-                  CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS
-                )
-              }
-              disabled={!installedBackends.includes('codex')}
-            >
-              GPT 5.6 Sol
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                handleApplyCodexDefaults(
-                  CODEX_56_SOL_FAST_DEFAULT_MAGIC_PROMPT_MODELS
-                )
-              }
-              disabled={!installedBackends.includes('codex')}
-            >
-              GPT 5.6 Sol Fast
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                handleApplyCodexDefaults(
-                  CODEX_56_LUNA_DEFAULT_MAGIC_PROMPT_MODELS
-                )
-              }
-              disabled={!installedBackends.includes('codex')}
-            >
-              GPT 5.6 Luna
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                handleApplyCodexDefaults(
-                  CODEX_56_LUNA_FAST_DEFAULT_MAGIC_PROMPT_MODELS
-                )
-              }
-              disabled={!installedBackends.includes('codex')}
-            >
-              GPT 5.6 Luna Fast
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                handleApplyCodexDefaults(
-                  CODEX_56_TERRA_DEFAULT_MAGIC_PROMPT_MODELS
-                )
-              }
-              disabled={!installedBackends.includes('codex')}
-            >
-              GPT 5.6 Terra
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                handleApplyCodexDefaults(
-                  CODEX_56_TERRA_FAST_DEFAULT_MAGIC_PROMPT_MODELS
-                )
-              }
-              disabled={!installedBackends.includes('codex')}
-            >
-              GPT 5.6 Terra Fast
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={handleApplyLegacyCodexDefaults}
-              disabled={!installedBackends.includes('codex')}
-            >
-              Codex Defaults
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={handleApplyCodexFastDefaults}
-              disabled={!installedBackends.includes('codex')}
-            >
-              Codex (Fast) Defaults
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={handleApplyOpenCodeDefaults}
-              disabled={!installedBackends.includes('opencode')}
-            >
-              OpenCode Defaults
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={handleApplyPiDefaults}
-              disabled={!installedBackends.includes('pi')}
-            >
-              Pi Defaults
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={handleApplyCommandCodeDefaults}
-              disabled={!installedBackends.includes('commandcode')}
-            >
-              Command Code Defaults
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={handleApplyGrokDefaults}
-              disabled={!installedBackends.includes('grok')}
-            >
-              Grok Defaults
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={handleApplyKimiDefaults}
-              disabled={!installedBackends.includes('kimi')}
-            >
-              Kimi Code Defaults
-            </DropdownMenuItem>
+            {TERMINAL_PRESET_BACKENDS.filter(backend =>
+              installedBackends.includes(backend)
+            ).map(backend => (
+              <DropdownMenuSub key={backend}>
+                <DropdownMenuSubTrigger>
+                  {getBackendPlainLabel(backend)} terminal
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {renderPresetItems('terminal', backend)}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -2060,7 +2185,51 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 </Button>
               </div>
             )}
-            {selectedKey !== 'code_review' && currentBackend !== undefined && (
+            {currentSurface !== undefined && (
+              <div
+                data-testid="magic-prompt-surface-control"
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
+              >
+                <span className="text-xs text-muted-foreground">Runs in</span>
+                <Select
+                  value={
+                    currentSurface === 'terminal'
+                      ? `terminal:${effectiveBackend}`
+                      : 'chat'
+                  }
+                  onValueChange={handleSurfaceChange}
+                >
+                  <SelectTrigger
+                    aria-label="Runs in"
+                    size="sm"
+                    className="w-full min-w-0 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="chat">Jean Chat</SelectItem>
+                    {TERMINAL_PRESET_BACKENDS.filter(backend =>
+                      installedBackends.includes(backend)
+                    ).map(backend => (
+                      <SelectItem key={backend} value={`terminal:${backend}`}>
+                        {getBackendPlainLabel(backend)} terminal
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {currentSurface === 'terminal' && (
+                  <p className="col-start-2 text-[11px] leading-4 text-muted-foreground">
+                    Terminal runs get Jean&apos;s system prompt and loaded
+                    context. MCP servers, the parallel execution prompt, and AI
+                    language still apply to Jean Chat only.
+                  </p>
+                )}
+              </div>
+            )}
+            {/* Hidden in terminal mode: the "Runs in" choice already named the CLI. */}
+            {selectedKey !== 'code_review' &&
+              currentBackend !== undefined &&
+              currentSurface !== 'terminal' && (
               <div
                 data-testid="magic-prompt-backend-control"
                 className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
