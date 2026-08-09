@@ -132,6 +132,7 @@ fn persist_native_cli_session_id(
             ("antigravity", Backend::Antigravity) => {
                 metadata.antigravity_session_id = Some(native_session_id.to_string())
             }
+            ("pi", Backend::Pi) => metadata.pi_session_id = Some(native_session_id.to_string()),
             _ => {
                 return Err(format!(
                     "Backend {backend} does not match session {jean_session_id}"
@@ -303,6 +304,7 @@ fn load_native_sessions_uncached(
         "antigravity" => {
             list_antigravity_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS)
         }
+        "pi" => list_pi_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS),
         "commandcode" => Ok(Vec::new()),
         other => Err(format!("Unsupported native CLI history backend: {other}")),
     }
@@ -517,6 +519,28 @@ fn list_antigravity_sessions(
     };
     let mut results = Vec::new();
     push_if_matches(&mut results, session, query);
+    sort_and_limit(results, limit)
+}
+
+fn list_pi_sessions(
+    worktree_path: &str,
+    query: Option<&str>,
+    limit: usize,
+) -> Result<Vec<NativeCliHistorySession>, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(Vec::new());
+    };
+    let sessions_root = home.join(".pi").join("agent").join("sessions");
+    if !sessions_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    for path in collect_jsonl_files(&sessions_root, None)? {
+        if let Some(session) = parse_pi_session_file(&path, worktree_path) {
+            push_if_matches(&mut results, session, query);
+        }
+    }
     sort_and_limit(results, limit)
 }
 
@@ -896,6 +920,72 @@ fn parse_opencode_session_identity(path: &Path, worktree_path: &str) -> Option<S
         .get("id")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn parse_pi_session_file(path: &Path, worktree_path: &str) -> Option<NativeCliHistorySession> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut id = None;
+    let mut cwd = None;
+    let mut title = None;
+
+    for line in contents.lines().take(500) {
+        let value: Value = serde_json::from_str(line).ok()?;
+        if value.get("type").and_then(Value::as_str) == Some("session") {
+            id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            cwd = value
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+        }
+        if title.is_none()
+            && value.get("type").and_then(Value::as_str) == Some("message")
+            && value
+                .get("message")
+                .and_then(|message| message.get("role"))
+                .and_then(Value::as_str)
+                == Some("user")
+        {
+            title = value
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(title_from_pi_content);
+        }
+        if id.is_some() && cwd.is_some() && title.is_some() {
+            break;
+        }
+    }
+
+    let id = id?;
+    let cwd = cwd?;
+    if !same_path(&cwd, worktree_path) {
+        return None;
+    }
+    Some(NativeCliHistorySession {
+        backend: "pi".to_string(),
+        id: id.clone(),
+        title: title.unwrap_or_else(|| "PI session".to_string()),
+        cwd,
+        updated_at: file_updated_at(path),
+        resume_args: vec!["--session".to_string(), id],
+        source_path: path.to_string_lossy().to_string(),
+    })
+}
+
+fn title_from_pi_content(content: &Value) -> Option<String> {
+    if let Some(text) = content.as_str() {
+        return trim_title(text);
+    }
+    for item in content.as_array()? {
+        if item.get("type").and_then(Value::as_str) == Some("text") {
+            if let Some(title) = trim_title(item.get("text")?.as_str()?) {
+                return Some(title);
+            }
+        }
+    }
+    None
 }
 
 fn opencode_project_worktree_from_path(path: &Path) -> Option<String> {
@@ -1513,6 +1603,50 @@ mod tests {
             parse_opencode_session_identity(&path, "/tmp/worktree").as_deref(),
             Some("opencode-session")
         );
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn pi_parser_reads_session_identity_and_first_user_prompt() {
+        let dir = std::env::temp_dir().join(format!(
+            "jean-native-history-test-pi-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("pi-session.jsonl");
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "session",
+                "version": 3,
+                "id": "pi-session",
+                "timestamp": "2026-08-09T15:00:45.489Z",
+                "cwd": "/tmp/worktree"
+            })
+        )
+        .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "message",
+                "id": "message-1",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "resume this PI task"}]
+                }
+            })
+        )
+        .unwrap();
+
+        let parsed = parse_pi_session_file(&path, "/tmp/worktree").unwrap();
+        assert_eq!(parsed.backend, "pi");
+        assert_eq!(parsed.id, "pi-session");
+        assert_eq!(parsed.title, "resume this PI task");
+        assert_eq!(parsed.resume_args, vec!["--session", "pi-session"]);
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir(dir);
     }

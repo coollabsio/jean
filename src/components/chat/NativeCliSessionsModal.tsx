@@ -412,7 +412,8 @@ export function NativeCliSessionsModal({
   )
 
   const createNewSession = useCallback(() => {
-    const nativeSessionId = backend === 'claude' ? generateId() : undefined
+    const nativeSessionId =
+      backend === 'claude' || backend === 'pi' ? generateId() : undefined
     const commandArgs = nativeSessionId
       ? [...initialCommandArgs, '--session-id', nativeSessionId]
       : initialCommandArgs
@@ -441,6 +442,8 @@ export function NativeCliSessionsModal({
                 backend === 'claude'
                   ? nativeSessionId
                   : session.claude_session_id,
+              pi_session_id:
+                backend === 'pi' ? nativeSessionId : session.pi_session_id,
             },
             {
               launchMode: 'new',
@@ -516,6 +519,10 @@ export function NativeCliSessionsModal({
                   backend === 'opencode'
                     ? nativeSession.id
                     : session.opencode_session_id,
+                pi_session_id:
+                  backend === 'pi'
+                    ? nativeSession.id
+                    : session.pi_session_id,
               },
               { launchMode: 'resume' }
             )

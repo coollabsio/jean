@@ -353,6 +353,8 @@ pub struct AppPreferences {
     pub opencode_auto_steer_enabled: bool, // Steer prompts into a running OpenCode session instead of queueing (default: true)
     #[serde(default = "default_pi_auto_steer")]
     pub pi_auto_steer_enabled: bool, // Steer prompts into a running PI turn instead of queueing (default: true)
+    #[serde(default)]
+    pub pi_agent_owns_policy: bool, // Let PI own tools, extensions, and system/project instructions
     #[serde(default = "default_grok_auto_steer")]
     pub grok_auto_steer_enabled: bool, // Steer prompts into a running Grok turn instead of queueing (default: true)
     #[serde(default)]
@@ -2630,6 +2632,7 @@ impl Default for AppPreferences {
             codex_auto_steer_enabled: default_codex_auto_steer(),
             opencode_auto_steer_enabled: default_opencode_auto_steer(),
             pi_auto_steer_enabled: default_pi_auto_steer(),
+            pi_agent_owns_policy: false,
             grok_auto_steer_enabled: default_grok_auto_steer(),
             kimi_auto_steer_enabled: false,
             antigravity_auto_steer_enabled: false,

@@ -138,6 +138,15 @@ Additional systems (no dedicated docs yet):
   terminal session from the session-tab context menu; the original chat session
   remains unchanged.
 
+  Native PI terminal sessions receive a generated `--session-id` when created,
+  persist that ID as `pi_session_id`, and reconnect with `pi --session <id>`.
+  The native history picker reads PI JSONL sessions from
+  `~/.pi/agent/sessions/**`, matching them by working directory. In web chat,
+  `pi_agent_owns_policy` makes Jean a transparent PI client: Jean retains RPC
+  transport, persistence, streaming, and attachments while omitting its
+  `--tools` allowlist and appended system prompt so PI keeps ownership of its
+  tools, extensions, and project instructions.
+
   **Codex terminal attention.** Full-screen Codex terminals receive a
   session-scoped `notify` override for the official `agent-turn-complete`
   event. Jean tails that notification file, persists the Codex thread id and

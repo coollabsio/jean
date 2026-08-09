@@ -1377,6 +1377,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handlePiAgentOwnsPolicyToggle = (enabled: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        pi_agent_owns_policy: enabled,
+      })
+    }
+  }
+
   const handleGrokAutoSteerToggle = (enabled: boolean) => {
     if (preferences) {
       patchPreferences.mutate({
@@ -3462,6 +3470,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               <Switch
                 checked={preferences?.pi_auto_steer_enabled ?? true}
                 onCheckedChange={handlePiAutoSteerToggle}
+              />
+            </InlineField>
+            <InlineField
+              label="PI owns agent policy"
+              description="Keep PI's native tools, extensions, and project instructions. Jean only transports prompts and renders events without injecting a tool allowlist or system prompt."
+            >
+              <Switch
+                checked={preferences?.pi_agent_owns_policy ?? false}
+                onCheckedChange={handlePiAgentOwnsPolicyToggle}
               />
             </InlineField>
           </div>
