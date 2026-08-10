@@ -508,6 +508,70 @@ describe('NewSessionModeModal', () => {
     })
   })
 
+  it('launches a native Claude session in auto permission mode', async () => {
+    mutate.mockImplementation(
+      (
+        _args: unknown,
+        opts?: {
+          onSuccess?: (session: {
+            id: string
+            name: string
+            backend?: string
+          }) => void
+        }
+      ) => {
+        opts?.onSuccess?.({
+          id: 'session-claude-auto',
+          name: 'Claude',
+          backend: 'claude',
+        })
+      }
+    )
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Start Claude in auto mode' })
+    )
+    fireEvent.click(screen.getByText('New Claude session'))
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: 'claude',
+        primarySurface: 'terminal',
+        terminalCommandArgs: [
+          '--permission-mode',
+          'auto',
+          '--session-id',
+          expect.any(String),
+        ],
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('offers auto mode for Claude only', () => {
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    expect(
+      screen.getByRole('button', { name: 'Start Claude in auto mode' })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Start Codex in auto mode' })
+    ).not.toBeInTheDocument()
+  })
+
   it('opens the native Codex session picker before starting with dangerous approval bypass', async () => {
     mutate.mockImplementation(
       (

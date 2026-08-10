@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   MessageSquarePlus,
   Loader2,
+  ShieldCheck,
   Terminal,
   Zap,
 } from 'lucide-react'
@@ -78,6 +79,11 @@ const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
   grok: ['--always-approve', '--sandbox', 'off'],
   kimi: ['--yolo'],
   antigravity: ['--approval-mode', 'yolo'],
+}
+
+/** Claude's classifier-backed permission mode; no other CLI has an equivalent. */
+const AUTO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
+  claude: ['--permission-mode', 'auto'],
 }
 
 export function NewSessionModeModal() {
@@ -267,6 +273,14 @@ export function NewSessionModeModal() {
     setMobileBackendActions(null)
   }, [])
 
+  const chooseBackendTerminalAuto = useCallback((backend: CliBackend) => {
+    const autoArgs = AUTO_ARGS_BY_BACKEND[backend]
+    if (!autoArgs) return
+    setNativePickerInitialCommandArgs(autoArgs)
+    setNativePickerKind(backend)
+    setMobileBackendActions(null)
+  }, [])
+
   const closeAll = useCallback(() => {
     autoHandledTargetRef.current = null
     setNativePickerKind(null)
@@ -352,6 +366,7 @@ export function NewSessionModeModal() {
               disabled={createSession.isPending}
               onBack={() => setMobileBackendActions(null)}
               onNormal={() => chooseBackendTerminal(mobileBackendActions)}
+              onAuto={() => chooseBackendTerminalAuto(mobileBackendActions)}
               onYolo={() => chooseBackendTerminalYolo(mobileBackendActions)}
             />
           ) : (
@@ -429,6 +444,7 @@ export function NewSessionModeModal() {
                     const Icon = getBackendIcon(choice.backend)
                     const label = getBackendPlainLabel(choice.backend)
                     const yoloArgs = YOLO_ARGS_BY_BACKEND[choice.backend]
+                    const autoArgs = AUTO_ARGS_BY_BACKEND[choice.backend]
                     return (
                       <NativeBackendChoice
                         key={choice.backend}
@@ -436,9 +452,13 @@ export function NewSessionModeModal() {
                         title={label}
                         subtitle={`Open native ${label} in a terminal session`}
                         shortcut={choice.shortcut}
+                        autoAvailable={Boolean(autoArgs)}
                         yoloAvailable={Boolean(yoloArgs)}
                         disabled={createSession.isPending}
                         onClick={() => chooseBackendTerminal(choice.backend)}
+                        onAutoClick={() =>
+                          chooseBackendTerminalAuto(choice.backend)
+                        }
                         onYoloClick={() =>
                           chooseBackendTerminalYolo(choice.backend)
                         }
@@ -490,15 +510,18 @@ function MobileBackendActions({
   disabled,
   onBack,
   onNormal,
+  onAuto,
   onYolo,
 }: {
   backend: CliBackend
   disabled?: boolean
   onBack: () => void
   onNormal: () => void
+  onAuto: () => void
   onYolo: () => void
 }) {
   const label = getBackendPlainLabel(backend)
+  const autoAvailable = Boolean(AUTO_ARGS_BY_BACKEND[backend])
   const yoloAvailable = Boolean(YOLO_ARGS_BY_BACKEND[backend])
 
   return (
@@ -530,6 +553,21 @@ function MobileBackendActions({
         >
           Start normal
         </button>
+        {autoAvailable && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onAuto}
+            className={cn(
+              'inline-flex items-center gap-2 rounded-lg border border-border/70 bg-muted/25 px-3 py-3 text-left text-sm font-medium transition-colors',
+              'hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              disabled && 'cursor-not-allowed opacity-50 hover:bg-muted/25'
+            )}
+          >
+            <ShieldCheck className="size-4 text-blue-600 dark:text-blue-400" />
+            Start auto
+          </button>
+        )}
         {yoloAvailable && (
           <button
             type="button"
@@ -586,18 +624,22 @@ function NativeBackendChoice({
   title,
   subtitle,
   shortcut,
+  autoAvailable,
   yoloAvailable,
   disabled,
   onClick,
+  onAutoClick,
   onYoloClick,
 }: {
   icon: React.ReactNode
   title: string
   subtitle: string
   shortcut: string
+  autoAvailable: boolean
   yoloAvailable: boolean
   disabled?: boolean
   onClick: () => void
+  onAutoClick: () => void
   onYoloClick: () => void
 }) {
   return (
@@ -626,6 +668,23 @@ function NativeBackendChoice({
         </span>
       </button>
       <span className="flex shrink-0 items-center gap-1.5">
+        {autoAvailable && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onAutoClick}
+            title={`Start ${title} in auto mode`}
+            aria-label={`Start ${title} in auto mode`}
+            className={cn(
+              'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
+              'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              disabled && 'cursor-not-allowed opacity-50 hover:bg-background'
+            )}
+          >
+            <ShieldCheck className="size-3.5 text-blue-600 dark:text-blue-400" />
+            Auto
+          </button>
+        )}
         {yoloAvailable && (
           <button
             type="button"

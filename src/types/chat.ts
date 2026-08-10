@@ -66,18 +66,26 @@ export type Backend =
  * Execution mode for Claude CLI permission handling
  * - plan: Read-only mode, Claude can't make changes (--permission-mode plan)
  * - build: Auto-approve file edits only (--permission-mode acceptEdits)
+ * - auto: Claude-only. A classifier approves each tool call, so commands run
+ *   without prompting unless they look risky (--permission-mode auto)
  * - yolo: Auto-approve ALL tools without prompting (--permission-mode bypassPermissions)
  */
-export type ExecutionMode = 'plan' | 'build' | 'yolo'
+export type ExecutionMode = 'plan' | 'build' | 'auto' | 'yolo'
 
-/** Cycle order for execution modes (used by Shift+Tab cycling) */
-export const EXECUTION_MODE_CYCLE: ExecutionMode[] = ['plan', 'build', 'yolo']
+/** Cycle order for execution modes, ordered least to most permissive (used by Shift+Tab cycling) */
+export const EXECUTION_MODE_CYCLE: ExecutionMode[] = [
+  'plan',
+  'build',
+  'auto',
+  'yolo',
+]
 
 export function getSupportedExecutionModes(
   backend: Backend | undefined
 ): ExecutionMode[] {
   if (backend === 'cursor') return ['plan', 'yolo']
-  return EXECUTION_MODE_CYCLE
+  if (backend === 'claude') return EXECUTION_MODE_CYCLE
+  return EXECUTION_MODE_CYCLE.filter(mode => mode !== 'auto')
 }
 
 export function isExecutionModeSupported(
@@ -91,7 +99,14 @@ export function normalizeExecutionModeForBackend(
   backend: Backend | undefined,
   mode: ExecutionMode
 ): ExecutionMode {
-  if (isExecutionModeSupported(backend, mode)) return mode
+  const supported = getSupportedExecutionModes(backend)
+  if (supported.includes(mode)) return mode
+  // Degrade to the closest mode the backend does support, never something
+  // more permissive: 'auto' lands on 'build' (or 'yolo' on cursor, which has
+  // no build equivalent), and anything else falls back to 'plan'.
+  if (mode === 'auto') {
+    return supported.includes('build') ? 'build' : 'yolo'
+  }
   return backend === 'cursor' ? 'yolo' : 'plan'
 }
 

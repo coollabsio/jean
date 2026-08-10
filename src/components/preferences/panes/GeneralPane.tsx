@@ -202,7 +202,7 @@ import {
   fetchRemoteServerInfo,
   formatJeanVersionLabel,
 } from '@/lib/remote-version'
-import type { ThinkingLevel, EffortLevel } from '@/types/chat'
+import type { ThinkingLevel, EffortLevel, ExecutionMode } from '@/types/chat'
 import { hasBackend, isNativeApp } from '@/lib/environment'
 import { isWindows, openExternal } from '@/lib/platform'
 import { isNewerVersion } from '@/lib/version-utils'
@@ -3870,7 +3870,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             >
               <Select
                 value={preferences?.default_execution_mode ?? 'plan'}
-                onValueChange={(value: 'plan' | 'build' | 'yolo') => {
+                onValueChange={(value: ExecutionMode) => {
                   patchPreferences.mutate({ default_execution_mode: value })
                 }}
               >
@@ -3880,6 +3880,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 <SelectContent>
                   <SelectItem value="plan">Plan</SelectItem>
                   <SelectItem value="build">Build</SelectItem>
+                  <SelectItem value="auto">Auto (Claude only)</SelectItem>
                   <SelectItem value="yolo">Yolo</SelectItem>
                 </SelectContent>
               </Select>

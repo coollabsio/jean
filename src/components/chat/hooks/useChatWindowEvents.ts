@@ -14,6 +14,8 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { cancelChatMessage } from '@/services/chat'
 import { logger } from '@/lib/logger'
 import type { ContentBlock, QueuedMessage, Session } from '@/types/chat'
+import { getSupportedExecutionModes } from '@/types/chat'
+import type { CliBackend } from '@/types/preferences'
 import type { DiffRequest } from '@/types/git-diff'
 
 interface UseChatWindowEventsParams {
@@ -21,6 +23,7 @@ interface UseChatWindowEventsParams {
   activeSessionId: string | null | undefined
   activeWorktreeId: string | null | undefined
   activeWorktreePath: string | null | undefined
+  selectedBackend: CliBackend
   isModal: boolean
   // Plan dialog
   latestPlanContent: string | null
@@ -78,6 +81,7 @@ export function useChatWindowEvents({
   activeSessionId,
   activeWorktreeId,
   activeWorktreePath,
+  selectedBackend,
   isModal,
   latestPlanContent,
   latestPlanFilePath,
@@ -223,7 +227,10 @@ export function useChatWindowEvents({
     if (!activeSessionId) return
     const handler = () => {
       const store = useChatStore.getState()
-      store.cycleExecutionMode(activeSessionId)
+      store.cycleExecutionMode(
+        activeSessionId,
+        getSupportedExecutionModes(selectedBackend)
+      )
       const mode =
         useChatStore.getState().executionModes[activeSessionId] ?? 'plan'
       // Broadcast to other clients (native ↔ web access)
@@ -244,7 +251,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('cycle-execution-mode', handler)
     return () => window.removeEventListener('cycle-execution-mode', handler)
-  }, [activeSessionId, activeWorktreeId, activeWorktreePath])
+  }, [activeSessionId, activeWorktreeId, activeWorktreePath, selectedBackend])
 
   // CMD+G: Open git diff (also handles button clicks that dispatch with detail.type)
   useEffect(() => {

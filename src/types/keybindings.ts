@@ -218,7 +218,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   {
     action: 'cycle_execution_mode',
     label: 'Cycle execution mode',
-    description: 'Cycle through Plan, Build, and Yolo modes',
+    description:
+      'Cycle through the modes the session backend supports (Plan, Build, Auto, Yolo)',
     default_shortcut: 'shift+tab',
     category: 'chat',
   },

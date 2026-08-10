@@ -1,3 +1,5 @@
+import { EXECUTION_MODE_CYCLE, type ExecutionMode } from '@/types/chat'
+
 export function collectWorktreePaths(
   worktreesByProject?: Record<string, unknown[]>
 ): Record<string, string> {
@@ -24,10 +26,8 @@ export function collectWorktreePaths(
   return paths
 }
 
-type ExecutionMode = 'plan' | 'build' | 'yolo'
-
 function isExecutionMode(value: unknown): value is ExecutionMode {
-  return value === 'plan' || value === 'build' || value === 'yolo'
+  return EXECUTION_MODE_CYCLE.includes(value as ExecutionMode)
 }
 
 function collectFromSessionList(

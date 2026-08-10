@@ -1,4 +1,4 @@
-import { ClipboardList, Hammer, Zap } from 'lucide-react'
+import { ClipboardList, Hammer, ShieldCheck, Zap } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +46,12 @@ const MODE_META: Record<
     description: 'Auto-edits',
     icon: Hammer,
   },
+  auto: {
+    label: 'Auto',
+    description: 'Safety-checked',
+    icon: ShieldCheck,
+    iconClassName: 'text-blue-600 dark:text-blue-400',
+  },
   yolo: {
     label: 'Yolo',
     description: 'No limits!',
@@ -58,7 +64,7 @@ const MODE_META: Record<
 
 export function ExecutionModeDropdown({
   executionMode,
-  availableModes = ['plan', 'build', 'yolo'],
+  availableModes = ['plan', 'build', 'auto', 'yolo'],
   disabled = false,
   onSetExecutionMode,
   className,

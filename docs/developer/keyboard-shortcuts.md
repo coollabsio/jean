@@ -28,7 +28,7 @@ preferences pane.
 | `new_worktree`              | `Cmd+N`           | Create new worktree                     |
 | `next_worktree`             | `Cmd+Alt+Down`    | Switch to next worktree                 |
 | `previous_worktree`         | `Cmd+Alt+Up`      | Switch to previous worktree             |
-| `cycle_execution_mode`      | `Shift+Tab`       | Cycle through Plan/Build/Yolo modes     |
+| `cycle_execution_mode`      | `Shift+Tab`       | Cycle Plan/Build/Auto/Yolo modes        |
 | `approve_plan`              | `Cmd+Enter`       | Approve plan or answer question         |
 | `restore_last_archived`     | `Cmd+Shift+Alt+T` | Restore most recently archived item     |
 

@@ -31,7 +31,7 @@ import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
 import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
-import type { Session, WorktreeSessions } from '@/types/chat'
+import type { ExecutionMode, Session, WorktreeSessions } from '@/types/chat'
 import type { Worktree } from '@/types/projects'
 import { initializeCommandSystem } from './lib/commands'
 import { logger } from './lib/logger'
@@ -1574,7 +1574,7 @@ function App() {
             if (session.execution_mode) {
               store.setExecutingMode(
                 session.session_id,
-                session.execution_mode as 'plan' | 'build' | 'yolo'
+                session.execution_mode as ExecutionMode
               )
             }
             invoke('resume_session', {

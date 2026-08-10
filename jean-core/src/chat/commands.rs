@@ -473,6 +473,19 @@ fn resolve_send_execution_mode(
         .or_else(|| normalize_optional_string(session_selected_mode))
 }
 
+/// `auto` is Claude's classifier-backed permission mode and has no equivalent
+/// elsewhere. Every other backend would fall through to its plan-mode default,
+/// so degrade to `build` instead — the closest thing they all understand.
+fn normalize_execution_mode_for_backend(
+    backend: &Backend,
+    execution_mode: Option<String>,
+) -> Option<String> {
+    match execution_mode.as_deref() {
+        Some("auto") if !matches!(backend, Backend::Claude) => Some("build".to_string()),
+        _ => execution_mode,
+    }
+}
+
 fn build_kimi_system_prompt(
     app: &AppHandle,
     worktree_id: &str,
@@ -2984,6 +2997,8 @@ pub async fn send_chat_message(
     } else {
         effective_backend
     };
+
+    let execution_mode = normalize_execution_mode_for_backend(&effective_backend, execution_mode);
 
     // Final model fallback: preferences default for the resolved backend.
     // Covers sessions created before selected_model was persisted, or when
@@ -10766,6 +10781,41 @@ mod tests {
         assert_eq!(
             resolve_send_execution_mode(Some("".to_string()), Some("plan".to_string())),
             Some("plan".to_string())
+        );
+    }
+
+    #[test]
+    fn auto_execution_mode_is_claude_only() {
+        assert_eq!(
+            normalize_execution_mode_for_backend(&Backend::Claude, Some("auto".to_string())),
+            Some("auto".to_string())
+        );
+        for backend in [
+            Backend::Codex,
+            Backend::Cursor,
+            Backend::Opencode,
+            Backend::Pi,
+            Backend::Commandcode,
+            Backend::Grok,
+            Backend::Kimi,
+            Backend::Antigravity,
+        ] {
+            assert_eq!(
+                normalize_execution_mode_for_backend(&backend, Some("auto".to_string())),
+                Some("build".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_execution_mode_leaves_other_modes_untouched() {
+        assert_eq!(
+            normalize_execution_mode_for_backend(&Backend::Codex, Some("yolo".to_string())),
+            Some("yolo".to_string())
+        );
+        assert_eq!(
+            normalize_execution_mode_for_backend(&Backend::Codex, None),
+            None
         );
     }
 
