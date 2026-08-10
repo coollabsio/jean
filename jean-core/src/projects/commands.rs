@@ -13034,12 +13034,31 @@ fn get_home_dir() -> Option<std::path::PathBuf> {
     })
 }
 
+/// Maximum number of directory levels below a configured skills root.
+const MAX_SKILL_SCAN_DEPTH: usize = 8;
+
 /// Collect skills from a directory into a map (later inserts override earlier ones)
 fn collect_skills_from_dir(
     dir: &std::path::Path,
     skills: &mut std::collections::HashMap<String, ClaudeSkill>,
 ) {
-    if !dir.exists() {
+    collect_skills_from_dir_at_depth(dir, skills, 0);
+}
+
+fn collect_skills_from_dir_at_depth(
+    dir: &std::path::Path,
+    skills: &mut std::collections::HashMap<String, ClaudeSkill>,
+    depth: usize,
+) {
+    let root_metadata = match std::fs::symlink_metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            log::warn!("Failed to inspect skills directory {dir:?}: {error}");
+            return;
+        }
+    };
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
         return;
     }
 
@@ -13051,22 +13070,38 @@ fn collect_skills_from_dir(
         }
     };
 
+    let mut entries = entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                log::warn!("Failed to read directory entry: {error}");
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+
     for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                log::warn!("Failed to read directory entry: {e}");
+        let path = entry.path();
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                log::warn!("Failed to inspect skill directory {path:?}: {error}");
                 continue;
             }
         };
-
-        let path = entry.path();
-        if !path.is_dir() {
+        if file_type.is_symlink() || !file_type.is_dir() {
             continue;
         }
 
         let skill_file = path.join("SKILL.md");
-        if !skill_file.exists() {
+        let is_skill = std::fs::symlink_metadata(&skill_file)
+            .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        if !is_skill {
+            if depth + 1 < MAX_SKILL_SCAN_DEPTH {
+                collect_skills_from_dir_at_depth(&path, skills, depth + 1);
+            }
             continue;
         }
 
@@ -13675,6 +13710,106 @@ mod tests {
     use super::*;
     use crate::chat::types::Backend;
     use std::path::Path;
+
+    #[test]
+    fn collects_flat_and_nested_skill_directories() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let skills_root = temp.path().join("skills");
+        let flat_skill = skills_root.join("flat-skill");
+        let nested_skill = skills_root.join("engineering/ask-matt");
+        std::fs::create_dir_all(&flat_skill).expect("flat skill dir");
+        std::fs::create_dir_all(&nested_skill).expect("nested skill dir");
+        std::fs::write(flat_skill.join("SKILL.md"), "# Flat skill\n").expect("flat skill");
+        std::fs::write(nested_skill.join("SKILL.md"), "# Ask Matt\n").expect("nested skill");
+
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(&skills_root, &mut skills);
+        let mut names: Vec<_> = skills.into_keys().collect();
+        names.sort();
+
+        assert_eq!(names, vec!["ask-matt", "flat-skill"]);
+    }
+
+    #[test]
+    fn stops_scanning_below_a_skill_leaf() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let parent_skill = temp.path().join("skills/parent-skill");
+        let nested_skill = parent_skill.join("nested-skill");
+        std::fs::create_dir_all(&nested_skill).expect("nested skill dir");
+        std::fs::write(parent_skill.join("SKILL.md"), "# Parent skill\n").expect("parent skill");
+        std::fs::write(nested_skill.join("SKILL.md"), "# Nested skill\n").expect("nested skill");
+
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(&temp.path().join("skills"), &mut skills);
+
+        assert_eq!(skills.len(), 1);
+        assert!(skills.contains_key("parent-skill"));
+    }
+
+    #[test]
+    fn duplicate_skill_names_resolve_deterministically() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let skills_root = temp.path().join("skills");
+        let first_skill = skills_root.join("alpha/duplicate");
+        let last_skill = skills_root.join("zeta/duplicate");
+        std::fs::create_dir_all(&first_skill).expect("first skill dir");
+        std::fs::create_dir_all(&last_skill).expect("last skill dir");
+        std::fs::write(first_skill.join("SKILL.md"), "# First skill\n").expect("first skill");
+        std::fs::write(last_skill.join("SKILL.md"), "# Last skill\n").expect("last skill");
+
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(&skills_root, &mut skills);
+
+        let duplicate = skills.get("duplicate").expect("duplicate skill");
+        assert_eq!(
+            duplicate.path,
+            last_skill.join("SKILL.md").to_string_lossy().to_string()
+        );
+    }
+
+    #[test]
+    fn skill_scan_does_not_exceed_max_depth() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let skills_root = temp.path().join("skills");
+        let mut within_limit = skills_root.clone();
+        for depth in 0..MAX_SKILL_SCAN_DEPTH {
+            within_limit = within_limit.join(format!("within-{depth}"));
+        }
+        let mut beyond_limit = skills_root.clone();
+        for depth in 0..=MAX_SKILL_SCAN_DEPTH {
+            beyond_limit = beyond_limit.join(format!("beyond-{depth}"));
+        }
+        std::fs::create_dir_all(&beyond_limit).expect("deep skill dirs");
+        std::fs::create_dir_all(&within_limit).expect("within-limit skill dir");
+        std::fs::write(within_limit.join("SKILL.md"), "# Within limit\n")
+            .expect("within-limit skill");
+        std::fs::write(beyond_limit.join("SKILL.md"), "# Too deep\n").expect("too-deep skill");
+
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(&skills_root, &mut skills);
+
+        assert!(skills.contains_key(&format!("within-{}", MAX_SKILL_SCAN_DEPTH - 1)));
+        assert!(!skills.contains_key(&format!("beyond-{MAX_SKILL_SCAN_DEPTH}")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_scan_skips_symlinked_directories() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let skills_root = temp.path().join("skills");
+        let external_skill = temp.path().join("external/linked-skill");
+        std::fs::create_dir_all(&skills_root).expect("skills root");
+        std::fs::create_dir_all(&external_skill).expect("external skill dir");
+        std::fs::write(external_skill.join("SKILL.md"), "# Linked skill\n").expect("linked skill");
+        symlink(&external_skill, skills_root.join("linked-skill")).expect("skill symlink");
+
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(&skills_root, &mut skills);
+
+        assert!(skills.is_empty());
+    }
 
     #[test]
     fn codex_skills_include_agents_user_and_project_directories() {
