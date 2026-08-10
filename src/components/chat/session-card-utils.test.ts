@@ -134,6 +134,38 @@ describe('native client resume sessions', () => {
     })
   })
 
+  it('builds an Antigravity resume launch with --conversation', () => {
+    const antigravitySession: Session = {
+      ...session,
+      name: 'Antigravity conversation support',
+      backend: 'antigravity',
+      codex_thread_id: undefined,
+      antigravity_session_id: 'agy-conv-1',
+    }
+
+    expect(getResumeArgs(antigravitySession)).toEqual({
+      command: 'agy',
+      args: ['--conversation', 'agy-conv-1'],
+    })
+    expect(
+      buildNativeClientSessionInput(
+        antigravitySession,
+        'worktree-1',
+        '/tmp/worktree-1'
+      )
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Antigravity conversation support (Native)',
+      backend: 'antigravity',
+      primarySurface: 'terminal',
+      terminalCommand: 'agy',
+      terminalCommandArgs: ['--conversation', 'agy-conv-1'],
+      terminalLabel: 'Antigravity conversation support (Native)',
+      nativeSessionId: 'agy-conv-1',
+    })
+  })
+
   it('builds a Kimi Code resume launch with --session', () => {
     const kimiSession: Session = {
       ...session,

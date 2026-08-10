@@ -106,28 +106,13 @@ import {
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
 import { dismissTransientUi } from './lib/dismiss-transient-ui'
+import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'
 
 interface AutoFixStoppedEvent {
   projectId: string
   projectName: string
   backend: string
   error: string
-}
-
-function WebLoadingScreen({ label }: { label: string }) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background">
-      <p
-        role="status"
-        className="whitespace-nowrap text-[16px] leading-[26px] text-muted-foreground"
-        style={{
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-        }}
-      >
-        {label}
-      </p>
-    </div>
-  )
 }
 
 function handleWsAuthTokenSubmit(token: string) {
@@ -1651,7 +1636,7 @@ function App() {
   if (isPreloading || blockOnWs) {
     return (
       <>
-        <WebLoadingScreen label="Loading Jean..." />
+        <JeanLoadingScreen />
         {webBackend && <WsAuthErrorOverlay />}
         {isNativeApp() && <QuitConfirmationDialog />}
       </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ChatMessage } from '@/types/chat'
+import type { Backend, ChatMessage } from '@/types/chat'
 import {
   getProviderChangeBeforeMessage,
   inferBackendFromModel,
@@ -8,7 +8,8 @@ import {
 function userMessage(
   id: string,
   model: string | undefined,
-  timestamp = 1
+  timestamp = 1,
+  backend?: Backend
 ): ChatMessage {
   return {
     id,
@@ -18,7 +19,8 @@ function userMessage(
     timestamp,
     tool_calls: [],
     model,
-  }
+    backend,
+  } as ChatMessage
 }
 
 function assistantMessage(id: string, timestamp = 2): ChatMessage {
@@ -43,6 +45,10 @@ describe('inferBackendFromModel', () => {
     expect(inferBackendFromModel('commandcode/deepseek/x')).toBe('commandcode')
     expect(inferBackendFromModel('grok/grok-4.5')).toBe('grok')
     expect(inferBackendFromModel('kimi/k2')).toBe('kimi')
+    expect(inferBackendFromModel('antigravity/auto')).toBe('antigravity')
+    expect(inferBackendFromModel('antigravity/gemini-3.1-pro-high')).toBe(
+      'antigravity'
+    )
   })
 
   it('returns null for missing model', () => {
@@ -84,6 +90,21 @@ describe('getProviderChangeBeforeMessage', () => {
     })
   })
 
+  it('uses the backend recorded for the prompt when its model is stale', () => {
+    const messages = [
+      userMessage('u1', 'gpt-5.4'),
+      assistantMessage('a1'),
+      userMessage('u2', 'gpt-5.4', 3, 'claude'),
+    ]
+
+    expect(getProviderChangeBeforeMessage(messages, 2)).toEqual({
+      from: 'codex',
+      to: 'claude',
+      fromLabel: 'Codex',
+      toLabel: 'Claude',
+    })
+  })
+
   it('detects Codex → Grok switches and skips assistant-only rows', () => {
     const messages = [
       userMessage('u1', 'gpt-5.4'),
@@ -96,6 +117,20 @@ describe('getProviderChangeBeforeMessage', () => {
       to: 'grok',
       fromLabel: 'Codex',
       toLabel: 'Grok',
+    })
+  })
+
+  it('detects Grok → Antigravity switches', () => {
+    const messages = [
+      userMessage('u1', 'grok/grok-4.5'),
+      assistantMessage('a1'),
+      userMessage('u2', 'antigravity/auto', 3),
+    ]
+    expect(getProviderChangeBeforeMessage(messages, 2)).toEqual({
+      from: 'grok',
+      to: 'antigravity',
+      fromLabel: 'Grok',
+      toLabel: 'Antigravity CLI',
     })
   })
 

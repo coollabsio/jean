@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   DEFAULT_FINAL_REVIEW_PROMPT,
@@ -56,6 +58,10 @@ describe('magic prompt preference resolvers', () => {
 
   it('uses Jean-managed Kimi Code CLI by default', () => {
     expect(defaultPreferences.kimi_cli_source).toBe('jean')
+  })
+
+  it('uses Jean-managed Antigravity CLI by default', () => {
+    expect(defaultPreferences.antigravity_cli_source).toBe('jean')
   })
 
   it('provides magic prompt defaults for Pi', () => {
@@ -119,6 +125,18 @@ describe('magic prompt preference resolvers', () => {
   it('provides magic prompt defaults for Kimi Code', () => {
     expect(KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend).toBe(
       'kimi'
+    )
+  })
+
+  it('provides magic prompt defaults for Antigravity', () => {
+    expect(
+      ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend
+    ).toBe('antigravity')
+    expect(
+      ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model
+    ).toBe('antigravity/auto')
+    expect(defaultPreferences.selected_antigravity_model).toBe(
+      'antigravity/auto'
     )
   })
 

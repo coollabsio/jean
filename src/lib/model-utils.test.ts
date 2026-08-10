@@ -23,14 +23,14 @@ describe('getModelImpliedBackend', () => {
 })
 
 describe('isGeminiModel', () => {
-  it('detects Gemini model ids across backends', () => {
+  it('detects Antigravity model ids across backends', () => {
     expect(isGeminiModel('commandcode/google/gemini-3.5-flash')).toBe(true)
     expect(isGeminiModel('cursor/gemini-3.1-pro')).toBe(true)
     expect(isGeminiModel('opencode/google/gemini-2.5-pro')).toBe(true)
     expect(isGeminiModel('GEMINI-3.5-flash')).toBe(true)
   })
 
-  it('rejects non-Gemini models', () => {
+  it('rejects non-Antigravity models', () => {
     expect(isGeminiModel('claude-opus-4-8')).toBe(false)
     expect(isGeminiModel('gpt-5.6-sol')).toBe(false)
     expect(isGeminiModel(null)).toBe(false)

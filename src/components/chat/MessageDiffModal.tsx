@@ -317,7 +317,7 @@ export function MessageDiffModal({
         style={{ fontSize: 'var(--ui-font-size)' }}
         showCloseButton={false}
       >
-        <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-12 sm:flex-row sm:items-center sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-10">
+        <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-24 sm:flex-row sm:items-center sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-24">
           <DialogTitle className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
             <FileText className="h-4 w-4 shrink-0" />
             <span className="truncate">{getFilename(filePath)}</span>
@@ -332,14 +332,26 @@ export function MessageDiffModal({
             )}
           </DialogTitle>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:right-5"
-          >
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </button>
+          <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-5">
+            {!isMobile && canOpenInEditor() && (
+              <button
+                type="button"
+                onClick={handleOpenExternal}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span className="sr-only">Open in Editor</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </button>
+          </div>
 
           <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:flex-nowrap">
             {/* Diff style toggle */}
@@ -381,17 +393,6 @@ export function MessageDiffModal({
                 <TooltipContent>Unified view</TooltipContent>
               </Tooltip>
             </div>
-
-            {canOpenInEditor() && (
-              <button
-                type="button"
-                onClick={handleOpenExternal}
-                className="ml-auto flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span className="hidden sm:inline">Open in Editor</span>
-              </button>
-            )}
           </div>
         </div>
 

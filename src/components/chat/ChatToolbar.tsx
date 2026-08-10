@@ -244,8 +244,8 @@ export const ChatToolbar = memo(function ChatToolbar({
     const values = new Set(
       selectedModelReasoning.levels.map(level => level.value)
     )
-    // Adaptive/Default is only valid for Gemini models.
-    if (selectedModel?.toLowerCase().includes('gemini')) {
+    // Adaptive/Default is only valid for Antigravity models.
+    if (selectedModel?.toLowerCase().includes('antigravity')) {
       values.add('adaptive')
     }
     if (selectedModelReasoning.type === 'effort') {

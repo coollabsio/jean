@@ -283,6 +283,25 @@ describe('DesktopToolbarControls', () => {
     expect(screen.queryByText('Ultracode')).not.toBeInTheDocument()
   })
 
+  it('shows only native Antigravity effort options', () => {
+    renderDesktopToolbarControls({
+      isCodex: false,
+      selectedBackend: 'antigravity',
+      selectedModel: 'antigravity/auto',
+      selectedEffortLevel: 'medium',
+      selectedThinkingLevel: 'megathink',
+      thinkingDropdownOpen: true,
+    })
+
+    for (const name of ['Adaptive/Default', 'Low', 'Medium', 'High']) {
+      expect(
+        screen.getByRole('menuitemradio', { name: new RegExp(name, 'i') })
+      ).toBeInTheDocument()
+    }
+    expect(screen.queryByText('Megathink')).not.toBeInTheDocument()
+    expect(screen.queryByText('xHigh')).not.toBeInTheDocument()
+  })
+
   it('calls effort change handler when selecting an effort on desktop', async () => {
     const user = userEvent.setup()
     const handleEffortLevelChange = vi.fn()

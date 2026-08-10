@@ -1797,6 +1797,16 @@ fn generate_checkpoint_restore_json(
         )?;
         return Ok(json_str);
     }
+    if backend == crate::chat::types::Backend::Antigravity {
+        let json_str = crate::chat::antigravity::execute_one_shot_antigravity(
+            app,
+            prompt,
+            model_str,
+            Some(CHECKPOINT_RESTORE_SCHEMA),
+            working_dir,
+        )?;
+        return Ok(json_str);
+    }
 
     // Default: Claude CLI structured output
     let cli_path = crate::claude_cli::resolve_cli_binary(app);

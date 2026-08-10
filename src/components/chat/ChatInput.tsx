@@ -67,10 +67,7 @@ interface ChatInputProps {
   executionMode: ExecutionMode
   canSwitchBackendWithTab?: boolean
   focusChatShortcut: string
-  onSubmit: (
-    e: React.FormEvent,
-    options?: { forceSteer?: boolean }
-  ) => void
+  onSubmit: (e: React.FormEvent, options?: { forceSteer?: boolean }) => void
   onCancel: () => void
   onSwitchBackendWithTab?: () => void
   onCommandExecute?: (command: ClaudeCommand) => void
@@ -517,7 +514,7 @@ export const ChatInput = memo(function ChatInput({
       const forceSteer =
         isSending &&
         isSteerCapableBackend(selectedBackend) &&
-        isModKeyEvent(e)
+        (e.metaKey || e.ctrlKey)
       onSteerModifierChange?.(forceSteer)
 
       // When file mention popover is open, handle navigation
@@ -1283,7 +1280,7 @@ export const ChatInput = memo(function ChatInput({
         disabled={false}
         className={cn(
           'min-h-[40px] w-full resize-none overflow-x-hidden overflow-y-auto border-0 dark:bg-transparent p-0 font-mono text-base placeholder:text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm',
-          zenMode ? 'h-10 max-h-10' : 'max-h-[50vh]'
+          zenMode ? 'h-12 max-h-12' : 'max-h-[50vh]'
         )}
         rows={1}
         autoFocus={!isMobile}

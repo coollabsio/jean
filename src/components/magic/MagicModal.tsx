@@ -61,6 +61,7 @@ import { usePreferences } from '@/services/preferences'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import { startCommitJob } from '@/services/commit-jobs'
 import { invoke, listen } from '@/lib/transport'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -110,6 +111,7 @@ import {
   CODEX_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
 import {
@@ -492,6 +494,9 @@ export function MagicModal() {
   const { data: availableKimiModels } = useAvailableKimiModels({
     enabled: installedBackends.includes('kimi'),
   })
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: installedBackends.includes('antigravity'),
+  })
   const { data: modelCatalog } = useModelCatalog()
 
   // Build columns dynamically based on PR state
@@ -558,6 +563,15 @@ export function MagicModal() {
       label: model.label,
     }))
   }, [availableKimiModels])
+  const antigravityModelOptions = useMemo(() => {
+    if (!availableAntigravityModels?.length) {
+      return ANTIGRAVITY_MODEL_OPTIONS
+    }
+    return availableAntigravityModels.map(model => ({
+      value: `antigravity/${model.id}`,
+      label: model.label || model.id,
+    }))
+  }, [availableAntigravityModels])
 
   const claudeModelOptions = useMemo(
     () =>
@@ -598,7 +612,10 @@ export function MagicModal() {
                 : backend === 'grok'
                   ? (preferences?.selected_grok_model ??
                     'grok/grok-4.5')
-                  : (preferences?.selected_model ?? 'sonnet'))
+                  : backend === 'antigravity'
+                    ? (preferences?.selected_antigravity_model ??
+                      'antigravity/auto')
+                    : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       providerKey,
@@ -632,7 +649,10 @@ export function MagicModal() {
                 : backend === 'grok'
                   ? (preferences?.selected_grok_model ??
                     'grok/grok-4.5')
-                  : (preferences?.selected_model ?? 'sonnet'))
+                  : backend === 'antigravity'
+                    ? (preferences?.selected_antigravity_model ??
+                      'antigravity/auto')
+                    : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       RESOLVE_CONFLICTS_PROVIDER_KEY,
@@ -809,7 +829,9 @@ export function MagicModal() {
                         ? configuredModel.startsWith('grok/')
                         : backend === 'kimi'
                           ? configuredModel.startsWith('kimi/')
-                          : true
+                          : backend === 'antigravity'
+                            ? configuredModel.startsWith('antigravity/')
+                            : true
         return matchesBackend ? configuredModel : backendDefaultModel
       })()
       const provider =
@@ -983,11 +1005,14 @@ export function MagicModal() {
           return grokModelOptions
         case 'kimi':
           return kimiModelOptions
+        case 'antigravity':
+          return antigravityModelOptions
         default:
           return investigateClaudeModelOptions
       }
     },
     [
+      antigravityModelOptions,
       grokModelOptions,
       investigateClaudeModelOptions,
       kimiModelOptions,
@@ -1022,6 +1047,8 @@ export function MagicModal() {
         return 'Grok'
       case 'kimi':
         return 'Kimi Code'
+      case 'antigravity':
+        return 'Antigravity'
       default:
         return 'Claude'
     }
@@ -1069,11 +1096,14 @@ export function MagicModal() {
           return grokModelOptions
         case 'kimi':
           return kimiModelOptions
+        case 'antigravity':
+          return antigravityModelOptions
         default:
           return resolveClaudeModelOptions
       }
     },
     [
+      antigravityModelOptions,
       grokModelOptions,
       kimiModelOptions,
       opencodeModelOptions,
@@ -2918,6 +2948,7 @@ ${resolveInstructions}`
                               'opencode',
                               'grok',
                               'kimi',
+                              'antigravity',
                             ].includes(backend)
                           ).length <= 1
                         }
@@ -2943,6 +2974,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('kimi') && (
                           <SelectItem value="kimi">
                             <BackendLabel backend="kimi" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('antigravity') && (
+                          <SelectItem value="antigravity">
+                            <BackendLabel backend="antigravity" />
                           </SelectItem>
                         )}
                       </SelectContent>
@@ -3082,6 +3118,7 @@ ${resolveInstructions}`
                               'opencode',
                               'grok',
                               'kimi',
+                              'antigravity',
                             ].includes(backend)
                           ).length <= 1
                         }
@@ -3107,6 +3144,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('kimi') && (
                           <SelectItem value="kimi">
                             <BackendLabel backend="kimi" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('antigravity') && (
+                          <SelectItem value="antigravity">
+                            <BackendLabel backend="antigravity" />
                           </SelectItem>
                         )}
                       </SelectContent>

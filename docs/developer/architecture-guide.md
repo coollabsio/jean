@@ -553,3 +553,26 @@ When opening a URL in the system browser, use `crate::platform::open_url_in_brow
 re-exported as `jean_core::open_url_in_browser`). On Windows it runs `cmd /c start` through
 `silent_command()` so the intermediary console never flashes. Do not call raw
 `Command::new("cmd")` with `/c start`.
+
+## Antigravity CLI backend
+
+Jean integrates Google's native `agy` executable through its documented headless interface. Interactive turns use `agy -p --output-format stream-json`; structured one-shot operations use `--output-format json --json-schema`. Jean maps Plan to `--mode plan`, Build to `--mode accept-edits`, and Yolo to `--mode accept-edits --dangerously-skip-permissions`.
+
+Antigravity conversation IDs are stored in `antigravity_session_id`. Follow-up turns resume with `--conversation`. Jean stores the NDJSON output in its run log, maps text, thinking, tool, result, and usage events to the common chat model, and cancels by stopping the registered process tree.
+
+Tool steps use the documented nested `tool_info` object. Subagent steps use `subagent_info` and are normalized into Jean's agent activity model. Terminal result states are authoritative: error and waiting states fail the turn, while canceled and interrupted states are stored as cancellations. Jean can also discover the latest workspace conversation from `~/.gemini/antigravity-cli/cache/last_conversations.json`.
+
+Antigravity MCP servers come from project `.agents/mcp_config.json` and user `~/.gemini/config/mcp_config.json`. Antigravity CLI owns authentication and secrets in the operating system keyring; Jean does not copy OAuth tokens.
+
+Headless mode has no interactive approval surface. Plan is read-only and sandboxed. Build runs in Antigravity's native terminal sandbox and auto-approves tools so a default `request-review` policy does not soft-deny required commands. Yolo explicitly auto-approves without the sandbox. Jean queues follow-up messages because the headless interface does not expose in-turn steering.
+
+Magic Prompts pass Jean's contract to Antigravity's native `--json-schema` option and read `structured_output` from the final JSON envelope.
+
+Current official references:
+
+- https://antigravity.google/docs/cli/install
+- https://antigravity.google/docs/cli/headless
+- https://antigravity.google/docs/cli/conversations
+- https://antigravity.google/docs/cli/permissions
+- https://antigravity.google/docs/cli/mcp
+- https://antigravity.google/docs/cli/gcli-migration

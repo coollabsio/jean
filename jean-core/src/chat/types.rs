@@ -104,6 +104,7 @@ pub enum Backend {
     Commandcode,
     Grok,
     Kimi,
+    Antigravity,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -125,6 +126,7 @@ impl<'de> Deserialize<'de> for Backend {
             "commandcode" => Backend::Commandcode,
             "grok" => Backend::Grok,
             "kimi" => Backend::Kimi,
+            "antigravity" | "gemini" => Backend::Antigravity,
             "claude" | "" => Backend::Claude,
             other => {
                 log::warn!("Unknown chat backend '{other}', falling back to claude");
@@ -149,6 +151,18 @@ mod backend_tests {
     fn backend_deserializes_kimi() {
         let backend: Backend = serde_json::from_str("\"kimi\"").unwrap();
         assert_eq!(backend, Backend::Kimi);
+    }
+
+    #[test]
+    fn backend_deserializes_antigravity() {
+        let backend: Backend = serde_json::from_str("\"antigravity\"").unwrap();
+        assert_eq!(backend, Backend::Antigravity);
+    }
+
+    #[test]
+    fn legacy_gemini_backend_migrates_to_antigravity() {
+        let backend: Backend = serde_json::from_str("\"gemini\"").unwrap();
+        assert_eq!(backend, Backend::Antigravity);
     }
 }
 
@@ -605,6 +619,9 @@ pub struct ChatMessage {
     /// Model used when this message was sent (user messages only)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Backend used when this message was sent (user messages only)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<Backend>,
     /// Execution mode when this message was sent (user messages only)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<String>,
@@ -635,6 +652,7 @@ impl Default for ChatMessage {
             cancelled: false,
             plan_approved: false,
             model: None,
+            backend: None,
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
@@ -752,6 +770,13 @@ pub struct Session {
     /// Kimi Code ACP session ID for resuming conversations
     #[serde(default)]
     pub kimi_session_id: Option<String>,
+    /// Antigravity CLI conversation ID for resuming conversations.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "gemini_session_id"
+    )]
+    pub antigravity_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -963,6 +988,7 @@ impl Session {
             commandcode_session_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -1183,6 +1209,7 @@ impl SessionMetadata {
             commandcode_session_id: self.commandcode_session_id.clone(),
             grok_session_id: self.grok_session_id.clone(),
             kimi_session_id: self.kimi_session_id.clone(),
+            antigravity_session_id: self.antigravity_session_id.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
@@ -1249,6 +1276,7 @@ impl SessionMetadata {
         self.commandcode_session_id = session.commandcode_session_id.clone();
         self.grok_session_id = session.grok_session_id.clone();
         self.kimi_session_id = session.kimi_session_id.clone();
+        self.antigravity_session_id = session.antigravity_session_id.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
@@ -1527,6 +1555,13 @@ pub struct RunEntry {
     /// Kimi Code ACP session ID — persisted per-run for conversation continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// Antigravity CLI conversation ID for resuming conversations.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "gemini_session_id"
+    )]
+    pub antigravity_session_id: Option<String>,
     /// AI change checkpoint id captured before this run (working-tree snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_id: Option<String>,
@@ -1611,6 +1646,9 @@ pub struct SessionMetadata {
     /// Kimi Code ACP session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// Antigravity CLI conversation ID for resuming conversations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
@@ -1792,6 +1830,9 @@ pub struct SessionDebugInfo {
     pub grok_session_id: Option<String>,
     /// Kimi Code ACP session ID (if any)
     pub kimi_session_id: Option<String>,
+    /// Antigravity CLI conversation ID for resuming conversations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_session_id: Option<String>,
     /// Path to Claude CLI's JSONL file (in ~/.claude/projects/)
     pub claude_jsonl_file: Option<String>,
     /// List of JSONL run log files for this session
@@ -1823,6 +1864,7 @@ impl SessionMetadata {
             commandcode_session_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -2342,6 +2384,35 @@ mod tests {
     }
 
     #[test]
+    fn test_antigravity_session_id_roundtrip_via_update_from_session() {
+        let mut session = Session::new(
+            "Antigravity conversation support".to_string(),
+            0,
+            Backend::Antigravity,
+        );
+        session.antigravity_session_id = Some("antigravity-conversation-1".to_string());
+
+        let mut metadata = SessionMetadata::new(
+            session.id.clone(),
+            "wt-antigravity".to_string(),
+            session.name.clone(),
+            session.order,
+        );
+        metadata.update_from_session(&session);
+
+        assert_eq!(
+            metadata.antigravity_session_id.as_deref(),
+            Some("antigravity-conversation-1")
+        );
+        let restored = metadata.to_session();
+        assert_eq!(
+            restored.antigravity_session_id.as_deref(),
+            Some("antigravity-conversation-1")
+        );
+        assert_eq!(restored.backend, Backend::Antigravity);
+    }
+
+    #[test]
     fn test_session_metadata_to_session_recovers_pending_plan_waiting_state() {
         let mut metadata = SessionMetadata::new(
             "sess-plan".to_string(),
@@ -2378,6 +2449,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2421,6 +2493,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2454,6 +2527,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -2508,6 +2582,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
@@ -2534,6 +2609,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2578,6 +2654,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2608,6 +2685,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 

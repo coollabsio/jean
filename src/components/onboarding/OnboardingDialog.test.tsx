@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     (_patch: unknown, options?: { onSuccess?: () => void }) =>
       options?.onSuccess?.()
   ),
+  patchPreferencesAsync: vi.fn().mockResolvedValue(undefined),
 }))
 
 function setupResult(installed = false, path: string | null = null) {
@@ -129,6 +130,12 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiPathDetection: () => pathResult(),
 }))
 
+vi.mock('@/services/antigravity-cli', () => ({
+  useAntigravityCliSetup: () => setupResult(),
+  useAntigravityCliAuth: () => authResult(),
+  useAntigravityPathDetection: () => pathResult(),
+}))
+
 vi.mock('@/services/gh-cli', () => ({
   useGhCliSetup: () => setupResult(true, '/usr/bin/gh'),
   useGhCliAuth: () => authResult(true),
@@ -146,10 +153,14 @@ vi.mock('@/services/preferences', () => ({
       commandcode_cli_source: 'path',
       grok_cli_source: 'path',
       kimi_cli_source: 'path',
+      antigravity_cli_source: 'path',
       gh_cli_source: 'path',
     },
   }),
-  usePatchPreferences: () => ({ mutate: mocks.patchPreferences }),
+  usePatchPreferences: () => ({
+    mutate: mocks.patchPreferences,
+    mutateAsync: mocks.patchPreferencesAsync,
+  }),
 }))
 
 vi.mock('@/lib/platform', async importOriginal => ({
@@ -188,6 +199,7 @@ describe('OnboardingDialog backends', () => {
     mocks.cursorAuthRefetchCount = 0
     mocks.cursorInstallSucceeds = true
     mocks.patchPreferences.mockClear()
+    mocks.patchPreferencesAsync.mockClear()
     useUIStore.setState({
       onboardingOpen: true,
       onboardingStartStep: null,
@@ -221,7 +233,9 @@ describe('OnboardingDialog backends', () => {
     expect(onInstall).toHaveBeenCalledOnce()
   })
 
-  async function chooseLocalAndContinue(user: ReturnType<typeof userEvent.setup>) {
+  async function chooseLocalAndContinue(
+    user: ReturnType<typeof userEvent.setup>
+  ) {
     expect(
       await screen.findByText('How will you use Jean?')
     ).toBeInTheDocument()

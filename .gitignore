@@ -33,6 +33,9 @@ test-results
 playwright-report
 playwright/.cache
 
+# Local Superpowers design and implementation planning artifacts
+docs/superpowers/
+
 # Rust build artifacts for standalone server wrapper
 src-server/target/
 jean-core/target/

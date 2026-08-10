@@ -6,13 +6,7 @@
  * interactive terminal access.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { invoke, listen } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
@@ -27,6 +21,7 @@ import { piCliQueryKeys } from '@/services/pi-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { kimiCliQueryKeys } from '@/services/kimi-cli'
+import { antigravityCliQueryKeys } from '@/services/antigravity-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
@@ -85,6 +80,7 @@ interface CliLoginModalContentProps {
     | 'commandcode'
     | 'grok'
     | 'kimi'
+    | 'antigravity'
     | 'coderabbit'
     | null
   command: string
@@ -127,9 +123,11 @@ function CliLoginModalContent({
                     ? 'Grok CLI'
                     : cliType === 'kimi'
                       ? 'Kimi Code'
-                      : cliType === 'glab'
-                        ? 'GitLab CLI'
-                        : 'GitHub CLI'
+                      : cliType === 'antigravity'
+                        ? 'Antigravity CLI'
+                        : cliType === 'glab'
+                          ? 'GitLab CLI'
+                          : 'GitHub CLI'
   const cliTitle =
     cliType === 'cursor' ||
     cliType === 'pi' ||
@@ -139,8 +137,8 @@ function CliLoginModalContent({
         <BackendLabel backend={cliType} />
         <span>CLI</span>
       </span>
-    ) : cliType === 'kimi' ? (
-      <BackendLabel backend="kimi" />
+    ) : cliType === 'kimi' || cliType === 'antigravity' ? (
+      <BackendLabel backend={cliType} />
     ) : (
       cliName
     )
@@ -218,6 +216,8 @@ function CliLoginModalContent({
           queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
         } else if (cliType === 'kimi') {
           queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
+        } else if (cliType === 'antigravity') {
+          queryClient.invalidateQueries({ queryKey: antigravityCliQueryKeys.all })
         } else if (cliType === 'coderabbit') {
           queryClient.invalidateQueries({
             queryKey: coderabbitCliQueryKeys.all,

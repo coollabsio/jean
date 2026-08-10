@@ -635,7 +635,9 @@ When launching multiple Task subagents, prefer sending them in a single message 
 Instruct each sub-agent to briefly outline its approach before implementing, so it can course-correct early without formal plan mode overhead.`
 
 /** Default global system prompt (must match DEFAULT_GLOBAL_SYSTEM_PROMPT in src-tauri) */
-export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
+export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Technical English when you talk to me.
+
+### 1. Planning Guidance
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
@@ -914,6 +916,10 @@ export const GROK_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 export const KIMI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('kimi/default')
 
+/** Antigravity preset for all magic prompts */
+export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
+  makeMagicPromptModelsPreset('antigravity/auto')
+
 /** Default reasoning efforts for Claude backend (null = use model default) */
 export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_issue_effort: null,
@@ -1128,6 +1134,8 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('commandcode')
 export const GROK_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('grok')
 export const KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('kimi')
+export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS =
+  makeBackendsPreset('antigravity')
 
 /**
  * Resolve a magic prompt provider for a given key.
@@ -1201,6 +1209,7 @@ export interface AppPreferences {
   parallel_execution_prompt_enabled: boolean // Add system prompt to encourage parallel sub-agent execution
   compact_chat_view_enabled: boolean // Collapse intermediate tool calls/replies into a single ticker line, only showing the latest activity
   auto_recaps_enabled?: boolean // Ask agents to end multi-step/tool turns with a recap
+  keep_ai_servers_warm?: boolean // Keep Codex/OpenCode servers alive briefly between requests
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
   magic_prompt_models: MagicPromptModels // Per-prompt model overrides
   magic_code_review_configs?: MagicCodeReviewConfig[] // Up to five backend/model/reasoning review runners
@@ -1268,6 +1277,7 @@ export interface AppPreferences {
   selected_commandcode_model?: string // Default Command Code model (CLI default)
   selected_grok_model: GrokModel // Default Grok model
   selected_kimi_model?: KimiModel // Default Kimi Code model
+  selected_antigravity_model?: AntigravityModel // Default Antigravity CLI model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
   default_codex_model_verbosity: CodexModelVerbosity // Default model verbosity for Codex chat: 'low' | 'medium' | 'high'
   default_grok_reasoning_effort: GrokReasoningEffort // Default reasoning effort for Grok: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1279,6 +1289,7 @@ export interface AppPreferences {
   pi_auto_steer_enabled: boolean // Steer prompts into a running PI turn instead of queueing (default: true)
   grok_auto_steer_enabled: boolean // Steer prompts into a running Grok turn instead of queueing (default: true)
   kimi_auto_steer_enabled?: boolean // Reserved for Kimi Code steering support
+  antigravity_auto_steer_enabled?: boolean // Reserved until Antigravity headless mode supports steering
   restore_last_session: boolean // Restore last session when switching projects (default: true)
   close_original_on_clear_context: boolean // Close original session when using Clear Context and yolo (default: true)
   build_model: string | null // Model override for plan approval (build mode), null = use session model
@@ -1297,6 +1308,7 @@ export interface AppPreferences {
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   grok_cli_source: 'jean' | 'path' // Grok CLI source: 'jean' (managed) or 'path' (system PATH)
   kimi_cli_source?: 'jean' | 'path' // Kimi Code CLI source: 'jean' (managed) or 'path' (system PATH)
+  antigravity_cli_source?: 'jean' | 'path' // Antigravity CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   glab_cli_source: 'jean' | 'path' // GitLab CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1830,6 +1842,7 @@ export type PiModel = `pi/${string}`
 export type CommandCodeModel = `commandcode/${string}`
 export type GrokModel = `grok/${string}`
 export type KimiModel = `kimi/${string}`
+export type AntigravityModel = `antigravity/${string}`
 export type MagicPromptModel =
   | ClaudeModel
   | CodexModel
@@ -1839,6 +1852,7 @@ export type MagicPromptModel =
   | CommandCodeModel
   | GrokModel
   | KimiModel
+  | AntigravityModel
 
 /** Check if a model string identifies an OpenCode model */
 export function isOpenCodeModel(model: string): model is OpenCodeModel {
@@ -1866,6 +1880,12 @@ export function isGrokModel(model: string): model is GrokModel {
 /** Check if a model string identifies a Kimi Code model */
 export function isKimiModel(model: string): model is KimiModel {
   return model.startsWith('kimi/')
+}
+/** Check if a model string identifies a Antigravity CLI model */
+export function isAntigravityCliModel(
+  model: string
+): model is AntigravityModel {
+  return model.startsWith('antigravity/')
 }
 
 /** Check if a model string identifies a Codex model */
@@ -1930,6 +1950,7 @@ export type CliBackend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'antigravity'
 
 export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'claude', label: 'Claude' },
@@ -1940,6 +1961,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'commandcode', label: 'Command Code (Beta)' },
   { value: 'grok', label: 'Grok (Beta)' },
   { value: 'kimi', label: 'Kimi Code (Beta)' },
+  { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
 ]
 
 export type TerminalApp =
@@ -2051,6 +2073,7 @@ export const newSessionKindOptions: {
   { value: 'cursor', label: 'Cursor' },
   { value: 'grok', label: 'Grok (Beta)' },
   { value: 'kimi', label: 'Kimi Code (Beta)' },
+  { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
 ]
 
 export function getNewSessionKindLabel(
@@ -2323,6 +2346,7 @@ export const defaultPreferences: AppPreferences = {
   parallel_execution_prompt_enabled: true, // Default: enabled
   compact_chat_view_enabled: true, // Default: enabled
   auto_recaps_enabled: true, // Default: enabled
+  keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
   magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,
   magic_code_review_configs: [],
@@ -2380,6 +2404,7 @@ export const defaultPreferences: AppPreferences = {
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
   selected_grok_model: 'grok/grok-4.5', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
+  selected_antigravity_model: 'antigravity/auto', // Use Antigravity CLI automatic model routing
   default_codex_reasoning_effort: 'high', // Default: high reasoning
   default_codex_model_verbosity: 'medium', // Default: medium verbosity (not low — Jean #535)
   default_grok_reasoning_effort: 'high', // Default: high reasoning
@@ -2391,6 +2416,7 @@ export const defaultPreferences: AppPreferences = {
   pi_auto_steer_enabled: true, // Default: steer PI running turn instead of queueing
   grok_auto_steer_enabled: true, // Default: steer Grok running turn instead of queueing
   kimi_auto_steer_enabled: false,
+  antigravity_auto_steer_enabled: false,
   restore_last_session: true, // Default: enabled
   close_original_on_clear_context: true, // Default: enabled
   build_model: null, // Default: use session model
@@ -2409,6 +2435,7 @@ export const defaultPreferences: AppPreferences = {
   opencode_cli_source: 'jean', // Default: Jean-managed
   grok_cli_source: 'jean', // Default: Jean-managed
   kimi_cli_source: 'jean', // Default: Jean-managed
+  antigravity_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   glab_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed

@@ -145,7 +145,7 @@ import { StreamingStatusBar } from './StreamingStatusBar'
 import { ChatErrorFallback } from './ChatErrorFallback'
 import { logger } from '@/lib/logger'
 import { saveCrashState } from '@/lib/recovery'
-import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
+import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
 import {
   isBackendAutoSteerEnabled,
   isSteerCapableBackend,
@@ -849,12 +849,12 @@ export function ChatWindow({
   )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
-  const defaultModel = resolveDefaultModelForBackend(
+  const selectedModel = resolveSelectedModelForBackend(
     selectedBackend,
+    session?.selected_model,
     preferences,
     selectedBackend === 'pi' ? availablePiModelOptions : undefined
   )
-  const selectedModel: string = session?.selected_model ?? defaultModel
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,
@@ -930,14 +930,15 @@ export function ChatWindow({
   )
   // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
-    !isCustomProvider &&
-    supportsAdaptiveThinking(
-      selectedModel,
-      cliStatus?.version ?? null,
-      selectedModelReasoning === undefined
-        ? undefined
-        : selectedModelReasoning?.type === 'effort'
-    )
+    selectedBackend === 'antigravity' ||
+    (!isCustomProvider &&
+      supportsAdaptiveThinking(
+        selectedModel,
+        cliStatus?.version ?? null,
+        selectedModelReasoning === undefined
+          ? undefined
+          : selectedModelReasoning?.type === 'effort'
+      ))
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
@@ -2093,7 +2094,8 @@ export function ChatWindow({
         backend === 'opencode' ||
         backend === 'pi' ||
         backend === 'grok' ||
-        backend === 'kimi'
+        backend === 'kimi' ||
+        backend === 'antigravity'
       const effortLevel = usesEffortBackend
         ? ((preferences?.magic_prompt_efforts?.code_review_effort as
             | EffortLevel
@@ -3664,8 +3666,8 @@ export function ChatWindow({
 
                             <div
                               className={cn(
-                                zenMode &&
-                                  'flex max-h-16 items-center overflow-hidden'
+                                zenMode && 'flex items-center overflow-hidden',
+                                zenMode && 'max-h-20'
                               )}
                             >
                               {/* Textarea section */}
@@ -3709,7 +3711,7 @@ export function ChatWindow({
                               </div>
 
                               {/* Bottom toolbar */}
-                              {zenMode && isMobile ? (
+                              {zenMode ? (
                                 <div className="shrink-0 pr-3">
                                   <SendCancelButton
                                     isSending={isSending}
@@ -3723,6 +3725,13 @@ export function ChatWindow({
                                       ) ||
                                       (steerModifierActive &&
                                         isSteerCapableBackend(selectedBackend))
+                                    }
+                                    steerWithModifier={
+                                      steerModifierActive &&
+                                      !isBackendAutoSteerEnabled(
+                                        selectedBackend,
+                                        preferences
+                                      )
                                     }
                                     queuedMessageCount={
                                       currentQueuedMessages.length

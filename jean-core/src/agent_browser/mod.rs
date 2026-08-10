@@ -414,6 +414,7 @@ pub async fn install_agent_browser_mcp(
             "cursor".to_string(),
             "grok".to_string(),
             "kimi".to_string(),
+            "antigravity".to_string(),
         ]
     });
 
@@ -426,6 +427,7 @@ pub async fn install_agent_browser_mcp(
             "cursor" => install_cursor(&entry),
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
+            "antigravity" => install_antigravity(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
         };
         results.push(match result {
@@ -531,6 +533,21 @@ fn install_kimi(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> 
     )
 }
 
+fn install_antigravity(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
+    install_antigravity_at(
+        home.join(".gemini").join("config").join("mcp_config.json"),
+        entry,
+    )
+}
+
+fn install_antigravity_at(
+    path: PathBuf,
+    entry: &McpEntry,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    install_json_server(path, "mcpServers", entry.claude_server_json())
+}
+
 fn install_opencode(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
     let path = find_opencode_config_path(&home)
@@ -563,6 +580,30 @@ fn find_opencode_config_path(home: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod antigravity_install_tests {
+    use super::*;
+
+    #[test]
+    fn installs_agent_browser_in_antigravity_global_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcp_config.json");
+        let entry = McpEntry {
+            command: "agent-browser".to_string(),
+            profile_path: temp.path().join("profile").to_string_lossy().to_string(),
+        };
+
+        install_antigravity_at(path.clone(), &entry).expect("install");
+
+        let value: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read")).expect("json");
+        assert_eq!(
+            value["mcpServers"][MCP_SERVER_NAME]["command"],
+            "agent-browser"
+        );
+    }
 }
 
 fn install_json_server(

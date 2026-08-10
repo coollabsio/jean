@@ -60,6 +60,7 @@ import {
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
   KIMI_EFFORT_LEVEL_OPTIONS,
+  ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   withAdaptiveEffortOption,
@@ -204,14 +205,17 @@ export function DesktopToolbarControls({
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
+  const isAntigravity = selectedBackend === 'antigravity'
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
-      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
+      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi || isAntigravity))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
-      : isPi
+      : isAntigravity
+        ? ANTIGRAVITY_EFFORT_LEVEL_OPTIONS
+        : isPi
         ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
         : isCodex
           ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)

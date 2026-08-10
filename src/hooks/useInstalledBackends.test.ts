@@ -16,6 +16,7 @@ const BACKENDS: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'antigravity',
 ]
 
 const status = Object.fromEntries(
@@ -72,6 +73,10 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiCliStatus: () => statusQuery('kimi'),
   useKimiCliAuth: () => authQuery('kimi'),
 }))
+vi.mock('@/services/antigravity-cli', () => ({
+  useAntigravityCliStatus: () => statusQuery('antigravity'),
+  useAntigravityCliAuth: () => authQuery('antigravity'),
+}))
 
 describe('isBackendUsable', () => {
   it('requires installed; excludes only when auth is known false', () => {
@@ -121,6 +126,17 @@ describe('useInstalledBackends', () => {
     ])
   })
 
+  it('lists installed Antigravity even when not authenticated', () => {
+    status.antigravity.installed = true
+    auth.antigravity.authenticated = false
+    status.claude.installed = true
+    auth.claude.authenticated = true
+
+    const { result } = renderHook(() => useInstalledBackends())
+
+    expect(result.current.installedBackends).toEqual(['claude', 'antigravity'])
+  })
+
   it('returns empty when nothing is installed', () => {
     status.claude.installed = false
     const { result } = renderHook(() => useInstalledBackends())
@@ -148,5 +164,18 @@ describe('useBackendAuthStatuses', () => {
     expect(result.current.authByBackend.opencode).toBe(true)
     expect(result.current.authByBackend.codex).toBeUndefined()
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it('reports Antigravity auth when installed', () => {
+    status.antigravity.installed = true
+    auth.antigravity.authenticated = true
+
+    const { result } = renderHook(() => useBackendAuthStatuses())
+
+    expect(result.current.authByBackend.antigravity).toBe(true)
+
+    status.antigravity.installed = false
+    const { result: uninstalled } = renderHook(() => useBackendAuthStatuses())
+    expect(uninstalled.current.authByBackend.antigravity).toBeUndefined()
   })
 })

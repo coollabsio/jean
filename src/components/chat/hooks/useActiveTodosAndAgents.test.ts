@@ -96,7 +96,7 @@ describe('extractCodexAgents', () => {
     ])
   })
 
-  it('does not convert unresolved in_progress agents to completed when parent stream ends', () => {
+  it('completes unresolved agents when the parent turn finishes normally', () => {
     const tools = [
       toolCall('SpawnAgent', {
         receiver_thread_ids: ['agent-a'],
@@ -111,12 +111,21 @@ describe('extractCodexAgents', () => {
       {
         id: 'agent-a',
         prompt: 'Still working',
-        status: 'interrupted',
-        message: 'Interrupted before completion',
+        status: 'completed',
+        message: undefined,
       },
     ])
 
     // While parent is still sending, leave as in_progress
     expect(extractCodexAgents(tools, true)[0]?.status).toBe('in_progress')
+
+    expect(extractCodexAgents(tools, false, true)).toEqual([
+      {
+        id: 'agent-a',
+        prompt: 'Still working',
+        status: 'interrupted',
+        message: 'Interrupted before completion',
+      },
+    ])
   })
 })

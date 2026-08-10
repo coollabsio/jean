@@ -33,7 +33,6 @@ vi.mock('./InlineFileDiff', async importOriginal => {
   }
 })
 
-
 function clickExpandTrigger() {
   const triggers = document.querySelectorAll(
     '[data-slot="collapsible-trigger"]'
@@ -44,6 +43,22 @@ function clickExpandTrigger() {
 }
 
 describe('ToolCallInline', () => {
+  it('keeps clickable file details at the compact tool-row font size', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-read-font-size',
+          name: 'Read',
+          input: { file_path: '/tmp/example.ts', limit: 20 },
+        }}
+        onFileClick={vi.fn()}
+      />
+    )
+
+    const fileDetail = screen.getByRole('button', { name: /example\.ts/i })
+    expect(fileDetail).not.toHaveClass('font-mono')
+  })
+
   it('renders Cursor EnterPlanMode instructions', () => {
     render(
       <ToolCallInline
@@ -293,6 +308,96 @@ describe('ToolCallInline', () => {
       unmount()
     }
   })
+
+  it.each([
+    ['run_command', { CommandLine: 'bun test' }, 'Bash', 'bun test'],
+    [
+      'view_file',
+      { AbsolutePath: '/Users/example/project/src/app.ts' },
+      'Read',
+      'app.ts',
+    ],
+    [
+      'write_to_file',
+      { TargetFile: '/Users/example/project/src/new.ts', CodeContent: 'export {}' },
+      'Write',
+      'new.ts',
+    ],
+    [
+      'replace_file_content',
+      {
+        TargetFile: '/Users/example/project/src/app.ts',
+        TargetContent: 'old',
+        ReplacementContent: 'new',
+      },
+      'Edit',
+      'app.ts',
+    ],
+    [
+      'grep_search',
+      { Query: 'Antigravity', SearchPath: '/Users/example/project' },
+      'Grep',
+      '"Antigravity" in /Users/example/project',
+    ],
+    [
+      'find_by_name',
+      { Pattern: '*.rs', SearchDirectory: '/Users/example/project' },
+      'Glob',
+      '*.rs',
+    ],
+    [
+      'list_dir',
+      { DirectoryPath: '/Users/example/project/src' },
+      'List',
+      '/Users/example/project/src',
+    ],
+    ['search_web', { Query: 'Antigravity CLI docs' }, 'Web Search', 'Antigravity CLI docs'],
+    ['read_url_content', { Url: 'https://antigravity.google' }, 'Web Fetch', 'https://antigravity.google'],
+  ])('renders Antigravity %s with the common renderer', (name, input, label, detail) => {
+    render(
+      <ToolCallInline
+        toolCall={{ id: `antigravity-${name}`, name, input }}
+      />
+    )
+
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.getByText(detail)).toBeInTheDocument()
+    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    'browser_click',
+    'browser_get_dom',
+    'command_status',
+    'generate_image',
+    'list_browser_pages',
+    'manage_inbox',
+    'manage_subagents',
+    'manage_task',
+    'notify_user',
+    'open_browser_url',
+    'read_browser_page',
+    'read_knowledge_base_item',
+    'read_terminal',
+    'search_knowledge_base',
+    'send_command_input',
+    'task_boundary',
+  ])(
+    'recognizes native Antigravity tool %s without an unhandled warning',
+    name => {
+      render(
+        <ToolCallInline
+          toolCall={{
+            id: `antigravity-${name}`,
+            name,
+            input: { Description: 'Native Antigravity operation' },
+          }}
+        />
+      )
+
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+    }
+  )
 
   it('renders FileChange diffs without duplicate raw output', () => {
     const { container } = render(

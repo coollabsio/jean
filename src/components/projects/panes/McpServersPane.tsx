@@ -216,7 +216,8 @@ export function McpServersPane({
     <div className="space-y-6">
       <SettingsSection title="MCP Servers">
         <p className="text-xs text-muted-foreground">
-          Servers enabled by default for sessions in this project
+          Servers enabled by default for sessions in this project. Antigravity
+          loads its configured servers automatically.
         </p>
 
         {mcpLoading ? (
@@ -252,10 +253,11 @@ export function McpServersPane({
                       id={`proj-mcp-${backend}-${server.name}`}
                       checked={
                         !server.disabled &&
-                        selectedServersSet.has(mcpKey(backend, server.name))
+                        (backend === 'antigravity' ||
+                          selectedServersSet.has(mcpKey(backend, server.name)))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
-                      disabled={server.disabled}
+                      disabled={server.disabled || backend === 'antigravity'}
                     />
                     <Label
                       htmlFor={`proj-mcp-${backend}-${server.name}`}
@@ -272,7 +274,11 @@ export function McpServersPane({
                       backend={backend}
                     />
                     <span className="text-xs text-muted-foreground">
-                      {server.disabled ? 'disabled' : server.scope}
+                      {server.disabled
+                        ? 'disabled'
+                        : backend === 'antigravity'
+                          ? 'automatic'
+                          : server.scope}
                     </span>
                   </div>
                 ))}

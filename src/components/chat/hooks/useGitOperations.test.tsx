@@ -175,7 +175,7 @@ describe('useGitOperations conflict resolution', () => {
   })
 
   it('sends detected conflicts immediately in yolo mode instead of drafting them', async () => {
-    const { result, sendMessage } = renderGitOperations()
+    const { result, sendMessage, queryClient } = renderGitOperations()
 
     await act(async () => {
       await result.current.handleResolveConflicts()
@@ -187,6 +187,15 @@ describe('useGitOperations conflict resolution', () => {
     expect(useChatStore.getState().executionModes['conflict-session']).toBe(
       'yolo'
     )
+    expect(
+      queryClient
+        .getQueryData<{ sessions: Session[] }>([
+          'chat',
+          'sessions',
+          'wt-1',
+        ])
+        ?.sessions.map(session => session.id)
+    ).toContain('conflict-session')
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'conflict-session',

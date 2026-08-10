@@ -2491,6 +2491,7 @@ pub async fn dispatch_command(
             let result = crate::cursor_cli::get_cursor_install_command(app.clone()).await?;
             to_value(result)
         }
+        "check_system_prerequisites" => to_value(crate::check_system_prerequisites()),
         "check_grok_cli_installed" => {
             let result = crate::grok_cli::check_grok_cli_installed(app.clone()).await?;
             to_value(result)
@@ -2573,6 +2574,48 @@ pub async fn dispatch_command(
         }
         "login_kimi_cli_device" => {
             crate::kimi_cli::login_kimi_cli_device(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "check_antigravity_cli_installed" => {
+            to_value(crate::antigravity_cli::check_antigravity_cli_installed(app.clone()).await?)
+        }
+        "detect_antigravity_in_path" => {
+            to_value(crate::antigravity_cli::detect_antigravity_in_path(app.clone()).await?)
+        }
+        "check_antigravity_cli_auth" => {
+            to_value(crate::antigravity_cli::check_antigravity_cli_auth(app.clone()).await?)
+        }
+        "list_antigravity_models" => {
+            to_value(crate::antigravity_cli::list_antigravity_models(app.clone()).await?)
+        }
+        "get_available_antigravity_versions" => {
+            to_value(crate::antigravity_cli::get_available_antigravity_versions(app.clone()).await?)
+        }
+        "check_antigravity_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            to_value(
+                crate::antigravity_cli::check_antigravity_cli_version_exists(app.clone(), version)
+                    .await?,
+            )
+        }
+        "get_antigravity_install_command" => {
+            to_value(crate::antigravity_cli::get_antigravity_install_command(app.clone()).await?)
+        }
+        "install_antigravity_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::antigravity_cli::install_antigravity_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_antigravity_cli" => {
+            crate::antigravity_cli::uninstall_antigravity_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_antigravity_cli" => {
+            crate::antigravity_cli::update_antigravity_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "login_antigravity_cli_device" => {
+            crate::antigravity_cli::login_antigravity_cli_device(app.clone()).await?;
             Ok(Value::Null)
         }
         "check_pi_cli_installed" => {

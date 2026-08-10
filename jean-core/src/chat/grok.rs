@@ -2935,6 +2935,7 @@ pub(crate) fn parse_grok_run_to_message(
         cancelled: run.cancelled || response.cancelled,
         plan_approved: false,
         model: run.model.clone(),
+        backend: None,
         execution_mode: run.execution_mode.clone(),
         thinking_level: run.thinking_level.clone(),
         effort_level: run.effort_level.clone(),
@@ -5284,6 +5285,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-err".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
@@ -6114,6 +6116,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-1".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
@@ -6191,6 +6194,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
