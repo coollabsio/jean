@@ -72,6 +72,19 @@ describe('SessionChatModal removal behavior', () => {
     expect(removeSessionTab).not.toContain('navigateToProjectPicker(')
   })
 
+  it('shows the empty worktree view after the last session is removed', () => {
+    const modalSource = readSource('src/components/chat/SessionChatModal.tsx')
+    const serviceSource = readSource('src/services/chat.ts')
+
+    expect(modalSource).toContain(
+      'No sessions yet. Create one to start chatting.'
+    )
+    expect(serviceSource).not.toContain('navigateToProjectPicker(')
+    expect(serviceSource).toContain(
+      'const { [worktreeId]: _removed, ...rest } = state.activeSessionIds'
+    )
+  })
+
   it('hides session tabs and top action chrome when zen mode is active', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
 

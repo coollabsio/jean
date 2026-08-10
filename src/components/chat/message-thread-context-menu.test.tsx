@@ -129,6 +129,37 @@ describe('MessageThreadContextMenu', () => {
     window.getSelection = original
   })
 
+  it('copies the URL when right-clicking an element inside a link', async () => {
+    const user = userEvent.setup()
+    const original = window.getSelection
+    window.getSelection = () =>
+      ({
+        toString: () => '',
+      }) as Selection
+
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>
+          <a href="/docs">
+            <span>documentation</span>
+          </a>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+    fireEvent.contextMenu(screen.getByText('documentation'))
+    await user.click(await screen.findByRole('menuitem', { name: /copy url/i }))
+
+    await waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(
+        'http://localhost:3000/docs'
+      )
+      expect(mocks.toastSuccess).toHaveBeenCalledWith('Copied to clipboard')
+    })
+
+    window.getSelection = original
+  })
+
   it('uses onCopyMessage when provided', async () => {
     const user = userEvent.setup()
     const onCopyMessage = vi.fn().mockResolvedValue(undefined)

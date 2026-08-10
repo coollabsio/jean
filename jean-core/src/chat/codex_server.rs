@@ -1000,6 +1000,15 @@ pub fn unregister_session(thread_id: &str) {
 
     let prev = USAGE_COUNT.fetch_sub(1, Ordering::SeqCst);
     if prev == 1 {
+        let keep_warm = APP_HANDLE
+            .get()
+            .and_then(|app| crate::load_preferences_sync(app).ok())
+            .map(|preferences| preferences.keep_ai_servers_warm)
+            .unwrap_or(true);
+        if !keep_warm {
+            shutdown_idle_server();
+            return;
+        }
         // Last session finished — schedule delayed shutdown (10min grace period
         // to keep server warm for typical work sessions).
         // Capture generation so we don't kill a newly-spawned server.
@@ -1013,6 +1022,16 @@ pub fn unregister_session(thread_id: &str) {
                 shutdown_server();
             }
         });
+    }
+}
+
+/// Shut down an idle server even if the just-finished run has not yet been
+/// removed from the incomplete-run manifest.
+fn shutdown_idle_server() {
+    let mut guard = CODEX_SERVER.lock().unwrap();
+    if let Some(server) = guard.take() {
+        log::info!("AI server warming disabled — shutting down codex app-server");
+        kill_server(server);
     }
 }
 

@@ -232,7 +232,9 @@ fn merge_todo_snapshot(existing: &[Value], incoming: &Value, merge: bool) -> Vec
             .is_none_or(|s| s.is_empty());
 
         if let Some(id) = id {
-            if let Some(pos) = result.iter().position(|existing_item| existing_item.get("id") == Some(&id))
+            if let Some(pos) = result
+                .iter()
+                .position(|existing_item| existing_item.get("id") == Some(&id))
             {
                 let prev = result[pos].as_object().cloned().unwrap_or_default();
                 let mut merged = prev;
@@ -242,10 +244,7 @@ fn merge_todo_snapshot(existing: &[Value], incoming: &Value, merge: bool) -> Vec
                 if !new_content_empty {
                     if let Some(content) = item.get("content").cloned() {
                         merged.insert("content".to_string(), content.clone());
-                        let active = item
-                            .get("activeForm")
-                            .cloned()
-                            .unwrap_or(content);
+                        let active = item.get("activeForm").cloned().unwrap_or(content);
                         merged.insert("activeForm".to_string(), active);
                     }
                 }
@@ -323,10 +322,7 @@ fn extract_acp_plan_todo_write(update: &Value) -> Option<ParsedToolCall> {
 
 /// Apply Grok TodoWrite / ACP plan state onto a running snapshot and rewrite the
 /// tool call input so the UI always sees a full merged list.
-fn apply_todo_write_snapshot(
-    tool: &mut ParsedToolCall,
-    todo_snapshot: &mut Vec<Value>,
-) {
+fn apply_todo_write_snapshot(tool: &mut ParsedToolCall, todo_snapshot: &mut Vec<Value>) {
     if tool.name != "TodoWrite" {
         return;
     }
@@ -2939,6 +2935,7 @@ pub(crate) fn parse_grok_run_to_message(
         cancelled: run.cancelled || response.cancelled,
         plan_approved: false,
         model: run.model.clone(),
+        backend: None,
         execution_mode: run.execution_mode.clone(),
         thinking_level: run.thinking_level.clone(),
         effort_level: run.effort_level.clone(),
@@ -5288,6 +5285,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-err".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
@@ -6118,6 +6116,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-1".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
@@ -6195,6 +6194,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();

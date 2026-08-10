@@ -23,6 +23,28 @@ struct ChunkEvent {
     run_id: Option<String>,
 }
 
+#[cfg(test)]
+mod one_shot_structured_output_tests {
+    use super::*;
+
+    #[test]
+    fn detects_provider_rejection_of_structured_output_in_thinking_mode() {
+        let error = "[invalid_request_error] Thinking mode does not support this tool_choice";
+
+        assert!(should_retry_structured_output_as_text(error));
+        assert!(!should_retry_structured_output_as_text("quota exceeded"));
+    }
+
+    #[test]
+    fn text_fallback_prompt_requires_json_matching_the_schema() {
+        let prompt = structured_output_text_prompt("Generate a PR", r#"{"type":"object"}"#);
+
+        assert!(prompt.contains("Generate a PR"));
+        assert!(prompt.contains(r#"{"type":"object"}"#));
+        assert!(prompt.contains("Return only the JSON object"));
+    }
+}
+
 #[derive(serde::Serialize, Clone)]
 struct ToolUseEvent {
     session_id: String,
@@ -1447,6 +1469,16 @@ fn variant_for_effort(reasoning_effort: Option<&str>) -> Option<&'static str> {
         Some("low") => Some("low"),
         _ => None,
     }
+}
+
+fn should_retry_structured_output_as_text(error: &str) -> bool {
+    error.contains("Thinking mode does not support this tool_choice")
+}
+
+fn structured_output_text_prompt(prompt: &str, schema: &str) -> String {
+    format!(
+        "{prompt}\n\nReturn only the JSON object matching this schema. Do not use markdown fences:\n{schema}"
+    )
 }
 
 /// Build the OpenCode `parts` array by resolving file annotations in the prompt.
@@ -3551,7 +3583,7 @@ fn one_shot_opencode_blocking(
         ));
     }
 
-    let response_json: serde_json::Value = response
+    let mut response_json: serde_json::Value = response
         .json()
         .map_err(|e| format!("Failed to parse OpenCode response: {e}"))?;
 
@@ -3573,7 +3605,41 @@ fn one_shot_opencode_blocking(
                 .and_then(|d| d.get("message"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Structured output failed");
-            return Err(format!("OpenCode {error_name}: {error_msg}"));
+            let error = format!("OpenCode {error_name}: {error_msg}");
+            if should_retry_structured_output_as_text(&error) {
+                log::warn!(
+                    "OpenCode provider rejected structured output with thinking enabled; retrying as strict JSON text"
+                );
+                payload
+                    .as_object_mut()
+                    .expect("OpenCode payload is an object")
+                    .remove("format");
+                payload["parts"] = prepare_opencode_parts(&structured_output_text_prompt(
+                    prompt,
+                    &json_schema
+                        .expect("schema exists when handling structured output error")
+                        .to_string(),
+                ));
+                let fallback_response =
+                    client
+                        .post(&msg_url)
+                        .query(&query)
+                        .json(&payload)
+                        .send()
+                        .map_err(|e| format!("Failed to retry OpenCode message: {e}"))?;
+                if !fallback_response.status().is_success() {
+                    let status = fallback_response.status();
+                    let body = fallback_response.text().unwrap_or_default();
+                    return Err(format!(
+                        "OpenCode one-shot fallback failed: status={status}, body={body}"
+                    ));
+                }
+                response_json = fallback_response
+                    .json()
+                    .map_err(|e| format!("Failed to parse OpenCode fallback response: {e}"))?;
+            } else {
+                return Err(error);
+            }
         }
     }
 

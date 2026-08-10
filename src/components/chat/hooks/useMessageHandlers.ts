@@ -270,6 +270,9 @@ function getDefaultModelForBackend(
   if (backend === 'kimi') {
     return preferences?.selected_kimi_model ?? 'kimi/default'
   }
+  if (backend === 'antigravity') {
+    return preferences?.selected_antigravity_model ?? 'antigravity/auto'
+  }
   return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
 }
 
@@ -282,6 +285,7 @@ const SESSION_BACKENDS = new Set<Session['backend']>([
   'pi',
   'grok',
   'kimi',
+  'antigravity',
 ])
 
 function asSessionBackend(

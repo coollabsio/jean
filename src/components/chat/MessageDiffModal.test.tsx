@@ -4,6 +4,8 @@ import { MessageDiffModal, undoEdit, patchFromEdits } from './MessageDiffModal'
 import { useState, type ReactNode } from 'react'
 
 let tauriAvailable = false
+let editorAvailable = false
+let mobile = false
 let mockFileContent: string | undefined = undefined
 
 vi.mock('@/hooks/use-theme', () => ({
@@ -11,7 +13,7 @@ vi.mock('@/hooks/use-theme', () => ({
 }))
 
 vi.mock('@/hooks/use-mobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => mobile,
 }))
 
 vi.mock('@/services/preferences', () => ({
@@ -25,7 +27,7 @@ vi.mock('@/services/projects', () => ({
 vi.mock('@/lib/environment', () => ({
   isNativeApp: () => false,
   isLocalBackend: () => false,
-  canOpenInEditor: () => false,
+  canOpenInEditor: () => editorAvailable,
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -49,9 +51,8 @@ vi.mock('@pierre/diffs/react', () => ({
 }))
 
 vi.mock('@pierre/diffs/edit', () => ({
-  Editor: class Editor {
-    constructor() {}
-  },
+  // Constructable stub; pierre-edit does `new Editor(options)`.
+  Editor: vi.fn(),
 }))
 
 const patch = `Index: src/example.ts
@@ -99,6 +100,8 @@ describe('patchFromEdits', () => {
 describe('MessageDiffModal header', () => {
   beforeEach(() => {
     tauriAvailable = false
+    editorAvailable = false
+    mobile = false
     mockFileContent = undefined
   })
 
@@ -155,9 +158,52 @@ describe('MessageDiffModal header', () => {
     )
 
     const closeButton = await screen.findByRole('button', { name: 'Close' })
-    expect(closeButton.className).toContain('absolute')
-    expect(closeButton.className).toContain('right-4')
-    expect(closeButton.className).toContain('top-4')
+    expect(closeButton.parentElement?.className).toContain('absolute')
+    expect(closeButton.parentElement?.className).toContain('right-4')
+    expect(closeButton.parentElement?.className).toContain('top-4')
+  })
+
+  it('groups the open-in-editor and close buttons together', async () => {
+    editorAvailable = true
+
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/src/example.ts"
+        worktreePath="/repo"
+        edits={[]}
+        patch={patch}
+      />
+    )
+
+    const openButton = await screen.findByRole('button', {
+      name: /Open in Editor/i,
+    })
+    const closeButton = screen.getByRole('button', { name: 'Close' })
+
+    expect(openButton.parentElement).toBe(closeButton.parentElement)
+  })
+
+  it('hides the open-in-editor button on mobile', async () => {
+    editorAvailable = true
+    mobile = true
+
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/src/example.ts"
+        worktreePath="/repo"
+        edits={[]}
+        patch={patch}
+      />
+    )
+
+    expect(await screen.findByText('example.ts')).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: /Open in Editor/i })
+    ).not.toBeInTheDocument()
   })
 
   it('refreshes the rendered diff when a live FileChange patch updates while open', async () => {

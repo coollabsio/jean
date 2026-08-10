@@ -35,6 +35,8 @@ function hasAttachments(msg: QueuedMessage): boolean {
   )
 }
 
+// Claude, Kimi, and Antigravity have no mid-turn steer API — their queued
+// prompts stay editable and "send now" falls back to promote + cancel.
 function supportsSteering(msg: QueuedMessage): boolean {
   const backend = msg.backend ?? 'claude'
   return (

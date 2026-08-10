@@ -32,6 +32,10 @@ const RTK_RELEASE_LATEST_API: &str = "https://api.github.com/repos/rtk-ai/rtk/re
 const RTK_CLI_DIR_NAME: &str = "rtk-cli";
 const RTK_BINARY_NAME: &str = if cfg!(windows) { "rtk.exe" } else { "rtk" };
 const RTK_ARM64_MIN_GLIBC: (u32, u32) = (2, 39);
+const CAVEMAN_UNIX_INSTALL_URL: &str =
+    "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh";
+const RTK_UNIX_INSTALL_URL: &str =
+    "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh";
 
 fn superpowers_claude_plugin_target() -> &'static str {
     "superpowers@claude-plugins-official"
@@ -40,6 +44,18 @@ fn superpowers_claude_plugin_target() -> &'static str {
 fn is_blocked_superpowers_skill_dir(name: &str) -> bool {
     name == SUPERPOWERS_GIT_WORKTREE_SKILL
         || name == format!("superpowers-{SUPERPOWERS_GIT_WORKTREE_SKILL}")
+}
+
+fn caveman_unix_install_command(backends: &[&str]) -> String {
+    let only_args = backends
+        .iter()
+        .map(|backend| format!(" --only {backend}"))
+        .collect::<String>();
+    format!("curl -fsSL {CAVEMAN_UNIX_INSTALL_URL} | bash -s -- --non-interactive{only_args}")
+}
+
+fn rtk_unix_install_command() -> String {
+    format!("curl -fsSL {RTK_UNIX_INSTALL_URL} | sh")
 }
 
 pub async fn check_opinionated_plugin_status(
@@ -84,6 +100,14 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
     let unsupported_reason = current_rtk_install_unsupported_reason();
     let install_supported = unsupported_reason.is_none();
     let managed_binary = rtk_binary_path(app).ok();
+    let unix_binary = dirs::home_dir().map(|home| home.join(".local/bin").join(RTK_BINARY_NAME));
+    if let Some(parent) = unix_binary
+        .as_ref()
+        .filter(|binary| binary.exists())
+        .and_then(|binary| binary.parent())
+    {
+        add_dir_to_process_path(parent)?;
+    }
     let result = tokio::task::spawn_blocking(move || {
         let path_result = silent_command("rtk").arg("--version").output();
         if matches!(&path_result, Ok(output) if output.status.success()) {
@@ -91,6 +115,12 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
         }
 
         if let Some(binary) = managed_binary {
+            if binary.exists() {
+                return silent_command(binary).arg("--version").output();
+            }
+        }
+
+        if let Some(binary) = unix_binary {
             if binary.exists() {
                 return silent_command(binary).arg("--version").output();
             }
@@ -149,7 +179,57 @@ async fn check_caveman_status(app: &AppHandle) -> Result<PluginStatus, String> {
     })
 }
 
-async fn install_rtk(app: &AppHandle) -> Result<String, String> {
+async fn install_rtk(_app: &AppHandle) -> Result<String, String> {
+    #[cfg(unix)]
+    {
+        install_rtk_unix().await
+    }
+    #[cfg(not(unix))]
+    {
+        install_rtk_direct(_app).await
+    }
+}
+
+#[cfg(unix)]
+async fn install_rtk_unix() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let install_dir = home.join(".local").join("bin");
+    let command = rtk_unix_install_command();
+    let output =
+        tokio::task::spawn_blocking(move || silent_command("sh").args(["-c", &command]).output())
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("Failed to run RTK curl installer: {e}"))?;
+
+    if !output.status.success() {
+        return Err(command_failure_message(
+            "RTK curl installer failed",
+            &output,
+        ));
+    }
+
+    add_dir_to_process_path(&install_dir)?;
+    let binary_path = install_dir.join(RTK_BINARY_NAME);
+    let init_output = silent_command(&binary_path)
+        .args(["init", "-g"])
+        .output()
+        .map_err(|e| format!("Failed to initialize RTK: {e}"))?;
+    if !init_output.status.success() {
+        return Ok(format!(
+            "RTK installed to {} but init had warnings: {}",
+            binary_path.display(),
+            command_output_detail(&init_output)
+        ));
+    }
+
+    Ok(format!(
+        "RTK installed and initialized successfully at {}",
+        binary_path.display()
+    ))
+}
+
+#[cfg(not(unix))]
+async fn install_rtk_direct(app: &AppHandle) -> Result<String, String> {
     if let Some(reason) = current_rtk_install_unsupported_reason() {
         return Err(reason);
     }
@@ -580,15 +660,13 @@ async fn install_caveman(app: &AppHandle) -> Result<String, String> {
         native_backends
     };
 
-    #[cfg(target_os = "linux")]
-    let install_dir = std::env::temp_dir().join(format!("jean-caveman-{}", uuid::Uuid::new_v4()));
-    #[cfg(target_os = "linux")]
-    std::fs::create_dir_all(&install_dir)
-        .map_err(|e| format!("Failed to create Caveman install directory: {e}"))?;
-
     let install_result = if native_backends.is_empty() {
         None
     } else {
+        #[cfg(unix)]
+        let command = caveman_unix_install_command(&native_backends);
+
+        #[cfg(not(unix))]
         let mut args = vec![
             "-y".to_string(),
             "github:JuliusBrussee/caveman".to_string(),
@@ -596,24 +674,26 @@ async fn install_caveman(app: &AppHandle) -> Result<String, String> {
             "--non-interactive".to_string(),
         ];
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(unix))]
         args.push("--with-init".to_string());
 
+        #[cfg(not(unix))]
         for backend in &native_backends {
             args.push("--only".to_string());
             args.push((*backend).to_string());
         }
 
-        #[cfg(target_os = "linux")]
-        let install_workdir = install_dir.clone();
-
         Some(
             tokio::task::spawn_blocking(move || {
-                let mut command = silent_command("npx");
-                command.args(args);
-                #[cfg(target_os = "linux")]
-                command.current_dir(install_workdir);
-                command.output()
+                #[cfg(unix)]
+                return silent_command("sh").args(["-c", &command]).output();
+
+                #[cfg(not(unix))]
+                {
+                    let mut command = silent_command("npx");
+                    command.args(args);
+                    command.output()
+                }
             })
             .await
             .map_err(|e| e.to_string())?,
@@ -627,28 +707,15 @@ async fn install_caveman(app: &AppHandle) -> Result<String, String> {
             let detail = if stderr.is_empty() { stdout } else { stderr };
             Err(format!("Failed to install Caveman: {detail}"))
         }
-        Some(Err(e)) => Err(format!("Failed to run Caveman installer with npx: {e}")),
+        Some(Err(e)) => Err(format!("Failed to run Caveman installer: {e}")),
         _ => {
             let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
             let backends_for_global = backends.clone();
-            #[cfg(target_os = "linux")]
-            let linux_source = install_dir.join(".agents").join("skills").join("caveman");
             let global_result = tokio::task::spawn_blocking(move || {
-                #[cfg(target_os = "linux")]
-                if linux_source.join("SKILL.md").exists() {
-                    return mirror_caveman_source_to_jean_global_backends(
-                        &linux_source,
-                        &home,
-                        &backends_for_global,
-                    );
-                }
                 mirror_caveman_to_jean_global_backends(&home, &backends_for_global)
             })
             .await
             .map_err(|e| e.to_string())?;
-
-            #[cfg(target_os = "linux")]
-            let _ = std::fs::remove_dir_all(&install_dir);
 
             let mut warnings = Vec::new();
             if let Err(e) = global_result {
@@ -2162,6 +2229,22 @@ mod tests {
         assert_eq!(
             superpowers_claude_plugin_target(),
             "superpowers@claude-plugins-official"
+        );
+    }
+
+    #[test]
+    fn uses_documented_curl_installer_for_caveman_on_unix() {
+        assert_eq!(
+            caveman_unix_install_command(&["codex", "claude"]),
+            "curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash -s -- --non-interactive --only codex --only claude"
+        );
+    }
+
+    #[test]
+    fn uses_documented_curl_installer_for_rtk_on_unix() {
+        assert_eq!(
+            rtk_unix_install_command(),
+            "curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh"
         );
     }
 

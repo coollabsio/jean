@@ -75,6 +75,7 @@ import {
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
   KIMI_EFFORT_LEVEL_OPTIONS,
+  ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   withAdaptiveEffortOption,
@@ -231,6 +232,7 @@ export function MobileSettingsMenu({
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
+  const isAntigravity = selectedBackend === 'antigravity'
   const singleRunScript =
     runScripts.length === 1 ? (runScripts[0] ?? null) : null
   const enabledMcpServersSet = useMemo(
@@ -253,11 +255,13 @@ export function MobileSettingsMenu({
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
-      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
+      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi || isAntigravity))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
-      : isPi
+      : isAntigravity
+        ? ANTIGRAVITY_EFFORT_LEVEL_OPTIONS
+        : isPi
         ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
         : isCodex
           ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)
@@ -745,14 +749,18 @@ export function MobileSettingsMenu({
                             }
                             onCheckedChange={() => onToggleMcpServer(key)}
                             onSelect={keepMenuOpenOnSelect}
-                            disabled={server.disabled}
+                            disabled={server.disabled || backend === 'antigravity'}
                             className={
                               server.disabled ? 'opacity-50' : undefined
                             }
                           >
                             {server.name}
                             <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                              {server.disabled ? 'disabled' : server.scope}
+                              {server.disabled
+                                ? 'disabled'
+                                : backend === 'antigravity'
+                                  ? 'automatic'
+                                  : server.scope}
                             </span>
                           </DropdownMenuCheckboxItem>
                         )
@@ -1320,7 +1328,7 @@ export function MobileSettingsMenu({
                       <button
                         key={key}
                         type="button"
-                        disabled={server.disabled}
+                        disabled={server.disabled || backend === 'antigravity'}
                         aria-pressed={enabled}
                         className={cn(
                           'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-50',
@@ -1332,6 +1340,11 @@ export function MobileSettingsMenu({
                           <span className="block truncate font-medium">
                             {server.name}
                           </span>
+                          {backend === 'antigravity' && !server.disabled && (
+                            <span className="block text-xs text-muted-foreground">
+                              Loaded automatically by Antigravity
+                            </span>
+                          )}
                           <span className="block text-xs text-muted-foreground">
                             {server.disabled ? 'Disabled' : server.scope}
                           </span>

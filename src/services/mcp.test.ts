@@ -73,6 +73,21 @@ describe('resolveEnabledMcpServers', () => {
     })
     expect(enabled).toEqual([mcpKey('claude', 'github')])
   })
+
+  it('keeps configured Antigravity servers active because agy loads them automatically', () => {
+    const antigravityServer: McpServerInfo = {
+      ...jeanServer,
+      backend: 'antigravity',
+    }
+    const enabled = resolveEnabledMcpServers({
+      availableServers: [antigravityServer],
+      sessionEnabled: [],
+      globalEnabled: [],
+      knownServers: [mcpKey('antigravity', 'jean')],
+    })
+
+    expect(enabled).toEqual([mcpKey('antigravity', 'jean')])
+  })
 })
 
 describe('getNewServersToAutoEnable', () => {

@@ -24,6 +24,7 @@ import { usePreferences } from '@/services/preferences'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import {
   type CliBackend,
@@ -35,6 +36,7 @@ import {
   CODEX_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
 import { BackendLabel } from '@/components/ui/backend-label'
@@ -99,6 +101,9 @@ export function ResolveConflictsDialog({
   const { data: availableKimiModels } = useAvailableKimiModels({
     enabled: installedBackends.includes('kimi'),
   })
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: installedBackends.includes('antigravity'),
+  })
   const { data: modelCatalog } = useModelCatalog()
 
   const [resolveSelectionMode, setResolveSelectionMode] =
@@ -135,6 +140,15 @@ export function ResolveConflictsDialog({
       label: model.label,
     }))
   }, [availableKimiModels])
+  const antigravityModelOptions = useMemo(() => {
+    if (!availableAntigravityModels?.length) {
+      return ANTIGRAVITY_MODEL_OPTIONS
+    }
+    return availableAntigravityModels.map(model => ({
+      value: `antigravity/${model.id}`,
+      label: model.label || model.id,
+    }))
+  }, [availableAntigravityModels])
 
   const claudeModelOptions = useMemo(
     () =>
@@ -170,7 +184,10 @@ export function ResolveConflictsDialog({
                 : backend === 'grok'
                   ? (preferences?.selected_grok_model ??
                     'grok/grok-4.5')
-                  : (preferences?.selected_model ?? 'sonnet'))
+                  : backend === 'antigravity'
+                    ? (preferences?.selected_antigravity_model ??
+                      'antigravity/auto')
+                    : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       RESOLVE_CONFLICTS_PROVIDER_KEY,
@@ -237,11 +254,14 @@ export function ResolveConflictsDialog({
           return grokModelOptions
         case 'kimi':
           return kimiModelOptions
+        case 'antigravity':
+          return antigravityModelOptions
         default:
           return resolveClaudeModelOptions
       }
     },
     [
+      antigravityModelOptions,
       grokModelOptions,
       kimiModelOptions,
       opencodeModelOptions,
@@ -276,6 +296,8 @@ export function ResolveConflictsDialog({
         return 'Grok'
       case 'kimi':
         return 'Kimi Code'
+      case 'antigravity':
+        return 'Antigravity'
       default:
         return 'Claude'
     }
@@ -451,6 +473,7 @@ export function ResolveConflictsDialog({
                             'opencode',
                             'grok',
                             'kimi',
+                            'antigravity',
                           ].includes(backend)
                         ).length <= 1
                       }
@@ -476,6 +499,11 @@ export function ResolveConflictsDialog({
                       {installedBackends.includes('kimi') && (
                         <SelectItem value="kimi">
                           <BackendLabel backend="kimi" />
+                        </SelectItem>
+                      )}
+                      {installedBackends.includes('antigravity') && (
+                        <SelectItem value="antigravity">
+                          <BackendLabel backend="antigravity" />
                         </SelectItem>
                       )}
                     </SelectContent>

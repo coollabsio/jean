@@ -26,6 +26,7 @@ const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
         'commandcode',
         'grok',
         'kimi',
+        'antigravity',
       ] as string[],
       isLoading: false,
     },
@@ -39,6 +40,7 @@ const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
         commandcode: true,
         grok: true,
         kimi: true,
+        antigravity: true,
       } as Record<string, boolean | undefined>,
       isLoading: false,
     },
@@ -112,7 +114,14 @@ function renderUseMessageSending({
   piAutoSteer?: boolean
   grokAutoSteer?: boolean
   inputValue?: string
-  selectedBackend?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'grok'
+  selectedBackend?:
+    | 'claude'
+    | 'codex'
+    | 'opencode'
+    | 'cursor'
+    | 'pi'
+    | 'grok'
+    | 'antigravity'
   selectedModel?: string
   selectedEffortLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   createSession?: {
@@ -188,6 +197,7 @@ function resetInstalledBackendsMock() {
     'commandcode',
     'grok',
     'kimi',
+    'antigravity',
   ]
   mockInstalledBackends.isLoading = false
   mockBackendAuthStatuses.authByBackend = {
@@ -199,6 +209,7 @@ function resetInstalledBackendsMock() {
     commandcode: true,
     grok: true,
     kimi: true,
+    antigravity: true,
   }
   mockBackendAuthStatuses.isLoading = false
 }
@@ -432,6 +443,82 @@ describe('useMessageSending PI effort', () => {
       }),
       expect.any(Object)
     )
+  })
+})
+
+describe('useMessageSending Antigravity effort', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
+    useChatStore.setState({
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      pendingTextFiles: {},
+      pendingSkills: {},
+      sendingSessionIds: {},
+      executionModes: {},
+      selectedModels: {},
+      executingModes: {},
+      errors: {},
+      lastSentMessages: {},
+      reviewingSessions: {},
+      waitingForInputSessionIds: {},
+      messageQueues: {},
+      approvedTools: {},
+      streamingContents: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+    })
+  })
+
+  it('passes selected Antigravity effort when sending a prompt', async () => {
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'antigravity',
+      selectedModel: 'antigravity/auto',
+      selectedEffortLevel: 'medium',
+      inputValue: 'inspect antigravity effort',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: 'antigravity',
+        effortLevel: 'medium',
+        thinkingLevel: 'off',
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('queues antigravity prompts while a turn is running (no steer API)', async () => {
+    useChatStore.setState({ sendingSessionIds: { 'session-1': true } })
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'antigravity',
+      selectedModel: 'antigravity/auto',
+      inputValue: 'also inspect antigravity',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(steerGrokTurn).not.toHaveBeenCalled()
+    expect(steerOpencodeTurn).not.toHaveBeenCalled()
+    expect(steerPiTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
   })
 })
 

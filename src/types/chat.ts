@@ -60,6 +60,7 @@ export type Backend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'antigravity'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -137,7 +138,7 @@ export interface PlanToolInput {
   plan_preview?: string
   explanation?: string
   steps?: PlanStep[]
-  source?: 'claude' | 'codex' | 'grok' | 'kimi'
+  source?: 'claude' | 'codex' | 'grok' | 'kimi' | 'antigravity'
 }
 
 /**
@@ -171,6 +172,8 @@ export interface ChatMessage {
   plan_approved?: boolean
   /** Model used when this message was sent (user messages only) */
   model?: string
+  /** Backend used when this message was sent (user messages only) */
+  backend?: Backend
   /** Execution mode when this message was sent (user messages only) */
   execution_mode?: ExecutionMode
   /** Thinking level when this message was sent (user messages only) */
@@ -239,6 +242,8 @@ export interface Session {
   grok_session_id?: string
   /** Kimi Code ACP session ID for resuming conversations */
   kimi_session_id?: string
+  /** Antigravity CLI conversation ID used for conversation continuity. */
+  antigravity_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

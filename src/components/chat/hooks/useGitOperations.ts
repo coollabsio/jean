@@ -45,6 +45,7 @@ import type {
   McpServerInfo,
   Session,
   ThinkingLevel,
+  WorktreeSessions,
 } from '@/types/chat'
 import {
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
@@ -171,6 +172,25 @@ export function useGitOperations({
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [pendingMergeWorktree, setPendingMergeWorktree] =
     useState<Worktree | null>(null)
+
+  const cacheCreatedSession = useCallback(
+    (worktreeId: string, session: Session) => {
+      queryClient.setQueryData(chatQueryKeys.session(session.id), session)
+      queryClient.setQueryData<WorktreeSessions>(
+        chatQueryKeys.sessions(worktreeId),
+        old => ({
+          worktree_id: worktreeId,
+          version: old?.version ?? 2,
+          ...old,
+          active_session_id: session.id,
+          sessions: old?.sessions.some(item => item.id === session.id)
+            ? old.sessions
+            : [...(old?.sessions ?? []), session],
+        })
+      )
+    },
+    [queryClient]
+  )
 
   const applyResolveConflictSessionSelection = useCallback(
     (
@@ -419,6 +439,7 @@ export function useGitOperations({
         name: 'Final review',
         backend,
       })
+      cacheCreatedSession(activeWorktreeId, session)
       const store = useChatStore.getState()
 
       store.setSelectedBackend(session.id, backend)
@@ -494,6 +515,7 @@ export function useGitOperations({
   }, [
     activeWorktreeId,
     activeWorktreePath,
+    cacheCreatedSession,
     enabledMcpServersRef,
     inputRef,
     mcpServersDataRef,
@@ -1303,6 +1325,7 @@ export function useGitOperations({
             worktreePath: worktree.path,
             name: 'PR: resolve conflicts',
           })
+          cacheCreatedSession(activeWorktreeId, newSession)
 
           if (currentSessionId)
             copySessionSettings(currentSessionId, newSession.id)
@@ -1372,6 +1395,7 @@ ${resolveInstructions}`
           worktreePath: worktree.path,
           name: 'Resolve conflicts',
         })
+        cacheCreatedSession(activeWorktreeId, newSession)
 
         // Inherit model/mode/thinking settings from current session
         if (currentSessionId)
@@ -1433,6 +1457,7 @@ ${resolveInstructions}`
       queryClient,
       inputRef,
       applyResolveConflictSessionSelection,
+      cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
     ]
@@ -1488,6 +1513,7 @@ ${resolveInstructions}`
           worktreePath: worktree.path,
           name: 'PR: resolve conflicts',
         })
+        cacheCreatedSession(activeWorktreeId, newSession)
 
         // Inherit model/mode/thinking settings from current session
         if (currentSessionId)
@@ -1552,6 +1578,7 @@ ${resolveInstructions}`
       queryClient,
       inputRef,
       applyResolveConflictSessionSelection,
+      cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
     ]
@@ -1650,6 +1677,7 @@ ${resolveInstructions}`
             worktreePath: worktreeData.path,
             name: 'Merge: resolve conflicts',
           })
+          cacheCreatedSession(activeWorktreeId, newSession)
 
           // Inherit model/mode/thinking settings from current session
           if (currentSessionId)
@@ -1721,6 +1749,7 @@ ${resolveInstructions}`
       queryClient,
       inputRef,
       applyResolveConflictSessionSelection,
+      cacheCreatedSession,
       resolveConflictSessionSelection,
       sendConflictResolutionPrompt,
     ]

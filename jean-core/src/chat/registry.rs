@@ -49,7 +49,7 @@ static CODEX_YOLO_AUTO_APPROVE: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
 
 /// Sessions in PROCESS_REGISTRY whose process is fully detached (survives Jean
-/// quitting). Claude CLI and host-backed Pi/Grok/Kimi runs are detached.
+/// quitting). Claude CLI and host-backed Pi/Grok/Kimi/Antigravity runs are detached.
 static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard<'a, T> {
@@ -177,6 +177,12 @@ fn try_abort_kimi_acp_host(app: &AppHandle, session_id: &str) {
 
 #[cfg(not(unix))]
 fn try_abort_kimi_acp_host(_app: &AppHandle, _session_id: &str) {}
+
+#[cfg(unix)]
+fn try_abort_antigravity_acp_host(_app: &AppHandle, _session_id: &str) {}
+
+#[cfg(not(unix))]
+fn try_abort_antigravity_acp_host(_app: &AppHandle, _session_id: &str) {}
 
 /// Register a running Claude process PID for a session.
 /// Returns `false` if the session was cancelled before registration (process is killed immediately).
@@ -727,6 +733,7 @@ pub fn cancel_process(
         try_abort_pi_rpc_host(app, session_id);
         try_abort_grok_acp_host(app, session_id);
         try_abort_kimi_acp_host(app, session_id);
+        try_abort_antigravity_acp_host(app, session_id);
         log::trace!("Cancelling Claude process group {pid} for session: {session_id}");
 
         // Kill the entire process tree to ensure child processes are also terminated
@@ -873,6 +880,7 @@ pub fn cancel_process_if_running(
         try_abort_pi_rpc_host(app, session_id);
         try_abort_grok_acp_host(app, session_id);
         try_abort_kimi_acp_host(app, session_id);
+        try_abort_antigravity_acp_host(app, session_id);
         log::trace!("Cancelling Claude process group {pid} for session: {session_id}");
 
         use crate::platform::{is_process_alive, kill_process, kill_process_tree};

@@ -533,7 +533,7 @@ gpt-5.4-high - GPT-5.4 1M High
 gpt-5.5-high-fast - GPT-5.5 High Fast
 claude-4.6-sonnet-medium - Sonnet 4.6 1M
 claude-opus-4-7-thinking-high - Opus 4.7 1M High Thinking
-gemini-3.1-pro - Gemini 3.1 Pro
+antigravity-3.1-pro - Antigravity 3.1 Pro
 grok-4.3 - Grok 4.3 1M
 
 Tip: use --model <id> (or /model <id> in interactive mode) to switch.

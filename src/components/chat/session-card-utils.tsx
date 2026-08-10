@@ -293,7 +293,10 @@ export interface ChatStoreState {
  */
 export function resolveSessionStatusOverride(
   session: Session,
-  storeState: Pick<ChatStoreState, 'sessionStatusOverrides' | 'reviewingSessions'>
+  storeState: Pick<
+    ChatStoreState,
+    'sessionStatusOverrides' | 'reviewingSessions'
+  >
 ): ManualSessionStatus | null {
   const fromStore = storeState.sessionStatusOverrides[session.id]
   if (isManualSessionStatus(fromStore)) return fromStore
@@ -759,6 +762,9 @@ export function getResumeCommand(session: Session): string | null {
   if (session.backend === 'kimi' && session.kimi_session_id) {
     return `kimi --session ${session.kimi_session_id}`
   }
+  if (session.backend === 'antigravity' && session.antigravity_session_id) {
+    return `agy --conversation ${session.antigravity_session_id}`
+  }
   return null
 }
 
@@ -770,6 +776,7 @@ export function getResumeSessionId(session: Session): string | null {
   if (session.backend === 'pi') return session.pi_session_id ?? null
   if (session.backend === 'grok') return session.grok_session_id ?? null
   if (session.backend === 'kimi') return session.kimi_session_id ?? null
+  if (session.backend === 'antigravity') return session.antigravity_session_id ?? null
   return null
 }
 
@@ -802,11 +809,7 @@ export function getResumeArgs(
   const nativeSessionId = getResumeSessionId(session)
   if (isNativeTerminalBackend(session.backend) && nativeSessionId) {
     return {
-      command: preferResolvedCliCommand(
-        cmd,
-        session.backend,
-        resolved
-      ),
+      command: preferResolvedCliCommand(cmd, session.backend, resolved),
       args: buildNativeResumeArgs(
         session.backend,
         nativeSessionId,
@@ -836,6 +839,12 @@ export function getResumeArgs(
     return {
       command: preferResolvedCliCommand(cmd, 'kimi', resolved),
       args: ['--session', session.kimi_session_id],
+    }
+  }
+  if (session.backend === 'antigravity' && session.antigravity_session_id) {
+    return {
+      command: preferResolvedCliCommand(cmd, 'agy', resolved),
+      args: ['--conversation', session.antigravity_session_id],
     }
   }
   return null

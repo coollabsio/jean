@@ -1293,8 +1293,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
       latestActivityByWorktreeId.set(worktree.id, latestActivityAt)
 
-      // Keep the base branch available for starting its first session.
-      if (shouldShowCanvasWorktreeSection(worktree, grouped.length)) {
+      // Keep every worktree available, including those without a session yet.
+      if (shouldShowCanvasWorktreeSection(worktree)) {
         readySections.push({ worktree, cards: grouped })
       }
     }

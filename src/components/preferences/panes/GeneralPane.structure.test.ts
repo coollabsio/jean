@@ -48,6 +48,16 @@ describe('GeneralPane settings structure', () => {
     }
   })
 
+  it('places managed uninstall actions below the full-width source cards', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+
+    expect(source.match(/className="w-full space-y-3"/g)).toHaveLength(7)
+    expect(source.match(/<BackendCliSourceCards/g)).toHaveLength(7)
+  })
+
   it('renders the Kimi auto-steer toggle inside Kimi settings', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
@@ -105,6 +115,9 @@ describe('GeneralPane settings structure', () => {
     expect(source).toContain(
       'const opencodeInstalled = !!opencodeStatus?.installed'
     )
+    expect(source).toContain(
+      'const antigravityInstalled = !!antigravityStatus?.installed'
+    )
     expect(source).not.toMatch(
       /claudeInstalled\s*=\s*!!cliStatus\?\.installed\s*&&\s*!!claudeAuth\?\.authenticated/
     )
@@ -125,6 +138,22 @@ describe('GeneralPane settings structure', () => {
     expect(executionOverrides).toContain('buildReasoning.levels.map')
     expect(executionOverrides).toContain('yoloReasoning.levels.map')
     expect(executionOverrides).not.toContain('? codexReasoningOptions')
+  })
+
+  it('uses Grok models for build and yolo overrides when Grok is selected', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const executionOverrides = source.slice(
+      source.indexOf('Build execution'),
+      source.indexOf('AI Language')
+    )
+
+    expect(
+      executionOverrides.match(/effective(?:Build|Yolo)Backend === 'grok'/g)
+    ).toHaveLength(2)
+    expect(executionOverrides.match(/\? grokModelOptions/g)).toHaveLength(2)
   })
 
   // Regression #505: shared patchPreferences.isPending made the AI Language

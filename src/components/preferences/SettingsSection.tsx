@@ -26,24 +26,19 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
     className={cn(
       'space-y-4',
       variant === 'card' &&
-        'rounded-lg border p-4 sm:[&_.settings-inline-field]:justify-between sm:[&_.settings-inline-field>div:first-child]:w-auto'
+        '[&_.settings-inline-field]:rounded-lg [&_.settings-inline-field]:border [&_.settings-inline-field]:p-4 sm:[&_.settings-inline-field]:justify-between sm:[&_.settings-inline-field>div:first-child]:w-auto'
     )}
   >
     <div>
       <div className="flex flex-wrap items-center gap-3">
-        <h3
-          className={cn(
-            'font-medium text-foreground',
-            variant === 'card' ? 'text-sm' : 'text-lg'
-          )}
-        >
+        <h3 className={cn('font-medium text-foreground', 'text-lg')}>
           {title}
         </h3>
         {actions && (
           <div
             className={cn(
               'flex flex-wrap items-center gap-2',
-              variant === 'card' && 'sm:ml-auto'
+              variant === 'card' && 'ml-auto'
             )}
           >
             {actions}
@@ -53,7 +48,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {description && (
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       )}
-      {variant === 'default' && <Separator className="mt-2" />}
+      <Separator className="mt-2" />
     </div>
     {children}
   </div>

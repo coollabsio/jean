@@ -193,7 +193,7 @@ fn tool_registry_session() -> Value {
         {"name":"get_session_status","description":"Get whether a Jean session is idle/running/resumable/cancelled/error plus latest run metadata. Use after send_chat_message to poll fire-and-forget work.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"cancel_session_run","description":"Cancel the currently running request for a session. Returns whether Jean found an active process/turn/flag to cancel.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"read_session_messages","description":"Read recent messages from a session (most recent first). Use limit to cap returned messages.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["sessionId"],"additionalProperties":false}},
-        {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.5)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
+        {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.5)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
         {"name":"get_usage","description":"Fetch subscription/usage snapshots for Claude, Codex, and/or Grok (same data as Jean Settings → Usage). Use to decide whether to switch models when a plan is near limits. Optional backend filters to one provider; omit or pass \"all\" for every available snapshot. Per-backend failures are reported in errors without failing the whole call.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","grok","all"],"default":"all","description":"Which provider usage to fetch. Default all."}},"additionalProperties":false}},
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
@@ -2148,6 +2148,8 @@ fn infer_backend_from_model(model: &str) -> &'static str {
         "grok"
     } else if crate::is_kimi_model(model) {
         "kimi"
+    } else if crate::is_antigravity_model(model) {
+        "antigravity"
     } else if crate::is_codex_model(model) {
         "codex"
     } else {
@@ -2158,11 +2160,10 @@ fn infer_backend_from_model(model: &str) -> &'static str {
 fn normalize_backend_name(backend: &str) -> Result<String, ToolError> {
     let normalized = backend.trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "claude" | "codex" | "cursor" | "opencode" | "pi" | "commandcode" | "grok" | "kimi" => {
-            Ok(normalized)
-        }
+        "claude" | "codex" | "cursor" | "opencode" | "pi" | "commandcode" | "grok" | "kimi"
+        | "antigravity" => Ok(normalized),
         other => Err(ToolError::invalid_params(format!(
-            "backend must be one of claude, codex, cursor, opencode, pi, commandcode, grok, kimi (got '{other}')"
+            "backend must be one of claude, codex, cursor, opencode, pi, commandcode, grok, kimi, antigravity (got '{other}')"
         ))),
     }
 }
@@ -2705,7 +2706,8 @@ mod tests {
                 "pi",
                 "commandcode",
                 "grok",
-                "kimi"
+                "kimi",
+                "antigravity"
             ])
         );
         assert!(
@@ -2724,6 +2726,10 @@ mod tests {
         assert_eq!(infer_backend_from_model("pi/sonnet"), "pi");
         assert_eq!(infer_backend_from_model("kimi/k2"), "kimi");
         assert_eq!(
+            infer_backend_from_model("antigravity/auto"),
+            "antigravity"
+        );
+        assert_eq!(
             infer_backend_from_model("commandcode/default"),
             "commandcode"
         );
@@ -2733,6 +2739,10 @@ mod tests {
     fn normalize_backend_name_accepts_known_backends() {
         assert_eq!(normalize_backend_name("Claude").unwrap(), "claude");
         assert_eq!(normalize_backend_name("GROK").unwrap(), "grok");
+        assert_eq!(
+            normalize_backend_name("Antigravity").unwrap(),
+            "antigravity"
+        );
         assert!(normalize_backend_name("openai").is_err());
     }
 

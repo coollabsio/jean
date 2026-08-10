@@ -129,6 +129,9 @@ fn persist_native_cli_session_id(
             ("opencode", Backend::Opencode) => {
                 metadata.opencode_session_id = Some(native_session_id.to_string())
             }
+            ("antigravity", Backend::Antigravity) => {
+                metadata.antigravity_session_id = Some(native_session_id.to_string())
+            }
             _ => {
                 return Err(format!(
                     "Backend {backend} does not match session {jean_session_id}"
@@ -156,7 +159,9 @@ fn validate_native_cli_tracking_metadata(
     }
 
     match (backend, &metadata.backend) {
-        ("codex", Backend::Codex) | ("opencode", Backend::Opencode) => Ok(()),
+        ("codex", Backend::Codex)
+        | ("opencode", Backend::Opencode)
+        | ("antigravity", Backend::Antigravity) => Ok(()),
         _ => Err(format!(
             "Backend {backend} does not match session {}",
             metadata.id
@@ -182,7 +187,7 @@ pub async fn track_native_cli_session(
     session_id: String,
     backend: String,
 ) -> Result<(), String> {
-    if backend != "codex" && backend != "opencode" {
+    if backend != "codex" && backend != "opencode" && backend != "antigravity" {
         return Err(format!(
             "Native CLI tracking is not supported for backend {backend}"
         ));
@@ -295,6 +300,9 @@ fn load_native_sessions_uncached(
         "claude" => list_claude_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS),
         "opencode" => list_opencode_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS),
         "cursor" => list_cursor_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS),
+        "antigravity" => {
+            list_antigravity_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS)
+        }
         "commandcode" => Ok(Vec::new()),
         other => Err(format!("Unsupported native CLI history backend: {other}")),
     }
@@ -332,6 +340,12 @@ fn load_native_session_ids_uncached(
             collect_files_with_extension(&root, "json")?
                 .into_iter()
                 .filter_map(|path| parse_opencode_session_identity(&path, worktree_path))
+                .collect()
+        }
+        "antigravity" => {
+            list_antigravity_sessions(worktree_path, None, MAX_NATIVE_HISTORY_CACHE_ROWS)?
+                .into_iter()
+                .map(|session| session.id)
                 .collect()
         }
         other => return Err(format!("Unsupported native CLI tracking backend: {other}")),
@@ -457,6 +471,52 @@ fn list_opencode_sessions(
             push_if_matches(&mut results, session, query);
         }
     }
+    sort_and_limit(results, limit)
+}
+
+fn list_antigravity_sessions(
+    worktree_path: &str,
+    query: Option<&str>,
+    limit: usize,
+) -> Result<Vec<NativeCliHistorySession>, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(Vec::new());
+    };
+    let path = home
+        .join(".gemini")
+        .join("antigravity-cli")
+        .join("cache")
+        .join("last_conversations.json");
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return Ok(Vec::new());
+    };
+    let value: Value = serde_json::from_str(&contents)
+        .map_err(|error| format!("Failed to parse Antigravity conversation cache: {error}"))?;
+    let Some(id) = value.as_object().and_then(|entries| {
+        entries
+            .iter()
+            .find(|(cwd, _)| same_path(cwd, worktree_path))
+            .and_then(|(_, id)| id.as_str())
+    }) else {
+        return Ok(Vec::new());
+    };
+    let updated_at = fs::metadata(&path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let session = NativeCliHistorySession {
+        backend: "antigravity".to_string(),
+        id: id.to_string(),
+        title: format!("Antigravity {}", &id[..id.len().min(8)]),
+        cwd: worktree_path.to_string(),
+        updated_at,
+        resume_args: vec!["--conversation".to_string(), id.to_string()],
+        source_path: path.to_string_lossy().to_string(),
+    };
+    let mut results = Vec::new();
+    push_if_matches(&mut results, session, query);
     sort_and_limit(results, limit)
 }
 

@@ -1500,12 +1500,7 @@ export function SessionChatModal({
                             )}
                             {renamingSessionId !== session.id && (
                               <DismissButton
-                                tooltip={
-                                  sessions.filter(s => !s.archived_at).length <=
-                                  1
-                                    ? 'Close worktree'
-                                    : 'Remove session'
-                                }
+                                tooltip={'Remove session'}
                                 onClick={e => {
                                   e.stopPropagation()
                                   removeSessionTab(session)
