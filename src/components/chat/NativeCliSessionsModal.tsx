@@ -274,7 +274,7 @@ export function NativeCliSessionsModal({
       if (
         backend === 'claude' &&
         commandArgs[0] === '--permission-mode' &&
-        commandArgs[1] === 'bypassPermissions'
+        (commandArgs[1] === 'bypassPermissions' || commandArgs[1] === 'auto')
       ) {
         return true
       }

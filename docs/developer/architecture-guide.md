@@ -208,6 +208,12 @@ Additional systems (no dedicated docs yet):
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 
+Claude-specific notes:
+
+- Execution modes map to `--permission-mode`: `plan` → `plan`, `build` → `acceptEdits`, `auto` → `auto`, `yolo` → `bypassPermissions`. `auto` is Claude-only; `getSupportedExecutionModes` hides it for every other backend, and `send_chat_message` rewrites a stray `auto` to `build` before dispatching so a persisted value can never reach a backend that would silently fall back to plan mode.
+- `auto` lets Claude's classifier approve tool calls instead of prompting. Blocked calls still arrive as permission denials, so Jean's approval UI stays visible (unlike `yolo`, which hides it).
+- `auto` requires an eligible Claude account and model. When it is unavailable the CLI rejects `--permission-mode auto` at startup; Jean surfaces that as a normal chat error rather than probing for eligibility up front.
+
 Cursor-specific notes:
 
 - Cursor auth/status checks must use short timeouts; `cursor-agent status/about` can hang indefinitely

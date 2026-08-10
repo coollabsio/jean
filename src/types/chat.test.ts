@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCodexUserInputAnswerMap,
+  EXECUTION_MODE_CYCLE,
   findCodexUserInputRequest,
   foldTodoWriteToolCalls,
   getAskUserQuestions,
   getCodexUserInputRequestId,
+  getSupportedExecutionModes,
   getTodoWriteTodos,
   hasQuestionAnswerOutput,
   isAskUserQuestion,
+  isExecutionModeSupported,
   isTodoWrite,
   normalizeCodexQuestions,
+  normalizeExecutionModeForBackend,
   normalizeTodoItem,
   upsertCodexUserInputRequest,
 } from './chat'
@@ -319,5 +323,69 @@ describe('buildCodexUserInputAnswerMap', () => {
     ).toEqual({
       '0': { answers: ['Backend'] },
     })
+  })
+})
+
+describe('getSupportedExecutionModes', () => {
+  it('offers auto only to claude', () => {
+    expect(getSupportedExecutionModes('claude')).toEqual([
+      'plan',
+      'build',
+      'auto',
+      'yolo',
+    ])
+    expect(isExecutionModeSupported('claude', 'auto')).toBe(true)
+
+    for (const backend of [
+      'codex',
+      'opencode',
+      'pi',
+      'commandcode',
+      'grok',
+      'kimi',
+      'antigravity',
+    ] as const) {
+      expect(getSupportedExecutionModes(backend)).toEqual([
+        'plan',
+        'build',
+        'yolo',
+      ])
+      expect(isExecutionModeSupported(backend, 'auto')).toBe(false)
+    }
+  })
+
+  it('keeps cursor limited to plan and yolo', () => {
+    expect(getSupportedExecutionModes('cursor')).toEqual(['plan', 'yolo'])
+    expect(isExecutionModeSupported('cursor', 'build')).toBe(false)
+  })
+
+  it('hides auto when the backend is unknown', () => {
+    expect(getSupportedExecutionModes(undefined)).not.toContain('auto')
+  })
+
+  it('orders the cycle from least to most permissive', () => {
+    expect(EXECUTION_MODE_CYCLE).toEqual(['plan', 'build', 'auto', 'yolo'])
+  })
+})
+
+describe('normalizeExecutionModeForBackend', () => {
+  it('passes supported modes through untouched', () => {
+    expect(normalizeExecutionModeForBackend('claude', 'auto')).toBe('auto')
+    expect(normalizeExecutionModeForBackend('codex', 'yolo')).toBe('yolo')
+    expect(normalizeExecutionModeForBackend('cursor', 'plan')).toBe('plan')
+  })
+
+  it('degrades auto to build on backends without a classifier mode', () => {
+    expect(normalizeExecutionModeForBackend('codex', 'auto')).toBe('build')
+    expect(normalizeExecutionModeForBackend('grok', 'auto')).toBe('build')
+    expect(normalizeExecutionModeForBackend(undefined, 'auto')).toBe('build')
+  })
+
+  it('degrades auto to yolo on cursor, which has no build mode', () => {
+    expect(normalizeExecutionModeForBackend('cursor', 'auto')).toBe('yolo')
+  })
+
+  it('keeps the existing cursor build fallback', () => {
+    expect(normalizeExecutionModeForBackend('cursor', 'build')).toBe('yolo')
   })
 })

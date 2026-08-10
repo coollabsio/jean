@@ -102,6 +102,7 @@ import {
   isAskUserQuestion,
   isPlanToolCall,
   normalizeCodexQuestions,
+  normalizeExecutionModeForBackend,
 } from '@/types/chat'
 import { getFilename, normalizePath } from '@/lib/path-utils'
 import { cn } from '@/lib/utils'
@@ -981,12 +982,18 @@ export function ChatWindow({
   // Per-session execution mode (defaults to preference or 'plan' for new sessions)
   // Uses deferredSessionId for display consistency with other content
   const defaultExecutionMode = preferences?.default_execution_mode ?? 'plan'
-  const executionMode = useChatStore(state =>
+  const selectedExecutionMode = useChatStore(state =>
     deferredSessionId
       ? (state.executionModes[deferredSessionId] ??
         session?.selected_execution_mode ??
         defaultExecutionMode)
       : defaultExecutionMode
+  )
+  // The global default and persisted session values are backend-agnostic, so a
+  // Claude-only mode like `auto` can reach a session running another backend.
+  const executionMode = normalizeExecutionModeForBackend(
+    selectedBackend,
+    selectedExecutionMode
   )
   // Executing mode - the mode the currently-running prompt was sent with
   // Uses activeSessionId for immediate status feedback (not deferred)
@@ -2686,6 +2693,7 @@ export function ChatWindow({
     activeSessionId,
     activeWorktreeId,
     activeWorktreePath,
+    selectedBackend,
     isModal,
     latestPlanContent,
     latestPlanFilePath,

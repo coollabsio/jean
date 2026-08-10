@@ -464,7 +464,11 @@ interface ChatUIState {
   clearInputDraft: (sessionId: string) => void
 
   // Actions - Execution mode (session-based)
-  cycleExecutionMode: (sessionId: string) => void
+  /** `availableModes` scopes the cycle to what the session's backend supports. */
+  cycleExecutionMode: (
+    sessionId: string,
+    availableModes?: ExecutionMode[]
+  ) => void
   setExecutionMode: (sessionId: string, mode: ExecutionMode) => void
   getExecutionMode: (sessionId: string) => ExecutionMode
 
@@ -2042,14 +2046,18 @@ export const useChatStore = create<ChatUIState>()(
         ),
 
       // Execution mode (session-based)
-      cycleExecutionMode: sessionId =>
+      cycleExecutionMode: (sessionId, availableModes) =>
         set(
           state => {
+            const cycle =
+              availableModes && availableModes.length > 0
+                ? availableModes
+                : EXECUTION_MODE_CYCLE
             const current = state.executionModes[sessionId] ?? 'plan'
-            const currentIndex = EXECUTION_MODE_CYCLE.indexOf(current)
-            const nextIndex = (currentIndex + 1) % EXECUTION_MODE_CYCLE.length
-            // EXECUTION_MODE_CYCLE[nextIndex] is always defined due to modulo
-            const next = EXECUTION_MODE_CYCLE[nextIndex] as ExecutionMode
+            const currentIndex = cycle.indexOf(current)
+            const nextIndex = (currentIndex + 1) % cycle.length
+            // cycle[nextIndex] is always defined due to modulo
+            const next = cycle[nextIndex] as ExecutionMode
             return {
               executionModes: {
                 ...state.executionModes,

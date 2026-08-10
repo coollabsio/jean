@@ -75,8 +75,7 @@ function renderHandlers({
           ...defaultPreferences,
           magic_prompt_modes: {
             ...defaultPreferences.magic_prompt_modes,
-            review_comments_mode:
-              executionMode === 'build' ? 'plan' : executionMode,
+            review_comments_mode: executionMode === 'yolo' ? 'yolo' : 'plan',
           },
         },
         defaultBackend: 'claude',

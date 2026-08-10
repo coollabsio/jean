@@ -1260,12 +1260,16 @@ export const ChatInput = memo(function ChatInput({
               ? 'Yolo: Type to queue next message...'
               : executionMode === 'plan'
                 ? 'Plan: Type to queue next message...'
-                : 'Build: Type to queue next message...'
+                : executionMode === 'auto'
+                  ? 'Auto: Type to queue next message...'
+                  : 'Build: Type to queue next message...'
             : executionMode === 'plan'
               ? 'Planning: Plan a task, @ files or # issues...'
               : executionMode === 'yolo'
                 ? 'Yolo: No limits, only your imagination and tokens...'
-                : 'Build: Ask, @ files or # issues...'
+                : executionMode === 'auto'
+                  ? 'Auto: Run free, risky calls still get checked...'
+                  : 'Build: Ask, @ files or # issues...'
         }
         // PERFORMANCE: Uncontrolled input - no value prop
         // Value is managed via valueRef and direct DOM manipulation

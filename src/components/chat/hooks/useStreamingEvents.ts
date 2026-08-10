@@ -64,6 +64,7 @@ import type {
   QueuedMessage,
   ContentBlock,
   ChatMessage,
+  ExecutionMode,
 } from '@/types/chat'
 import { persistEnqueue, saveCancelledMessage } from '@/services/chat'
 import {
@@ -2319,7 +2320,7 @@ export default function useStreamingEvents({
           )
           break
         case 'executionMode':
-          store.setExecutionMode(session_id, value as 'plan' | 'build' | 'yolo')
+          store.setExecutionMode(session_id, value as ExecutionMode)
           break
         case 'provider':
           store.setSelectedProvider(

@@ -18,6 +18,7 @@ import type {
   PendingImage,
   PendingTextFile,
   QuestionAnswer,
+  ExecutionMode,
 } from '@/types/chat'
 import type { ReviewResponse } from '@/types/projects'
 
@@ -825,9 +826,23 @@ describe('ChatStore', () => {
       expect(getExecutionMode('session-1')).toBe('build')
 
       cycleExecutionMode('session-1')
+      expect(getExecutionMode('session-1')).toBe('auto')
+
+      cycleExecutionMode('session-1')
       expect(getExecutionMode('session-1')).toBe('yolo')
 
       cycleExecutionMode('session-1')
+      expect(getExecutionMode('session-1')).toBe('plan')
+    })
+
+    it('cycles only through the modes the backend supports', () => {
+      const { cycleExecutionMode, getExecutionMode } = useChatStore.getState()
+      const cursorModes: ExecutionMode[] = ['plan', 'yolo']
+
+      cycleExecutionMode('session-1', cursorModes)
+      expect(getExecutionMode('session-1')).toBe('yolo')
+
+      cycleExecutionMode('session-1', cursorModes)
       expect(getExecutionMode('session-1')).toBe('plan')
     })
 

@@ -63,6 +63,7 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
       activeSessionId: 'session-1',
       activeWorktreeId: 'worktree-1',
       activeWorktreePath: '/tmp/worktree-1',
+      selectedBackend: 'claude',
       isModal: false,
       latestPlanContent: null,
       latestPlanFilePath: null,

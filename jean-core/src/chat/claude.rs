@@ -98,6 +98,16 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 \n\
 - After each finished task, please write a few bullet points on how to test the changes.";
 
+/// Jean execution mode → Claude CLI `--permission-mode`.
+fn claude_permission_mode(execution_mode: Option<&str>) -> &'static str {
+    match execution_mode.unwrap_or("plan") {
+        "build" => "acceptEdits",
+        "auto" => "auto",
+        "yolo" => "bypassPermissions",
+        _ => "plan",
+    }
+}
+
 fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
     match execution_mode.unwrap_or("plan") {
         "build" => Some(
@@ -106,6 +116,15 @@ fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static s
              for a new plan. If a required decision is missing, use AskUserQuestion instead of \
              ExitPlanMode; if AskUserQuestion is not in your tool set, ask inline with a short \
              numbered list of options and have the user reply with a number.",
+        ),
+        "auto" => Some(
+            "You are in AUTO MODE. Start implementing immediately. \
+             Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
+             for a new plan. A safety classifier reviews each tool call, so keep working instead \
+             of asking for confirmation on routine steps; if a call is blocked, adjust your \
+             approach rather than stopping. If a required decision is missing, use \
+             AskUserQuestion instead of ExitPlanMode; if AskUserQuestion is not in your tool set, \
+             ask inline with a short numbered list of options and have the user reply with a number.",
         ),
         "yolo" => Some(
             "You are in YOLO EXECUTION MODE. Start implementing immediately. \
@@ -497,17 +516,12 @@ fn build_claude_args(
     };
 
     // Permission mode
-    let perm_mode = match execution_mode.unwrap_or("plan") {
-        "build" => "acceptEdits",
-        "yolo" => "bypassPermissions",
-        _ => "plan",
-    };
     args.push("--permission-mode".to_string());
-    args.push(perm_mode.to_string());
+    args.push(claude_permission_mode(execution_mode).to_string());
 
-    // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
+    // In build/auto/yolo, remove ExitPlanMode entirely so Claude can't loop back
     // into plan-approval after the user already approved one.
-    if matches!(execution_mode.unwrap_or("plan"), "build" | "yolo") {
+    if matches!(execution_mode.unwrap_or("plan"), "build" | "auto" | "yolo") {
         args.push("--disallowedTools".to_string());
         args.push("ExitPlanMode".to_string());
     }
@@ -2577,6 +2591,25 @@ mod tests {
 
         assert_eq!(metadata.trigger, "auto");
         assert_eq!(metadata.pre_tokens, 170298);
+    }
+
+    #[test]
+    fn permission_mode_maps_every_execution_mode() {
+        assert_eq!(claude_permission_mode(Some("plan")), "plan");
+        assert_eq!(claude_permission_mode(Some("build")), "acceptEdits");
+        assert_eq!(claude_permission_mode(Some("auto")), "auto");
+        assert_eq!(claude_permission_mode(Some("yolo")), "bypassPermissions");
+        assert_eq!(claude_permission_mode(None), "plan");
+        assert_eq!(claude_permission_mode(Some("nonsense")), "plan");
+    }
+
+    #[test]
+    fn auto_mode_gets_its_own_instruction() {
+        let instruction = execution_mode_instruction(Some("auto")).unwrap();
+
+        assert!(instruction.contains("AUTO MODE"));
+        assert!(instruction.contains("classifier"));
+        assert!(execution_mode_instruction(Some("plan")).is_none());
     }
 
     #[test]
