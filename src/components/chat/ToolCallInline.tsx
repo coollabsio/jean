@@ -154,7 +154,32 @@ function isRecognizedExternalTool(name: string): boolean {
   return (
     name.startsWith('mcp__') ||
     name.startsWith('mcp:') ||
+    isAntigravityNativeToolName(name) ||
     isJeanMcpToolName(name)
+  )
+}
+
+/** Native Antigravity tools that use Jean's generic expandable renderer. */
+function isAntigravityNativeToolName(name: string): boolean {
+  return (
+    name.startsWith('browser_') ||
+    [
+      'command_status',
+      'generate_image',
+      'list_browser_pages',
+      'manage_inbox',
+      'manage_subagents',
+      'manage_task',
+      'multi_replace_file_content',
+      'notify_user',
+      'open_browser_url',
+      'read_browser_page',
+      'read_knowledge_base_item',
+      'read_terminal',
+      'search_knowledge_base',
+      'send_command_input',
+      'task_boundary',
+    ].includes(name)
   )
 }
 
@@ -403,7 +428,7 @@ export function ToolCallInline({
         )}
       >
         <div className={TOOL_CALL_ROW_CLASS}>
-          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 text-left outline-none">
+          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 self-stretch text-left outline-none">
             {icon}
             <span className="font-medium shrink-0 flex-none whitespace-nowrap">
               {label}
@@ -415,7 +440,7 @@ export function ToolCallInline({
               onClick={handleFileClick}
               className={cn(
                 TOOL_CALL_DETAIL_PILL_CLASS,
-                'inline-flex items-center gap-1 font-mono hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
+                'inline-flex items-center gap-1 hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
               )}
             >
               <span className="truncate">{detail}</span>
@@ -424,7 +449,7 @@ export function ToolCallInline({
           ) : detail ? (
             <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{detail}</code>
           ) : null}
-          <CollapsibleTrigger className="ml-auto flex shrink-0 items-center outline-none">
+          <CollapsibleTrigger className="ml-auto flex min-w-0 flex-1 items-center justify-end self-stretch outline-none">
             {isStreaming && isIncomplete ? (
               <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />
             ) : (
@@ -682,10 +707,7 @@ export function StackedGroup({
           <div className="border-t border-border/50 px-3 py-2 space-y-1">
             {items.map(item =>
               item.type === 'thinking' ? (
-                <SubThinkingItem
-                  key={item.key}
-                  thinking={item.thinking}
-                />
+                <SubThinkingItem key={item.key} thinking={item.thinking} />
               ) : (
                 <SubToolItem
                   key={item.tool.id}
@@ -780,7 +802,7 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
         )}
       >
         <div className={TOOL_CALL_SUB_ROW_CLASS}>
-          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 text-left outline-none">
+          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 self-stretch text-left outline-none">
             <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
             <span className="font-medium shrink-0 flex-none whitespace-nowrap">
               {label}
@@ -800,7 +822,7 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
               {detail}
             </code>
           ) : null}
-          <CollapsibleTrigger className="ml-auto flex shrink-0 items-center outline-none">
+          <CollapsibleTrigger className="ml-auto flex min-w-0 flex-1 items-center justify-end self-stretch outline-none">
             <ChevronRight
               className={cn(
                 'h-2.5 w-2.5 transition-transform duration-200',
@@ -988,6 +1010,7 @@ export function normalizeToolCallForDisplay(
 
   switch (normalizedName) {
     case 'Bash':
+    case 'run_command':
     case 'shell_command':
     case 'run_terminal_command':
     case 'Shell':
@@ -995,8 +1018,12 @@ export function normalizeToolCallForDisplay(
     case 'execute':
       return {
         name: 'Bash',
-        input: withoutVariant,
+        input: {
+          ...withoutVariant,
+          command: input.command ?? input.CommandLine,
+        },
       }
+    case 'view_file':
     case 'read_file':
     case 'Read':
       return {
@@ -1008,9 +1035,11 @@ export function normalizeToolCallForDisplay(
             input.target_file ??
             input.absolutePath ??
             input.filePath ??
+            input.AbsolutePath ??
             input.path,
         },
       }
+    case 'write_to_file':
     case 'write_file':
     case 'Write':
       return {
@@ -1022,10 +1051,12 @@ export function normalizeToolCallForDisplay(
             input.target_file ??
             input.filePath ??
             input.absolutePath ??
+            input.TargetFile ??
             input.path,
-          content: input.content ?? input.contents,
+          content: input.content ?? input.contents ?? input.CodeContent,
         },
       }
+    case 'replace_file_content':
     case 'Edit':
       return {
         name: 'Edit',
@@ -1035,9 +1066,18 @@ export function normalizeToolCallForDisplay(
             input.file_path ??
             input.target_file ??
             input.filePath ??
+            input.TargetFile ??
             input.path,
-          old_string: input.old_string ?? input.oldText ?? input.old_text,
-          new_string: input.new_string ?? input.newText ?? input.new_text,
+          old_string:
+            input.old_string ??
+            input.oldText ??
+            input.old_text ??
+            input.TargetContent,
+          new_string:
+            input.new_string ??
+            input.newText ??
+            input.new_text ??
+            input.ReplacementContent,
         },
       }
     case 'read_multiple_files':
@@ -1049,7 +1089,14 @@ export function normalizeToolCallForDisplay(
         },
       }
     case 'read_directory':
-      return { name: 'List', input }
+    case 'list_dir':
+      return {
+        name: 'List',
+        input: {
+          ...withoutVariant,
+          path: input.path ?? input.DirectoryPath,
+        },
+      }
     case 'glob':
     case 'Glob':
       return {
@@ -1062,6 +1109,34 @@ export function normalizeToolCallForDisplay(
       }
     case 'grep':
       return { name: 'Grep', input }
+    case 'grep_search':
+      return {
+        name: 'Grep',
+        input: {
+          ...withoutVariant,
+          pattern: input.pattern ?? input.Query,
+          path: input.path ?? input.SearchPath,
+        },
+      }
+    case 'find_by_name':
+      return {
+        name: 'Glob',
+        input: {
+          ...withoutVariant,
+          pattern: input.pattern ?? input.Pattern,
+          path: input.path ?? input.SearchDirectory,
+        },
+      }
+    case 'search_web':
+      return {
+        name: 'WebSearch',
+        input: { ...withoutVariant, query: input.query ?? input.Query },
+      }
+    case 'read_url_content':
+      return {
+        name: 'WebFetch',
+        input: { ...withoutVariant, url: input.url ?? input.Url },
+      }
     case 'List':
       return {
         name: 'List',
@@ -1343,7 +1418,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const prompt = input.prompt as string | undefined
       return {
         icon: <Globe className="h-4 w-4 shrink-0" />,
-        label: toolCall.name,
+        label: normalized.name === 'WebSearch' ? 'Web Search' : 'Web Fetch',
         detail: url ?? query,
         expandedContent: url
           ? `URL: ${url}${prompt ? `\n\nPrompt: ${prompt}` : ''}`
@@ -1843,13 +1918,20 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const detail =
         firstStringField(input, [
           'query',
+          'Query',
           'command',
+          'CommandLine',
           'path',
+          'AbsolutePath',
+          'TargetFile',
+          'DirectoryPath',
           'file_path',
           'filePath',
           'url',
+          'Url',
           'pattern',
           'description',
+          'Description',
           'prompt',
           'title',
           'name',
@@ -1867,7 +1949,9 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: isKnownExternal
-          ? normalized.name
+          ? isAntigravityNativeToolName(normalized.name)
+            ? humanizeSnakeCase(normalized.name)
+            : normalized.name
           : `${normalized.name} (unhandled tool)`,
         detail,
         expandedContent: expanded,

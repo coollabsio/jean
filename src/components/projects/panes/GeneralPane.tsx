@@ -95,7 +95,7 @@ export function GeneralPane({
 
   const { data: preferences } = usePreferences()
   const profiles = preferences?.custom_cli_profiles ?? []
-  // Only show backends the user is logged into (installed + authenticated).
+  // Show all installed backends (auth is checked at send time / backend settings).
   const { installedBackends } = useInstalledBackends()
   const installedBackendsSet = useMemo(
     () => new Set(installedBackends),
@@ -437,6 +437,7 @@ export function GeneralPane({
                     'commandcode',
                     'grok',
                     'kimi',
+                    'antigravity',
                   ] as CliBackend[]
                 )
                   .filter(backend => installedBackendsSet.has(backend))
@@ -446,7 +447,8 @@ export function GeneralPane({
                       backend === 'pi' ||
                       backend === 'commandcode' ||
                       backend === 'grok' ||
-                      backend === 'kimi' ? (
+                      backend === 'kimi' ||
+                      backend === 'antigravity' ? (
                         <BackendLabel backend={backend} />
                       ) : backend === 'claude' ? (
                         'Claude'

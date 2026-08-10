@@ -70,8 +70,10 @@ import { useChatStore, DEFAULT_THINKING_LEVEL } from '@/store/chat-store'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { getLabelTextColor } from '@/lib/label-colors'
 import {
+  DEFAULT_PARALLEL_EXECUTION_PROMPT,
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
+  resolveMagicPromptProvider,
   type CliBackend,
 } from '@/types/preferences'
 import type {
@@ -122,6 +124,7 @@ import { FilePreview } from './FilePreview'
 import { ChatInput } from './ChatInput'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
+import { SendCancelButton } from './toolbar/SendCancelButton'
 import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { ReviewMethodModal } from './ReviewMethodModal'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
@@ -142,8 +145,11 @@ import { StreamingStatusBar } from './StreamingStatusBar'
 import { ChatErrorFallback } from './ChatErrorFallback'
 import { logger } from '@/lib/logger'
 import { saveCrashState } from '@/lib/recovery'
-import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
-import { isBackendAutoSteerEnabled } from '@/lib/backend-auto-steer'
+import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
+import {
+  isBackendAutoSteerEnabled,
+  isSteerCapableBackend,
+} from '@/lib/backend-auto-steer'
 import { ErrorBanner } from './ErrorBanner'
 import {
   VirtualizedMessageList,
@@ -270,6 +276,7 @@ export function ChatWindow({
   worktreePath: propWorktreePath,
 }: ChatWindowProps = {}) {
   const isMobile = useIsMobile()
+  const zenMode = useUIStore(state => state.zenMode)
   // PERFORMANCE: Use focused selectors instead of whole-store destructuring
   // This prevents re-renders when other sessions' state changes (e.g., streaming chunks)
 
@@ -842,12 +849,12 @@ export function ChatWindow({
   )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
-  const defaultModel = resolveDefaultModelForBackend(
+  const selectedModel = resolveSelectedModelForBackend(
     selectedBackend,
+    session?.selected_model,
     preferences,
     selectedBackend === 'pi' ? availablePiModelOptions : undefined
   )
-  const selectedModel: string = session?.selected_model ?? defaultModel
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,
@@ -923,14 +930,15 @@ export function ChatWindow({
   )
   // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
-    !isCustomProvider &&
-    supportsAdaptiveThinking(
-      selectedModel,
-      cliStatus?.version ?? null,
-      selectedModelReasoning === undefined
-        ? undefined
-        : selectedModelReasoning?.type === 'effort'
-    )
+    selectedBackend === 'antigravity' ||
+    (!isCustomProvider &&
+      supportsAdaptiveThinking(
+        selectedModel,
+        cliStatus?.version ?? null,
+        selectedModelReasoning === undefined
+          ? undefined
+          : selectedModelReasoning?.type === 'effort'
+      ))
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
@@ -969,6 +977,7 @@ export function ChatWindow({
   // PERFORMANCE: Track hasValue via callback from ChatInput instead of store subscription
   // ChatInput notifies on mount, session change, and empty/non-empty boundary changes
   const [hasInputValue, setHasInputValue] = useState(false)
+  const [steerModifierActive, setSteerModifierActive] = useState(false)
   // Per-session execution mode (defaults to preference or 'plan' for new sessions)
   // Uses deferredSessionId for display consistency with other content
   const defaultExecutionMode = preferences?.default_execution_mode ?? 'plan'
@@ -2029,10 +2038,13 @@ export function ChatWindow({
 
   // Opens new session(s) and sends review fix message(s) there.
   // Pass a string for one combined fix, or string[] to send each finding separately.
+  // Prefer the selected reviewer's backend/model (multi-review) so MiniMax/Grok
+  // findings keep the same auth path as the review job (issue #630).
   const handleReviewFix = useCallback(
     async (
       messageOrMessages: string | string[],
-      executionMode: 'plan' | 'yolo'
+      executionMode: 'plan' | 'yolo',
+      options?: { backend?: string; model?: string }
     ) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
@@ -2047,14 +2059,52 @@ export function ChatWindow({
       const store = useChatStore.getState()
       store.setSessionReviewing(activeSessionId, false)
 
-      const backend = resolveMagicPromptBackend(
-        preferences?.magic_prompt_backends,
-        'code_review_backend',
-        preferences?.default_backend
-      )
+      const defaultBackend = (preferences?.default_backend ??
+        'claude') as CliBackend
+      const backend = (options?.backend ??
+        resolveMagicPromptBackend(
+          preferences?.magic_prompt_backends,
+          'code_review_backend',
+          defaultBackend
+        ) ??
+        defaultBackend) as CliBackend
       const model =
+        options?.model ??
         preferences?.magic_prompt_models?.code_review_model ??
         selectedModelRef.current
+      // Code-review magic prompt provider (e.g. MiniMax custom CLI profile).
+      // Without this, Claude fix sessions run unauthenticated OAuth and fail
+      // with "Not logged in · Please run /login" (issue #630).
+      const provider = resolveMagicPromptProvider(
+        preferences?.magic_prompt_providers,
+        'code_review_provider',
+        preferences?.default_provider
+      )
+      const isCustomProvider = Boolean(
+        provider && provider !== '__anthropic__' && provider !== '__default__'
+      )
+      // Claude custom profiles only apply to Claude-compatible backends.
+      const customProfileName =
+        backend === 'claude' && isCustomProvider
+          ? (provider ?? undefined)
+          : undefined
+
+      const usesEffortBackend =
+        backend === 'codex' ||
+        backend === 'opencode' ||
+        backend === 'pi' ||
+        backend === 'grok' ||
+        backend === 'kimi' ||
+        backend === 'antigravity'
+      const effortLevel = usesEffortBackend
+        ? ((preferences?.magic_prompt_efforts?.code_review_effort as
+            | EffortLevel
+            | null
+            | undefined) ?? selectedEffortLevelRef.current)
+        : undefined
+      const thinkingLevel = usesEffortBackend
+        ? undefined
+        : selectedThinkingLevelRef.current
 
       // Sequential on purpose: each session must fully create before the next
       // (TanStack Query per-call onSuccess is unreliable across consecutive
@@ -2065,7 +2115,8 @@ export function ChatWindow({
           newSession = await createSession.mutateAsync({
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
-            backend: backend ?? undefined,
+            name: 'Fix review findings',
+            backend,
           })
         } catch (err) {
           toast.error(`Failed to create session: ${err}`)
@@ -2078,10 +2129,41 @@ export function ChatWindow({
         nextStore.setError(newSession.id, null)
         nextStore.addSendingSession(newSession.id)
         nextStore.setSelectedModel(newSession.id, model)
-        if (backend) {
-          nextStore.setSelectedBackend(newSession.id, backend)
+        nextStore.setSelectedBackend(newSession.id, backend)
+        if (provider !== undefined) {
+          nextStore.setSelectedProvider(newSession.id, provider)
         }
         nextStore.setExecutingMode(newSession.id, executionMode)
+        if (effortLevel) {
+          nextStore.setEffortLevel(newSession.id, effortLevel)
+        }
+        // Map session → worktree without switching the active tab (background fix).
+        useChatStore.setState(s => ({
+          sessionWorktreeMap: {
+            ...s.sessionWorktreeMap,
+            [newSession.id]: activeWorktreeId,
+          },
+        }))
+
+        // Persist so the toolbar matches when the user opens the fix tab.
+        setSessionBackend.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          backend,
+        })
+        setSessionModel.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          model,
+        })
+        setSessionProvider.mutate({
+          sessionId: newSession.id,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          provider,
+        })
 
         sendMessage.mutate({
           sessionId: newSession.id,
@@ -2089,9 +2171,23 @@ export function ChatWindow({
           worktreePath: activeWorktreePath,
           message,
           model,
-          backend: backend ?? undefined,
+          backend,
           executionMode,
-          thinkingLevel: selectedThinkingLevelRef.current,
+          thinkingLevel,
+          effortLevel,
+          customProfileName,
+          mcpConfig: buildMcpConfigJson(
+            mcpServersDataRef.current ?? [],
+            enabledMcpServersRef.current,
+            backend
+          ),
+          parallelExecutionPrompt:
+            preferences?.parallel_execution_prompt_enabled
+              ? (preferences.magic_prompts?.parallel_execution ??
+                DEFAULT_PARALLEL_EXECUTION_PROMPT)
+              : undefined,
+          chromeEnabled: preferences?.chrome_enabled ?? false,
+          aiLanguage: preferences?.ai_language,
         })
       }
     },
@@ -2102,8 +2198,14 @@ export function ChatWindow({
       createSession,
       preferences,
       sendMessage,
+      selectedEffortLevelRef,
       selectedModelRef,
       selectedThinkingLevelRef,
+      setSessionBackend,
+      setSessionModel,
+      setSessionProvider,
+      mcpServersDataRef,
+      enabledMcpServersRef,
     ]
   )
 
@@ -3092,17 +3194,21 @@ export function ChatWindow({
                                       handleScrollToBottomHandled
                                     }
                                     completedDurationMs={completedDurationMs}
-                                    hasOlderOnDisk={hasOlderOnDisk}
+                                    hasOlderOnDisk={!zenMode && hasOlderOnDisk}
                                     isLoadingOlder={loadOlderMessages.isPending}
-                                    onLoadOlderRuns={handleLoadOlderRuns}
+                                    onLoadOlderRuns={
+                                      zenMode ? undefined : handleLoadOlderRuns
+                                    }
                                     loadedRunStartIndex={loadedRunStartIndex}
                                     hiddenPromptCount={
-                                      isCompactHistoryExpanded
+                                      zenMode || isCompactHistoryExpanded
                                         ? 0
                                         : compactHistoryWindow.hiddenPromptCount
                                     }
                                     onShowHiddenPrompts={
-                                      handleShowHiddenCompactPrompts
+                                      zenMode
+                                        ? undefined
+                                        : handleShowHiddenCompactPrompts
                                     }
                                   />
                                 ) : (
@@ -3558,157 +3664,231 @@ export function ChatWindow({
                                 </div>
                               )}
 
-                            {/* Textarea section */}
-                            <div className="px-4 pt-3 pb-2 md:px-6">
-                              <ChatInput
-                                activeSessionId={activeSessionId}
-                                activeWorktreePath={activeWorktreePath}
-                                activeProjectId={worktree?.project_id ?? null}
-                                isSending={isSending}
-                                executionMode={executionMode}
-                                canSwitchBackendWithTab={
-                                  (session?.messages?.length ?? 0) === 0
-                                }
-                                focusChatShortcut={focusChatShortcut}
-                                onSubmit={handleSubmit}
-                                onCancel={handleCancel}
-                                onSwitchBackendWithTab={handleTabBackendSwitch}
-                                onCommandExecute={handleCommandExecute}
-                                onHasValueChange={setHasInputValue}
-                                onRegisterClearHandler={(
-                                  handler: (() => void) | null
-                                ) => {
-                                  clearChatInputStateRef.current = handler
-                                }}
-                                onRegisterAttachHandler={handler => {
-                                  triggerChatAttachRef.current = handler
-                                }}
-                                formRef={formRef}
-                                inputRef={inputRef}
-                                installedBackends={installedBackends}
-                                selectedBackend={selectedBackend}
-                              />
-                            </div>
+                            <div
+                              className={cn(
+                                zenMode && 'flex items-center overflow-hidden',
+                                zenMode && 'max-h-20'
+                              )}
+                            >
+                              {/* Textarea section */}
+                              <div
+                                className={cn(
+                                  'px-4 pt-3 pb-2 md:px-6',
+                                  zenMode && 'min-w-0 flex-1'
+                                )}
+                              >
+                                <ChatInput
+                                  activeSessionId={activeSessionId}
+                                  activeWorktreePath={activeWorktreePath}
+                                  activeProjectId={worktree?.project_id ?? null}
+                                  isSending={isSending}
+                                  executionMode={executionMode}
+                                  canSwitchBackendWithTab={
+                                    (session?.messages?.length ?? 0) === 0
+                                  }
+                                  focusChatShortcut={focusChatShortcut}
+                                  onSubmit={handleSubmit}
+                                  onCancel={handleCancel}
+                                  onSwitchBackendWithTab={
+                                    handleTabBackendSwitch
+                                  }
+                                  onCommandExecute={handleCommandExecute}
+                                  onHasValueChange={setHasInputValue}
+                                  onSteerModifierChange={setSteerModifierActive}
+                                  onRegisterClearHandler={(
+                                    handler: (() => void) | null
+                                  ) => {
+                                    clearChatInputStateRef.current = handler
+                                  }}
+                                  onRegisterAttachHandler={handler => {
+                                    triggerChatAttachRef.current = handler
+                                  }}
+                                  formRef={formRef}
+                                  inputRef={inputRef}
+                                  installedBackends={installedBackends}
+                                  selectedBackend={selectedBackend}
+                                />
+                              </div>
 
-                            {/* Bottom toolbar */}
-                            <div>
-                              <ChatToolbar
-                                isSending={isSending}
-                                hasPendingQuestions={hasPendingQuestions}
-                                hasPendingAttachments={hasPendingAttachments}
-                                hasInputValue={hasInputValue}
-                                executionMode={executionMode}
-                                selectedBackend={selectedBackend}
-                                sessionHasMessages={
-                                  (session?.messages?.length ?? 0) > 0
-                                }
-                                selectedModel={selectedModel}
-                                selectedProvider={selectedProvider}
-                                providerLocked={
-                                  (session?.messages?.length ?? 0) > 0
-                                }
-                                selectedThinkingLevel={selectedThinkingLevel}
-                                selectedEffortLevel={selectedEffortLevel}
-                                useAdaptiveThinking={useAdaptiveThinkingFlag}
-                                hideThinkingLevel={hideThinkingLevel}
-                                baseBranch={
-                                  gitStatus?.base_branch ??
-                                  worktree?.base_branch ??
-                                  'main'
-                                }
-                                baseRemote={
-                                  gitStatus?.base_remote ??
-                                  worktree?.base_remote
-                                }
-                                uncommittedAdded={uncommittedAdded}
-                                uncommittedRemoved={uncommittedRemoved}
-                                branchDiffAdded={branchDiffAdded}
-                                branchDiffRemoved={branchDiffRemoved}
-                                prUrl={worktree?.pr_url}
-                                prNumber={worktree?.pr_number}
-                                displayStatus={displayStatus}
-                                checkStatus={checkStatus}
-                                mergeableStatus={mergeableStatus}
-                                activeWorktreePath={activeWorktreePath}
-                                worktreeId={activeWorktreeId ?? null}
-                                activeSessionId={activeSessionId}
-                                projectId={worktree?.project_id}
-                                runScripts={runScripts}
-                                loadedIssueContexts={loadedIssueContexts ?? []}
-                                loadedPRContexts={loadedPRContexts ?? []}
-                                loadedSecurityContexts={
-                                  loadedSecurityContexts ?? []
-                                }
-                                loadedAdvisoryContexts={
-                                  loadedAdvisoryContexts ?? []
-                                }
-                                loadedLinearContexts={
-                                  loadedLinearContexts ?? []
-                                }
-                                attachedSavedContexts={
-                                  attachedSavedContexts ?? []
-                                }
-                                onOpenMagicModal={handleOpenMagicModal}
-                                onSaveContext={handleSaveContext}
-                                onLoadContext={handleLoadContext}
-                                onCommit={handleCommit}
-                                onCommitAndPush={handleCommitAndPushWithPicker}
-                                onOpenPr={handleOpenPr}
-                                onReview={() => setReviewMethodModalOpen(true)}
-                                onMerge={handleMerge}
-                                onMergePr={handleMergePr}
-                                onResolvePrConflicts={handleResolvePrConflicts}
-                                onBackendModelChange={
-                                  handleToolbarBackendModelChange
-                                }
-                                onResolveConflicts={handleResolveConflicts}
-                                hasOpenPr={Boolean(
-                                  worktree?.pr_number || worktree?.pr_url
-                                )}
-                                onSetDiffRequest={setDiffRequest}
-                                installedBackends={installedBackends}
-                                onModelChange={handleToolbarModelChange}
-                                onProviderChange={handleToolbarProviderChange}
-                                customCliProfiles={
-                                  preferences?.custom_cli_profiles ?? []
-                                }
-                                customCodexProviders={
-                                  preferences?.custom_codex_providers ?? []
-                                }
-                                onThinkingLevelChange={
-                                  handleToolbarThinkingLevelChange
-                                }
-                                onEffortLevelChange={
-                                  handleToolbarEffortLevelChange
-                                }
-                                onSetExecutionMode={
-                                  handleToolbarSetExecutionMode
-                                }
-                                onAttach={() =>
-                                  triggerChatAttachRef.current?.()
-                                }
-                                onCancel={handleCancel}
-                                willSteer={isBackendAutoSteerEnabled(
-                                  selectedBackend,
-                                  preferences
-                                )}
-                                queuedMessageCount={
-                                  currentQueuedMessages.length
-                                }
-                                availableMcpServers={availableMcpServers}
-                                enabledMcpServers={enabledMcpServers}
-                                onToggleMcpServer={handleToggleMcpServer}
-                                onOpenProjectSettings={
-                                  handleOpenProjectSettings
-                                }
-                                onRunCommand={handleRunCommand}
-                                packageScripts={packageScripts}
-                                favoritePackageScripts={favoritePackageScripts}
-                                onRunPackageScript={handleRunPackageScript}
-                                onToggleFavoritePackageScript={
-                                  handleToggleFavoritePackageScript
-                                }
-                              />
+                              {/* Bottom toolbar */}
+                              {zenMode ? (
+                                <div className="shrink-0 pr-3">
+                                  <SendCancelButton
+                                    isSending={isSending}
+                                    canSend={
+                                      hasInputValue || hasPendingAttachments
+                                    }
+                                    willSteer={
+                                      isBackendAutoSteerEnabled(
+                                        selectedBackend,
+                                        preferences
+                                      ) ||
+                                      (steerModifierActive &&
+                                        isSteerCapableBackend(selectedBackend))
+                                    }
+                                    steerWithModifier={
+                                      steerModifierActive &&
+                                      !isBackendAutoSteerEnabled(
+                                        selectedBackend,
+                                        preferences
+                                      )
+                                    }
+                                    queuedMessageCount={
+                                      currentQueuedMessages.length
+                                    }
+                                    onCancel={handleCancel}
+                                  />
+                                </div>
+                              ) : (
+                                <div className={cn(zenMode && 'shrink-0')}>
+                                  <ChatToolbar
+                                    isSending={isSending}
+                                    hasPendingQuestions={hasPendingQuestions}
+                                    hasPendingAttachments={
+                                      hasPendingAttachments
+                                    }
+                                    hasInputValue={hasInputValue}
+                                    executionMode={executionMode}
+                                    selectedBackend={selectedBackend}
+                                    sessionHasMessages={
+                                      (session?.messages?.length ?? 0) > 0
+                                    }
+                                    selectedModel={selectedModel}
+                                    selectedProvider={selectedProvider}
+                                    providerLocked={
+                                      (session?.messages?.length ?? 0) > 0
+                                    }
+                                    selectedThinkingLevel={
+                                      selectedThinkingLevel
+                                    }
+                                    selectedEffortLevel={selectedEffortLevel}
+                                    useAdaptiveThinking={
+                                      useAdaptiveThinkingFlag
+                                    }
+                                    hideThinkingLevel={hideThinkingLevel}
+                                    baseBranch={
+                                      gitStatus?.base_branch ??
+                                      worktree?.base_branch ??
+                                      'main'
+                                    }
+                                    baseRemote={
+                                      gitStatus?.base_remote ??
+                                      worktree?.base_remote
+                                    }
+                                    uncommittedAdded={uncommittedAdded}
+                                    uncommittedRemoved={uncommittedRemoved}
+                                    branchDiffAdded={branchDiffAdded}
+                                    branchDiffRemoved={branchDiffRemoved}
+                                    prUrl={worktree?.pr_url}
+                                    prNumber={worktree?.pr_number}
+                                    displayStatus={displayStatus}
+                                    checkStatus={checkStatus}
+                                    mergeableStatus={mergeableStatus}
+                                    activeWorktreePath={activeWorktreePath}
+                                    worktreeId={activeWorktreeId ?? null}
+                                    activeSessionId={activeSessionId}
+                                    projectId={worktree?.project_id}
+                                    runScripts={runScripts}
+                                    loadedIssueContexts={
+                                      loadedIssueContexts ?? []
+                                    }
+                                    loadedPRContexts={loadedPRContexts ?? []}
+                                    loadedSecurityContexts={
+                                      loadedSecurityContexts ?? []
+                                    }
+                                    loadedAdvisoryContexts={
+                                      loadedAdvisoryContexts ?? []
+                                    }
+                                    loadedLinearContexts={
+                                      loadedLinearContexts ?? []
+                                    }
+                                    attachedSavedContexts={
+                                      attachedSavedContexts ?? []
+                                    }
+                                    onOpenMagicModal={handleOpenMagicModal}
+                                    onSaveContext={handleSaveContext}
+                                    onLoadContext={handleLoadContext}
+                                    onCommit={handleCommit}
+                                    onCommitAndPush={
+                                      handleCommitAndPushWithPicker
+                                    }
+                                    onOpenPr={handleOpenPr}
+                                    onReview={() =>
+                                      setReviewMethodModalOpen(true)
+                                    }
+                                    onMerge={handleMerge}
+                                    onMergePr={handleMergePr}
+                                    onResolvePrConflicts={
+                                      handleResolvePrConflicts
+                                    }
+                                    onBackendModelChange={
+                                      handleToolbarBackendModelChange
+                                    }
+                                    onResolveConflicts={handleResolveConflicts}
+                                    hasOpenPr={Boolean(
+                                      worktree?.pr_number || worktree?.pr_url
+                                    )}
+                                    onSetDiffRequest={setDiffRequest}
+                                    installedBackends={installedBackends}
+                                    onModelChange={handleToolbarModelChange}
+                                    onProviderChange={
+                                      handleToolbarProviderChange
+                                    }
+                                    customCliProfiles={
+                                      preferences?.custom_cli_profiles ?? []
+                                    }
+                                    customCodexProviders={
+                                      preferences?.custom_codex_providers ?? []
+                                    }
+                                    onThinkingLevelChange={
+                                      handleToolbarThinkingLevelChange
+                                    }
+                                    onEffortLevelChange={
+                                      handleToolbarEffortLevelChange
+                                    }
+                                    onSetExecutionMode={
+                                      handleToolbarSetExecutionMode
+                                    }
+                                    onAttach={() =>
+                                      triggerChatAttachRef.current?.()
+                                    }
+                                    onCancel={handleCancel}
+                                    willSteer={
+                                      isBackendAutoSteerEnabled(
+                                        selectedBackend,
+                                        preferences
+                                      ) ||
+                                      (steerModifierActive &&
+                                        isSteerCapableBackend(selectedBackend))
+                                    }
+                                    steerWithModifier={
+                                      steerModifierActive &&
+                                      !isBackendAutoSteerEnabled(
+                                        selectedBackend,
+                                        preferences
+                                      )
+                                    }
+                                    queuedMessageCount={
+                                      currentQueuedMessages.length
+                                    }
+                                    availableMcpServers={availableMcpServers}
+                                    enabledMcpServers={enabledMcpServers}
+                                    onToggleMcpServer={handleToggleMcpServer}
+                                    onOpenProjectSettings={
+                                      handleOpenProjectSettings
+                                    }
+                                    onRunCommand={handleRunCommand}
+                                    packageScripts={packageScripts}
+                                    favoritePackageScripts={
+                                      favoritePackageScripts
+                                    }
+                                    onRunPackageScript={handleRunPackageScript}
+                                    onToggleFavoritePackageScript={
+                                      handleToggleFavoritePackageScript
+                                    }
+                                  />
+                                </div>
+                              )}
                             </div>
                           </form>
 

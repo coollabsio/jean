@@ -16,7 +16,12 @@ describe('ChatWindow context controls', () => {
   })
 
   it('keeps loaded contexts in the toolbar submenu', () => {
-    expect(source).toContain('loadedIssueContexts={loadedIssueContexts ?? []}')
-    expect(source).toContain('loadedPRContexts={loadedPRContexts ?? []}')
+    // Formatting may be multi-line; assert the prop bindings themselves.
+    expect(source).toMatch(
+      /loadedIssueContexts=\{\s*loadedIssueContexts \?\? \[\]\s*\}/
+    )
+    expect(source).toMatch(
+      /loadedPRContexts=\{\s*loadedPRContexts \?\? \[\]\s*\}/
+    )
   })
 })

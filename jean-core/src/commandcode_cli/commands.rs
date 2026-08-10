@@ -186,7 +186,7 @@ fn is_model_token(token: &str) -> bool {
     provider_model
         || token.starts_with("claude-")
         || token.starts_with("gpt-")
-        || token.starts_with("gemini-")
+        || token.starts_with("antigravity-")
         || lower.contains("kimi-")
 }
 
@@ -703,6 +703,7 @@ pub async fn install_commandcode_cli(
     app: AppHandle,
     version: Option<String>,
 ) -> Result<(), String> {
+    crate::prerequisites::require_npm("Command Code CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = commandcode_package(version.as_deref());
     let output = silent_command("npm")

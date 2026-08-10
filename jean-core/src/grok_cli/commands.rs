@@ -662,6 +662,7 @@ pub async fn get_grok_install_command(app: AppHandle) -> Result<GrokInstallComma
 }
 
 pub async fn install_grok_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
+    crate::prerequisites::require_npm("Grok CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = grok_package(version.as_deref());
     let output = silent_command("npm")

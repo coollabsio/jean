@@ -36,7 +36,7 @@ import { cn } from '@/lib/utils'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
 
-// Lazy load CodeEditor since it's heavy (CodeMirror + language packs)
+// Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
 const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
 
 function isMarkdownFile(filename: string | null | undefined): boolean {
@@ -140,8 +140,10 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
       ? (preferences?.syntax_theme_dark ?? 'vitesse-black')
       : (preferences?.syntax_theme_light ?? 'github-light')
 
-  // Always use Jean's CodeMirror editor for in-app file viewing — same on
+  // Always use Jean's Pierre inline editor for in-app file viewing — same on
   // desktop and mobile. External editors stay available via "Open in Editor".
+  /** Bumps when content should remount the Pierre edit session (load / discard). */
+  const [editorEpoch, setEditorEpoch] = useState(0)
 
   const loadFileContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
     setIsLoading(true)
@@ -149,6 +151,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
     setContent(null)
     setEditedContent(null)
     setIsEditing(false)
+    setEditorEpoch(e => e + 1)
 
     try {
       const fileContent = await invoke<string>('read_file_content', { path })
@@ -265,8 +268,9 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   // Toggle edit mode
   const handleToggleEdit = useCallback(() => {
     if (isEditing && hasChanges) {
-      // Discard changes
+      // Discard changes and remount Pierre editor with original content
       setEditedContent(content)
+      setEditorEpoch(e => e + 1)
     }
     setIsEditing(!isEditing)
   }, [isEditing, hasChanges, content])
@@ -374,7 +378,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
           </div>
         )}
 
-        {/* CodeMirror editor (default — same on desktop and mobile) */}
+        {/* Pierre File editor (default — same on desktop and mobile) */}
         {!isLoading && !error && isEditing && content !== null ? (
           <div className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0 min-w-0">
             <Suspense
@@ -386,7 +390,9 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
               }
             >
               <CodeEditor
+                key={`${filePath}:${editorEpoch}`}
                 value={editedContent ?? content}
+                fileName={filename ?? undefined}
                 language={language}
                 onChange={setEditedContent}
                 className="h-full min-w-0"

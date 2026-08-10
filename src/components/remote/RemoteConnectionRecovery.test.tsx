@@ -56,4 +56,25 @@ describe('RemoteConnectionRecovery', () => {
     const root = container.firstElementChild as HTMLElement
     expect(root.className).toContain('z-[100]')
   })
+
+  it('automatically retries the connection every 10 seconds', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval')
+
+    const { unmount } = render(
+      <RemoteConnectionRecovery
+        connection={{
+          id: 'remote-1',
+          name: 'Lab',
+          url: 'https://lab.example',
+          token: 'tok',
+        }}
+        error="lost"
+      />
+    )
+
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 10_000)
+
+    unmount()
+    setIntervalSpy.mockRestore()
+  })
 })

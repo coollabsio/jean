@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen } from '@/test/test-utils'
+import { act, render, screen } from '@/test/test-utils'
 import { ChatToolbar } from './ChatToolbar'
 import type { ChatToolbarProps } from './toolbar/types'
+import { useUIStore } from '@/store/ui-store'
 
 vi.mock('@/store/terminal-store', () => ({
   useTerminalStore: {
@@ -13,6 +14,7 @@ vi.mock('@/store/terminal-store', () => ({
 }))
 
 beforeEach(() => {
+  useUIStore.setState({ zenMode: false })
   vi.stubGlobal(
     'matchMedia',
     vi.fn().mockImplementation(() => ({
@@ -125,5 +127,43 @@ describe('ChatToolbar pending questions', () => {
     await user.click(screen.getByRole('button', { name: /settings/i }))
 
     expect(screen.getByText('Model')).toBeInTheDocument()
+  })
+})
+
+describe('ChatToolbar zen mode', () => {
+  it('hides chrome icons and keeps only send', () => {
+    useUIStore.setState({ zenMode: true })
+    renderChatToolbar({ hasInputValue: true })
+
+    expect(
+      screen
+        .getByRole('button', { name: /more actions/i, hidden: true })
+        .closest('.hidden')
+    ).not.toBeNull()
+    expect(
+      screen
+        .getByRole('button', { name: /settings/i, hidden: true })
+        .closest('.hidden')
+    ).not.toBeNull()
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeInTheDocument()
+  })
+
+  it('keeps model and reasoning shortcut popups mounted', async () => {
+    useUIStore.setState({ zenMode: true })
+    renderChatToolbar({ hasInputValue: true })
+
+    expect(
+      screen
+        .getByRole('button', {
+          name: /choose backend and model/i,
+          hidden: true,
+        })
+        .closest('.hidden')
+    ).not.toBeNull()
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('open-thinking-dropdown'))
+    })
+    expect(await screen.findByRole('menu')).toBeInTheDocument()
   })
 })

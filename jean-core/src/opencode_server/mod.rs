@@ -411,6 +411,17 @@ pub fn acquire(app: &AppHandle) -> Result<String, String> {
 pub fn release() {
     let prev = USAGE_COUNT.fetch_sub(1, Ordering::SeqCst);
     if prev == 1 {
+        let keep_warm = APP_HANDLE
+            .get()
+            .and_then(|app| crate::load_preferences_sync(app).ok())
+            .map(|preferences| preferences.keep_ai_servers_warm)
+            .unwrap_or(true);
+        if !keep_warm {
+            if let Err(e) = stop_managed_server_inner() {
+                log::warn!("Failed to stop managed OpenCode server on last release: {e}");
+            }
+            return;
+        }
         // Schedule delayed shutdown — if no one re-acquires within 10min, stop the server.
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_secs(600));

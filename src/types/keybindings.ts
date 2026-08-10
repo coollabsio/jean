@@ -50,6 +50,8 @@ export type KeybindingAction =
   | 'split_terminal_vertical'
   | 'close_terminal_pane'
   | 'focus_next_pane'
+  | 'toggle_zen_mode'
+  | 'clear_session_context'
 
 // Shortcut string format: "mod+key" where mod is cmd/ctrl
 // Examples: "mod+l", "mod+shift+p", "mod+1"
@@ -116,6 +118,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   split_terminal_vertical: 'mod+shift+backslash',
   close_terminal_pane: 'mod+shift+w',
   focus_next_pane: 'mod+bracketright',
+  toggle_zen_mode: 'mod+shift+z',
+  clear_session_context: 'mod+shift+k',
 }
 
 // UI definitions for the settings pane
@@ -310,6 +314,21 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     description: 'Show or hide the embedded browser side pane',
     default_shortcut: 'mod+shift+backquote',
     category: 'navigation',
+  },
+  {
+    action: 'toggle_zen_mode',
+    label: 'Toggle zen mode',
+    description:
+      'Full-screen the active session: hide session tabs and top chrome',
+    default_shortcut: 'mod+shift+z',
+    category: 'navigation',
+  },
+  {
+    action: 'clear_session_context',
+    label: 'Clear session context',
+    description: 'Clear the current chat history and start with fresh context',
+    default_shortcut: 'mod+shift+k',
+    category: 'chat',
   },
   {
     action: 'toggle_session_label',

@@ -701,6 +701,9 @@ pub async fn add_project(
 ) -> Result<Project, String> {
     log::trace!("Adding project from path: {path}, parent_id: {parent_id:?}");
 
+    // A save dialog can return a new path that does not exist yet.
+    git::ensure_project_directory(Path::new(&path))?;
+
     // Validate it's a git repository
     if !git::validate_git_repo(&path)? {
         return Err(format!(
@@ -1075,6 +1078,67 @@ pub async fn list_worktrees(app: AppHandle, project_id: String) -> Result<Vec<Wo
         .collect();
 
     Ok(worktrees)
+}
+
+/// One-shot project open payload: worktrees + session lists (with message counts).
+/// Avoids the frontend waterfall of `list_worktrees` then N× `get_sessions` over WS.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBootstrap {
+    pub worktrees: Vec<Worktree>,
+    pub sessions_by_worktree: HashMap<String, crate::chat::types::WorktreeSessions>,
+}
+
+/// Load worktrees and per-worktree session lists for a project in one round-trip.
+/// Sessions are fetched in parallel with message counts (canvas needs them).
+pub async fn bootstrap_project(
+    app: AppHandle,
+    project_id: String,
+) -> Result<ProjectBootstrap, String> {
+    log::trace!("Bootstrapping project canvas data: {project_id}");
+
+    let worktrees = list_worktrees(app.clone(), project_id).await?;
+
+    let session_futures: Vec<_> = worktrees
+        .iter()
+        .map(|wt| {
+            let app = app.clone();
+            let worktree_id = wt.id.clone();
+            let worktree_path = wt.path.clone();
+            async move {
+                let sessions = crate::chat::get_sessions(
+                    app,
+                    worktree_id.clone(),
+                    worktree_path,
+                    None,       // include_archived
+                    Some(true), // include_message_counts
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("bootstrap_project: get_sessions failed for {worktree_id}: {e}");
+                    crate::chat::types::WorktreeSessions {
+                        worktree_id: worktree_id.clone(),
+                        sessions: vec![],
+                        active_session_id: None,
+                        default_model: None,
+                        version: 2,
+                        branch_naming_completed: false,
+                    }
+                });
+                (worktree_id, sessions)
+            }
+        })
+        .collect();
+
+    let sessions_by_worktree = futures_util::future::join_all(session_futures)
+        .await
+        .into_iter()
+        .collect();
+
+    Ok(ProjectBootstrap {
+        worktrees,
+        sessions_by_worktree,
+    })
 }
 
 /// Get a single worktree by ID
@@ -8453,6 +8517,19 @@ fn generate_pr_content_from_inputs(
         response.body = augment_pr_references_in_body(&response.body, related_pr_issue_refs);
         return Ok(response);
     }
+    if backend == crate::chat::types::Backend::Antigravity {
+        let json_str = crate::chat::antigravity::execute_one_shot_antigravity(
+            app,
+            &prompt,
+            model_str,
+            Some(PR_CONTENT_SCHEMA),
+            Some(std::path::Path::new(repo_path)),
+        )?;
+        let mut response: PrContentResponse = serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Antigravity PR content: {error}"))?;
+        response.body = augment_pr_references_in_body(&response.body, related_pr_issue_refs);
+        return Ok(response);
+    }
 
     log::trace!("Generating PR content with Claude CLI (JSON schema)");
 
@@ -9206,6 +9283,17 @@ fn generate_commit_message_once(
         return serde_json::from_str(&json_str)
             .map_err(|error| format!("Failed to parse Kimi commit message: {error}"));
     }
+    if backend == crate::chat::types::Backend::Antigravity {
+        let json_str = crate::chat::antigravity::execute_one_shot_antigravity(
+            app,
+            prompt,
+            model_str,
+            Some(COMMIT_MESSAGE_SCHEMA),
+            working_dir,
+        )?;
+        return serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Antigravity commit message: {error}"));
+    }
 
     log::trace!("Generating commit message with Claude CLI (JSON schema)");
 
@@ -9544,6 +9632,55 @@ pub struct ReviewResponse {
     pub approval_status: String,
 }
 
+fn validate_review_response(
+    response: ReviewResponse,
+    working_dir: Option<&Path>,
+) -> Result<ReviewResponse, String> {
+    let Some(root) = working_dir else {
+        return Ok(response);
+    };
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve review root: {error}"))?;
+    for finding in &response.findings {
+        let relative = Path::new(&finding.file);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "Review finding uses an unsafe file path: {}",
+                finding.file
+            ));
+        }
+        let path = root.join(relative);
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| format!("Review finding references a missing file: {}", finding.file))?;
+        if !canonical.starts_with(&root) {
+            return Err(format!(
+                "Review finding is outside the reviewed worktree: {}",
+                finding.file
+            ));
+        }
+        if let Some(line) = finding.line {
+            let line_count = std::fs::read_to_string(&canonical)
+                .map_err(|error| format!("Failed to read {}: {error}", finding.file))?
+                .lines()
+                .count()
+                .max(1) as u32;
+            if line == 0 || line > line_count {
+                return Err(format!(
+                    "Review finding line {line} is outside {} (1-{line_count})",
+                    finding.file
+                ));
+            }
+        }
+    }
+    Ok(response)
+}
+
 fn extract_codex_review_structured_output(output: &str) -> Result<String, String> {
     let mut last_agent_message = None;
 
@@ -9829,6 +9966,18 @@ fn generate_review(
         )?;
         return serde_json::from_str(&json_str)
             .map_err(|error| format!("Failed to parse Kimi review: {error}"));
+    }
+    if backend == crate::chat::types::Backend::Antigravity {
+        let json_str = crate::chat::antigravity::execute_one_shot_antigravity(
+            app,
+            prompt,
+            model_str,
+            Some(REVIEW_SCHEMA),
+            working_dir,
+        )?;
+        let response = serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Antigravity review: {error}"))?;
+        return validate_review_response(response, working_dir);
     }
 
     let cli_path = resolve_cli_binary(app);
@@ -11345,6 +11494,20 @@ fn generate_release_notes_content(
         )?;
         let mut response: ReleaseNotesResponse = serde_json::from_str(&json_str)
             .map_err(|error| format!("Failed to parse Kimi release notes: {error}"))?;
+        response.body =
+            augment_pr_references_in_body(&response.body, &release_notes_context.pr_issue_refs);
+        return Ok(response);
+    }
+    if backend == crate::chat::types::Backend::Antigravity {
+        let json_str = crate::chat::antigravity::execute_one_shot_antigravity(
+            app,
+            &prompt,
+            model_str,
+            Some(RELEASE_NOTES_SCHEMA),
+            Some(std::path::Path::new(project_path)),
+        )?;
+        let mut response: ReleaseNotesResponse = serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Antigravity release notes: {error}"))?;
         response.body =
             augment_pr_references_in_body(&response.body, &release_notes_context.pr_issue_refs);
         return Ok(response);
@@ -12992,12 +13155,25 @@ fn get_home_dir() -> Option<std::path::PathBuf> {
     })
 }
 
-/// Collect skills from a directory into a map (later inserts override earlier ones)
+const MAX_SKILL_DIRECTORY_DEPTH: usize = 8;
+
+/// Collect skills from a directory into a map (later inserts override earlier ones).
+///
+/// Category directories are traversed recursively, but a directory containing a
+/// `SKILL.md` is treated as a skill root and its children are not visited.
 fn collect_skills_from_dir(
     dir: &std::path::Path,
     skills: &mut std::collections::HashMap<String, ClaudeSkill>,
 ) {
-    if !dir.exists() {
+    collect_skills_from_dir_inner(dir, skills, 0);
+}
+
+fn collect_skills_from_dir_inner(
+    dir: &std::path::Path,
+    skills: &mut std::collections::HashMap<String, ClaudeSkill>,
+    depth: usize,
+) {
+    if depth > MAX_SKILL_DIRECTORY_DEPTH {
         return;
     }
 
@@ -13009,22 +13185,48 @@ fn collect_skills_from_dir(
         }
     };
 
+    let mut entries: Vec<_> = entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                log::warn!("Failed to read directory entry in {dir:?}: {error}");
+                None
+            }
+        })
+        .collect();
+    entries.sort_by_key(|entry| entry.file_name());
+
     for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                log::warn!("Failed to read directory entry: {e}");
+        let entry_depth = depth + 1;
+        if entry_depth > MAX_SKILL_DIRECTORY_DEPTH {
+            continue;
+        }
+
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                log::warn!("Failed to read file type for {:?}: {error}", entry.path());
                 continue;
             }
         };
-
         let path = entry.path();
-        if !path.is_dir() {
+        if !file_type.is_dir() || file_type.is_symlink() {
             continue;
         }
 
         let skill_file = path.join("SKILL.md");
-        if !skill_file.exists() {
+        let is_skill_file = match std::fs::symlink_metadata(&skill_file) {
+            Ok(metadata) => metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                log::warn!("Failed to inspect skill file {skill_file:?}: {error}");
+                false
+            }
+        };
+        if !is_skill_file {
+            if entry_depth < MAX_SKILL_DIRECTORY_DEPTH {
+                collect_skills_from_dir_inner(&path, skills, entry_depth);
+            }
             continue;
         }
 
@@ -13656,6 +13858,133 @@ mod tests {
         let names: Vec<_> = skills.into_iter().map(|skill| skill.name).collect();
 
         assert_eq!(names, vec!["project-skill", "user-skill"]);
+    }
+
+    fn collect_test_skills(root: &Path) -> std::collections::HashMap<String, ClaudeSkill> {
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(root, &mut skills);
+        skills
+    }
+
+    #[test]
+    fn skill_discovery_finds_flat_and_nested_skills() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let flat = root.join("flat");
+        let nested = root.join("engineering/testing/tdd");
+        std::fs::create_dir_all(&flat).expect("flat skill dir");
+        std::fs::create_dir_all(&nested).expect("nested skill dir");
+        std::fs::write(flat.join("SKILL.md"), "# Flat skill\n").expect("flat skill");
+        std::fs::write(nested.join("SKILL.md"), "# Test-driven development\n")
+            .expect("nested skill");
+        std::fs::write(root.join("README.md"), "not a skill\n").expect("readme");
+        std::fs::create_dir_all(root.join("empty-category")).expect("empty category");
+
+        let skills = collect_test_skills(&root);
+
+        assert_eq!(skills.len(), 2);
+        assert_eq!(
+            skills
+                .get("flat")
+                .and_then(|skill| skill.description.as_deref()),
+            Some("Flat skill")
+        );
+        assert_eq!(
+            skills
+                .get("tdd")
+                .map(|skill| std::path::PathBuf::from(&skill.path)),
+            Some(nested.join("SKILL.md"))
+        );
+
+        assert!(collect_test_skills(&root.join("missing")).is_empty());
+    }
+
+    #[test]
+    fn skill_discovery_stops_descending_at_a_skill_root() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let parent = root.join("parent-skill");
+        let child = parent.join("nested/child-skill");
+        std::fs::create_dir_all(&child).expect("child skill dir");
+        std::fs::write(parent.join("SKILL.md"), "# Parent\n").expect("parent skill");
+        std::fs::write(child.join("SKILL.md"), "# Child\n").expect("child skill");
+
+        let skills = collect_test_skills(&root);
+
+        assert_eq!(skills.len(), 1);
+        assert!(skills.contains_key("parent-skill"));
+        assert!(!skills.contains_key("child-skill"));
+    }
+
+    #[test]
+    fn skill_discovery_respects_the_directory_depth_limit() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+
+        let mut at_limit = root.clone();
+        for index in 1..MAX_SKILL_DIRECTORY_DEPTH {
+            at_limit.push(format!("category-{index}"));
+        }
+        at_limit.push("at-limit");
+        std::fs::create_dir_all(&at_limit).expect("skill at limit dir");
+        std::fs::write(at_limit.join("SKILL.md"), "# At limit\n").expect("skill at limit");
+
+        let mut beyond_limit = root.clone();
+        for index in 1..=MAX_SKILL_DIRECTORY_DEPTH {
+            beyond_limit.push(format!("deep-category-{index}"));
+        }
+        beyond_limit.push("beyond-limit");
+        std::fs::create_dir_all(&beyond_limit).expect("skill beyond limit dir");
+        std::fs::write(beyond_limit.join("SKILL.md"), "# Beyond limit\n")
+            .expect("skill beyond limit");
+
+        let skills = collect_test_skills(&root);
+
+        assert!(skills.contains_key("at-limit"));
+        assert!(!skills.contains_key("beyond-limit"));
+    }
+
+    #[test]
+    fn skill_discovery_resolves_duplicate_leaf_names_deterministically() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let first = root.join("a-category/shared");
+        let last = root.join("z-category/shared");
+        std::fs::create_dir_all(&first).expect("first skill dir");
+        std::fs::create_dir_all(&last).expect("last skill dir");
+        std::fs::write(first.join("SKILL.md"), "# First\n").expect("first skill");
+        std::fs::write(last.join("SKILL.md"), "# Last\n").expect("last skill");
+
+        let skills = collect_test_skills(&root);
+
+        assert_eq!(
+            skills
+                .get("shared")
+                .and_then(|skill| skill.description.as_deref()),
+            Some("Last")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_discovery_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let outside = temp.path().join("outside-skill");
+        let linked_file_skill = root.join("linked-file-skill");
+        std::fs::create_dir_all(&root).expect("skills root");
+        std::fs::create_dir_all(&outside).expect("outside skill dir");
+        std::fs::create_dir_all(&linked_file_skill).expect("linked file skill dir");
+        std::fs::write(outside.join("SKILL.md"), "# Outside\n").expect("outside skill");
+        symlink(&outside, root.join("linked-directory")).expect("directory symlink");
+        symlink(outside.join("SKILL.md"), linked_file_skill.join("SKILL.md"))
+            .expect("skill file symlink");
+
+        let skills = collect_test_skills(&root);
+
+        assert!(skills.is_empty());
     }
 
     fn run_test_git(repo: &Path, args: &[&str]) {

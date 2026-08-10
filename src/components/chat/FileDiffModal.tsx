@@ -20,6 +20,11 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
+import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
 
 interface FileDiffModalProps {
   /** Absolute path to the file to show diff for, or null to close */
@@ -151,19 +156,16 @@ export function FileDiffModal({
   // Memoize FileDiff options
   const fileDiffOptions = useMemo(
     () => ({
-      theme: {
-        dark: preferences?.syntax_theme_dark ?? 'vitesse-black',
-        light: preferences?.syntax_theme_light ?? 'github-light',
-      },
+      theme: pierreThemePair(
+        preferences?.syntax_theme_dark,
+        preferences?.syntax_theme_light
+      ),
       themeType: resolvedThemeType,
       diffStyle,
       overflow: 'wrap' as const,
       enableLineSelection: false,
       disableFileHeader: true,
-      unsafeCSS: `
-        pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-        * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
-      `,
+      unsafeCSS: PIERRE_UNSAFE_CSS,
     }),
     [
       resolvedThemeType,
@@ -293,11 +295,14 @@ export function FileDiffModal({
                     </span>
                   )}
               </div>
-              {/* Diff render */}
-              <FileDiff
-                fileDiff={matchingFile.fileDiff}
-                options={fileDiffOptions}
-              />
+              {/* Diff render — Pierre edit mode for review & correct */}
+              <PierreEditProvider>
+                <FileDiff
+                  fileDiff={matchingFile.fileDiff}
+                  options={fileDiffOptions}
+                  edit
+                />
+              </PierreEditProvider>
             </div>
           )}
         </div>

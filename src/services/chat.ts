@@ -29,6 +29,7 @@ import type {
   EffortLevel,
   LabelData,
   QueuedMessage,
+  Backend,
 } from '@/types/chat'
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
@@ -1809,6 +1810,7 @@ export function useSendMessage() {
         sessionId,
         worktreeId,
         model,
+        backend: backend as Backend | undefined,
         executionMode,
         thinkingLevel,
         effortLevel,

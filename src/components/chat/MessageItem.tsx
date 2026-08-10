@@ -66,6 +66,7 @@ import {
 } from '@/types/chat'
 import { MessageSettingsBadges } from '@/components/chat/MessageSettingsBadges'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
+import { useUIStore } from '@/store/ui-store'
 
 interface MessageItemProps {
   /** The message to render */
@@ -203,6 +204,7 @@ export const MessageItem = memo(function MessageItem({
   hideCancelledIndicator,
   durationMs,
 }: MessageItemProps) {
+  const zenMode = useUIStore(state => state.zenMode)
   // Only show Approve button for the last message with ExitPlanMode
   const isLatestPlanRequest = messageIndex === lastPlanMessageIndex
 
@@ -891,7 +893,7 @@ export const MessageItem = memo(function MessageItem({
         <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
           <div className="min-w-0 max-w-full break-words [overflow-wrap:anywhere] rounded-lg border border-border bg-muted/20 px-3 py-2 text-foreground">
             {messageBoxContent}
-            {message.model && (
+            {!zenMode && message.model && (
               <div className="mt-1.5">
                 <MessageSettingsBadges
                   model={message.model}
@@ -904,7 +906,7 @@ export const MessageItem = memo(function MessageItem({
             )}
           </div>
           {/* Actions under the prompt (restore only after finished turns with file edits) */}
-          {(showTurnRestore || onCopyToInput) && (
+          {!zenMode && (showTurnRestore || onCopyToInput) && (
             <div className="flex shrink-0 items-center gap-1 pr-0.5">
               {showTurnRestore && (
                 <CheckpointTurnRestoreButton
@@ -937,7 +939,7 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         <div className="group relative text-foreground/90 w-full min-w-0 break-words">
           {messageBoxContent}
-          {assistantResponse && (
+          {!zenMode && assistantResponse && (
             <div className="mt-1 flex justify-end">
               <Tooltip>
                 <TooltipTrigger asChild>

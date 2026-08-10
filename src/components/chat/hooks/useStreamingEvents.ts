@@ -1929,13 +1929,12 @@ export default function useStreamingEvents({
         // Clear compacting state (safety net)
         useChatStore.getState().setCompacting(session_id, false)
 
-        // Determine if we should restore message to input:
-        // - undo_send from backend, OR
-        // - No content streamed yet (cancelled before any response)
-        // BUT: Don't restore if there are queued messages (user chose "Skip to Next")
-        // Any assistant output (text, tool call, thinking, content block) counts
-        // as a started response — if present, remove it from history and leave
-        // input empty.
+        // Restore message to input ONLY when the prompt never started
+        // (backend undo_send=true: process not registered / pending cancel).
+        // If the prompt is already running, do not restore even when no
+        // assistant content has streamed yet — cancel of a live run leaves
+        // the input empty. Also skip restore when queued messages exist
+        // ("Skip to Next").
         const hasToolCalls = toolCalls && toolCalls.length > 0
         const hasText = sanitizedContent.trim().length > 0
         const hasThinking = !!streamingThinkingContent[session_id]
@@ -1946,8 +1945,7 @@ export default function useStreamingEvents({
         const hasQueuedMessages =
           (useChatStore.getState().messageQueues[session_id] ?? []).length > 0
         const shouldHydrateCancelledFromBackend = !undo_send && !hasContent
-        const shouldRestoreMessage =
-          !hasQueuedMessages && (undo_send || !hasContent)
+        const shouldRestoreMessage = !hasQueuedMessages && undo_send
 
         const removeLatestUserMessageFromCache = () => {
           queryClient.setQueryData<Session>(

@@ -85,6 +85,32 @@ describe('UIStore', () => {
     expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 
+  it('toggles zen mode and restores sidebars', () => {
+    useUIStore.setState({
+      zenMode: false,
+      leftSidebarVisible: true,
+      fileBrowserVisible: true,
+    })
+
+    useUIStore.getState().toggleZenMode()
+    expect(useUIStore.getState().zenMode).toBe(true)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+
+    useUIStore.getState().toggleZenMode()
+    expect(useUIStore.getState().zenMode).toBe(false)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+  })
+
+  it('setZenMode is a no-op when already at the target value', () => {
+    useUIStore.setState({ zenMode: false, leftSidebarVisible: true })
+    const before = useUIStore.getState()
+    useUIStore.getState().setZenMode(false)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useUIStore.getState().zenMode).toBe(before.zenMode)
+  })
+
   it('sets viewing file path for global file modal', () => {
     useUIStore.getState().setViewingFilePath('/tmp/foo.ts')
     expect(useUIStore.getState().viewingFilePath).toBe('/tmp/foo.ts')

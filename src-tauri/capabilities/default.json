@@ -15,6 +15,7 @@
     "core:window:allow-is-fullscreen",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
     "opener:default",
     "opener:allow-open-path",
     "clipboard-manager:default",

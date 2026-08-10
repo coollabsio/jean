@@ -19,6 +19,8 @@ use crate::projects::storage::load_projects_data;
 
 /// Default global system prompt (must match DEFAULT_GLOBAL_SYSTEM_PROMPT in preferences.ts)
 const DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = "\
+Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
+\n\
 ### 1. Planning Guidance\n\
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.\n\
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing\n\
@@ -182,7 +184,7 @@ pub struct ErrorEvent {
 pub struct CancelledEvent {
     pub session_id: String,
     pub worktree_id: String, // Kept for backward compatibility
-    pub undo_send: bool, // True if user message should be restored to input (instant cancellation)
+    pub undo_send: bool,     // True only when the prompt never started (restore to input)
     pub emitted_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -2623,6 +2625,8 @@ mod tests {
 
     #[test]
     fn default_global_system_prompt_prefers_interactive_plan_questions() {
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("Always use ASD-STE100 Simplified Technical English when you talk to me."));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("backend-native interactive question UI"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Claude AskUserQuestion"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Codex request_user_input"));

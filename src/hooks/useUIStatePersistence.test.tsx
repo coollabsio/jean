@@ -95,6 +95,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     })
     useUIStore.setState({
       uiStateInitialized: false,
+      zenMode: false,
       sessionTerminalIds: {},
       sessionPrimarySurface: {},
     })
@@ -135,6 +136,27 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
         'session-1': 'first unsent message',
         'session-2': 'second unsent message',
       })
+    })
+  })
+
+  it('restores zen mode after a reload', async () => {
+    mockUseUIState.mockReturnValue({
+      data: buildUiState({ zen_mode: true }),
+      isSuccess: true,
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useUIStore.getState().zenMode).toBe(true)
     })
   })
 
@@ -238,6 +260,30 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
         input_drafts: { 'session-1': 'unsent message' },
       })
     )
+  })
+
+  it('debounces persistence when zen mode changes', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useUIStore.getState().uiStateInitialized).toBe(true)
+    })
+
+    useUIStore.getState().setZenMode(true)
+
+    await waitFor(() => {
+      expect(mockSaveUIState).toHaveBeenCalledWith(
+        expect.objectContaining({ zen_mode: true })
+      )
+    })
   })
 
   it('debounces persistence when pending images or text files change', async () => {

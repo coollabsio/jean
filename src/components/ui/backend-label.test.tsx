@@ -6,11 +6,12 @@ import {
 } from '@/components/ui/backend-label'
 
 describe('backend labels', () => {
-  it('marks Command Code, Grok, and Kimi as beta, not Cursor, in plain labels', () => {
+  it('marks Command Code, Grok, Kimi, and Antigravity as beta, not Cursor, in plain labels', () => {
     expect(getBackendPlainLabel('cursor')).toBe('Cursor')
     expect(getBackendPlainLabel('commandcode')).toBe('Command Code (Beta)')
     expect(getBackendPlainLabel('grok')).toBe('Grok (Beta)')
     expect(getBackendPlainLabel('kimi')).toBe('Kimi Code (Beta)')
+    expect(getBackendPlainLabel('antigravity')).toBe('Antigravity CLI (Beta)')
   })
 
   it('renders the beta badge on Command Code and Grok, not Cursor', () => {
@@ -32,6 +33,11 @@ describe('backend labels', () => {
     rerender(<BackendLabel backend="kimi" />)
 
     expect(screen.getByText('Kimi Code')).toBeInTheDocument()
+    expect(screen.getByText('Beta')).toBeInTheDocument()
+
+    rerender(<BackendLabel backend="antigravity" />)
+
+    expect(screen.getByText('Antigravity CLI')).toBeInTheDocument()
     expect(screen.getByText('Beta')).toBeInTheDocument()
   })
 })

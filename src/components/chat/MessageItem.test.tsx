@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import userEvent from '@testing-library/user-event'
 import { MessageItem } from './MessageItem'
@@ -8,6 +8,7 @@ import type {
   QuestionAnswer,
   Question,
 } from '@/types/chat'
+import { useUIStore } from '@/store/ui-store'
 
 const mocks = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
@@ -27,6 +28,9 @@ vi.mock('sonner', () => ({
 }))
 
 describe('MessageItem', () => {
+  beforeEach(() => {
+    useUIStore.setState({ zenMode: false })
+  })
   const noopQuestionAnswer = (
     _toolCallId: string,
     _answers: QuestionAnswer[],
@@ -83,6 +87,72 @@ describe('MessageItem', () => {
     areQuestionsSkipped: vi.fn(() => false),
     isFindingFixed: vi.fn(() => false),
   }
+
+  it('renders user prompts without a collapsed prompt-sent indicator', () => {
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          id: 'user-1',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'Keep this prompt visible',
+          timestamp: 1,
+          tool_calls: [],
+        }}
+      />
+    )
+
+    expect(screen.getByText('Keep this prompt visible')).toBeVisible()
+    expect(screen.queryByText('Prompt sent')).not.toBeInTheDocument()
+  })
+
+  it('hides prompt metadata and message actions in zen mode', () => {
+    useUIStore.setState({ zenMode: true })
+    render(
+      <MessageItem
+        {...baseProps}
+        onCopyToInput={vi.fn()}
+        message={{
+          id: 'user-1',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'Keep only this prompt',
+          timestamp: 1,
+          tool_calls: [],
+          model: 'codex/gpt-5.6',
+          execution_mode: 'yolo',
+          effort_level: 'medium',
+        }}
+      />
+    )
+
+    expect(screen.getByText('Keep only this prompt')).toBeVisible()
+    expect(screen.queryByText(/GPT 5.6/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Copy message to input' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('hides assistant copy actions in zen mode', () => {
+    useUIStore.setState({ zenMode: true })
+    render(
+      <MessageItem
+        {...baseProps}
+        message={{
+          ...baseMessage,
+          content: 'Zen response',
+          content_blocks: [{ type: 'text', text: 'Zen response' }],
+          tool_calls: [],
+        }}
+      />
+    )
+
+    expect(screen.getByText('Zen response')).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: 'Copy response to clipboard' })
+    ).not.toBeInTheDocument()
+  })
 
   it('renders assistant text blocks even when a Codex plan is present', () => {
     render(<MessageItem {...baseProps} />)

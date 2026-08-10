@@ -178,20 +178,32 @@ export function useCommandContext(
   // Sessions - Clear chat history
   const clearSessionHistory = useCallback(async () => {
     const { activeWorktreeId, getActiveSession } = useChatStore.getState()
+    const uiState = useUIStore.getState()
+    if (uiState.sessionChatModalOpen && uiState.sessionChatModalWorktreeId) {
+      window.dispatchEvent(new CustomEvent('clear-session-context'))
+      return
+    }
+
     if (!activeWorktreeId) return
 
     const sessionId = getActiveSession(activeWorktreeId)
     if (!sessionId) return
+    const worktreePath =
+      useChatStore.getState().getWorktreePath(activeWorktreeId) ??
+      useChatStore.getState().activeWorktreePath
+    if (!worktreePath) return
 
     try {
       await invoke('clear_session_history', {
         worktreeId: activeWorktreeId,
+        worktreePath,
         sessionId,
       })
       await queryClient.invalidateQueries({
         queryKey: chatQueryKeys.session(sessionId),
       })
       notify('Chat history cleared', undefined, { type: 'success' })
+      window.dispatchEvent(new CustomEvent('focus-chat-input'))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       notify(message, undefined, { type: 'error' })
@@ -463,7 +475,11 @@ export function useCommandContext(
   // State getters
   const hasActiveSession = useCallback(() => {
     const chatState = useChatStore.getState()
+    const uiState = useUIStore.getState()
     const worktreeId =
+      (uiState.sessionChatModalOpen
+        ? uiState.sessionChatModalWorktreeId
+        : null) ??
       chatState.activeWorktreeId ??
       useProjectsStore.getState().selectedWorktreeId
     if (!worktreeId) return false

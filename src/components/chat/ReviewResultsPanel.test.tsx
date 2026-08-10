@@ -396,7 +396,10 @@ describe('ReviewResultsPanel', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /send to chat \(1\)/i })
     )
-    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'plan')
+    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'plan', {
+      backend: 'claude',
+      model: 'claude-fable-5',
+    })
 
     onSendFix.mockClear()
     await userEvent.click(screen.getByRole('combobox'))
@@ -406,7 +409,10 @@ describe('ReviewResultsPanel', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /send to chat \(1\)/i })
     )
-    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'yolo')
+    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'yolo', {
+      backend: 'codex',
+      model: 'gpt-5.6-sol',
+    })
   })
 
   it('falls back to global code_review_fix_mode when reviewer has no fix_mode', async () => {
@@ -444,7 +450,11 @@ describe('ReviewResultsPanel', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /send to chat \(1\)/i })
     )
-    expect(onSendFix).toHaveBeenCalledWith(expect.any(String), 'yolo')
+    expect(onSendFix).toHaveBeenCalledWith(
+      expect.any(String),
+      'yolo',
+      undefined
+    )
   })
 
   it('supports select all / deselect all', async () => {

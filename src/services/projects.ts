@@ -24,6 +24,7 @@ import type {
   WorktreeBranchExistsEvent,
   WorktreeSetupCompleteEvent,
 } from '@/types/projects'
+import type { WorktreeSessions } from '@/types/chat'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
@@ -84,8 +85,59 @@ export function useProjects() {
   })
 }
 
+/** One-shot project open payload (worktrees + session lists with counts). */
+export interface ProjectBootstrap {
+  worktrees: Worktree[]
+  sessionsByWorktree: Record<string, WorktreeSessions>
+}
+
 /**
- * Hook to list worktrees for a specific project
+ * Fetch worktrees + all session lists in one backend round-trip and seed
+ * TanStack caches so ProjectCanvasView does not waterfall N get_sessions.
+ */
+export async function fetchAndSeedProjectBootstrap(
+  projectId: string,
+  queryClient: ReturnType<typeof useQueryClient>
+): Promise<Worktree[]> {
+  const { chatQueryKeys } = await import('@/services/chat')
+
+  logger.debug('Bootstrapping project canvas data', { projectId })
+  const bootstrap = await invoke<ProjectBootstrap>('bootstrap_project', {
+    projectId,
+  })
+
+  const previous = queryClient.getQueryData<Worktree[]>(
+    projectsQueryKeys.worktrees(projectId)
+  )
+  const merged = mergeWorktreesPreservingOptimistic(
+    bootstrap.worktrees ?? [],
+    previous
+  )
+  queryClient.setQueryData(projectsQueryKeys.worktrees(projectId), merged)
+
+  const sessionsByWorktree = bootstrap.sessionsByWorktree ?? {}
+  for (const [worktreeId, sessions] of Object.entries(sessionsByWorktree)) {
+    queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
+    queryClient.setQueryData(
+      [...chatQueryKeys.sessions(worktreeId), 'with-counts'],
+      sessions
+    )
+  }
+
+  logger.info('Project bootstrap loaded', {
+    projectId,
+    worktrees: merged.length,
+    sessionGroups: Object.keys(sessionsByWorktree).length,
+  })
+  return merged
+}
+
+/**
+ * Hook to list worktrees for a specific project.
+ *
+ * Uses `bootstrap_project` so session lists (with message counts) are seeded in
+ * the same round-trip. That removes the worktrees → N× get_sessions waterfall
+ * when opening a project over WebSocket (sidebar + canvas share this cache key).
  */
 export function useWorktrees(projectId: string | null) {
   const queryClient = useQueryClient()
@@ -98,24 +150,36 @@ export function useWorktrees(projectId: string | null) {
       }
 
       try {
-        logger.debug('Loading worktrees for project', { projectId })
-        const worktrees = await invoke<Worktree[]>('list_worktrees', {
+        return await fetchAndSeedProjectBootstrap(projectId, queryClient)
+      } catch (error) {
+        // Older servers / partial deploy: fall back to worktrees-only.
+        logger.warn('bootstrap_project failed, falling back to list_worktrees', {
+          error,
           projectId,
         })
-        // Pending creations are client-only until git finishes; keep them when
-        // something else invalidates this query mid-create (issue #528).
-        const previous = queryClient.getQueryData<Worktree[]>(
-          projectsQueryKeys.worktrees(projectId)
-        )
-        const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
-        logger.info('Worktrees loaded successfully', {
-          count: worktrees.length,
-          pendingPreserved: merged.length - worktrees.length,
-        })
-        return merged
-      } catch (error) {
-        logger.error('Failed to load worktrees', { error, projectId })
-        return preserveQueryCacheOnError(error)
+        try {
+          logger.debug('Loading worktrees for project', { projectId })
+          const worktrees = await invoke<Worktree[]>('list_worktrees', {
+            projectId,
+          })
+          // Pending creations are client-only until git finishes; keep them when
+          // something else invalidates this query mid-create (issue #528).
+          const previous = queryClient.getQueryData<Worktree[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
+          const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
+          logger.info('Worktrees loaded successfully', {
+            count: worktrees.length,
+            pendingPreserved: merged.length - worktrees.length,
+          })
+          return merged
+        } catch (fallbackError) {
+          logger.error('Failed to load worktrees', {
+            error: fallbackError,
+            projectId,
+          })
+          return preserveQueryCacheOnError(fallbackError)
+        }
       }
     },
     enabled: !!projectId,

@@ -13,22 +13,38 @@ import {
 import type { ExecutionMode, Session } from '@/types/chat'
 import type * as ChatService from '@/services/chat'
 
-const { mockInvoke, mockInstalledBackends } = vi.hoisted(() => ({
-  mockInvoke: vi.fn().mockResolvedValue(undefined),
-  mockInstalledBackends: {
-    installedBackends: [
-      'claude',
-      'codex',
-      'opencode',
-      'cursor',
-      'pi',
-      'commandcode',
-      'grok',
-      'kimi',
-    ] as string[],
-    isLoading: false,
-  },
-}))
+const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
+  vi.hoisted(() => ({
+    mockInvoke: vi.fn().mockResolvedValue(undefined),
+    mockInstalledBackends: {
+      installedBackends: [
+        'claude',
+        'codex',
+        'opencode',
+        'cursor',
+        'pi',
+        'commandcode',
+        'grok',
+        'kimi',
+        'antigravity',
+      ] as string[],
+      isLoading: false,
+    },
+    mockBackendAuthStatuses: {
+      authByBackend: {
+        claude: true,
+        codex: true,
+        opencode: true,
+        cursor: true,
+        pi: true,
+        commandcode: true,
+        grok: true,
+        kimi: true,
+        antigravity: true,
+      } as Record<string, boolean | undefined>,
+      isLoading: false,
+    },
+  }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: mockInvoke,
@@ -36,6 +52,15 @@ vi.mock('@/lib/transport', () => ({
 
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => mockInstalledBackends,
+  useBackendAuthStatuses: () => mockBackendAuthStatuses,
+  isBackendUsable: (
+    installed: boolean | undefined,
+    authenticated: boolean | undefined
+  ) => {
+    if (!installed) return false
+    if (authenticated === undefined) return true
+    return authenticated
+  },
 }))
 
 vi.mock('sonner', () => ({
@@ -89,7 +114,14 @@ function renderUseMessageSending({
   piAutoSteer?: boolean
   grokAutoSteer?: boolean
   inputValue?: string
-  selectedBackend?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'grok'
+  selectedBackend?:
+    | 'claude'
+    | 'codex'
+    | 'opencode'
+    | 'cursor'
+    | 'pi'
+    | 'grok'
+    | 'antigravity'
   selectedModel?: string
   selectedEffortLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   createSession?: {
@@ -165,8 +197,21 @@ function resetInstalledBackendsMock() {
     'commandcode',
     'grok',
     'kimi',
+    'antigravity',
   ]
   mockInstalledBackends.isLoading = false
+  mockBackendAuthStatuses.authByBackend = {
+    claude: true,
+    codex: true,
+    opencode: true,
+    cursor: true,
+    pi: true,
+    commandcode: true,
+    grok: true,
+    kimi: true,
+    antigravity: true,
+  }
+  mockBackendAuthStatuses.isLoading = false
 }
 
 describe('useMessageSending Codex /goal', () => {
@@ -197,7 +242,7 @@ describe('useMessageSending Codex /goal', () => {
     })
   })
 
-  it('blocks send when the selected backend is not authenticated', async () => {
+  it('blocks send when the selected backend is not installed', async () => {
     mockInstalledBackends.installedBackends = ['claude']
     const { result, sendMessage } = renderUseMessageSending({
       inputValue: 'hello',
@@ -211,7 +256,31 @@ describe('useMessageSending Codex /goal', () => {
     })
 
     expect(handleCliAuthError).toHaveBeenCalledWith(
-      expect.stringContaining('codex'),
+      'codex is not installed',
+      'codex'
+    )
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('blocks send when the selected backend is installed but not authenticated', async () => {
+    mockInstalledBackends.installedBackends = ['claude', 'codex']
+    mockBackendAuthStatuses.authByBackend = {
+      ...mockBackendAuthStatuses.authByBackend,
+      codex: false,
+    }
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: 'hello',
+      selectedBackend: 'codex',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(handleCliAuthError).toHaveBeenCalledWith(
+      'codex is not authenticated',
       'codex'
     )
     expect(sendMessage.mutate).not.toHaveBeenCalled()
@@ -374,6 +443,82 @@ describe('useMessageSending PI effort', () => {
       }),
       expect.any(Object)
     )
+  })
+})
+
+describe('useMessageSending Antigravity effort', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
+    useChatStore.setState({
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      pendingTextFiles: {},
+      pendingSkills: {},
+      sendingSessionIds: {},
+      executionModes: {},
+      selectedModels: {},
+      executingModes: {},
+      errors: {},
+      lastSentMessages: {},
+      reviewingSessions: {},
+      waitingForInputSessionIds: {},
+      messageQueues: {},
+      approvedTools: {},
+      streamingContents: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+    })
+  })
+
+  it('passes selected Antigravity effort when sending a prompt', async () => {
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'antigravity',
+      selectedModel: 'antigravity/auto',
+      selectedEffortLevel: 'medium',
+      inputValue: 'inspect antigravity effort',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: 'antigravity',
+        effortLevel: 'medium',
+        thinkingLevel: 'off',
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('queues antigravity prompts while a turn is running (no steer API)', async () => {
+    useChatStore.setState({ sendingSessionIds: { 'session-1': true } })
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'antigravity',
+      selectedModel: 'antigravity/auto',
+      inputValue: 'also inspect antigravity',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(steerGrokTurn).not.toHaveBeenCalled()
+    expect(steerOpencodeTurn).not.toHaveBeenCalled()
+    expect(steerPiTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
   })
 })
 
@@ -608,6 +753,28 @@ describe('useMessageSending Codex auto-steer', () => {
     expect(steerCodexTurn).not.toHaveBeenCalled()
     expect(persistEnqueue).toHaveBeenCalled()
     expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+  })
+
+  it('steers when explicitly requested even if auto-steer is disabled', async () => {
+    vi.mocked(steerCodexTurn).mockResolvedValue(undefined)
+    const { result } = renderUseMessageSending({
+      autoSteer: false,
+      inputValue: 'steer this now',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit(
+        { preventDefault: vi.fn() } as unknown as React.FormEvent,
+        { forceSteer: true }
+      )
+    })
+
+    expect(steerCodexTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      'steer this now'
+    )
+    expect(persistEnqueue).not.toHaveBeenCalled()
   })
 
   it('queues pi prompts instead of steering when pi auto-steer is disabled', async () => {

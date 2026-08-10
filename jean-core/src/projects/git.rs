@@ -159,17 +159,51 @@ pub fn validate_git_repo(path: &str) -> Result<bool, String> {
     Ok(git_path.exists())
 }
 
+/// Create a selected project directory and its parents when they do not exist.
+pub fn ensure_project_directory(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
+
+    if !path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path.display()));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod project_directory_tests {
+    use super::*;
+
+    #[test]
+    fn ensure_project_directory_creates_a_missing_nested_path() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let project_path = temp.path().join("missing").join("project");
+
+        ensure_project_directory(&project_path).expect("create project directory");
+
+        assert!(project_path.is_dir());
+    }
+
+    #[test]
+    fn ensure_project_directory_rejects_an_existing_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let file_path = temp.path().join("project");
+        std::fs::write(&file_path, "not a directory").expect("write file");
+
+        let error = ensure_project_directory(&file_path).expect_err("reject file path");
+
+        assert!(error.contains("Failed to create directory"));
+    }
+}
+
 /// Initialize a new git repository at the given path
 ///
 /// Creates the directory if it doesn't exist, runs `git init`, and creates an initial commit
 pub fn init_repo(path: &str) -> Result<(), String> {
     let path_obj = Path::new(path);
 
-    // Create directory if it doesn't exist
-    if !path_obj.exists() {
-        std::fs::create_dir_all(path_obj)
-            .map_err(|e| format!("Failed to create directory: {e}"))?;
-    }
+    ensure_project_directory(path_obj)?;
 
     // Check if directory already has .git
     let git_path = path_obj.join(".git");

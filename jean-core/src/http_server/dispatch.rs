@@ -189,6 +189,11 @@ pub async fn dispatch_command(
             let result = crate::projects::list_worktrees(app.clone(), project_id).await?;
             to_value(result)
         }
+        "bootstrap_project" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::bootstrap_project(app.clone(), project_id).await?;
+            to_value(result)
+        }
         "get_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let result = crate::projects::get_worktree(app.clone(), worktree_id).await?;
@@ -2500,6 +2505,7 @@ pub async fn dispatch_command(
             let result = crate::cursor_cli::get_cursor_install_command(app.clone()).await?;
             to_value(result)
         }
+        "check_system_prerequisites" => to_value(crate::check_system_prerequisites()),
         "check_grok_cli_installed" => {
             let result = crate::grok_cli::check_grok_cli_installed(app.clone()).await?;
             to_value(result)
@@ -2582,6 +2588,48 @@ pub async fn dispatch_command(
         }
         "login_kimi_cli_device" => {
             crate::kimi_cli::login_kimi_cli_device(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "check_antigravity_cli_installed" => {
+            to_value(crate::antigravity_cli::check_antigravity_cli_installed(app.clone()).await?)
+        }
+        "detect_antigravity_in_path" => {
+            to_value(crate::antigravity_cli::detect_antigravity_in_path(app.clone()).await?)
+        }
+        "check_antigravity_cli_auth" => {
+            to_value(crate::antigravity_cli::check_antigravity_cli_auth(app.clone()).await?)
+        }
+        "list_antigravity_models" => {
+            to_value(crate::antigravity_cli::list_antigravity_models(app.clone()).await?)
+        }
+        "get_available_antigravity_versions" => {
+            to_value(crate::antigravity_cli::get_available_antigravity_versions(app.clone()).await?)
+        }
+        "check_antigravity_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            to_value(
+                crate::antigravity_cli::check_antigravity_cli_version_exists(app.clone(), version)
+                    .await?,
+            )
+        }
+        "get_antigravity_install_command" => {
+            to_value(crate::antigravity_cli::get_antigravity_install_command(app.clone()).await?)
+        }
+        "install_antigravity_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::antigravity_cli::install_antigravity_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_antigravity_cli" => {
+            crate::antigravity_cli::uninstall_antigravity_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_antigravity_cli" => {
+            crate::antigravity_cli::update_antigravity_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "login_antigravity_cli_device" => {
+            crate::antigravity_cli::login_antigravity_cli_device(app.clone()).await?;
             Ok(Value::Null)
         }
         "check_pi_cli_installed" => {
@@ -2760,6 +2808,26 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["mcp", "jean-mcp-snippet"]);
             to_value(result)
         }
+        "get_agent_browser_status" => {
+            let result = crate::agent_browser::get_agent_browser_status(app.clone()).await?;
+            to_value(result)
+        }
+        "ensure_agent_browser_profile" => {
+            let result = crate::agent_browser::ensure_agent_browser_profile(app.clone()).await?;
+            to_value(result)
+        }
+        "install_agent_browser" => {
+            let result = crate::agent_browser::install_agent_browser(app.clone()).await?;
+            emit_cache_invalidation(app, &["agent-browser"]);
+            to_value(result)
+        }
+        "install_agent_browser_mcp" => {
+            let backends: Option<Vec<String>> = from_field_opt(&args, "backends")?;
+            let result =
+                crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
+            emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
+            to_value(result)
+        }
         "start_opencode_server" => {
             let result = crate::opencode_server::start_opencode_server(app.clone()).await?;
             to_value(result)
@@ -2806,6 +2874,11 @@ pub async fn dispatch_command(
             let version: Option<String> = from_field_opt(&args, "version")?;
             crate::codex_cli::install_codex_cli(app.clone(), version).await?;
             Ok(Value::Null)
+        }
+        "install_missing_codex_code_mode_host" => {
+            let installed =
+                crate::codex_cli::install_missing_codex_code_mode_host(app.clone()).await?;
+            to_value(installed)
         }
         "uninstall_codex_cli" => {
             crate::codex_cli::uninstall_codex_cli(app.clone()).await?;

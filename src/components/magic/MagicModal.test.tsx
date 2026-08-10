@@ -225,6 +225,7 @@ vi.mock('@/services/git-status', () => ({
   fetchWorktreesStatus: mocks.fetchWorktreesStatus,
   gitPush: mocks.gitPush,
   performGitPull: vi.fn(),
+  performGitSync: vi.fn(),
 }))
 
 vi.mock('@/services/commit-jobs', () => ({

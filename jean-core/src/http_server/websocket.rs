@@ -13,6 +13,7 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
     matches!(
         command,
         "get_sessions"
+            | "bootstrap_project"
             | "list_native_cli_sessions"
             | "create_commit_with_ai"
             | "create_pr_with_ai_content"
@@ -21,6 +22,7 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
             | "execute_summarization"
             | "install_claude_cli"
             | "install_codex_cli"
+            | "install_missing_codex_code_mode_host"
             | "install_opencode_cli"
             | "install_pi_cli"
             | "install_grok_cli"

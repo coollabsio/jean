@@ -1031,6 +1031,7 @@ pub(crate) fn parse_kimi_run_to_message(
         cancelled: run.cancelled || response.cancelled,
         plan_approved: false,
         model: run.model.clone(),
+        backend: None,
         execution_mode: run.execution_mode.clone(),
         thinking_level: run.thinking_level.clone(),
         effort_level: run.effort_level.clone(),

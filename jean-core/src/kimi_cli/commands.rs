@@ -408,6 +408,7 @@ pub async fn get_kimi_install_command(app: AppHandle) -> Result<KimiInstallComma
 }
 
 pub async fn install_kimi_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
+    crate::prerequisites::require_npm("Kimi Code CLI")?;
     let dir = ensure_cli_dir(&app)?;
     let output = silent_command("npm")
         .args(["install", "--prefix"])

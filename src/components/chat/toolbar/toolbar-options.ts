@@ -101,6 +101,14 @@ export const KIMI_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'kimi/default', label: 'Configured default' },
 ]
 
+export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'antigravity/auto', label: 'Auto' },
+  { value: 'antigravity/gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)' },
+  { value: 'antigravity/gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash (Medium)' },
+  { value: 'antigravity/gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash (Medium)' },
+  { value: 'antigravity/gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
+]
+
 export const KIMI_EFFORT_LEVEL_OPTIONS: {
   value: EffortLevel
   label: string
@@ -148,6 +156,14 @@ export const EFFORT_LEVEL_OPTIONS: {
   },
 ]
 
+/** Exact values accepted by Antigravity CLI 1.1.x: --effort low|medium|high. */
+export const ANTIGRAVITY_EFFORT_LEVEL_OPTIONS = [
+  ADAPTIVE_EFFORT_OPTION,
+  ...EFFORT_LEVEL_OPTIONS.filter(option =>
+    ['low', 'medium', 'high'].includes(option.value)
+  ),
+]
+
 export const CODEX_EFFORT_LEVEL_OPTIONS = EFFORT_LEVEL_OPTIONS.filter(
   option => option.value !== 'max' && option.value !== 'ultracode'
 )
@@ -166,8 +182,8 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
 ]
 
 /**
- * Prepend Adaptive/Default only for Gemini models (native adaptive thinking
- * when no level is forced). Non-Gemini levels are returned unchanged.
+ * Prepend Adaptive/Default only for Antigravity models (native adaptive thinking
+ * when no level is forced). Non-Antigravity levels are returned unchanged.
  */
 export function withAdaptiveEffortOption<
   T extends { value: string; label: string; description?: string },

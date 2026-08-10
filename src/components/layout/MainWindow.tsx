@@ -320,7 +320,7 @@ export function MainWindow() {
     : null
 
   // Compute window title based on selected project/worktree
-  // On mobile, show only project name (worktree name is in the content header)
+  // On mobile, show only the project name to fit the compact title bar.
   const windowTitle = useMemo(() => {
     if (!project || !worktree) return 'Jean'
     if (isMobile) return project.name
