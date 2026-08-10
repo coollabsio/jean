@@ -31,7 +31,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
-import { useUIStore } from '@/store/ui-store'
+import { openNewWorktree } from '@/lib/open-new-worktree'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { getFileManagerName } from '@/lib/platform'
 import { isNativeApp } from '@/lib/environment'
@@ -55,10 +55,7 @@ export function ProjectContextMenu({
   const openInEditor = useOpenWorktreeInEditor()
   const { data: worktrees = [] } = useWorktrees(project.id)
   const { data: preferences } = usePreferences()
-  const { openProjectSettings, selectProject } = useProjectsStore()
-  const setNewWorktreeModalOpen = useUIStore(
-    state => state.setNewWorktreeModalOpen
-  )
+  const { openProjectSettings } = useProjectsStore()
   // Check if base session already exists
   const existingBaseSession = worktrees.find(isBaseSession)
   const isNested = project.parent_id !== undefined
@@ -86,8 +83,7 @@ export function ProjectContextMenu({
   }
 
   const handleNewWorktree = () => {
-    selectProject(project.id)
-    setNewWorktreeModalOpen(true)
+    openNewWorktree({ projectId: project.id })
   }
 
   const handleNewBaseSession = () => {

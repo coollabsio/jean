@@ -19,7 +19,6 @@ interface Params {
   selectedItemIndex: number
   setSelectedItemIndex: (i: number | ((prev: number) => number)) => void
   creatingFromNumber: number | null
-  handleCreateWorktree: () => void
   handleBaseSession: () => void
   handleSelectIssue: (issue: GitHubIssue, background?: boolean) => void
   handleSelectIssueAndInvestigate: (
@@ -77,7 +76,6 @@ export function useNewWorktreeKeyboard({
   selectedItemIndex,
   setSelectedItemIndex,
   creatingFromNumber,
-  handleCreateWorktree,
   handleBaseSession,
   handleSelectIssue,
   handleSelectIssueAndInvestigate,
@@ -163,12 +161,6 @@ export function useNewWorktreeKeyboard({
       if (activeTab === 'quick') {
         const tag = (e.target as HTMLElement)?.tagName
         if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-          if (key === 'n') {
-            e.preventDefault()
-            e.nativeEvent.stopImmediatePropagation()
-            handleCreateWorktree()
-            return
-          }
           if (key === 'm') {
             e.preventDefault()
             e.nativeEvent.stopImmediatePropagation()
@@ -445,7 +437,6 @@ export function useNewWorktreeKeyboard({
       filteredAdvisories,
       filteredBranches,
       selectedItemIndex,
-      handleCreateWorktree,
       handleBaseSession,
       handleSelectIssue,
       handleSelectIssueAndInvestigate,

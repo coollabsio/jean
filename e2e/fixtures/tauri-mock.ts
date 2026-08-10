@@ -169,6 +169,25 @@ export const test = base.extend<TauriMockFixtures>({
                 }
           },
           send_chat_message: args => {
+            const wid = (args?.worktreeId as string) ?? 'unknown'
+            const store = getWorktreeStore(wid)
+            const session = store.sessions.find(s => s.id === args?.sessionId)
+            if (session) {
+              const messages = Array.isArray(session.messages)
+                ? session.messages
+                : []
+              messages.push({
+                id: `user-${Date.now()}`,
+                session_id: args?.sessionId ?? 'unknown',
+                role: 'user',
+                content: args?.message ?? '',
+                content_blocks: [
+                  { type: 'text', text: args?.message ?? '' },
+                ],
+                timestamp: Math.floor(Date.now() / 1000),
+              })
+              session.messages = messages
+            }
             // Return a mock assistant ChatMessage
             // Actual streaming is handled via emitEvent
             return {
@@ -220,6 +239,14 @@ export const test = base.extend<TauriMockFixtures>({
     )
 
     await page.goto('/')
+    const crashHeading = page.getByRole('heading', {
+      name: 'Something went wrong',
+    })
+    if (await crashHeading.isVisible().catch(() => false)) {
+      const details = page.locator('details')
+      await details.locator('summary').click().catch(() => undefined)
+      throw new Error(`Application crashed during E2E startup:\n${await details.innerText()}`)
+    }
     await use(page)
   },
 

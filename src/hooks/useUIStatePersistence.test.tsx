@@ -105,6 +105,9 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
       activeSessionIds: {},
       sessionWorktreeMap: {},
       inputDrafts: {},
+      pendingSetupPrompts: {},
+      pendingSetupMessages: {},
+      recoverableSetupMessageIds: {},
       pendingImages: {},
       pendingTextFiles: {},
     })
@@ -135,6 +138,54 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
       expect(useChatStore.getState().inputDrafts).toEqual({
         'session-1': 'first unsent message',
         'session-2': 'second unsent message',
+      })
+    })
+  })
+
+  it('restores a prompt waiting for worktree setup after a reload', async () => {
+    const queuedMessage = {
+      id: 'queued-1',
+      message: 'Resume this prompt after setup',
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: 'gpt-5.6-sol',
+      provider: null,
+      executionMode: 'yolo' as const,
+      thinkingLevel: 'high' as const,
+      backend: 'codex' as const,
+      queuedAt: 1,
+    }
+    mockUseUIState.mockReturnValue({
+      data: buildUiState({
+        pending_setup_prompts: {
+          'worktree-1': 'Resume this prompt after setup',
+        },
+        pending_setup_messages: { 'worktree-1': queuedMessage },
+      }),
+      isSuccess: true,
+    })
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useChatStore.getState().pendingSetupPrompts).toEqual({
+        'worktree-1': 'Resume this prompt after setup',
+      })
+      expect(useChatStore.getState().pendingSetupMessages).toEqual({
+        'worktree-1': queuedMessage,
+      })
+      expect(useChatStore.getState().recoverableSetupMessageIds).toEqual({
+        'worktree-1': true,
       })
     })
   })
@@ -260,6 +311,49 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
         input_drafts: { 'session-1': 'unsent message' },
       })
     )
+  })
+
+  it('persists a prompt while worktree setup is running', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useUIStore.getState().uiStateInitialized).toBe(true)
+    })
+
+    const queuedMessage = {
+      id: 'queued-1',
+      message: 'Keep this across a reload',
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: 'gpt-5.6-sol',
+      provider: null,
+      executionMode: 'yolo' as const,
+      thinkingLevel: 'high' as const,
+      backend: 'codex' as const,
+      queuedAt: 1,
+    }
+    useChatStore.getState().setPendingSetupMessage('worktree-1', queuedMessage)
+
+    await waitFor(() => {
+      expect(mockSaveUIState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pending_setup_prompts: {
+            'worktree-1': 'Keep this across a reload',
+          },
+          pending_setup_messages: { 'worktree-1': queuedMessage },
+        })
+      )
+    })
   })
 
   it('debounces persistence when zen mode changes', async () => {
@@ -625,7 +719,9 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     expect(terminalState.activeTerminalIds['worktree-1']).toBe('fallback-panel')
     expect(terminalState.runningTerminals.has('fallback-panel')).toBe(true)
     expect(terminalState.runningTerminals.has('fallback-session')).toBe(true)
-    expect(terminalState.terminals['worktree-1']?.[0]?.sessionId).toBeUndefined()
+    expect(
+      terminalState.terminals['worktree-1']?.[0]?.sessionId
+    ).toBeUndefined()
     expect(terminalState.terminals['worktree-1']?.[1]?.sessionId).toBe(
       'session-1'
     )

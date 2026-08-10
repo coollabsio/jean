@@ -114,6 +114,7 @@ import { OpenCodePermissionsRequest } from './OpenCodePermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
 import { SetupScriptOutput } from './SetupScriptOutput'
+import { WorktreeSetupProgress } from './WorktreeSetupProgress'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
 import { normalizeTodosForDisplay } from './tool-call-utils'
@@ -1028,6 +1029,17 @@ export function ChatWindow({
   // Per-worktree setup script result (stays at worktree level)
   const setupScriptResult = useChatStore(state =>
     activeWorktreeId ? state.setupScriptResults[activeWorktreeId] : undefined
+  )
+  const pendingSetupPrompt = useChatStore(state =>
+    activeWorktreeId ? state.pendingSetupPrompts[activeWorktreeId] : undefined
+  )
+  const pendingSetupMessage = useChatStore(state =>
+    activeWorktreeId ? state.pendingSetupMessages[activeWorktreeId] : undefined
+  )
+  const isWorktreeSetupRunning = Boolean(
+    worktree?.setup_script &&
+      worktree.setup_success == null &&
+      !setupScriptResult
   )
   // PERFORMANCE: Input-related selectors use activeSessionId for immediate feedback
   // When user switches tabs, attachments should reflect the NEW session immediately
@@ -3087,15 +3099,11 @@ export function ChatWindow({
                             {worktree?.setup_script &&
                               worktree.setup_success == null &&
                               !setupScriptResult && (
-                                <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
-                                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                                  <span>
-                                    Running setup script:{' '}
-                                    <code className="rounded bg-muted px-1 py-0.5">
-                                      {worktree.setup_script}
-                                    </code>
-                                  </span>
-                                </div>
+                                <WorktreeSetupProgress
+                                  setupScript={worktree.setup_script}
+                                  queuedPrompt={pendingSetupPrompt}
+                                  queuedMessage={pendingSetupMessage}
+                                />
                               )}
                             {/* Setup script output from jean.json */}
                             {setupScriptResult && activeWorktreeId && (
@@ -3122,6 +3130,11 @@ export function ChatWindow({
                               <>
                                 {messages.length === 0 &&
                                   !isSending &&
+                                  !(
+                                    worktree?.setup_script &&
+                                    worktree.setup_success == null &&
+                                    !setupScriptResult
+                                  ) &&
                                   activeSessionId && (
                                     <RecentContexts
                                       sessionId={activeSessionId}
@@ -3664,12 +3677,14 @@ export function ChatWindow({
                                 </div>
                               )}
 
-                            <div
-                              className={cn(
-                                zenMode && 'flex items-center overflow-hidden',
-                                zenMode && 'max-h-20'
-                              )}
-                            >
+                            {!isWorktreeSetupRunning && (
+                              <div
+                                className={cn(
+                                  zenMode &&
+                                    'flex items-center overflow-hidden',
+                                  zenMode && 'max-h-20'
+                                )}
+                              >
                               {/* Textarea section */}
                               <div
                                 className={cn(
@@ -3889,7 +3904,8 @@ export function ChatWindow({
                                   />
                                 </div>
                               )}
-                            </div>
+                              </div>
+                            )}
                           </form>
 
                           {/* Side panel widgets (Tasks + Agents) for wide screens */}

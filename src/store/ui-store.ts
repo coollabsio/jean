@@ -117,6 +117,7 @@ interface UIState {
     | 'security'
     | 'branches'
     | 'linear'
+    | 'pipeline'
     | 'sentry'
     | null
   releaseNotesModalOpen: boolean
@@ -244,6 +245,7 @@ interface UIState {
       | 'security'
       | 'branches'
       | 'linear'
+      | 'pipeline'
       | 'sentry'
       | null
   ) => void
