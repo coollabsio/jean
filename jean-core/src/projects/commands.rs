@@ -13034,12 +13034,25 @@ fn get_home_dir() -> Option<std::path::PathBuf> {
     })
 }
 
-/// Collect skills from a directory into a map (later inserts override earlier ones)
+const MAX_SKILL_DIRECTORY_DEPTH: usize = 8;
+
+/// Collect skills from a directory into a map (later inserts override earlier ones).
+///
+/// Category directories are traversed recursively, but a directory containing a
+/// `SKILL.md` is treated as a skill root and its children are not visited.
 fn collect_skills_from_dir(
     dir: &std::path::Path,
     skills: &mut std::collections::HashMap<String, ClaudeSkill>,
 ) {
-    if !dir.exists() {
+    collect_skills_from_dir_inner(dir, skills, 0);
+}
+
+fn collect_skills_from_dir_inner(
+    dir: &std::path::Path,
+    skills: &mut std::collections::HashMap<String, ClaudeSkill>,
+    depth: usize,
+) {
+    if depth > MAX_SKILL_DIRECTORY_DEPTH {
         return;
     }
 
@@ -13051,22 +13064,50 @@ fn collect_skills_from_dir(
         }
     };
 
+    let mut entries: Vec<_> = entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                log::warn!("Failed to read directory entry in {dir:?}: {error}");
+                None
+            }
+        })
+        .collect();
+    entries.sort_by_key(|entry| entry.file_name());
+
     for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                log::warn!("Failed to read directory entry: {e}");
+        let entry_depth = depth + 1;
+        if entry_depth > MAX_SKILL_DIRECTORY_DEPTH {
+            continue;
+        }
+
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                log::warn!("Failed to read file type for {:?}: {error}", entry.path());
                 continue;
             }
         };
-
         let path = entry.path();
-        if !path.is_dir() {
+        if !file_type.is_dir() || file_type.is_symlink() {
             continue;
         }
 
         let skill_file = path.join("SKILL.md");
-        if !skill_file.exists() {
+        let is_skill_file = match std::fs::symlink_metadata(&skill_file) {
+            Ok(metadata) => {
+                metadata.file_type().is_file() && !metadata.file_type().is_symlink()
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                log::warn!("Failed to inspect skill file {skill_file:?}: {error}");
+                false
+            }
+        };
+        if !is_skill_file {
+            if entry_depth < MAX_SKILL_DIRECTORY_DEPTH {
+                collect_skills_from_dir_inner(&path, skills, entry_depth);
+            }
             continue;
         }
 
@@ -13702,6 +13743,134 @@ mod tests {
             names,
             vec!["legacy-project-skill", "project-skill", "user-skill"]
         );
+    }
+
+    fn collect_test_skills(root: &Path) -> std::collections::HashMap<String, ClaudeSkill> {
+        let mut skills = std::collections::HashMap::new();
+        collect_skills_from_dir(root, &mut skills);
+        skills
+    }
+
+    #[test]
+    fn skill_discovery_finds_flat_and_nested_skills() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let flat = root.join("flat");
+        let nested = root.join("engineering/testing/tdd");
+        std::fs::create_dir_all(&flat).expect("flat skill dir");
+        std::fs::create_dir_all(&nested).expect("nested skill dir");
+        std::fs::write(flat.join("SKILL.md"), "# Flat skill\n").expect("flat skill");
+        std::fs::write(nested.join("SKILL.md"), "# Test-driven development\n")
+            .expect("nested skill");
+        std::fs::write(root.join("README.md"), "not a skill\n").expect("readme");
+        std::fs::create_dir_all(root.join("empty-category")).expect("empty category");
+
+        let skills = collect_test_skills(&root);
+
+        assert_eq!(skills.len(), 2);
+        assert_eq!(
+            skills.get("flat").and_then(|skill| skill.description.as_deref()),
+            Some("Flat skill")
+        );
+        assert_eq!(
+            skills
+                .get("tdd")
+                .map(|skill| std::path::PathBuf::from(&skill.path)),
+            Some(nested.join("SKILL.md"))
+        );
+
+        assert!(collect_test_skills(&root.join("missing")).is_empty());
+    }
+
+    #[test]
+    fn skill_discovery_stops_descending_at_a_skill_root() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let parent = root.join("parent-skill");
+        let child = parent.join("nested/child-skill");
+        std::fs::create_dir_all(&child).expect("child skill dir");
+        std::fs::write(parent.join("SKILL.md"), "# Parent\n").expect("parent skill");
+        std::fs::write(child.join("SKILL.md"), "# Child\n").expect("child skill");
+
+        let skills = collect_test_skills(&root);
+
+        assert_eq!(skills.len(), 1);
+        assert!(skills.contains_key("parent-skill"));
+        assert!(!skills.contains_key("child-skill"));
+    }
+
+    #[test]
+    fn skill_discovery_respects_the_directory_depth_limit() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+
+        let mut at_limit = root.clone();
+        for index in 1..MAX_SKILL_DIRECTORY_DEPTH {
+            at_limit.push(format!("category-{index}"));
+        }
+        at_limit.push("at-limit");
+        std::fs::create_dir_all(&at_limit).expect("skill at limit dir");
+        std::fs::write(at_limit.join("SKILL.md"), "# At limit\n").expect("skill at limit");
+
+        let mut beyond_limit = root.clone();
+        for index in 1..=MAX_SKILL_DIRECTORY_DEPTH {
+            beyond_limit.push(format!("deep-category-{index}"));
+        }
+        beyond_limit.push("beyond-limit");
+        std::fs::create_dir_all(&beyond_limit).expect("skill beyond limit dir");
+        std::fs::write(beyond_limit.join("SKILL.md"), "# Beyond limit\n")
+            .expect("skill beyond limit");
+
+        let skills = collect_test_skills(&root);
+
+        assert!(skills.contains_key("at-limit"));
+        assert!(!skills.contains_key("beyond-limit"));
+    }
+
+    #[test]
+    fn skill_discovery_resolves_duplicate_leaf_names_deterministically() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let first = root.join("a-category/shared");
+        let last = root.join("z-category/shared");
+        std::fs::create_dir_all(&first).expect("first skill dir");
+        std::fs::create_dir_all(&last).expect("last skill dir");
+        std::fs::write(first.join("SKILL.md"), "# First\n").expect("first skill");
+        std::fs::write(last.join("SKILL.md"), "# Last\n").expect("last skill");
+
+        let skills = collect_test_skills(&root);
+
+        assert_eq!(
+            skills
+                .get("shared")
+                .and_then(|skill| skill.description.as_deref()),
+            Some("Last")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_discovery_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let outside = temp.path().join("outside-skill");
+        let linked_file_skill = root.join("linked-file-skill");
+        std::fs::create_dir_all(&root).expect("skills root");
+        std::fs::create_dir_all(&outside).expect("outside skill dir");
+        std::fs::create_dir_all(&linked_file_skill).expect("linked file skill dir");
+        std::fs::write(outside.join("SKILL.md"), "# Outside\n").expect("outside skill");
+        symlink(&outside, root.join("linked-directory")).expect("directory symlink");
+        symlink(
+            outside.join("SKILL.md"),
+            linked_file_skill.join("SKILL.md"),
+        )
+        .expect("skill file symlink");
+
+        let skills = collect_test_skills(&root);
+
+        assert!(skills.is_empty());
     }
 
     fn run_test_git(repo: &Path, args: &[&str]) {
