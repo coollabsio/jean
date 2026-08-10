@@ -1558,6 +1558,16 @@ fn remove_dir_all_with_retry(path: &Path) -> std::io::Result<()> {
                     // (for example after a container teardown). Restore only the
                     // owner's permissions, then let the normal retry remove them.
                     let _ = restore_owner_directory_permissions(path);
+                    #[cfg(unix)]
+                    if let Some(foreign) =
+                        find_foreign_owned_directory(path, unsafe { libc::geteuid() })?
+                    {
+                        return Err(permission_denied_cleanup_error(
+                            path,
+                            unsafe { libc::geteuid() },
+                            foreign,
+                        ));
+                    }
                 }
                 if attempt >= WORKTREE_RM_ATTEMPTS || !is_transient_dir_removal_error(&e) {
                     return Err(e);
@@ -1571,6 +1581,49 @@ fn remove_dir_all_with_retry(path: &Path) -> std::io::Result<()> {
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn find_foreign_owned_directory(
+    path: &Path,
+    expected_uid: u32,
+) -> std::io::Result<Option<(std::path::PathBuf, u32)>> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_dir() {
+        return Ok(None);
+    }
+    if metadata.uid() != expected_uid {
+        return Ok(Some((path.to_path_buf(), metadata.uid())));
+    }
+
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            if let Some(foreign) = find_foreign_owned_directory(&entry.path(), expected_uid)? {
+                return Ok(Some(foreign));
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn permission_denied_cleanup_error(
+    path: &Path,
+    expected_uid: u32,
+    (foreign_path, owner_uid): (std::path::PathBuf, u32),
+) -> std::io::Error {
+    let escaped_path = crate::platform::shell_escape(&path.to_string_lossy());
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "{} is owned by UID {owner_uid}, not the current UID {expected_uid}. Repair ownership, then retry: sudo chown -R {expected_uid}:{} -- {escaped_path}",
+            foreign_path.display(),
+            unsafe { libc::getegid() }
+        ),
+    )
 }
 
 #[cfg(unix)]
@@ -1638,15 +1691,10 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str) -> Result<(), Strin
     );
 
     if !output.status.success() {
-        // Don't fail if worktree doesn't exist or is not a working tree
-        // This allows cleanup of stale worktree entries
-        if stderr.contains("is not a working tree")
-            || stderr.contains("does not exist")
-            || stderr.contains("No such file or directory")
-        {
-            log::warn!(
-                "Worktree at {worktree_path} not found or not a working tree, proceeding with cleanup"
-            );
+        // Git error messages are localized, so use filesystem state rather than
+        // matching English stderr to recognize an already-absent worktree.
+        if !Path::new(worktree_path).exists() {
+            log::warn!("Worktree at {worktree_path} is already absent, proceeding with cleanup");
             // Try to prune stale worktrees
             let _ = wsl_aware_command("git", Some(Path::new(repo_path)))
                 .args(["worktree", "prune"])
@@ -2803,6 +2851,41 @@ mod tests {
         remove_dir_all_with_retry(&root).unwrap();
 
         assert!(!root.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_find_foreign_owned_directory_reports_owner_uid() {
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let owner_uid = std::fs::symlink_metadata(dir.path()).unwrap().uid();
+
+        let foreign = find_foreign_owned_directory(dir.path(), owner_uid + 1)
+            .unwrap()
+            .expect("the directory should be foreign to the supplied uid");
+
+        assert_eq!(foreign.0, dir.path());
+        assert_eq!(foreign.1, owner_uid);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_permission_denied_cleanup_error_explains_ownership_repair() {
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let owner_uid = std::fs::symlink_metadata(dir.path()).unwrap().uid();
+        let error = permission_denied_cleanup_error(
+            dir.path(),
+            owner_uid + 1,
+            (dir.path().to_path_buf(), owner_uid),
+        );
+        let message = error.to_string();
+
+        assert!(message.contains(&format!("owned by UID {owner_uid}")));
+        assert!(message.contains("sudo chown -R"));
+        assert!(message.contains(&dir.path().display().to_string()));
     }
 
     #[test]
