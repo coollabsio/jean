@@ -301,6 +301,45 @@ Shared infrastructure in `src/components/chat/`:
 - `hooks/useCanvasShortcutEvents.ts` - Event handlers for plan/recap/approve shortcuts
 - `hooks/useCanvasStoreState.ts` - Store state subscriptions for card data
 
+### Prompt-first worktree creation
+
+`NewWorktreeModal` opens on `NewSessionComposer`: the user writes the prompt
+before Jean creates anything, but may also create an empty worktree without
+starting an agent. GitHub, Linear, Sentry, security, branch, and
+project-folder sources are selected in a sibling context browser and returned
+to the same composer draft.
+
+Keep these boundaries when adding an entry point or source:
+
+- Open the flow through `openNewWorktree()` in
+  `src/lib/open-new-worktree.ts`. Do not set modal state or dispatch a custom
+  event directly from feature UI.
+- Store unfinished prompt attachments under `getNewWorktreeDraftId(projectId)`
+  so switching projects cannot mix drafts.
+- Build backend arguments in `new-session-flow.ts`; UI components should not
+  duplicate GitHub/Linear/Sentry context mapping.
+- Register worktree event listeners before invoking creation. Fast repositories
+  can emit `worktree:created` before the command promise returns.
+- Clear the submitted draft as soon as creation is dispatched. Project setup
+  continues in the background, and `Create more` must remain immediately
+  reusable even when that setup is long-running.
+- Start a non-empty prompt explicitly after setup completes; do not depend on
+  mounting `ChatWindow` to consume an in-memory queue because `Create more`
+  intentionally keeps the composer open.
+- Persist the complete queued message until `send_chat_message` starts. The
+  global recovery hook resumes restored setup messages after a frontend reload;
+  plain prompt text is not enough because backend, model, mode, and attachments
+  must remain identical.
+- Keep source browsing and the compact composer as sibling dialogs. Closing a
+  source browser returns to the composer instead of discarding its context.
+- Reuse `ChatInput`, `DesktopBackendModelPicker`, and
+  `ExecutionModeDropdown` so model, mode, attachments, and keyboard behavior
+  stay aligned with normal conversations.
+
+The end-to-end contract lives in
+`e2e/tests/new-worktree-prompt-first.spec.ts`; run it with `--workers=1` to
+avoid resource-contention timeouts in the Tauri mock environment.
+
 ### File Organization
 
 ```

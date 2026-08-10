@@ -158,11 +158,26 @@ fn install_menu_events(app: &tauri::App) {
     });
 }
 
+#[cfg(debug_assertions)]
+fn ensure_debug_data_dir_is_isolated(app_data_dir: &std::path::Path) -> Result<(), String> {
+    let directory_name = app_data_dir.file_name().and_then(|name| name.to_str());
+    if directory_name == Some("com.jean.desktop.dev") {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Refusing to start a debug build with app data directory '{}'. Debug builds must use com.jean.desktop.dev; run `bun run tauri:dev`.",
+        app_data_dir.display()
+    ))
+}
+
 fn initialize_core(app: &mut tauri::App) -> Result<jean_core::RuntimeContext, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
+    #[cfg(debug_assertions)]
+    ensure_debug_data_dir_is_isolated(&app_data_dir)?;
     let resource_dir = app
         .path()
         .resource_dir()
@@ -181,6 +196,30 @@ fn initialize_core(app: &mut tauri::App) -> Result<jean_core::RuntimeContext, St
     });
     jean_core::initialize_runtime(&core)?;
     Ok(core)
+}
+
+#[cfg(test)]
+mod dev_data_dir_tests {
+    use super::ensure_debug_data_dir_is_isolated;
+    use std::path::Path;
+
+    #[test]
+    fn debug_build_rejects_production_app_data_directory() {
+        let error = ensure_debug_data_dir_is_isolated(Path::new(
+            "/home/user/.local/share/com.jean.desktop",
+        ))
+        .expect_err("debug Jean must never write production data");
+
+        assert!(error.contains("com.jean.desktop.dev"));
+    }
+
+    #[test]
+    fn debug_build_accepts_development_app_data_directory() {
+        ensure_debug_data_dir_is_isolated(Path::new(
+            "/home/user/.local/share/com.jean.desktop.dev",
+        ))
+        .expect("development data directory should be accepted");
+    }
 }
 
 fn allow_project_assets(app: &AppHandle, core: &jean_core::RuntimeContext) {

@@ -2845,6 +2845,14 @@ pub struct UIState {
     #[serde(default)]
     pub input_drafts: std::collections::HashMap<String, String>,
 
+    /// Prompt waiting for a newly-created worktree setup to finish
+    #[serde(default)]
+    pub pending_setup_prompts: std::collections::HashMap<String, String>,
+
+    /// Complete queued messages used to resume prompt sending after a UI reload
+    #[serde(default)]
+    pub pending_setup_messages: std::collections::HashMap<String, serde_json::Value>,
+
     /// Unsent image attachments per session (files already on disk)
     #[serde(default)]
     pub pending_images: std::collections::HashMap<String, Vec<PendingImageDraft>>,
@@ -3051,6 +3059,8 @@ impl Default for UIState {
             zen_mode: None,
             active_session_ids: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
+            pending_setup_prompts: std::collections::HashMap::new(),
+            pending_setup_messages: std::collections::HashMap::new(),
             pending_images: std::collections::HashMap::new(),
             pending_text_files: std::collections::HashMap::new(),
             review_sidebar_visible: None,

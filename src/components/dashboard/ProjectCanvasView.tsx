@@ -109,6 +109,7 @@ import { useGitStatus } from '@/services/git-status'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
+import { openNewWorktree } from '@/lib/open-new-worktree'
 import { useTerminalStore } from '@/store/terminal-store'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
@@ -3094,8 +3095,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                   <DropdownMenuContent align="start" className="w-64">
                     <DropdownMenuItem
                       onSelect={() => {
-                        useProjectsStore.getState().selectProject(projectId)
-                        useUIStore.getState().setNewWorktreeModalOpen(true)
+                        openNewWorktree({ projectId })
                       }}
                     >
                       <Plus className="h-4 w-4" />
@@ -3127,13 +3127,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onSelect={() => {
-                            useProjectsStore.getState().selectProject(projectId)
-                            const {
-                              setNewWorktreeModalDefaultTab,
-                              setNewWorktreeModalOpen,
-                            } = useUIStore.getState()
-                            setNewWorktreeModalDefaultTab('issues')
-                            setNewWorktreeModalOpen(true)
+                            openNewWorktree({ projectId, tab: 'issues' })
                           }}
                         >
                           <CircleDot className="h-4 w-4 text-green-600" />
@@ -3143,13 +3137,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() => {
-                            useProjectsStore.getState().selectProject(projectId)
-                            const {
-                              setNewWorktreeModalDefaultTab,
-                              setNewWorktreeModalOpen,
-                            } = useUIStore.getState()
-                            setNewWorktreeModalDefaultTab('prs')
-                            setNewWorktreeModalOpen(true)
+                            openNewWorktree({ projectId, tab: 'prs' })
                           }}
                         >
                           <GitPullRequestArrow className="h-4 w-4 text-blue-600" />
@@ -3175,13 +3163,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() => {
-                            useProjectsStore.getState().selectProject(projectId)
-                            const {
-                              setNewWorktreeModalDefaultTab,
-                              setNewWorktreeModalOpen,
-                            } = useUIStore.getState()
-                            setNewWorktreeModalDefaultTab('security')
-                            setNewWorktreeModalOpen(true)
+                            openNewWorktree({ projectId, tab: 'security' })
                           }}
                         >
                           <ShieldAlert className="h-4 w-4 text-orange-600" />
@@ -3845,9 +3827,7 @@ function EmptyDashboardTabs({
           variant="outline"
           size="lg"
           className="gap-2"
-          onClick={() =>
-            window.dispatchEvent(new CustomEvent('create-new-worktree'))
-          }
+          onClick={() => openNewWorktree({ projectId })}
         >
           <Plus className="h-4 w-4" />
           Start Building

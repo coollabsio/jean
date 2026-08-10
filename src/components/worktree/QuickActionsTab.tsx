@@ -37,6 +37,7 @@ import {
   type JeanConfig,
   type ProjectRemote,
 } from '@/services/projects'
+import { isInvalidWorktreeName } from './worktree-name-validation'
 
 export interface QuickActionsTabProps {
   hasBaseSession: boolean
@@ -61,22 +62,8 @@ export interface QuickActionsTabProps {
   isLoadingBranches?: boolean
 }
 
-const INVALID_BRANCH_CHAR = /[\s:?*~^[\\]/
 /** Stable default so omit/undefined doesn't allocate a new [] each render. */
 const EMPTY_BRANCHES: string[] = []
-
-function isInvalidBranchName(trimmed: string): boolean {
-  if (trimmed.length === 0) return false
-  return (
-    INVALID_BRANCH_CHAR.test(trimmed) ||
-    trimmed.startsWith('/') ||
-    trimmed.endsWith('/') ||
-    trimmed.startsWith('.') ||
-    trimmed.endsWith('.') ||
-    trimmed.includes('..') ||
-    trimmed.endsWith('.lock')
-  )
-}
 
 export function QuickActionsTab({
   hasBaseSession,
@@ -118,7 +105,7 @@ export function QuickActionsTab({
   )
 
   const trimmedBranchName = customBranchName.trim()
-  const isInvalid = isInvalidBranchName(trimmedBranchName)
+  const isInvalid = isInvalidWorktreeName(trimmedBranchName)
 
   // Keep selection in sync when the project default arrives/changes, and when
   // the fetched branch list no longer includes the current selection.
@@ -138,8 +125,7 @@ export function QuickActionsTab({
     })
   }, [defaultBranch, branches])
 
-  const effectiveBaseBranch =
-    selectedBaseBranch || defaultBranch || undefined
+  const effectiveBaseBranch = selectedBaseBranch || defaultBranch || undefined
 
   // Remotes that actually have the *selected* base branch fetched. Parent may
   // pass default-branch remotes as a fallback while this query loads.
@@ -303,9 +289,7 @@ export function QuickActionsTab({
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                           )}
                           aria-label={
-                            isStarred
-                              ? `Unstar ${branch}`
-                              : `Star ${branch}`
+                            isStarred ? `Unstar ${branch}` : `Star ${branch}`
                           }
                           aria-pressed={isStarred}
                           onClick={event => {

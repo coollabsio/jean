@@ -136,10 +136,15 @@ export const defaultResponses: Record<string, unknown> = {
 
   // Branches
   get_project_branches: [],
+  get_package_scripts: [],
+  get_run_scripts: [],
+  get_ports: [],
 
   // Session settings
   set_active_session: null,
   set_session_model: null,
+  set_session_backend: null,
+  update_session_state: null,
   set_session_provider: null,
   broadcast_session_setting: null,
   rename_session: null,

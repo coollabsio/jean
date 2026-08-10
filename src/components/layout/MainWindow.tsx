@@ -184,6 +184,7 @@ import { useTerminalThemeSync } from '@/hooks/useTerminalThemeSync'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
+import { usePendingSetupMessageRecovery } from '@/components/worktree/usePendingSetupMessageRecovery'
 import { useChatStore } from '@/store/chat-store'
 import { useMainWindowEventListeners } from '@/hooks/useMainWindowEventListeners'
 import { useGlobalInputSanitizer } from '@/hooks/useGlobalInputSanitizer'
@@ -406,6 +407,7 @@ export function MainWindow() {
   // Listen for background worktree events (creation/deletion) - must be here
   // (not in sidebar) so events are received even when sidebar is closed
   useWorktreeEvents()
+  usePendingSetupMessageRecovery()
 
   // Handle CMD+N keybinding to create new worktree
   useCreateWorktreeKeybinding()

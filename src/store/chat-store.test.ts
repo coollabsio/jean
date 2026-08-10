@@ -541,8 +541,7 @@ describe('ChatStore', () => {
         input: { file_path: '/large-file.txt' },
       })
 
-      const toolCall =
-        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
       expect(toolCall?.name).toBe('Read')
       expect(toolCall?.input).toEqual({ file_path: '/large-file.txt' })
       expect(toolCall?.output).toBe('')
@@ -558,8 +557,7 @@ describe('ChatStore', () => {
         input: {},
       })
 
-      const toolCall =
-        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
       expect(toolCall?.name).toBe('Monitor')
       expect(toolCall?.output).toBeUndefined()
     })
@@ -574,8 +572,7 @@ describe('ChatStore', () => {
         input: { questions: [{ question: 'Continue?' }] },
       })
 
-      const toolCall =
-        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
       expect(toolCall?.name).toBe('question')
       expect(toolCall?.output).toBe('Answer questions?')
     })
@@ -760,9 +757,9 @@ describe('ChatStore', () => {
 
       store.setStreamingReplayContentBlocks('session-1', replayBlocks)
 
-      expect(
-        store.consumeStreamingReplayToolBlock('session-1', 'tool-1')
-      ).toBe(true)
+      expect(store.consumeStreamingReplayToolBlock('session-1', 'tool-1')).toBe(
+        true
+      )
       expect(store.consumeStreamingReplayText('session-1', 'After tool.')).toBe(
         ''
       )
@@ -793,9 +790,9 @@ describe('ChatStore', () => {
       store.addTextBlock('session-1', 'After tool.')
       store.setStreamingReplayContentBlocks('session-1', replayBlocks)
 
-      expect(store.consumeStreamingReplayText('session-1', 'Before tool. ')).toBe(
-        ''
-      )
+      expect(
+        store.consumeStreamingReplayText('session-1', 'Before tool. ')
+      ).toBe('')
       expect(store.consumeStreamingReplayToolBlock('session-1', 'tool-1')).toBe(
         true
       )
@@ -1281,6 +1278,50 @@ describe('ChatStore', () => {
       expect(
         useChatStore.getState().lastSentMessages['session-1']
       ).toBeUndefined()
+    })
+
+    it('tracks a prompt while a new worktree setup is running', () => {
+      const { setPendingSetupPrompt, clearPendingSetupPrompt } =
+        useChatStore.getState()
+
+      setPendingSetupPrompt('worktree-1', 'Fix the checkout regression')
+      expect(useChatStore.getState().pendingSetupPrompts['worktree-1']).toBe(
+        'Fix the checkout regression'
+      )
+
+      clearPendingSetupPrompt('worktree-1')
+      expect(
+        useChatStore.getState().pendingSetupPrompts['worktree-1']
+      ).toBeUndefined()
+    })
+
+    it('claims a restored setup message once and clears all recovery state', () => {
+      const message = {
+        id: 'queued-1',
+        message: 'Resume after reload',
+        pendingImages: [],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+        model: 'gpt-5.6-sol',
+        provider: null,
+        executionMode: 'yolo' as const,
+        thinkingLevel: 'high' as const,
+        backend: 'codex' as const,
+        queuedAt: 1,
+      }
+      const store = useChatStore.getState()
+      store.setPendingSetupMessage('worktree-1', message)
+      store.restorePendingSetupRecovery('worktree-1')
+
+      expect(store.claimPendingSetupRecovery('worktree-1')).toEqual(message)
+      expect(store.claimPendingSetupRecovery('worktree-1')).toBeUndefined()
+
+      useChatStore.getState().clearPendingSetupPrompt('worktree-1')
+      const state = useChatStore.getState()
+      expect(state.pendingSetupPrompts['worktree-1']).toBeUndefined()
+      expect(state.pendingSetupMessages['worktree-1']).toBeUndefined()
+      expect(state.recoverableSetupMessageIds['worktree-1']).toBeUndefined()
     })
   })
 

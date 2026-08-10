@@ -13,6 +13,7 @@ import { dismissibleToast } from '@/lib/dismissible-toast'
 import type { Project } from '@/types/projects'
 import { isBaseSession } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { openNewWorktree } from '@/lib/open-new-worktree'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -73,10 +74,6 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const { data: appDataDir = '' } = useAppDataDir()
   const hasWorktrees = worktrees.length > 0
   const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
-  const setNewWorktreeModalOpen = useUIStore(
-    state => state.setNewWorktreeModalOpen
-  )
-
   const avatarKey = project.avatar_path ?? project.default_avatar_path ?? null
 
   // Track image load errors to fall back to letter avatar
@@ -221,12 +218,9 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const handleAddWorktree = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      // Select this project first so the modal knows which project to use
-      selectProject(project.id)
-      // Open the New Session modal
-      setNewWorktreeModalOpen(true)
+      openNewWorktree({ projectId: project.id })
     },
-    [project.id, selectProject, setNewWorktreeModalOpen]
+    [project.id]
   )
 
   const handleBasePull = useCallback(

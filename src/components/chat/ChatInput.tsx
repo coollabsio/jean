@@ -68,6 +68,8 @@ interface ChatInputProps {
   executionMode: ExecutionMode
   canSwitchBackendWithTab?: boolean
   focusChatShortcut: string
+  showFocusHint?: boolean
+  clearOnSubmit?: boolean
   onSubmit: (e: React.FormEvent, options?: { forceSteer?: boolean }) => void
   onCancel: () => void
   onSwitchBackendWithTab?: () => void
@@ -90,6 +92,8 @@ export const ChatInput = memo(function ChatInput({
   executionMode,
   canSwitchBackendWithTab = false,
   focusChatShortcut,
+  showFocusHint = true,
+  clearOnSubmit = true,
   onSubmit,
   onCancel,
   onSwitchBackendWithTab,
@@ -644,12 +648,14 @@ export const ChatInput = memo(function ChatInput({
             .setInputDraft(activeSessionId, valueRef.current)
         }
         onSubmit(e, forceSteer ? { forceSteer: true } : undefined)
-        // Clear input immediately (don't wait for store subscription)
-        valueRef.current = ''
-        setShowHint(true)
-        const textarea = e.target as HTMLTextAreaElement
-        textarea.value = ''
-        resizeTextarea()
+        if (clearOnSubmit) {
+          // Clear input immediately (don't wait for store subscription)
+          valueRef.current = ''
+          setShowHint(true)
+          const textarea = e.target as HTMLTextAreaElement
+          textarea.value = ''
+          resizeTextarea()
+        }
       }
       // Shift+Enter adds a new line (default behavior)
     },
@@ -664,6 +670,7 @@ export const ChatInput = memo(function ChatInput({
       canSwitchBackendWithTab,
       onSwitchBackendWithTab,
       isMobile,
+      clearOnSubmit,
       resizeTextarea,
       selectedBackend,
       onSteerModifierChange,
@@ -1262,6 +1269,7 @@ export const ChatInput = memo(function ChatInput({
       <Textarea
         ref={inputRef}
         data-chat-input
+        aria-label="Prompt"
         placeholder={
           isSending
             ? executionMode === 'yolo'
@@ -1293,7 +1301,7 @@ export const ChatInput = memo(function ChatInput({
         rows={1}
         autoFocus={!isMobile}
       />
-      {showHint && !zenMode && (
+      {showFocusHint && showHint && !zenMode && (
         <span className="absolute top-0 right-0 hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground opacity-40">
           <Kbd>{focusChatShortcut}</Kbd>
           <span>to focus</span>

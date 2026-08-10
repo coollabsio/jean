@@ -54,6 +54,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
+import { openNewWorktree } from '@/lib/open-new-worktree'
 import type { GhAuthStatus } from '@/types/gh-cli'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
@@ -151,27 +152,15 @@ export function WorktreeDropdownMenu({
     (isMobile && (hasDiff || hasBranchDiff))
 
   const handleOpenIssues = useCallback(() => {
-    useProjectsStore.getState().selectProject(projectId)
-    const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-      useUIStore.getState()
-    setNewWorktreeModalDefaultTab('issues')
-    setNewWorktreeModalOpen(true)
+    openNewWorktree({ projectId, tab: 'issues' })
   }, [projectId])
 
   const handleOpenPRs = useCallback(() => {
-    useProjectsStore.getState().selectProject(projectId)
-    const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-      useUIStore.getState()
-    setNewWorktreeModalDefaultTab('prs')
-    setNewWorktreeModalOpen(true)
+    openNewWorktree({ projectId, tab: 'prs' })
   }, [projectId])
 
   const handleOpenSecurity = useCallback(() => {
-    useProjectsStore.getState().selectProject(projectId)
-    const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-      useUIStore.getState()
-    setNewWorktreeModalDefaultTab('security')
-    setNewWorktreeModalOpen(true)
+    openNewWorktree({ projectId, tab: 'security' })
   }, [projectId])
 
   const handleOpenWorkflowRuns = useCallback(() => {
