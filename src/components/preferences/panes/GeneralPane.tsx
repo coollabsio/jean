@@ -3914,6 +3914,18 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
+              label="Keep AI servers warm"
+              description="Keep Codex and OpenCode running for 10 minutes after a request so follow-up prompts start faster"
+            >
+              <Switch
+                checked={preferences?.keep_ai_servers_warm ?? true}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({ keep_ai_servers_warm: checked })
+                }}
+              />
+            </InlineField>
+
+            <InlineField
               label="Parallel execution prompting"
               description="Add system prompt encouraging sub-agent parallelization for faster task execution"
             >

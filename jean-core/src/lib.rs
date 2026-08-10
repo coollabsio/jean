@@ -216,6 +216,8 @@ pub struct AppPreferences {
     pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
     #[serde(default = "default_auto_recaps_enabled")]
     pub auto_recaps_enabled: bool, // Ask agents to end multi-step turns with a recap block
+    #[serde(default = "default_keep_ai_servers_warm")]
+    pub keep_ai_servers_warm: bool, // Keep Codex/OpenCode servers alive briefly after a request
     #[serde(default)]
     pub magic_prompts: MagicPrompts, // Customizable prompts for AI-powered features
     #[serde(default)]
@@ -667,6 +669,10 @@ fn default_compact_chat_view_enabled() -> bool {
 
 fn default_auto_recaps_enabled() -> bool {
     true // Enabled by default
+}
+
+fn default_keep_ai_servers_warm() -> bool {
+    true // Enabled by default to make follow-up requests start faster
 }
 
 fn default_chrome_enabled() -> bool {
@@ -2561,6 +2567,7 @@ impl Default for AppPreferences {
             parallel_execution_prompt_enabled: default_parallel_execution_prompt_enabled(),
             compact_chat_view_enabled: default_compact_chat_view_enabled(),
             auto_recaps_enabled: default_auto_recaps_enabled(),
+            keep_ai_servers_warm: default_keep_ai_servers_warm(),
             magic_prompts: MagicPrompts::default(),
             magic_prompt_models: MagicPromptModels::default(),
             magic_code_review_configs: Vec::new(),

@@ -1209,6 +1209,7 @@ export interface AppPreferences {
   parallel_execution_prompt_enabled: boolean // Add system prompt to encourage parallel sub-agent execution
   compact_chat_view_enabled: boolean // Collapse intermediate tool calls/replies into a single ticker line, only showing the latest activity
   auto_recaps_enabled?: boolean // Ask agents to end multi-step/tool turns with a recap
+  keep_ai_servers_warm?: boolean // Keep Codex/OpenCode servers alive briefly between requests
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
   magic_prompt_models: MagicPromptModels // Per-prompt model overrides
   magic_code_review_configs?: MagicCodeReviewConfig[] // Up to five backend/model/reasoning review runners
@@ -1880,7 +1881,9 @@ export function isKimiModel(model: string): model is KimiModel {
   return model.startsWith('kimi/')
 }
 /** Check if a model string identifies a Antigravity CLI model */
-export function isAntigravityCliModel(model: string): model is AntigravityModel {
+export function isAntigravityCliModel(
+  model: string
+): model is AntigravityModel {
   return model.startsWith('antigravity/')
 }
 
@@ -2342,6 +2345,7 @@ export const defaultPreferences: AppPreferences = {
   parallel_execution_prompt_enabled: true, // Default: enabled
   compact_chat_view_enabled: true, // Default: enabled
   auto_recaps_enabled: true, // Default: enabled
+  keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
   magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,
   magic_code_review_configs: [],
