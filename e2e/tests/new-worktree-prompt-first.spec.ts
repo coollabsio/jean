@@ -347,7 +347,7 @@ test.describe('Prompt-first worktree creation', () => {
     })
 
     const composer = await openPromptFirstComposer(mockPage)
-    await composer.getByLabel('Attach images').setInputFiles({
+    await composer.locator('input[type="file"]').setInputFiles({
       name: 'proof.png',
       mimeType: 'image/png',
       buffer: Buffer.from('not-a-real-png'),
@@ -1075,7 +1075,7 @@ test.describe('Prompt-first project setup', () => {
 
     const composer = await openPromptFirstComposer(mockPage)
     await composer.getByLabel('Prompt').fill('Fix it with this screenshot')
-    await composer.getByLabel('Attach images').setInputFiles({
+    await composer.locator('input[type="file"]').setInputFiles({
       name: 'setup-proof.png',
       mimeType: 'image/png',
       buffer: Buffer.from('not-a-real-png'),
@@ -1212,8 +1212,8 @@ test.describe('Prompt-first mobile layout', () => {
     })
     const box = await composer.boundingBox()
     expect(box).not.toBeNull()
-    expect(box!.width).toBeLessThanOrEqual(390)
-    expect(box!.height).toBeLessThanOrEqual(844)
+    expect(box!.width).toBeLessThanOrEqual(382)
+    expect(box!.height).toBeLessThan(420)
 
     await composer.getByLabel('Prompt').fill('Mobile prompt draft')
     await composer
@@ -1229,5 +1229,24 @@ test.describe('Prompt-first mobile layout', () => {
     await expect(composer.getByLabel('Prompt')).toHaveValue(
       'Mobile prompt draft'
     )
+  })
+
+  test('closes the sidebar before opening the prompt composer', async ({
+    mockPage,
+  }) => {
+    await expect(mockPage.getByText('Test Project')).toBeVisible({
+      timeout: 15_000,
+    })
+
+    await mockPage.keyboard.press('Control+B')
+    const sidebar = mockPage.getByTestId('mobile-left-sidebar')
+    await expect(sidebar).toBeVisible()
+    await sidebar.getByRole('button', { name: 'New worktree' }).click()
+
+    const composer = mockPage.getByRole('dialog', {
+      name: 'Start something new',
+    })
+    await expect(sidebar).toBeHidden()
+    await expect(composer).toBeVisible()
   })
 })

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   selectProject: vi.fn(),
   setDefaultTab: vi.fn(),
   setOpen: vi.fn(),
+  setLeftSidebarVisible: vi.fn(),
 }))
 
 vi.mock('@/store/projects-store', () => ({
@@ -18,12 +19,42 @@ vi.mock('@/store/ui-store', () => ({
     getState: () => ({
       setNewWorktreeModalDefaultTab: mocks.setDefaultTab,
       setNewWorktreeModalOpen: mocks.setOpen,
+      setLeftSidebarVisible: mocks.setLeftSidebarVisible,
     }),
   },
 }))
 
 describe('openNewWorktree', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1024,
+    })
+  })
+
+  it('closes the mobile sidebar before opening the composer', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+
+    openNewWorktree({ projectId: 'project-1' })
+
+    expect(mocks.setLeftSidebarVisible).toHaveBeenCalledWith(false)
+    const [closeSidebarOrder] =
+      mocks.setLeftSidebarVisible.mock.invocationCallOrder
+    const [openComposerOrder] = mocks.setOpen.mock.invocationCallOrder
+    expect(closeSidebarOrder as number).toBeLessThan(
+      openComposerOrder as number
+    )
+  })
+
+  it('keeps the desktop sidebar visible', () => {
+    openNewWorktree({ projectId: 'project-1' })
+
+    expect(mocks.setLeftSidebarVisible).not.toHaveBeenCalled()
+  })
 
   it('selects the project before opening the prompt-first composer', () => {
     openNewWorktree({ projectId: 'project-1' })

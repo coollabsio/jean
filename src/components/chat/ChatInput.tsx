@@ -1244,6 +1244,7 @@ export const ChatInput = memo(function ChatInput({
         multiple
         tabIndex={-1}
         className="sr-only"
+        aria-label="Attach images"
         onChange={handleFileInputChange}
       />
       <Textarea
