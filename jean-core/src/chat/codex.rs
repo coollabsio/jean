@@ -1009,6 +1009,12 @@ pub fn build_turn_steer_params_with_input(
 // Execution via app-server
 // =============================================================================
 
+fn reload_mcp_servers_before_thread_start(
+    send_request: impl FnOnce(&str, serde_json::Value) -> Result<serde_json::Value, String>,
+) -> Result<(), String> {
+    send_request("config/mcpServer/reload", serde_json::Value::Null).map(|_| ())
+}
+
 /// Execute a Codex chat message via the persistent app-server.
 ///
 /// Handles thread creation/resume, turn execution, event mapping, and approvals.
@@ -1052,6 +1058,13 @@ pub fn execute_codex_via_server(
 
     // Ensure the app-server is running
     codex_server::ensure_running(app)?;
+    // The app-server outlives individual Jean sessions, so its MCP registry may
+    // predate changes to ~/.codex/config.toml. Refresh it before starting or
+    // resuming a thread so configured servers match a fresh Codex CLI process.
+    if let Err(error) = reload_mcp_servers_before_thread_start(codex_server::send_request) {
+        codex_server::decrement_usage_count();
+        return Err(format!("Failed to reload Codex MCP servers: {error}"));
+    }
 
     // Start or resume thread
     // Wrapped in a closure so we can decrement USAGE_COUNT on failure
@@ -5283,6 +5296,25 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reloads_mcp_servers_with_app_server_protocol_before_thread_start() {
+        let result = reload_mcp_servers_before_thread_start(|method, params| {
+            assert_eq!(method, "config/mcpServer/reload");
+            assert_eq!(params, serde_json::Value::Null);
+            Ok(serde_json::json!({}))
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fails_thread_start_when_mcp_reload_fails() {
+        let error = reload_mcp_servers_before_thread_start(|_, _| Err("reload failed".into()))
+            .expect_err("reload failure must block thread start");
+
+        assert_eq!(error, "reload failed");
+    }
 
     #[cfg(unix)]
     #[test]
