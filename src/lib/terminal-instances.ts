@@ -465,6 +465,8 @@ function ensureWakeHandler(): void {
     for (const terminalId of [...inputBuffers.keys()]) {
       flushTerminalInput(terminalId)
     }
+    // Also deliver sticky Ctrl-C/D/Z held across a remote WS blip (issue #635).
+    flushPendingCriticalInput()
 
     for (const inst of instances.values()) {
       if (!inst.terminal || inst.renderer !== 'xterm') continue
@@ -581,6 +583,23 @@ function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
 
 const INPUT_FLUSH_DELAY_MS = 5
 
+/** Control chars that must never be silently dropped on a brief WS disconnect
+ *  (issue #635). Typing general keys while offline is discarded on purpose;
+ *  interrupt/EOF/suspend are sticky until the transport is back. */
+const CRITICAL_TERMINAL_CONTROL_CHARS = new Set(['\u0003', '\u0004', '\u001a'])
+
+/** Pending critical control input held while the WebSocket is down, keyed by
+ *  terminal id. Flushed on reconnect / wake. */
+const pendingCriticalInput = new Map<string, string>()
+
+function extractCriticalControlChars(data: string): string {
+  let out = ''
+  for (const ch of data) {
+    if (CRITICAL_TERMINAL_CONTROL_CHARS.has(ch)) out += ch
+  }
+  return out
+}
+
 function shouldFlushTerminalInputNow(data: string): boolean {
   return (
     data.includes('\r') ||
@@ -591,25 +610,65 @@ function shouldFlushTerminalInputNow(data: string): boolean {
   )
 }
 
+function sendTerminalWrite(terminalId: string, data: string): void {
+  if (!data) return
+  invoke('terminal_write', { terminalId, data }).catch(error => {
+    console.error('[terminal-instances] terminal_write failed:', error)
+    const critical = extractCriticalControlChars(data)
+    if (!critical) return
+    const existing = pendingCriticalInput.get(terminalId) ?? ''
+    pendingCriticalInput.set(terminalId, existing + critical)
+  })
+}
+
+function flushPendingCriticalInput(terminalId?: string): void {
+  if (!isTransportConnected()) return
+  const ids = terminalId ? [terminalId] : [...pendingCriticalInput.keys()]
+  for (const id of ids) {
+    const data = pendingCriticalInput.get(id)
+    if (!data) continue
+    pendingCriticalInput.delete(id)
+    sendTerminalWrite(id, data)
+  }
+}
+
 function flushTerminalInput(terminalId: string): void {
   const buffer = inputBuffers.get(terminalId)
   if (!buffer) return
   if (buffer.timer) clearTimeout(buffer.timer)
   inputBuffers.delete(terminalId)
   if (!buffer.data) return
-  invoke('terminal_write', { terminalId, data: buffer.data }).catch(
-    console.error
-  )
+
+  if (!isTransportConnected()) {
+    const critical = extractCriticalControlChars(buffer.data)
+    if (critical) {
+      const existing = pendingCriticalInput.get(terminalId) ?? ''
+      pendingCriticalInput.set(terminalId, existing + critical)
+    }
+    return
+  }
+
+  sendTerminalWrite(terminalId, buffer.data)
 }
 
 function discardTerminalInput(terminalId: string): void {
   const buffer = inputBuffers.get(terminalId)
   if (buffer?.timer) clearTimeout(buffer.timer)
   inputBuffers.delete(terminalId)
+  pendingCriticalInput.delete(terminalId)
 }
 
 function queueTerminalInput(terminalId: string, data: string): void {
-  if (!isTransportConnected()) return
+  if (!isTransportConnected()) {
+    const critical = extractCriticalControlChars(data)
+    if (critical) {
+      const existing = pendingCriticalInput.get(terminalId) ?? ''
+      pendingCriticalInput.set(terminalId, existing + critical)
+    }
+    return
+  }
+
+  flushPendingCriticalInput(terminalId)
 
   const buffer = inputBuffers.get(terminalId) ?? {
     data: '',
