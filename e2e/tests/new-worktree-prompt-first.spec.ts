@@ -1215,6 +1215,19 @@ test.describe('Prompt-first mobile layout', () => {
     expect(box!.width).toBeLessThanOrEqual(382)
     expect(box!.height).toBeLessThan(420)
 
+    const modelPicker = composer.getByRole('button', {
+      name: 'Choose backend and model',
+    })
+    await expect(modelPicker).toBeVisible()
+    await expect(
+      composer.getByRole('button', { name: 'Create worktree', exact: true })
+    ).toBeVisible()
+    await modelPicker.click()
+    await expect(
+      mockPage.getByRole('heading', { name: 'Select Backend & Model' })
+    ).toBeVisible()
+    await mockPage.keyboard.press('Escape')
+
     await composer.getByLabel('Prompt').fill('Mobile prompt draft')
     await composer
       .getByRole('button', { name: 'Choose starting point' })

@@ -62,6 +62,10 @@ vi.mock('@/components/chat/toolbar/DesktopBackendModelPicker', () => ({
     </button>
   ),
 }))
+vi.mock('@/components/chat/toolbar/MobileBackendModelPickerSheet', () => ({
+  MobileBackendModelPickerSheet: ({ open }: { open: boolean }) =>
+    open ? <div>Select Backend &amp; Model</div> : null,
+}))
 vi.mock('@/components/chat/toolbar/ExecutionModeDropdown', () => ({
   ExecutionModeDropdown: ({ executionMode }: { executionMode: string }) => (
     <button type="button">{executionMode} mode</button>
@@ -136,6 +140,10 @@ const baseProps = {
 describe('NewSessionComposer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1024,
+    })
     useChatStore.setState({ pendingSetupPrompts: {} })
     HTMLElement.prototype.scrollIntoView = vi.fn()
     backendState.installedBackends = ['claude', 'codex']
@@ -163,6 +171,26 @@ describe('NewSessionComposer', () => {
       target: { value: 'Implement prompt-first sessions' },
     })
     expect(createButton).toBeEnabled()
+  })
+
+  it('keeps model selection visible and hides the Enter hint on mobile', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+
+    render(<NewSessionComposer {...baseProps} />)
+
+    const modelPicker = screen.getByRole('button', {
+      name: 'Choose backend and model',
+    })
+    expect(modelPicker).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Create worktree' })
+    ).not.toHaveTextContent('↵')
+
+    fireEvent.click(modelPicker)
+    expect(screen.getByText('Select Backend & Model')).toBeVisible()
   })
 
   it('lets users switch project from the composer header', () => {

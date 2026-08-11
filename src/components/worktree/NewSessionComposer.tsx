@@ -23,7 +23,9 @@ import { ChatInput } from '@/components/chat/ChatInput'
 import { ImagePreview } from '@/components/chat/ImagePreview'
 import { TextFilePreview } from '@/components/chat/TextFilePreview'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
+import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
+import { BackendLabel } from '@/components/ui/backend-label'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +49,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { invoke, listen } from '@/lib/transport'
 import { generateId } from '@/lib/uuid'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
@@ -200,6 +203,7 @@ export function NewSessionComposer({
   const patchPreferences = usePatchPreferences()
   const { installedBackends, isLoading: areBackendsLoading } =
     useInstalledBackends()
+  const isMobile = useIsMobile()
   const preferredBackend = preferences?.default_backend as
     | CliBackend
     | undefined
@@ -231,6 +235,7 @@ export function NewSessionComposer({
   const [namePickerOpen, setNamePickerOpen] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
   const [optionsOpen, setOptionsOpen] = useState(false)
+  const [mobileModelPickerOpen, setMobileModelPickerOpen] = useState(false)
   const [createMore, setCreateMore] = useState(false)
   const [customName, setCustomName] = useState(
     initialSettings?.customName ?? ''
@@ -940,70 +945,100 @@ export function NewSessionComposer({
         </div>
       )}
 
-      <div className="@container flex items-center gap-1 px-4 pt-1 pb-3.5">
-        {!areBackendsLoading && installedBackends.length === 0 ? (
+      <div className="@container flex flex-col gap-1 px-4 pt-1 pb-3.5 md:flex-row md:items-center">
+        <div className="flex min-w-0 items-center gap-1">
+          {!areBackendsLoading && installedBackends.length === 0 ? (
+            <button
+              type="button"
+              onClick={onConfigureBackends}
+              className="rounded-md px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+            >
+              Configure agents
+            </button>
+          ) : isMobile ? (
+            <>
+              <button
+                type="button"
+                aria-label="Choose backend and model"
+                onClick={() => setMobileModelPickerOpen(true)}
+                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <BackendLabel backend={backend} className="shrink-0" />
+                <span className="truncate">· {model}</span>
+                <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
+              </button>
+              <MobileBackendModelPickerSheet
+                open={mobileModelPickerOpen}
+                onOpenChange={setMobileModelPickerOpen}
+                selectedBackend={backend}
+                selectedProvider={null}
+                selectedModel={model}
+                installedBackends={installedBackends}
+                customCliProfiles={preferences?.custom_cli_profiles ?? []}
+                onModelChange={setModel}
+                onBackendModelChange={handleBackendModelChange}
+              />
+            </>
+          ) : (
+            <DesktopBackendModelPicker
+              selectedBackend={backend}
+              selectedModel={model}
+              selectedProvider={null}
+              installedBackends={installedBackends}
+              customCliProfiles={preferences?.custom_cli_profiles ?? []}
+              onModelChange={setModel}
+              onBackendModelChange={handleBackendModelChange}
+              triggerClassName="border-0 bg-transparent shadow-none"
+            />
+          )}
+          <ExecutionModeDropdown
+            executionMode={executionMode}
+            onSetExecutionMode={setExecutionMode}
+          />
           <button
             type="button"
-            onClick={onConfigureBackends}
-            className="rounded-md px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+            aria-label="Attach files"
+            onClick={() => attachRef.current?.()}
+            className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
-            Configure agents
+            <Paperclip className="h-4 w-4" />
           </button>
-        ) : (
-          <DesktopBackendModelPicker
-            selectedBackend={backend}
-            selectedModel={model}
-            selectedProvider={null}
-            installedBackends={installedBackends}
-            customCliProfiles={preferences?.custom_cli_profiles ?? []}
-            onModelChange={setModel}
-            onBackendModelChange={handleBackendModelChange}
-            triggerClassName="border-0 bg-transparent shadow-none"
-          />
-        )}
-        <ExecutionModeDropdown
-          executionMode={executionMode}
-          onSetExecutionMode={setExecutionMode}
-        />
-        <button
-          type="button"
-          aria-label="Attach files"
-          onClick={() => attachRef.current?.()}
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <Paperclip className="h-4 w-4" />
-        </button>
-        <label className="ml-auto flex cursor-pointer items-center gap-2 px-2 text-xs text-muted-foreground">
-          <Switch
-            checked={createMore}
-            onCheckedChange={setCreateMore}
-            aria-label="Create more"
-            disabled={isCreating}
-          />
-          <span>Create more</span>
-        </label>
-        <button
-          type="submit"
-          disabled={
-            !projectId ||
-            isCreating ||
-            hasInvalidName ||
-            (hasConversationContent &&
-              (areBackendsLoading || !backendAvailable))
-          }
-          className="h-9 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:shadow-none disabled:opacity-35"
-        >
-          {isCreating
-            ? 'Creating…'
-            : areBackendsLoading
-              ? 'Checking backends…'
-              : hasConversationContent && !backendAvailable
-                ? 'No backend available'
-                : hasConversationContent
-                  ? submitLabel
-                  : submitLabel.replace(' & start', '')}{' '}
-          {!isCreating && <span className="ml-1 opacity-60">↵</span>}
-        </button>
+        </div>
+        <div className="flex w-full items-center justify-end gap-1 md:ml-auto md:w-auto">
+          <label className="mr-auto flex cursor-pointer items-center gap-2 px-2 text-xs text-muted-foreground md:mr-0">
+            <Switch
+              checked={createMore}
+              onCheckedChange={setCreateMore}
+              aria-label="Create more"
+              disabled={isCreating}
+            />
+            <span>Create more</span>
+          </label>
+          <button
+            type="submit"
+            disabled={
+              !projectId ||
+              isCreating ||
+              hasInvalidName ||
+              (hasConversationContent &&
+                (areBackendsLoading || !backendAvailable))
+            }
+            className="h-9 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:shadow-none disabled:opacity-35"
+          >
+            {isCreating
+              ? 'Creating…'
+              : areBackendsLoading
+                ? 'Checking backends…'
+                : hasConversationContent && !backendAvailable
+                  ? 'No backend available'
+                  : hasConversationContent
+                    ? submitLabel
+                    : submitLabel.replace(' & start', '')}{' '}
+            {!isCreating && !isMobile && (
+              <span className="ml-1 opacity-60">↵</span>
+            )}
+          </button>
+        </div>
       </div>
     </form>
   )
