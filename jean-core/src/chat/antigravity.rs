@@ -531,7 +531,6 @@ pub fn execute_antigravity(
             usage: None,
             terminal_error: None,
             diagnostics: vec![],
-            diagnostics: vec![],
         };
         for line in BufReader::new(stdout).lines() {
             let line =
