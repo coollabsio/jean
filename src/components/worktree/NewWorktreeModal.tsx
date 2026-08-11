@@ -292,7 +292,7 @@ export function NewWorktreeModal() {
           aria-describedby={undefined}
           showCloseButton={false}
           className={cn(
-            '!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!rounded-2xl p-0 flex flex-col overflow-hidden gap-0',
+            '!h-auto !max-h-[calc(100dvh-1rem)] !w-[calc(100vw-1rem)] !max-w-[calc(100vw-1rem)] !rounded-2xl p-0 flex flex-col overflow-hidden gap-0',
             getNewSessionDialogSizeClass('quick')
           )}
         >

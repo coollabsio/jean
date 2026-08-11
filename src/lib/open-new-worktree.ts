@@ -11,8 +11,14 @@ export function openNewWorktree({
 } = {}) {
   if (projectId) useProjectsStore.getState().selectProject(projectId)
 
-  const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-    useUIStore.getState()
+  const {
+    setLeftSidebarVisible,
+    setNewWorktreeModalDefaultTab,
+    setNewWorktreeModalOpen,
+  } = useUIStore.getState()
+  if (typeof window !== 'undefined' && window.innerWidth < 768) {
+    setLeftSidebarVisible(false)
+  }
   setNewWorktreeModalDefaultTab(tab)
   setNewWorktreeModalOpen(true)
 }
