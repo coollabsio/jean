@@ -22,7 +22,7 @@ describe('getStartupOnboardingAction', () => {
     ).toBe('wait')
   })
 
-  it('closes startup onboarding when required tools are already ready', () => {
+  it('closes startup onboarding when an AI backend is ready', () => {
     expect(
       getStartupOnboardingAction({
         aiStatuses: [missingStatus, readyStatus, missingStatus],
@@ -52,7 +52,7 @@ describe('getStartupOnboardingAction', () => {
     ).toBe('ready')
   })
 
-  it('treats Grok (or any later backend) as a valid ready AI backend', () => {
+it('treats Grok (or any later backend) as a valid ready AI backend', () => {
     // Regression: startup used to only count Claude/Codex/OpenCode, so remotes
     // with only Grok ready reopened the "Setup Complete" dialog every launch.
     expect(
@@ -87,6 +87,34 @@ describe('getStartupOnboardingAction', () => {
     ).toBe('ready')
   })
 
+  it('treats GitHub CLI as optional when an AI backend is ready', () => {
+    expect(
+      getStartupOnboardingAction({
+        aiStatuses: [readyStatus, missingStatus, missingStatus],
+        aiAuth: [authenticated, undefined, undefined],
+        ghStatus: missingStatus,
+        ghAuth: undefined,
+        onboardingOpen: false,
+        onboardingDismissed: false,
+        onboardingManuallyTriggered: false,
+        requiresWslChoice: false,
+      })
+    ).toBe('ready')
+
+    expect(
+      getStartupOnboardingAction({
+        aiStatuses: [readyStatus, missingStatus, missingStatus],
+        aiAuth: [authenticated, undefined, undefined],
+        ghStatus: missingStatus,
+        ghAuth: undefined,
+        onboardingOpen: true,
+        onboardingDismissed: false,
+        onboardingManuallyTriggered: false,
+        requiresWslChoice: false,
+      })
+    ).toBe('close')
+  })
+
   it('does not open for WSL when tools are already ready', () => {
     expect(
       getStartupOnboardingAction({
@@ -117,7 +145,7 @@ describe('getStartupOnboardingAction', () => {
     ).toBe('none')
   })
 
-  it('opens onboarding when setup is definitively incomplete', () => {
+  it('opens onboarding when no AI backend is ready', () => {
     expect(
       getStartupOnboardingAction({
         aiStatuses: [missingStatus, missingStatus, missingStatus],

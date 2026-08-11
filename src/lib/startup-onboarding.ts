@@ -63,15 +63,15 @@ export function getStartupOnboardingAction({
   if (aiAuthPending || ghAuthPending) return 'wait'
 
   // Any authenticated AI backend counts (Claude, Codex, Grok, Pi, …).
+  // GitHub CLI is optional (GitLab/Bitbucket users should not be blocked).
   const hasAiBackendReady = aiStatuses.some((status, index) =>
     isReady(status, aiAuth[index])
   )
-  const ghReady = isReady(ghStatus, ghAuth)
 
   // Tools already good: never force the setup wizard (including the "Setup
   // Complete" success screen). WSL choice can wait until the user actually
   // needs local CLI installs.
-  if (ghReady && hasAiBackendReady) {
+  if (hasAiBackendReady) {
     return onboardingOpen ? 'close' : 'ready'
   }
 

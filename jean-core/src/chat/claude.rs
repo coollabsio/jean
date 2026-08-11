@@ -622,15 +622,17 @@ fn build_claude_args(
     }
 
     // Allow embedded/resolved CLI binaries without approval via --allowedTools
-    // Claude wraps paths with spaces in quotes, so use glob patterns to match
-    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
-    let gh_path_str = gh_binary.to_string_lossy();
-    args.push("--allowedTools".to_string());
-    args.push(format!("Bash(*{gh_path_str}*)"));
-    // Also allow the Jean-managed path pattern when user configured system PATH gh
-    if !gh_path_str.contains("gh-cli/gh") {
+    // Claude wraps paths with spaces in quotes, so use glob patterns to match.
+    // Only pre-approve `gh` when it is actually installed.
+    if let Some(gh_binary) = crate::gh_cli::config::resolve_available_gh_binary(app) {
+        let gh_path_str = gh_binary.to_string_lossy();
         args.push("--allowedTools".to_string());
-        args.push("Bash(*gh-cli/gh*)".to_string());
+        args.push(format!("Bash(*{gh_path_str}*)"));
+        // Also allow the Jean-managed path pattern when user configured system PATH gh
+        if !gh_path_str.contains("gh-cli/gh") {
+            args.push("--allowedTools".to_string());
+            args.push("Bash(*gh-cli/gh*)".to_string());
+        }
     }
     args.push("--allowedTools".to_string());
     args.push("Bash(*claude-cli/claude*)".to_string());
@@ -711,15 +713,8 @@ fn build_claude_args(
         }
     }
 
-    // Embedded gh CLI path - tell Claude to use the app's bundled binary
-    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
-    if gh_binary != std::path::PathBuf::from("gh") {
-        system_prompt_parts.push(format!(
-            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-             Do NOT use bare `gh` — always use the full path above.",
-            gh_binary.display()
-        ));
-    }
+    // GitHub CLI: path hint when installed; strip discovery + forbid gh when not
+    crate::gh_cli::config::append_gh_cli_system_prompt(&mut system_prompt_parts, app);
 
     // Embedded Claude CLI path - tell Claude to use the app's bundled binary
     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(app) {

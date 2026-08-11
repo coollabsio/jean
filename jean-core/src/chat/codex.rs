@@ -3133,13 +3133,15 @@ fn handle_approval_request(
                 return;
             }
 
-            // Auto-approve embedded/resolved CLI binaries (matches Claude's --allowedTools)
-            let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
-            let gh_str = gh_binary.to_string_lossy();
-            if command.contains(&*gh_str)
-                || command.contains("gh-cli/gh")
-                || command.contains("claude-cli/claude")
-            {
+            // Auto-approve embedded/resolved CLI binaries (matches Claude's --allowedTools).
+            // Only treat `gh` as auto-approved when it is actually installed.
+            let gh_auto_approve = crate::gh_cli::config::resolve_available_gh_binary(app)
+                .map(|path| {
+                    let gh_str = path.to_string_lossy().into_owned();
+                    command.contains(&gh_str) || command.contains("gh-cli/gh")
+                })
+                .unwrap_or(false);
+            if gh_auto_approve || command.contains("claude-cli/claude") {
                 log::trace!("Auto-accepting CLI command (rpc_id={rpc_id}): {command}");
                 if let Err(e) = super::codex_server::send_response(
                     rpc_id,

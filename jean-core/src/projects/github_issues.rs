@@ -4,6 +4,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
+use super::forge::{detect_forge, ForgeKind};
 use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
 
@@ -85,6 +86,11 @@ pub async fn list_github_labels(
 ) -> Result<Vec<GitHubLabel>, String> {
     log::trace!("Listing GitHub labels for {project_path}");
 
+    if detect_forge(&project_path) == ForgeKind::GitLab {
+        // glab label list -F json when available; empty is fine for MVP
+        return Ok(Vec::new());
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args(["label", "list", "--json", "name,color", "-L", "1000"])
@@ -159,6 +165,10 @@ pub async fn list_github_issues(
     state: Option<String>,
 ) -> Result<GitHubIssueListResult, String> {
     log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
+
+    if detect_forge(&project_path) == ForgeKind::GitLab {
+        return super::gitlab_ops::list_gitlab_issues(&app, &project_path, state).await;
+    }
 
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
@@ -299,6 +309,20 @@ pub async fn get_github_issue_by_number(
 ) -> Result<GitHubIssue, String> {
     log::trace!("Getting GitHub issue #{issue_number} by number for {project_path}");
 
+    if detect_forge(&project_path) == ForgeKind::GitLab {
+        let detail =
+            super::gitlab_ops::get_gitlab_issue(&app, &project_path, issue_number).await?;
+        return Ok(GitHubIssue {
+            number: detail.number,
+            title: detail.title,
+            body: detail.body,
+            state: detail.state,
+            labels: detail.labels,
+            created_at: detail.created_at,
+            author: detail.author,
+        });
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -339,6 +363,10 @@ pub async fn get_github_issue(
     issue_number: u32,
 ) -> Result<GitHubIssueDetail, String> {
     log::trace!("Getting GitHub issue #{issue_number} for {project_path}");
+
+    if detect_forge(&project_path) == ForgeKind::GitLab {
+        return super::gitlab_ops::get_gitlab_issue(&app, &project_path, issue_number).await;
+    }
 
     let gh = resolve_gh_binary(&app);
     // Run gh issue view
@@ -1545,6 +1573,10 @@ pub async fn list_github_prs(
 ) -> Result<Vec<GitHubPullRequest>, String> {
     log::trace!("Listing GitHub PRs for {project_path} with state: {state:?}");
 
+    if detect_forge(&project_path) == ForgeKind::GitLab {
+        return super::gitlab_ops::list_gitlab_mrs(&app, &project_path, state).await;
+    }
+
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
@@ -1645,6 +1677,10 @@ pub async fn get_github_pr_by_number(
     pr_number: u32,
 ) -> Result<GitHubPullRequest, String> {
     log::trace!("Getting GitHub PR #{pr_number} by number for {project_path}");
+
+    if detect_forge(&project_path) == ForgeKind::GitLab {
+        return super::gitlab_ops::get_gitlab_mr(&app, &project_path, pr_number).await;
+    }
 
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)

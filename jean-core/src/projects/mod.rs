@@ -1,10 +1,12 @@
 pub mod checkpoints;
 mod commands;
+pub mod forge;
 pub mod git;
 pub mod git_log;
 pub mod git_status;
 pub mod github_actions;
 pub mod github_issues;
+pub mod gitlab_ops;
 pub mod linear_issues;
 mod names;
 pub mod pr_status;
@@ -22,6 +24,7 @@ pub use checkpoints::{
     restore_ai_checkpoint_file, restore_ai_checkpoint_turn,
 };
 pub use commands::*;
+pub use forge::*;
 pub use github_actions::*;
 pub use github_issues::*;
 pub use linear_issues::*;

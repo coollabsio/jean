@@ -2,7 +2,8 @@
  * Onboarding Dialog for CLI Setup
  *
  * Multi-step wizard that handles installation and authentication of at least
- * one supported AI backend CLI plus mandatory GitHub CLI.
+ * one supported AI backend CLI. GitHub CLI is optional (recommended for GitHub
+ * features; skippable for GitLab/Bitbucket users).
  */
 
 /* eslint-disable no-console */
@@ -71,6 +72,11 @@ import {
   useGhCliAuth,
   useGhPathDetection,
 } from '@/services/gh-cli'
+import {
+  useGlabCliSetup,
+  useGlabCliAuth,
+  useGlabPathDetection,
+} from '@/services/glab-cli'
 import {
   SetupState,
   InstallingState,
@@ -188,6 +194,10 @@ type OnboardingStep =
   | 'gh-installing'
   | 'gh-auth-checking'
   | 'gh-auth-login'
+  | 'glab-setup'
+  | 'glab-installing'
+  | 'glab-auth-checking'
+  | 'glab-auth-login'
   | 'complete'
 
 /**
@@ -221,6 +231,8 @@ const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
   'antigravity-auth-login',
   'gh-setup',
   'gh-auth-login',
+  'glab-setup',
+  'glab-auth-login',
 ] as const
 
 interface VersionOption {
@@ -389,6 +401,8 @@ function OnboardingDialogContent() {
   const antigravitySetup = useAntigravityCliSetup()
   const ghPathDetection = useGhPathDetection()
   const ghSetup = useGhCliSetup()
+  const glabPathDetection = useGlabPathDetection()
+  const glabSetup = useGlabCliSetup()
 
   const claudeAuth = useClaudeCliAuth({
     enabled: !!claudeSetup.status?.installed,
@@ -410,6 +424,7 @@ function OnboardingDialogContent() {
     enabled: !!antigravitySetup.status?.installed,
   })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
+  const glabAuth = useGlabCliAuth({ enabled: !!glabSetup.status?.installed })
 
   const [step, _setStepRaw] = useState<OnboardingStep>('backend-select')
   const stepRef = useRef<OnboardingStep>('backend-select')
@@ -464,6 +479,8 @@ function OnboardingDialogContent() {
   const [antigravityInstallFailed, setAntigravityInstallFailed] =
     useState(false)
   const [ghInstallFailed, setGhInstallFailed] = useState(false)
+  const [glabPathSelected, setGlabPathSelected] = useState(false)
+  const [glabUsePath, setGlabUsePath] = useState(false)
   const [claudePathSelected, setClaudePathSelected] = useState(false)
   const [codexPathSelected, setCodexPathSelected] = useState(false)
   const [opencodePathSelected, setOpencodePathSelected] = useState(false)
@@ -484,6 +501,7 @@ function OnboardingDialogContent() {
   const [kimiLoginAttempt, setKimiLoginAttempt] = useState(0)
   const [antigravityLoginAttempt, setAntigravityLoginAttempt] = useState(0)
   const [ghLoginAttempt, setGhLoginAttempt] = useState(0)
+  const [glabLoginAttempt, setGlabLoginAttempt] = useState(0)
 
   const goBack = useCallback(() => {
     const current = stepRef.current
@@ -629,6 +647,7 @@ function OnboardingDialogContent() {
   const kimiLoginTerminalId = `onboarding-kimi-login-${loginSessionSeed}-${kimiLoginAttempt}`
   const antigravityLoginTerminalId = `onboarding-antigravity-login-${loginSessionSeed}-${antigravityLoginAttempt}`
   const ghLoginTerminalId = `onboarding-gh-login-${loginSessionSeed}-${ghLoginAttempt}`
+  const glabLoginTerminalId = `onboarding-glab-login-${loginSessionSeed}-${glabLoginAttempt}`
 
   const stableClaudeVersions = claudeSetup.versions.filter(v => !v.prerelease)
   const stableCodexVersions = codexSetup.versions.filter(v => !v.prerelease)
@@ -1010,15 +1029,16 @@ function OnboardingDialogContent() {
       return
     }
 
-    // Already on a remote: skip usage mode and continue CLI setup there.
+// Already on a remote: skip usage mode and continue CLI setup there.
     // WSL mode only applies to local Windows development.
+    // At least one AI backend is enough; GitHub CLI is optional.
     if (remoteActive) {
-      if (ghReady && readyBackends.length > 0) {
-        // Auto-opened with tools already ready (e.g. reconnecting to a remote
+      if (readyBackends.length > 0) {
+        // Auto-opened with AI already ready (e.g. reconnecting to a remote
         // that was set up earlier). Don't force the "Setup Complete" screen —
         // that was reappearing on every remote session open.
         if (!onboardingManuallyTriggered) {
-          dbg('init effect: remote all ready → auto-dismiss')
+          dbg('init effect: remote AI ready → auto-dismiss')
           useUIStore.setState({
             onboardingOpen: false,
             onboardingStartStep: null,
@@ -1026,12 +1046,13 @@ function OnboardingDialogContent() {
           })
           return
         }
-        dbg('init effect: remote all ready → complete')
-        queueMicrotask(() => setStep('complete', { replace: true }))
-        return
-      }
-      if (readyBackends.length > 0) {
-        dbg('init effect: remote + some backends ready → after backends')
+        if (ghReady) {
+          dbg('init effect: remote AI + optional gh ready → complete')
+          queueMicrotask(() => setStep('complete', { replace: true }))
+          return
+        }
+        // Manual re-open with AI ready: offer optional forge CLI setup.
+        dbg('init effect: remote + AI ready → after backends')
         queueMicrotask(() => {
           setSelectedBackends(readyBackends)
           setStep(getNextStepAfterBackends(), { replace: true })
@@ -1046,10 +1067,10 @@ function OnboardingDialogContent() {
     const needsWslChoice =
       isServerWindows() && !!preferences && !preferences.wsl_mode_chosen
 
-    // Local tools already ready and environment chosen → finish.
-    if (ghReady && readyBackends.length > 0 && !needsWslChoice) {
+    // Local: AI ready and environment chosen → finish (gh is optional).
+    if (readyBackends.length > 0 && !needsWslChoice) {
       if (!onboardingManuallyTriggered) {
-        dbg('init effect: all ready → auto-dismiss')
+        dbg('init effect: AI ready → auto-dismiss')
         useUIStore.setState({
           onboardingOpen: false,
           onboardingStartStep: null,
@@ -1057,14 +1078,13 @@ function OnboardingDialogContent() {
         })
         return
       }
-      dbg('init effect: all ready → complete')
-      queueMicrotask(() => setStep('complete', { replace: true }))
-      return
-    }
-
-    // Partial local progress (and WSL already chosen): resume CLI setup.
-    if (readyBackends.length > 0 && !needsWslChoice) {
-      dbg('init effect: some backends ready → skip to after backends')
+      if (ghReady) {
+        dbg('init effect: AI + optional gh ready → complete')
+        queueMicrotask(() => setStep('complete', { replace: true }))
+        return
+      }
+      // Offer optional GitHub CLI setup once an AI backend is ready.
+      dbg('init effect: AI ready → optional gh-setup')
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
         setStep(getNextStepAfterBackends(), { replace: true })
@@ -1311,8 +1331,8 @@ function OnboardingDialogContent() {
     if (ghAuth.isLoading || ghAuth.isFetching) return
 
     if (ghAuth.data?.authenticated) {
-      dbg('gh auth OK → complete')
-      queueMicrotask(() => setStep('complete'))
+      dbg('gh auth OK → optional glab-setup')
+      queueMicrotask(() => setStep('glab-setup'))
     } else {
       dbg('gh auth NOT OK → gh-auth-login')
       queueMicrotask(() => setStep('gh-auth-login'))
@@ -1326,6 +1346,22 @@ function OnboardingDialogContent() {
     ghAuth.fetchStatus,
     ghAuth.error,
     ghSetup.status?.installed,
+    setStep,
+  ])
+
+  useEffect(() => {
+    if (step !== 'glab-auth-checking') return
+    if (glabAuth.isLoading || glabAuth.isFetching) return
+    if (glabAuth.data?.authenticated) {
+      queueMicrotask(() => setStep('complete'))
+    } else {
+      queueMicrotask(() => setStep('glab-auth-login'))
+    }
+  }, [
+    step,
+    glabAuth.isLoading,
+    glabAuth.isFetching,
+    glabAuth.data?.authenticated,
     setStep,
   ])
 
@@ -2045,6 +2081,11 @@ function OnboardingDialogContent() {
     dbg('handleGhLoginComplete: refetch result =', result.data)
   }, [ghAuth, setStep])
 
+  const handleGlabLoginComplete = useCallback(async () => {
+    setStep('glab-auth-checking')
+    await glabAuth.refetch()
+  }, [glabAuth, setStep])
+
   const handleClaudeLoginRetry = useCallback(() => {
     setClaudeLoginAttempt(prev => prev + 1)
   }, [])
@@ -2085,6 +2126,22 @@ function OnboardingDialogContent() {
     setGhLoginAttempt(prev => prev + 1)
   }, [])
 
+  const handleGlabLoginRetry = useCallback(() => {
+    setGlabLoginAttempt(prev => prev + 1)
+  }, [])
+
+  /** Skip optional GitHub CLI setup; offer GitLab CLI next. */
+  const handleGhSkip = useCallback(() => {
+    dbg('handleGhSkip: skipping optional GitHub CLI → glab-setup')
+    setStep('glab-setup')
+  }, [setStep])
+
+  /** Skip optional GitLab CLI setup and finish onboarding. */
+  const handleGlabSkip = useCallback(() => {
+    dbg('handleGlabSkip: skipping optional GitLab CLI → complete')
+    setStep('complete')
+  }, [setStep])
+
   const handleComplete = useCallback(async () => {
     claudeSetup.refetchStatus()
     codexSetup.refetchStatus()
@@ -2096,6 +2153,7 @@ function OnboardingDialogContent() {
     kimiSetup.refetchStatus()
     antigravitySetup.refetchStatus()
     ghSetup.refetchStatus()
+    glabSetup.refetchStatus()
     // Set the first selected backend as the default so the preference
     // isn't left pointing at an uninstalled backend (e.g. 'claude').
     const authenticatedBackends: Partial<Record<AIBackend, boolean>> = {
@@ -2144,6 +2202,7 @@ function OnboardingDialogContent() {
     kimiSetup,
     antigravitySetup,
     ghSetup,
+    glabSetup,
     claudeAuth.data?.authenticated,
     codexAuth.data?.authenticated,
     opencodeAuth.data?.authenticated,
@@ -2320,7 +2379,8 @@ function OnboardingDialogContent() {
       return {
         type: 'gh',
         title: 'GitHub CLI',
-        description: 'GitHub CLI is required for GitHub integration.',
+        description:
+          'Optional — enables GitHub issues, PRs, and dashboard features. Skip if you use GitLab or another host.',
         versions: stableGhVersions,
         isVersionsLoading: ghSetup.isVersionsLoading,
         isVersionsError: ghSetup.isVersionsError,
@@ -2404,7 +2464,12 @@ function OnboardingDialogContent() {
     ghPathSelected && ghPathDetection.data?.path
       ? ghPathDetection.data.path
       : (ghSetup.status?.path ?? '')
-  const ghLoginArgs = AUTH_LOGIN_ARGS
+const ghLoginArgs = AUTH_LOGIN_ARGS
+  const glabLoginCommand =
+    glabUsePath && glabPathDetection.data?.path
+      ? glabPathDetection.data.path
+      : (glabSetup.status?.path ?? '')
+  const glabLoginArgs = AUTH_LOGIN_ARGS
 
   dbg('login commands:', {
     claude: {
@@ -2531,7 +2596,7 @@ function OnboardingDialogContent() {
           : 'Welcome to Jean',
         description: onboardingManuallyTriggered
           ? 'Select additional AI backends to install.'
-          : 'Select at least one AI backend to install. GitHub CLI setup is required next.',
+          : 'Select at least one AI backend to install. GitHub CLI is optional next.',
       }
     }
 
@@ -2539,26 +2604,42 @@ function OnboardingDialogContent() {
       return {
         title: 'Setup Complete',
         description:
-          'All required tools have been installed and authenticated.',
+          'Required tools have been installed and authenticated. You can add GitHub CLI later from Settings.',
       }
     }
 
     if (dialogStep === 'gh-setup' || dialogStep === 'gh-installing') {
       const hasPathCli = ghPathDetection.data?.found
       return {
-        title: isGhReinstall ? 'Change GitHub CLI Version' : 'Setup GitHub CLI',
+        title: isGhReinstall
+          ? 'Change GitHub CLI Version'
+          : 'Setup GitHub CLI (optional)',
         description: isGhReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : hasPathCli
-            ? 'Choose to use your system GitHub CLI or install with Jean.'
-            : 'GitHub CLI is required for GitHub integration.',
+            ? 'Choose to use your system GitHub CLI or install with Jean. You can skip if you do not use GitHub.'
+            : 'Optional — enables GitHub issues, PRs, and dashboard features. Skip if you use GitLab or another host.',
       }
     }
 
     if (dialogStep === 'gh-auth-checking' || dialogStep === 'gh-auth-login') {
       return {
         title: 'Authenticate GitHub CLI',
-        description: 'GitHub CLI authentication is required to continue.',
+        description:
+          'Sign in to GitHub for issue/PR features, or skip if you do not use GitHub.',
+      }
+    }
+
+    if (
+      dialogStep === 'glab-setup' ||
+      dialogStep === 'glab-installing' ||
+      dialogStep === 'glab-auth-checking' ||
+      dialogStep === 'glab-auth-login'
+    ) {
+      return {
+        title: 'Setup GitLab CLI (optional)',
+        description:
+          'Optional — enables GitLab issues and merge requests via glab. Skip if you only use GitHub or plain git.',
       }
     }
 
@@ -2742,7 +2823,7 @@ function OnboardingDialogContent() {
       step.startsWith('grok-') ||
       step.startsWith('kimi-') ||
       step.startsWith('antigravity-')
-    const isGhStep = step.startsWith('gh-')
+    const isGhStep = step.startsWith('gh-') || step.startsWith('glab-')
 
     const backendComplete = !isBackendSelection && !isBackendStep
     const ghComplete = step === 'complete'
@@ -2772,7 +2853,7 @@ function OnboardingDialogContent() {
           }`}
         >
           <span className="font-medium">2</span>
-          <span>GitHub CLI</span>
+          <span>GitHub / GitLab CLI (optional)</span>
         </div>
         <div className="w-4 h-px bg-border" />
         <div
@@ -3235,7 +3316,83 @@ function OnboardingDialogContent() {
                 jeanInstalled={!!ghSetup.status?.installed}
                 onSelectPath={handleGhPathSelect}
                 onSelectJean={handleGhJeanSelect}
+                onSkip={handleGhSkip}
               />
+            ) : step === 'glab-setup' && !glabPathSelected ? (
+              <CliPathSelector
+                cliName="GitLab CLI"
+                pathFound={!!glabPathDetection.data?.found}
+                pathVersion={glabPathDetection.data?.version ?? null}
+                pathPath={glabPathDetection.data?.path ?? null}
+                isLoading={glabPathSelected}
+                currentSource={preferences?.glab_cli_source ?? null}
+                jeanInstalled={!!glabSetup.status?.installed}
+                onSelectPath={() => {
+                  setGlabPathSelected(true)
+                  setGlabUsePath(true)
+                  patchPreferences.mutate(
+                    { glab_cli_source: 'path' },
+                    {
+                      onSuccess: () => {
+                        setStep('glab-auth-checking')
+                        glabAuth.refetch()
+                      },
+                    }
+                  )
+                }}
+                onSelectJean={() => {
+                  setGlabPathSelected(true)
+                  setGlabUsePath(false)
+                  patchPreferences.mutate(
+                    { glab_cli_source: 'jean' },
+                    {
+                      onSuccess: () => {
+                        if (glabSetup.status?.installed) {
+                          setStep('glab-auth-checking')
+                          glabAuth.refetch()
+                          return
+                        }
+                        const version =
+                          glabSetup.versions?.[0]?.version ?? undefined
+                        setStep('glab-installing')
+                        glabSetup.install(version, {
+                          onSuccess: () => {
+                            setStep('glab-auth-checking')
+                            glabAuth.refetch()
+                          },
+                          onError: () => {
+                            setGlabPathSelected(false)
+                            setStep('glab-setup')
+                          },
+                        })
+                      },
+                    }
+                  )
+                }}
+                onSkip={handleGlabSkip}
+              />
+            ) : step === 'glab-installing' ? (
+              <InstallingState
+                cliName="GitLab CLI"
+                progress={glabSetup.progress}
+              />
+            ) : step === 'glab-auth-checking' ? (
+              <AuthCheckingState cliName="GitLab CLI" />
+            ) : step === 'glab-auth-login' ? (
+              glabLoginCommand ? (
+                <AuthLoginState
+                  key={glabLoginTerminalId}
+                  cliName="GitLab CLI"
+                  terminalId={glabLoginTerminalId}
+                  command={glabLoginCommand}
+                  commandArgs={glabLoginArgs}
+                  onComplete={handleGlabLoginComplete}
+                  onRetry={handleGlabLoginRetry}
+                  onSkip={handleGlabSkip}
+                />
+              ) : (
+                <AuthCheckingState cliName="GitLab CLI" />
+              )
             ) : step === 'gh-auth-login' ? (
               ghLoginCommand ? (
                 <AuthLoginState
@@ -3246,6 +3403,7 @@ function OnboardingDialogContent() {
                   commandArgs={ghLoginArgs}
                   onComplete={handleGhLoginComplete}
                   onRetry={handleGhLoginRetry}
+                  onSkip={handleGhSkip}
                 />
               ) : (
                 <AuthCheckingState cliName="GitHub CLI" />
@@ -3274,6 +3432,7 @@ function OnboardingDialogContent() {
                                     ? handleAntigravityInstall
                                     : handleGhInstall
                   }
+                  onSkip={cliData.type === 'gh' ? handleGhSkip : undefined}
                 />
               ) : (
                 <SetupState
@@ -3354,6 +3513,7 @@ function OnboardingDialogContent() {
                                     ? handleAntigravityInstall
                                     : handleGhInstall
                   }
+                  onSkip={cliData.type === 'gh' ? handleGhSkip : undefined}
                 />
               )
             ) : (
@@ -3617,7 +3777,7 @@ function SuccessState({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <p className="font-medium">All Tools Ready</p>
+        <p className="font-medium">You&apos;re Ready</p>
         <div className="text-sm text-muted-foreground mt-2 space-y-1">
           {claudeVersion && <p>Claude CLI: v{claudeVersion}</p>}
           {codexVersion && <p>Codex CLI: v{codexVersion}</p>}

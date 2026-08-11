@@ -28,6 +28,7 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
             | "install_grok_cli"
             | "update_grok_cli"
             | "install_gh_cli"
+            | "install_glab_cli"
             | "install_coderabbit_cli"
             | "update_coderabbit_cli"
             | "install_agent_browser"

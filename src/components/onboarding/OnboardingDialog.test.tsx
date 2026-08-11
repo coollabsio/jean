@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   cursorAuthenticated: false,
   cursorAuthRefetchCount: 0,
   cursorInstallSucceeds: true,
+  glabInstalled: false,
+  glabPath: null as string | null,
   patchPreferences: vi.fn(
     (_patch: unknown, options?: { onSuccess?: () => void }) =>
       options?.onSuccess?.()
@@ -142,6 +144,12 @@ vi.mock('@/services/gh-cli', () => ({
   useGhPathDetection: () => pathResult(true, '/usr/bin/gh'),
 }))
 
+vi.mock('@/services/glab-cli', () => ({
+  useGlabCliSetup: () => setupResult(mocks.glabInstalled, mocks.glabPath),
+  useGlabCliAuth: () => authResult(false),
+  useGlabPathDetection: () => pathResult(false),
+}))
+
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
     data: {
@@ -155,6 +163,7 @@ vi.mock('@/services/preferences', () => ({
       kimi_cli_source: 'path',
       antigravity_cli_source: 'path',
       gh_cli_source: 'path',
+      glab_cli_source: 'path',
     },
   }),
   usePatchPreferences: () => ({
@@ -174,21 +183,49 @@ vi.mock('./CliSetupComponents', async importOriginal => {
     ...original,
     AuthLoginState: ({
       action = 'login',
+      command,
+      commandArgs,
       onComplete,
+      onSkip,
     }: {
       action?: 'login' | 'install'
+      command?: string
+      commandArgs?: string[]
       onComplete: () => void
-    }) => <button onClick={onComplete}>Complete Cursor {action}</button>,
+      onSkip?: () => void
+    }) => (
+      <div>
+        {command && (
+          <div data-testid="auth-login-command">
+            {[command, ...(commandArgs ?? [])].join(' ')}
+          </div>
+        )}
+        <button onClick={onComplete}>Complete Cursor {action}</button>
+        {onSkip && <button onClick={onSkip}>Skip for Now</button>}
+      </div>
+    ),
     AuthCheckingState: ({ cliName }: { cliName: string }) => (
       <div>Checking {cliName}</div>
     ),
     CliPathSelector: ({
       cliName,
       onSelectPath,
+      onSelectJean,
+      onSkip,
     }: {
       cliName: string
       onSelectPath: () => void
-    }) => <button onClick={onSelectPath}>Use {cliName} from PATH</button>,
+      onSelectJean?: () => void
+      onSkip?: () => void
+    }) => (
+      <div>
+        <button onClick={onSelectPath}>Use {cliName} from PATH</button>
+        {onSelectJean && (
+          <button onClick={onSelectJean}>Use Jean-managed {cliName}</button>
+        )}
+        {onSkip && <button onClick={onSkip}>Skip for Now</button>}
+      </div>
+    ),
   }
 })
 
@@ -198,6 +235,8 @@ describe('OnboardingDialog backends', () => {
     mocks.cursorAuthenticated = false
     mocks.cursorAuthRefetchCount = 0
     mocks.cursorInstallSucceeds = true
+    mocks.glabInstalled = false
+    mocks.glabPath = null
     mocks.patchPreferences.mockClear()
     mocks.patchPreferencesAsync.mockClear()
     useUIStore.setState({
@@ -289,9 +328,87 @@ describe('OnboardingDialog backends', () => {
     await user.click(
       await screen.findByRole('button', { name: 'Use GitHub CLI from PATH' })
     )
+    // Optional GitLab CLI step after GitHub
+    await user.click(
+      await screen.findByRole('button', { name: 'Skip for Now' })
+    )
 
-    expect(await screen.findByText('All Tools Ready')).toBeInTheDocument()
+    expect(await screen.findByText("You're Ready")).toBeInTheDocument()
     expect(screen.getByText('Cursor CLI: Installed')).toBeInTheDocument()
+  })
+
+  it('allows skipping optional GitHub CLI setup after an AI backend is ready', async () => {
+    const user = userEvent.setup()
+    const { OnboardingDialog } = await import('./OnboardingDialog')
+    render(<OnboardingDialog />)
+
+    await chooseLocalAndContinue(user)
+    await user.click(
+      await screen.findByRole('checkbox', { name: /cursor cli/i })
+    )
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(
+      await screen.findByRole('button', { name: /^Install Cursor Agent/ })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Complete Cursor install' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Complete Cursor login' })
+    )
+
+    expect(
+      await screen.findByRole('button', { name: 'Skip for Now' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Use GitHub CLI from PATH' })
+    ).toBeInTheDocument()
+
+    // Skip GitHub CLI → optional GitLab CLI
+    await user.click(screen.getByRole('button', { name: 'Skip for Now' }))
+    expect(
+      await screen.findByRole('button', { name: 'Skip for Now' })
+    ).toBeInTheDocument()
+    // Skip GitLab CLI → complete
+    await user.click(screen.getByRole('button', { name: 'Skip for Now' }))
+
+    expect(await screen.findByText("You're Ready")).toBeInTheDocument()
+    expect(screen.getByText('Cursor CLI: Installed')).toBeInTheDocument()
+  })
+
+  it('uses the resolved Jean-managed glab binary for authentication', async () => {
+    mocks.glabInstalled = true
+    mocks.glabPath = '/app-data/cli/glab'
+    const user = userEvent.setup()
+    const { OnboardingDialog } = await import('./OnboardingDialog')
+    render(<OnboardingDialog />)
+
+    await chooseLocalAndContinue(user)
+    await user.click(
+      await screen.findByRole('checkbox', { name: /cursor cli/i })
+    )
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(
+      await screen.findByRole('button', { name: /^Install Cursor Agent/ })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Complete Cursor install' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Complete Cursor login' })
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Use GitHub CLI from PATH' })
+    )
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Use Jean-managed GitLab CLI',
+      })
+    )
+
+    expect(await screen.findByTestId('auth-login-command')).toHaveTextContent(
+      '/app-data/cli/glab auth login'
+    )
   })
 
   it('returns to backend selection after a failed Cursor install check and Back', async () => {

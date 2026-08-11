@@ -80,6 +80,15 @@ export const defaultResponses: Record<string, unknown> = {
   check_claude_cli_auth: { authenticated: true },
   check_gh_cli_installed: { installed: true },
   check_gh_cli_auth: { authenticated: true },
+  check_glab_cli_installed: { installed: false },
+  check_glab_cli_auth: { authenticated: false },
+  detect_glab_in_path: {
+    found: false,
+    path: null,
+    version: null,
+    package_manager: null,
+  },
+  detect_project_forge: 'unknown',
   get_available_cli_versions: [],
   get_available_gh_versions: [],
 

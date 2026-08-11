@@ -110,6 +110,101 @@ pub fn ensure_gh_cli_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(cli_dir)
 }
 
+/// Resolve GitHub CLI binary only when it is actually installed/runnable.
+///
+/// Unlike [`resolve_gh_binary`], this returns `None` when the preferred binary
+/// path does not exist (or is not executable in WSL). Use this for system
+/// prompt injection so we never tell the model to use a missing `gh`.
+pub fn resolve_available_gh_binary(app: &AppHandle) -> Option<PathBuf> {
+    let path = resolve_gh_binary(app);
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        let tool = path.to_string_lossy();
+        let installed = if tool.starts_with('/') {
+            crate::platform::wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            crate::platform::check_wsl_tool(&wsl.distro, &tool)
+        };
+        return installed.then_some(path);
+    }
+    path.exists().then_some(path)
+}
+
+/// System prompt block injected when GitHub CLI is not available.
+pub const GH_CLI_UNAVAILABLE_INSTRUCTION: &str = "\
+## GitHub CLI\n\
+- GitHub CLI (`gh`) is not installed in this environment.\n\
+- Do NOT run `gh` or other GitHub CLI commands; they will fail.\n\
+- Skip GitHub issue, PR, discussion, and Actions discovery unless the user provides that context another way.\n\
+- Prefer local git for remotes/branches. For GitLab or other hosts, use that host's tools if available.";
+
+/// Heading used by the default global system prompt for post-change GitHub discovery.
+pub const GITHUB_DISCOVERY_SECTION_MARKER: &str = "## GitHub Issue and Discussion Discovery";
+
+/// Remove the GitHub Issue/Discussion Discovery section from a prompt string.
+///
+/// Used when `gh` is unavailable so the model is not instructed to search
+/// GitHub issues that require the GitHub CLI.
+pub fn strip_github_discovery_section(prompt: &str) -> String {
+    let Some(start) = prompt.find(GITHUB_DISCOVERY_SECTION_MARKER) else {
+        return prompt.to_string();
+    };
+
+    let after_marker = &prompt[start + GITHUB_DISCOVERY_SECTION_MARKER.len()..];
+    // Next markdown H2 (or end of string) ends the discovery section.
+    let section_end_rel = after_marker
+        .find("\n## ")
+        .map(|i| i + 1) // include the leading newline of the next heading
+        .unwrap_or(after_marker.len());
+    let end = start + GITHUB_DISCOVERY_SECTION_MARKER.len() + section_end_rel;
+
+    let before = prompt[..start].trim_end();
+    let after = prompt[end..].trim_start();
+    if before.is_empty() {
+        return after.to_string();
+    }
+    if after.is_empty() {
+        return before.to_string();
+    }
+    format!("{before}\n\n{after}")
+}
+
+/// Append GitHub + GitLab CLI guidance to system prompt parts based on availability.
+///
+/// - When `gh` is installed: inject the full path so agents use Jean's binary.
+/// - When `gh` is missing: strip GitHub-discovery duties from earlier parts and
+///   tell the model not to invoke `gh`.
+/// - When `glab` is installed: inject path and instruct use for GitLab remotes.
+/// - When `glab` is missing: note that GitLab CLI commands will fail.
+pub fn append_gh_cli_system_prompt(parts: &mut Vec<String>, app: &AppHandle) {
+    match resolve_available_gh_binary(app) {
+        Some(path) => {
+            parts.push(format!(
+                "When running GitHub CLI commands for GitHub remotes, use the full path to the embedded binary: {}\n\
+                 Do NOT use bare `gh` — always use the full path above.\n\
+                 Do not use `gh` for GitLab remotes.",
+                path.display()
+            ));
+        }
+        None => {
+            for part in parts.iter_mut() {
+                *part = strip_github_discovery_section(part);
+            }
+            parts.push(GH_CLI_UNAVAILABLE_INSTRUCTION.to_string());
+        }
+    }
+
+    // GitLab CLI (optional, host-aware)
+    match crate::glab_cli::config::resolve_available_glab_binary(app) {
+        Some(path) => {
+            parts.push(crate::glab_cli::config::glab_path_instruction(&path));
+        }
+        None => {
+            parts.push(crate::glab_cli::config::GLAB_CLI_UNAVAILABLE_NOTE.to_string());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +215,48 @@ mod tests {
 
         assert!(resolved.ends_with(GH_CLI_BINARY_NAME));
         assert!(resolved.to_string_lossy().contains(GH_CLI_DIR_NAME));
+    }
+
+    #[test]
+    fn strip_github_discovery_section_removes_middle_block() {
+        let input = "\
+## Core Principles
+- Keep it simple
+
+## GitHub Issue and Discussion Discovery
+- Search issues after changes
+- Include links in the recap
+
+## Jean Worktree Policy
+- Do not create worktrees manually";
+
+        let stripped = strip_github_discovery_section(input);
+        assert!(!stripped.contains("GitHub Issue and Discussion Discovery"));
+        assert!(!stripped.contains("Search issues after changes"));
+        assert!(stripped.contains("## Core Principles"));
+        assert!(stripped.contains("## Jean Worktree Policy"));
+        assert!(stripped.contains("Do not create worktrees manually"));
+    }
+
+    #[test]
+    fn strip_github_discovery_section_is_noop_when_absent() {
+        let input = "## Core Principles\n- Keep it simple";
+        assert_eq!(strip_github_discovery_section(input), input);
+    }
+
+    #[test]
+    fn strip_github_discovery_section_handles_trailing_section() {
+        let input = "\
+## Core Principles
+- Keep it simple
+
+## GitHub Issue and Discussion Discovery
+- Search issues after changes
+";
+        let stripped = strip_github_discovery_section(input);
+        assert_eq!(
+            stripped,
+            "## Core Principles\n- Keep it simple"
+        );
     }
 }

@@ -112,14 +112,7 @@ fn build_system_prompt_parts(
         }
     }
 
-    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
-    if gh_binary != std::path::PathBuf::from("gh") {
-        parts.push(format!(
-            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-             Do NOT use bare `gh` — always use the full path above.",
-            gh_binary.display()
-        ));
-    }
+    crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, app);
     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(app) {
         if claude_binary.exists() {
             parts.push(format!(

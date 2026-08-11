@@ -1005,7 +1005,7 @@ function App() {
     enabled: nativeCli && !!ghStatus?.installed,
   })
 
-  // Show onboarding if GitHub CLI is not ready, or no AI backend is ready.
+// Show onboarding if no AI backend is ready. GitHub CLI is optional.
   // Only in native app - pure web access uses the host's already-setup CLIs.
   useEffect(() => {
     if (!isNativeApp()) return
@@ -1186,14 +1186,14 @@ function App() {
       (ghStatus?.installed && isGhAuthLoading)
     if (isLoading) return
 
-    const ghReady = !!ghStatus?.installed && !!ghAuth?.authenticated
-    const hasAiBackendReady = aiStatuses.some(
+const hasAiBackendReady = aiStatuses.some(
       (status, index) =>
         !!status?.installed && !!aiAuth[index]?.authenticated
     )
 
     // If setup is incomplete, onboarding owns the startup surface.
-    if (!ghReady || !hasAiBackendReady) return
+    // GitHub CLI is optional and must not block post-setup intros.
+    if (!hasAiBackendReady) return
 
     // Existing first-run tour has priority; show MCP intro on a later tick/reload
     // after that preference has been marked seen.

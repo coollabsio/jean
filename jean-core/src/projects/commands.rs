@@ -5527,6 +5527,7 @@ pub async fn open_pull_request(
     // (not only the project default) so stacked branches target the right base.
     let gh = resolve_gh_binary(&app);
     let result = git::open_pull_request(
+        &app,
         &worktree.path,
         title.as_deref(),
         body.as_deref(),

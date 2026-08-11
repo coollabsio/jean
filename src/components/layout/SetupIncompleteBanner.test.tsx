@@ -58,11 +58,6 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiCliAuth: () => authResult(),
 }))
 
-vi.mock('@/services/gh-cli', () => ({
-  useGhCliStatus: () => statusResult(true),
-  useGhCliAuth: () => authResult(true),
-}))
-
 describe('SetupIncompleteBanner', () => {
   beforeEach(() => {
     mocks.cursorInstalled = true
@@ -82,5 +77,8 @@ describe('SetupIncompleteBanner', () => {
     render(<SetupIncompleteBanner />)
 
     expect(screen.getByText(/setup incomplete/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/at least one AI backend/i)
+    ).toBeInTheDocument()
   })
 })

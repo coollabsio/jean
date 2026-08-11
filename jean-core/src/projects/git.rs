@@ -1939,16 +1939,18 @@ pub fn commit_changes(repo_path: &str, message: &str, stage_all: bool) -> Result
     Ok(hash)
 }
 
-/// Open a pull request using the GitHub CLI (gh)
+/// Open a pull request (GitHub) or merge request (GitLab) using the forge CLI.
 ///
 /// * `repo_path` - Path to the repository
-/// * `title` - Optional PR title (if None, gh will prompt or use default)
-/// * `body` - Optional PR body
-/// * `draft` - Whether to create as draft PR
+/// * `title` - Optional PR/MR title (if None, the forge CLI may prompt or fill)
+/// * `body` - Optional body
+/// * `draft` - Whether to create as draft (GitHub; ignored on GitLab if unsupported)
 /// * `base_branch` - Optional base branch (when set, passed as `gh pr create --base`)
+/// * `gh_binary` - GitHub CLI path (used when remote is GitHub)
 ///
-/// Returns the PR URL on success
+/// Returns the PR/MR URL on success
 pub fn open_pull_request(
+    app: &tauri::AppHandle,
     repo_path: &str,
     title: Option<&str>,
     body: Option<&str>,
@@ -1956,7 +1958,7 @@ pub fn open_pull_request(
     base_branch: Option<&str>,
     gh_binary: &std::path::Path,
 ) -> Result<String, String> {
-    log::trace!("Opening pull request from {repo_path}");
+    log::trace!("Opening pull/merge request from {repo_path}");
 
     // Push current branch to remote first
     log::trace!("Pushing current branch to remote...");
@@ -1973,6 +1975,39 @@ pub fn open_pull_request(
         }
     }
     log::trace!("Push completed");
+
+    if super::forge::detect_forge(repo_path) == super::forge::ForgeKind::GitLab {
+        let glab_path = crate::glab_cli::config::resolve_available_glab_binary(app)
+            .ok_or_else(|| "GitLab CLI not installed".to_string())?;
+
+        let mut args = vec!["mr", "create", "--yes", "--fill"];
+        if let Some(t) = title {
+            args.push("--title");
+            args.push(t);
+        }
+        if let Some(b) = body {
+            args.push("--description");
+            args.push(b);
+        }
+        if draft {
+            args.push("--draft");
+        }
+
+        let output = crate::platform::resolved_cli_command(&glab_path, Some(Path::new(repo_path)))
+            .args(&args)
+            .output()
+            .map_err(|e| format!("Failed to run glab mr create: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("already exists") {
+                return Err("A merge request for this branch already exists".to_string());
+            }
+            return Err(format!("Failed to create merge request: {stderr}"));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(stdout);
+    }
 
     // Build the gh pr create command
     let mut args = vec!["pr", "create", "--fill"];
@@ -2853,6 +2888,18 @@ fn handle_merge_failure(repo_path: &str, stdout: &[u8], stderr: &[u8]) -> MergeR
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_pull_request_accepts_app_handle_for_forge_cli_resolution() {
+        let _: fn(
+            &tauri::AppHandle,
+            &str,
+            Option<&str>,
+            Option<&str>,
+            bool,
+            &Path,
+        ) -> Result<String, String> = open_pull_request;
+    }
 
     // ========================================================================
     // remove_dir_all_with_retry tests

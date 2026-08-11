@@ -62,6 +62,8 @@ export interface SetupStateProps {
   onVersionChange: (version: string) => void
   onCheckManualVersion?: (version: string) => Promise<boolean>
   onInstall: () => void
+  /** Optional skip action (e.g. optional GitHub CLI during onboarding). */
+  onSkip?: () => void
 }
 
 type ManualVersionStatus = 'idle' | 'checking' | 'valid' | 'invalid' | 'error'
@@ -77,6 +79,7 @@ export function SetupState({
   onVersionChange,
   onCheckManualVersion,
   onInstall,
+  onSkip,
 }: SetupStateProps) {
   const [manualVersion, setManualVersion] = useState('')
   const [manualVersionStatus, setManualVersionStatus] =
@@ -295,15 +298,27 @@ export function SetupState({
         </p>
       </div>
 
-      <Button
-        onClick={onInstall}
-        disabled={!selectedVersion || isLoading || manualVersionNeedsCheck}
-        className="w-full"
-        size="lg"
-      >
-        <Download className="size-4" />
-        {currentVersion ? 'Install Selected Version' : `Install ${cliName}`}
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button
+          onClick={onInstall}
+          disabled={!selectedVersion || isLoading || manualVersionNeedsCheck}
+          className="w-full"
+          size="lg"
+        >
+          <Download className="size-4" />
+          {currentVersion ? 'Install Selected Version' : `Install ${cliName}`}
+        </Button>
+        {onSkip && (
+          <Button
+            onClick={onSkip}
+            variant="outline"
+            className="w-full"
+            size="lg"
+          >
+            Skip for Now
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -585,6 +600,8 @@ export interface CliPathSelectorProps {
   jeanInstalled?: boolean
   onSelectPath: () => void
   onSelectJean: () => void
+  /** Optional skip action (e.g. optional GitHub CLI during onboarding). */
+  onSkip?: () => void
 }
 
 export function CliPathSelector({
@@ -597,6 +614,7 @@ export function CliPathSelector({
   jeanInstalled,
   onSelectPath,
   onSelectJean,
+  onSkip,
 }: CliPathSelectorProps) {
   useEffect(() => {
     dbg(
@@ -681,6 +699,18 @@ export function CliPathSelector({
           </div>
         </button>
       </div>
+
+      {onSkip && (
+        <Button
+          onClick={onSkip}
+          variant="outline"
+          className="w-full"
+          size="lg"
+          disabled={isLoading}
+        >
+          Skip for Now
+        </Button>
+      )}
     </div>
   )
 }
