@@ -24,6 +24,7 @@ export function useWorktreeMenuActions({
   projectId,
 }: UseWorktreeMenuActionsProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showScheduleHermes, setShowScheduleHermes] = useState(false)
   const archiveWorktree = useArchiveWorktree()
   const closeBaseSession = useCloseBaseSession()
   const deleteWorktree = useDeleteWorktree()
@@ -106,10 +107,13 @@ export function useWorktreeMenuActions({
     // State
     showDeleteConfirm,
     setShowDeleteConfirm,
+    showScheduleHermes,
+    setShowScheduleHermes,
     isBase,
     hasMessages,
     runScripts,
     preferences,
+    worktree,
 
     // Handlers
     handleRun,

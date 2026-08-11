@@ -22,6 +22,7 @@ import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
+import { useAvailableHermesModels } from '@/services/hermes-cli'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { BackendLabel } from '@/components/ui/backend-label'
@@ -96,6 +97,9 @@ export function DesktopBackendModelPicker({
   const { data: availableAntigravityModels } = useAvailableAntigravityModels({
     enabled: installedBackends.includes('antigravity'),
   })
+  const { data: availableHermesModels } = useAvailableHermesModels({
+    enabled: installedBackends.includes('hermes'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -155,6 +159,15 @@ export function DesktopBackendModelPicker({
       })),
     [availableAntigravityModels]
   )
+  const hermesModelOptions = useMemo(
+    () =>
+      availableHermesModels?.map(model => ({
+        // list_hermes_models already returns Jean wire ids (hermes/{provider}/{model})
+        value: model.id,
+        label: model.label,
+      })),
+    [availableHermesModels]
+  )
 
   const {
     backendModelSections,
@@ -169,6 +182,7 @@ export function DesktopBackendModelPicker({
     commandcodeModelOptions,
     grokModelOptions,
     kimiModelOptions,
+    hermesModelOptions,
     customCliProfiles,
     installedBackends,
   })

@@ -426,6 +426,7 @@ pub fn start_run(
         grok_session_id: None,
         kimi_session_id: None,
         antigravity_session_id: None,
+        hermes_session_id: None,
         checkpoint_id: None,
     };
 
@@ -1586,6 +1587,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         }
     }
@@ -2110,6 +2112,7 @@ Move services between instances without downtime.
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         };
 

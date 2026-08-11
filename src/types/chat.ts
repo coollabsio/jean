@@ -61,6 +61,7 @@ export type Backend =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'hermes'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -244,6 +245,7 @@ export interface Session {
   kimi_session_id?: string
   /** Antigravity CLI conversation ID used for conversation continuity. */
   antigravity_session_id?: string
+  hermes_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

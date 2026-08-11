@@ -318,7 +318,12 @@ export function useGitOperations({
       const isCustomProvider = Boolean(provider && provider !== '__anthropic__')
       const customProfileName = isCustomProvider ? provider : undefined
       const usesEffortLevel =
-        backend === 'codex' || backend === 'opencode' || backend === 'pi'
+        backend === 'codex' ||
+        backend === 'opencode' ||
+        backend === 'pi' ||
+        backend === 'grok' ||
+        backend === 'kimi' ||
+        backend === 'hermes'
 
       sendMessage.mutate(
         {

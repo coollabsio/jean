@@ -111,6 +111,16 @@ const CLAUDE_EFFORT_LEVELS: ModelReasoningLevel[] = [
   },
 ]
 
+/** Hermes API reasoning_effort: none | minimal | low | medium | high | xhigh */
+const HERMES_EFFORT_LEVELS: ModelReasoningLevel[] = [
+  { value: 'off', label: 'Off', description: 'Disable reasoning' },
+  { value: 'minimal', label: 'Minimal', description: 'Minimal' },
+  { value: 'low', label: 'Low', description: 'Light' },
+  { value: 'medium', label: 'Medium', description: 'Moderate' },
+  { value: 'high', label: 'High', description: 'Deep' },
+  { value: 'xhigh', label: 'Extra high', description: 'Extra deep' },
+]
+
 function getBundledReasoning(
   backend: CatalogBackend,
   model: string
@@ -126,6 +136,15 @@ function getBundledReasoning(
       type: 'effort',
       default: isGpt56 ? 'medium' : 'high',
       levels,
+    }
+  }
+
+  // Hermes is always effort-based (model_options.reasoning_effort).
+  if (backend === 'hermes') {
+    return {
+      type: 'effort',
+      default: 'medium',
+      levels: HERMES_EFFORT_LEVELS,
     }
   }
 
@@ -499,5 +518,7 @@ export function getCatalogModelReasoning(
   if (remoteModel && 'reasoning' in remoteModel) {
     return remoteModel.reasoning ?? null
   }
-  return find(fallbackModelCatalog)?.reasoning ?? undefined
+  const bundled =
+    find(fallbackModelCatalog)?.reasoning ?? getBundledReasoning(backend, model)
+  return bundled
 }

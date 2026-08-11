@@ -286,6 +286,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "grok" => Backend::Grok,
         "kimi" => Backend::Kimi,
         "antigravity" => Backend::Antigravity,
+        "hermes" => Backend::Hermes,
         _ => Backend::Claude,
     };
 
@@ -309,6 +310,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "grok" => Backend::Grok,
                         "kimi" => Backend::Kimi,
                         "antigravity" => Backend::Antigravity,
+                        "hermes" => Backend::Hermes,
                         "claude" => Backend::Claude,
                         _ => resolved,
                     };
@@ -336,6 +338,7 @@ pub(crate) fn resolve_magic_prompt_backend(
             "grok" => return Backend::Grok,
             "kimi" => return Backend::Kimi,
             "antigravity" => return Backend::Antigravity,
+            "hermes" => return Backend::Hermes,
             "codex" => return Backend::Codex,
             "claude" => return Backend::Claude,
             _ => {}
@@ -355,10 +358,12 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Commandcode
     } else if crate::is_grok_model(model) {
         Backend::Grok
-    } else if model.starts_with("kimi/") {
+    } else if crate::is_kimi_model(model) {
         Backend::Kimi
     } else if model.starts_with("antigravity/") {
         Backend::Antigravity
+    } else if crate::is_hermes_model(model) {
+        Backend::Hermes
     } else if crate::is_codex_model(model) {
         Backend::Codex
     } else {
@@ -427,6 +432,7 @@ fn default_model_for_backend(
         Backend::Grok => &preferences.selected_grok_model,
         Backend::Kimi => &preferences.selected_kimi_model,
         Backend::Antigravity => &preferences.selected_antigravity_model,
+        Backend::Hermes => &preferences.selected_hermes_model,
         Backend::Claude => &preferences.selected_model,
     };
 
@@ -924,6 +930,7 @@ pub async fn create_session(
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
         Some("antigravity") => Backend::Antigravity,
+        Some("hermes") => Backend::Hermes,
         Some("claude") => Backend::Claude,
         _ => {
             // No explicit backend — check project default, then global preference
@@ -945,6 +952,8 @@ pub async fn create_session(
                     resolved = Backend::Kimi;
                 } else if prefs.default_backend == "antigravity" {
                     resolved = Backend::Antigravity;
+                } else if prefs.default_backend == "hermes" {
+                    resolved = Backend::Hermes;
                 }
             }
             // Check project-level override
@@ -2694,6 +2703,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
         Backend::Kimi => session.kimi_session_id = Some(sid.to_string()),
         Backend::Antigravity => session.antigravity_session_id = Some(sid.to_string()),
+        Backend::Hermes => session.hermes_session_id = Some(sid.to_string()),
     }
 }
 
@@ -2983,6 +2993,7 @@ pub async fn send_chat_message(
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
         Some("antigravity") => Backend::Antigravity,
+        Some("hermes") => Backend::Hermes,
         Some("claude") => Backend::Claude,
         _ => session_backend.clone(),
     };
@@ -3059,6 +3070,9 @@ pub async fn send_chat_message(
     let antigravity_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.antigravity_session_id.clone());
+    let hermes_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.hermes_session_id.clone());
     // Command Code has no native resume id; a non-empty sentinel marks that a
     // prior Command Code turn completed in this worktree, so the next run can
     // pass `-c` (cwd-scoped continue) to resume the conversation.
@@ -3210,6 +3224,11 @@ pub async fn send_chat_message(
     } else {
         antigravity_session_id
     };
+    let hermes_session_id = if clear_target_resume && effective_backend == Backend::Hermes {
+        None
+    } else {
+        hermes_session_id
+    };
 
     // Cursor CLI doesn't support thinking/effort levels
     let run_thinking_level = if matches!(
@@ -3346,6 +3365,7 @@ pub async fn send_chat_message(
                     Backend::Grok => {}
                     Backend::Kimi => {}
                     Backend::Antigravity => {}
+                    Backend::Hermes => {}
                 }
             }
         }
@@ -3399,6 +3419,7 @@ pub async fn send_chat_message(
     let thread_grok_session_id = grok_session_id.clone();
     let thread_kimi_session_id = kimi_session_id.clone();
     let thread_antigravity_session_id = antigravity_session_id.clone();
+    let thread_hermes_session_id = hermes_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
@@ -5009,6 +5030,73 @@ pub async fn send_chat_message(
                     Err(error) => Err(error),
                 }
             }
+            Backend::Hermes => {
+                let hermes_system = {
+                    let mut parts = Vec::new();
+                    if let Some(lang) = thread_ai_language.as_ref() {
+                        parts.push(format!("Respond to the user in {lang}."));
+                    }
+                    // Layer Jean global system prompt when present (prefs on disk).
+                    if let Ok(path) = crate::get_preferences_path(&thread_app) {
+                        if let Ok(contents) = std::fs::read_to_string(path) {
+                            if let Ok(prefs) =
+                                serde_json::from_str::<crate::AppPreferences>(&contents)
+                            {
+                                if let Some(prompt) = prefs
+                                    .magic_prompts
+                                    .global_system_prompt
+                                    .as_ref()
+                                    .map(|s| s.trim())
+                                    .filter(|s| !s.is_empty())
+                                {
+                                    parts.push(prompt.to_string());
+                                }
+                            }
+                        }
+                    }
+                    parts.push(format!("Working directory: {thread_working_dir}"));
+                    let joined = parts.join("\n\n");
+                    if joined.trim().is_empty() {
+                        None
+                    } else {
+                        Some(joined)
+                    }
+                };
+                match super::hermes::execute_hermes(super::hermes::HermesExecutionOptions {
+                    app: &thread_app,
+                    jean_session_id: &thread_session_id,
+                    worktree_id: &thread_worktree_id,
+                    worktree_path: &thread_working_dir,
+                    message: &thread_message,
+                    system_prompt: hermes_system.as_deref(),
+                    model: thread_model.as_deref(),
+                    hermes_session_id: thread_hermes_session_id.as_deref(),
+                    effort_level: thread_effort_level.as_ref(),
+                    thinking_level: thread_thinking_level.as_ref(),
+                }) {
+                    Ok(response) => {
+                        // When Hermes already emitted chat:error with no text,
+                        // mirror other backends' error_emitted path.
+                        let error_emitted =
+                            response.error.is_some() && response.content.trim().is_empty();
+                        Ok((
+                            0,
+                            UnifiedResponse {
+                                content: response.content,
+                                resume_id: response.session_id,
+                                tool_calls: response.tool_calls,
+                                content_blocks: response.content_blocks,
+                                cancelled: response.cancelled,
+                                waiting_for_plan: false,
+                                error_emitted,
+                                usage: response.usage,
+                                backend: Backend::Hermes,
+                            },
+                        ))
+                    }
+                    Err(error) => Err(error),
+                }
+            }
         };
 
         let _ = tx.send(result);
@@ -5377,6 +5465,9 @@ pub async fn send_chat_message(
                         Backend::Antigravity => {
                             session.antigravity_session_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::Hermes => {
+                            session.hermes_session_id = Some(resume_id_for_log.clone());
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -5531,6 +5622,9 @@ pub async fn send_chat_message(
                     Backend::Antigravity => {
                         session.antigravity_session_id = Some(resume_id_for_log.clone());
                     }
+                    Backend::Hermes => {
+                        session.hermes_session_id = Some(resume_id_for_log.clone());
+                    }
                 }
             }
 
@@ -5637,6 +5731,7 @@ pub async fn clear_session_history(
             session.grok_session_id = None;
             session.kimi_session_id = None;
             session.antigravity_session_id = None;
+            session.hermes_session_id = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_effort_level = selected_effort_level;
@@ -5757,6 +5852,7 @@ pub async fn set_session_backend(
                 "grok" => super::types::Backend::Grok,
                 "kimi" => super::types::Backend::Kimi,
                 "antigravity" => super::types::Backend::Antigravity,
+                "hermes" => super::types::Backend::Hermes,
                 _ => super::types::Backend::Claude,
             };
             log::trace!("Backend selection saved");
@@ -8021,6 +8117,7 @@ pub async fn get_session_debug_info(
         grok_session_id,
         kimi_session_id: session.and_then(|s| s.kimi_session_id.clone()),
         antigravity_session_id: session.and_then(|s| s.antigravity_session_id.clone()),
+        hermes_session_id: session.and_then(|s| s.hermes_session_id.clone()),
         claude_jsonl_file,
         run_log_files,
         total_usage,

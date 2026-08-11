@@ -30,6 +30,7 @@ import { useCodeRabbitCliSetup } from '@/services/coderabbit-cli'
 import { useCommandCodeCliSetup } from '@/services/commandcode-cli'
 import { useGrokCliSetup } from '@/services/grok-cli'
 import { useKimiCliSetup } from '@/services/kimi-cli'
+import { useHermesCliSetup } from '@/services/hermes-cli'
 import { logger } from '@/lib/logger'
 import {
   SetupState,
@@ -263,6 +264,25 @@ function CommandCodeCliReinstallModalContent({
   )
 }
 
+export function HermesCliReinstallModal({ open, onOpenChange }: ModalProps) {
+  if (!open) return null
+  return (
+    <HermesCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  )
+}
+
+function HermesCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+  const setup = useHermesCliSetup()
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType="hermes"
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
 /**
  * Shared UI component - receives setup as prop, no hooks here
  */
@@ -278,6 +298,7 @@ interface CliReinstallModalUIProps {
     | 'commandcode'
     | 'grok'
     | 'kimi'
+    | 'hermes'
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -305,7 +326,9 @@ function CliReinstallModalUI({
                   ? 'Grok CLI'
                   : cliType === 'kimi'
                     ? 'Kimi Code CLI'
-                    : 'GitHub CLI'
+                    : cliType === 'hermes'
+                      ? 'Hermes Agent'
+                      : 'GitHub CLI'
 
   // Store setup in ref for stable callback reference
   const setupRef = useRef(setup)
@@ -430,7 +453,9 @@ function CliReinstallModalUI({
                               ? 'Command Code AI sessions'
                               : cliType === 'grok'
                                 ? 'Grok AI sessions'
-                                : 'GitHub integration'
+                                : cliType === 'hermes'
+                                  ? 'Hermes chat sessions and gateway cron jobs'
+                                  : 'GitHub integration'
                   }.`}
           </DialogDescription>
         </DialogHeader>

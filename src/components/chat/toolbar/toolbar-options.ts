@@ -109,6 +109,19 @@ export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'antigravity/gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
 ]
 
+export const HERMES_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'hermes-agent', label: 'Hermes Agent (gateway default)' },
+]
+
+/** Jean wire ids for Hermes: `hermes/{provider}/{model}`. */
+export function isHermesModelId(model: string): boolean {
+  return (
+    model === 'hermes-agent' ||
+    model.startsWith('hermes/') ||
+    model.startsWith('hermes:')
+  )
+}
+
 export const KIMI_EFFORT_LEVEL_OPTIONS: {
   value: EffortLevel
   label: string
@@ -201,3 +214,21 @@ export function withAdaptiveEffortOption<
 export const GROK_EFFORT_LEVEL_OPTIONS = EFFORT_LEVEL_OPTIONS.filter(
   option => option.value !== 'ultracode'
 )
+
+/**
+ * Hermes API `model_options.reasoning_effort` values:
+ * none | minimal | low | medium | high | xhigh
+ * (see Hermes api_server `_REASONING_EFFORTS`).
+ */
+export const HERMES_EFFORT_LEVEL_OPTIONS: {
+  value: EffortLevel
+  label: string
+  description: string
+}[] = [
+  { value: 'off', label: 'Off', description: 'Disable reasoning' },
+  { value: 'minimal', label: 'Minimal', description: 'Minimal' },
+  { value: 'low', label: 'Low', description: 'Light' },
+  { value: 'medium', label: 'Medium', description: 'Moderate' },
+  { value: 'high', label: 'High', description: 'Deep' },
+  { value: 'xhigh', label: 'xHigh', description: 'Extra high' },
+]

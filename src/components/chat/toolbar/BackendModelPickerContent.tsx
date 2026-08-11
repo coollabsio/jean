@@ -33,6 +33,7 @@ import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
+import { useAvailableHermesModels } from '@/services/hermes-cli'
 import {
   getCatalogModelFastInfo,
   useModelCatalog,
@@ -173,6 +174,9 @@ export function BackendModelPickerContent({
   const { data: availableAntigravityModels } = useAvailableAntigravityModels({
     enabled: installedBackends.includes('antigravity'),
   })
+  const { data: availableHermesModels } = useAvailableHermesModels({
+    enabled: installedBackends.includes('hermes'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -232,6 +236,14 @@ export function BackendModelPickerContent({
       })),
     [availableAntigravityModels]
   )
+  const hermesModelOptions = useMemo(
+    () =>
+      availableHermesModels?.map(model => ({
+        value: model.id,
+        label: model.label,
+      })),
+    [availableHermesModels]
+  )
 
   const { backendModelSections: baseBackendModelSections } =
     useToolbarDerivedState({
@@ -244,6 +256,7 @@ export function BackendModelPickerContent({
       commandcodeModelOptions,
       grokModelOptions,
       kimiModelOptions,
+      hermesModelOptions,
       customCliProfiles,
       installedBackends,
     })

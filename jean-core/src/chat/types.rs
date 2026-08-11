@@ -105,6 +105,7 @@ pub enum Backend {
     Grok,
     Kimi,
     Antigravity,
+    Hermes,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -127,6 +128,7 @@ impl<'de> Deserialize<'de> for Backend {
             "grok" => Backend::Grok,
             "kimi" => Backend::Kimi,
             "antigravity" | "gemini" => Backend::Antigravity,
+            "hermes" => Backend::Hermes,
             "claude" | "" => Backend::Claude,
             other => {
                 log::warn!("Unknown chat backend '{other}', falling back to claude");
@@ -163,6 +165,12 @@ mod backend_tests {
     fn legacy_gemini_backend_migrates_to_antigravity() {
         let backend: Backend = serde_json::from_str("\"gemini\"").unwrap();
         assert_eq!(backend, Backend::Antigravity);
+    }
+
+    #[test]
+    fn backend_deserializes_hermes() {
+        let backend: Backend = serde_json::from_str("\"hermes\"").unwrap();
+        assert_eq!(backend, Backend::Hermes);
     }
 }
 
@@ -777,6 +785,9 @@ pub struct Session {
         alias = "gemini_session_id"
     )]
     pub antigravity_session_id: Option<String>,
+    /// Hermes API resume / conversation id
+    #[serde(default)]
+    pub hermes_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -989,6 +1000,7 @@ impl Session {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -1210,6 +1222,7 @@ impl SessionMetadata {
             grok_session_id: self.grok_session_id.clone(),
             kimi_session_id: self.kimi_session_id.clone(),
             antigravity_session_id: self.antigravity_session_id.clone(),
+            hermes_session_id: self.hermes_session_id.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
@@ -1277,6 +1290,7 @@ impl SessionMetadata {
         self.grok_session_id = session.grok_session_id.clone();
         self.kimi_session_id = session.kimi_session_id.clone();
         self.antigravity_session_id = session.antigravity_session_id.clone();
+        self.hermes_session_id = session.hermes_session_id.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
@@ -1562,6 +1576,9 @@ pub struct RunEntry {
         alias = "gemini_session_id"
     )]
     pub antigravity_session_id: Option<String>,
+    /// Hermes API resume / conversation id
+    #[serde(default)]
+    pub hermes_session_id: Option<String>,
     /// AI change checkpoint id captured before this run (working-tree snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_id: Option<String>,
@@ -1649,6 +1666,9 @@ pub struct SessionMetadata {
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antigravity_session_id: Option<String>,
+    /// Hermes API resume / conversation id
+    #[serde(default)]
+    pub hermes_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
@@ -1833,6 +1853,9 @@ pub struct SessionDebugInfo {
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antigravity_session_id: Option<String>,
+    /// Hermes API resume / conversation id
+    #[serde(default)]
+    pub hermes_session_id: Option<String>,
     /// Path to Claude CLI's JSONL file (in ~/.claude/projects/)
     pub claude_jsonl_file: Option<String>,
     /// List of JSONL run log files for this session
@@ -1865,6 +1888,7 @@ impl SessionMetadata {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -2450,6 +2474,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2494,6 +2519,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2528,6 +2554,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         };
 
@@ -2583,6 +2610,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
@@ -2610,6 +2638,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2655,6 +2684,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2686,6 +2716,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 

@@ -48,6 +48,7 @@ mod commandcode_cli;
 mod cursor_cli;
 mod gh_cli;
 mod grok_cli;
+mod hermes_cli;
 pub mod http_server;
 pub mod jean_mcp_config;
 pub mod jean_mcp_core;
@@ -399,6 +400,16 @@ pub struct AppPreferences {
     pub kimi_cli_source: String, // Kimi Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source", alias = "gemini_cli_source")]
     pub antigravity_cli_source: String, // Antigravity CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default = "default_hermes_api_base_url")]
+    pub hermes_api_base_url: String, // Hermes API server base URL (no trailing /v1)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hermes_api_key: Option<String>, // Bearer token for Hermes API server
+    #[serde(default)]
+    pub hermes_profile: String, // Hermes profile name (empty = default)
+    #[serde(default = "default_cli_source")]
+    pub hermes_cli_source: String, // Hermes CLI source: "jean" | "path"
+    #[serde(default = "default_hermes_model")]
+    pub selected_hermes_model: String, // Default Hermes model alias
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
@@ -804,6 +815,14 @@ fn default_kimi_model() -> String {
 
 fn default_antigravity_model() -> String {
     "antigravity/auto".to_string()
+}
+
+fn default_hermes_api_base_url() -> String {
+    crate::hermes_cli::DEFAULT_API_BASE_URL.to_string()
+}
+
+fn default_hermes_model() -> String {
+    crate::hermes_cli::DEFAULT_MODEL.to_string()
 }
 
 fn default_grok_cli_source() -> String {
@@ -2216,6 +2235,11 @@ pub fn is_grok_model(model: &str) -> bool {
     model.starts_with("grok/")
 }
 
+pub fn is_hermes_model(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    m == "hermes-agent" || m.starts_with("hermes") || m.starts_with("hermes/")
+}
+
 pub fn is_kimi_model(model: &str) -> bool {
     model.starts_with("kimi/")
 }
@@ -2411,6 +2435,7 @@ fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
         "grok" => is_grok_model(model),
         "kimi" => is_kimi_model(model),
         "antigravity" => is_antigravity_model(model),
+        "hermes" => is_hermes_model(model),
         "claude" => {
             !is_codex_model(model)
                 && !is_opencode_model(model)
@@ -2419,6 +2444,7 @@ fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
                 && !is_grok_model(model)
                 && !is_kimi_model(model)
                 && !is_antigravity_model(model)
+                && !is_hermes_model(model)
                 && !model.starts_with("commandcode/")
         }
         _ => true,
@@ -2435,6 +2461,7 @@ fn selected_model_for_backend(preferences: &AppPreferences, backend: &str) -> St
         "grok" => preferences.selected_grok_model.clone(),
         "kimi" => preferences.selected_kimi_model.clone(),
         "antigravity" => preferences.selected_antigravity_model.clone(),
+        "hermes" => preferences.selected_hermes_model.clone(),
         _ => preferences.selected_model.clone(),
     }
 }
@@ -2659,6 +2686,11 @@ impl Default for AppPreferences {
             grok_cli_source: default_grok_cli_source(),
             kimi_cli_source: default_cli_source(),
             antigravity_cli_source: default_cli_source(),
+            hermes_api_base_url: default_hermes_api_base_url(),
+            hermes_api_key: None,
+            hermes_profile: String::new(),
+            hermes_cli_source: default_cli_source(),
+            selected_hermes_model: default_hermes_model(),
             gh_cli_source: default_cli_source(),
             wsl_mode_chosen: false,
             wsl_enabled: false,

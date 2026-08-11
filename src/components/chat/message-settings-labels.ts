@@ -7,6 +7,8 @@ import {
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
+  HERMES_MODEL_OPTIONS,
+  isHermesModelId,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatCommandCodeModelLabel,
@@ -42,6 +44,7 @@ const ALL_MODEL_OPTIONS = [
   ...GROK_MODEL_OPTIONS,
   ...KIMI_MODEL_OPTIONS,
   ...ANTIGRAVITY_MODEL_OPTIONS,
+  ...HERMES_MODEL_OPTIONS,
 ]
 
 export function getMessageModelLabel(model: string): string {
@@ -95,6 +98,7 @@ export function getMessagePromptModelLabel(model: string): string {
   if (isKimiModel(model)) return `Kimi Code · ${getMessageModelLabel(model)}`
   if (isAntigravityCliModel(model))
     return `Antigravity CLI · ${getMessageModelLabel(model)}`
+  if (isHermesModelId(model)) return `Hermes · ${getMessageModelLabel(model)}`
   if (isClaudeMessageModel(model))
     return `Claude · ${getMessageModelLabel(model)}`
   return getMessageModelLabel(model)
@@ -115,6 +119,7 @@ export function inferBackendFromModel(
   if (isGrokModel(model)) return 'grok'
   if (isKimiModel(model)) return 'kimi'
   if (isAntigravityCliModel(model)) return 'antigravity'
+  if (isHermesModelId(model)) return 'hermes'
   if (isCodexModel(model)) return 'codex'
   if (isClaudeMessageModel(model)) return 'claude'
   // Legacy short aliases + bare Claude ids

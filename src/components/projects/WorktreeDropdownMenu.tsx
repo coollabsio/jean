@@ -2,6 +2,7 @@ import {
   Activity,
   Archive,
   AlertCircle,
+  CalendarClock,
   CircleDot,
   Code,
   FolderOpen,
@@ -55,6 +56,7 @@ import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
 import type { GhAuthStatus } from '@/types/gh-cli'
+import { ScheduleHermesJobDialog } from '@/components/hermes/ScheduleHermesJobDialog'
 import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
 interface WorktreeDropdownMenuProps {
@@ -86,9 +88,12 @@ export function WorktreeDropdownMenu({
   const {
     showDeleteConfirm,
     setShowDeleteConfirm,
+    showScheduleHermes,
+    setShowScheduleHermes,
     isBase,
     runScripts,
     preferences,
+    worktree: menuWorktree,
     handleRun,
     handleRunCommand,
     handleOpenInFinder,
@@ -324,6 +329,13 @@ export function WorktreeDropdownMenu({
 
           <DropdownMenuSeparator />
 
+          <DropdownMenuItem onClick={() => setShowScheduleHermes(true)}>
+            <CalendarClock className="mr-2 h-4 w-4" />
+            Schedule Hermes job
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
           <DropdownMenuItem onClick={handleArchiveOrClose}>
             {isBase ? (
               <>
@@ -346,6 +358,12 @@ export function WorktreeDropdownMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ScheduleHermesJobDialog
+        open={showScheduleHermes}
+        onOpenChange={setShowScheduleHermes}
+        worktree={menuWorktree}
+      />
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent

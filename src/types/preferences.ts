@@ -1309,6 +1309,11 @@ export interface AppPreferences {
   grok_cli_source: 'jean' | 'path' // Grok CLI source: 'jean' (managed) or 'path' (system PATH)
   kimi_cli_source?: 'jean' | 'path' // Kimi Code CLI source: 'jean' (managed) or 'path' (system PATH)
   antigravity_cli_source?: 'jean' | 'path' // Antigravity CLI source: 'jean' (managed) or 'path' (system PATH)
+  hermes_api_base_url?: string // Hermes API server base URL (no trailing /v1)
+  hermes_api_key?: string | null // Bearer token for Hermes API server
+  hermes_profile?: string // Hermes profile name (empty = default)
+  hermes_cli_source?: 'jean' | 'path' // Hermes CLI source
+  selected_hermes_model?: string // Default Hermes model alias
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
   commandcode_cli_source?: 'jean' | 'path' // Command Code CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1950,6 +1955,7 @@ export type CliBackend =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'hermes'
 
 export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'claude', label: 'Claude' },
@@ -1961,6 +1967,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'grok', label: 'Grok (Beta)' },
   { value: 'kimi', label: 'Kimi Code (Beta)' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
+  { value: 'hermes', label: 'Hermes Agent (Beta)' },
 ]
 
 export type TerminalApp =
@@ -2435,6 +2442,11 @@ export const defaultPreferences: AppPreferences = {
   grok_cli_source: 'jean', // Default: Jean-managed
   kimi_cli_source: 'jean', // Default: Jean-managed
   antigravity_cli_source: 'jean', // Default: Jean-managed
+  hermes_api_base_url: 'http://127.0.0.1:8642',
+  hermes_api_key: null,
+  hermes_profile: '',
+  hermes_cli_source: 'jean',
+  selected_hermes_model: 'hermes-agent',
   gh_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed
   commandcode_cli_source: 'jean', // Default: Jean-managed

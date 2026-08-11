@@ -2618,6 +2618,131 @@ pub async fn dispatch_command(
             crate::antigravity_cli::login_antigravity_cli_device(app.clone()).await?;
             Ok(Value::Null)
         }
+        "check_hermes_cli_installed" => {
+            to_value(crate::hermes_cli::check_hermes_cli_installed(app.clone()).await?)
+        }
+        "detect_hermes_in_path" => {
+            to_value(crate::hermes_cli::detect_hermes_in_path(app.clone()).await?)
+        }
+        "check_hermes_cli_auth" => {
+            to_value(crate::hermes_cli::check_hermes_cli_auth(app.clone()).await?)
+        }
+        "list_hermes_models" => {
+            let refresh: Option<bool> = from_field_opt(&args, "refresh")?;
+            to_value(crate::hermes_cli::list_hermes_models(app.clone(), refresh).await?)
+        }
+        "check_hermes_status" => {
+            to_value(crate::hermes_cli::check_hermes_status(app.clone()).await?)
+        }
+        "get_hermes_install_command" => {
+            to_value(crate::hermes_cli::get_hermes_install_command(app.clone()).await?)
+        }
+        "install_hermes_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::hermes_cli::install_hermes_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_hermes_cli" => {
+            crate::hermes_cli::uninstall_hermes_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_hermes_cli" => {
+            crate::hermes_cli::update_hermes_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "start_hermes_gateway" => {
+            to_value(crate::hermes_cli::start_hermes_gateway(app.clone()).await?)
+        }
+        "stop_hermes_gateway" => {
+            crate::hermes_cli::stop_hermes_gateway(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "ensure_hermes_gateway" => {
+            to_value(crate::hermes_cli::ensure_hermes_gateway(app.clone()).await?)
+        }
+        "list_hermes_jobs" => {
+            let include_disabled: Option<bool> =
+                field_opt(&args, "includeDisabled", "include_disabled")?;
+            let project_id: Option<String> = field_opt(&args, "projectId", "project_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            to_value(
+                crate::hermes_cli::list_hermes_jobs(
+                    app.clone(),
+                    include_disabled,
+                    project_id,
+                    worktree_id,
+                )
+                .await?,
+            )
+        }
+        "get_hermes_job" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            to_value(crate::hermes_cli::get_hermes_job(app.clone(), job_id).await?)
+        }
+        "create_hermes_job" => {
+            // Accept either { request: {...} } or a flat create-job body.
+            let request: crate::hermes_cli::HermesCreateJobRequest =
+                if let Some(Value::Object(_)) = args.get("request") {
+                    from_field(&args, "request")?
+                } else {
+                    serde_json::from_value(args.clone())
+                        .map_err(|e| format!("Invalid create_hermes_job args: {e}"))?
+                };
+            to_value(crate::hermes_cli::create_hermes_job(app.clone(), request).await?)
+        }
+        "update_hermes_job" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            let request: crate::hermes_cli::HermesUpdateJobRequest = from_field(&args, "request")?;
+            to_value(crate::hermes_cli::update_hermes_job(app.clone(), job_id, request).await?)
+        }
+        "delete_hermes_job" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            crate::hermes_cli::delete_hermes_job(app.clone(), job_id).await?;
+            Ok(Value::Null)
+        }
+        "pause_hermes_job" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            to_value(crate::hermes_cli::pause_hermes_job(app.clone(), job_id).await?)
+        }
+        "resume_hermes_job" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            to_value(crate::hermes_cli::resume_hermes_job(app.clone(), job_id).await?)
+        }
+        "run_hermes_job" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            to_value(crate::hermes_cli::run_hermes_job(app.clone(), job_id).await?)
+        }
+        "create_hermes_job_from_worktree" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let name: String = from_field_opt(&args, "name")?.unwrap_or_default();
+            let schedule: String = from_field(&args, "schedule")?;
+            let prompt: String = from_field(&args, "prompt")?;
+            let deliver: Option<String> = from_field_opt(&args, "deliver")?;
+            let skills: Option<Vec<String>> = from_field_opt(&args, "skills")?;
+            let model: Option<String> = from_field_opt(&args, "model")?;
+            let provider: Option<String> = from_field_opt(&args, "provider")?;
+            to_value(
+                crate::hermes_cli::create_hermes_job_from_worktree(
+                    app.clone(),
+                    worktree_id,
+                    name,
+                    schedule,
+                    prompt,
+                    deliver,
+                    skills,
+                    model,
+                    provider,
+                )
+                .await?,
+            )
+        }
+        "get_hermes_job_output" => {
+            let job_id: String = field(&args, "jobId", "job_id")?;
+            to_value(crate::hermes_cli::get_hermes_job_output(app.clone(), job_id).await?)
+        }
+        "list_hermes_job_links" => {
+            to_value(crate::hermes_cli::list_hermes_job_links(app.clone()).await?)
+        }
         "check_pi_cli_installed" => {
             let result = crate::pi_cli::check_pi_cli_installed(app.clone()).await?;
             to_value(result)

@@ -113,6 +113,11 @@ export function loginArgsForBackend(
     case 'antigravity':
       // Antigravity authentication is selected from its interactive start screen.
       return []
+    case 'hermes':
+      // Hermes owns provider auth (gateway/CLI). `hermes model` adds providers,
+      // OAuth, and imports Claude Code / Codex disk credentials when present.
+      // Jean does not copy Jean-backend tokens into Hermes.
+      return ['model']
     default:
       return ['login']
   }
@@ -130,6 +135,7 @@ const STATUS_COMMANDS: Partial<
   grok: { command: 'check_grok_cli_installed' },
   kimi: { command: 'check_kimi_cli_installed' },
   antigravity: { command: 'check_antigravity_cli_installed' },
+  hermes: { command: 'check_hermes_cli_installed' },
 }
 
 /**
@@ -173,7 +179,8 @@ export async function openBackendLoginModal(
       backend === 'commandcode' ||
       backend === 'grok' ||
       backend === 'kimi' ||
-      backend === 'antigravity'
+      backend === 'antigravity' ||
+      backend === 'hermes'
         ? backend
         : null
     if (!loginType) {

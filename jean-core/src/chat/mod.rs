@@ -10,6 +10,7 @@ pub(crate) mod cursor;
 pub mod detached;
 pub(crate) mod grok;
 pub(crate) mod handoff;
+pub(crate) mod hermes;
 pub mod jean_mcp;
 pub(crate) mod kimi;
 mod naming;

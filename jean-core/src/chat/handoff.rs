@@ -31,6 +31,7 @@ fn backend_label(backend: &Backend) -> &'static str {
         Backend::Grok => "grok",
         Backend::Kimi => "kimi",
         Backend::Antigravity => "antigravity",
+        Backend::Hermes => "hermes",
     }
 }
 
@@ -96,6 +97,14 @@ pub(crate) fn latest_completed_backend(metadata: &SessionMetadata) -> Option<Bac
                     .is_some_and(crate::is_antigravity_model)
             {
                 return Some(Backend::Antigravity);
+            }
+            if run.hermes_session_id.is_some()
+                || run
+                    .model
+                    .as_deref()
+                    .is_some_and(|m| m.starts_with("hermes") || m == "hermes-agent")
+            {
+                return Some(Backend::Hermes);
             }
             if run.claude_session_id.is_some() {
                 return Some(Backend::Claude);
@@ -489,6 +498,7 @@ mod tests {
                 grok_session_id: None,
                 kimi_session_id: None,
                 antigravity_session_id: None,
+                hermes_session_id: None,
                 checkpoint_id: None,
             },
             RunEntry {
@@ -516,6 +526,7 @@ mod tests {
                 grok_session_id: None,
                 kimi_session_id: None,
                 antigravity_session_id: None,
+                hermes_session_id: None,
                 checkpoint_id: None,
             },
         ];
@@ -590,6 +601,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 
@@ -651,6 +663,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
@@ -678,6 +691,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            hermes_session_id: None,
             checkpoint_id: None,
         });
 

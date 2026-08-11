@@ -10,6 +10,7 @@ import {
   GROK_MODEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
   ANTIGRAVITY_MODEL_OPTIONS,
+  HERMES_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -32,6 +33,7 @@ interface UseToolbarDerivedStateArgs {
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
   kimiModelOptions?: { value: string; label: string }[]
+  hermesModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
   installedBackends?: CliBackend[]
   availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
@@ -54,6 +56,8 @@ const DEFAULT_INSTALLED_BACKENDS: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'antigravity',
+  'hermes',
 ]
 
 function mergeCatalogOptions(
@@ -85,6 +89,7 @@ export function buildBackendModelSections({
   commandcodeModelOptions,
   grokModelOptions,
   kimiModelOptions,
+  hermesModelOptions,
 }: {
   installedBackends: CliBackend[]
   claudeModelOptions: { value: string; label: string }[]
@@ -95,6 +100,7 @@ export function buildBackendModelSections({
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
   kimiModelOptions?: { value: string; label: string }[]
+  hermesModelOptions?: { value: string; label: string }[]
 }): BackendModelSection[] {
   const sections: BackendModelSection[] = []
 
@@ -141,6 +147,12 @@ export function buildBackendModelSections({
         label: 'Antigravity CLI',
         options: ANTIGRAVITY_MODEL_OPTIONS,
       })
+    } else if (backend === 'hermes') {
+      sections.push({
+        backend,
+        label: 'Hermes',
+        options: hermesModelOptions ?? HERMES_MODEL_OPTIONS,
+      })
     }
   }
 
@@ -158,6 +170,7 @@ export function useToolbarDerivedState({
   customCliProfiles,
   grokModelOptions,
   kimiModelOptions,
+  hermesModelOptions,
   installedBackends = DEFAULT_INSTALLED_BACKENDS,
   availableMcpServers = EMPTY_MCP_SERVERS,
   enabledMcpServers = EMPTY_ENABLED_MCP_SERVERS,
@@ -169,6 +182,7 @@ export function useToolbarDerivedState({
   const isCommandCode = selectedBackend === 'commandcode'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
+  const isHermes = selectedBackend === 'hermes'
 
   const { data: modelCatalog } = useModelCatalog()
 
@@ -252,6 +266,7 @@ export function useToolbarDerivedState({
     'kimi',
     kimiModelOptions ?? KIMI_MODEL_OPTIONS
   )
+  const resolvedHermesModelOptions = hermesModelOptions ?? HERMES_MODEL_OPTIONS
 
   const backendModelSections = useMemo(
     () =>
@@ -265,6 +280,7 @@ export function useToolbarDerivedState({
         commandcodeModelOptions: resolvedCommandCodeModelOptions,
         grokModelOptions: resolvedGrokModelOptions,
         kimiModelOptions: resolvedKimiModelOptions,
+        hermesModelOptions: resolvedHermesModelOptions,
       }),
     [
       claudeModelOptions,
@@ -274,6 +290,7 @@ export function useToolbarDerivedState({
       resolvedCommandCodeModelOptions,
       resolvedGrokModelOptions,
       resolvedKimiModelOptions,
+      resolvedHermesModelOptions,
       resolvedOpencodeModelOptions,
       resolvedPiModelOptions,
     ]
@@ -287,6 +304,7 @@ export function useToolbarDerivedState({
     if (isCommandCode) return resolvedCommandCodeModelOptions
     if (isGrok) return resolvedGrokModelOptions
     if (isKimi) return resolvedKimiModelOptions
+    if (isHermes) return resolvedHermesModelOptions
     return claudeModelOptions
   }, [
     claudeModelOptions,
@@ -297,11 +315,13 @@ export function useToolbarDerivedState({
     isCommandCode,
     isGrok,
     isKimi,
+    isHermes,
     isOpencode,
     resolvedCommandCodeModelOptions,
     resolvedCursorModelOptions,
     resolvedGrokModelOptions,
     resolvedKimiModelOptions,
+    resolvedHermesModelOptions,
     resolvedOpencodeModelOptions,
     resolvedPiModelOptions,
   ])
@@ -348,6 +368,8 @@ export function useToolbarDerivedState({
     kimiModelOptions: resolvedKimiModelOptions,
     isGrok,
     isKimi,
+    isHermes,
+    hermesModelOptions: resolvedHermesModelOptions,
     selectedModelLabel,
     selectedModelReasoning,
   }

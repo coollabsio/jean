@@ -13,7 +13,11 @@ import {
 } from '@/services/commandcode-cli'
 import { useGrokCliStatus, useGrokCliAuth } from '@/services/grok-cli'
 import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
-import { useAntigravityCliStatus, useAntigravityCliAuth } from '@/services/antigravity-cli'
+import {
+  useAntigravityCliStatus,
+  useAntigravityCliAuth,
+} from '@/services/antigravity-cli'
+import { useHermesCliStatus, useHermesCliAuth } from '@/services/hermes-cli'
 import type { CliBackend } from '@/types/preferences'
 
 /**
@@ -51,6 +55,7 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
   const antigravity = useAntigravityCliStatus({ enabled })
+  const hermes = useHermesCliStatus({ enabled })
 
   const installedBackends = useMemo(() => {
     const backends: CliBackend[] = []
@@ -63,6 +68,9 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     if (grok.data?.installed) backends.push('grok')
     if (kimi.data?.installed) backends.push('kimi')
     if (antigravity.data?.installed) backends.push('antigravity')
+    // Hermes: installed CLI is enough to show in the picker; gateway is started
+    // on demand (or via install → service) so cron can run without Jean.
+    if (hermes.data?.installed) backends.push('hermes')
     return backends
   }, [
     claude.data?.installed,
@@ -74,6 +82,7 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     grok.data?.installed,
     kimi.data?.installed,
     antigravity.data?.installed,
+    hermes.data?.installed,
   ])
 
   const isLoading =
@@ -85,7 +94,8 @@ export function useInstalledBackends(options?: { enabled?: boolean }) {
     commandcode.isLoading ||
     grok.isLoading ||
     kimi.isLoading ||
-    antigravity.isLoading
+    antigravity.isLoading ||
+    hermes.isLoading
 
   return {
     installedBackends,
@@ -108,6 +118,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
   const antigravity = useAntigravityCliStatus({ enabled })
+  const hermes = useHermesCliStatus({ enabled })
 
   const claudeAuth = useClaudeCliAuth({
     enabled: enabled && !!claude.data?.installed,
@@ -136,6 +147,9 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const antigravityAuth = useAntigravityCliAuth({
     enabled: enabled && !!antigravity.data?.installed,
   })
+  const hermesAuth = useHermesCliAuth({
+    enabled: enabled && !!hermes.data?.installed,
+  })
 
   const authByBackend = useMemo(() => {
     const map: Partial<Record<CliBackend, boolean | undefined>> = {
@@ -158,6 +172,9 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
       antigravity: antigravity.data?.installed
         ? antigravityAuth.data?.authenticated
         : undefined,
+      hermes: hermes.data?.installed
+        ? hermesAuth.data?.authenticated
+        : undefined,
     }
     return map
   }, [
@@ -179,6 +196,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     kimiAuth.data?.authenticated,
     antigravity.data?.installed,
     antigravityAuth.data?.authenticated,
+    hermes.data?.installed,
+    hermesAuth.data?.authenticated,
   ])
 
   const isStatusLoading =
@@ -190,7 +209,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     commandcode.isLoading ||
     grok.isLoading ||
     kimi.isLoading ||
-    antigravity.isLoading
+    antigravity.isLoading ||
+    hermes.isLoading
 
   const isAuthLoading =
     (!!claude.data?.installed && claudeAuth.isLoading) ||
@@ -201,7 +221,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     (!!commandcode.data?.installed && commandcodeAuth.isLoading) ||
     (!!grok.data?.installed && grokAuth.isLoading) ||
     (!!kimi.data?.installed && kimiAuth.isLoading) ||
-    (!!antigravity.data?.installed && antigravityAuth.isLoading)
+    (!!antigravity.data?.installed && antigravityAuth.isLoading) ||
+    (!!hermes.data?.installed && hermesAuth.isLoading)
 
   return {
     authByBackend,

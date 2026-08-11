@@ -443,6 +443,7 @@ export const BACKEND_LABELS: Record<CliBackend, string> = {
   grok: 'Grok',
   kimi: 'Kimi Code',
   antigravity: 'Antigravity CLI',
+  hermes: 'Hermes',
 }
 
 /** Group servers by their backend field */

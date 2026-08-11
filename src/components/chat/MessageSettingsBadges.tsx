@@ -2,6 +2,7 @@ import { memo } from 'react'
 import {
   ADAPTIVE_EFFORT_OPTION,
   EFFORT_LEVEL_OPTIONS,
+  HERMES_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -41,14 +42,22 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
     isGrokModel(model) ||
     isKimiModel(model) ||
     isPiModel(model) ||
-    model.startsWith('pi/')
+    model.startsWith('pi/') ||
+    model === 'hermes-agent' ||
+    model.startsWith('hermes/') ||
+    model.startsWith('hermes:')
   const executionModeLabel = executionMode
     ? executionMode.charAt(0).toUpperCase() + executionMode.slice(1)
     : null
 
-  const effortOptions = model.startsWith('pi/')
-    ? PI_EFFORT_LEVEL_OPTIONS
-    : EFFORT_LEVEL_OPTIONS
+  const effortOptions =
+    model.startsWith('pi/') || model.startsWith('pi:')
+      ? PI_EFFORT_LEVEL_OPTIONS
+      : model === 'hermes-agent' ||
+          model.startsWith('hermes/') ||
+          model.startsWith('hermes:')
+        ? HERMES_EFFORT_LEVEL_OPTIONS
+        : EFFORT_LEVEL_OPTIONS
 
   const effortLabel =
     effortLevel === 'adaptive'

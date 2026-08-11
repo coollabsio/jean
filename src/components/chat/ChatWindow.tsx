@@ -1973,7 +1973,11 @@ export function ChatWindow({
       const modeThinking = modeThinkingRef.current
       const modeEffort = modeEffortRef.current
       const modeUsesEffort =
-        effectiveBackend === 'codex' || effectiveBackend === 'pi'
+        effectiveBackend === 'codex' ||
+        effectiveBackend === 'pi' ||
+        effectiveBackend === 'hermes' ||
+        effectiveBackend === 'grok' ||
+        effectiveBackend === 'kimi'
       const thinkingLevel: ThinkingLevel = modeUsesEffort
         ? 'off'
         : ((modeThinking ?? selectedThinkingLevelRef.current) as ThinkingLevel)

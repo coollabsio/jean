@@ -14,6 +14,7 @@ export type PreferencePane =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'hermes'
   | 'github'
   | 'coderabbit'
   | 'appearance'
@@ -51,6 +52,7 @@ export type CliUpdateModalType =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'hermes'
   | null
 
 export interface PendingCliUpdate {
@@ -81,6 +83,7 @@ export type CliLoginModalType =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'hermes'
   | 'coderabbit'
   | null
 

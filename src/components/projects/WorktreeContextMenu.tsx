@@ -1,5 +1,6 @@
 import {
   Archive,
+  CalendarClock,
   Code,
   FolderOpen,
   Play,
@@ -30,6 +31,7 @@ import {
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { canOpenInEditor, canOpenNativeApps } from '@/lib/environment'
 import { getFileManagerName } from '@/lib/platform'
+import { ScheduleHermesJobDialog } from '@/components/hermes/ScheduleHermesJobDialog'
 import type { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
 interface WorktreeContextMenuProps {
@@ -46,9 +48,12 @@ export function WorktreeContextMenu({
   const {
     showDeleteConfirm,
     setShowDeleteConfirm,
+    showScheduleHermes,
+    setShowScheduleHermes,
     isBase,
     runScripts,
     preferences,
+    worktree,
     handleRun,
     handleRunCommand,
     handleOpenInFinder,
@@ -115,6 +120,13 @@ export function WorktreeContextMenu({
 
         <ContextMenuSeparator />
 
+        <ContextMenuItem onClick={() => setShowScheduleHermes(true)}>
+          <CalendarClock className="mr-2 h-4 w-4" />
+          Schedule Hermes job
+        </ContextMenuItem>
+
+        <ContextMenuSeparator />
+
         <ContextMenuItem onClick={handleArchiveOrClose}>
           {isBase ? (
             <>
@@ -136,6 +148,12 @@ export function WorktreeContextMenu({
           </ContextMenuItem>
         )}
       </ContextMenuContent>
+
+      <ScheduleHermesJobDialog
+        open={showScheduleHermes}
+        onOpenChange={setShowScheduleHermes}
+        worktree={worktree}
+      />
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent

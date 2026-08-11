@@ -74,6 +74,7 @@ import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
+  HERMES_EFFORT_LEVEL_OPTIONS,
   KIMI_EFFORT_LEVEL_OPTIONS,
   ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
@@ -233,6 +234,7 @@ export function MobileSettingsMenu({
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
   const isAntigravity = selectedBackend === 'antigravity'
+  const isHermes = selectedBackend === 'hermes'
   const singleRunScript =
     runScripts.length === 1 ? (runScripts[0] ?? null) : null
   const enabledMcpServersSet = useMemo(
@@ -255,7 +257,13 @@ export function MobileSettingsMenu({
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
-      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi || isAntigravity))
+      (useAdaptiveThinking ||
+        isCodex ||
+        isPi ||
+        isGrok ||
+        isKimi ||
+        isAntigravity ||
+        isHermes))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
@@ -269,7 +277,12 @@ export function MobileSettingsMenu({
             ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS, selectedModel)
             : isGrok
               ? withAdaptiveEffortOption(GROK_EFFORT_LEVEL_OPTIONS, selectedModel)
-              : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
+              : isHermes
+                ? withAdaptiveEffortOption(
+                    HERMES_EFFORT_LEVEL_OPTIONS,
+                    selectedModel
+                  )
+                : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)

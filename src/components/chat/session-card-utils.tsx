@@ -777,6 +777,7 @@ export function getResumeSessionId(session: Session): string | null {
   if (session.backend === 'grok') return session.grok_session_id ?? null
   if (session.backend === 'kimi') return session.kimi_session_id ?? null
   if (session.backend === 'antigravity') return session.antigravity_session_id ?? null
+  if (session.backend === 'hermes') return session.hermes_session_id ?? null
   return null
 }
 
