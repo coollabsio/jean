@@ -57,6 +57,19 @@ export function shouldLetPlanDialogHandleAction(
   return planDialogOpen && PLAN_DIALOG_APPROVAL_ACTIONS.has(action)
 }
 
+export function shouldLetChatInputHandleAction(
+  action: KeybindingAction,
+  target: EventTarget | null,
+  planDialogOpen: boolean
+): boolean {
+  return (
+    action === 'approve_plan' &&
+    !planDialogOpen &&
+    target instanceof Element &&
+    target.closest('[data-chat-input]') !== null
+  )
+}
+
 export function findKeybindingAction(
   shortcut: string,
   keybindings: KeybindingsMap
@@ -889,6 +902,21 @@ export function useMainWindowEventListeners() {
 
       const keybindings = keybindingsRef.current
       const matchedAction = findKeybindingAction(shortcut, keybindings)
+
+      // Cmd/Ctrl+Enter is also the chat input's explicit steer shortcut. The
+      // global approve-plan binding runs in capture phase, so it must yield or
+      // the textarea never receives Enter. A visible plan dialog still owns
+      // the same shortcut.
+      if (
+        matchedAction &&
+        shouldLetChatInputHandleAction(
+          matchedAction,
+          e.target,
+          useUIStore.getState().planDialogOpen
+        )
+      ) {
+        return
+      }
 
       // OS key-repeat must not re-fire one-shot actions (issue #56: holding
       // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).

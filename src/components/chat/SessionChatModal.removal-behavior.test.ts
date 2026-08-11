@@ -165,6 +165,16 @@ describe('SessionChatModal removal behavior', () => {
     expect(source).toContain("'bg-yellow-500/10")
   })
 
+  it('uses a subtle grey background only for inactive unread session tabs', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+
+    expect(source).toContain('isUnreadSession(session)')
+    expect(source).toContain('!isActive')
+    expect(source).toContain('!isActionableWaitingStatus(status)')
+    expect(source).toContain("'bg-muted/60")
+    expect(source).not.toContain("'bg-green-500/10")
+  })
+
   it('offers to open resumable chat sessions in a separate native client session', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
 

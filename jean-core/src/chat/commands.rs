@@ -1858,6 +1858,14 @@ fn is_pending_blocking_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
     ) && !is_unavailable_tool_error(tc.output.as_deref())
 }
 
+fn is_pending_blocking_tool_call_for_mode(
+    tc: &crate::chat::types::ToolCall,
+    execution_mode: Option<&str>,
+) -> bool {
+    is_pending_question_tool_call(tc)
+        || (execution_mode != Some("yolo") && is_pending_plan_tool_call(tc))
+}
+
 fn is_pending_question_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
     matches!(tc.name.as_str(), "AskUserQuestion" | "question")
         && !is_unavailable_tool_error(tc.output.as_deref())
@@ -5429,7 +5437,7 @@ pub async fn send_chat_message(
     let has_blocking_tool = unified_response
         .tool_calls
         .iter()
-        .any(is_pending_blocking_tool_call);
+        .any(|tool| is_pending_blocking_tool_call_for_mode(tool, execution_mode.as_deref()));
     let has_question_tool = unified_response
         .tool_calls
         .iter()
@@ -10342,6 +10350,20 @@ mod tests {
         };
 
         assert!(!is_pending_blocking_tool_call(&tool));
+    }
+
+    #[test]
+    fn yolo_exit_plan_mode_is_not_pending_approval() {
+        let tool = ToolCall {
+            id: "toolu_exit_plan".to_string(),
+            name: "ExitPlanMode".to_string(),
+            input: serde_json::json!({}),
+            output: None,
+            parent_tool_use_id: None,
+        };
+
+        assert!(!is_pending_blocking_tool_call_for_mode(&tool, Some("yolo")));
+        assert!(is_pending_blocking_tool_call_for_mode(&tool, Some("build")));
     }
 
     #[test]

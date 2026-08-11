@@ -405,6 +405,10 @@ fn claude_permission_mode(execution_mode: Option<&str>, running_as_root: bool) -
     }
 }
 
+fn claude_allows_all_bash(execution_mode: Option<&str>) -> bool {
+    execution_mode == Some("yolo")
+}
+
 fn is_running_as_root() -> bool {
     #[cfg(unix)]
     {
@@ -521,7 +525,8 @@ fn build_claude_args(
     };
 
     // Permission mode
-    let perm_mode = claude_permission_mode(execution_mode, is_running_as_root());
+    let running_as_root = is_running_as_root();
+    let perm_mode = claude_permission_mode(execution_mode, running_as_root);
     args.push("--permission-mode".to_string());
     args.push(perm_mode.to_string());
 
@@ -614,6 +619,12 @@ fn build_claude_args(
     }
 
     // Allowed tools
+    // Make unrestricted shell access explicit for every YOLO session. This is
+    // also required when root uses the acceptEdits compatibility fallback.
+    if claude_allows_all_bash(execution_mode) {
+        args.push("--allowedTools".to_string());
+        args.push("Bash(*)".to_string());
+    }
     if let Some(tools) = allowed_tools {
         for tool in tools {
             args.push("--allowedTools".to_string());
@@ -2626,6 +2637,7 @@ mod tests {
     #[test]
     fn yolo_uses_accept_edits_when_running_as_root() {
         assert_eq!(claude_permission_mode(Some("yolo"), true), "acceptEdits");
+        assert!(claude_allows_all_bash(Some("yolo")));
     }
 
     #[test]
@@ -2634,6 +2646,8 @@ mod tests {
             claude_permission_mode(Some("yolo"), false),
             "bypassPermissions"
         );
+        assert!(claude_allows_all_bash(Some("yolo")));
+        assert!(!claude_allows_all_bash(Some("build")));
     }
 
     #[test]

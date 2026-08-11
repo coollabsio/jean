@@ -55,6 +55,7 @@ import {
 } from './message-content-utils'
 import { isModKeyEvent } from '@/types/keybindings'
 import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
+import { isNativeApp } from '@/lib/environment'
 
 /** Threshold for saving pasted text as file (2000 chars) */
 const TEXT_PASTE_THRESHOLD = 2000
@@ -878,22 +879,34 @@ export const ChatInput = memo(function ChatInput({
         return
       }
 
-      const items = e.clipboardData?.items
-      if (!items) return
+      const items = e.clipboardData?.items ?? []
 
       // First, check for image items in the clipboard
-      let hasImage = false
+      const imageFiles: File[] = []
       for (const item of items) {
         if (!item.type.startsWith('image/')) continue
-        hasImage = true
         // Prevent the browser from also inserting any text/html fallback for
         // image clipboard entries; mixed text is handled explicitly below.
         e.preventDefault()
 
         const file = item.getAsFile()
         if (!file) continue
-
-        await processAttachmentFile(file, activeSessionId)
+        imageFiles.push(file)
+      }
+      // iOS can expose an image copied from the share sheet through `files`
+      // while leaving `items` empty.
+      for (const file of Array.from(e.clipboardData?.files ?? [])) {
+        if (file.type.startsWith('image/') && !imageFiles.includes(file)) {
+          e.preventDefault()
+          imageFiles.push(file)
+        }
+      }
+      const hasImage = imageFiles.length > 0
+      // Independent per-image save; process in parallel
+      if (imageFiles.length > 0) {
+        await Promise.all(
+          imageFiles.map(file => processAttachmentFile(file, activeSessionId))
+        )
       }
 
       // Mixed image+text paste should preserve both parts. Because image paste
@@ -912,7 +925,7 @@ export const ChatInput = memo(function ChatInput({
       // Native clipboard fallback (Linux/WebKitGTK doesn't expose image items via Web API)
       const clipboardText = plainText
       const clipboardHtml = e.clipboardData?.getData('text/html')
-      if (!clipboardText && !clipboardHtml) {
+      if (isNativeApp() && !clipboardText && !clipboardHtml) {
         e.preventDefault()
         const placeholderId = `clipboard-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
         const { addPendingImage, updatePendingImage, removePendingImage } =

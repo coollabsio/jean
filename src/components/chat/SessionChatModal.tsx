@@ -139,6 +139,7 @@ import {
   getStackedBaseBranch,
   resolveStackedOnPr,
 } from './worktree-branch-badge'
+import { isUnreadSession } from '@/components/unread/unread-utils'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -1509,6 +1510,10 @@ export function SessionChatModal({
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
                               draggedSessionId === session.id && 'opacity-60',
+                              !isActive &&
+                                !isActionableWaitingStatus(status) &&
+                                isUnreadSession(session) &&
+                                'bg-muted/60 text-foreground/90 hover:bg-muted/80',
                               isActionableWaitingStatus(status) &&
                                 'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
                             )}

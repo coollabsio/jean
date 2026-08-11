@@ -12,8 +12,9 @@ import {
 
 const processAttachmentFile = vi.fn()
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>
-const { mobileState, slashPopoverMock } = vi.hoisted(() => ({
+const { mobileState, nativeState, slashPopoverMock } = vi.hoisted(() => ({
   mobileState: { value: false },
+  nativeState: { value: false },
   slashPopoverMock: vi.fn(() => null),
 }))
 
@@ -30,6 +31,11 @@ const storeState = {
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mobileState.value,
+}))
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  isNativeApp: () => nativeState.value,
 }))
 
 vi.mock('./attachment-processing', () => ({
@@ -79,6 +85,7 @@ describe('ChatInput attachments', () => {
 
   beforeEach(() => {
     mobileState.value = false
+    nativeState.value = false
     useUIStore.setState({ zenMode: false })
     processAttachmentFile.mockReset()
     invokeMock.mockReset()
@@ -423,6 +430,41 @@ describe('ChatInput attachments', () => {
       )
     })
     expect(textarea.value).toBe('caption text')
+  })
+
+  it('uses clipboard files when iOS omits the image from clipboard items', async () => {
+    const textarea = renderInput()
+    const image = new File(['png'], 'image.png', { type: 'image/png' })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [image],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledWith(image, 'session-1')
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+  })
+
+  it('does not request the desktop clipboard for an empty web paste', async () => {
+    const textarea = renderInput()
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+    })
   })
 
   it('saves large text as an attachment when pasted with an image', async () => {

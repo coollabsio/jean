@@ -17,6 +17,7 @@ import {
   getTerminalShortcutWorktreeId,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
+  shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
   splitTerminalForShortcut,
   switchActiveTerminalTabByIndexForShortcut,
@@ -31,6 +32,26 @@ import type {
   Session,
   WorktreeSessions,
 } from '@/types/chat'
+
+describe('shouldLetChatInputHandleAction', () => {
+  it('lets Cmd/Ctrl+Enter reach the chat input when no plan dialog is open', () => {
+    const input = document.createElement('textarea')
+    input.setAttribute('data-chat-input', '')
+
+    expect(shouldLetChatInputHandleAction('approve_plan', input, false)).toBe(
+      true
+    )
+  })
+
+  it('keeps plan approval handling when the plan dialog is open', () => {
+    const input = document.createElement('textarea')
+    input.setAttribute('data-chat-input', '')
+
+    expect(shouldLetChatInputHandleAction('approve_plan', input, true)).toBe(
+      false
+    )
+  })
+})
 
 const { mockInvoke, mockListen, mockDisposeTerminal, mockEnvironment } =
   vi.hoisted(() => ({
@@ -577,10 +598,7 @@ describe('dialog overlay keybinding passthrough', () => {
       useUIStore.setState({ sessionChatModalOpen: true })
 
       expect(
-        shouldAllowKeybindingThroughOpenOverlay(
-          action,
-          useUIStore.getState()
-        )
+        shouldAllowKeybindingThroughOpenOverlay(action, useUIStore.getState())
       ).toBe(true)
     }
   )
