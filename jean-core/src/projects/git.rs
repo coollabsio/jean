@@ -1,9 +1,11 @@
 use crate::platform::silent_command;
 use crate::platform::wsl_aware_command;
 use once_cell::sync::Lazy;
+use std::io::Read;
 use std::path::Path;
+use std::process::Stdio;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,7 @@ fn gh_command(gh: &Path, repo_path: &str) -> std::process::Command {
 
 static WORKTREE_CREATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 const WORKTREE_CREATE_ATTEMPTS: usize = 4;
+const JEAN_SCRIPT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Strip Windows `\\?\` / `\\?\UNC\` verbatim prefixes from a path string.
 ///
@@ -2257,6 +2260,24 @@ fn run_jean_script(
     branch: &str,
     script: &str,
 ) -> Result<String, String> {
+    run_jean_script_with_timeout(
+        kind,
+        worktree_path,
+        root_path,
+        branch,
+        script,
+        JEAN_SCRIPT_TIMEOUT,
+    )
+}
+
+fn run_jean_script_with_timeout(
+    kind: &str,
+    worktree_path: &str,
+    root_path: &str,
+    branch: &str,
+    script: &str,
+    timeout: Duration,
+) -> Result<String, String> {
     log::trace!("Running {kind} script in {worktree_path}: {script}");
 
     validate_script_env(worktree_path, root_path, branch)?;
@@ -2266,20 +2287,91 @@ fn run_jean_script(
 
     let mut cmd = silent_command(&shell);
     cmd.args(jean_script_shell_args(supports_login, script));
-
-    let output = cmd
-        .current_dir(worktree_path)
+    cmd.current_dir(worktree_path)
         .env("JEAN_WORKSPACE_PATH", worktree_path)
         .env("JEAN_ROOT_PATH", root_path)
         .env("JEAN_BRANCH", branch)
-        .output()
-        .map_err(|e| format!("Failed to run {kind} script: {e}"))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    // Give the shell its own process group so timing out also stops package
+    // managers and other descendants that inherited the output pipes.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run {kind} script: {e}"))?;
+    let mut stdout = child.stdout.take().expect("stdout was configured as piped");
+    let mut stderr = child.stderr.take().expect("stderr was configured as piped");
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = Instant::now() + timeout;
+    let timed_out = loop {
+        if child
+            .try_wait()
+            .map_err(|e| format!("Failed while waiting for {kind} script: {e}"))?
+            .is_some()
+        {
+            break false;
+        }
+        if Instant::now() >= deadline {
+            break true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    if timed_out {
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+        #[cfg(windows)]
+        {
+            let _ = silent_command("taskkill")
+                .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                .output();
+        }
+        let _ = child.kill();
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to collect {kind} script status: {e}"))?;
+    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).to_string();
     let combined = strip_non_tty_shell_noise(&format!("{stdout}{stderr}"));
 
-    if !output.status.success() {
+    if timed_out {
+        let minutes = timeout.as_secs().div_ceil(60);
+        let suffix = if combined.is_empty() {
+            String::new()
+        } else {
+            format!("\n{combined}")
+        };
+        return Err(format!(
+            "{kind} script timed out after {minutes} minute(s){suffix}"
+        ));
+    }
+
+    if !status.success() {
         return Err(format!("{kind} script failed:\n{combined}"));
     }
 
@@ -2937,6 +3029,28 @@ mod tests {
 
         let clean = "npm install\ndone\n";
         assert_eq!(strip_non_tty_shell_noise(clean), "npm install\ndone");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn jean_script_timeout_stops_script_and_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let started = Instant::now();
+
+        let error = run_jean_script_with_timeout(
+            "setup",
+            path,
+            path,
+            "test-branch",
+            "echo started; sleep 5",
+            Duration::from_millis(100),
+        )
+        .unwrap_err();
+
+        assert!(error.starts_with("setup script timed out after"));
+        assert!(error.contains("started"));
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     // ========================================================================

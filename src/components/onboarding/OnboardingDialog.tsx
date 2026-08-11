@@ -2858,10 +2858,7 @@ function OnboardingDialogContent() {
                 cliName="Git and Node.js prerequisites"
                 terminalId={`onboarding-prerequisites-${loginSessionSeed}-${prerequisiteAttempt}`}
                 command="/bin/bash"
-                commandArgs={[
-                  '-lc',
-                  prerequisites.automaticInstallCommand,
-                ]}
+                commandArgs={['-lc', prerequisites.automaticInstallCommand]}
                 action="install"
                 onComplete={async () => {
                   const status = await refreshPrerequisites()
@@ -3422,7 +3419,10 @@ function PrerequisiteSetupState({
         {status.automaticInstallSupported && (
           <Button onClick={onAutomaticInstall}>Install automatically</Button>
         )}
-        <Button variant="outline" onClick={() => openUrl(status.manualInstallUrl)}>
+        <Button
+          variant="outline"
+          onClick={() => openUrl(status.manualInstallUrl)}
+        >
           Node.js instructions
         </Button>
         <Button

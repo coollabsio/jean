@@ -393,6 +393,30 @@ fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+fn claude_permission_mode(execution_mode: Option<&str>, running_as_root: bool) -> &'static str {
+    match execution_mode.unwrap_or("plan") {
+        "build" => "acceptEdits",
+        // Claude Code rejects bypassPermissions when the process runs as root.
+        // Fall back to its most permissive supported mode so server installs
+        // can still start a Claude turn instead of producing no chat output.
+        "yolo" if running_as_root => "acceptEdits",
+        "yolo" => "bypassPermissions",
+        _ => "plan",
+    }
+}
+
+fn is_running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and does not mutate memory.
+        unsafe { libc::geteuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 /// Build CLI arguments for Claude CLI.
 ///
 /// Returns a tuple of (args, env_vars) where env_vars are (key, value) pairs.
@@ -497,11 +521,7 @@ fn build_claude_args(
     };
 
     // Permission mode
-    let perm_mode = match execution_mode.unwrap_or("plan") {
-        "build" => "acceptEdits",
-        "yolo" => "bypassPermissions",
-        _ => "plan",
-    };
+    let perm_mode = claude_permission_mode(execution_mode, is_running_as_root());
     args.push("--permission-mode".to_string());
     args.push(perm_mode.to_string());
 
@@ -2600,6 +2620,19 @@ mod tests {
         assert_eq!(
             split_fast_model("claude-fable-5"),
             ("claude-fable-5", false)
+        );
+    }
+
+    #[test]
+    fn yolo_uses_accept_edits_when_running_as_root() {
+        assert_eq!(claude_permission_mode(Some("yolo"), true), "acceptEdits");
+    }
+
+    #[test]
+    fn yolo_uses_bypass_permissions_for_non_root_users() {
+        assert_eq!(
+            claude_permission_mode(Some("yolo"), false),
+            "bypassPermissions"
         );
     }
 

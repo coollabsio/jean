@@ -140,6 +140,22 @@ describe('GeneralPane settings structure', () => {
     expect(executionOverrides).not.toContain('? codexReasoningOptions')
   })
 
+  it('uses Grok models for build and yolo overrides when Grok is selected', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const executionOverrides = source.slice(
+      source.indexOf('Build execution'),
+      source.indexOf('AI Language')
+    )
+
+    expect(
+      executionOverrides.match(/effective(?:Build|Yolo)Backend === 'grok'/g)
+    ).toHaveLength(2)
+    expect(executionOverrides.match(/\? grokModelOptions/g)).toHaveLength(2)
+  })
+
   // Regression #505: shared patchPreferences.isPending made the AI Language
   // Save button spin when model defaults (or any other General field) saved.
   it('scopes AI Language save loading to its own preferences mutation', () => {

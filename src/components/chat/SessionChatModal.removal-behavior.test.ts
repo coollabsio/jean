@@ -52,7 +52,7 @@ describe('SessionChatModal removal behavior', () => {
     )
     // Confirm gate wraps the action for every non-empty tab (not only last).
     expect(removeSessionTab).toMatch(
-      /if \(needsConfirm\) \{\s*pendingCloseAction\.current = action/
+      /if \(needsConfirm\) \{[\s\S]*?pendingCloseAction\.current = action/
     )
     // Neighbor select happens inside the deferred action, not as a bypass.
     expect(removeSessionTab).toMatch(
@@ -70,6 +70,34 @@ describe('SessionChatModal removal behavior', () => {
     expect(removeSessionTab).toContain('handleDeleteSession(session.id)')
     expect(removeSessionTab).not.toContain('onClose()')
     expect(removeSessionTab).not.toContain('navigateToProjectPicker(')
+  })
+
+  it('shows the empty worktree view after the last session is removed', () => {
+    const modalSource = readSource('src/components/chat/SessionChatModal.tsx')
+    const serviceSource = readSource('src/services/chat.ts')
+
+    expect(modalSource).toContain(
+      'No sessions yet. Create one to start chatting.'
+    )
+    expect(serviceSource).not.toContain('navigateToProjectPicker(')
+    expect(serviceSource).toContain(
+      'const { [worktreeId]: _removed, ...rest } = state.activeSessionIds'
+    )
+  })
+
+  it('asks to close the worktree when Cmd+W is pressed with no sessions', () => {
+    const modalSource = readSource('src/components/chat/SessionChatModal.tsx')
+    const canvasSource = readSource(
+      'src/components/dashboard/ProjectCanvasView.tsx'
+    )
+
+    expect(modalSource).toContain("setCloseConfirmMode('worktree')")
+    expect(modalSource).toContain('onRequestCloseWorktree')
+    expect(modalSource).toContain('mode={closeConfirmMode}')
+    expect(canvasSource).toContain('onRequestCloseWorktree={() => {')
+    expect(canvasSource).toContain(
+      'closeWorktreeDirectly(selectedWorktreeModal.worktreeId)'
+    )
   })
 
   it('hides session tabs and top action chrome when zen mode is active', () => {

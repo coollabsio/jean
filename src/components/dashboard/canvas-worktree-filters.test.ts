@@ -54,7 +54,7 @@ describe('canvas worktree filters', () => {
     expect(getCanvasFilterTabCount(worktrees, 'auto_fix')).toBe(1)
   })
 
-  it('shows the base branch even when it has no sessions', () => {
+  it('shows ready worktrees even when they have no sessions', () => {
     const base = worktree({
       id: 'base',
       name: 'main',
@@ -63,7 +63,12 @@ describe('canvas worktree filters', () => {
     })
     const regular = worktree({ id: 'regular' })
 
-    expect(shouldShowCanvasWorktreeSection(base, 0)).toBe(true)
-    expect(shouldShowCanvasWorktreeSection(regular, 0)).toBe(false)
+    expect(shouldShowCanvasWorktreeSection(base)).toBe(true)
+    expect(shouldShowCanvasWorktreeSection(regular)).toBe(true)
+    expect(
+      shouldShowCanvasWorktreeSection(
+        worktree({ id: 'deleting', status: 'deleting' })
+      )
+    ).toBe(false)
   })
 })
