@@ -125,4 +125,27 @@ describe('sendRecoveredSetupMessage', () => {
       useChatStore.getState().sendingSessionIds['session-1']
     ).toBeUndefined()
   })
+
+  it('discards recovery state when its worktree no longer exists', async () => {
+    mocks.invoke.mockRejectedValue(
+      new Error('Worktree not found: worktree-1')
+    )
+    act(() => {
+      const store = useChatStore.getState()
+      store.setPendingSetupMessage(worktree.id, message)
+      store.restorePendingSetupRecovery(worktree.id)
+    })
+
+    renderHook(() => usePendingSetupMessageRecovery())
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().pendingSetupMessages[worktree.id]
+      ).toBeUndefined()
+    })
+    expect(
+      useChatStore.getState().recoverableSetupMessageIds[worktree.id]
+    ).toBeUndefined()
+    expect(mocks.invoke).toHaveBeenCalledOnce()
+  })
 })

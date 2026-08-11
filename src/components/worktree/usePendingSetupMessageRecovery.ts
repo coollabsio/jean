@@ -6,6 +6,10 @@ import type { QueuedMessage, Session } from '@/types/chat'
 import type { Worktree } from '@/types/projects'
 import { finishNewSessionFlow, startNewSessionPrompt } from './new-session-flow'
 
+function isMissingWorktreeError(error: unknown): boolean {
+  return String(error).toLowerCase().includes('worktree not found')
+}
+
 export async function sendRecoveredSetupMessage(
   worktree: Worktree,
   message: QueuedMessage
@@ -70,6 +74,10 @@ export function usePendingSetupMessageRecovery() {
           toast.success('Recovered session — prompt started')
         } catch (error) {
           if (cancelled) return
+          if (!claimed && isMissingWorktreeError(error)) {
+            useChatStore.getState().clearPendingSetupPrompt(worktreeId)
+            return
+          }
           if (!claimed) needsRetry = true
           toast.error('Could not resume the pending prompt', {
             description: String(error),
