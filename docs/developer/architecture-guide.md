@@ -545,9 +545,26 @@ On Windows, npm installs can return an extensionless Unix shim before the runnab
 shim; the shared selector ranks `.exe`, `.cmd`, `.bat`, extensionless, then `.ps1`.
 
 When launching a resolved CLI path, use `crate::platform::cli_command()` instead of
-`silent_command()` directly. It keeps `CREATE_NO_WINDOW`, wraps Windows `.cmd`/`.bat` shims with
-`cmd.exe /C`, and routes commands through WSL when WSL mode is enabled. Pass the working directory
-as the `cwd` argument so WSL launches receive `wsl.exe --cd ...` rather than a host-only cwd.
+`silent_command()` directly. It keeps `CREATE_NO_WINDOW`, redirects an extensionless Windows shim to
+its `.exe`/`.cmd`/`.bat` sibling, and routes commands through WSL when WSL mode is enabled. Pass the
+working directory as the `cwd` argument so WSL launches receive `wsl.exe --cd ...` rather than a
+host-only cwd. Use `host_cli_command()` instead when the arguments are host paths that a Linux CLI
+inside the WSL distro could not act on, such as `npm install --prefix <app data dir>`.
+
+A `.cmd`/`.bat` shim cannot be launched by `CreateProcessW` directly, and the two ways to launch one
+are not interchangeable. `cli_command()` wraps it in `cmd.exe /C`, which tolerates arguments
+containing newlines — agent backends pass whole chat prompts and pretty-printed JSON schemas as
+arguments, so they need this. `host_cli_command()` instead leaves the shim as the program so
+`std::process` builds the `cmd.exe` line, escaping each argument for batch parsing, quoting the line
+so a spaced shim path such as `C:\Program Files\nodejs\npm.cmd` still parses, and passing `/d` so
+AutoRun cannot run. `std` rejects CR/LF in batch arguments, so only use `host_cli_command()` where
+arguments are simple values such as package names and paths. Do not hand-roll either wrap at a call
+site.
+
+To launch a tool by bare name from PATH (`npm`, `npx`, `node`), use
+`crate::platform::path_tool_command()`. Windows `PATH` search only appends `.exe`, so spawning bare
+`npm` cannot find the `npm.cmd` a stock Node.js install ships (issue #675). A test in
+`platform/cli_detect.rs` fails the build if `npm`/`npx` are ever spawned by bare name again.
 
 When opening a URL in the system browser, use `crate::platform::open_url_in_browser()` (also
 re-exported as `jean_core::open_url_in_browser`). On Windows it runs `cmd /c start` through
