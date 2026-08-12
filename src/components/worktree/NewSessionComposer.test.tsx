@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getNewWorktreeDraftId, NewSessionComposer } from './NewSessionComposer'
 import type * as NewSessionFlow from './new-session-flow'
@@ -144,7 +144,7 @@ describe('NewSessionComposer', () => {
       configurable: true,
       value: 1024,
     })
-    useChatStore.setState({ pendingSetupPrompts: {} })
+    useChatStore.setState({ pendingSetupPrompts: {}, pendingSkills: {} })
     HTMLElement.prototype.scrollIntoView = vi.fn()
     backendState.installedBackends = ['claude', 'codex']
     backendState.isLoading = false
@@ -191,6 +191,24 @@ describe('NewSessionComposer', () => {
 
     fireEvent.click(modelPicker)
     expect(screen.getByText('Select Backend & Model')).toBeVisible()
+  })
+
+  it('shows and removes a skill selected for the new conversation', () => {
+    render(<NewSessionComposer {...baseProps} />)
+
+    act(() => {
+      useChatStore
+        .getState()
+        .addPendingSkill(getNewWorktreeDraftId('project-1'), {
+          id: 'review-skill',
+          name: 'review',
+          path: '/skills/review/SKILL.md',
+        })
+    })
+
+    expect(screen.getByText('/review')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove skill' }))
+    expect(screen.queryByText('/review')).not.toBeInTheDocument()
   })
 
   it('lets users switch project from the composer header', () => {

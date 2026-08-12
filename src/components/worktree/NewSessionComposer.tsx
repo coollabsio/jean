@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ImagePreview } from '@/components/chat/ImagePreview'
+import { SkillBadge } from '@/components/chat/SkillBadge'
 import { TextFilePreview } from '@/components/chat/TextFilePreview'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileBackendModelPickerSheet'
@@ -320,9 +321,11 @@ export function NewSessionComposer({
   const pendingTextFilesBySession = useChatStore(
     state => state.pendingTextFiles
   )
+  const pendingSkillsBySession = useChatStore(state => state.pendingSkills)
   const pendingImages = pendingImagesBySession[draftSessionId] ?? []
   const pendingTextFiles =
     pendingTextFilesBySession[draftSessionId] ?? []
+  const pendingSkills = pendingSkillsBySession[draftSessionId] ?? []
   const hasPendingAttachments = useChatStore(state =>
     [
       state.pendingImages[draftSessionId],
@@ -795,6 +798,24 @@ export function NewSessionComposer({
           sessionId={draftSessionId}
           disabled={isCreating}
         />
+        {pendingSkills.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 py-2 md:px-6">
+            {pendingSkills.map(skill => (
+              <SkillBadge
+                key={skill.id}
+                skill={skill}
+                onRemove={
+                  isCreating
+                    ? undefined
+                    : () =>
+                        useChatStore
+                          .getState()
+                          .removePendingSkill(draftSessionId, skill.id)
+                }
+              />
+            ))}
+          </div>
+        )}
         <ChatInput
           activeSessionId={draftSessionId}
           activeWorktreePath={projectPath}

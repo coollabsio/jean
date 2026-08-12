@@ -83,6 +83,12 @@ const pullRequest = {
   reviews: [],
 }
 
+const promptFirstSkill = {
+  name: 'prompt-first-review',
+  path: '/tmp/e2e-skills/prompt-first-review/SKILL.md',
+  description: 'Review the prompt-first workflow',
+}
+
 test.describe('Prompt-first worktree creation', () => {
   test.use({
     responseOverrides: {
@@ -92,7 +98,58 @@ test.describe('Prompt-first worktree creation', () => {
       get_github_pr: pullRequest,
       get_project_branches: ['main', 'develop', 'feature/existing'],
       get_jean_config: { scripts: { setup: null, run: [] } },
+      list_claude_skills: [promptFirstSkill],
     },
+  })
+
+  test('shows a selected skill inside the prompt composer', async ({
+    mockPage,
+  }) => {
+    await installSuccessfulCreation(mockPage, 'skill-worktree')
+    await mockPage.evaluate(() => {
+      const win = window as any
+      win.__SKILL_SEND_ARGS__ = []
+      win.__JEAN_E2E_MOCK__.invokeHandlers.send_chat_message = (
+        args: Record<string, unknown>
+      ) => {
+        win.__SKILL_SEND_ARGS__.push(args)
+        return { id: 'assistant-response', role: 'assistant', content: 'Done' }
+      }
+    })
+    const composer = await openPromptFirstComposer(mockPage)
+    const prompt = composer.getByLabel('Prompt')
+
+    await prompt.fill('/')
+    await mockPage.getByText('$prompt-first-review', { exact: true }).click()
+
+    await expect(
+      composer.getByText('/prompt-first-review', { exact: true })
+    ).toBeVisible()
+    await expect(prompt).toHaveValue('')
+
+    await composer.getByRole('button', { name: 'Remove skill' }).click()
+    await expect(
+      composer.getByText('/prompt-first-review', { exact: true })
+    ).toBeHidden()
+
+    await prompt.fill('/')
+    await mockPage.getByText('$prompt-first-review', { exact: true }).click()
+    await composer
+      .getByRole('button', { name: /^Create worktree & start\s*↵$/ })
+      .click()
+
+    await expect
+      .poll(() =>
+        mockPage.evaluate(() => (window as any).__SKILL_SEND_ARGS__.length)
+      )
+      .toBe(1)
+    expect(
+      await mockPage.evaluate(
+        () => (window as any).__SKILL_SEND_ARGS__[0].message
+      )
+    ).toContain(
+      '[Skill: /tmp/e2e-skills/prompt-first-review/SKILL.md - Read and use this skill to guide your response]'
+    )
   })
 
   test('opens on the prompt and keeps it while attaching an issue', async ({
