@@ -125,8 +125,8 @@ pub fn find_cli_in_host_path(tool: &str, jean_managed: Option<&Path>) -> Option<
 /// appends `.exe`, so spawning bare `npm` fails with "program not found" on a
 /// stock Node.js install, which ships `npm.cmd`/`npx.cmd` plus an extensionless
 /// shell shim that is not a valid executable image (issue #675). Resolving the
-/// name first and handing the shim to [`host_cli_command`] runs it through the
-/// same `cmd.exe /C` path Jean already uses for `.cmd`/`.bat` CLI shims.
+/// name first lets [`host_cli_command`] hand the shim to `std::process`, which
+/// launches batch files through `cmd.exe` with the argument escaping that needs.
 ///
 /// Paths stay on the Windows host rather than routing through WSL, because these
 /// callers pass host directories (`npm install --prefix <app data dir>`).

@@ -199,14 +199,6 @@ pub fn wsl_aware_command(program: &str, cwd: Option<&std::path::Path>) -> Comman
     cmd
 }
 
-fn is_windows_batch_file(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
-        .unwrap_or(false)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliLaunchPlan {
     program: String,
@@ -244,14 +236,13 @@ fn cli_launch_plan(
         program.to_string()
     };
 
-    if is_windows && is_windows_batch_file(&program) {
-        return CliLaunchPlan {
-            program: "cmd.exe".to_string(),
-            args: vec!["/C".to_string(), program],
-            cwd: cwd.map(std::path::Path::to_path_buf),
-        };
-    }
-
+    // A `.cmd`/`.bat` shim is deliberately left as the program instead of being
+    // re-wrapped in `cmd.exe /C` here. `std::process` recognises batch programs
+    // and builds the `cmd.exe` line itself, which — unlike a hand-rolled wrap —
+    // escapes every argument for batch parsing, brackets the whole line in the
+    // extra quote pair `cmd.exe` needs when the shim path contains a space, and
+    // passes `/d` so a user's AutoRun registry command cannot run. Hand-wrapping
+    // left `&`/`|`/`^` inside arguments acting as `cmd.exe` separators.
     CliLaunchPlan {
         program,
         args: Vec::new(),
@@ -270,9 +261,11 @@ fn command_from_plan(plan: CliLaunchPlan) -> Command {
 
 /// Create a Command for a resolved CLI path.
 ///
-/// This routes Unix paths through WSL when WSL mode is enabled and wraps
-/// Windows `.cmd`/`.bat` npm shims in `cmd.exe /C`, because CreateProcessW
-/// cannot launch those scripts directly.
+/// This routes Unix paths through WSL when WSL mode is enabled. On Windows an
+/// extensionless npm shim is redirected to its `.exe`/`.cmd`/`.bat` sibling,
+/// and `.cmd`/`.bat` shims are handed to `std::process` as the program so it
+/// performs the `cmd.exe` wrapping — including per-argument batch escaping —
+/// rather than Jean assembling that command line by hand.
 pub fn cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
     let config = get_wsl_config();
     command_from_plan(cli_launch_plan(
@@ -287,8 +280,8 @@ pub fn cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
 /// Create a Command for a resolved path on the Windows host, never through WSL.
 ///
 /// Applies the same Windows shim handling as [`cli_command`] — extensionless
-/// npm shims resolve to their `.exe`/`.cmd`/`.bat` sibling, and batch shims run
-/// through `cmd.exe /C` — but always executes on the host.
+/// npm shims resolve to their `.exe`/`.cmd`/`.bat` sibling, and batch shims are
+/// left for `std::process` to wrap — but always executes on the host.
 ///
 /// Use this for tools whose arguments are Windows paths, such as
 /// `npm install --prefix <app data dir>`: a Linux `npm` inside the WSL distro
@@ -853,7 +846,13 @@ mod tests {
     }
 
     #[test]
-    fn cli_launch_plan_wraps_windows_cmd_shim() {
+    fn cli_launch_plan_leaves_windows_cmd_shim_for_std_to_wrap() {
+        // Returning `cmd.exe` + `["/C", shim]` would put every argument the
+        // caller appends afterwards onto a cmd.exe command line, and Rust only
+        // quotes arguments containing whitespace — so `1.0.0&calc` would reach
+        // cmd.exe unquoted and `&` would run `calc`. Keeping the shim as the
+        // program makes std build that line, escaping each argument for batch
+        // parsing and quoting the whole thing.
         let plan = cli_launch_plan(
             r"C:\Users\u\AppData\Roaming\npm\codex.cmd",
             Some(std::path::Path::new(r"C:\tmp")),
@@ -862,21 +861,63 @@ mod tests {
             "Ubuntu",
         );
 
-        assert_eq!(plan.program, "cmd.exe");
-        assert_eq!(
-            plan.args,
-            vec!["/C", r"C:\Users\u\AppData\Roaming\npm\codex.cmd"]
+        assert_eq!(plan.program, r"C:\Users\u\AppData\Roaming\npm\codex.cmd");
+        assert!(
+            plan.args.is_empty(),
+            "batch shim must not be re-wrapped by Jean: {:?}",
+            plan.args
         );
         assert_eq!(plan.cwd, Some(std::path::PathBuf::from(r"C:\tmp")));
     }
 
     #[test]
-    fn cli_launch_plan_wraps_windows_bat_shim() {
+    fn cli_launch_plan_leaves_windows_bat_shim_for_std_to_wrap() {
         let plan = cli_launch_plan(r"C:\tools\run.bat", None, true, false, "Ubuntu");
 
-        assert_eq!(plan.program, "cmd.exe");
-        assert_eq!(plan.args, vec!["/C", r"C:\tools\run.bat"]);
+        assert_eq!(plan.program, r"C:\tools\run.bat");
+        assert!(plan.args.is_empty(), "{:?}", plan.args);
         assert_eq!(plan.cwd, None);
+    }
+
+    /// A shim path containing a space is the normal case for npm itself
+    /// (`C:\Program Files\nodejs\npm.cmd`), and it must not turn into a
+    /// `cmd.exe` argument: `cmd /C "<quoted shim>" ... "<quoted arg>"` has four
+    /// quotes, so cmd.exe strips the outer pair and mangles the command.
+    #[test]
+    fn cli_launch_plan_keeps_spaced_npm_shim_as_the_program() {
+        let plan = cli_launch_plan(
+            r"C:\Program Files\nodejs\npm.cmd",
+            None,
+            true,
+            false,
+            "Ubuntu",
+        );
+
+        assert_eq!(plan.program, r"C:\Program Files\nodejs\npm.cmd");
+        assert!(plan.args.is_empty(), "{:?}", plan.args);
+    }
+
+    /// End-to-end of the #675 resolution step: an extensionless npm shim on a
+    /// `PATH` that has no `.exe` must come out of planning as the `.cmd` beside
+    /// it, since that redirect is what makes the shim launchable at all.
+    #[test]
+    fn cli_launch_plan_redirects_extensionless_shim_to_its_cmd_sibling() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let extensionless = dir.path().join("npm");
+        let cmd_shim = dir.path().join("npm.cmd");
+        std::fs::write(&extensionless, b"#!/bin/sh\n").expect("write shim");
+        std::fs::write(&cmd_shim, b"@echo off\n").expect("write cmd shim");
+
+        let plan = cli_launch_plan(
+            &extensionless.to_string_lossy(),
+            None,
+            true,
+            false,
+            "Ubuntu",
+        );
+
+        assert_eq!(plan.program, cmd_shim.to_string_lossy());
+        assert!(plan.args.is_empty(), "{:?}", plan.args);
     }
 
     #[test]
