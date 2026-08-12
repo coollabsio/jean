@@ -259,6 +259,15 @@ fn cli_launch_plan(
     }
 }
 
+fn command_from_plan(plan: CliLaunchPlan) -> Command {
+    let mut cmd = silent_command(plan.program);
+    cmd.args(plan.args);
+    if let Some(dir) = plan.cwd {
+        cmd.current_dir(dir);
+    }
+    cmd
+}
+
 /// Create a Command for a resolved CLI path.
 ///
 /// This routes Unix paths through WSL when WSL mode is enabled and wraps
@@ -266,13 +275,26 @@ fn cli_launch_plan(
 /// cannot launch those scripts directly.
 pub fn cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
     let config = get_wsl_config();
-    let plan = cli_launch_plan(program, cwd, cfg!(windows), config.enabled, &config.distro);
-    let mut cmd = silent_command(plan.program);
-    cmd.args(plan.args);
-    if let Some(dir) = plan.cwd {
-        cmd.current_dir(dir);
-    }
-    cmd
+    command_from_plan(cli_launch_plan(
+        program,
+        cwd,
+        cfg!(windows),
+        config.enabled,
+        &config.distro,
+    ))
+}
+
+/// Create a Command for a resolved path on the Windows host, never through WSL.
+///
+/// Applies the same Windows shim handling as [`cli_command`] — extensionless
+/// npm shims resolve to their `.exe`/`.cmd`/`.bat` sibling, and batch shims run
+/// through `cmd.exe /C` — but always executes on the host.
+///
+/// Use this for tools whose arguments are Windows paths, such as
+/// `npm install --prefix <app data dir>`: a Linux `npm` inside the WSL distro
+/// cannot write to the host directory those flows install into.
+pub fn host_cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
+    command_from_plan(cli_launch_plan(program, cwd, cfg!(windows), false, ""))
 }
 
 /// True when `path` is a Unix-style absolute path that only exists inside WSL.

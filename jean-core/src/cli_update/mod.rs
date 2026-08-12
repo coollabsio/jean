@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::platform::silent_command;
+use crate::platform::path_tool_command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliPathUpdateOutput {
@@ -21,9 +21,40 @@ const ALLOWED_COMMANDS: &[&str] = &[
     "pi",
 ];
 
+/// Reduce `command` to the name matched against [`ALLOWED_COMMANDS`].
+///
+/// Windows CLI paths reach this as launcher shims — npm installs `claude.cmd`,
+/// and that `.cmd` is what path detection hands back — so the allowlist has to
+/// compare the bare stem or every Windows self-update is refused (issue #675).
+/// This gives `.cmd`/`.bat` the same treatment `.exe` already had, and nothing
+/// more: the basename must still be an allowlisted updater.
+fn allowlist_key(command: &str) -> &str {
+    let name = std::path::Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command);
+
+    let Some(extension) = std::path::Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+    else {
+        return name;
+    };
+
+    if ["exe", "cmd", "bat"]
+        .iter()
+        .any(|launcher| extension.eq_ignore_ascii_case(launcher))
+    {
+        // Safe slice: `extension()` matched at the end, after a `.`.
+        &name[..name.len() - extension.len() - 1]
+    } else {
+        name
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ALLOWED_CLI_TYPES, ALLOWED_COMMANDS};
+    use super::{allowlist_key, ALLOWED_CLI_TYPES, ALLOWED_COMMANDS};
 
     #[test]
     fn pi_is_an_allowed_cli_type_for_path_updates() {
@@ -38,6 +69,30 @@ mod tests {
     #[test]
     fn arbitrary_cli_type_is_not_allowed_for_path_updates() {
         assert!(!ALLOWED_CLI_TYPES.contains(&"definitely-not-a-cli"));
+    }
+
+    #[test]
+    fn windows_cmd_shims_match_their_allowlisted_updater() {
+        // What npm leaves on PATH — and what CLI detection returns — on Windows.
+        for command in ["claude.cmd", "claude.CMD", "npm.cmd", "opencode.bat"] {
+            assert!(
+                ALLOWED_COMMANDS.contains(&allowlist_key(command)),
+                "{command} should map onto an allowlisted updater"
+            );
+        }
+    }
+
+    #[test]
+    fn allowlist_key_keeps_extensionless_and_unix_commands() {
+        assert_eq!(allowlist_key("npm"), "npm");
+        assert_eq!(allowlist_key("/usr/local/bin/claude"), "claude");
+        assert_eq!(allowlist_key("claude.exe"), "claude");
+    }
+
+    #[test]
+    fn allowlist_key_does_not_smuggle_in_unrelated_binaries() {
+        assert!(!ALLOWED_COMMANDS.contains(&allowlist_key("rm.cmd")));
+        assert!(!ALLOWED_COMMANDS.contains(&allowlist_key("npm.ps1")));
     }
 }
 
@@ -58,11 +113,7 @@ pub async fn run_cli_path_update(
     }
 
     // Bare-binary check: command must be a known updater (no path traversal, no arbitrary binaries).
-    let bare_command = std::path::Path::new(&command)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(&command)
-        .trim_end_matches(".exe");
+    let bare_command = allowlist_key(&command);
     if !ALLOWED_COMMANDS.contains(&bare_command) {
         return Err(format!("Disallowed update command: {command}"));
     }
@@ -84,8 +135,12 @@ pub async fn run_cli_path_update(
     }
 
     // Run blocking subprocess on the blocking pool to avoid stalling the async runtime.
+    // `command` is either a package manager on PATH (`npm`, `bun`, `brew`) or the
+    // detected CLI path for a self-update; both reach Windows as `.cmd` shims, so
+    // resolve and launch through the shared helper. The allowlist above is checked
+    // against the caller's value, never against what resolution turns it into.
     let result = tokio::task::spawn_blocking(move || {
-        silent_command(&command)
+        path_tool_command(&command)
             .args(&args)
             .output()
             .map_err(|e| format!("Failed to spawn update command '{command}': {e}"))
