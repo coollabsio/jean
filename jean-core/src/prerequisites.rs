@@ -24,9 +24,10 @@ pub struct SystemPrerequisites {
 /// perfectly good Node.js install (issue #675).
 fn version(command: &str) -> Option<String> {
     let output = path_tool_command(command).arg("--version").output().ok()?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    })
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 pub fn check_system_prerequisites() -> SystemPrerequisites {
@@ -70,6 +71,9 @@ mod tests {
 
     #[test]
     fn prerequisite_status_has_official_node_url() {
-        assert_eq!(check_system_prerequisites().manual_install_url, "https://nodejs.org/en/download");
+        assert_eq!(
+            check_system_prerequisites().manual_install_url,
+            "https://nodejs.org/en/download"
+        );
     }
 }

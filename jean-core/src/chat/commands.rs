@@ -63,7 +63,14 @@ const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
-- If already in a Jean worktree or base/main workspace, continue in the current workspace.";
+- If already in a Jean worktree or base/main workspace, continue in the current workspace.
+
+## Jean Run Environment
+
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
+- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- In how-to-test notes, include the exact URL/port you used.";
 const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 ## Plan Mode
 
@@ -478,6 +485,7 @@ fn build_kimi_system_prompt(
     worktree_id: &str,
     ai_language: Option<&str>,
     parallel_prompt: Option<&str>,
+    include_recap: bool,
 ) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(language) = ai_language.map(str::trim).filter(|value| !value.is_empty()) {
@@ -535,7 +543,7 @@ fn build_kimi_system_prompt(
             gh_binary.display()
         ));
     }
-    if super::should_add_recap_instruction(app) {
+    if super::should_include_recap_instruction(app, include_recap) {
         parts.push(super::RECAP_INSTRUCTION.to_string());
     }
     (!parts.is_empty()).then(|| parts.join("\n\n"))
@@ -1148,6 +1156,7 @@ async fn drain_backend_queue(
             request.chrome_enabled,
             request.custom_profile_name,
             request.backend,
+            None,
         )
         .await
         {
@@ -2725,6 +2734,7 @@ pub async fn send_chat_message(
     chrome_enabled: Option<bool>,
     custom_profile_name: Option<String>,
     backend: Option<String>,
+    include_recap: Option<bool>,
 ) -> Result<ChatMessage, String> {
     log::info!("[SendChat] ENTRY session={session_id} worktree={worktree_id} model={model:?} execution_mode={execution_mode:?}");
     log::trace!("Sending chat message for session: {session_id}, worktree: {worktree_id}, model: {model:?}, execution_mode: {execution_mode:?}, thinking: {thinking_level:?}, effort: {effort_level:?}, allowed_tools: {allowed_tools:?}");
@@ -3437,6 +3447,7 @@ pub async fn send_chat_message(
     };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
+    let thread_include_recap = include_recap.unwrap_or(true);
     let thread_codex_search = codex_search_enabled;
     let thread_codex_multi_agent = codex_multi_agent_enabled;
     let thread_codex_max_threads = codex_max_agent_threads;
@@ -3517,6 +3528,7 @@ pub async fn send_chat_message(
                         thread_mcp_config.as_deref(),
                         chrome,
                         thread_custom_profile.as_deref(),
+                        thread_include_recap,
                         Some(make_pid_callback()),
                     ) {
                         Ok((pid, response)) => {
@@ -3774,7 +3786,7 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4187,7 +4199,7 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4537,7 +4549,7 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4588,6 +4600,7 @@ pub async fn send_chat_message(
                         &thread_app,
                         &thread_session_id,
                         &thread_worktree_id,
+                        thread_include_recap,
                     );
                 match super::commandcode::execute_commandcode_headless(
                     &thread_app,
@@ -4720,7 +4733,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4863,7 +4876,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4931,6 +4944,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_include_recap,
                 );
                 let effort = thread_effort_level
                     .as_ref()
@@ -4972,6 +4986,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_include_recap,
                 );
                 let effort = thread_effort_level
                     .as_ref()
@@ -10814,6 +10829,9 @@ mod tests {
         assert!(build_prompt.contains("Jean Worktree Policy"));
         assert!(build_prompt.contains("Do NOT create git worktrees manually"));
         assert!(build_prompt.contains("Jean MCP/tools"));
+        assert!(build_prompt.contains("Jean Run Environment"));
+        assert!(build_prompt.contains("get_run_environments"));
+        assert!(build_prompt.contains("test against its `url`, port, and startup command"));
         assert!(build_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(build_prompt.contains("Always implement the simplest maintainable solution"));
         assert!(build_prompt.contains("Clickable References"));
@@ -10824,6 +10842,8 @@ mod tests {
         assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
+        assert!(yolo_prompt.contains("Jean Run Environment"));
+        assert!(yolo_prompt.contains("get_run_environments"));
         assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(yolo_prompt.contains("Clickable References"));
     }

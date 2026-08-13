@@ -1729,6 +1729,7 @@ export function useSendMessage() {
       chromeEnabled,
       customProfileName,
       backend,
+      includeRecap,
     }: {
       sessionId: string
       worktreeId: string
@@ -1747,6 +1748,8 @@ export function useSendMessage() {
       backend?: string
       /** Set by the queue processor — its onError requeues the original message */
       fromQueue?: boolean
+      /** When false, skip the end-of-turn recap instruction. */
+      includeRecap?: boolean
     }): Promise<ChatMessage> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -1785,6 +1788,7 @@ export function useSendMessage() {
         chromeEnabled,
         customProfileName,
         backend,
+        includeRecap,
       })
       logger.info('Chat message sent', { responseId: response.id })
       return response

@@ -87,7 +87,7 @@ describe('magic prompt preference resolvers', () => {
       'grok'
     )
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model).toBe(
-      'grok/grok-4.5'
+      'grok/grok-4.6'
     )
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_issue_mode).toBe('yolo')
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_pr_mode).toBe('yolo')
@@ -109,7 +109,7 @@ describe('magic prompt preference resolvers', () => {
     // Non-investigation chat modes keep shared defaults
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode).toBe('plan')
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.final_review_mode).toBe('yolo')
-    expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.5')
+    expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.6')
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
 

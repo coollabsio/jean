@@ -420,7 +420,13 @@ export async function performGitSync(opts: GitSyncOptions): Promise<void> {
     const result = await gitPush(pull.worktreePath, prNumber, pushRemote)
     await triggerImmediateGitPoll()
     if (pull.projectId) fetchWorktreesStatus(pull.projectId)
-    if (result.fellBack) {
+    if (result.permissionDenied) {
+      toast.error('Sync failed', {
+        id: toastId,
+        duration: Infinity,
+        description: result.output.trim() || 'The remote rejected the push.',
+      })
+    } else if (result.fellBack) {
       toast.warning(
         'Could not push to PR branch, pushed to new branch instead',
         { id: toastId }

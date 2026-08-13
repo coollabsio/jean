@@ -32,6 +32,30 @@ pub fn get_all_terminal_ids() -> Vec<String> {
     sessions.keys().cloned().collect()
 }
 
+/// Snapshot of live PTY metadata needed to report run environments.
+#[derive(Debug, Clone)]
+pub struct LiveTerminalMeta {
+    pub terminal_id: String,
+    pub worktree_path: String,
+    pub command: Option<String>,
+    pub command_args: Option<Vec<String>>,
+    pub session_id: Option<String>,
+}
+
+pub fn list_live_terminal_meta() -> Vec<LiveTerminalMeta> {
+    let sessions = TERMINAL_SESSIONS.lock().unwrap();
+    sessions
+        .values()
+        .map(|session| LiveTerminalMeta {
+            terminal_id: session.terminal_id.clone(),
+            worktree_path: session.worktree_path.clone(),
+            command: session.command.clone(),
+            command_args: session.command_args.clone(),
+            session_id: session.session_id.clone(),
+        })
+        .collect()
+}
+
 /// Execute a function with mutable access to a terminal session
 pub fn with_terminal<F, R>(terminal_id: &str, f: F) -> Option<R>
 where

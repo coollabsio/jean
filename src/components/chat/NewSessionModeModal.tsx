@@ -42,6 +42,7 @@ import {
 import type { CliBackend } from '@/types/preferences'
 import { usePreferences } from '@/services/preferences'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import {
   NativeCliSessionsModal,
   type NativeCliSessionKind,
@@ -224,9 +225,17 @@ export function NewSessionModeModal() {
   const chooseChat = useCallback(() => {
     if (!target) return
     const { worktreeId, worktreePath } = target
+    const backend = (preferences?.default_backend ?? 'claude') as CliBackend
+    const model = resolveDefaultModelForBackend(backend, preferences)
+    const effortLevel =
+      backend === 'codex'
+        ? (preferences?.default_codex_reasoning_effort ?? 'high')
+        : backend === 'grok'
+          ? (preferences?.default_grok_reasoning_effort ?? 'high')
+          : (preferences?.default_effort_level ?? 'high')
     close()
     createSession.mutate(
-      { worktreeId, worktreePath },
+      { worktreeId, worktreePath, backend },
       {
         onSuccess: session => {
           const defaultExecutionMode =
@@ -234,11 +243,15 @@ export function NewSessionModeModal() {
           useChatStore
             .getState()
             .setExecutionMode(session.id, defaultExecutionMode)
+          useChatStore.getState().setSelectedModel(session.id, model)
+          useChatStore.getState().setEffortLevel(session.id, effortLevel)
           invoke('update_session_state', {
             worktreeId,
             worktreePath,
             sessionId: session.id,
             selectedExecutionMode: defaultExecutionMode,
+            selectedModel: model,
+            selectedEffortLevel: effortLevel,
           }).catch(() => undefined)
           useChatStore.getState().setActiveSession(worktreeId, session.id)
           useUIStore.getState().setSessionPrimarySurface(session.id, 'chat')

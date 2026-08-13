@@ -32,4 +32,18 @@ describe('ChatWindow zen composer', () => {
       /onShowHiddenPrompts=\{\s*zenMode\s*\? undefined\s*:\s*handleShowHiddenCompactPrompts\s*\}/
     )
   })
+
+  it('exposes the composer so mobile toasts can sit above the textarea', () => {
+    expect(source).toContain('data-chat-composer=')
+    expect(source).toContain('setChatComposerNode')
+    expect(source).toContain('registerChatComposer')
+  })
+
+  it('hides tasks and agents bars in zen mode', () => {
+    expect(source).toMatch(/\{!zenMode &&\s*activeTodos\.length > 0 &&/)
+    expect(source).toMatch(/\{!zenMode &&\s*activeAgents\.length > 0 &&/)
+    expect(source).toMatch(
+      /\{!zenMode &&\s*!terminalPanelOpen &&\s*\(activeTodos\.length > 0 \|\|/
+    )
+  })
 })

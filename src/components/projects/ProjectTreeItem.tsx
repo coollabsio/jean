@@ -52,9 +52,9 @@ interface ProjectTreeItemProps {
  * Projects with worktrees expand/collapse only — never clear session selection.
  * Empty projects still open the project canvas.
  */
-export function resolveProjectRowClickAction(hasWorktrees: boolean):
-  | 'toggle-expand'
-  | 'open-canvas' {
+export function resolveProjectRowClickAction(
+  hasWorktrees: boolean
+): 'toggle-expand' | 'open-canvas' {
   return hasWorktrees ? 'toggle-expand' : 'open-canvas'
 }
 
@@ -250,9 +250,17 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
       pickRemoteOrRun(async remote => {
         const opToast = dismissibleToast.loading('Pushing changes...')
         try {
-          await gitPush(project.path, undefined, remote)
+          const result = await gitPush(project.path, undefined, remote)
           fetchWorktreesStatus(project.id)
-          opToast.success('Changes pushed')
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else {
+            opToast.success('Changes pushed')
+          }
         } catch (error) {
           opToast.error(`Push failed: ${error}`)
         }
@@ -339,7 +347,9 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
               {hasWorktrees && (
                 <button
                   type="button"
-                  aria-label={isExpanded ? 'Collapse project' : 'Expand project'}
+                  aria-label={
+                    isExpanded ? 'Collapse project' : 'Expand project'
+                  }
                   className={cn(
                     'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-accent-foreground/10',
                     isMobile

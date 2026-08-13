@@ -679,6 +679,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
+- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP \`get_run_environments\` and test against the returned url/port/command when a Run environment is available.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -716,6 +717,12 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Do NOT create git worktrees manually (\`git worktree add\`, Superpowers \`using-git-worktrees\`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.
+
+## Jean Run Environment
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP \`get_run_environments\` first (pass this worktreeId when known).
+- If an environment is running, test against its \`url\`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
 
@@ -918,7 +925,7 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 
 /** Grok preset for all magic prompts */
 export const GROK_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('grok/grok-4.5')
+  makeMagicPromptModelsPreset('grok/grok-4.6')
 
 export const KIMI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('kimi/default')
@@ -1963,10 +1970,10 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'codex', label: 'Codex' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
-  { value: 'pi', label: 'Pi (Beta)' },
-  { value: 'commandcode', label: 'Command Code (Beta)' },
-  { value: 'grok', label: 'Grok (Beta)' },
-  { value: 'kimi', label: 'Kimi Code (Beta)' },
+  { value: 'pi', label: 'Pi' },
+  { value: 'commandcode', label: 'Command Code' },
+  { value: 'grok', label: 'Grok' },
+  { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
 ]
 
@@ -2077,8 +2084,8 @@ export const newSessionKindOptions: {
   { value: 'claude', label: 'Claude' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
-  { value: 'grok', label: 'Grok (Beta)' },
-  { value: 'kimi', label: 'Kimi Code (Beta)' },
+  { value: 'grok', label: 'Grok' },
+  { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
 ]
 
@@ -2408,7 +2415,7 @@ export const defaultPreferences: AppPreferences = {
   selected_cursor_model: 'cursor/auto', // Default Cursor model
   selected_pi_model: 'pi/sonnet', // Default PI model
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
-  selected_grok_model: 'grok/grok-4.5', // Default Grok model
+  selected_grok_model: 'grok/grok-4.6', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
   selected_antigravity_model: 'antigravity/auto', // Use Antigravity CLI automatic model routing
   default_codex_reasoning_effort: 'high', // Default: high reasoning

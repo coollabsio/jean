@@ -695,8 +695,7 @@ export function useGitOperations({
       await performGitPull({
         worktreeId: activeWorktreeId,
         worktreePath: activeWorktreePath,
-        baseBranch:
-          worktree?.base_branch ?? project?.default_branch ?? 'main',
+        baseBranch: worktree?.base_branch ?? project?.default_branch ?? 'main',
         branchLabel: worktree?.branch,
         remote: remote ?? worktree?.base_remote,
         onMergeConflict: () => {
@@ -740,6 +739,9 @@ export function useGitOperations({
           opToast.error(
             `No permission to push to PR #${worktree?.pr_number}. Create a separate PR instead.`,
             {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
               action: {
                 label: toastActionLabel('Open PR'),
                 onClick: () =>

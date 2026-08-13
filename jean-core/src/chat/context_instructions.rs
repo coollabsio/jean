@@ -55,6 +55,7 @@ fn build_system_prompt_parts(
     app: &tauri::AppHandle,
     session_id: &str,
     worktree_id: &str,
+    include_recap: bool,
 ) -> Vec<String> {
     let prefs = load_preferences(app);
     let mut parts = Vec::new();
@@ -139,7 +140,7 @@ fn build_system_prompt_parts(
         }
     }
 
-    if super::should_add_recap_instruction(app) {
+    if super::should_include_recap_instruction(app, include_recap) {
         parts.push(super::RECAP_INSTRUCTION.to_string());
     }
 
@@ -315,8 +316,9 @@ pub fn build_combined_terminal_context_content(
     app: &tauri::AppHandle,
     session_id: &str,
     worktree_id: &str,
+    include_recap: bool,
 ) -> String {
-    let system_prompt_parts = build_system_prompt_parts(app, session_id, worktree_id);
+    let system_prompt_parts = build_system_prompt_parts(app, session_id, worktree_id, include_recap);
     let context_paths = collect_context_paths(app, session_id, worktree_id);
 
     let mut content = String::new();
@@ -359,7 +361,7 @@ pub fn write_combined_terminal_context_file(
         .map_err(|e| format!("Failed to create combined context directory: {e}"))?;
 
     let file_path = combined_dir.join(format!("{session_id}-terminal-context.md"));
-    let content = build_combined_terminal_context_content(app, session_id, worktree_id);
+    let content = build_combined_terminal_context_content(app, session_id, worktree_id, true);
     std::fs::write(&file_path, content)
         .map_err(|e| format!("Failed to write terminal context file: {e}"))?;
     Ok(file_path)

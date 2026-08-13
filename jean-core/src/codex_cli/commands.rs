@@ -1889,10 +1889,7 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
 
     // Create the install dir on all platforms. Path is used for Windows helpers
     // and Linux bubblewrap; macOS only needs the side effect of ensuring the dir.
-    #[cfg_attr(
-        not(any(windows, target_os = "linux")),
-        allow(unused_variables)
-    )]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(unused_variables))]
     let cli_dir = ensure_cli_dir(&app)?;
     let binary_path = get_cli_binary_path(&app)?;
 
@@ -2446,9 +2443,7 @@ fn extract_zip_entry_by_file_name(
         }
     }
 
-    Err(format!(
-        "File '{expected_name}' not found in zip archive"
-    ))
+    Err(format!("File '{expected_name}' not found in zip archive"))
 }
 
 /// Windows helper binaries that Codex expects next to `codex.exe`.

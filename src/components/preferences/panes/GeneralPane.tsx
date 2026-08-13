@@ -341,9 +341,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const grokReasoning = getCatalogModelReasoning(
     modelCatalog,
     'grok',
-    preferences?.selected_grok_model ?? 'grok/grok-4.5'
+    preferences?.selected_grok_model ?? 'grok/grok-4.6'
   )
-  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.6'
   const selectedGrokReasoningOptions = withAdaptiveEffortOption(
     grokReasoning?.type === 'effort'
       ? grokReasoning.levels

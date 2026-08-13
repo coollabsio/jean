@@ -514,6 +514,39 @@ describe('git-status service', () => {
       expect(mockInvoke).toHaveBeenCalledWith('git_pull', expect.anything())
       expect(mockInvoke).not.toHaveBeenCalledWith('git_push', expect.anything())
     })
+
+    it('reports a denied push as a sync failure', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'git_push') {
+          return {
+            output: 'remote: error: GH013: Repository rule violations found',
+            fellBack: false,
+            permissionDenied: true,
+          }
+        }
+        return undefined
+      })
+
+      await performGitSync({
+        needsPull: false,
+        needsPush: true,
+        pull: {
+          worktreeId: 'wt-123',
+          worktreePath: '/path/to/repo',
+          baseBranch: 'v4.x',
+        },
+      })
+
+      expect(mockToast.error).toHaveBeenCalledWith(
+        'Sync failed',
+        expect.objectContaining({
+          id: 'toast-1',
+          duration: Infinity,
+          description: 'remote: error: GH013: Repository rule violations found',
+        })
+      )
+      expect(mockToast.success).not.toHaveBeenCalled()
+    })
   })
 
   describe('useGitStatus', () => {

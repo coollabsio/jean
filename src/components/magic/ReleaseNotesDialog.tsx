@@ -168,6 +168,7 @@ export function ReleaseNotesDialog() {
           effortLevel:
             preferences?.magic_prompt_efforts?.release_notes_effort ?? undefined,
           mcpConfig,
+          includeRecap: false,
         })
       } catch (cause) {
         toast.error(`Failed to start release notes session: ${cause}`)

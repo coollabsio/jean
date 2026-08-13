@@ -41,6 +41,7 @@ import {
   defaultPreferences,
 } from '@/types/preferences'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
+import { clearClientPreferencesForTests } from '@/lib/client-preferences'
 
 vi.mock('@/lib/transport', () => ({
   invoke: vi.fn(),
@@ -221,6 +222,11 @@ describe('model option helpers', () => {
       'Do NOT create git worktrees manually'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Jean MCP/tools')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Jean Run Environment')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('get_run_environments')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      'test against its `url`, port, and startup command'
+    )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'VERY IMPORTANT: Keep Code Simple'
     )
@@ -250,6 +256,7 @@ describe('preferences service', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
+    clearClientPreferencesForTests()
     queryClient = createTestQueryClient()
     vi.clearAllMocks()
     // Mock Tauri environment
@@ -1411,25 +1418,19 @@ describe('preferences service', () => {
 
       await user.click(switchEl)
 
-      await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { finished_session_animation_enabled: false },
-        })
-      })
+      await waitFor(() => expect(switchEl).toHaveAttribute('aria-checked', 'false'))
+      expect(invoke).not.toHaveBeenCalledWith('patch_preferences', expect.anything())
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
     })
   })
 
   describe('AppearancePane window vibrancy', () => {
-    it('keeps the switch off and skips runtime vibrancy when persistence fails', async () => {
+    it('stores window vibrancy locally and applies it to the native window', async () => {
       const { invoke } = await import('@/lib/transport')
       const { toast } = await import('sonner')
       vi.mocked(invoke).mockImplementation(async command => {
         if (command === 'load_preferences') {
           return { ...defaultPreferences, window_vibrancy: false }
-        }
-        if (command === 'patch_preferences') {
-          throw new Error('Save failed')
         }
         if (command === 'set_window_vibrancy') return undefined
         throw new Error(`Unexpected command ${command}`)
@@ -1451,23 +1452,17 @@ describe('preferences service', () => {
 
       await user.click(switchEl)
 
-      await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { window_vibrancy: true },
-        })
-      })
-      expect(invoke).not.toHaveBeenCalledWith('set_window_vibrancy', {
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('set_window_vibrancy', {
         enabled: true,
-      })
+      }))
+      expect(invoke).not.toHaveBeenCalledWith('patch_preferences', expect.anything())
       expect(
         queryClient.getQueryData<AppPreferences>(
           preferencesQueryKeys.preferences()
         )?.window_vibrancy
-      ).toBe(false)
-      expect(switchEl).toHaveAttribute('aria-checked', 'false')
-      expect(toast.error).toHaveBeenCalledWith('Failed to save preferences', {
-        description: 'Save failed',
-      })
+      ).toBe(true)
+      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+      expect(toast.error).not.toHaveBeenCalled()
     })
   })
 })

@@ -69,9 +69,7 @@ pub fn install_process_failed_recovery(app: &tauri::App) {
                 .unwrap_or(-1);
 
             let recovery = process_failed_recovery(kind);
-            log::error!(
-                "WebView2 ProcessFailed kind={kind} recovery={recovery} (issue #575)"
-            );
+            log::error!("WebView2 ProcessFailed kind={kind} recovery={recovery} (issue #575)");
 
             match recovery {
                 "browser" => {

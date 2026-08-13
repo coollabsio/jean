@@ -231,7 +231,8 @@ function useRetainedMount(active: boolean) {
 export function MainWindow() {
   useTerminalThemeSync()
   const isMaximized = useWindowMaximized()
-  const toasterOffset = useToasterOffset()
+  const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
+    useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarSize = useUIStore(state => state.setLeftSidebarSize)
@@ -823,7 +824,7 @@ export function MainWindow() {
       <Toaster
         position="bottom-right"
         offset={toasterOffset}
-        mobileOffset={toasterOffset}
+        mobileOffset={toasterMobileOffset}
         expand={true}
         swipeDirections={['left', 'right', 'top', 'bottom']}
         style={{ '--width': '400px' } as CSSProperties}

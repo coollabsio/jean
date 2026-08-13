@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { backendOptions } from '@/types/preferences'
 import { useUIStore } from '@/store/ui-store'
 import type * as PlatformModule from '@/lib/platform'
+import type * as EnvironmentModule from '@/lib/environment'
 import type * as CliSetupComponentsModule from './CliSetupComponents'
 import { AI_BACKENDS, CursorSetupState } from './OnboardingDialog'
 
 const mocks = vi.hoisted(() => ({
+  nativeApp: true,
   cursorInstalled: false,
   cursorAuthenticated: false,
   cursorAuthRefetchCount: 0,
@@ -17,6 +19,11 @@ const mocks = vi.hoisted(() => ({
       options?.onSuccess?.()
   ),
   patchPreferencesAsync: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  isNativeApp: () => mocks.nativeApp,
 }))
 
 function setupResult(installed = false, path: string | null = null) {
@@ -194,6 +201,7 @@ vi.mock('./CliSetupComponents', async importOriginal => {
 
 describe('OnboardingDialog backends', () => {
   beforeEach(() => {
+    mocks.nativeApp = true
     mocks.cursorInstalled = false
     mocks.cursorAuthenticated = false
     mocks.cursorAuthRefetchCount = 0
@@ -252,6 +260,19 @@ describe('OnboardingDialog backends', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Local/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Remote/i })).toBeInTheDocument()
+  })
+
+  it('skips local vs remote selection in Jean Server Web Access', async () => {
+    mocks.nativeApp = false
+    const { OnboardingDialog } = await import('./OnboardingDialog')
+    render(<OnboardingDialog />)
+
+    expect(
+      await screen.findByText(/Select additional AI backends to install/i)
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('How will you use Jean?')
+    ).not.toBeInTheDocument()
   })
 
   it('shows remote setup after choosing remote', async () => {

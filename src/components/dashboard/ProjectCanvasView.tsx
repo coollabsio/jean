@@ -564,7 +564,13 @@ function WorktreeSectionHeader({
           )
           triggerImmediateGitPoll()
           fetchWorktreesStatus(projectId)
-          if (result.fellBack) {
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else if (result.fellBack) {
             opToast.warning(
               'Could not push to PR branch, pushed to new branch instead'
             )

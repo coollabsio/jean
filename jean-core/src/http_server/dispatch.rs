@@ -131,6 +131,16 @@ pub async fn dispatch_command(
             let result = crate::load_preferences(app.clone()).await?;
             to_value(result)
         }
+        "get_server_preferences" => to_value(crate::get_server_preferences(app.clone()).await?),
+        "update_server_preferences" => {
+            let patch: Value = from_field(&args, "patch")?;
+            let expected_revision: String = field(&args, "expectedRevision", "expected_revision")?;
+            let result =
+                crate::update_server_preferences(app.clone(), patch, expected_revision).await?;
+            emit_cache_invalidation(app, &["preferences", "server-preferences"]);
+            to_value(result)
+        }
+        "get_server_capabilities" => to_value(crate::get_server_capabilities().await?),
         "save_preferences" => {
             let preferences = from_field(&args, "preferences")?;
             crate::save_preferences(app.clone(), preferences).await?;
@@ -1370,6 +1380,7 @@ pub async fn dispatch_command(
             let custom_profile_name: Option<String> =
                 field_opt(&args, "customProfileName", "custom_profile_name")?;
             let backend: Option<String> = field_opt(&args, "backend", "backend")?;
+            let include_recap: Option<bool> = field_opt(&args, "includeRecap", "include_recap")?;
             let result = crate::chat::send_chat_message(
                 app.clone(),
                 session_id,
@@ -1387,6 +1398,7 @@ pub async fn dispatch_command(
                 chrome_enabled,
                 custom_profile_name,
                 backend,
+                include_recap,
             )
             .await?;
             to_value(result)
@@ -2092,6 +2104,13 @@ pub async fn dispatch_command(
         }
         "get_terminal_listening_ports" => {
             let result = crate::terminal::get_terminal_listening_ports().await;
+            to_value(result)
+        }
+        "get_run_environments" => {
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let project_id: Option<String> = field_opt(&args, "projectId", "project_id")?;
+            let result =
+                crate::terminal::get_run_environments(app.clone(), worktree_id, project_id).await?;
             to_value(result)
         }
 

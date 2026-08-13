@@ -37,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import { useServerCapabilities } from '@/services/server-capabilities'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableCursorModels } from '@/services/cursor-cli'
@@ -133,7 +134,10 @@ import {
   type CustomCliProfile,
 } from '@/types/preferences'
 import { cn } from '@/lib/utils'
-import { BackendLabel } from '@/components/ui/backend-label'
+import {
+  BackendLabel,
+  getBackendPlainLabel,
+} from '@/components/ui/backend-label'
 import {
   codeReviewConfigKey,
   resolveCodeReviewConfigs,
@@ -744,6 +748,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   searchTargetPromptKey = null,
 }) => {
   const { data: preferences } = usePreferences()
+  const { data: serverCapabilities } = useServerCapabilities()
   const patchPreferences = usePatchPreferences()
   const [selectedKey, setSelectedKey] =
     useState<keyof MagicPrompts>('investigate_issue')
@@ -879,7 +884,17 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     [preferences?.custom_cli_profiles]
   )
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const selectedConfig = PROMPT_CONFIGS.find(c => c.key === selectedKey)!
+  const bundledSelectedConfig = PROMPT_CONFIGS.find(c => c.key === selectedKey)!
+  const serverPrompt = serverCapabilities?.magicPrompts.find(
+    prompt => prompt.id === selectedKey
+  )
+  const selectedConfig = serverPrompt
+    ? {
+        ...bundledSelectedConfig,
+        label: serverPrompt.label,
+        defaultValue: serverPrompt.defaultPrompt,
+      }
+    : bundledSelectedConfig
   const currentValue =
     currentPrompts[selectedKey] ?? selectedConfig.defaultValue
   const rawCurrentModel = selectedConfig.modelKey
@@ -2170,32 +2185,41 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                       </SelectItem>
                     )}
                     {installedBackends.includes('pi') && (
-                      <SelectItem value="pi" aria-label="PI (Beta)">
+                      <SelectItem
+                        value="pi"
+                        aria-label={getBackendPlainLabel('pi')}
+                      >
                         <BackendLabel backend="pi" />
                       </SelectItem>
                     )}
                     {installedBackends.includes('commandcode') && (
                       <SelectItem
                         value="commandcode"
-                        aria-label="Command Code (Beta)"
+                        aria-label={getBackendPlainLabel('commandcode')}
                       >
                         <BackendLabel backend="commandcode" />
                       </SelectItem>
                     )}
                     {installedBackends.includes('grok') && (
-                      <SelectItem value="grok" aria-label="Grok (Beta)">
+                      <SelectItem
+                        value="grok"
+                        aria-label={getBackendPlainLabel('grok')}
+                      >
                         <BackendLabel backend="grok" />
                       </SelectItem>
                     )}
                     {installedBackends.includes('kimi') && (
-                      <SelectItem value="kimi" aria-label="Kimi Code (Beta)">
+                      <SelectItem
+                        value="kimi"
+                        aria-label={getBackendPlainLabel('kimi')}
+                      >
                         <BackendLabel backend="kimi" />
                       </SelectItem>
                     )}
                     {installedBackends.includes('antigravity') && (
                       <SelectItem
                         value="antigravity"
-                        aria-label="Antigravity CLI (Beta)"
+                        aria-label={getBackendPlainLabel('antigravity')}
                       >
                         <BackendLabel backend="antigravity" />
                       </SelectItem>
