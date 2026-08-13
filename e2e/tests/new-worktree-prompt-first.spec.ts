@@ -120,7 +120,9 @@ test.describe('Prompt-first worktree creation', () => {
     const prompt = composer.getByLabel('Prompt')
 
     await prompt.fill('/')
-    await mockPage.getByText('$prompt-first-review', { exact: true }).click()
+    await mockPage
+      .getByRole('option', { name: /prompt-first-review/ })
+      .click()
 
     await expect(
       composer.getByText('/prompt-first-review', { exact: true })
@@ -133,7 +135,9 @@ test.describe('Prompt-first worktree creation', () => {
     ).toBeHidden()
 
     await prompt.fill('/')
-    await mockPage.getByText('$prompt-first-review', { exact: true }).click()
+    await mockPage
+      .getByRole('option', { name: /prompt-first-review/ })
+      .click()
     await composer
       .getByRole('button', { name: /^Create worktree & start\s*↵$/ })
       .click()
