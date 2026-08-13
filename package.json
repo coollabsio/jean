@@ -43,7 +43,7 @@
     "tauri:build:linux:appimage": "bash scripts/build-appimage.sh",
     "tauri:build:windows": "tauri build --bundles msi,nsis",
     "tauri:check": "bun run typecheck && bun run tauri build --check",
-    "dev:e2e": "vite build --config e2e/vite.config.e2e.ts && vite preview --config e2e/vite.config.e2e.ts --port 1421",
+    "dev:e2e": "vite --config e2e/vite.config.e2e.ts --port 1421",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:all": "bun run test:run && bun run rust:test",
     "check:all": "bun run typecheck && bun run lint && bun run rust:fmt:check && bun run rust:clippy && bun run test:run && bun run rust:test",

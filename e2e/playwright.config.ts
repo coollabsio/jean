@@ -26,6 +26,6 @@ export default defineConfig({
     command: 'bun run dev:e2e',
     port: 1421,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 30_000,
   },
 })
