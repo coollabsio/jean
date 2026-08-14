@@ -328,6 +328,14 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         install_menu_events(app);
     }
 
+    // Ensure the main window is visible and focused after restoring persisted
+    // window state. This is especially important for development launches
+    // when the previous window was closed or hidden on another Space.
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+
     // Recover from WebView2 process death on Windows (issue #575 — blank /
     // "invisible" window after the browser process exits). No-op elsewhere.
     platform::install_process_failed_recovery(app);
@@ -361,11 +369,18 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     platform::apply_linux_webkit_env();
 
-    let log_targets = vec![
+    let mut log_targets = vec![
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
     ];
+    // Dev builds run from the workspace and should not require macOS
+    // permission to create the per-app log directory. Release builds retain
+    // file logging for diagnostics.
+    if !cfg!(debug_assertions) {
+        log_targets.push(tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::LogDir { file_name: None },
+        ));
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())

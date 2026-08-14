@@ -29,12 +29,13 @@ describe('shared magic prompt defaults', () => {
     typescriptSource.matchAll(
       /export const DEFAULT_([A-Z0-9_]+)_PROMPT = `((?:\\`|[^`])*)`/g
     )
-  )
-    .map(match => [
-      `default_${match[1]!.toLowerCase()}_prompt`,
-      match[2]!.replaceAll('\\`', '`'),
-    ])
-    .filter(([functionName]) => rustSource.includes(`fn ${functionName}()`))
+  ).flatMap(match => {
+    const [, name, prompt] = match
+    if (!name || prompt === undefined) return []
+    const functionName = `default_${name.toLowerCase()}_prompt`
+    if (!rustSource.includes(`fn ${functionName}()`)) return []
+    return [[functionName, prompt.replaceAll('\\`', '`')] as const]
+  })
 
   it.each(prompts)(
     'keeps %s identical in Rust and TypeScript',

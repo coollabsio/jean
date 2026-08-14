@@ -318,7 +318,8 @@ pub fn build_combined_terminal_context_content(
     worktree_id: &str,
     include_recap: bool,
 ) -> String {
-    let system_prompt_parts = build_system_prompt_parts(app, session_id, worktree_id, include_recap);
+    let system_prompt_parts =
+        build_system_prompt_parts(app, session_id, worktree_id, include_recap);
     let context_paths = collect_context_paths(app, session_id, worktree_id);
 
     let mut content = String::new();

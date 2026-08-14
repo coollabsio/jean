@@ -428,6 +428,27 @@ fn is_running_as_root() -> bool {
     }
 }
 
+fn claude_extra_usage_cap_exhausted(app: &tauri::AppHandle) -> bool {
+    let Ok(path) = crate::get_preferences_path(app) else {
+        return false;
+    };
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(preferences) = serde_json::from_str::<crate::AppPreferences>(&contents) else {
+        return false;
+    };
+    let Some(cap) = preferences
+        .claude_extra_usage_cap_usd
+        .filter(|value| value.is_finite() && *value >= 0.0)
+    else {
+        return false;
+    };
+    crate::claude_cli::cached_claude_extra_usage_spent()
+        .map(|spent| spent >= cap)
+        .unwrap_or(false)
+}
+
 /// Build CLI arguments for Claude CLI.
 ///
 /// Returns a tuple of (args, env_vars) where env_vars are (key, value) pairs.
@@ -464,6 +485,27 @@ fn build_claude_args(
     // Stream partial messages so long-running tools (Monitor, etc.) can push events
     // to the UI without waiting for message boundaries.
     args.push("--include-partial-messages".to_string());
+
+    // Apply the account-wide extra usage cap to this request. Claude's
+    // --max-budget-usd flag is per invocation, so subtract the latest known
+    // account spend before passing the remaining budget to the CLI.
+    if let Ok(preferences_path) = crate::get_preferences_path(app) {
+        if let Ok(contents) = std::fs::read_to_string(preferences_path) {
+            if let Ok(preferences) = serde_json::from_str::<crate::AppPreferences>(&contents) {
+                if let Some(cap) = preferences
+                    .claude_extra_usage_cap_usd
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                {
+                    let spent = crate::claude_cli::cached_claude_extra_usage_spent().unwrap_or(0.0);
+                    let remaining = (cap - spent).max(0.0);
+                    if remaining > 0.0 {
+                        args.push("--max-budget-usd".to_string());
+                        args.push(remaining.to_string());
+                    }
+                }
+            }
+        }
+    }
 
     // Add app data directories
     if let Ok(app_data_dir) = app.path().app_data_dir() {
@@ -1205,6 +1247,12 @@ pub fn execute_claude_detached(
         };
         let _ = app.emit_all("chat:error", &error_event);
         return Err(error_msg);
+    }
+
+    if claude_extra_usage_cap_exhausted(app) {
+        return Err(
+            "Claude's configured account-wide extra usage limit has been reached. Increase or disable the limit in Settings → Usage to continue.".to_string(),
+        );
     }
 
     // Build args

@@ -1058,6 +1058,13 @@ fn load_stale_cached_claude_usage(now_secs: u64) -> Option<ClaudeUsageSnapshot> 
     None
 }
 
+/// Return the latest known account-wide Claude extra usage spend for callers
+/// that need to budget a new request across all Jean sessions.
+pub(crate) fn cached_claude_extra_usage_spent() -> Option<f64> {
+    let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    load_stale_cached_claude_usage(now_secs)?.extra_usage_spent
+}
+
 fn save_cached_claude_usage(snapshot: &ClaudeUsageSnapshot, now_secs: u64) {
     let Some(path) = get_claude_usage_cache_path() else {
         return;
