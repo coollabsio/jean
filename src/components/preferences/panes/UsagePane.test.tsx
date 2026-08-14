@@ -97,6 +97,7 @@ describe('UsagePane', () => {
     expect(screen.getByText('Claude')).toBeInTheDocument()
     expect(screen.getByText('pro')).toBeInTheDocument()
     expect(screen.getByText('Extra: 1.5 / 50')).toBeInTheDocument()
+    expect(screen.getByText('Extra usage cap')).toBeInTheDocument()
     expect(screen.getByText('Session')).toBeInTheDocument()
     expect(screen.getByText('Sonnet')).toBeInTheDocument()
   })
@@ -127,7 +128,39 @@ describe('UsagePane', () => {
 
     expect(screen.getByText('Codex')).toBeInTheDocument()
     expect(screen.getByText('Credits remaining: 3')).toBeInTheDocument()
+    expect(screen.getByText('Credit threshold')).toBeInTheDocument()
     expect(screen.getByText('12.5%')).toBeInTheDocument()
+  })
+
+  it('hides extra thresholds when no extra balance is detected', () => {
+    mocks.useClaudeUsage.mockReturnValue(
+      idleQuery({
+        planType: 'pro',
+        session: null,
+        weekly: null,
+        sonnetWeekly: null,
+        extraUsageSpent: null,
+        extraUsageLimit: null,
+        fetchedAt: Math.floor(Date.now() / 1000),
+      })
+    )
+    mocks.useCodexUsage.mockReturnValue(
+      idleQuery({
+        planType: 'pro',
+        session: null,
+        weekly: null,
+        reviews: null,
+        creditsRemaining: null,
+        rateLimitReachedType: null,
+        modelLimits: [],
+        fetchedAt: Math.floor(Date.now() / 1000),
+      })
+    )
+
+    render(<UsagePane />)
+
+    expect(screen.queryByText('Extra usage cap')).not.toBeInTheDocument()
+    expect(screen.queryByText('Credit threshold')).not.toBeInTheDocument()
   })
 
   it('hides backends that are not installed or not authenticated', () => {

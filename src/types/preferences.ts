@@ -1198,6 +1198,10 @@ export interface AppPreferences {
   selected_model: ClaudeModel // Claude model ID passed to --model flag
   thinking_level: ThinkingLevel // Thinking level: 'off' | 'think' | 'megathink' | 'ultrathink'
   default_effort_level: EffortLevel // Effort level for Opus adaptive thinking: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultracode'
+  /** Account-wide Claude extra usage limit in USD; null leaves the CLI uncapped. */
+  claude_extra_usage_cap_usd?: number | null
+  /** Minimum Codex credits to keep available before starting a request; null disables the guard. */
+  codex_credits_threshold?: number | null
   terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'iterm2' | 'powershell' | 'windows-terminal'
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
@@ -2335,6 +2339,8 @@ export const defaultPreferences: AppPreferences = {
   selected_model: 'claude-opus-4-8[1m]',
   thinking_level: 'ultrathink',
   default_effort_level: 'high',
+  claude_extra_usage_cap_usd: null,
+  codex_credits_threshold: null,
   terminal: isServerWindows() ? 'powershell' : 'terminal',
   terminal_renderer: 'xterm',
   terminal_font: 'jetbrains-mono',

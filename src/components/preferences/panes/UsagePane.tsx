@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,6 +17,9 @@ import {
   useGrokUsage,
 } from '@/services/grok-cli'
 import { cn } from '@/lib/utils'
+import { Slider } from '@/components/ui/slider'
+import { Input } from '@/components/ui/input'
+import { usePatchPreferences, usePreferences } from '@/services/preferences'
 
 function CompactSection({
   title,
@@ -44,6 +47,21 @@ interface UsageWindow {
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value))
+}
+
+function sliderTicksBetween(
+  min: number,
+  max: number,
+  format: (value: number) => string
+): { value: number; label: string }[] {
+  if (max <= min) return []
+  const values = [min, min + (max - min) / 3, min + (max - min) * (2 / 3), max]
+  return values
+    .filter((value, index) => index === 0 || value !== values[index - 1])
+    .map(value => ({
+      value,
+      label: format(value),
+    }))
 }
 
 function barClass(usedPercent: number): string {
@@ -210,13 +228,25 @@ function ErrorLine({
 }
 
 export const UsagePane: React.FC = () => {
+  const { data: preferences } = usePreferences()
+  const patchPreferences = usePatchPreferences()
+  const [extraUsageCap, setExtraUsageCap] = useState<number>(0)
+  const [codexCreditsThreshold, setCodexCreditsThreshold] = useState<number>(0)
+
+  useEffect(() => {
+    setExtraUsageCap(preferences?.claude_extra_usage_cap_usd ?? 0)
+    setCodexCreditsThreshold(preferences?.codex_credits_threshold ?? 0)
+  }, [
+    preferences?.claude_extra_usage_cap_usd,
+    preferences?.codex_credits_threshold,
+  ])
+
   const claudeStatus = useClaudeCliStatus()
   const claudeAuth = useClaudeCliAuth({
     enabled: !!claudeStatus.data?.installed,
   })
   const claudeUsage = useClaudeUsage({
-    enabled:
-      !!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated,
+    enabled: !!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated,
   })
 
   const codexStatus = useCodexCliStatus()
@@ -328,9 +358,80 @@ export const UsagePane: React.FC = () => {
             data.extraUsageLimit != null ? ` / ${data.extraUsageLimit}` : ''
           }`
         : null
+    // Keep the lower bound at zero so the cap can intentionally be set below
+    // current spend to stop further extra usage.
+    const extraUsageMin = 0
+    const extraUsageMax = Math.max(
+      extraUsageMin,
+      data.extraUsageLimit ?? extraUsageMin
+    )
+    const extraUsageTicks = sliderTicksBetween(
+      extraUsageMin,
+      extraUsageMax,
+      value => Math.round(value).toLocaleString()
+    )
 
     return (
       <div className="space-y-2">
+        {extraUsageTicks.length > 0 ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Extra usage cap</span>
+              <Input
+                aria-label="Claude total extra usage limit value"
+                className="h-6 w-24 px-2 text-right text-xs tabular-nums"
+                type="number"
+                min={extraUsageMin}
+                max={extraUsageMax}
+                step="0.01"
+                value={Math.min(
+                  extraUsageMax,
+                  Math.max(extraUsageMin, extraUsageCap)
+                )}
+                onChange={event => {
+                  const value = Number(event.target.value)
+                  if (Number.isFinite(value)) setExtraUsageCap(value)
+                }}
+                onBlur={event => {
+                  const value = Number(event.target.value)
+                  if (Number.isFinite(value)) {
+                    patchPreferences.mutate({
+                      claude_extra_usage_cap_usd: Math.min(
+                        extraUsageMax,
+                        Math.max(extraUsageMin, value)
+                      ),
+                    })
+                  }
+                }}
+                disabled={patchPreferences.isPending}
+              />
+            </div>
+            <Slider
+              aria-label="Claude total extra usage limit"
+              ticks={extraUsageTicks}
+              continuous={{
+                min: extraUsageMin,
+                max: extraUsageMax,
+                step: 0.01,
+              }}
+              value={Math.min(
+                extraUsageMax,
+                Math.max(extraUsageMin, extraUsageCap)
+              )}
+              onValueChange={setExtraUsageCap}
+              onValueCommit={value =>
+                patchPreferences.mutate({
+                  claude_extra_usage_cap_usd: value,
+                })
+              }
+              disabled={patchPreferences.isPending}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Shared across all sessions. Jean subtracts your latest Claude
+              usage before starting each request.
+            </p>
+          </div>
+        ) : null}
         <MetaLine items={[data.planType ?? 'Unknown', extra]} />
         <div className="space-y-1.5">
           <UsageRow label="Session" usage={data.session} />
@@ -365,6 +466,12 @@ export const UsagePane: React.FC = () => {
       data.creditsRemaining !== null
         ? `Credits remaining: ${data.creditsRemaining}`
         : null
+    const creditTicks =
+      data.creditsRemaining != null
+        ? sliderTicksBetween(0, data.creditsRemaining, value =>
+            Number.isInteger(value) ? String(value) : value.toFixed(1)
+          )
+        : []
 
     const extraLimits = data.modelLimits.flatMap(limit => {
       const rows: { key: string; label: string; usage: UsageWindow }[] = []
@@ -387,6 +494,69 @@ export const UsagePane: React.FC = () => {
 
     return (
       <div className="space-y-2">
+        {creditTicks.length > 0 ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Credit threshold</span>
+              <Input
+                aria-label="Codex credit threshold value"
+                className="h-6 w-20 px-2 text-right text-xs tabular-nums"
+                type="number"
+                min={0}
+                max={data.creditsRemaining ?? 0}
+                step="0.01"
+                value={Math.min(
+                  codexCreditsThreshold,
+                  data.creditsRemaining ?? 0
+                )}
+                onChange={event => {
+                  const value = Number(event.target.value)
+                  if (Number.isFinite(value)) setCodexCreditsThreshold(value)
+                }}
+                onBlur={event => {
+                  const value = Number(event.target.value)
+                  if (Number.isFinite(value)) {
+                    const boundedValue = Math.min(
+                      data.creditsRemaining ?? 0,
+                      Math.max(0, value)
+                    )
+                    patchPreferences.mutate({
+                      codex_credits_threshold:
+                        boundedValue === 0 ? null : boundedValue,
+                    })
+                  }
+                }}
+                disabled={patchPreferences.isPending}
+              />
+            </div>
+            <Slider
+              aria-label="Codex credit threshold"
+              ticks={creditTicks.map(tick => ({
+                ...tick,
+                label: tick.value === 0 ? 'Off' : tick.label,
+              }))}
+              continuous={{
+                min: 0,
+                max: data.creditsRemaining ?? 0,
+                step: 0.01,
+              }}
+              value={Math.min(
+                codexCreditsThreshold,
+                data.creditsRemaining ?? 0
+              )}
+              onValueChange={setCodexCreditsThreshold}
+              onValueCommit={value =>
+                patchPreferences.mutate({
+                  codex_credits_threshold: value === 0 ? null : value,
+                })
+              }
+              disabled={patchPreferences.isPending}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Prevents new Codex requests when credits fall below this balance.
+            </p>
+          </div>
+        ) : null}
         <MetaLine items={[data.planType ?? 'Unknown', credits]} />
         {data.rateLimitReachedType ? (
           <InlineStatus tone="error">

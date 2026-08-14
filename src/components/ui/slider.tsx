@@ -17,6 +17,7 @@ interface SliderProps extends Omit<
 > {
   ticks: { value: number; label: string }[]
   value: number
+  continuous?: { min: number; max: number; step?: number }
   onValueChange: (value: number) => void
   /** Called only when the user finishes dragging (mouse/touch up). Use for expensive operations like zoom. */
   onValueCommit?: (value: number) => void
@@ -26,6 +27,7 @@ function Slider({
   className,
   ticks,
   value,
+  continuous,
   onValueChange,
   onValueCommit,
   disabled,
@@ -48,20 +50,28 @@ function Slider({
     }
     return closest
   }, [ticks, value])
+  const sliderMin = continuous?.min ?? 0
+  const sliderMax = continuous?.max ?? ticks.length - 1
+  const sliderStep = continuous?.step ?? 1
+  const sliderValue = continuous ? value : currentIndex
 
   return (
     <div className="w-full space-y-1">
       <SliderPrimitive.Root
         data-slot="slider"
-        min={0}
-        max={ticks.length - 1}
-        step={1}
-        value={[currentIndex]}
+        min={sliderMin}
+        max={sliderMax}
+        step={sliderStep}
+        value={[sliderValue]}
         onValueChange={values => {
           const idx = values[0]
           if (idx != null) {
-            const tick = ticks[idx]
-            if (tick) onValueChange(tick.value)
+            if (continuous) {
+              onValueChange(idx)
+            } else {
+              const tick = ticks[idx]
+              if (tick) onValueChange(tick.value)
+            }
           }
         }}
         onValueCommit={
@@ -69,8 +79,12 @@ function Slider({
             ? values => {
                 const idx = values[0]
                 if (idx != null) {
-                  const tick = ticks[idx]
-                  if (tick) onValueCommit(tick.value)
+                  if (continuous) {
+                    onValueCommit(idx)
+                  } else {
+                    const tick = ticks[idx]
+                    if (tick) onValueCommit(tick.value)
+                  }
                 }
               }
             : undefined

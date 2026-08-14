@@ -169,6 +169,10 @@ pub struct AppPreferences {
     pub thinking_level: String, // Thinking level: off, think, megathink, ultrathink
     #[serde(default = "default_effort_level")]
     pub default_effort_level: String, // Effort level for Opus adaptive thinking: low, medium, high, xhigh, max, ultracode
+    #[serde(default)]
+    pub claude_extra_usage_cap_usd: Option<f64>, // Maximum Claude extra usage spend per request in USD
+    #[serde(default)]
+    pub codex_credits_threshold: Option<f64>, // Minimum Codex credits to keep available before a request
     #[serde(default = "default_terminal")]
     pub terminal: String, // Terminal app: terminal, warp, ghostty, iterm2, powershell, windows-terminal
     #[serde(default = "default_terminal_renderer")]
@@ -2650,6 +2654,8 @@ impl Default for AppPreferences {
             theme: "system".to_string(),
             selected_model: default_model(),
             thinking_level: default_thinking_level(),
+            claude_extra_usage_cap_usd: None,
+            codex_credits_threshold: None,
             terminal: default_terminal(),
             terminal_renderer: default_terminal_renderer(),
             terminal_font: default_terminal_font(),

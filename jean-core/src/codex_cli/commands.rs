@@ -552,6 +552,12 @@ fn load_cached_codex_usage(now_secs: u64) -> Option<CodexUsageSnapshot> {
     None
 }
 
+/// Return the latest known Codex credit balance for request guards.
+pub(crate) fn cached_codex_credits_remaining() -> Option<f64> {
+    let now_secs = current_unix_secs();
+    load_cached_codex_usage(now_secs)?.credits_remaining
+}
+
 fn save_cached_codex_usage(snapshot: &CodexUsageSnapshot, now_secs: u64) {
     let Some(path) = get_codex_usage_cache_path() else {
         return;

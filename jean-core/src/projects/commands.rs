@@ -6625,7 +6625,7 @@ fn detect_and_link_pr_for_worktree(
     // Branch-name detection is best-effort and can match the wrong fork PR when
     // several PRs share a head name, or clear a correct link after a temp-branch
     // checkout renames the local head.
-    let (existing_pr_number, existing_pr_url) = match load_projects_data(&app) {
+    let (existing_pr_number, existing_pr_url) = match load_projects_data(app) {
         Ok(data) => data
             .worktrees
             .iter()

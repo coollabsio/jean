@@ -1035,6 +1035,25 @@ pub fn execute_codex_via_server(
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
 
+    if let Ok(path) = crate::get_preferences_path(app) {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            if let Ok(preferences) = serde_json::from_str::<crate::AppPreferences>(&contents) {
+                if let Some(threshold) = preferences
+                    .codex_credits_threshold
+                    .filter(|value| *value > 0.0)
+                {
+                    if let Some(credits) = crate::codex_cli::cached_codex_credits_remaining() {
+                        if credits < threshold {
+                            return Err(format!(
+                                "Codex credits are below the configured threshold ({credits} remaining, {threshold} required). Increase or disable the threshold in Settings → Usage to continue."
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let is_plan_mode = execution_mode.unwrap_or("plan") == "plan";
     let is_build_mode = execution_mode.unwrap_or("plan") == "build";
     let is_yolo_mode = execution_mode.unwrap_or("plan") == "yolo";
