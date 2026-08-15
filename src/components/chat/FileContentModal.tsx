@@ -15,8 +15,11 @@ import {
   Eye,
   Save,
   ExternalLink,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { invoke } from '@/lib/transport'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   Dialog,
   DialogContent,
@@ -123,6 +126,16 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
 
   const { theme } = useTheme()
   const { data: preferences } = usePreferences()
+  const [copiedPath, setCopiedPath] = useState(false)
+
+  const handleCopyPath = useCallback(() => {
+    if (filePath) {
+      void copyToClipboard(filePath)
+      toast.success('Copied file path to clipboard')
+      setCopiedPath(true)
+      setTimeout(() => setCopiedPath(false), 2000)
+    }
+  }, [filePath])
 
   // Resolve 'system' theme to actual dark/light
   const resolvedTheme = useMemo((): 'dark' | 'light' => {
@@ -355,9 +368,24 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
             )}
           </div>
           {filePath && (
-            <span className="text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere]">
-              {filePath}
-            </span>
+            <div className="flex items-center gap-1.5 mt-0.5 select-text group/path min-w-0">
+              <span className="text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere] select-text">
+                {filePath}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyPath}
+                className="inline-flex items-center justify-center h-5 w-5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 cursor-pointer"
+                title="Copy file path"
+              >
+                {copiedPath ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+                <span className="sr-only">Copy file path</span>
+              </button>
+            </div>
           )}
         </DialogTitle>
         <DialogDescription className="sr-only">

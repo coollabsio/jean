@@ -1,4 +1,5 @@
-import { FileText } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { FileText, Copy, Check } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -7,6 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFilename } from '@/lib/path-utils'
+import { copyToClipboard } from '@/lib/clipboard'
+import { toast } from 'sonner'
 import { InlineFileDiff } from './InlineFileDiff'
 
 export interface FileEdit {
@@ -32,6 +35,16 @@ export function FileEditsDiffModal({
   onClose,
 }: FileEditsDiffModalProps) {
   const filename = filePath ? getFilename(filePath) : null
+  const [copiedPath, setCopiedPath] = useState(false)
+
+  const handleCopyPath = useCallback(() => {
+    if (filePath) {
+      void copyToClipboard(filePath)
+      toast.success('Copied file path to clipboard')
+      setCopiedPath(true)
+      setTimeout(() => setCopiedPath(false), 2000)
+    }
+  }, [filePath])
 
   return (
     <Dialog open={!!filePath} onOpenChange={open => !open && onClose()}>
@@ -47,9 +60,24 @@ export function FileEditsDiffModal({
             )}
           </div>
           {filePath && (
-            <span className="text-muted-foreground font-normal text-xs truncate">
-              {filePath}
-            </span>
+            <div className="flex items-center gap-1.5 mt-0.5 select-text group/path min-w-0">
+              <span className="text-muted-foreground font-normal text-xs truncate select-text">
+                {filePath}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyPath}
+                className="inline-flex items-center justify-center h-5 w-5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 cursor-pointer"
+                title="Copy file path"
+              >
+                {copiedPath ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+                <span className="sr-only">Copy file path</span>
+              </button>
+            </div>
           )}
         </DialogTitle>
         <DialogDescription className="sr-only">
