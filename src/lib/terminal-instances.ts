@@ -577,6 +577,149 @@ function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
   return event.altKey && (code === 'Backspace' || code === 'Delete')
 }
 
+/**
+ * Terminals send the same carriage return for Enter and Shift+Enter, so a CLI
+ * that submits on Enter (Claude Code, Codex, …) sends the message instead of
+ * inserting a newline. Terminals that can tell them apart encode the modifier
+ * with CSI u (kitty keyboard protocol): `CSI 13 ; 2 u` is Enter with Shift.
+ * xterm.js does not implement that protocol, so the sequence is injected here.
+ * https://code.claude.com/docs/en/terminal-config
+ */
+export const SHIFT_ENTER_SEQUENCE = '\x1b[13;2u'
+
+/**
+ * True for every event of a Shift+Enter press. The renderer calls its key
+ * handler for keydown, keypress and keyup, so all three must be suppressed —
+ * letting keypress through makes the terminal send its own carriage return in
+ * addition to the sequence, which the CLI reads as submit.
+ */
+export function isShiftEnterEvent(event: KeyboardEvent): boolean {
+  return (
+    event.key === 'Enter' &&
+    event.shiftKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    // An Enter that confirms IME composition belongs to the composition, not
+    // to the terminal (issue #584; WKWebView reports keyCode 229 instead).
+    !event.isComposing &&
+    event.keyCode !== 229
+  )
+}
+
+/**
+ * Handle one key event of a possible Shift+Enter press for a terminal.
+ *
+ * Returns true when the renderer must not process the event itself: emitting
+ * the sequence AND letting the renderer run would send a carriage return too,
+ * which the CLI reads as submit. Callers map that to their own convention.
+ */
+export function handleShiftEnterKey(
+  terminalId: string,
+  event: KeyboardEvent
+): boolean {
+  if (!isShiftEnterEvent(event)) return false
+  if (!acceptsModifierEncodedKeys(terminalId)) return false
+  if (shouldSendShiftEnterSequence(event)) {
+    queueTerminalInput(terminalId, SHIFT_ENTER_SEQUENCE)
+  }
+  return true
+}
+
+/** Only the keydown of that press may emit the sequence, or it repeats. */
+export function shouldSendShiftEnterSequence(event: KeyboardEvent): boolean {
+  return event.type === 'keydown' && isShiftEnterEvent(event)
+}
+
+/**
+ * Whether the foreground program can read modifier-encoded keys, tracked from
+ * its own output. Two signals:
+ *
+ * - The kitty keyboard protocol: a program pushes flags with `CSI > flags u`,
+ *   restores them with `CSI < number u`, or sets them with `CSI = flags ; n u`.
+ *   This is the only signal a real terminal acts on.
+ * - Focus reporting (`CSI ? 1004 h`). Claude Code negotiates no keyboard
+ *   protocol at all, yet parses CSI u input; focus reporting is the narrowest
+ *   mode it does enable. Trusting it is deliberately more aggressive than any
+ *   terminal emulator, so keep it as tight as possible: the alternate screen
+ *   buffer is NOT trusted, because `less`, `htop`, `fzf` and classic `vim` use
+ *   it without reading CSI u — and in vim's insert mode a stray `\x1b[13;2u`
+ *   leaves insert, repeats a search and then undoes two changes.
+ *
+ * A plain shell prompt enables neither, which is what keeps Shift+Enter from
+ * spraying `;2u` into a command line that cannot read it.
+ *
+ * ponytail: a program killed before it restores the mode leaves the verdict
+ * stuck on until the terminal is closed. Track the foreground process if that
+ * ever matters.
+ */
+interface TerminalKeyboardState {
+  /** Depth of the kitty keyboard flag stack. */
+  kittyDepth: number
+  focusReporting: boolean
+  /** Trailing partial escape sequence carried over between output chunks. */
+  tail: string
+}
+
+const keyboardStates = new Map<string, TerminalKeyboardState>()
+// eslint-disable-next-line no-control-regex -- ESC starts every CSI sequence
+const KITTY_KEYBOARD_SEQUENCE = /\x1b\[([<>=])([0-9;]*)u/g
+// eslint-disable-next-line no-control-regex -- ESC starts every CSI sequence
+const PRIVATE_MODE_SEQUENCE = /\x1b\[\?([0-9;]+)([hl])/g
+// eslint-disable-next-line no-control-regex -- ESC starts every CSI sequence
+const PARTIAL_TAIL = /\x1b\[?[<>=?]?[0-9;]*$/
+/** A CSI introducer is a handful of bytes; never carry more than this. */
+const MAX_TAIL_LENGTH = 32
+
+function getKeyboardState(terminalId: string): TerminalKeyboardState {
+  const existing = keyboardStates.get(terminalId)
+  if (existing) return existing
+  const created = { kittyDepth: 0, focusReporting: false, tail: '' }
+  keyboardStates.set(terminalId, created)
+  return created
+}
+
+export function trackTerminalKeyboardMode(
+  terminalId: string,
+  data: string
+): void {
+  const existing = keyboardStates.get(terminalId)
+  if (!existing?.tail && !data.includes('\x1b')) return
+
+  const state = getKeyboardState(terminalId)
+  const text = state.tail + data
+
+  for (const [, kind, params] of text.matchAll(KITTY_KEYBOARD_SEQUENCE)) {
+    if (kind === '>') {
+      state.kittyDepth += 1
+    } else if (kind === '<') {
+      state.kittyDepth = Math.max(0, state.kittyDepth - (Number(params) || 1))
+    } else {
+      const flags = Number(params?.split(';')[0])
+      state.kittyDepth = flags > 0 ? Math.max(state.kittyDepth, 1) : 0
+    }
+  }
+
+  for (const [, params, action] of text.matchAll(PRIVATE_MODE_SEQUENCE)) {
+    const enabled = action === 'h'
+    for (const mode of (params ?? '').split(';')) {
+      if (mode === '1004') state.focusReporting = enabled
+    }
+  }
+
+  state.tail = (text.match(PARTIAL_TAIL)?.[0] ?? '').slice(-MAX_TAIL_LENGTH)
+}
+
+export function acceptsModifierEncodedKeys(terminalId: string): boolean {
+  const state = keyboardStates.get(terminalId)
+  if (!state) return false
+  return state.kittyDepth > 0 || state.focusReporting
+}
+
+function forgetTerminalKeyboardMode(terminalId: string): void {
+  keyboardStates.delete(terminalId)
+}
+
 const INPUT_FLUSH_DELAY_MS = 5
 
 /** Control chars that must never be silently dropped on a brief WS disconnect
@@ -744,7 +887,8 @@ function queueTerminalOutput(instance: PersistentTerminal, data: string): void {
 
 async function createTerminalForRenderer(
   renderer: TerminalRenderer,
-  worktreePath: string
+  worktreePath: string,
+  terminalId: string
 ): Promise<{
   terminal: EmbeddedTerminal
   fitAddon: EmbeddedFitAddon
@@ -766,6 +910,7 @@ async function createTerminalForRenderer(
     terminal.attachCustomKeyEventHandler(event => {
       // ghostty-web uses the inverse convention from xterm.js:
       // true means "custom handler consumed/prevented default".
+      if (handleShiftEnterKey(terminalId, event)) return true
       return shouldLetAppHandleShortcut(event)
     })
     const fitAddon = new GhosttyWebFitAddon()
@@ -778,6 +923,12 @@ async function createTerminalForRenderer(
     allowProposedApi: true,
   })
   terminal.attachCustomKeyEventHandler(event => {
+    // Returning false keeps xterm from also sending its own carriage return.
+    // xterm skips its own cancel() on that path, so prevent the default here.
+    if (handleShiftEnterKey(terminalId, event)) {
+      event.preventDefault()
+      return false
+    }
     if (shouldLetAppHandleShortcut(event)) return false
     // All other CMD shortcuts: xterm consumes them (prevents app actions)
     return true
@@ -813,7 +964,8 @@ async function ensureTerminalCreated(
   try {
     const { terminal, fitAddon, appearance } = await createTerminalForRenderer(
       instance.renderer,
-      instance.worktreePath
+      instance.worktreePath,
+      terminalId
     )
 
     if (!isCurrentInstance(terminalId, instance)) {
@@ -856,6 +1008,10 @@ function ensureTerminalBackendListeners(): Promise<void> {
         const terminalId = event.payload.terminal_id
         const inst = instances.get(terminalId)
         if (!inst) return
+        // Track here, not in queueTerminalOutput: buffered output re-enters
+        // that function, which would count a kitty push twice and leave the
+        // stack permanently non-empty.
+        trackTerminalKeyboardMode(terminalId, event.payload.data)
         queueTerminalOutput(inst, event.payload.data)
       }),
       listen<TerminalStartedEvent>('terminal:started', event => {
@@ -1350,6 +1506,7 @@ export async function disposeTerminal(terminalId: string): Promise<void> {
   instances.delete(terminalId)
   discardTerminalInput(terminalId)
   outputBuffers.delete(terminalId)
+  forgetTerminalKeyboardMode(terminalId)
   instance.pendingOutput = []
   instance.readyForOutput = false
   instance.outputReadyPromise = null
