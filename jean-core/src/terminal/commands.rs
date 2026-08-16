@@ -58,9 +58,9 @@ pub async fn start_terminal(
     let (command_args, signal) = match (command.as_deref(), session_id.as_deref()) {
         (Some(command), Some(session_id)) => {
             let had_args = command_args.is_some();
-            let (args, signal) = super::attention::inject_codex_notify(
+            let (args, signal) = super::attention::inject_lifecycle_hook(
                 &app,
-                session_id,
+                &terminal_id,
                 command,
                 command_args.unwrap_or_default(),
             );
@@ -74,7 +74,9 @@ pub async fn start_terminal(
         _ => (command_args, None),
     };
 
-    spawn_terminal(
+    // The tailer owns cleanup of the signal file, so a spawn failure (no
+    // tailer) has to clean up after itself.
+    let spawned = spawn_terminal(
         &app,
         terminal_id.clone(),
         worktree_path,
@@ -83,7 +85,13 @@ pub async fn start_terminal(
         command,
         command_args,
         session_id,
-    )?;
+    );
+    if spawned.is_err() {
+        if let Some((_, signal_path)) = &signal {
+            let _ = std::fs::remove_file(signal_path);
+        }
+    }
+    spawned?;
     if let Some((session_id, signal_path)) = signal {
         super::attention::spawn_signal_tailer(app, session_id, terminal_id, signal_path);
     }
