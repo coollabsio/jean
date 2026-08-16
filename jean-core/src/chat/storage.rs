@@ -381,6 +381,7 @@ pub fn delete_session_data(app: &AppHandle, session_id: &str) -> Result<(), Stri
         let allowed_dirs = [
             app_data_dir.join("pasted-images"),
             app_data_dir.join("pasted-texts"),
+            app_data_dir.join("pasted-files"),
         ];
 
         let mut deletion_errors = Vec::new();
@@ -424,6 +425,9 @@ fn collect_session_pasted_paths(metadata: &SessionMetadata) -> Vec<String> {
     for run in &metadata.runs {
         paths.extend(super::commands::extract_image_paths(&run.user_message));
         paths.extend(super::commands::extract_text_file_paths(&run.user_message));
+        paths.extend(super::commands::extract_file_attachment_paths(
+            &run.user_message,
+        ));
     }
 
     for queued_message in &metadata.queued_messages {
@@ -436,6 +440,25 @@ fn collect_session_pasted_paths(metadata: &SessionMetadata) -> Vec<String> {
                         .map(str::to_string)
                 }));
             }
+        }
+        // pendingFiles entries are {sourceRootPath, relativePath}; only Jean-owned
+        // pasted-files copies are ours to delete (worktree @mentions share the shape).
+        if let Some(files) = queued_message
+            .get("pendingFiles")
+            .and_then(|value| value.as_array())
+        {
+            paths.extend(files.iter().filter_map(|file| {
+                let root = file.get("sourceRootPath")?.as_str()?;
+                if !root.contains("pasted-files") {
+                    return None;
+                }
+                let relative = file.get("relativePath")?.as_str()?;
+                Some(format!(
+                    "{}/{}",
+                    root.trim_end_matches('/'),
+                    relative.trim_start_matches('/')
+                ))
+            }));
         }
     }
 
@@ -1081,6 +1104,21 @@ pub fn get_pastes_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Get the files directory path in app data directory (creates if not exists)
+/// Used for storing arbitrary attached files: ~/Library/Application Support/<app>/pasted-files/
+pub fn get_files_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?;
+
+    let path = app_data_dir.join("pasted-files");
+
+    fs::create_dir_all(&path).map_err(|e| format!("Failed to create files directory: {e}"))?;
+
+    Ok(path)
+}
+
 /// Get the saved contexts directory path in app data directory (creates if not exists)
 /// Used for storing conversation context summaries: ~/Library/Application Support/<app>/session-context/
 pub fn get_saved_contexts_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1284,7 +1322,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({
                 "run_id": "run-1",
                 "user_message_id": "message-1",
-                "user_message": "Cancelled prompt\n\n[Image attached: /tmp/pasted-images/image.png - Use the Read tool to view this image]\n[Text file attached: /tmp/pasted-texts/paste.txt - Use the Read tool to view this file]",
+                "user_message": "Cancelled prompt\n\n[Image attached: /tmp/pasted-images/image.png - Use the Read tool to view this image]\n[Text file attached: /tmp/pasted-texts/paste.txt - Use the Read tool to view this file]\n[File: /tmp/pasted-files/report x.pdf - Use the Read tool to view this file]\n[File: /tmp/worktree/src/main.rs - Use the Read tool to view this file]",
                 "started_at": 1,
                 "ended_at": 2,
                 "status": "cancelled",
@@ -1294,7 +1332,11 @@ mod tests {
         );
         metadata.queued_messages.push(serde_json::json!({
             "pendingImages": [{ "path": "/tmp/pasted-images/queued.png" }],
-            "pendingTextFiles": [{ "path": "/tmp/pasted-texts/queued.txt" }]
+            "pendingTextFiles": [{ "path": "/tmp/pasted-texts/queued.txt" }],
+            "pendingFiles": [
+                { "sourceRootPath": "/tmp/pasted-files/", "relativePath": "/queued.pdf" },
+                { "sourceRootPath": "/tmp/worktree", "relativePath": "src/lib.rs" }
+            ]
         }));
 
         let paths = collect_session_pasted_paths(&metadata);
@@ -1302,6 +1344,8 @@ mod tests {
         assert_eq!(
             paths,
             vec![
+                "/tmp/pasted-files/queued.pdf".to_string(),
+                "/tmp/pasted-files/report x.pdf".to_string(),
                 "/tmp/pasted-images/image.png".to_string(),
                 "/tmp/pasted-images/queued.png".to_string(),
                 "/tmp/pasted-texts/paste.txt".to_string(),

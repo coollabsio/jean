@@ -224,7 +224,7 @@ import { useGitOperations } from './hooks/useGitOperations'
 import { useContextOperations } from './hooks/useContextOperations'
 import { useMessageHandlers } from './hooks/useMessageHandlers'
 import { useMagicCommands } from './hooks/useMagicCommands'
-import { useDragAndDropImages } from './hooks/useDragAndDropImages'
+import { useDragAndDropFiles } from './hooks/useDragAndDropFiles'
 import { usePlanDialogApproval } from './hooks/usePlanDialogApproval'
 import { useChatWindowEvents } from './hooks/useChatWindowEvents'
 import { useInvestigateHandlers } from './hooks/useInvestigateHandlers'
@@ -1291,8 +1291,8 @@ export function ChatWindow({
     isSending,
   })
 
-  // Drag and drop images into chat input
-  const { isDragging } = useDragAndDropImages(activeSessionId)
+  // Drag and drop files into chat input
+  const { isDragging } = useDragAndDropFiles(activeSessionId)
 
   // File content modal is global (MainWindow) so the file browser can open it too
   const setViewingFilePath = useUIStore(state => state.setViewingFilePath)

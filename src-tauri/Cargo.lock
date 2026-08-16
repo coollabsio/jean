@@ -2499,6 +2499,7 @@ dependencies = [
  "jean-core",
  "log",
  "objc2-app-kit",
+ "objc2-foundation",
  "once_cell",
  "serde",
  "serde_json",

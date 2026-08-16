@@ -1821,6 +1821,19 @@ pub(crate) fn extract_text_file_paths(content: &str) -> Vec<String> {
         .collect()
 }
 
+/// Extract Jean-owned attached file paths from message content
+/// Matches: [File: /path/to/file.pdf - Use the Read tool to view this file]
+/// Worktree @mention files share this marker, so only pasted-files paths are returned.
+pub(crate) fn extract_file_attachment_paths(content: &str) -> Vec<String> {
+    use regex::Regex;
+    let re = Regex::new(r"\[File: (.+?) - Use the Read tool to view this file\]")
+        .expect("Invalid regex");
+    re.captures_iter(content)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+        .filter(|path| path.contains("/pasted-files/") || path.contains("\\pasted-files\\"))
+        .collect()
+}
+
 fn plan_mode_content_waits_for_approval(
     backend: &Backend,
     execution_mode: Option<&str>,
@@ -3637,6 +3650,7 @@ pub async fn send_chat_message(
                         for subdir in [
                             "pasted-images",
                             "pasted-texts",
+                            "pasted-files",
                             "session-context",
                             "git-context",
                             "combined-contexts",
@@ -6255,6 +6269,16 @@ pub async fn read_clipboard_image(_app: AppHandle) -> Result<Option<SaveImageRes
     Err("Native clipboard access is only available in the desktop app".to_string())
 }
 
+/// Read file paths from the native system clipboard (copied files in Finder/Explorer).
+pub async fn read_clipboard_file_paths() -> Result<Vec<super::types::DroppedPath>, String> {
+    Err("Native clipboard access is only available in the desktop app".to_string())
+}
+
+/// Read file paths from the OS drag pasteboard right after a DOM drop.
+pub async fn read_drag_file_paths() -> Result<Vec<super::types::DroppedPath>, String> {
+    Err("Native drag pasteboard access is only available in the desktop app".to_string())
+}
+
 /// Write text to the native system clipboard.
 ///
 /// Browser web access can lose Clipboard API user activation when a command
@@ -6577,6 +6601,246 @@ pub async fn delete_pasted_text(app: AppHandle, path: String) -> Result<(), Stri
 
     log::trace!("Text file deleted: {path}");
     Ok(())
+}
+
+// ============================================================================
+// File Attachment Commands (arbitrary files attached in chat)
+// ============================================================================
+
+use super::storage::get_files_dir;
+use super::types::SaveFileResponse;
+
+/// Maximum attached file size in bytes (25MB)
+const MAX_FILE_SIZE: usize = 25 * 1024 * 1024;
+
+/// Save an attached file (base64, no data URL prefix) to the app data directory
+///
+/// The original name is kept recognisable in the saved filename so the AI
+/// sees e.g. `quarterly-report-1704067200-ab12cd34.pdf`.
+pub async fn save_pasted_file(
+    app: AppHandle,
+    data: String,
+    filename: String,
+) -> Result<SaveFileResponse, String> {
+    let bytes = STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Failed to decode base64 file data: {e}"))?;
+    let size = bytes.len();
+    log::trace!("Saving attached file {filename}, size: {size} bytes");
+
+    if size > MAX_FILE_SIZE {
+        return Err(format!(
+            "File too large: {size} bytes. Maximum size: {MAX_FILE_SIZE} bytes (25MB)"
+        ));
+    }
+
+    let files_dir = get_files_dir(&app)?;
+    let filename = pasted_file_filename(&filename);
+    let file_path = files_dir.join(&filename);
+
+    // Write file atomically (temp file + rename)
+    let temp_path = file_path.with_extension("tmp");
+    std::fs::write(&temp_path, &bytes).map_err(|e| format!("Failed to write file: {e}"))?;
+    std::fs::rename(&temp_path, &file_path).map_err(|e| format!("Failed to finalize file: {e}"))?;
+
+    let path_str = file_path
+        .to_str()
+        .ok_or_else(|| "Failed to convert path to string".to_string())?
+        .to_string();
+
+    log::trace!("Attached file saved to: {path_str}");
+
+    Ok(SaveFileResponse {
+        id: Uuid::new_v4().to_string(),
+        filename,
+        path: path_str,
+        size,
+    })
+}
+
+/// `<sanitized-stem>-<timestamp>-<uuid8>.<ext>`; ext omitted when empty.
+fn pasted_file_filename(original: &str) -> String {
+    let timestamp = now();
+    let short_uuid = &Uuid::new_v4().to_string()[..8];
+    let base = original.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let (stem, ext) = match base.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem, ext),
+        _ => (base, ""),
+    };
+
+    let mut sanitized = String::new();
+    let mut last_was_dash = false;
+    for ch in stem.to_lowercase().chars() {
+        if ch.is_alphanumeric() {
+            sanitized.push(ch);
+            last_was_dash = false;
+        } else if !last_was_dash {
+            sanitized.push('-');
+            last_was_dash = true;
+        }
+        if sanitized.len() >= 80 {
+            break;
+        }
+    }
+    let sanitized = sanitized.trim_matches('-');
+    let stem = if sanitized.is_empty() {
+        "file"
+    } else {
+        sanitized
+    };
+
+    let ext: String = ext
+        .to_lowercase()
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(10)
+        .collect();
+    if ext.is_empty() {
+        format!("{stem}-{timestamp}-{short_uuid}")
+    } else {
+        format!("{stem}-{timestamp}-{short_uuid}.{ext}")
+    }
+}
+
+/// Delete an attached file. Only files directly inside pasted-files/ are deletable.
+pub async fn delete_pasted_file(app: AppHandle, path: String) -> Result<(), String> {
+    log::trace!("Deleting attached file: {path}");
+
+    let file_path = std::path::PathBuf::from(&path);
+    let files_dir = get_files_dir(&app)?;
+    if file_path.parent() != Some(files_dir.as_path()) {
+        return Err("Invalid path: must be within allowed directories".to_string());
+    }
+
+    match std::fs::remove_file(&file_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log::warn!("Attached file not found: {path}");
+            Ok(())
+        }
+        Err(e) => Err(format!("Failed to delete file: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod pasted_file_tests {
+    use super::*;
+
+    #[test]
+    fn pasted_file_filename_sanitizes_stem_and_keeps_ext() {
+        let name = pasted_file_filename("Quarterly Report (Q3) 2024.PDF");
+        assert!(name.starts_with("quarterly-report-q3-2024-"), "{name}");
+        assert!(name.ends_with(".pdf"), "{name}");
+    }
+
+    #[test]
+    fn pasted_file_filename_handles_unicode_and_paths() {
+        let name = pasted_file_filename("/Users/x/Документ résumé.docx");
+        assert!(name.starts_with("документ-résumé-"), "{name}");
+        assert!(name.ends_with(".docx"), "{name}");
+        assert!(!name.contains('/'));
+
+        let name = pasted_file_filename("報告 final.pdf");
+        assert!(name.starts_with("報告-final-"), "{name}");
+        assert!(name.ends_with(".pdf"), "{name}");
+    }
+
+    #[test]
+    fn pasted_file_filename_truncates_long_stem() {
+        let name = pasted_file_filename(&format!("{}.tar", "a".repeat(200)));
+        let stem = name.split('-').next().unwrap();
+        assert_eq!(stem.len(), 80);
+        assert!(name.ends_with(".tar"));
+    }
+
+    #[test]
+    fn pasted_file_filename_without_ext_and_weird_ext() {
+        let name = pasted_file_filename("Makefile");
+        assert!(name.starts_with("makefile-"), "{name}");
+        assert!(!name.contains('.'), "{name}");
+
+        let name = pasted_file_filename("archive.T@r!.Gz#");
+        assert!(name.starts_with("archive-t-r-"), "{name}");
+        assert!(name.ends_with(".gz"), "{name}");
+
+        let name = pasted_file_filename(".env");
+        assert!(name.starts_with("env-"), "{name}");
+        assert!(!name.contains('.'), "{name}");
+
+        let name = pasted_file_filename("!!!.verylongextension123");
+        assert!(name.starts_with("file-"), "{name}");
+        assert!(name.ends_with(".verylongex"), "{name}");
+    }
+
+    #[tokio::test]
+    async fn save_and_delete_pasted_file_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+
+        let saved = save_pasted_file(
+            app.clone(),
+            STANDARD.encode(b"hello"),
+            "My Report.pdf".to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(saved.size, 5);
+        assert!(saved.filename.starts_with("my-report-"));
+        assert!(saved.filename.ends_with(".pdf"));
+        assert_eq!(std::fs::read(&saved.path).unwrap(), b"hello");
+        assert_eq!(
+            std::path::Path::new(&saved.path).parent().unwrap(),
+            tmp.path().join("data").join("pasted-files")
+        );
+
+        let outside = tmp.path().join("data").join("outside.pdf");
+        std::fs::write(&outside, b"x").unwrap();
+        assert!(
+            delete_pasted_file(app.clone(), outside.to_string_lossy().to_string())
+                .await
+                .is_err()
+        );
+        assert!(outside.exists());
+
+        delete_pasted_file(app.clone(), saved.path.clone())
+            .await
+            .unwrap();
+        assert!(!std::path::Path::new(&saved.path).exists());
+        // NotFound is not an error
+        delete_pasted_file(app, saved.path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn save_pasted_file_rejects_oversized_and_bad_base64() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        assert!(
+            save_pasted_file(app.clone(), "%%%".to_string(), "a.bin".to_string())
+                .await
+                .is_err()
+        );
+        let big = STANDARD.encode(vec![0u8; MAX_FILE_SIZE + 1]);
+        let err = save_pasted_file(app, big, "a.bin".to_string())
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("File too large"), "{err}");
+    }
+
+    #[test]
+    fn extract_file_attachment_paths_only_returns_pasted_files() {
+        let message = "Look at these
+            [File: /app/data/pasted-files/my report-1-ab.pdf - Use the Read tool to view this file]
+            [File: /home/u/worktree/src/main.rs - Use the Read tool to view this file]
+            [Image attached: /app/data/pasted-images/x.png - Use the Read tool to view this image]
+            [File: C:\\data\\pasted-files\\win.zip - Use the Read tool to view this file]";
+        assert_eq!(
+            extract_file_attachment_paths(message),
+            vec![
+                "/app/data/pasted-files/my report-1-ab.pdf".to_string(),
+                "C:\\data\\pasted-files\\win.zip".to_string(),
+            ]
+        );
+    }
 }
 
 /// Read a pasted text file from disk
