@@ -79,7 +79,7 @@ export function resolveApprovalLabel(
               ? (preferences.selected_pi_model ?? 'pi/sonnet')
               : resolvedBackend === 'grok'
                 ? (preferences.selected_grok_model ??
-                  'grok/grok-4.5')
+                  'grok/grok-4.6')
                 : resolvedBackend === 'kimi'
                   ? (preferences.selected_kimi_model ?? 'kimi/default')
                   : resolvedBackend === 'antigravity'

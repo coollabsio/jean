@@ -62,7 +62,7 @@ export function resolveDefaultModelForBackend(
     return preferences?.selected_commandcode_model ?? 'commandcode/default'
   }
   if (backend === 'grok') {
-    return preferences?.selected_grok_model ?? 'grok/grok-4.5'
+    return preferences?.selected_grok_model ?? 'grok/grok-4.6'
   }
   if (backend === 'kimi') {
     return preferences?.selected_kimi_model ?? 'kimi/default'

@@ -2443,9 +2443,7 @@ fn extract_zip_entry_by_file_name(
         }
     }
 
-    Err(format!(
-        "File '{expected_name}' not found in zip archive"
-    ))
+    Err(format!("File '{expected_name}' not found in zip archive"))
 }
 
 /// Windows helper binaries that Codex expects next to `codex.exe`.

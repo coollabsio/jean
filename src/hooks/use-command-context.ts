@@ -136,13 +136,16 @@ export function useCommandContext(
 
     try {
       await invoke('rebase_worktree', { worktreeId: selectedWorktreeId })
+      queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
+      queryClient.invalidateQueries({ queryKey: ['ports'] })
+      queryClient.invalidateQueries({ queryKey: ['jean-config'] })
       notify('Rebase completed successfully!', undefined, { type: 'success' })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger.error('Failed to rebase worktree:', { error: message })
       notify(message, undefined, { type: 'error' })
     }
-  }, [])
+  }, [queryClient])
 
   // Sessions - Create new session
   const createSession = useCallback(() => {

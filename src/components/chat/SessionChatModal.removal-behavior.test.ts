@@ -52,7 +52,7 @@ describe('SessionChatModal removal behavior', () => {
     )
     // Confirm gate wraps the action for every non-empty tab (not only last).
     expect(removeSessionTab).toMatch(
-      /if \(needsConfirm\) \{\s*pendingCloseAction\.current = action/
+      /if \(needsConfirm\) \{[\s\S]*?pendingCloseAction\.current = action/
     )
     // Neighbor select happens inside the deferred action, not as a bypass.
     expect(removeSessionTab).toMatch(
@@ -82,6 +82,21 @@ describe('SessionChatModal removal behavior', () => {
     expect(serviceSource).not.toContain('navigateToProjectPicker(')
     expect(serviceSource).toContain(
       'const { [worktreeId]: _removed, ...rest } = state.activeSessionIds'
+    )
+  })
+
+  it('asks to close the worktree when Cmd+W is pressed with no sessions', () => {
+    const modalSource = readSource('src/components/chat/SessionChatModal.tsx')
+    const canvasSource = readSource(
+      'src/components/dashboard/ProjectCanvasView.tsx'
+    )
+
+    expect(modalSource).toContain("setCloseConfirmMode('worktree')")
+    expect(modalSource).toContain('onRequestCloseWorktree')
+    expect(modalSource).toContain('mode={closeConfirmMode}')
+    expect(canvasSource).toContain('onRequestCloseWorktree={() => {')
+    expect(canvasSource).toContain(
+      'closeWorktreeDirectly(selectedWorktreeModal.worktreeId)'
     )
   })
 
@@ -148,6 +163,16 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(source).toContain('isActionableWaitingStatus(status)')
     expect(source).toContain("'bg-yellow-500/10")
+  })
+
+  it('uses a subtle grey background only for inactive unread session tabs', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+
+    expect(source).toContain('isUnreadSession(session)')
+    expect(source).toContain('!isActive')
+    expect(source).toContain('!isActionableWaitingStatus(status)')
+    expect(source).toContain("'bg-muted/60")
+    expect(source).not.toContain("'bg-green-500/10")
   })
 
   it('offers to open resumable chat sessions in a separate native client session', () => {

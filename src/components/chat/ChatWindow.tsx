@@ -104,6 +104,7 @@ import {
   normalizeCodexQuestions,
 } from '@/types/chat'
 import { getFilename, normalizePath } from '@/lib/path-utils'
+import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -1176,6 +1177,11 @@ export function ChatWindow({
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  const unregisterChatComposerRef = useRef<(() => void) | null>(null)
+  const setChatComposerNode = useCallback((node: HTMLDivElement | null) => {
+    unregisterChatComposerRef.current?.()
+    unregisterChatComposerRef.current = node ? registerChatComposer(node) : null
+  }, [])
   const clearChatInputStateRef = useRef<(() => void) | null>(null)
   // PERFORMANCE: Refs for session/worktree IDs and settings to avoid recreating callbacks when session changes
   // This enables stable callback references that read current values from refs
@@ -1440,7 +1446,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : yoloBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : yoloBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -1630,7 +1636,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : buildBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : buildBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -1903,7 +1909,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : modeBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : modeBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -3545,7 +3551,11 @@ export function ChatWindow({
                     {/* Input container - full width, centered content */}
                     <div className="bg-background">
                       <div className="mx-auto max-w-7xl">
-                        <div className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl">
+                        <div
+                          ref={setChatComposerNode}
+                          data-chat-composer=""
+                          className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl"
+                        >
                           {/* Queued prompts - rendered as an extension above the chat input */}
                           {activeSessionId &&
                             currentQueuedMessages.length > 0 && (
@@ -3612,7 +3622,8 @@ export function ChatWindow({
                             )}
 
                             {/* Task widget - inline fallback for narrow screens */}
-                            {activeTodos.length > 0 &&
+                            {!zenMode &&
+                              activeTodos.length > 0 &&
                               (dismissedTodoMessageId === null ||
                                 (todoSourceMessageId !== null &&
                                   todoSourceMessageId !==
@@ -3640,7 +3651,8 @@ export function ChatWindow({
                               )}
 
                             {/* Agent widget - inline fallback for narrow screens */}
-                            {activeAgents.length > 0 &&
+                            {!zenMode &&
+                              activeAgents.length > 0 &&
                               (dismissedAgentMessageId === null ||
                                 (agentSourceMessageId !== null &&
                                   agentSourceMessageId !==
@@ -3893,7 +3905,8 @@ export function ChatWindow({
                           </form>
 
                           {/* Side panel widgets (Tasks + Agents) for wide screens */}
-                          {!terminalPanelOpen &&
+                          {!zenMode &&
+                            !terminalPanelOpen &&
                             (activeTodos.length > 0 ||
                               activeAgents.length > 0) && (
                               <div className="hidden xl:flex flex-col gap-2 absolute left-full bottom-0 ml-3 w-64 z-20">

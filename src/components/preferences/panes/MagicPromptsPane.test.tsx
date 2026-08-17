@@ -503,7 +503,7 @@ describe('MagicPromptsPane', () => {
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         magic_prompt_models: expect.objectContaining({
-          investigate_issue_model: 'grok/grok-4.5',
+          investigate_issue_model: 'grok/grok-4.6',
         }),
         magic_prompt_backends: expect.objectContaining({
           investigate_issue_backend: 'grok',

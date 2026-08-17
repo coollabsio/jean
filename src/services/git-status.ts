@@ -23,6 +23,13 @@ import type {
 import type { GitDiff, CommitHistoryResult } from '@/types/git-diff'
 import { toastActionLabel } from '@/lib/toast-action-label'
 import { logger } from '@/lib/logger'
+import { queryClient } from '@/lib/query-client'
+
+function invalidateJeanConfigQueries() {
+  queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
+  queryClient.invalidateQueries({ queryKey: ['ports'] })
+  queryClient.invalidateQueries({ queryKey: ['jean-config'] })
+}
 
 // ============================================================================
 // Types
@@ -258,6 +265,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
   try {
     await gitPull(worktreePath, baseBranch, remote)
     await triggerImmediateGitPoll()
+    invalidateJeanConfigQueries()
     if (projectId) fetchWorktreesStatus(projectId)
     if (keepLoadingOnSuccess) {
       // Caller continues the flow (e.g. push after pull)
@@ -293,6 +301,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
         toast.loading('Restoring stashed changes...', { id: toastId })
         await gitStashPop(worktreePath)
         await triggerImmediateGitPoll()
+        invalidateJeanConfigQueries()
         if (projectId) fetchWorktreesStatus(projectId)
         if (keepLoadingOnSuccess) {
           toast.loading(loadingMessage ?? `Syncing ${label}...`, {
@@ -420,7 +429,13 @@ export async function performGitSync(opts: GitSyncOptions): Promise<void> {
     const result = await gitPush(pull.worktreePath, prNumber, pushRemote)
     await triggerImmediateGitPoll()
     if (pull.projectId) fetchWorktreesStatus(pull.projectId)
-    if (result.fellBack) {
+    if (result.permissionDenied) {
+      toast.error('Sync failed', {
+        id: toastId,
+        duration: Infinity,
+        description: result.output.trim() || 'The remote rejected the push.',
+      })
+    } else if (result.fellBack) {
       toast.warning(
         'Could not push to PR branch, pushed to new branch instead',
         { id: toastId }

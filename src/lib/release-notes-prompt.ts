@@ -107,3 +107,37 @@ PR_NUMBER = ${prNumber}
 
 Update PR #${prNumber} now.`
 }
+
+/** Build the first message for an interactive release-notes chat session. */
+export function buildReleaseNotesFromTagSessionPrompt(
+  tag: string,
+  releaseName: string,
+  customPrompt?: string | null
+): string {
+  if (customPrompt?.trim()) {
+    return customPrompt
+      .replaceAll('{tag}', tag)
+      .replaceAll('{previous_release_name}', releaseName)
+      .replaceAll(
+        '{pull_requests}',
+        'Use the merged pull request metadata you gathered.'
+      )
+      .replaceAll(
+        '{related_pull_requests}',
+        'Use only verified pull request and closing issue references.'
+      )
+      .replaceAll('{commits}', 'Use the commit metadata you gathered.')
+  }
+
+  return `Generate user-facing release notes for all changes since the \`${tag}\` release (${releaseName}).
+
+Inspect the repository yourself. Fetch current remote data, use \`git log\` and the GitHub CLI to identify commits and merged pull requests since \`${tag}\`, and inspect PR titles and descriptions when useful. Treat merged PR metadata as the primary source and commits as fallback context.
+
+Include a concise title and group entries under only the applicable headings: Features, Fixes, Improvements, and Breaking Changes. Keep the notes concise, user-facing, and in past tense. Include PR and closing issue references when verified, but never invent references. Skip merge commits and trivial formatting-only changes.
+
+Reply with the finished release notes inside a single fenced \`markdown\` code block so Jean shows a copy button. Do not put any text before the code block.
+
+Immediately after the code block, add exactly one Markdown link labeled \`Create release on GitHub\`. Point it to the repository's \`/releases/new?title=<title>&body=<body>\` URL. URL-encode the title and complete Markdown body so GitHub opens its new-release form with both fields prefilled. Do not add any other text outside the code block.
+
+Do not create or edit a GitHub release, PR, tag, or repository file.`
+}

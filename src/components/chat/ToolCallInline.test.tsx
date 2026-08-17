@@ -55,8 +55,61 @@ describe('ToolCallInline', () => {
       />
     )
 
-    const fileDetail = screen.getByRole('button', { name: /example\.ts/i })
+    const fileDetail = screen.getByText('example.ts')
+    expect(fileDetail.tagName).toBe('CODE')
     expect(fileDetail).not.toHaveClass('font-mono')
+    expect(fileDetail).toHaveClass('font-sans')
+  })
+
+  it('expands when the command detail is clicked and does not expose selectable text', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-bash-click-row',
+          name: 'Bash',
+          input: {
+            command: 'php artisan test --compact tests/Unit/DockerStopCo',
+          },
+        }}
+      />
+    )
+
+    const command = screen.getByText(
+      'php artisan test --compact tests/Unit/DockerStopCo'
+    )
+    expect(command.closest('.tool-call-row')).toHaveClass('select-none')
+    expect(
+      screen.queryByText(
+        '$ php artisan test --compact tests/Unit/DockerStopCo'
+      )
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(command)
+
+    expect(
+      screen.getByText('$ php artisan test --compact tests/Unit/DockerStopCo')
+    ).toBeInTheDocument()
+  })
+
+  it('opens the file from the icon without expanding the row', () => {
+    const onFileClick = vi.fn()
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-read-open-icon',
+          name: 'Read',
+          input: { file_path: '/tmp/example.ts' },
+        }}
+        onFileClick={onFileClick}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /open example\.ts/i }))
+
+    expect(onFileClick).toHaveBeenCalledWith('/tmp/example.ts')
+    expect(
+      screen.queryByText('Path: /tmp/example.ts')
+    ).not.toBeInTheDocument()
   })
 
   it('renders Cursor EnterPlanMode instructions', () => {
@@ -763,6 +816,44 @@ describe('Jean MCP tool helpers', () => {
 })
 
 describe('StackedGroup', () => {
+  it('keeps nested Read file details at the same compact size as Grep/Bash', () => {
+    render(
+      <StackedGroup
+        items={[
+          {
+            type: 'tool',
+            tool: {
+              id: 'stacked-read-1',
+              name: 'Read',
+              input: { file_path: '/tmp/example.ts', limit: 20 },
+            },
+          },
+          {
+            type: 'tool',
+            tool: {
+              id: 'stacked-grep-1',
+              name: 'Grep',
+              input: { pattern: 'StopApplication' },
+            },
+          },
+        ]}
+        onFileClick={vi.fn()}
+      />
+    )
+
+    clickExpandTrigger()
+
+    const fileDetail = screen.getByText('example.ts')
+    const grepDetail = screen.getByText('"StopApplication"')
+    expect(fileDetail.tagName).toBe('CODE')
+    expect(fileDetail).not.toHaveClass('font-mono')
+    expect(fileDetail).toHaveClass('font-sans')
+    expect(grepDetail).toHaveClass('font-sans')
+    expect(fileDetail.className).toContain('text-[0.625rem]')
+    expect(grepDetail.className).toContain('text-[0.625rem]')
+    expect(fileDetail.closest('.tool-call-row')).toHaveClass('select-none')
+  })
+
   it('uses the wrapped Jean tool name in its summary', () => {
     render(
       <StackedGroup

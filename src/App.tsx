@@ -41,6 +41,7 @@ import './App.css'
 import MainWindow from './components/layout/MainWindow'
 import { ThemeProvider } from './components/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
+import { shouldSurfaceGlobalError } from '@/lib/global-error-utils'
 import { useClaudeCliStatus, useClaudeCliAuth } from './services/claude-cli'
 import {
   useCodexCliStatus,
@@ -797,6 +798,7 @@ function App() {
         stack: reason instanceof Error ? reason.stack : undefined,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -813,6 +815,7 @@ function App() {
         filename: event.filename,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {

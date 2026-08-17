@@ -94,6 +94,7 @@ export const PI_MODEL_OPTIONS: { value: string; label: string }[] = [
 ]
 
 export const GROK_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'grok/grok-4.6', label: 'Grok 4.6' },
   { value: 'grok/grok-4.5', label: 'Grok 4.5' },
 ]
 

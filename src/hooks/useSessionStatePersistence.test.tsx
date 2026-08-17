@@ -45,6 +45,57 @@ describe('useSessionStatePersistence', () => {
     })
   })
 
+  it('hydrates persisted queued messages after a WebSocket reconnect', async () => {
+    const queuedMessage = {
+      id: 'queue-1',
+      message: 'queued prompt',
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: 'claude-sonnet-4-5',
+      provider: null,
+      executionMode: 'plan' as const,
+      thinkingLevel: 'off' as const,
+      queuedAt: 123,
+    }
+    const sessionsData: WorktreeSessions = {
+      worktree_id: 'worktree-1',
+      active_session_id: 'session-1',
+      version: 1,
+      sessions: [
+        {
+          id: 'session-1',
+          name: 'Reconnected session',
+          order: 0,
+          created_at: 1,
+          updated_at: 2,
+          messages: [],
+          backend: 'claude',
+          queued_messages: [queuedMessage],
+        },
+      ],
+    }
+    mockUseSessions.mockReturnValue({ data: sessionsData })
+    useChatStore.setState({ messageQueues: {} })
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useSessionStatePersistence(), { wrapper })
+
+    await waitFor(() => {
+      expect(useChatStore.getState().messageQueues['session-1']).toEqual([
+        queuedMessage,
+      ])
+    })
+  })
+
   it('does not change a selected plan-waiting Codex session to review', async () => {
     const sessionsData: WorktreeSessions = {
       worktree_id: 'worktree-1',

@@ -153,9 +153,14 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
       if (!isTauri()) {
         return [
           {
+            id: 'grok-4.6',
+            label: 'Grok 4.6',
+            isDefault: true,
+          },
+          {
             id: 'grok-4.5',
             label: 'Grok 4.5',
-            isDefault: true,
+            isDefault: false,
           },
         ]
       }
@@ -165,9 +170,14 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
         logger.error('Failed to list Grok models', { error })
         return [
           {
+            id: 'grok-4.6',
+            label: 'Grok 4.6',
+            isDefault: true,
+          },
+          {
             id: 'grok-4.5',
             label: 'Grok 4.5',
-            isDefault: true,
+            isDefault: false,
           },
         ]
       }

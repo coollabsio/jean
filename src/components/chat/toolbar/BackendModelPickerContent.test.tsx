@@ -220,7 +220,7 @@ describe('BackendModelPickerContent', () => {
     expect(onRequestClose).toHaveBeenCalled()
   })
 
-  it('shows the beta sidebar dot on Command Code, Grok, and Antigravity, not Cursor', () => {
+  it('shows the beta sidebar dot on Antigravity, not Cursor, Command Code, or Grok', () => {
     render(
       <BackendModelPickerContent
         open
@@ -237,16 +237,16 @@ describe('BackendModelPickerContent', () => {
 
     const cursorTab = screen.getByRole('tab', { name: 'Cursor' })
     const commandCodeTab = screen.getByRole('tab', {
-      name: 'Command Code (Beta)',
+      name: 'Command Code',
     })
-    const grokTab = screen.getByRole('tab', { name: 'Grok (Beta)' })
+    const grokTab = screen.getByRole('tab', { name: 'Grok' })
     const antigravityTab = screen.getByRole('tab', {
       name: 'Antigravity CLI (Beta)',
     })
 
     expect(cursorTab.querySelector('.bg-yellow-500')).toBeNull()
-    expect(commandCodeTab.querySelector('.bg-yellow-500')).not.toBeNull()
-    expect(grokTab.querySelector('.bg-yellow-500')).not.toBeNull()
+    expect(commandCodeTab.querySelector('.bg-yellow-500')).toBeNull()
+    expect(grokTab.querySelector('.bg-yellow-500')).toBeNull()
     expect(antigravityTab.querySelector('.bg-yellow-500')).not.toBeNull()
   })
 

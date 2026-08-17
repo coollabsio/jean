@@ -2415,7 +2415,8 @@ pub async fn create_worktree(
             // initial worktree record. This lets the frontend know a setup script
             // will run (setup_script is set, but setup_output is still None).
             let pending_setup_script =
-                git::read_jean_config(&project_path).and_then(|config| config.scripts.setup);
+                git::resolve_jean_config(&worktree_path_clone, Some(&project_path))
+                    .and_then(|config| config.scripts.setup);
 
             // Save to storage and emit worktree:created BEFORE running setup script
             // so the UI can open immediately and the user can start typing.
@@ -3218,28 +3219,29 @@ pub async fn create_worktree_from_existing_branch(
             }
 
             // Check for jean.json and run setup script
-            let (setup_output, setup_script, setup_success) =
-                if let Some(config) = git::read_jean_config(&project_path) {
-                    if let Some(script) = config.scripts.setup {
-                        log::trace!("Background: Found jean.json with setup script, executing...");
-                        match git::run_setup_script(
-                            &worktree_path_clone,
-                            &project_path,
-                            &name_clone,
-                            &script,
-                        ) {
-                            Ok(output) => (Some(output), Some(script), Some(true)),
-                            Err(e) => {
-                                log::warn!("Background: Setup script failed (continuing): {e}");
-                                (Some(e), Some(script), Some(false))
-                            }
+            let (setup_output, setup_script, setup_success) = if let Some(config) =
+                git::resolve_jean_config(&worktree_path_clone, Some(&project_path))
+            {
+                if let Some(script) = config.scripts.setup {
+                    log::trace!("Background: Found jean.json with setup script, executing...");
+                    match git::run_setup_script(
+                        &worktree_path_clone,
+                        &project_path,
+                        &name_clone,
+                        &script,
+                    ) {
+                        Ok(output) => (Some(output), Some(script), Some(true)),
+                        Err(e) => {
+                            log::warn!("Background: Setup script failed (continuing): {e}");
+                            (Some(e), Some(script), Some(false))
                         }
-                    } else {
-                        (None, None, None)
                     }
                 } else {
                     (None, None, None)
-                };
+                }
+            } else {
+                (None, None, None)
+            };
 
             // Save to storage
             if let Ok(mut data) = load_projects_data(&app_clone) {
@@ -3746,28 +3748,29 @@ pub async fn checkout_pr(
                 detect_ephemeral_pr_push_target(&project_path, &actual_branch);
 
             // Check for jean.json and run setup script
-            let (setup_output, setup_script, setup_success) =
-                if let Some(config) = git::read_jean_config(&worktree_path_clone) {
-                    if let Some(script) = config.scripts.setup {
-                        log::trace!("Background: Found jean.json with setup script, executing...");
-                        match git::run_setup_script(
-                            &worktree_path_clone,
-                            &project_path,
-                            &actual_branch,
-                            &script,
-                        ) {
-                            Ok(output) => (Some(output), Some(script), Some(true)),
-                            Err(e) => {
-                                log::warn!("Background: Setup script failed (continuing): {e}");
-                                (Some(e), Some(script), Some(false))
-                            }
+            let (setup_output, setup_script, setup_success) = if let Some(config) =
+                git::resolve_jean_config(&worktree_path_clone, Some(&project_path))
+            {
+                if let Some(script) = config.scripts.setup {
+                    log::trace!("Background: Found jean.json with setup script, executing...");
+                    match git::run_setup_script(
+                        &worktree_path_clone,
+                        &project_path,
+                        &actual_branch,
+                        &script,
+                    ) {
+                        Ok(output) => (Some(output), Some(script), Some(true)),
+                        Err(e) => {
+                            log::warn!("Background: Setup script failed (continuing): {e}");
+                            (Some(e), Some(script), Some(false))
                         }
-                    } else {
-                        (None, None, None)
                     }
                 } else {
                     (None, None, None)
-                };
+                }
+            } else {
+                (None, None, None)
+            };
 
             // Write PR context file to shared git-context directory
             if let Ok(repo_id) = get_repo_identifier(&project_path) {
@@ -3990,10 +3993,8 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
 
     log::trace!("Found project: id={}, path={}", project.id, project.path);
 
-    // Read jean.json teardown script — try worktree first, fall back to project root
-    // (worktree has jean.json if committed; project root always has it if saved via UI)
-    let teardown_script = git::read_jean_config(&worktree.path)
-        .or_else(|| git::read_jean_config(&project.path))
+    // Read jean.json teardown script from the newest project/worktree copy.
+    let teardown_script = git::resolve_jean_config(&worktree.path, Some(&project.path))
         .and_then(|config| config.scripts.teardown);
 
     // Remove from storage SYNCHRONOUSLY to avoid race conditions with other operations
@@ -5774,6 +5775,10 @@ pub async fn get_project_branches(
 }
 
 /// Update project settings
+fn checkout_project_default_branch(project_path: &str, branch: &str) -> Result<(), String> {
+    git::checkout_branch(project_path, branch)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn update_project_settings(
     app: AppHandle,
@@ -5817,7 +5822,10 @@ pub async fn update_project_settings(
             project.default_branch,
             branch
         );
-        project.default_branch = branch;
+        if branch != project.default_branch {
+            checkout_project_default_branch(&project.path, &branch)?;
+            project.default_branch = branch;
+        }
     }
 
     if let Some(servers) = enabled_mcp_servers {
@@ -6629,11 +6637,34 @@ pub async fn detect_and_link_pr(
 ) -> Result<Option<DetectPrResponse>, String> {
     log::trace!("Detecting PR for worktree {worktree_id} at {worktree_path}");
 
+    // Base sessions represent the repository's default branch, not a PR head.
+    // `gh pr list --head <branch>` also returns fork PRs with the same branch
+    // name, so auto-linking here can route pushes into an unrelated fork PR.
+    if let Ok(mut data) = load_projects_data(&app) {
+        if let Some(worktree) = data.worktrees.iter_mut().find(|w| w.id == worktree_id) {
+            if worktree.session_type == SessionType::Base {
+                if clear_invalid_base_pr_link(worktree) {
+                    save_projects_data(&app, &data)?;
+                    log::warn!("Removed invalid PR link from base session {worktree_id}");
+                }
+                return Ok(None);
+            }
+        }
+    }
+
+    detect_and_link_pr_for_worktree(&app, &worktree_id, &worktree_path)
+}
+
+fn detect_and_link_pr_for_worktree(
+    app: &AppHandle,
+    worktree_id: &str,
+    worktree_path: &str,
+) -> Result<Option<DetectPrResponse>, String> {
     // Preserve an intentional link (opened from a PR, or already fully linked).
     // Branch-name detection is best-effort and can match the wrong fork PR when
     // several PRs share a head name, or clear a correct link after a temp-branch
     // checkout renames the local head.
-    let (existing_pr_number, existing_pr_url) = match load_projects_data(&app) {
+    let (existing_pr_number, existing_pr_url) = match load_projects_data(app) {
         Ok(data) => data
             .worktrees
             .iter()
@@ -6654,12 +6685,12 @@ pub async fn detect_and_link_pr(
     // exact PR number so magic Open/Merge/status work without branch detection.
     if let Some(pr_number) = existing_pr_number {
         if existing_pr_url.is_none() {
-            if let Some(response) = view_pr_link_by_number(&app, &worktree_path, pr_number)? {
+            if let Some(response) = view_pr_link_by_number(app, worktree_path, pr_number)? {
                 log::trace!(
                     "Filled missing PR URL for worktree {worktree_id} from PR #{pr_number}"
                 );
                 let _ =
-                    save_worktree_pr_link(&app, &worktree_id, response.pr_number, &response.pr_url);
+                    save_worktree_pr_link(app, worktree_id, response.pr_number, &response.pr_url);
                 return Ok(Some(response));
             }
             log::trace!(
@@ -6670,7 +6701,7 @@ pub async fn detect_and_link_pr(
         }
     }
 
-    if let Some(response) = find_open_pr_for_branch(&app, &worktree_path)? {
+    if let Some(response) = find_open_pr_for_branch(app, worktree_path)? {
         // If the worktree was created from a specific PR but URL is still missing,
         // only accept a branch match for that same number — never overwrite with
         // a different PR that happens to share the head branch name.
@@ -6689,7 +6720,7 @@ pub async fn detect_and_link_pr(
             response.pr_number
         );
 
-        let _ = save_worktree_pr_link(&app, &worktree_id, response.pr_number, &response.pr_url);
+        let _ = save_worktree_pr_link(app, worktree_id, response.pr_number, &response.pr_url);
 
         return Ok(Some(response));
     }
@@ -6709,6 +6740,25 @@ pub async fn detect_and_link_pr(
     }
 
     Ok(None)
+}
+
+fn clear_invalid_base_pr_link(worktree: &mut Worktree) -> bool {
+    if worktree.session_type != SessionType::Base {
+        return false;
+    }
+    let had_pr_link = worktree.pr_number.is_some()
+        || worktree.pr_url.is_some()
+        || worktree.pr_push_remote.is_some()
+        || worktree.pr_push_branch.is_some();
+    if had_pr_link {
+        worktree.pr_number = None;
+        worktree.pr_url = None;
+        worktree.pr_push_remote = None;
+        worktree.pr_push_branch = None;
+        worktree.cached_pr_status = None;
+        worktree.cached_check_status = None;
+    }
+    had_pr_link
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -6930,6 +6980,56 @@ mod pr_remote_cleanup_tests {
         assert!(remote_still_referenced_by_other_worktrees(
             &data, "c", "fork-a"
         ));
+    }
+
+    #[test]
+    fn base_session_never_uses_pr_aware_push() {
+        let mut base = minimal_worktree("base", Some("contributor"), None);
+        base.session_type = SessionType::Base;
+        base.pr_number = Some(9822);
+
+        let data = ProjectsData {
+            projects: vec![],
+            worktrees: vec![base],
+        };
+
+        assert_eq!(
+            effective_pr_number_for_push(&data, "/tmp/base", Some(9822)),
+            None
+        );
+    }
+
+    #[test]
+    fn regular_worktree_keeps_pr_aware_push() {
+        let mut worktree = minimal_worktree("feature", Some("contributor"), None);
+        worktree.pr_number = Some(42);
+
+        let data = ProjectsData {
+            projects: vec![],
+            worktrees: vec![worktree],
+        };
+
+        assert_eq!(
+            effective_pr_number_for_push(&data, "/tmp/feature", Some(42)),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn base_session_pr_link_is_cleared() {
+        let mut base = minimal_worktree("base", Some("contributor"), None);
+        base.session_type = SessionType::Base;
+        base.pr_number = Some(9822);
+        base.pr_url = Some("https://github.com/acme/app/pull/9822".to_string());
+        base.pr_push_branch = Some("v4.x".to_string());
+        base.cached_pr_status = Some("open".to_string());
+
+        assert!(clear_invalid_base_pr_link(&mut base));
+        assert_eq!(base.pr_number, None);
+        assert_eq!(base.pr_url, None);
+        assert_eq!(base.pr_push_remote, None);
+        assert_eq!(base.pr_push_branch, None);
+        assert_eq!(base.cached_pr_status, None);
     }
 
     #[test]
@@ -9107,7 +9207,16 @@ fn push_for_commit(
     remote: Option<&str>,
     pr_number: Option<u32>,
 ) -> Result<(bool, bool), String> {
-    match pr_number {
+    let mut data = load_projects_data(app)?;
+    let effective_pr_number = effective_pr_number_for_push(&data, repo_path, pr_number);
+    if let Some(worktree) = data.worktrees.iter_mut().find(|w| w.path == repo_path) {
+        if clear_invalid_base_pr_link(worktree) {
+            save_projects_data(app, &data)?;
+            log::warn!("Removed invalid PR link from base session before commit push");
+        }
+    }
+
+    match effective_pr_number {
         Some(pr) => {
             let result = git::git_push_to_pr(repo_path, pr, &resolve_gh_binary(app))?;
             Ok((result.fell_back, result.permission_denied))
@@ -11144,6 +11253,17 @@ fn persist_pr_push_target(
     Ok(())
 }
 
+fn effective_pr_number_for_push(
+    data: &super::types::ProjectsData,
+    worktree_path: &str,
+    requested_pr_number: Option<u32>,
+) -> Option<u32> {
+    match data.worktrees.iter().find(|w| w.path == worktree_path) {
+        Some(worktree) if worktree.session_type == SessionType::Base => None,
+        _ => requested_pr_number,
+    }
+}
+
 /// Push current branch to remote. If pr_number is provided, uses PR-aware push
 /// that handles fork remotes and uses --force-with-lease.
 pub async fn git_push(
@@ -11152,8 +11272,16 @@ pub async fn git_push(
     pr_number: Option<u32>,
     remote: Option<String>,
 ) -> Result<GitPushResponse, String> {
-    log::trace!("Pushing changes for worktree: {worktree_path}, pr_number: {pr_number:?}, remote: {remote:?}");
-    match pr_number {
+    let mut data = load_projects_data(&app)?;
+    let effective_pr_number = effective_pr_number_for_push(&data, &worktree_path, pr_number);
+    if let Some(worktree) = data.worktrees.iter_mut().find(|w| w.path == worktree_path) {
+        if clear_invalid_base_pr_link(worktree) {
+            save_projects_data(&app, &data)?;
+            log::warn!("Removed invalid PR link from base session before push");
+        }
+    }
+    log::trace!("Pushing changes for worktree: {worktree_path}, pr_number: {pr_number:?}, effective_pr_number: {effective_pr_number:?}, remote: {remote:?}");
+    match effective_pr_number {
         Some(pr) => {
             let result = git::git_push_to_pr(&worktree_path, pr, &resolve_gh_binary(&app))?;
             if let (Some(pushed_remote), Some(pushed_branch)) =
@@ -13233,9 +13361,7 @@ fn collect_skills_from_dir_inner(
 
         let skill_file = path.join("SKILL.md");
         let is_skill_file = match std::fs::symlink_metadata(&skill_file) {
-            Ok(metadata) => {
-                metadata.file_type().is_file() && !metadata.file_type().is_symlink()
-            }
+            Ok(metadata) => metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
             Err(error) => {
                 log::warn!("Failed to inspect skill file {skill_file:?}: {error}");
@@ -13907,7 +14033,9 @@ mod tests {
 
         assert_eq!(skills.len(), 2);
         assert_eq!(
-            skills.get("flat").and_then(|skill| skill.description.as_deref()),
+            skills
+                .get("flat")
+                .and_then(|skill| skill.description.as_deref()),
             Some("Flat skill")
         );
         assert_eq!(
@@ -14000,11 +14128,8 @@ mod tests {
         std::fs::create_dir_all(&linked_file_skill).expect("linked file skill dir");
         std::fs::write(outside.join("SKILL.md"), "# Outside\n").expect("outside skill");
         symlink(&outside, root.join("linked-directory")).expect("directory symlink");
-        symlink(
-            outside.join("SKILL.md"),
-            linked_file_skill.join("SKILL.md"),
-        )
-        .expect("skill file symlink");
+        symlink(outside.join("SKILL.md"), linked_file_skill.join("SKILL.md"))
+            .expect("skill file symlink");
 
         let skills = collect_test_skills(&root);
 
@@ -14022,6 +14147,28 @@ mod tests {
             "git {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn changing_default_branch_checks_out_branch_in_project_repository() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo dir");
+        run_test_git(&repo, &["init", "-b", "main"]);
+        run_test_git(&repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(&repo, &["config", "user.name", "Test User"]);
+        std::fs::write(repo.join("README.md"), "test\n").expect("write file");
+        run_test_git(&repo, &["add", "."]);
+        run_test_git(&repo, &["commit", "-m", "initial"]);
+        run_test_git(&repo, &["branch", "v4.x"]);
+
+        checkout_project_default_branch(repo.to_str().unwrap(), "v4.x")
+            .expect("checkout default branch");
+
+        assert_eq!(
+            git::get_current_branch(repo.to_str().unwrap()).unwrap(),
+            "v4.x"
         );
     }
 

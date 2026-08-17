@@ -36,15 +36,14 @@ describe('copyToClipboard', () => {
     document.execCommand = vi.fn().mockReturnValue(false)
   })
 
-  it('falls back to backend clipboard when browser clipboard is unavailable', async () => {
-    await copyToClipboard('debug details')
-
-    expect(invokeMock).toHaveBeenCalledWith('write_clipboard_text', {
-      text: 'debug details',
-    })
+  it('does not write to the server clipboard when the browser clipboard is unavailable', async () => {
+    await expect(copyToClipboard('debug details')).rejects.toThrow(
+      /browser.*clipboard|permission/i
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
-  it('falls back to backend clipboard when browser clipboard write is denied', async () => {
+  it('does not write to the server clipboard when browser clipboard permission is denied', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
@@ -52,11 +51,10 @@ describe('copyToClipboard', () => {
       },
     })
 
-    await copyToClipboard('debug details')
-
-    expect(invokeMock).toHaveBeenCalledWith('write_clipboard_text', {
-      text: 'debug details',
-    })
+    await expect(copyToClipboard('debug details')).rejects.toThrow(
+      /permission/i
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it('uses sync execCommand first on insecure HTTP contexts', async () => {
@@ -77,9 +75,9 @@ describe('copyToClipboard', () => {
 
   it('explains HTTPS requirement when insecure copy fully fails', async () => {
     setSecureContext(false)
-    invokeMock.mockRejectedValue(new Error('Native clipboard access is only available in the desktop app'))
 
     await expect(copyToClipboard('nope')).rejects.toThrow(/HTTPS|localhost/i)
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 })
 
@@ -130,20 +128,18 @@ describe('readFromClipboard', () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
-  it('falls back to backend clipboard when browser read is unavailable', async () => {
-    invokeMock.mockResolvedValue('host paste')
-
-    await expect(readFromClipboard()).resolves.toBe('host paste')
-    expect(invokeMock).toHaveBeenCalledWith('read_clipboard_text')
+  it('does not read the server clipboard when browser clipboard access is unavailable', async () => {
+    await expect(readFromClipboard()).rejects.toThrow(
+      /browser.*clipboard|permission/i
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it('explains HTTPS requirement when insecure paste fully fails', async () => {
     setSecureContext(false)
-    invokeMock.mockRejectedValue(
-      new Error('Native clipboard access is only available in the desktop app')
-    )
 
     await expect(readFromClipboard()).rejects.toThrow(/HTTPS|localhost/i)
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 })
 

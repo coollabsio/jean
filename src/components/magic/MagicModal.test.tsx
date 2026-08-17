@@ -168,6 +168,8 @@ vi.mock('@/services/projects', () => ({
       worktreePath,
       prNumber,
     }),
+  clearWorktreePr: (worktreeId: string) =>
+    mocks.invokeMock('clear_worktree_pr', { worktreeId }),
   projectsQueryKeys: {
     worktrees: (projectId: string) => ['projects', projectId, 'worktrees'],
     all: ['projects'],
@@ -365,6 +367,27 @@ describe('MagicModal manual PR link', () => {
       'Linked PR #123: Fix bug',
       expect.any(Object)
     )
+  })
+
+  it('shows an unlink action for a linked PR and clears the link', async () => {
+    const user = userEvent.setup()
+    mocks.worktree.pr_number = 9822
+    mocks.worktree.pr_url = 'https://github.com/o/r/pull/9822'
+
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /link pr/i }))
+    await user.click(screen.getByRole('button', { name: /unlink pr/i }))
+
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith('clear_worktree_pr', {
+        worktreeId: 'wt-1',
+      })
+    })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['projects', 'project-1', 'worktrees'],
+    })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Unlinked PR #9822')
   })
 
   it('sends resolve conflicts immediately in yolo from the direct canvas dialog', async () => {

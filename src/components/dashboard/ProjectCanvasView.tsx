@@ -360,6 +360,20 @@ interface FlatCard {
   isPending?: boolean
 }
 
+interface CanvasHighlight {
+  worktreeId: string
+  sessionId?: string
+}
+
+export function getCanvasHighlight(
+  item: Pick<FlatCard, 'worktreeId' | 'card'>
+): CanvasHighlight {
+  return {
+    worktreeId: item.worktreeId,
+    sessionId: item.card?.session.id,
+  }
+}
+
 type ActiveStatus =
   | 'waiting'
   | 'planning'
@@ -550,7 +564,13 @@ function WorktreeSectionHeader({
           )
           triggerImmediateGitPoll()
           fetchWorktreesStatus(projectId)
-          if (result.fellBack) {
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else if (result.fellBack) {
             opToast.warning(
               'Could not push to PR branch, pushed to new branch instead'
             )
@@ -1650,10 +1670,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   }, [projectId])
   const searchInputRef = useRef<HTMLInputElement>(null)
   // Track highlighted card to survive reordering
-  const highlightedCardRef = useRef<{
-    worktreeId: string
-    sessionId: string
-  } | null>(null)
+  const highlightedCardRef = useRef<CanvasHighlight | null>(null)
   const suppressNextRestoreAutoOpenRef = useRef(false)
 
   // Worktree close confirmation (CMD+W on canvas)
@@ -1852,12 +1869,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const handleSelectedIndexChange = useCallback(
     (index: number | null) => {
       setSelectedIndex(index)
-      if (index !== null && flatCards[index]?.card) {
-        highlightedCardRef.current = {
-          worktreeId: flatCards[index].worktreeId,
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          sessionId: flatCards[index].card!.session.id,
-        }
+      if (index !== null && flatCards[index]) {
+        highlightedCardRef.current = getCanvasHighlight(flatCards[index])
       }
     },
     [flatCards]
@@ -3775,6 +3788,11 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         worktreePath={selectedWorktreeModal?.worktreePath ?? ''}
         isOpen={!!selectedWorktreeModal}
         onClose={() => setSelectedWorktreeModal(null)}
+        onRequestCloseWorktree={() => {
+          if (selectedWorktreeModal) {
+            closeWorktreeDirectly(selectedWorktreeModal.worktreeId)
+          }
+        }}
       />
 
       {/* Git Diff Modal (CMD+G on canvas) */}

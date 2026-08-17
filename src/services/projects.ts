@@ -2358,7 +2358,7 @@ export function useJeanConfig(projectPath: string | null) {
       return config ?? null
     },
     enabled: !!projectPath,
-    staleTime: 30_000,
+    staleTime: 0,
   })
 }
 
@@ -2412,7 +2412,7 @@ export function useRunScripts(worktreePath: string | null) {
       return scripts
     },
     enabled: !!worktreePath,
-    staleTime: 30_000, // Cache for 30 seconds
+    staleTime: 0,
   })
 }
 
@@ -2431,7 +2431,7 @@ export function usePackageScripts(worktreePath: string | null) {
         ? invoke<PackageScript[]>('get_package_scripts', { worktreePath })
         : Promise.resolve([]),
     enabled: !!worktreePath && hasBackendTransport(),
-    staleTime: 30_000,
+    staleTime: 0,
   })
 }
 
@@ -2449,7 +2449,7 @@ export function usePorts(worktreePath: string | null) {
       return ports
     },
     enabled: !!worktreePath && hasBackendTransport(),
-    staleTime: 30_000,
+    staleTime: 0,
   })
 }
 

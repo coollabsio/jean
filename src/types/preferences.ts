@@ -385,7 +385,11 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 2. Read the error output carefully to identify the failure cause
 3. Explore the relevant code in the codebase to understand the context
 4. Determine if this is a code issue, configuration issue, or flaky test
-5. Propose a fix with specific files and changes needed
+5. Implement the fix and run the relevant local checks
+6. Commit and push the changes
+7. Periodically monitor CI for the newly pushed commit until it completes
+8. If CI fails, inspect the new failure logs, fix the issue, run local checks, commit, push, and monitor the newest commit
+9. Repeat until the latest pushed commit is green
 
 </instructions>
 
@@ -396,6 +400,7 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in CI config (.github/workflows), explain the fix
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
+- If progress is blocked by infrastructure, permissions, or a non-actionable external failure, stop and report the blocker clearly
 
 </guidelines>`
 
@@ -632,7 +637,9 @@ export const DEFAULT_PARALLEL_EXECUTION_PROMPT = `In plan mode, structure plans 
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
 
-Instruct each sub-agent to briefly outline its approach before implementing, so it can course-correct early without formal plan mode overhead.`
+Instruct each sub-agent to briefly outline its approach before implementing, so it can course-correct early without formal plan mode overhead.
+
+When specifying subagent_type for Task tool calls, always use the fully qualified name exactly as listed in the system prompt (e.g., "code-simplifier:code-simplifier", not just "code-simplifier"). If the agent type contains a colon, include the full namespace:name string.`
 
 /** Default global system prompt (must match DEFAULT_GLOBAL_SYSTEM_PROMPT in src-tauri) */
 export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Technical English when you talk to me.
@@ -672,6 +679,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
+- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP \`get_run_environments\` and test against the returned url/port/command when a Run environment is available.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -709,6 +717,12 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Do NOT create git worktrees manually (\`git worktree add\`, Superpowers \`using-git-worktrees\`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.
+
+## Jean Run Environment
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP \`get_run_environments\` first (pass this worktreeId when known).
+- If an environment is running, test against its \`url\`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
 
@@ -911,7 +925,7 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 
 /** Grok preset for all magic prompts */
 export const GROK_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('grok/grok-4.5')
+  makeMagicPromptModelsPreset('grok/grok-4.6')
 
 export const KIMI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('kimi/default')
@@ -1957,10 +1971,10 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'codex', label: 'Codex' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
-  { value: 'pi', label: 'Pi (Beta)' },
-  { value: 'commandcode', label: 'Command Code (Beta)' },
-  { value: 'grok', label: 'Grok (Beta)' },
-  { value: 'kimi', label: 'Kimi Code (Beta)' },
+  { value: 'pi', label: 'Pi' },
+  { value: 'commandcode', label: 'Command Code' },
+  { value: 'grok', label: 'Grok' },
+  { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
 ]
 
@@ -2071,8 +2085,8 @@ export const newSessionKindOptions: {
   { value: 'claude', label: 'Claude' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
-  { value: 'grok', label: 'Grok (Beta)' },
-  { value: 'kimi', label: 'Kimi Code (Beta)' },
+  { value: 'grok', label: 'Grok' },
+  { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
 ]
 
@@ -2402,7 +2416,7 @@ export const defaultPreferences: AppPreferences = {
   selected_cursor_model: 'cursor/auto', // Default Cursor model
   selected_pi_model: 'pi/sonnet', // Default PI model
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
-  selected_grok_model: 'grok/grok-4.5', // Default Grok model
+  selected_grok_model: 'grok/grok-4.6', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
   selected_antigravity_model: 'antigravity/auto', // Use Antigravity CLI automatic model routing
   default_codex_reasoning_effort: 'high', // Default: high reasoning
