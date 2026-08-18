@@ -102,6 +102,56 @@ describe('ChatInput attachments', () => {
     slashPopoverMock.mockClear()
   })
 
+  it('can hide the keyboard focus hint in an already-focused composer', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+
+    render(
+      <ChatInput
+        activeSessionId="new-session"
+        activeWorktreePath="/tmp/worktree"
+        isSending={false}
+        executionMode="plan"
+        focusChatShortcut="⌘L"
+        showFocusHint={false}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+      />
+    )
+
+    expect(screen.queryByText('to focus')).not.toBeInTheDocument()
+  })
+
+  it('can submit with Enter without clearing a reusable draft composer', () => {
+    const formRef = createRef<HTMLFormElement>()
+    const inputRef = createRef<HTMLTextAreaElement>()
+    const onSubmit = vi.fn()
+
+    render(
+      <ChatInput
+        activeSessionId="new-worktree-project-1"
+        activeWorktreePath="/tmp/project"
+        isSending={false}
+        executionMode="plan"
+        focusChatShortcut=""
+        clearOnSubmit={false}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        formRef={formRef}
+        inputRef={inputRef}
+      />
+    )
+
+    const prompt = screen.getByRole('textbox')
+    fireEvent.change(prompt, { target: { value: 'Keep me' } })
+    fireEvent.keyDown(prompt, { key: 'Enter' })
+
+    expect(onSubmit).toHaveBeenCalledOnce()
+    expect(prompt).toHaveValue('Keep me')
+  })
+
   it('opens the skill picker when typing $ for a Codex session', () => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()

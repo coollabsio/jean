@@ -86,7 +86,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         const { newWorktreeModalDefaultTab, setNewWorktreeModalDefaultTab } =
           useUIStore.getState()
         setActiveTab(
-          newWorktreeModalDefaultTab ?? (selectedProjectId ? 'issues' : 'quick')
+          newWorktreeModalDefaultTab ?? 'quick'
         )
         setNewWorktreeModalDefaultTab(null)
         setIncludeClosed(false)

@@ -129,6 +129,8 @@ export function useUIStatePersistence() {
       lastActiveWorktreeId,
       activeSessionIds,
       inputDrafts,
+      pendingSetupPrompts,
+      pendingSetupMessages,
       pendingImages,
       pendingTextFiles,
       reviewSidebarVisible,
@@ -207,6 +209,8 @@ export function useUIStatePersistence() {
       zen_mode: zenMode,
       active_session_ids: activeSessionIds,
       input_drafts: inputDrafts,
+      pending_setup_prompts: pendingSetupPrompts,
+      pending_setup_messages: pendingSetupMessages,
       pending_images: serializePendingImages(pendingImages),
       pending_text_files: serializePendingTextFiles(pendingTextFiles),
       // Review sidebar visibility
@@ -429,6 +433,27 @@ export function useUIStatePersistence() {
         count: Object.keys(inputDrafts).length,
       })
       useChatStore.setState({ inputDrafts })
+    }
+
+    const pendingSetupPrompts = uiState.pending_setup_prompts ?? {}
+    if (Object.keys(pendingSetupPrompts).length > 0) {
+      logger.debug('Restoring prompts waiting for worktree setup', {
+        count: Object.keys(pendingSetupPrompts).length,
+      })
+      useChatStore.setState({ pendingSetupPrompts })
+    }
+
+    const pendingSetupMessages = uiState.pending_setup_messages ?? {}
+    if (Object.keys(pendingSetupMessages).length > 0) {
+      logger.debug('Restoring messages waiting for worktree setup', {
+        count: Object.keys(pendingSetupMessages).length,
+      })
+      useChatStore.setState({
+        pendingSetupMessages,
+        recoverableSetupMessageIds: Object.fromEntries(
+          Object.keys(pendingSetupMessages).map(id => [id, true])
+        ),
+      })
     }
 
     // Restore unsent image attachments (files already on disk)
@@ -1061,6 +1086,8 @@ export function useUIStatePersistence() {
     let prevLastActiveWorktreeId = useChatStore.getState().lastActiveWorktreeId
     let prevActiveSessionIds = useChatStore.getState().activeSessionIds
     let prevInputDrafts = useChatStore.getState().inputDrafts
+    let prevPendingSetupPrompts = useChatStore.getState().pendingSetupPrompts
+    let prevPendingSetupMessages = useChatStore.getState().pendingSetupMessages
     let prevPendingImages = useChatStore.getState().pendingImages
     let prevPendingTextFiles = useChatStore.getState().pendingTextFiles
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
@@ -1181,6 +1208,10 @@ export function useUIStatePersistence() {
         state.lastActiveWorktreeId !== prevLastActiveWorktreeId
       const sessionsChanged = state.activeSessionIds !== prevActiveSessionIds
       const inputDraftsChanged = state.inputDrafts !== prevInputDrafts
+      const pendingSetupPromptsChanged =
+        state.pendingSetupPrompts !== prevPendingSetupPrompts
+      const pendingSetupMessagesChanged =
+        state.pendingSetupMessages !== prevPendingSetupMessages
       const pendingImagesChanged = state.pendingImages !== prevPendingImages
       const pendingTextFilesChanged =
         state.pendingTextFiles !== prevPendingTextFiles
@@ -1193,6 +1224,8 @@ export function useUIStatePersistence() {
         worktreeChanged ||
         sessionsChanged ||
         inputDraftsChanged ||
+        pendingSetupPromptsChanged ||
+        pendingSetupMessagesChanged ||
         pendingImagesChanged ||
         pendingTextFilesChanged ||
         reviewSidebarChanged ||
@@ -1203,6 +1236,8 @@ export function useUIStatePersistence() {
         prevLastActiveWorktreeId = state.lastActiveWorktreeId
         prevActiveSessionIds = state.activeSessionIds
         prevInputDrafts = state.inputDrafts
+        prevPendingSetupPrompts = state.pendingSetupPrompts
+        prevPendingSetupMessages = state.pendingSetupMessages
         prevPendingImages = state.pendingImages
         prevPendingTextFiles = state.pendingTextFiles
         prevReviewSidebarVisible = state.reviewSidebarVisible

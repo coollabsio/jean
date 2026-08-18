@@ -153,10 +153,13 @@ export function useWorktrees(projectId: string | null) {
         return await fetchAndSeedProjectBootstrap(projectId, queryClient)
       } catch (error) {
         // Older servers / partial deploy: fall back to worktrees-only.
-        logger.warn('bootstrap_project failed, falling back to list_worktrees', {
-          error,
-          projectId,
-        })
+        logger.warn(
+          'bootstrap_project failed, falling back to list_worktrees',
+          {
+            error,
+            projectId,
+          }
+        )
         try {
           logger.debug('Loading worktrees for project', { projectId })
           const worktrees = await invoke<Worktree[]>('list_worktrees', {
@@ -732,6 +735,13 @@ export function useCreateWorktree() {
   })
 }
 
+const locallyHandledWorktreeErrors = new Set<string>()
+
+/** Avoid a duplicate global toast when a caller owns its recovery UI. */
+export function handleNextWorktreeErrorLocally(worktreeId: string) {
+  locallyHandledWorktreeErrors.add(worktreeId)
+}
+
 /**
  * Hook to create a worktree from an existing branch
  *
@@ -880,9 +890,8 @@ export function useCreateWorktreeKeybinding() {
   useEffect(() => {
     const handleCreateWorktree = async () => {
       // Import dynamically to avoid circular dependency
-      const { useUIStore } = await import('@/store/ui-store')
-      const { setNewWorktreeModalOpen } = useUIStore.getState()
-      setNewWorktreeModalOpen(true)
+      const { openNewWorktree } = await import('@/lib/open-new-worktree')
+      openNewWorktree()
     }
 
     window.addEventListener('create-new-worktree', handleCreateWorktree)
@@ -1142,6 +1151,7 @@ export function useWorktreeEvents() {
     unlistenPromises.push(
       listen<WorktreeCreatedEvent>('worktree:created', event => {
         const { worktree, autoOpenInJean } = event.payload
+        locallyHandledWorktreeErrors.delete(worktree.id)
         logger.info('Worktree created (background complete)', {
           id: worktree.id,
           name: worktree.name,
@@ -1215,6 +1225,9 @@ export function useWorktreeEvents() {
     unlistenPromises.push(
       listen<WorktreeCreateErrorEvent>('worktree:error', event => {
         const { id, project_id, error } = event.payload
+        const errorHandledLocally =
+          locallyHandledWorktreeErrors.delete(id) ||
+          Boolean(useChatStore.getState().pendingSetupMessages[id])
         logger.error('Worktree creation failed', { id, project_id, error })
 
         // Clear recovery timeout since we got the error event
@@ -1240,6 +1253,7 @@ export function useWorktreeEvents() {
         // Don't show toast for path/branch conflicts — they're handled by
         // worktree:path_exists / worktree:branch_exists event listeners
         if (
+          !errorHandledLocally &&
           !error.includes('Directory already exists') &&
           !error.includes('Branch already exists')
         ) {
@@ -2403,7 +2417,7 @@ export function useRunScripts(worktreePath: string | null) {
         worktreePath,
       })
       logger.debug('Run scripts result', { scripts })
-      return scripts
+      return scripts ?? []
     },
     enabled: !!worktreePath,
     staleTime: 0,

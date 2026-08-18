@@ -9,6 +9,7 @@ import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { projectsQueryKeys } from '@/services/projects'
 import type { Project } from '@/types/projects'
+import { openNewWorktree } from '@/lib/open-new-worktree'
 
 export const githubCommands: AppCommand[] = [
   {
@@ -20,10 +21,7 @@ export const githubCommands: AppCommand[] = [
     keywords: ['github', 'issues', 'bugs', 'tickets'],
 
     execute: () => {
-      const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-        useUIStore.getState()
-      setNewWorktreeModalDefaultTab('issues')
-      setNewWorktreeModalOpen(true)
+      openNewWorktree({ tab: 'issues' })
     },
     isAvailable: context => context.hasSelectedProject(),
   },
@@ -37,10 +35,7 @@ export const githubCommands: AppCommand[] = [
     keywords: ['github', 'pull', 'requests', 'pr', 'merge'],
 
     execute: () => {
-      const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-        useUIStore.getState()
-      setNewWorktreeModalDefaultTab('prs')
-      setNewWorktreeModalOpen(true)
+      openNewWorktree({ tab: 'prs' })
     },
     isAvailable: context => context.hasSelectedProject(),
   },

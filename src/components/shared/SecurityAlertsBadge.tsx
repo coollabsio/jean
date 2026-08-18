@@ -9,9 +9,8 @@ import {
 } from '@/components/ui/tooltip'
 import { useDependabotAlerts, useRepositoryAdvisories } from '@/services/github'
 import { ghCliQueryKeys } from '@/services/gh-cli'
-import { useUIStore } from '@/store/ui-store'
-import { useProjectsStore } from '@/store/projects-store'
 import type { GhAuthStatus } from '@/types/gh-cli'
+import { openNewWorktree } from '@/lib/open-new-worktree'
 
 const BADGE_STALE_TIME = 5 * 60 * 1000 // 5 minutes — background badge, not active UI
 
@@ -49,11 +48,7 @@ export function SecurityAlertsBadge({
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      useProjectsStore.getState().selectProject(projectId)
-      const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
-        useUIStore.getState()
-      setNewWorktreeModalDefaultTab('security')
-      setNewWorktreeModalOpen(true)
+      openNewWorktree({ projectId, tab: 'security' })
     },
     [projectId]
   )
@@ -65,6 +60,7 @@ export function SecurityAlertsBadge({
       <TooltipTrigger asChild>
         <button
           type="button"
+          aria-label={`Open ${totalCount} security alert${totalCount > 1 ? 's' : ''} in a new session`}
           onClick={handleClick}
           className={cn(
             'shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-600 transition-colors hover:bg-orange-500/20',
