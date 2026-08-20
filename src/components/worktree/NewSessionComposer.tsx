@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { ChatInput } from '@/components/chat/ChatInput'
+import { useDragAndDropImages } from '@/components/chat/hooks/useDragAndDropImages'
 import { ImagePreview } from '@/components/chat/ImagePreview'
 import { SkillBadge } from '@/components/chat/SkillBadge'
 import { TextFilePreview } from '@/components/chat/TextFilePreview'
@@ -317,6 +318,7 @@ export function NewSessionComposer({
   const hasSetupScript = Boolean(setupScript)
   const sourceOwnsBranch = sourceContextOwnsBranch(source)
   const draftSessionId = getNewWorktreeDraftId(projectId)
+  useDragAndDropImages(draftSessionId)
   const pendingImagesBySession = useChatStore(state => state.pendingImages)
   const pendingTextFilesBySession = useChatStore(
     state => state.pendingTextFiles

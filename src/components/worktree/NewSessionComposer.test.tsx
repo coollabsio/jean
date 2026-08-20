@@ -5,8 +5,13 @@ import { getNewWorktreeDraftId, NewSessionComposer } from './NewSessionComposer'
 import type * as NewSessionFlow from './new-session-flow'
 import { useChatStore } from '@/store/chat-store'
 
-const { flowMocks, backendState, preferenceMocks, projectServiceState } =
-  vi.hoisted(() => ({
+const {
+  flowMocks,
+  backendState,
+  preferenceMocks,
+  projectServiceState,
+  dragAndDropMocks,
+} = vi.hoisted(() => ({
     flowMocks: {
       finish: vi.fn(),
       startPrompt: vi.fn().mockResolvedValue(undefined),
@@ -22,7 +27,12 @@ const { flowMocks, backendState, preferenceMocks, projectServiceState } =
     },
     preferenceMocks: { patch: vi.fn() },
     projectServiceState: { remotes: undefined as undefined | unknown[] },
+    dragAndDropMocks: { useDragAndDropImages: vi.fn() },
   }))
+
+vi.mock('@/components/chat/hooks/useDragAndDropImages', () => ({
+  useDragAndDropImages: dragAndDropMocks.useDragAndDropImages,
+}))
 
 vi.mock('./new-session-flow', async importOriginal => ({
   ...(await importOriginal<typeof NewSessionFlow>()),
@@ -149,6 +159,14 @@ describe('NewSessionComposer', () => {
     backendState.installedBackends = ['claude', 'codex']
     backendState.isLoading = false
     projectServiceState.remotes = undefined
+  })
+
+  it('routes dropped images to the modal prompt draft', () => {
+    render(<NewSessionComposer {...baseProps} />)
+
+    expect(dragAndDropMocks.useDragAndDropImages).toHaveBeenCalledWith(
+      getNewWorktreeDraftId('project-1')
+    )
   })
 
   it('keeps the prompt first while allowing a worktree without a prompt', () => {

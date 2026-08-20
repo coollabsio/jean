@@ -1303,8 +1303,11 @@ export function ChatWindow({
     isSending,
   })
 
-  // Drag and drop images into chat input
-  const { isDragging } = useDragAndDropImages(activeSessionId)
+  // The new-session prompt owns file drops while its modal is open.
+  const newWorktreeModalOpen = useUIStore(state => state.newWorktreeModalOpen)
+  const { isDragging } = useDragAndDropImages(activeSessionId, {
+    disabled: newWorktreeModalOpen,
+  })
 
   // File content modal is global (MainWindow) so the file browser can open it too
   const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
