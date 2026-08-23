@@ -13,7 +13,6 @@ import { useCommandContext } from '@/lib/commands'
 import {
   ArrowUpCircle,
   Download,
-  FolderTree,
   Github,
   Heart,
   Minimize2,
@@ -53,8 +52,6 @@ export function TitleBar({
 }: TitleBarProps) {
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const toggleLeftSidebar = useUIStore(state => state.toggleLeftSidebar)
-  const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
-  const toggleFileBrowser = useUIStore(state => state.toggleFileBrowser)
   const zenMode = useUIStore(state => state.zenMode)
   const toggleZenMode = useUIStore(state => state.toggleZenMode)
   const commandContext = useCommandContext()
@@ -66,10 +63,6 @@ export function TitleBar({
   const sidebarShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.toggle_left_sidebar ||
       DEFAULT_KEYBINDINGS.toggle_left_sidebar) as string
-  )
-  const fileBrowserShortcut = formatShortcutDisplay(
-    (preferences?.keybindings?.toggle_file_browser ||
-      DEFAULT_KEYBINDINGS.toggle_file_browser) as string
   )
   const native = isNativeApp()
 
@@ -129,34 +122,6 @@ export function TitleBar({
                 {leftSidebarVisible ? 'Hide' : 'Show'} Left Sidebar{' '}
                 <kbd className="ml-1 text-[0.625rem] opacity-60">
                   {sidebarShortcut}
-                </kbd>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={toggleFileBrowser}
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
-                    fileBrowserVisible && 'text-foreground bg-muted/50'
-                  )}
-                  aria-pressed={fileBrowserVisible}
-                  aria-label={
-                    fileBrowserVisible
-                      ? 'Hide file browser'
-                      : 'Show file browser'
-                  }
-                  data-testid="toggle-file-browser"
-                >
-                  <FolderTree className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
-                <kbd className="ml-1 text-[0.625rem] opacity-60">
-                  {fileBrowserShortcut}
                 </kbd>
               </TooltipContent>
             </Tooltip>

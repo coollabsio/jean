@@ -14,6 +14,7 @@ import {
   Archive,
   ChevronDown,
   Copy,
+  FolderTree,
   GitBranchPlus,
   GitPullRequestArrow,
   Maximize2,
@@ -207,6 +208,8 @@ export function SessionChatModal({
   const isTouch = useIsTouchDevice()
   const zenMode = useUIStore(state => state.zenMode)
   const toggleZenMode = useUIStore(state => state.toggleZenMode)
+  const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
+  const toggleFileBrowser = useUIStore(state => state.toggleFileBrowser)
   const isModalTerminalOpen = useTerminalStore(
     state => state.modalTerminalOpen[worktreeId] ?? false
   )
@@ -295,6 +298,10 @@ export function SessionChatModal({
   )
   const runShortcut = formatShortcutDisplay(
     preferences?.keybindings?.execute_run ?? DEFAULT_KEYBINDINGS.execute_run
+  )
+  const fileBrowserShortcut = formatShortcutDisplay(
+    preferences?.keybindings?.toggle_file_browser ??
+      DEFAULT_KEYBINDINGS.toggle_file_browser
   )
   // Horizontal scroll on session tabs
   const modalTabScrollRef = useRef<HTMLDivElement>(null)
@@ -1100,6 +1107,34 @@ export function SessionChatModal({
                 )}
               >
                 <div className="flex items-center gap-2 min-w-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={toggleFileBrowser}
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          'h-6 w-6 shrink-0 text-foreground/70 hover:text-foreground',
+                          fileBrowserVisible && 'text-foreground bg-muted/50'
+                        )}
+                        aria-pressed={fileBrowserVisible}
+                        aria-label={
+                          fileBrowserVisible
+                            ? 'Hide file browser'
+                            : 'Show file browser'
+                        }
+                        data-testid="toggle-file-browser"
+                      >
+                        <FolderTree className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+                      <kbd className="ml-1 text-[0.625rem] opacity-60">
+                        {fileBrowserShortcut}
+                      </kbd>
+                    </TooltipContent>
+                  </Tooltip>
                   <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
                     {project && !isMobile && (
                       <span className="text-muted-foreground font-normal">
