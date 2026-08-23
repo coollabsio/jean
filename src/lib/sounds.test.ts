@@ -181,4 +181,25 @@ describe('notification sounds', () => {
     expect(fetchMock).toHaveBeenCalledWith('/sounds/work-work.wav')
     expect(fetchMock).toHaveBeenCalledWith('/sounds/jobs-done.wav')
   })
+
+  it('plays the waiting sound from preferences', async () => {
+    nativeApp = true
+    const { playWaitingSound } = await import('./sounds')
+
+    playWaitingSound({ waiting_sound: 'jobsdone' } as never)
+
+    await vi.waitFor(() => expect(startedBuffers).toHaveLength(1))
+    expect(fetchMock).toHaveBeenCalledWith('/sounds/jobs-done.wav')
+  })
+
+  it('stays silent when the waiting sound preference is unset', async () => {
+    nativeApp = true
+    const { playWaitingSound } = await import('./sounds')
+
+    playWaitingSound(undefined)
+    await Promise.resolve()
+
+    expect(startedBuffers).toHaveLength(0)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

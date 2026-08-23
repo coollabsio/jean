@@ -19,7 +19,10 @@ import type {
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
-import { usePreferences } from '@/services/preferences'
+import { usePreferences, preferencesQueryKeys } from '@/services/preferences'
+import type { AppPreferences } from '@/types/preferences'
+import { notifySessionNeedsAttention } from '@/lib/session-notifications'
+import { playWaitingSound } from '@/lib/sounds'
 import { logger } from '@/lib/logger'
 import {
   eventToShortcutString,
@@ -204,6 +207,46 @@ export function applySessionRenamedToCaches(
     })
     return changed ? { ...old, entries } : old
   })
+}
+
+/**
+ * Apply a native-terminal lifecycle event to the chat store.
+ *
+ * Terminal sessions have no run transcript, so these events are the only thing
+ * driving their status: `working` on prompt submit, `attention` when the CLI
+ * finishes or asks for permission, `idle` when the CLI exits but the terminal
+ * stays open. Attention mirrors `chat:done` — sound always, OS banner unless the
+ * user is already looking at this session.
+ */
+export function applyTerminalLifecycleEvent(
+  kind: 'working' | 'idle' | 'attention',
+  payload: { sessionId?: string } | undefined,
+  queryClient: QueryClient
+): void {
+  const sessionId = payload?.sessionId
+  if (!sessionId) return
+
+  const store = useChatStore.getState()
+  if (kind === 'working') {
+    store.addSendingSession(sessionId)
+    store.setWaitingForInput(sessionId, false)
+    return
+  }
+
+  store.removeSendingSession(sessionId)
+  store.setWaitingForInput(sessionId, kind === 'attention')
+  if (kind !== 'attention') return
+
+  const prefs = queryClient.getQueryData<AppPreferences>(
+    preferencesQueryKeys.preferences()
+  )
+  playWaitingSound(prefs)
+  if (prefs?.desktop_notifications_enabled === false) return
+  notifySessionNeedsAttention(
+    sessionId,
+    'Needs your input',
+    queryClient.getQueryData<Session>(chatQueryKeys.session(sessionId))?.name
+  )
 }
 
 export function shouldAllowKeybindingThroughOpenOverlay(
@@ -997,24 +1040,17 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
-        listen<{ sessionId: string }>('terminal:working', event => {
-          const sessionId = event.payload?.sessionId
-          if (!sessionId) return
-          const store = useChatStore.getState()
-          store.addSendingSession(sessionId)
-          // Mirror chat turn start: clear waiting so the session shows as running.
-          store.setWaitingForInput(sessionId, false)
-        }),
+        listen<{ sessionId: string }>('terminal:working', event =>
+          applyTerminalLifecycleEvent('working', event.payload, queryClient)
+        ),
 
-        listen<{ sessionId: string }>('terminal:attention', event => {
-          const sessionId = event.payload?.sessionId
-          if (!sessionId) return
-          const store = useChatStore.getState()
-          store.removeSendingSession(sessionId)
-          // Mirror chat:done waiting so canvas/list badges update before sessions
-          // cache invalidation lands (terminal sessions have no run transcript).
-          store.setWaitingForInput(sessionId, true)
-        }),
+        listen<{ sessionId: string }>('terminal:idle', event =>
+          applyTerminalLifecycleEvent('idle', event.payload, queryClient)
+        ),
+
+        listen<{ sessionId: string }>('terminal:attention', event =>
+          applyTerminalLifecycleEvent('attention', event.payload, queryClient)
+        ),
 
         listenLocal('menu-about', async () => {
           logger.debug('About menu event received')
